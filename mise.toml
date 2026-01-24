@@ -1,0 +1,44 @@
+[tools]
+node = "22"
+rust = "stable"
+"cargo:cargo-nextest" = "latest"
+"cargo:cargo-audit" = "latest"      # for security vulnerability checks
+"cargo:cargo-deny" = "latest"
+"cargo:cargo-edit" = "latest"       # provides: cargo add, cargo rm, cargo upgrade
+
+[tasks.build]
+run = "cargo build --release"
+description = "Build the crates"
+
+[tasks.test]
+run = "cargo test --all"
+description = "Run all tests"
+
+[tasks.clean]
+run = [
+    "cargo clean",
+    "rm -rf lib/*/"
+]
+description = "Clean the crates"
+
+[tasks.lint]
+run = "cargo clippy --all -- -D warnings"
+description = "Run clippy lint checks"
+
+[tasks."lint:fix"]
+run = ["cargo fmt", "cargo clippy --fix --allow-dirty", "cargo fmt"]
+description = "Run clippy lint checks and fix applicable issues"
+
+[tasks.nextest]
+run = "cargo nextest run"
+description = "Run all tests, requires nextest"
+
+[tasks."fix:newlines"]
+run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --fix"
+description = "Fix newlines formatting in the codebase"
+
+# [tasks."perf:gtime"]
+# run = "./scripts/devtools/gtime.sh"
+
+# [tasks."perf:rss"]
+# run = "./scripts/devtools/average_rss.sh"
