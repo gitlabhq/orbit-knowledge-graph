@@ -14,6 +14,7 @@ variables:
     - saas-linux-medium-amd64
   image: rust:1.89.0
   before_script:
+    - apt-get update && apt-get install -y libclang-dev
     - rustup set auto-self-update disable
 
 .mr-only-rules:
@@ -57,6 +58,7 @@ lint-check:
     - .job-template
     - .mr-only-rules
   before_script:
+    - apt-get update && apt-get install -y libclang-dev
     - rustup component add clippy
   script:
     - cargo clippy --all-targets --all-features -- -D warnings
@@ -73,6 +75,7 @@ unit-test:
   variables:
     RUST_BACKTRACE: "1"
   before_script:
+    - apt-get update && apt-get install -y libclang-dev
     - cargo install cargo-nextest --locked
   script:
     - cargo nextest run --profile ci
