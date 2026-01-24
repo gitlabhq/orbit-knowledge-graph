@@ -1,0 +1,83 @@
+instructions:
+  - name: Rust Security
+    fileFilters:
+      - "**/*.rs"
+    instructions: |
+      Review for security issues only. Read surrounding code for context.
+      1. Flag unsafe code without clear justification
+      2. Check for unvalidated external input
+      3. Ensure no hardcoded secrets or credentials
+      4. Flag unwrap/expect on untrusted data (panic vectors)
+      5. Check for integer overflow/underflow in arithmetic
+      6. Check deserialized data is validated before use
+      7. Verify organization_id and traversal_id filters in query generation
+      8. Check for SQL injection via string interpolation in query builders
+      9. Ensure JWT tokens are validated before trusting claims
+      10. Check for any over-permissive permissions in access control logic
+      11. Check for any potential DOS vectors
+      12. Check for any overt security issues in the MR.
+      Only comment if a clear security issue exists. Skip if unrelated.
+
+  - name: Rust Performance
+    fileFilters:
+      - "**/*.rs"
+    instructions: |
+      Review for performance issues only. Read surrounding code for context.
+      1. Flag unnecessary allocations (prefer &str over String, &[] over Vec when possible)
+      2. Check for inefficient iteration patterns (collect then iterate vs chaining)
+      3. Identify missing use of iterators or zero-copy approaches
+      4. Flag excessive cloning where borrowing suffices
+      Only comment on significant performance concerns. Do not over-comment.
+
+  - name: Logging Security Agent
+    fileFilters:
+      - "**/*.rs"
+    instructions: |
+      Review for logging security. Flag any sensitive or red data being logged.
+      Read surrounding code for context before commenting.
+
+      ## Red data (never log these)
+      Based on LabKit mask patterns:
+      1. Authentication tokens - fields ending in "token" (access_token, refresh_token)
+      2. Passwords - fields containing "password"
+      3. Secrets - fields containing "secret"
+      4. API/encryption keys - fields ending in "key"
+      5. Cryptographic signatures - fields containing "signature"
+      6. Authorization headers, Bearer tokens
+      7. Certificates, encrypted_key fields
+      8. Webhook/hook URLs and payloads
+      9. Integration URLs (elasticsearch_url, sentry_dsn, import_url)
+      10. JWT tokens - no claims or full tokens
+      11. OTP/MFA codes (otp_attempt, verification codes)
+      12. CI/CD variables (often contain secrets)
+      13. Credentials in URLs (user:password@host)
+
+      ## PII and user content
+      14. Request/response bodies with user data
+      15. User content fields: body, description, note, text, title, message
+      16. Health data (PHI), government IDs
+      17. Full email addresses (mask to u***@domain.com)
+      18. Credit card numbers, SSNs, financial data
+
+      ## Required patterns
+      19. Use mask::URL() when logging URLs with query parameters
+      20. Skip grpc.request.content and grpc.response.content
+      21. Log IDs (user_id, correlation_id) instead of full objects
+      22. Log only allowlisted fields from request/response objects
+      23. Filter sensitive headers before logging (IsSensitiveHeader patterns)
+      24. Use [FILTERED] or [REDACTED] for masked values
+
+      ## Log injection
+      25. Encode log data to prevent injection (CWE-117)
+      26. Sanitize user-controlled data before logging
+      27. No string interpolation of untrusted input in log statements
+
+      ## Safe to log
+      - correlation_id, request_id, trace_id
+      - user_id (numeric), username
+      - HTTP method, status code, path (with masked query params)
+      - Duration, latency metrics
+      - Remote IP, hostname
+      - Error types and codes (no sensitive stack trace context)
+
+      Only comment on clear issues. Give specific fixes.
