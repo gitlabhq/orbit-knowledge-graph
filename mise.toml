@@ -11,8 +11,8 @@ run = "cargo build --release"
 description = "Build the crates"
 
 [tasks.test]
-run = "cargo test --all"
-description = "Run all tests"
+run = "cargo nextest run"
+description = "Run all tests, requires nextest"
 
 [tasks.clean]
 run = [
@@ -28,10 +28,6 @@ description = "Run clippy lint checks"
 [tasks."lint:fix"]
 run = ["cargo fmt", "cargo clippy --fix --allow-dirty", "cargo fmt"]
 description = "Run clippy lint checks and fix applicable issues"
-
-[tasks.nextest]
-run = "cargo nextest run"
-description = "Run all tests, requires nextest"
 
 [tasks."fix:newlines"]
 run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --fix"

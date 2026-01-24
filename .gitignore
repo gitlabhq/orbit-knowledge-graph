@@ -1,1 +1,12 @@
-/target
+target
+.DS_Store
+report.xml
+public
+node_modules
+bindings/go/.idea/
+.idea/
+profile.json.gz
+output/
+
+# auto-summarization files
+git_diff_full.txt
