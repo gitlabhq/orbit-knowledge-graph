@@ -1,0 +1,83 @@
+stages:
+  - lint
+  - test
+
+variables:
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+
+# ------------------------------------------------------------------------------
+# Job Templates
+# ------------------------------------------------------------------------------
+
+.job-template:
+  tags:
+    - saas-linux-medium-amd64
+  image: rust:1.89.0
+  before_script:
+    - rustup set auto-self-update disable
+
+.mr-only-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+
+.mr-and-main-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ------------------------------------------------------------------------------
+# Lint Stage
+# ------------------------------------------------------------------------------
+
+mr-title-check:
+  stage: lint
+  image: node:lts-alpine
+  tags:
+    - saas-linux-small-amd64
+  extends:
+    - .mr-only-rules
+  before_script:
+    - npm install -g @commitlint/cli @commitlint/config-conventional
+  script:
+    - ./scripts/check-mr-title.sh
+
+fmt-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-only-rules
+  before_script:
+    - rustup component add rustfmt
+  script:
+    - cargo fmt --all -- --check
+
+lint-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-only-rules
+  before_script:
+    - rustup component add clippy
+  script:
+    - cargo clippy --all-targets --all-features -- -D warnings
+
+# ------------------------------------------------------------------------------
+# Test Stage
+# ------------------------------------------------------------------------------
+
+unit-test:
+  stage: test
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+  variables:
+    RUST_BACKTRACE: "1"
+  before_script:
+    - cargo install cargo-nextest --locked
+  script:
+    - cargo nextest run --profile ci
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - target/nextest/ci/junit.xml
