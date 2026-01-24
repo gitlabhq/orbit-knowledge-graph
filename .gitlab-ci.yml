@@ -1,5 +1,6 @@
 stages:
   - lint
+  - security
   - test
 
 variables:
@@ -62,6 +63,53 @@ lint-check:
     - rustup component add clippy
   script:
     - cargo clippy --all-targets --all-features -- -D warnings
+
+# ------------------------------------------------------------------------------
+# Security Stage
+# ------------------------------------------------------------------------------
+
+cargo-audit:
+  stage: security
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+  script:
+    - cargo install cargo-audit --locked
+    - cargo audit
+
+cargo-deny:
+  stage: security
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+  script:
+    - cargo install cargo-deny --locked
+    - cargo deny check
+
+cargo-geiger:
+  stage: security
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+  script:
+    - cargo install cargo-geiger --locked
+    - for pkg in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do cargo geiger -p "$pkg" --all-features || true; done
+  allow_failure: true
+
+generate-sbom:
+  stage: security
+  extends:
+    - .job-template
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - cargo install cargo-cyclonedx --locked
+    - cargo cyclonedx --format json > sbom.cdx.json
+  artifacts:
+    paths:
+      - sbom.cdx.json
+    reports:
+      cyclonedx: sbom.cdx.json
 
 # ------------------------------------------------------------------------------
 # Test Stage
