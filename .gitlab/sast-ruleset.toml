@@ -1,0 +1,12 @@
+# GitLab SAST custom ruleset for Rust
+# https://docs.gitlab.com/ee/user/application_security/sast/index.html#scanning-rust-applications
+
+[semgrep]
+  description = "Rust ruleset for Semgrep"
+  targetdir = "/sgrules"
+  timeout = 60
+
+  [[semgrep.passthrough]]
+    type  = "url"
+    value = "https://semgrep.dev/c/p/rust"
+    target = "rust.yml"

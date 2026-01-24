@@ -1,3 +1,6 @@
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+
 stages:
   - lint
   - security
@@ -110,6 +113,16 @@ generate-sbom:
       - sbom.cdx.json
     reports:
       cyclonedx: sbom.cdx.json
+
+semgrep-sast:
+  stage: security
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      exists:
+        - '**/*.rs'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - '**/*.rs'
 
 # ------------------------------------------------------------------------------
 # Test Stage
