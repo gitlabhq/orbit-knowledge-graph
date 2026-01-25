@@ -6,9 +6,6 @@ stages:
   - security
   - test
 
-variables:
-  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
-
 # ------------------------------------------------------------------------------
 # Job Templates
 # ------------------------------------------------------------------------------
@@ -16,10 +13,9 @@ variables:
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: rust:1.93.0
+  image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
   before_script:
-    - apt-get update && apt-get install -y libclang-dev
-    - rustup set auto-self-update disable
+    - mise install
 
 .mr-only-rules:
   rules:
@@ -51,8 +47,6 @@ fmt-check:
   extends:
     - .job-template
     - .mr-only-rules
-  before_script:
-    - rustup component add rustfmt
   script:
     - cargo fmt --all -- --check
 
@@ -61,9 +55,6 @@ lint-check:
   extends:
     - .job-template
     - .mr-only-rules
-  before_script:
-    - apt-get update && apt-get install -y libclang-dev
-    - rustup component add clippy
   script:
     - cargo clippy --all-targets --all-features -- -D warnings
 
@@ -78,7 +69,6 @@ cargo-audit:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo install cargo-audit --locked
     - cargo audit
 
 cargo-deny:
@@ -88,7 +78,6 @@ cargo-deny:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo install cargo-deny --locked
     - cargo deny check
 
 cargo-geiger:
@@ -98,7 +87,6 @@ cargo-geiger:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo install cargo-geiger --locked
     - for pkg in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do cargo geiger -p "$pkg" --all-features || true; done
   allow_failure: true
 
@@ -110,7 +98,6 @@ generate-sbom:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - cargo install cargo-cyclonedx --locked
     - cargo cyclonedx --format json > sbom.cdx.json
   artifacts:
     paths:
@@ -141,9 +128,6 @@ unit-test:
   needs: []
   variables:
     RUST_BACKTRACE: "1"
-  before_script:
-    - apt-get update && apt-get install -y libclang-dev
-    - cargo install cargo-nextest --locked
   script:
     - cargo nextest run --profile ci
   artifacts:
