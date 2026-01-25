@@ -1,4 +1,4 @@
-use crate::project::file_info::FileInfo;
+use crate::loading::FileInfo;
 use log::debug;
 use parser_core::definitions::DefinitionInfo;
 use parser_core::{

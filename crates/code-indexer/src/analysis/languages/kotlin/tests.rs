@@ -1,11 +1,10 @@
-use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::repository::testing::local::LocalGitRepository;
 use std::path::Path;
 
 use crate::analysis::types::GraphData;
 use crate::graph::RelationshipType;
 use crate::indexer::{IndexingConfig, RepositoryIndexer};
-use crate::project::source::GitaliskFileSource;
+use crate::loading::DirectoryFileSource;
 
 fn init_kotlin_references_repository() -> LocalGitRepository {
     let mut local_repo = LocalGitRepository::new(None);
@@ -95,16 +94,12 @@ impl KotlinReferenceTestSetup {
 pub async fn setup_kotlin_reference_pipeline() -> KotlinReferenceTestSetup {
     let local_repo = init_kotlin_references_repository();
     let repo_path_str = local_repo.path.to_str().unwrap();
-    let workspace_path = local_repo.workspace_path.to_str().unwrap();
-
-    let gitalisk_repo =
-        CoreGitaliskRepository::new(repo_path_str.to_string(), workspace_path.to_string());
 
     let indexer = RepositoryIndexer::new(
         "kotlin-references-test".to_string(),
         repo_path_str.to_string(),
     );
-    let file_source: GitaliskFileSource = GitaliskFileSource::new(gitalisk_repo.clone());
+    let file_source = DirectoryFileSource::new(repo_path_str.to_string());
 
     let config = IndexingConfig {
         worker_threads: 1,
