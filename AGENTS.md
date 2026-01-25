@@ -38,3 +38,18 @@ The Knowledge Graph builds a property graph from GitLab data and exposes it thro
 - Siphon streams PostgreSQL logical replication events into NATS
 - NATS JetStream brokers messages and handles distributed coordination
 - ClickHouse stores the property graph and runs queries via a custom graph engine
+
+## Crates
+
+### gitaly-client
+
+Rust gRPC client for Gitaly. Provides repository operations for the code indexer:
+
+- Unix socket and TCP connection support
+- HMAC-SHA256 v2 token authentication
+- Repository extraction via GetArchive RPC
+- `RepositorySource` trait for testing abstraction
+
+Build with: `GITALY_PROTO_ROOT=/path/to/gitaly cargo build -p gitaly-client`
+
+Integration tests require a running Gitaly instance. Set `GITALY_CONNECTION_INFO` JSON with address, storage, and token.

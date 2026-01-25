@@ -7,6 +7,7 @@ members = [
   "crates/labkit-rs",
   "crates/etl-engine",
   "crates/cli",
+  "crates/gitaly-client",
 ]
 
 [workspace.dependencies]
@@ -58,6 +59,23 @@ async-nats = "0.46"
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["nats"] }
 serial_test = "3.3.1"
+
+# Gitaly client dependencies
+regex = "1.11"
+hex = "0.4"
+hmac = "0.12"
+hyper-util = { version = "0.1", features = ["client", "tokio"] }
+prost = "0.14"
+prost-build = "0.14"
+prost-types = "0.14"
+protoc-bin-vendored = "3.0"
+sha2 = "0.10"
+tar = "0.4"
+tonic = "0.14"
+tonic-build = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+tower = "0.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

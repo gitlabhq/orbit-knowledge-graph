@@ -58,6 +58,11 @@ name = "labkit-rs"
 expression = "MIT"
 license-files = []
 
+[[licenses.clarify]]
+name = "gitaly-client"
+expression = "MIT"
+license-files = []
+
 [[licenses.exceptions]]
 name = "ruby-prism"
 allow = ["MIT"]
