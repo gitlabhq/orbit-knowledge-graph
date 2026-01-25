@@ -1,0 +1,43 @@
+[package]
+name = "gitaly-client"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Gitaly gRPC client for repository operations"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+integration = []
+# Regenerate proto code from GITALY_PROTO_ROOT (requires local Gitaly repo)
+regenerate-protos = []
+
+[build-dependencies]
+tonic-build = { workspace = true, optional = true }
+prost-build = { workspace = true, optional = true }
+protoc-bin-vendored = { workspace = true, optional = true }
+tonic-prost-build = { workspace = true, optional = true }
+
+[dependencies]
+async-trait = { workspace = true }
+hex = { workspace = true }
+hmac = { workspace = true }
+hyper-util = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+tower = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
