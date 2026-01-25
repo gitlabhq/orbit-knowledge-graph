@@ -17,7 +17,7 @@ fn init_local_git_repository(language: SupportedLanguage) -> LocalGitRepository 
             .unwrap()
             .parent()
             .unwrap()
-            .join("fixtures/test-repo");
+            .join("fixtures/code/test-repo");
         local_repo.copy_dir(&fixtures_path);
     } else if language == SupportedLanguage::TypeScript {
         let fixtures_path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -25,7 +25,7 @@ fn init_local_git_repository(language: SupportedLanguage) -> LocalGitRepository 
             .unwrap()
             .parent()
             .unwrap()
-            .join("fixtures/typescript/test-repo");
+            .join("fixtures/code/typescript/test-repo");
         local_repo.copy_dir(&fixtures_path);
     }
     local_repo.add_all().commit("Initial commit");

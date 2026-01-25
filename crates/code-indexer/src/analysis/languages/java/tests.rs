@@ -13,7 +13,7 @@ fn init_java_references_repository() -> LocalGitRepository {
         .unwrap()
         .parent()
         .unwrap()
-        .join("fixtures/java");
+        .join("fixtures/code/java");
     local_repo.copy_dir(&fixtures_path);
     local_repo
         .add_all()
