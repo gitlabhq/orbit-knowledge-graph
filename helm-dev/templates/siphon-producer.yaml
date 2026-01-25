@@ -1,0 +1,117 @@
+{{- if .Values.producer.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: siphon-producer-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "siphon-producer") | nindent 4 }}
+data:
+  config.yaml: |
+    application_identifier: {{ .Values.producer.applicationIdentifier | quote }}
+    max_column_size_in_bytes: {{ .Values.producer.maxColumnSizeBytes | int }}
+
+    database:
+      host: {{ .Values.postgres.host | quote }}
+      port: {{ .Values.postgres.port }}
+      database: {{ .Values.postgres.database | quote }}
+      user: {{ .Values.postgres.user | quote }}
+      password: ${POSTGRES_PASSWORD}
+      application_name: {{ .Values.producer.applicationIdentifier | quote }}
+      advisory_lock_id: {{ .Values.producer.advisoryLockId }}
+      advisory_lock_timeout_ms: 100
+      advisory_lock_timeout_fuzziness_ms: 50
+      lock_timeout_ms: 500
+      lock_timeout_fuzziness_ms: 300
+
+    replication:
+      publication_name: {{ .Values.producer.publicationName | quote }}
+      slot_name: {{ .Values.producer.slotName | quote }}
+      standby_timeout_ms: 3000
+      memory_buffer_size_in_bytes: {{ .Values.producer.memoryBufferSize | int }}
+
+    queueing:
+      driver: nats
+      url: {{ include "gkg.natsUrl" . | quote }}
+      stream_name: {{ .Values.nats.streamName | quote }}
+      lsn_store_name: postgresql_lsn_store
+      snapshot_subject_name: tables
+      oversize_bucket_name: repl_events_bucket
+
+    prometheus:
+      port: 8080
+
+    table_mapping:
+      {{- range .Values.tableMappings }}
+      - table: {{ .table | quote }}
+        schema: {{ .schema | quote }}
+        subject: {{ .subject | quote }}
+      {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: siphon-producer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "siphon-producer") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "siphon-producer") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "siphon-producer") | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.producer | sha256sum }}-{{ toJson .Values.postgres | sha256sum }}-{{ toJson .Values.tableMappings | sha256sum }}
+    spec:
+      serviceAccountName: gcp-secrets-sa
+      securityContext:
+        {{- include "gkg.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: siphon-producer
+          image: "{{ .Values.siphon.image.repository }}:{{ .Values.siphon.image.tag }}"
+          imagePullPolicy: {{ .Values.siphon.image.pullPolicy }}
+          command: ["/app/siphon"]
+          args:
+            - "--config=/config/config.yaml"
+            - "--log-level={{ .Values.producer.logLevel }}"
+          ports:
+            - name: metrics
+              containerPort: 8080
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+          securityContext:
+            {{- include "gkg.securityContext" . | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.producer.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: siphon-producer-config
+{{- end }}
