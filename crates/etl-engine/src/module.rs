@@ -9,10 +9,12 @@
 //!
 //! #[async_trait]
 //! impl Handler for MyHandler {
+//!     fn name(&self) -> &str { "my-handler" }
 //!     fn topic(&self) -> &str { "my-topic" }
 //!
 //!     async fn handle(&self, ctx: HandlerContext, msg: Envelope) -> Result<(), HandlerError> {
 //!         // ctx.destination has your writers
+//!         // ctx.metrics has the metric collector
 //!         Ok(())
 //!     }
 //! }
@@ -33,7 +35,9 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 use thiserror::Error;
 
-use crate::{destination::Destination, entities::Entity, message_broker::Envelope};
+use crate::{
+    destination::Destination, entities::Entity, message_broker::Envelope, metrics::MetricCollector,
+};
 
 /// Errors that can occur during message handling.
 #[derive(Debug, Error)]
@@ -55,19 +59,24 @@ pub enum HandlerError {
 pub struct HandlerContext {
     /// The destination where processed data should be written.
     pub destination: Arc<dyn Destination>,
+
+    /// The metric collector for recording metrics.
+    pub metrics: Arc<dyn MetricCollector>,
 }
 
 impl HandlerContext {
-    /// Creates a new handler context with the given destination.
-    pub fn new(destination: Arc<dyn Destination>) -> Self {
-        HandlerContext { destination }
+    /// Creates a new handler context with the given destination and metrics collector.
+    pub fn new(destination: Arc<dyn Destination>, metrics: Arc<dyn MetricCollector>) -> Self {
+        HandlerContext {
+            destination,
+            metrics,
+        }
     }
 }
 
 /// A message handler that processes events from a specific topic.
 ///
-/// Handlers are the core processing units in the ETL engine. Each handler
-/// subscribes to a topic and processes incoming messages.
+/// Each handler subscribes to one topic and processes incoming messages.
 ///
 /// # Example
 ///
@@ -80,6 +89,10 @@ impl HandlerContext {
 ///
 /// #[async_trait]
 /// impl Handler for OrderHandler {
+///     fn name(&self) -> &str {
+///         "order-handler"
+///     }
+///
 ///     fn topic(&self) -> &str {
 ///         "orders"
 ///     }
@@ -95,6 +108,11 @@ impl HandlerContext {
 /// ```
 #[async_trait]
 pub trait Handler: Send + Sync {
+    /// Returns the unique name of this handler.
+    ///
+    /// Used for metrics labeling and debugging. Should be a stable identifier.
+    fn name(&self) -> &str;
+
     /// Returns the topic this handler subscribes to.
     fn topic(&self) -> &str;
 
@@ -102,7 +120,7 @@ pub trait Handler: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `context` - Shared resources for processing (e.g., destination writers)
+    /// * `context` - Shared resources for processing (e.g., destination writers, metrics)
     /// * `message` - The message envelope containing the payload
     ///
     /// # Errors
@@ -114,9 +132,8 @@ pub trait Handler: Send + Sync {
 
 /// A module that groups related handlers and entities.
 ///
-/// Modules are the primary extension point for the ETL engine. They package
-/// together handlers that process messages and entity definitions that
-/// describe the data model.
+/// Modules package handlers that process messages along with entity
+/// definitions that describe the data model.
 ///
 /// # Example
 ///

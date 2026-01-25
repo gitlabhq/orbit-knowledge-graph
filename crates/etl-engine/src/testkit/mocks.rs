@@ -20,11 +20,11 @@ use crate::entities::Entity;
 use crate::message_broker::{
     AckHandle, BrokerError, Envelope, Message, MessageBroker, MessageId, Subscription,
 };
+use crate::metrics::MetricCollector;
 use crate::module::{Handler, HandlerContext, HandlerError, Module};
 
 type MessageSenders = Arc<Mutex<Vec<mpsc::Sender<Result<Message, BrokerError>>>>>;
 
-/// Tracks ack/nack/dlq calls for verification in tests.
 pub struct MockAckHandle {
     acked: Arc<AtomicBool>,
     nacked: Arc<AtomicBool>,
@@ -66,7 +66,6 @@ impl AckHandle for MockAckHandle {
     }
 }
 
-/// A shared ack handle that can be cloned for verification after message processing.
 #[derive(Clone)]
 pub struct SharedMockAckHandle {
     acked: Arc<AtomicBool>,
@@ -103,14 +102,12 @@ impl Default for SharedMockAckHandle {
     }
 }
 
-/// A pre-built message with an envelope and shared ack handle for verification.
 pub struct QueuedMessage {
     envelope: Envelope,
     ack_handle: SharedMockAckHandle,
 }
 
 impl QueuedMessage {
-    /// Creates a new queued message with a shared ack handle.
     pub fn new(envelope: Envelope) -> Self {
         Self {
             envelope,
@@ -118,16 +115,11 @@ impl QueuedMessage {
         }
     }
 
-    /// Returns the shared ack handle for verification after processing.
     pub fn ack_handle(&self) -> &SharedMockAckHandle {
         &self.ack_handle
     }
 }
 
-/// A controllable mock broker for testing.
-///
-/// Uses channels internally so subscriptions stay open until the broker is dropped,
-/// simulating real broker behavior where you listen until explicitly stopped.
 #[derive(Clone, Default)]
 pub struct MockMessageBroker {
     messages: Arc<Mutex<HashMap<String, Vec<Envelope>>>>,
@@ -142,7 +134,6 @@ impl MockMessageBroker {
         Self::default()
     }
 
-    /// Queue messages to be delivered when subscribed.
     pub fn queue_messages(&self, topic: &str, messages: Vec<Envelope>) {
         self.messages
             .lock()
@@ -151,7 +142,6 @@ impl MockMessageBroker {
             .extend(messages);
     }
 
-    /// Queue a message with a shared ack handle for verification.
     pub fn queue_message_with_handle(&self, topic: &str, message: QueuedMessage) {
         self.messages_with_handles
             .lock()
@@ -160,12 +150,10 @@ impl MockMessageBroker {
             .push(message);
     }
 
-    /// Make subscribe() return an error.
     pub fn fail_subscription(&self, error: BrokerError) {
         *self.subscription_error.lock() = Some(error);
     }
 
-    /// Get all published messages for assertions.
     pub fn get_published(&self) -> Vec<(String, Envelope)> {
         self.published.lock().clone()
     }
@@ -213,7 +201,6 @@ impl MessageBroker for MockMessageBroker {
     }
 }
 
-/// Records all writes for verification.
 pub struct MockDestination {
     batch_writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
     stream_writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
@@ -257,7 +244,6 @@ impl Destination for MockDestination {
     }
 }
 
-/// Captures written RecordBatches for verification.
 pub struct MockBatchWriter {
     writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
 }
@@ -269,7 +255,6 @@ impl BatchWriter for MockBatchWriter {
     }
 }
 
-/// Captures buffered writes with flush/close.
 pub struct MockStreamWriter {
     buffer: Arc<Mutex<Vec<RecordBatch>>>,
     writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
@@ -294,8 +279,8 @@ impl StreamWriter for MockStreamWriter {
     }
 }
 
-/// A configurable test handler.
 pub struct MockHandler {
+    name: String,
     topic: String,
     delay: Option<Duration>,
     error: Option<HandlerError>,
@@ -306,12 +291,18 @@ pub struct MockHandler {
 impl MockHandler {
     pub fn new(topic: &str) -> Self {
         Self {
+            name: format!("mock-handler-{}", topic),
             topic: topic.to_string(),
             delay: None,
             error: None,
             invocations: Arc::new(AtomicUsize::new(0)),
             received: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
     }
 
     pub fn with_delay(mut self, delay: Duration) -> Self {
@@ -339,6 +330,10 @@ impl MockHandler {
 
 #[async_trait]
 impl Handler for MockHandler {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
     fn topic(&self) -> &str {
         &self.topic
     }
@@ -363,7 +358,6 @@ impl Handler for MockHandler {
     }
 }
 
-/// Builder pattern for test modules.
 pub struct MockModule {
     name: String,
     handlers: Vec<Arc<dyn Handler>>,
@@ -411,6 +405,10 @@ struct HandlerWrapper(Arc<dyn Handler>);
 
 #[async_trait]
 impl Handler for HandlerWrapper {
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
     fn topic(&self) -> &str {
         self.0.topic()
     }
@@ -420,7 +418,6 @@ impl Handler for HandlerWrapper {
     }
 }
 
-/// Factory for creating test envelopes.
 pub struct TestEnvelopeFactory;
 
 impl TestEnvelopeFactory {
@@ -446,5 +443,88 @@ impl TestEnvelopeFactory {
         (0..count)
             .map(|i| Self::simple(&format!("message-{}", i)))
             .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecordedMetric {
+    Increment {
+        name: String,
+        tags: Vec<(String, String)>,
+    },
+    Gauge {
+        name: String,
+        value: f64,
+        tags: Vec<(String, String)>,
+    },
+    Histogram {
+        name: String,
+        value: f64,
+        tags: Vec<(String, String)>,
+    },
+}
+
+#[derive(Default)]
+pub struct MockMetricCollector {
+    metrics: Mutex<Vec<RecordedMetric>>,
+}
+
+impl MockMetricCollector {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get_metrics(&self) -> Vec<RecordedMetric> {
+        self.metrics.lock().clone()
+    }
+
+    pub fn count(&self, name: &str) -> usize {
+        self.metrics
+            .lock()
+            .iter()
+            .filter(|m| match m {
+                RecordedMetric::Increment { name: n, .. } => n == name,
+                RecordedMetric::Gauge { name: n, .. } => n == name,
+                RecordedMetric::Histogram { name: n, .. } => n == name,
+            })
+            .count()
+    }
+
+    pub fn clear(&self) {
+        self.metrics.lock().clear();
+    }
+}
+
+impl MetricCollector for MockMetricCollector {
+    fn increment(&self, name: &str, tags: &[(&str, &str)]) {
+        self.metrics.lock().push(RecordedMetric::Increment {
+            name: name.to_string(),
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        });
+    }
+
+    fn gauge(&self, name: &str, value: f64, tags: &[(&str, &str)]) {
+        self.metrics.lock().push(RecordedMetric::Gauge {
+            name: name.to_string(),
+            value,
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        });
+    }
+
+    fn histogram(&self, name: &str, value: f64, tags: &[(&str, &str)]) {
+        self.metrics.lock().push(RecordedMetric::Histogram {
+            name: name.to_string(),
+            value,
+            tags: tags
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        });
     }
 }
