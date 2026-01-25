@@ -1,12 +1,39 @@
 //! The engine subscribes to topics, dispatches messages to handlers, and acks/nacks.
 //!
+//! # Example
+//!
 //! ```ignore
-//! let engine = Engine::new(Box::new(broker), registry, Arc::new(destination));
+//! use etl_engine::engine::EngineBuilder;
+//! use etl_engine::module::ModuleRegistry;
+//! use etl_engine::configuration::EngineConfiguration;
+//! use std::sync::Arc;
+//!
+//! let registry = Arc::new(ModuleRegistry::default());
+//! registry.register_module(&my_module);
+//!
+//! let engine = EngineBuilder::new(
+//!     Box::new(my_broker),
+//!     registry,
+//!     Arc::new(my_destination),
+//! ).build();
+//!
 //! engine.run(&EngineConfiguration::default()).await?;
 //!
 //! // From another task:
 //! engine.stop();
 //! ```
+//!
+//! # Metrics
+//!
+//! To collect metrics, pass a [`MetricCollector`](crate::metrics::MetricCollector) to the builder:
+//!
+//! ```ignore
+//! let engine = EngineBuilder::new(broker, registry, destination)
+//!     .metrics(Arc::new(my_metrics_backend))
+//!     .build();
+//! ```
+//!
+//! Handlers receive the collector via [`HandlerContext`](crate::module::HandlerContext).
 
 use std::sync::Arc;
 
@@ -17,13 +44,14 @@ use tokio_util::sync::CancellationToken;
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
 use crate::message_broker::{BrokerError, Envelope, MessageBroker};
+use crate::metrics::{MetricCollector, NoopMetricCollector};
 use crate::module::{Handler, HandlerContext, HandlerError, ModuleRegistry};
 use crate::worker_pool::WorkerPool;
 
 /// Errors that can occur during engine operation.
 #[derive(Debug, Error)]
 pub enum EngineError {
-    /// An error from the message broker (subscription, ack/nack, etc.).
+    /// An error from the message broker.
     #[error("broker error: {0}")]
     Broker(#[from] BrokerError),
 
@@ -32,37 +60,30 @@ pub enum EngineError {
     Handler(#[from] HandlerError),
 }
 
-/// The ETL engine that processes messages through registered handlers.
+/// Builder for constructing an [`Engine`].
 ///
-/// The engine subscribes to topics based on registered handlers, processes
-/// incoming messages, and manages acknowledgments. It uses a worker pool
-/// to control concurrency at both global and per-module levels.
+/// Required components are passed to `new()`. Optional components can be set
+/// via builder methods before calling `build()`.
 ///
-/// # Lifecycle
+/// # Example
 ///
-/// 1. Create an engine with [`Engine::new`]
-/// 2. Start processing with [`Engine::run`]
-/// 3. Stop gracefully with [`Engine::stop`]
+/// ```ignore
+/// use etl_engine::engine::EngineBuilder;
+/// use std::sync::Arc;
 ///
-/// # Concurrency
-///
-/// The engine uses a [`WorkerPool`](crate::worker_pool::WorkerPool) to limit
-/// concurrent message processing. Configure limits via [`EngineConfiguration`].
-pub struct Engine {
+/// let engine = EngineBuilder::new(broker, registry, destination)
+///     .metrics(Arc::new(my_metrics))  // optional
+///     .build();
+/// ```
+pub struct EngineBuilder {
     broker: Box<dyn MessageBroker>,
     registry: Arc<ModuleRegistry>,
     destination: Arc<dyn Destination>,
-    cancel: CancellationToken,
+    metrics: Arc<dyn MetricCollector>,
 }
 
-impl Engine {
-    /// Creates a new engine with the given components.
-    ///
-    /// # Arguments
-    ///
-    /// * `broker` - The message broker for subscribing to topics
-    /// * `registry` - The module registry containing handlers
-    /// * `destination` - The destination for writing processed data
+impl EngineBuilder {
+    /// Creates a new engine builder with the required components.
     pub fn new(
         broker: Box<dyn MessageBroker>,
         registry: Arc<ModuleRegistry>,
@@ -72,24 +93,61 @@ impl Engine {
             broker,
             registry,
             destination,
-            cancel: CancellationToken::new(),
+            metrics: Arc::new(NoopMetricCollector),
         }
     }
 
+    /// Sets the metric collector.
+    ///
+    /// If not called, metrics are discarded.
+    pub fn metrics(mut self, metrics: Arc<dyn MetricCollector>) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    /// Builds the engine.
+    pub fn build(self) -> Engine {
+        Engine {
+            broker: self.broker,
+            registry: self.registry,
+            destination: self.destination,
+            metrics: self.metrics,
+            cancel: CancellationToken::new(),
+        }
+    }
+}
+
+/// The ETL engine that processes messages through registered handlers.
+///
+/// The engine subscribes to topics based on registered handlers, processes
+/// incoming messages, and manages acknowledgments. It uses a worker pool
+/// to control concurrency.
+///
+/// # Creating an engine
+///
+/// Use [`EngineBuilder`]:
+///
+/// ```ignore
+/// let engine = EngineBuilder::new(broker, registry, destination).build();
+/// ```
+///
+/// # Lifecycle
+///
+/// 1. Create with [`EngineBuilder`]
+/// 2. Start with [`Engine::run`]
+/// 3. Stop with [`Engine::stop`]
+pub struct Engine {
+    broker: Box<dyn MessageBroker>,
+    registry: Arc<ModuleRegistry>,
+    destination: Arc<dyn Destination>,
+    metrics: Arc<dyn MetricCollector>,
+    cancel: CancellationToken,
+}
+
+impl Engine {
     /// Starts the engine and processes messages until stopped.
     ///
-    /// The engine will:
-    /// 1. Create a worker pool based on the configuration
-    /// 2. Subscribe to all topics that have registered handlers
-    /// 3. Process messages through the appropriate handlers
-    /// 4. Ack or nack messages based on handler results
-    ///
-    /// Returns when the engine is stopped via [`Engine::stop`] or all
-    /// subscriptions are exhausted.
-    ///
-    /// # Arguments
-    ///
-    /// * `configuration` - Engine configuration including concurrency limits
+    /// Returns when stopped via [`Engine::stop`] or when all subscriptions end.
     pub async fn run(&self, configuration: &EngineConfiguration) -> Result<(), EngineError> {
         let topics = self.registry.topics();
         if topics.is_empty() {
@@ -115,7 +173,10 @@ impl Engine {
                 Some(msg) = subscription.next() => {
                     let msg = msg?;
                     let handlers = self.registry.handlers_for(&topic);
-                    let context = HandlerContext::new(self.destination.clone());
+                    let context = HandlerContext::new(
+                        self.destination.clone(),
+                        self.metrics.clone(),
+                    );
 
                     match dispatch(&handlers, context, msg.envelope.clone(), &worker_pool).await {
                         Ok(_)  => msg.ack().await?,
@@ -128,8 +189,7 @@ impl Engine {
 
     /// Signals the engine to stop processing.
     ///
-    /// This cancels all active subscriptions and causes [`Engine::run`]
-    /// to return. In-flight messages will complete before shutdown.
+    /// In-flight messages will complete before shutdown.
     pub fn stop(&self) {
         self.cancel.cancel();
     }
