@@ -53,3 +53,12 @@ Rust gRPC client for Gitaly. Provides repository operations for the code indexer
 Build with: `GITALY_PROTO_ROOT=/path/to/gitaly cargo build -p gitaly-client`
 
 Integration tests require a running Gitaly instance. Set `GITALY_CONNECTION_INFO` JSON with address, storage, and token.
+
+## Infrastructure
+
+See [docs/dev/INFRASTRUCTURE.md](docs/dev/INFRASTRUCTURE.md) for sandbox environment details (GCP project, VMs, networking).
+
+Kubernetes deployments are managed via Helm charts in `./helm-dev/`. The charts are the source of truth for:
+- Component configuration (NATS, siphon-producer, siphon-consumer)
+- Secret management (External Secrets Operator integration)
+- Service connectivity
