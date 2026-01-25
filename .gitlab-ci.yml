@@ -17,6 +17,20 @@ stages:
   before_script:
     - mise install
 
+.test-template:
+  extends:
+    - .job-template
+  variables:
+    RUST_BACKTRACE: "1"
+  before_script:
+    - apt-get update && apt-get install -y libclang-dev
+    - cargo install cargo-nextest --locked
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - target/nextest/ci/junit.xml
+
 .mr-only-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -111,10 +125,10 @@ semgrep-sast:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       exists:
-        - '**/*.rs'
+        - "**/*.rs"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
-        - '**/*.rs'
+        - "**/*.rs"
 
 # ------------------------------------------------------------------------------
 # Test Stage
@@ -123,15 +137,26 @@ semgrep-sast:
 unit-test:
   stage: test
   extends:
-    - .job-template
+    - .test-template
     - .mr-and-main-rules
   needs: []
-  variables:
-    RUST_BACKTRACE: "1"
   script:
-    - cargo nextest run --profile ci
-  artifacts:
-    when: always
-    reports:
-      junit:
-        - target/nextest/ci/junit.xml
+    - cargo nextest run --profile ci --lib --bins
+
+integration-test:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    TESTCONTAINERS_HOST_OVERRIDE: docker
+  needs: []
+  before_script:
+    - !reference [.test-template, before_script]
+    - apt-get install -y docker.io
+  script:
+    - cargo nextest run --profile ci --all-features --test '*' -j 1
