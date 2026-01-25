@@ -41,14 +41,14 @@ pub mod codegen;
 pub mod error;
 pub mod input;
 pub mod lower;
-#[cfg(test)]
-mod ontology;
+pub mod ontology;
 pub mod schema;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, RecursiveCte, SelectExpr, TableRef};
 pub use codegen::ParameterizedQuery;
 pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
+pub use ontology::{load_ontology_from_dir, load_ontology_from_strings, OntologyError};
 pub use schema::Schema;
 
 /// Compile a JSON query into parameterized SQL.
@@ -227,11 +227,11 @@ mod tests {
 #[cfg(test)]
 mod ontology_integration_tests {
     use super::*;
-    use crate::ontology::tests::load_ontology_schema;
+    use crate::ontology::load_test_ontology;
 
     #[test]
     fn test_valid_column_in_order_by() {
-        let schema = load_ontology_schema();
+        let schema = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "label": "User"}],
@@ -249,7 +249,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_invalid_column_in_order_by() {
-        let schema = load_ontology_schema();
+        let schema = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "label": "User"}],
@@ -268,7 +268,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_valid_column_in_filter() {
-        let schema = load_ontology_schema();
+        let schema = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [{
@@ -289,7 +289,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_invalid_column_in_filter() {
-        let schema = load_ontology_schema();
+        let schema = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [{
@@ -311,7 +311,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_valid_column_in_aggregation() {
-        let schema = load_ontology_schema();
+        let schema = load_test_ontology();
         let json = r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "label": "Project"}],
@@ -331,7 +331,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_invalid_column_in_aggregation() {
-        let schema = load_ontology_schema();
+        let schema = load_test_ontology();
         let json = r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "label": "Project"}],
@@ -352,7 +352,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_invalid_type_filter_in_codegen() {
-        let schema = load_ontology_schema();
+        let schema = load_test_ontology();
 
         // This test creates an AST directly to test codegen validation
         let query = Query {
@@ -378,7 +378,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_full_pipeline_with_ontology() {
-        let schema = load_ontology_schema();
+        let schema = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
