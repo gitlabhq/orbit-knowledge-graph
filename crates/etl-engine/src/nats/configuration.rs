@@ -1,0 +1,132 @@
+//! NATS broker configuration.
+
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+/// NATS connection settings.
+///
+/// Matches siphon's QueuingConfig fields.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NatsConfiguration {
+    /// Server address, e.g. "localhost:4222".
+    pub url: String,
+
+    /// Optional username for authentication.
+    #[serde(default)]
+    pub username: Option<String>,
+
+    /// Optional password for authentication.
+    /// For production, prefer environment variables over storing in config files.
+    #[serde(default)]
+    pub password: Option<String>,
+
+    /// Connection timeout in seconds. Defaults to 10.
+    #[serde(default = "NatsConfiguration::default_connection_timeout_secs")]
+    pub connection_timeout_secs: u64,
+
+    /// Request timeout in seconds. Defaults to 5.
+    #[serde(default = "NatsConfiguration::default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+
+    /// Acknowledgment wait time in seconds before message redelivery. Defaults to 30.
+    #[serde(default = "NatsConfiguration::default_ack_wait_secs")]
+    pub ack_wait_secs: u64,
+
+    /// Maximum redelivery attempts. None means unlimited. Defaults to None.
+    #[serde(default)]
+    pub max_deliver: Option<u32>,
+
+    /// How many messages to buffer per subscription. Defaults to 100.
+    ///
+    /// This controls the capacity of the internal channel between the NATS fetch loop
+    /// and your message handler. When `subscribe()` is called, a background task fetches
+    /// messages and queues them in this buffer.
+    ///
+    /// - **Smaller buffer**: Less memory, but the fetch loop may block waiting for the handler
+    /// - **Larger buffer**: More messages pre-fetched, smoother throughput, higher memory usage
+    ///
+    /// For slow handlers or bursty workloads, consider increasing this value.
+    #[serde(default = "NatsConfiguration::default_subscription_buffer_size")]
+    pub subscription_buffer_size: usize,
+
+    /// Consumer name for durable subscriptions. Defaults to None (ephemeral consumer).
+    ///
+    /// **Ephemeral consumers** (`None`): Created on subscribe, destroyed on disconnect.
+    /// Messages are only delivered while connected. Good for transient workers or testing.
+    ///
+    /// **Durable consumers** (`Some("name")`): Persist across restarts. NATS tracks the
+    /// last acknowledged message, so reconnecting consumers resume where they left off.
+    /// Required for reliable message processing.
+    ///
+    /// For horizontal scaling, give all instances the same `consumer_name`. NATS will
+    /// distribute messages across them (each message delivered to exactly one instance).
+    #[serde(default)]
+    pub consumer_name: Option<String>,
+
+    /// How many messages to fetch per batch. Higher values improve throughput
+    /// but increase memory usage. Defaults to 10.
+    #[serde(default = "NatsConfiguration::default_batch_size")]
+    pub batch_size: usize,
+}
+
+impl NatsConfiguration {
+    fn default_connection_timeout_secs() -> u64 {
+        10
+    }
+
+    fn default_request_timeout_secs() -> u64 {
+        5
+    }
+
+    fn default_ack_wait_secs() -> u64 {
+        30
+    }
+
+    fn default_subscription_buffer_size() -> usize {
+        100
+    }
+
+    fn default_batch_size() -> usize {
+        10
+    }
+
+    pub fn connection_timeout(&self) -> Duration {
+        Duration::from_secs(self.connection_timeout_secs)
+    }
+
+    pub fn request_timeout(&self) -> Duration {
+        Duration::from_secs(self.request_timeout_secs)
+    }
+
+    pub fn ack_wait(&self) -> Duration {
+        Duration::from_secs(self.ack_wait_secs)
+    }
+
+    /// Returns buffer size, clamped to at least 1.
+    pub fn subscription_buffer_size(&self) -> usize {
+        self.subscription_buffer_size.max(1)
+    }
+
+    /// Returns batch size, clamped to at least 1.
+    pub fn batch_size(&self) -> usize {
+        self.batch_size.max(1)
+    }
+}
+
+impl Default for NatsConfiguration {
+    fn default() -> Self {
+        Self {
+            url: "localhost:4222".to_string(),
+            username: None,
+            password: None,
+            connection_timeout_secs: Self::default_connection_timeout_secs(),
+            request_timeout_secs: Self::default_request_timeout_secs(),
+            ack_wait_secs: Self::default_ack_wait_secs(),
+            max_deliver: None,
+            subscription_buffer_size: Self::default_subscription_buffer_size(),
+            consumer_name: None,
+            batch_size: Self::default_batch_size(),
+        }
+    }
+}

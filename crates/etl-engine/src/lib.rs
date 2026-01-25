@@ -57,7 +57,7 @@
 //! - [`destination`] - batch and stream writers
 //! - [`metrics`] - metric collection
 //! - [`configuration`] - concurrency limits
-
+//!
 pub mod configuration;
 pub mod destination;
 pub mod engine;
@@ -66,6 +66,9 @@ pub mod message_broker;
 pub mod metrics;
 pub mod module;
 pub mod worker_pool;
+
+#[cfg(feature = "nats")]
+pub mod nats;
 
 #[cfg(test)]
 pub mod testkit;

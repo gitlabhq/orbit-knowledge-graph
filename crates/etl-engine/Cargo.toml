@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+default = ["nats"]
+nats = ["dep:async-nats", "dep:tokio-stream"]
+
 [dependencies]
 async-trait = { workspace = true }
 arrow = { workspace = true }
@@ -17,7 +21,12 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }
+async-nats = { workspace = true, optional = true }
+tokio-stream = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }
+testcontainers = { workspace = true }
+testcontainers-modules = { workspace = true }
+serial_test = { workspace = true }
