@@ -22,11 +22,11 @@ run = [
 description = "Clean the crates"
 
 [tasks.lint]
-run = "cargo clippy --all -- -D warnings"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
 description = "Run clippy lint checks"
 
 [tasks."lint:fix"]
-run = ["cargo fmt", "cargo clippy --fix --allow-dirty", "cargo fmt"]
+run = ["cargo fmt", "cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings", "cargo fmt"]
 description = "Run clippy lint checks and fix applicable issues"
 
 [tasks."fix:newlines"]

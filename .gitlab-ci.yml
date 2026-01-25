@@ -16,7 +16,7 @@ variables:
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: rust:1.89.0
+  image: rust:1.93.0
   before_script:
     - apt-get update && apt-get install -y libclang-dev
     - rustup set auto-self-update disable
