@@ -1,0 +1,23 @@
+[package]
+name = "etl-engine"
+version = "0.1.0"
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+async-trait = { workspace = true }
+arrow = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+uuid = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
+tokio-stream = { workspace = true }

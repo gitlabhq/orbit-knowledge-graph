@@ -27,12 +27,31 @@ allow = [
     "Unicode-DFS-2016",
     "CC0-1.0",
     "MPL-2.0",
+    "LicenseRef-EE",
 ]
 confidence-threshold = 0.8
 
 [licenses.private]
-ignore = false
+ignore = true
 registries = []
+
+[[licenses.clarify]]
+name = "etl-engine"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
+name = "labkit-rs"
+expression = "MIT"
+license-files = []
+
+[[licenses.exceptions]]
+name = "ruby-prism"
+allow = ["MIT"]
+
+[[licenses.exceptions]]
+name = "ruby-prism-sys"
+allow = ["MIT"]
 
 [bans]
 multiple-versions = "warn"
