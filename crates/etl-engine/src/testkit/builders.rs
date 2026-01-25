@@ -5,35 +5,46 @@ use std::sync::Arc;
 use crate::configuration::{EngineConfiguration, ModuleConfiguration};
 use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
-use crate::message_broker::MessageBroker;
 use crate::metrics::MetricCollector;
 use crate::module::{Module, ModuleRegistry};
+use crate::nats::{NatsBroker, NatsServices};
 
-use super::mocks::{MockDestination, MockMessageBroker};
+use super::mocks::{MockDestination, MockNatsServices};
 
 /// Fluent builder for test engine setup.
+///
+/// The engine requires a real NATS broker. For integration tests,
+/// use testcontainers to start a NATS container.
+///
+/// # Example
+///
+/// ```ignore
+/// let config = NatsConfiguration { url: "localhost:4222".into(), ..Default::default() };
+/// let broker = Arc::new(NatsBroker::connect(&config).await?);
+///
+/// let (engine, config) = TestEngineBuilder::new(broker)
+///     .with_module(&MyModule)
+///     .build();
+/// ```
 pub struct TestEngineBuilder {
-    broker: Option<Box<dyn MessageBroker>>,
+    broker: Arc<NatsBroker>,
     destination: Option<Arc<dyn Destination>>,
     metrics: Option<Arc<dyn MetricCollector>>,
+    nats_services: Option<Arc<dyn NatsServices>>,
     registry: Arc<ModuleRegistry>,
     configuration: EngineConfiguration,
 }
 
 impl TestEngineBuilder {
-    pub fn new() -> Self {
+    pub fn new(broker: Arc<NatsBroker>) -> Self {
         Self {
-            broker: None,
+            broker,
             destination: None,
             metrics: None,
+            nats_services: None,
             registry: Arc::new(ModuleRegistry::default()),
             configuration: EngineConfiguration::default(),
         }
-    }
-
-    pub fn with_broker<B: MessageBroker + 'static>(mut self, broker: B) -> Self {
-        self.broker = Some(Box::new(broker));
-        self
     }
 
     pub fn with_module(self, module: &dyn Module) -> Self {
@@ -41,8 +52,18 @@ impl TestEngineBuilder {
         self
     }
 
+    pub fn with_destination(mut self, destination: Arc<dyn Destination>) -> Self {
+        self.destination = Some(destination);
+        self
+    }
+
     pub fn with_metrics<M: MetricCollector + 'static>(mut self, metrics: M) -> Self {
         self.metrics = Some(Arc::new(metrics));
+        self
+    }
+
+    pub fn with_nats_services(mut self, nats_services: Arc<dyn NatsServices>) -> Self {
+        self.nats_services = Some(nats_services);
         self
     }
 
@@ -62,14 +83,16 @@ impl TestEngineBuilder {
     }
 
     pub fn build(self) -> (Arc<Engine>, EngineConfiguration) {
-        let broker = self
-            .broker
-            .unwrap_or_else(|| Box::new(MockMessageBroker::new()));
         let destination = self
             .destination
             .unwrap_or_else(|| Arc::new(MockDestination::new()));
 
-        let mut engine_builder = EngineBuilder::new(broker, self.registry, destination);
+        let nats_services = self
+            .nats_services
+            .unwrap_or_else(|| Arc::new(MockNatsServices::new()));
+
+        let mut engine_builder = EngineBuilder::new(self.broker, self.registry, destination)
+            .nats_services(nats_services);
 
         if let Some(metrics) = self.metrics {
             engine_builder = engine_builder.metrics(metrics);
@@ -77,11 +100,5 @@ impl TestEngineBuilder {
 
         let engine = Arc::new(engine_builder.build());
         (engine, self.configuration)
-    }
-}
-
-impl Default for TestEngineBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

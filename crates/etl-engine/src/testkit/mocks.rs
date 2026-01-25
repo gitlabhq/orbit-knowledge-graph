@@ -1,206 +1,64 @@
 //! Mock implementations for testing.
 
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::Utc;
-
 use parking_lot::Mutex;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::destination::{BatchWriter, Destination, DestinationError, StreamWriter};
 use crate::entities::Entity;
-use crate::message_broker::{
-    AckHandle, BrokerError, Envelope, Message, MessageBroker, MessageId, Subscription,
-};
 use crate::metrics::MetricCollector;
 use crate::module::{Handler, HandlerContext, HandlerError, Module};
+use crate::nats::{NatsError, NatsServices};
+use crate::types::{Envelope, MessageId, Topic};
 
-type MessageSenders = Arc<Mutex<Vec<mpsc::Sender<Result<Message, BrokerError>>>>>;
-
-pub struct MockAckHandle {
-    acked: Arc<AtomicBool>,
-    nacked: Arc<AtomicBool>,
-}
-
-impl MockAckHandle {
-    pub fn new() -> Self {
-        Self {
-            acked: Arc::new(AtomicBool::new(false)),
-            nacked: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    pub fn was_acked(&self) -> bool {
-        self.acked.load(Ordering::SeqCst)
-    }
-
-    pub fn was_nacked(&self) -> bool {
-        self.nacked.load(Ordering::SeqCst)
-    }
-}
-
-impl Default for MockAckHandle {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl AckHandle for MockAckHandle {
-    async fn ack(self: Box<Self>) -> Result<(), BrokerError> {
-        self.acked.store(true, Ordering::SeqCst);
-        Ok(())
-    }
-
-    async fn nack(self: Box<Self>) -> Result<(), BrokerError> {
-        self.nacked.store(true, Ordering::SeqCst);
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub struct SharedMockAckHandle {
-    acked: Arc<AtomicBool>,
-    nacked: Arc<AtomicBool>,
-}
-
-impl SharedMockAckHandle {
-    pub fn new() -> Self {
-        Self {
-            acked: Arc::new(AtomicBool::new(false)),
-            nacked: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    pub fn was_acked(&self) -> bool {
-        self.acked.load(Ordering::SeqCst)
-    }
-
-    pub fn was_nacked(&self) -> bool {
-        self.nacked.load(Ordering::SeqCst)
-    }
-
-    pub fn to_ack_handle(&self) -> Box<dyn AckHandle> {
-        Box::new(MockAckHandle {
-            acked: self.acked.clone(),
-            nacked: self.nacked.clone(),
-        })
-    }
-}
-
-impl Default for SharedMockAckHandle {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct QueuedMessage {
-    envelope: Envelope,
-    ack_handle: SharedMockAckHandle,
-}
-
-impl QueuedMessage {
-    pub fn new(envelope: Envelope) -> Self {
-        Self {
-            envelope,
-            ack_handle: SharedMockAckHandle::new(),
-        }
-    }
-
-    pub fn ack_handle(&self) -> &SharedMockAckHandle {
-        &self.ack_handle
-    }
-}
-
+/// Mock implementation of [`NatsServices`] for testing handlers.
+///
+/// Records all published messages for later verification.
+///
+/// # Example
+///
+/// ```ignore
+/// let mock_nats = MockNatsServices::new();
+/// let context = HandlerContext::new(destination, metrics, Arc::new(mock_nats.clone()));
+///
+/// handler.handle(context, envelope).await?;
+///
+/// let published = mock_nats.get_published();
+/// assert_eq!(published.len(), 1);
+/// ```
 #[derive(Clone, Default)]
-pub struct MockMessageBroker {
-    messages: Arc<Mutex<HashMap<String, Vec<Envelope>>>>,
-    messages_with_handles: Arc<Mutex<HashMap<String, Vec<QueuedMessage>>>>,
-    published: Arc<Mutex<Vec<(String, Envelope)>>>,
-    subscription_error: Arc<Mutex<Option<BrokerError>>>,
-    senders: MessageSenders,
+pub struct MockNatsServices {
+    published: Arc<Mutex<Vec<(Topic, Envelope)>>>,
 }
 
-impl MockMessageBroker {
+impl MockNatsServices {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn queue_messages(&self, topic: &str, messages: Vec<Envelope>) {
-        self.messages
-            .lock()
-            .entry(topic.to_string())
-            .or_default()
-            .extend(messages);
-    }
-
-    pub fn queue_message_with_handle(&self, topic: &str, message: QueuedMessage) {
-        self.messages_with_handles
-            .lock()
-            .entry(topic.to_string())
-            .or_default()
-            .push(message);
-    }
-
-    pub fn fail_subscription(&self, error: BrokerError) {
-        *self.subscription_error.lock() = Some(error);
-    }
-
-    pub fn get_published(&self) -> Vec<(String, Envelope)> {
+    pub fn get_published(&self) -> Vec<(Topic, Envelope)> {
         self.published.lock().clone()
     }
 }
 
 #[async_trait]
-impl MessageBroker for MockMessageBroker {
-    async fn publish(&self, topic: &str, envelope: Envelope) -> Result<(), BrokerError> {
-        self.published.lock().push((topic.to_string(), envelope));
-        Ok(())
-    }
-
-    async fn subscribe(&self, topic: &str) -> Result<Subscription, BrokerError> {
-        if let Some(error) = self.subscription_error.lock().take() {
-            return Err(error);
-        }
-
-        let messages = self.messages.lock().remove(topic).unwrap_or_default();
-        let messages_with_handles = self
-            .messages_with_handles
+impl NatsServices for MockNatsServices {
+    async fn publish(&self, topic: &Topic, envelope: &Envelope) -> Result<(), NatsError> {
+        self.published
             .lock()
-            .remove(topic)
-            .unwrap_or_default();
-
-        let total_messages = messages.len() + messages_with_handles.len();
-        let (tx, rx) = mpsc::channel(total_messages.max(1));
-
-        for envelope in messages {
-            let _ = tx
-                .send(Ok(Message::new(envelope, Box::new(MockAckHandle::new()))))
-                .await;
-        }
-
-        for queued in messages_with_handles {
-            let _ = tx
-                .send(Ok(Message::new(
-                    queued.envelope,
-                    queued.ack_handle.to_ack_handle(),
-                )))
-                .await;
-        }
-
-        self.senders.lock().push(tx);
-        Ok(Box::pin(ReceiverStream::new(rx)))
+            .push((topic.clone(), envelope.clone()));
+        Ok(())
     }
 }
 
+/// Mock destination for testing.
 pub struct MockDestination {
     batch_writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
     stream_writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
@@ -212,14 +70,6 @@ impl MockDestination {
             batch_writes: Arc::new(Mutex::new(Vec::new())),
             stream_writes: Arc::new(Mutex::new(Vec::new())),
         }
-    }
-
-    pub fn get_batch_writes(&self) -> Vec<Vec<RecordBatch>> {
-        self.batch_writes.lock().clone()
-    }
-
-    pub fn get_stream_writes(&self) -> Vec<Vec<RecordBatch>> {
-        self.stream_writes.lock().clone()
     }
 }
 
@@ -279,9 +129,10 @@ impl StreamWriter for MockStreamWriter {
     }
 }
 
+/// Mock handler for testing.
 pub struct MockHandler {
     name: String,
-    topic: String,
+    topic: Topic,
     delay: Option<Duration>,
     error: Option<HandlerError>,
     invocations: Arc<AtomicUsize>,
@@ -289,10 +140,10 @@ pub struct MockHandler {
 }
 
 impl MockHandler {
-    pub fn new(topic: &str) -> Self {
+    pub fn new(stream: &'static str, subject: &'static str) -> Self {
         Self {
-            name: format!("mock-handler-{}", topic),
-            topic: topic.to_string(),
+            name: format!("mock-handler-{}:{}", stream, subject),
+            topic: Topic::new(stream, subject),
             delay: None,
             error: None,
             invocations: Arc::new(AtomicUsize::new(0)),
@@ -314,18 +165,6 @@ impl MockHandler {
         self.error = Some(error);
         self
     }
-
-    pub fn invocation_count(&self) -> usize {
-        self.invocations.load(Ordering::SeqCst)
-    }
-
-    pub fn get_received(&self) -> Vec<Envelope> {
-        self.received.lock().clone()
-    }
-
-    pub fn invocations_arc(&self) -> Arc<AtomicUsize> {
-        self.invocations.clone()
-    }
 }
 
 #[async_trait]
@@ -334,8 +173,8 @@ impl Handler for MockHandler {
         &self.name
     }
 
-    fn topic(&self) -> &str {
-        &self.topic
+    fn topic(&self) -> Topic {
+        self.topic.clone()
     }
 
     async fn handle(
@@ -358,6 +197,7 @@ impl Handler for MockHandler {
     }
 }
 
+/// Mock module for testing.
 pub struct MockModule {
     name: String,
     handlers: Vec<Arc<dyn Handler>>,
@@ -409,7 +249,7 @@ impl Handler for HandlerWrapper {
         self.0.name()
     }
 
-    fn topic(&self) -> &str {
+    fn topic(&self) -> Topic {
         self.0.topic()
     }
 

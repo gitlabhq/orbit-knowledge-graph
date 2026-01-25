@@ -10,7 +10,6 @@ use async_nats::jetstream::Context;
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
 use async_nats::jetstream::stream::Stream;
-use async_trait::async_trait;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use tokio::sync::RwLock;
@@ -18,30 +17,28 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
-use crate::message_broker::{
-    BrokerError, Envelope, Message, MessageBroker, MessageId, Subscription,
-};
+use crate::types::{Envelope, MessageId, Topic};
 
-use super::ack_handle::NatsAckHandle;
 use super::configuration::NatsConfiguration;
-use super::error::{map_connect_error, map_subscribe_error};
+use super::error::{NatsError, map_connect_error, map_subscribe_error};
+use super::message::{NatsMessage, NatsSubscription};
 
 /// NATS JetStream message broker.
 ///
-/// Topics are `stream:subject`. See the [module docs](super) for examples.
+/// See the [module docs](super) for examples.
 ///
 /// Call [`shutdown`](Self::shutdown) for graceful termination of subscription tasks.
 pub struct NatsBroker {
     jetstream: Context,
     config: NatsConfiguration,
-    streams: RwLock<HashMap<String, Stream>>,
+    streams: RwLock<HashMap<Arc<str>, Stream>>,
     subscription_handles: Mutex<Vec<JoinHandle<()>>>,
     cancellation_token: CancellationToken,
 }
 
 impl NatsBroker {
-    pub async fn connect(config: &NatsConfiguration) -> Result<Self, BrokerError> {
-        let connect_options = Self::build_connect_options(config)?;
+    pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
+        let connect_options = Self::build_connect_options(config);
 
         let url = format!("nats://{}", config.url);
         let client = async_nats::connect_with_options(&url, connect_options)
@@ -59,7 +56,6 @@ impl NatsBroker {
         })
     }
 
-    /// Stops all subscription tasks and waits for them to finish.
     pub async fn shutdown(self) {
         self.cancellation_token.cancel();
         let handles: Vec<_> = self.subscription_handles.lock().drain(..).collect();
@@ -68,9 +64,7 @@ impl NatsBroker {
         }
     }
 
-    fn build_connect_options(
-        config: &NatsConfiguration,
-    ) -> Result<async_nats::ConnectOptions, BrokerError> {
+    fn build_connect_options(config: &NatsConfiguration) -> async_nats::ConnectOptions {
         let mut options = async_nats::ConnectOptions::new()
             .connection_timeout(config.connection_timeout())
             .request_timeout(Some(config.request_timeout()));
@@ -79,19 +73,10 @@ impl NatsBroker {
             options = options.user_and_password(user.clone(), pass.clone());
         }
 
-        Ok(options)
+        options
     }
 
-    /// Split "stream:subject" into parts. Errors if the format is not valid.
-    fn parse_topic(topic: &str) -> Result<(&str, &str), BrokerError> {
-        topic.split_once(':').ok_or_else(|| {
-            BrokerError::Subscribe(format!(
-                "invalid topic '{topic}': expected 'stream:subject'"
-            ))
-        })
-    }
-
-    async fn get_stream(&self, stream_name: &str) -> Result<Stream, BrokerError> {
+    async fn get_stream(&self, stream_name: &Arc<str>) -> Result<Stream, NatsError> {
         {
             let cache = self.streams.read().await;
             if let Some(stream) = cache.get(stream_name) {
@@ -104,11 +89,16 @@ impl NatsBroker {
             return Ok(stream.clone());
         }
 
-        let stream = self.jetstream.get_stream(stream_name).await.map_err(|e| {
-            BrokerError::Connection(format!("failed to get stream '{stream_name}': {e}"))
-        })?;
+        let stream = self
+            .jetstream
+            .get_stream(stream_name.as_ref())
+            .await
+            .map_err(|e| NatsError::StreamNotFound {
+                stream: stream_name.to_string(),
+                source: e,
+            })?;
 
-        cache.insert(stream_name.to_string(), stream.clone());
+        cache.insert(stream_name.clone(), stream.clone());
         Ok(stream)
     }
 
@@ -116,7 +106,7 @@ impl NatsBroker {
         &self,
         stream: &Stream,
         subject: &str,
-    ) -> Result<PullConsumer, BrokerError> {
+    ) -> Result<PullConsumer, NatsError> {
         let max_deliver = self.config.max_deliver.map(|n| n as i64).unwrap_or(-1);
 
         let consumer_config = ConsumerConfig {
@@ -141,10 +131,10 @@ impl NatsBroker {
 
     fn convert_message(
         nats_message: async_nats::jetstream::message::Message,
-    ) -> Result<Message, BrokerError> {
+    ) -> Result<NatsMessage, NatsError> {
         let message_info = nats_message
             .info()
-            .map_err(|e| BrokerError::Subscribe(format!("failed to get message info: {e}")))?;
+            .map_err(|e| NatsError::Subscribe(format!("failed to get message info: {e}")))?;
 
         let message_id = format!(
             "{}.{}.{}",
@@ -167,39 +157,33 @@ impl NatsBroker {
             attempt,
         };
 
-        let ack_handle = Box::new(NatsAckHandle::new(acker));
-        Ok(Message::new(envelope, ack_handle))
+        Ok(NatsMessage { envelope, acker })
     }
-}
 
-#[async_trait]
-impl MessageBroker for NatsBroker {
-    async fn publish(&self, topic: &str, envelope: Envelope) -> Result<(), BrokerError> {
-        let (stream_name, subject) = Self::parse_topic(topic)?;
-
+    pub async fn publish(&self, topic: &Topic, envelope: &Envelope) -> Result<(), NatsError> {
         self.jetstream
-            .publish(subject.to_string(), envelope.payload)
+            .publish(topic.subject.to_string(), envelope.payload.clone())
             .await
             .map_err(|e| {
-                BrokerError::Publish(format!(
-                    "failed to publish to '{subject}' (stream '{stream_name}'): {e}"
+                NatsError::Publish(format!(
+                    "failed to publish to '{}' (stream '{}'): {e}",
+                    topic.subject, topic.stream
                 ))
             })?
             .await
             .map_err(|e| {
-                BrokerError::Publish(format!(
-                    "publish ack failed for '{subject}' (stream '{stream_name}'): {e}"
+                NatsError::Publish(format!(
+                    "publish ack failed for '{}' (stream '{}'): {e}",
+                    topic.subject, topic.stream
                 ))
             })?;
 
         Ok(())
     }
 
-    async fn subscribe(&self, topic: &str) -> Result<Subscription, BrokerError> {
-        let (stream_name, subject) = Self::parse_topic(topic)?;
-
-        let stream = self.get_stream(stream_name).await?;
-        let consumer = self.get_or_create_consumer(&stream, subject).await?;
+    pub async fn subscribe(&self, topic: &Topic) -> Result<NatsSubscription, NatsError> {
+        let stream = self.get_stream(&topic.stream).await?;
+        let consumer = self.get_or_create_consumer(&stream, &topic.subject).await?;
 
         let (sender, receiver) = tokio::sync::mpsc::channel(self.config.subscription_buffer_size());
 
@@ -240,11 +224,9 @@ impl MessageBroker for NatsBroker {
             }
         });
 
-        // Track handle for shutdown(). Lock needed since subscribe() can be called
-        // concurrently (engine subscribes to multiple topics in parallel).
         {
             let mut handles = self.subscription_handles.lock();
-            handles.retain(|h| !h.is_finished()); // Prune finished to avoid unbounded growth
+            handles.retain(|h| !h.is_finished());
             handles.push(handle);
         }
 

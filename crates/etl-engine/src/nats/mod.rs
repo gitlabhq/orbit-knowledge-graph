@@ -32,10 +32,14 @@
 //!
 //! Handlers can use different streams. The broker caches stream connections.
 
-mod ack_handle;
 mod broker;
 mod configuration;
 mod error;
+mod message;
+mod services;
 
 pub use broker::NatsBroker;
 pub use configuration::NatsConfiguration;
+pub use error::NatsError;
+pub use message::{NatsMessage, NatsSubscription};
+pub use services::{NatsServices, NatsServicesImpl};

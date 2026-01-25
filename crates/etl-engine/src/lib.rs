@@ -1,20 +1,20 @@
 //! # ETL Engine
 //!
-//! Process messages from a broker, run them through handlers, write to a destination.
+//! Process messages from NATS, run them through handlers, write to a destination.
 //!
 //! You provide:
-//! - A [`MessageBroker`](message_broker::MessageBroker) (Kafka, RabbitMQ, etc.)
+//! - A [`NatsBroker`](nats::NatsBroker) for message streaming
 //! - A [`Destination`](destination::Destination) (database, data lake, etc.)
 //! - One or more [`Module`](module::Module)s containing [`Handler`](module::Handler)s
 //!
 //! ```text
-//! MessageBroker ──▶ Engine ──▶ Destination
-//!                     │
-//!                     ▼
-//!               ModuleRegistry
-//!                 └─ Module
-//!                     └─ Handler
-//!                     └─ Handler
+//! NatsBroker ──▶ Engine ──▶ Destination
+//!                  │
+//!                  ▼
+//!            ModuleRegistry
+//!              └─ Module
+//!                  └─ Handler
+//!                  └─ Handler
 //! ```
 //!
 //! ## Quick start
@@ -22,17 +22,17 @@
 //! ```ignore
 //! use etl_engine::engine::EngineBuilder;
 //! use etl_engine::module::ModuleRegistry;
+//! use etl_engine::nats::{NatsBroker, NatsConfiguration};
 //! use etl_engine::configuration::EngineConfiguration;
 //! use std::sync::Arc;
+//!
+//! let config = NatsConfiguration { url: "localhost:4222".into(), ..Default::default() };
+//! let broker = Arc::new(NatsBroker::connect(&config).await?);
 //!
 //! let registry = Arc::new(ModuleRegistry::default());
 //! registry.register_module(&MyModule);
 //!
-//! let engine = EngineBuilder::new(
-//!     Box::new(my_broker),
-//!     registry,
-//!     Arc::new(my_destination),
-//! ).build();
+//! let engine = EngineBuilder::new(broker, registry, Arc::new(my_destination)).build();
 //!
 //! engine.run(&EngineConfiguration::default()).await?;
 //! ```
@@ -53,7 +53,8 @@
 //! ## Modules
 //!
 //! - [`module`] - handlers and modules
-//! - [`message_broker`] - broker trait and message types
+//! - [`nats`] - NATS broker and services
+//! - [`types`] - core message types (Envelope, Event)
 //! - [`destination`] - batch and stream writers
 //! - [`metrics`] - metric collection
 //! - [`configuration`] - concurrency limits
@@ -62,13 +63,11 @@ pub mod configuration;
 pub mod destination;
 pub mod engine;
 pub mod entities;
-pub mod message_broker;
 pub mod metrics;
 pub mod module;
-pub mod worker_pool;
-
-#[cfg(feature = "nats")]
 pub mod nats;
+pub mod types;
+pub mod worker_pool;
 
 #[cfg(test)]
 pub mod testkit;
