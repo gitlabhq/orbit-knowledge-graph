@@ -1,10 +1,11 @@
 [tools]
-node = "22"
-rust = "stable"
-"cargo:cargo-nextest" = "latest"
-"cargo:cargo-audit" = "latest"      # for security vulnerability checks
-"cargo:cargo-deny" = "latest"
-"cargo:cargo-edit" = "latest"       # provides: cargo add, cargo rm, cargo upgrade
+"rust" = { version = "1.93.0", components = "rustfmt,clippy" }
+"cargo:cargo-nextest" = "0.9.123"
+"cargo:cargo-edit" = "0.13.8"
+"cargo:cargo-audit" = "0.22.0"
+"cargo:cargo-deny" = "0.19.0"
+"cargo:cargo-geiger" = "0.13.0"
+"cargo:cargo-cyclonedx" = "0.5.7"
 
 [tasks.build]
 run = "cargo build --release"
