@@ -28,7 +28,7 @@ macro_rules! define_languages {
         }
 
         $(
-            paste::paste! {
+            pastey::paste! {
                 const [<$variant:upper _EXTENSIONS>]: &[&str] = &[$($ext),+];
                 const [<$variant:upper _EXCLUDE_EXTENSIONS>]: &[&str] = &[$($exclude_ext),*];
             }
@@ -50,14 +50,14 @@ macro_rules! define_languages {
 
             pub const fn file_extensions(&self) -> &'static [&'static str] {
                 match self {
-                    $(SupportedLanguage::$variant => paste::paste! { [<$variant:upper _EXTENSIONS>] }),+
+                    $(SupportedLanguage::$variant => pastey::paste! { [<$variant:upper _EXTENSIONS>] }),+
                 }
             }
 
             /// File path patterns to exclude for this language
             pub const fn exclude_extensions(&self) -> &'static [&'static str] {
                 match self {
-                    $(SupportedLanguage::$variant => paste::paste! { [<$variant:upper _EXCLUDE_EXTENSIONS>] }),+
+                    $(SupportedLanguage::$variant => pastey::paste! { [<$variant:upper _EXCLUDE_EXTENSIONS>] }),+
                 }
             }
         }
@@ -146,7 +146,7 @@ macro_rules! define_languages {
         pub fn get_supported_extensions() -> SmallVec<[&'static str; 11]> {
             let mut extensions = SmallVec::new();
             $(
-                extensions.extend_from_slice(paste::paste! { [<$variant:upper _EXTENSIONS>] });
+                extensions.extend_from_slice(pastey::paste! { [<$variant:upper _EXTENSIONS>] });
             )+
             extensions
         }
