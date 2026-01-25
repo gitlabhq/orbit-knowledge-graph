@@ -172,10 +172,14 @@ pub mod tests {
         let schema = load_ontology_schema();
 
         // Invalid columns should fail
-        let err = schema.validate_column("User", "nonexistent_column").unwrap_err();
+        let err = schema
+            .validate_column("User", "nonexistent_column")
+            .unwrap_err();
         assert!(err.to_string().contains("does not exist"));
 
-        let err = schema.validate_column("Project", "invalid_property").unwrap_err();
+        let err = schema
+            .validate_column("Project", "invalid_property")
+            .unwrap_err();
         assert!(err.to_string().contains("does not exist"));
     }
 
@@ -216,7 +220,11 @@ pub mod tests {
         assert!(labels.iter().any(|v| v.as_str() == Some("Note")));
 
         // RelationshipTypeName should contain our types
-        let rel_type = defs.get("RelationshipTypeName").unwrap().as_object().unwrap();
+        let rel_type = defs
+            .get("RelationshipTypeName")
+            .unwrap()
+            .as_object()
+            .unwrap();
         let types = rel_type.get("enum").unwrap().as_array().unwrap();
         assert!(types.iter().any(|v| v.as_str() == Some("AUTHORED")));
         assert!(types.iter().any(|v| v.as_str() == Some("CONTAINS")));

@@ -309,7 +309,11 @@ mod tests {
         assert!(labels.iter().any(|v| v.as_str() == Some("Project")));
 
         // Check RelationshipTypeName enum is populated
-        let rel_type = defs.get("RelationshipTypeName").unwrap().as_object().unwrap();
+        let rel_type = defs
+            .get("RelationshipTypeName")
+            .unwrap()
+            .as_object()
+            .unwrap();
         let types = rel_type.get("enum").unwrap().as_array().unwrap();
         assert!(types.iter().any(|v| v.as_str() == Some("AUTHORED")));
         assert!(types.iter().any(|v| v.as_str() == Some("CONTAINS")));

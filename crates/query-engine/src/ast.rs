@@ -15,7 +15,11 @@ pub enum Expr {
     /// Function call: COUNT(x), SUM(x), etc.
     FuncCall { name: String, args: Vec<Expr> },
     /// Binary operation: x = y, x AND y, etc.
-    BinaryOp { op: Op, left: Box<Expr>, right: Box<Expr> },
+    BinaryOp {
+        op: Op,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
     /// Unary operation: NOT x, x IS NULL, etc.
     UnaryOp { op: Op, expr: Box<Expr> },
 }

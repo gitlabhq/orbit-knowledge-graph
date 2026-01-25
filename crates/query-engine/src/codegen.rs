@@ -28,11 +28,7 @@ pub fn codegen(ast: &Node, schema: &Schema) -> Result<ParameterizedQuery> {
     Ok(ParameterizedQuery { sql, params })
 }
 
-fn emit_query(
-    q: &Query,
-    params: &mut HashMap<String, Value>,
-    schema: &Schema,
-) -> Result<String> {
+fn emit_query(q: &Query, params: &mut HashMap<String, Value>, schema: &Schema) -> Result<String> {
     let mut sql = String::new();
 
     // SELECT clause
@@ -432,8 +428,11 @@ mod tests {
         assert_eq!(sql, "NULL");
 
         // Array
-        let sql = emit_literal(&Value::Array(vec![Value::from(1), Value::from(2)]), &mut params)
-            .unwrap();
+        let sql = emit_literal(
+            &Value::Array(vec![Value::from(1), Value::from(2)]),
+            &mut params,
+        )
+        .unwrap();
         assert_eq!(sql, "({p3:Int64}, {p4:Int64})");
     }
 
@@ -450,11 +449,7 @@ mod tests {
         assert_eq!(sql, "(t.deleted_at IS NULL)");
 
         // NOT
-        let sql = emit_expr(
-            &Expr::unary(Op::Not, Expr::col("t", "active")),
-            &mut params,
-        )
-        .unwrap();
+        let sql = emit_expr(&Expr::unary(Op::Not, Expr::col("t", "active")), &mut params).unwrap();
         assert_eq!(sql, "(NOT t.active)");
     }
 }

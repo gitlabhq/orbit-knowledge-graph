@@ -115,8 +115,12 @@ mod tests {
 
         // Basic assertions
         assert!(result.sql.contains("SELECT"));
-        assert!(result.sql.contains("INNER JOIN edges AS e0 ON (u.id = e0.from_id)"));
-        assert!(result.sql.contains("INNER JOIN nodes AS n ON (e0.to_id = n.id)"));
+        assert!(result
+            .sql
+            .contains("INNER JOIN edges AS e0 ON (u.id = e0.from_id)"));
+        assert!(result
+            .sql
+            .contains("INNER JOIN nodes AS n ON (e0.to_id = n.id)"));
         assert!(result.sql.contains("LIMIT 25"));
     }
 
@@ -236,7 +240,11 @@ mod ontology_integration_tests {
         }"#;
 
         let result = compile(json, &schema);
-        assert!(result.is_ok(), "expected no error for valid column, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "expected no error for valid column, got: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -252,7 +260,10 @@ mod ontology_integration_tests {
         let result = compile(json, &schema);
         assert!(result.is_err(), "expected error for invalid column");
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("does not exist"), "error should mention column doesn't exist: {err}");
+        assert!(
+            err.to_string().contains("does not exist"),
+            "error should mention column doesn't exist: {err}"
+        );
     }
 
     #[test]
@@ -269,7 +280,11 @@ mod ontology_integration_tests {
         }"#;
 
         let result = compile(json, &schema);
-        assert!(result.is_ok(), "expected no error for valid column, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "expected no error for valid column, got: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -288,7 +303,10 @@ mod ontology_integration_tests {
         let result = compile(json, &schema);
         assert!(result.is_err(), "expected error for invalid column");
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("does not exist"), "error should mention column doesn't exist: {err}");
+        assert!(
+            err.to_string().contains("does not exist"),
+            "error should mention column doesn't exist: {err}"
+        );
     }
 
     #[test]
@@ -304,7 +322,11 @@ mod ontology_integration_tests {
         }"#;
 
         let result = compile(json, &schema);
-        assert!(result.is_ok(), "expected no error for valid column, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "expected no error for valid column, got: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -322,7 +344,10 @@ mod ontology_integration_tests {
         let result = compile(json, &schema);
         assert!(result.is_err(), "expected error for invalid column");
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("does not exist"), "error should mention column doesn't exist: {err}");
+        assert!(
+            err.to_string().contains("does not exist"),
+            "error should mention column doesn't exist: {err}"
+        );
     }
 
     #[test]
@@ -345,7 +370,10 @@ mod ontology_integration_tests {
         let result = codegen::codegen(&Node::Query(Box::new(query)), &schema);
         assert!(result.is_err(), "expected error for invalid type filter");
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("not a valid"), "error should mention invalid type: {err}");
+        assert!(
+            err.to_string().contains("not a valid"),
+            "error should mention invalid type: {err}"
+        );
     }
 
     #[test]

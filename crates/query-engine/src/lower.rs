@@ -92,7 +92,10 @@ fn lower_aggregation(input: &Input, schema: &Schema) -> Result<Node> {
         }
 
         // Add aggregate function
-        let alias = agg.alias.clone().unwrap_or_else(|| agg.function.as_sql().to_lowercase());
+        let alias = agg
+            .alias
+            .clone()
+            .unwrap_or_else(|| agg.function.as_sql().to_lowercase());
         select.push(SelectExpr {
             expr: build_agg_func(agg),
             alias: Some(alias),
@@ -239,10 +242,7 @@ fn lower_path_finding(input: &Input, _schema: &Schema) -> Result<Node> {
             )),
             Some(Expr::unary(
                 Op::Not,
-                Expr::func(
-                    "has",
-                    vec![Expr::col("p", "path"), Expr::col("n", "id")],
-                ),
+                Expr::func("has", vec![Expr::col("p", "path"), Expr::col("n", "id")]),
             )),
         ]),
         group_by: vec![],
@@ -322,10 +322,9 @@ fn build_from(
 
         // Join edge table
         let edge_join_cond = match rel.direction {
-            Direction::Incoming => Expr::eq(
-                Expr::col(&rel.from, "id"),
-                Expr::col(&edge_alias, "to_id"),
-            ),
+            Direction::Incoming => {
+                Expr::eq(Expr::col(&rel.from, "id"), Expr::col(&edge_alias, "to_id"))
+            }
             Direction::Both => Expr::or_all([
                 Some(Expr::eq(
                     Expr::col(&rel.from, "id"),
@@ -354,10 +353,9 @@ fn build_from(
         // Join target node
         let target_label = find_node_label(nodes, &rel.to);
         let target_join_cond = match rel.direction {
-            Direction::Incoming => Expr::eq(
-                Expr::col(&edge_alias, "from_id"),
-                Expr::col(&rel.to, "id"),
-            ),
+            Direction::Incoming => {
+                Expr::eq(Expr::col(&edge_alias, "from_id"), Expr::col(&rel.to, "id"))
+            }
             Direction::Both => Expr::or_all([
                 Some(Expr::eq(
                     Expr::col(&edge_alias, "to_id"),
@@ -369,10 +367,9 @@ fn build_from(
                 )),
             ])
             .unwrap(),
-            Direction::Outgoing => Expr::eq(
-                Expr::col(&edge_alias, "to_id"),
-                Expr::col(&rel.to, "id"),
-            ),
+            Direction::Outgoing => {
+                Expr::eq(Expr::col(&edge_alias, "to_id"), Expr::col(&rel.to, "id"))
+            }
         };
 
         let target_table = if let Some(ref label) = target_label {
@@ -463,12 +460,16 @@ fn filter_to_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     match filter.op {
         None => {
             // Simple equality
-            Expr::eq(col, Expr::Literal(filter.value.clone().unwrap_or(Value::Null)))
+            Expr::eq(
+                col,
+                Expr::Literal(filter.value.clone().unwrap_or(Value::Null)),
+            )
         }
         Some(op) => match op {
-            FilterOp::Eq => {
-                Expr::eq(col, Expr::Literal(filter.value.clone().unwrap_or(Value::Null)))
-            }
+            FilterOp::Eq => Expr::eq(
+                col,
+                Expr::Literal(filter.value.clone().unwrap_or(Value::Null)),
+            ),
             FilterOp::Gt => Expr::binary(
                 Op::Gt,
                 col,
@@ -495,27 +496,15 @@ fn filter_to_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
                 Expr::Literal(filter.value.clone().unwrap_or(Value::Null)),
             ),
             FilterOp::Contains => {
-                let val = filter
-                    .value
-                    .as_ref()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
                 Expr::binary(Op::Like, col, Expr::lit(format!("%{val}%")))
             }
             FilterOp::StartsWith => {
-                let val = filter
-                    .value
-                    .as_ref()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
                 Expr::binary(Op::Like, col, Expr::lit(format!("{val}%")))
             }
             FilterOp::EndsWith => {
-                let val = filter
-                    .value
-                    .as_ref()
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
                 Expr::binary(Op::Like, col, Expr::lit(format!("%{val}")))
             }
             FilterOp::IsNull => Expr::unary(Op::IsNull, col),
@@ -578,9 +567,10 @@ mod tests {
         if let Node::Query(q) = ast {
             assert!(!q.group_by.is_empty());
             // Check for COUNT in select
-            let has_count = q.select.iter().any(|s| {
-                matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")
-            });
+            let has_count = q
+                .select
+                .iter()
+                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"));
             assert!(has_count);
         } else {
             panic!("expected Query");
