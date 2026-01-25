@@ -1,0 +1,99 @@
+# GCP Configuration
+gcp:
+  project: gl-knowledgegraph-prj-f2eec59d
+  region: us-central1
+  cluster: knowledge-graph-test
+
+# Secrets Configuration (External Secrets Operator)
+secrets:
+  enabled: true
+  gcpServiceAccount: gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com
+  postgresSecretName: postgres-password
+  clickhouseSecretName: clickhouse-password
+
+# PostgreSQL Configuration (GitLab Omnibus VM)
+postgres:
+  host: 10.128.0.4
+  port: 5432
+  database: gitlabhq_production
+  user: gitlab
+
+# ClickHouse Configuration (ClickHouse VM)
+clickhouse:
+  host: 10.128.0.13
+  port: 9000
+  database: gitlab_clickhouse_main_production
+  user: default
+  ssl: false
+
+# NATS Configuration
+nats:
+  enabled: true
+  streamName: gkg_replication
+  image:
+    repository: nats
+    tag: "2.10-alpine"
+    pullPolicy: IfNotPresent
+  storage: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Siphon Image Configuration
+siphon:
+  image:
+    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+    tag: "0.0.25-beta"
+    pullPolicy: Always
+
+# Table Mappings (shared between producer and consumer)
+tableMappings:
+  - table: projects
+    schema: public
+    subject: projects
+    target: siphon_projects
+  - table: namespaces
+    schema: public
+    subject: namespaces
+    target: siphon_namespaces
+  - table: users
+    schema: public
+    subject: users
+    target: siphon_users
+
+# Producer Configuration
+producer:
+  enabled: true
+  applicationIdentifier: gkg-producer
+  publicationName: gkg_publication
+  slotName: gkg_slot
+  advisoryLockId: 144324
+  maxColumnSizeBytes: 8000000
+  memoryBufferSize: 104857600
+  logLevel: info
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+# Consumer Configuration
+consumer:
+  enabled: true
+  applicationIdentifier: gkg-consumer
+  replicas: 1
+  logLevel: info
+  insertBatchSize: 10000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi

@@ -1,0 +1,81 @@
+# Default values for gkg-sandbox
+# This is a minimal defaults file. Use values-sandbox.yaml for actual deployment.
+
+gcp:
+  project: ""
+  region: ""
+  cluster: ""
+
+secrets:
+  enabled: true
+  gcpServiceAccount: ""
+  postgresSecretName: postgres-password
+  clickhouseSecretName: clickhouse-password
+
+postgres:
+  host: ""
+  port: 5432
+  database: ""
+  user: ""
+
+clickhouse:
+  host: ""
+  port: 9000
+  database: ""
+  user: default
+  ssl: false
+
+nats:
+  enabled: true
+  streamName: ""
+  image:
+    repository: nats
+    tag: "2.10-alpine"
+    pullPolicy: IfNotPresent
+  storage: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+siphon:
+  image:
+    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+    tag: "latest"
+    pullPolicy: Always
+
+tableMappings: []
+
+producer:
+  enabled: true
+  applicationIdentifier: ""
+  publicationName: ""
+  slotName: ""
+  advisoryLockId: 144324
+  maxColumnSizeBytes: 8000000
+  memoryBufferSize: 104857600
+  logLevel: info
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+consumer:
+  enabled: true
+  applicationIdentifier: ""
+  replicas: 1
+  logLevel: info
+  insertBatchSize: 10000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
