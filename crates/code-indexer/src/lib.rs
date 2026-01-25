@@ -1,8 +1,8 @@
 pub mod analysis;
 pub mod graph;
 pub mod indexer;
+pub mod loading;
 pub mod parsing;
-pub mod project;
 pub mod stats;
 
 #[cfg(test)]

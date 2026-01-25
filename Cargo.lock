@@ -1100,6 +1100,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rayon",
+ "tokio-stream",
  "tracing",
  "tracing-test",
  "walkdir",

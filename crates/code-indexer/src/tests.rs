@@ -2,11 +2,9 @@ use std::path::Path;
 
 use crate::analysis::types::{DefinitionType, GraphData};
 use crate::indexer::{IndexingConfig, RepositoryIndexer};
-use crate::project::file_info::FileInfo;
-use crate::project::source::{GitaliskFileSource, PathFileSource};
+use crate::loading::DirectoryFileSource;
 
 use crate::graph::{RelationshipKind, RelationshipType};
-use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::repository::testing::local::LocalGitRepository;
 use parser_core::SupportedLanguage;
 use tracing_test::traced_test;
@@ -124,13 +122,9 @@ impl IndexingTestSetup {
 async fn setup_indexing_test(language: SupportedLanguage) -> IndexingTestSetup {
     let local_repo = init_local_git_repository(language);
     let repo_path_str = local_repo.path.to_str().unwrap();
-    let workspace_path = local_repo.workspace_path.to_str().unwrap();
-
-    let gitalisk_repo =
-        CoreGitaliskRepository::new(repo_path_str.to_string(), workspace_path.to_string());
 
     let indexer = RepositoryIndexer::new("test-repo".to_string(), repo_path_str.to_string());
-    let file_source = GitaliskFileSource::new(gitalisk_repo);
+    let file_source = DirectoryFileSource::new(repo_path_str.to_string());
 
     let config = IndexingConfig {
         worker_threads: 1,
@@ -153,14 +147,12 @@ async fn setup_indexing_test(language: SupportedLanguage) -> IndexingTestSetup {
 
 #[traced_test]
 #[tokio::test]
-async fn test_new_indexer_with_gitalisk_file_source() {
+async fn test_new_indexer_with_directory_file_source() {
     let temp_repo = init_local_git_repository(SupportedLanguage::Ruby);
     let repo_path = temp_repo.path.to_str().unwrap();
 
-    let gitalisk_repo = CoreGitaliskRepository::new(repo_path.to_string(), repo_path.to_string());
-
     let indexer = RepositoryIndexer::new("test-repo".to_string(), repo_path.to_string());
-    let file_source = GitaliskFileSource::new(gitalisk_repo);
+    let file_source = DirectoryFileSource::new(repo_path.to_string());
 
     let config = IndexingConfig {
         worker_threads: 1,
@@ -188,20 +180,12 @@ async fn test_new_indexer_with_gitalisk_file_source() {
 
 #[traced_test]
 #[tokio::test]
-async fn test_new_indexer_with_path_file_source() {
+async fn test_indexer_with_directory_file_source() {
     let temp_repo = init_local_git_repository(SupportedLanguage::Ruby);
     let repo_path = temp_repo.path.to_str().unwrap();
 
-    let mut ruby_files = Vec::new();
-    for entry in walkdir::WalkDir::new(repo_path) {
-        let entry = entry.unwrap();
-        if entry.path().extension().and_then(|s| s.to_str()) == Some("rb") {
-            ruby_files.push(FileInfo::from_path(entry.path().to_path_buf()));
-        }
-    }
-
     let indexer = RepositoryIndexer::new("test-repo".to_string(), repo_path.to_string());
-    let file_source = PathFileSource::new(ruby_files);
+    let file_source = DirectoryFileSource::new(repo_path.to_string());
 
     let config = IndexingConfig {
         worker_threads: 1,
@@ -223,7 +207,7 @@ async fn test_new_indexer_with_path_file_source() {
     );
     assert_eq!(result.errored_files.len(), 0, "Should have no errors");
 
-    println!("✅ Path file source test completed successfully!");
+    println!("✅ Directory file source test completed successfully!");
     println!("📊 Processed {} files", graph_data.file_nodes.len());
 }
 

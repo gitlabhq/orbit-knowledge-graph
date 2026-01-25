@@ -3,8 +3,7 @@ use std::path::Path;
 use crate::analysis::types::GraphData;
 use crate::graph::RelationshipType;
 use crate::indexer::{IndexingConfig, RepositoryIndexer};
-use crate::project::source::GitaliskFileSource;
-use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
+use crate::loading::DirectoryFileSource;
 use gitalisk_core::repository::testing::local::LocalGitRepository;
 
 use tracing_test::traced_test;
@@ -153,18 +152,13 @@ async fn setup_ruby_reference_pipeline() -> RubyReferenceTestSetup {
     // Create temporary repository with Ruby reference test files
     let local_repo = init_ruby_references_repository();
     let repo_path_str = local_repo.path.to_str().unwrap();
-    let workspace_path = local_repo.workspace_path.to_str().unwrap();
-
-    // Create a gitalisk repository wrapper
-    let gitalisk_repo =
-        CoreGitaliskRepository::new(repo_path_str.to_string(), workspace_path.to_string());
 
     // Create our RepositoryIndexer wrapper
     let indexer = RepositoryIndexer::new(
         "ruby-references-test".to_string(),
         repo_path_str.to_string(),
     );
-    let file_source: GitaliskFileSource = GitaliskFileSource::new(gitalisk_repo.clone());
+    let file_source = DirectoryFileSource::new(repo_path_str.to_string());
 
     // Configure indexing for Ruby files with Ruby-specific settings
     let config = IndexingConfig {
