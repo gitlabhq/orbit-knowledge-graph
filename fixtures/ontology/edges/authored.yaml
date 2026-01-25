@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Authorship relationship between entities and users.
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Note, id: id }
+    meaning: "User authored the note."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: notes, from_column: author_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]

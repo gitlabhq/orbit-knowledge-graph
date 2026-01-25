@@ -13,7 +13,7 @@ fn init_kotlin_references_repository() -> LocalGitRepository {
         .unwrap()
         .parent()
         .unwrap()
-        .join("fixtures/kotlin");
+        .join("fixtures/code/kotlin");
     local_repo.copy_dir(&fixtures_path);
     local_repo
         .add_all()

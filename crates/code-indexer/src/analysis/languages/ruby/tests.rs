@@ -16,7 +16,7 @@ fn init_ruby_references_repository() -> LocalGitRepository {
         .unwrap()
         .parent()
         .unwrap()
-        .join("fixtures/ruby-references");
+        .join("fixtures/code/ruby-references");
     local_repo.copy_dir(&fixtures_path);
     local_repo
         .add_all()
