@@ -2,8 +2,8 @@
 //!
 //! These tests require a Docker-compatible runtime (Docker, Colima, etc).
 
-use etl_engine::message_broker::{Envelope, Event, MessageBroker};
 use etl_engine::nats::{NatsBroker, NatsConfiguration};
+use etl_engine::types::{Envelope, Event, Topic};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serial_test::serial;
@@ -94,7 +94,7 @@ async fn publish_and_subscribe() {
         .await
         .expect("failed to connect");
 
-    let topic = format!("{TEST_STREAM}:{TEST_SUBJECT}");
+    let topic = Topic::new(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker.subscribe(&topic).await.expect("failed to subscribe");
 
@@ -105,7 +105,7 @@ async fn publish_and_subscribe() {
     let envelope = Envelope::new(&event).expect("failed to create envelope");
 
     broker
-        .publish(&topic, envelope)
+        .publish(&topic, &envelope)
         .await
         .expect("failed to publish");
 
@@ -138,7 +138,7 @@ async fn nack_redelivers_message() {
         .await
         .expect("failed to connect");
 
-    let topic = format!("{TEST_STREAM}:{TEST_SUBJECT}");
+    let topic = Topic::new(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker.subscribe(&topic).await.expect("failed to subscribe");
 
@@ -148,7 +148,7 @@ async fn nack_redelivers_message() {
     };
     let envelope = Envelope::new(&event).expect("failed to create envelope");
     broker
-        .publish(&topic, envelope)
+        .publish(&topic, &envelope)
         .await
         .expect("failed to publish");
 
@@ -174,27 +174,6 @@ async fn nack_redelivers_message() {
 
 #[tokio::test]
 #[serial]
-async fn invalid_topic_format() {
-    let (_container, url) = start_nats_container().await;
-
-    let config = NatsConfiguration {
-        url,
-        ..Default::default()
-    };
-
-    let broker = NatsBroker::connect(&config)
-        .await
-        .expect("failed to connect");
-
-    let result = broker.subscribe("no_colon_here").await;
-    match result {
-        Err(err) => assert!(err.to_string().contains("expected 'stream:subject'")),
-        Ok(_) => panic!("subscribe should fail for invalid topic"),
-    }
-}
-
-#[tokio::test]
-#[serial]
 async fn nonexistent_stream() {
     let (_container, url) = start_nats_container().await;
 
@@ -207,7 +186,8 @@ async fn nonexistent_stream() {
         .await
         .expect("failed to connect");
 
-    let result = broker.subscribe("nonexistent:subject").await;
+    let topic = Topic::new("nonexistent", "subject");
+    let result = broker.subscribe(&topic).await;
     assert!(result.is_err());
 }
 
@@ -246,15 +226,19 @@ async fn multiple_streams() {
         .await
         .expect("failed to connect");
 
-    let mut sub_a = broker.subscribe("stream_a:a.events").await.expect("sub a");
-    let mut sub_b = broker.subscribe("stream_b:b.events").await.expect("sub b");
+    let topic_a = Topic::new("stream_a", "a.events");
+    let topic_b = Topic::new("stream_b", "b.events");
+
+    let mut sub_a = broker.subscribe(&topic_a).await.expect("sub a");
+    let mut sub_b = broker.subscribe(&topic_b).await.expect("sub b");
 
     let event_a = TestEvent {
         id: "from-a".to_string(),
         value: 1,
     };
+    let envelope_a = Envelope::new(&event_a).unwrap();
     broker
-        .publish("stream_a:a.events", Envelope::new(&event_a).unwrap())
+        .publish(&topic_a, &envelope_a)
         .await
         .expect("publish a");
 
@@ -262,8 +246,9 @@ async fn multiple_streams() {
         id: "from-b".to_string(),
         value: 2,
     };
+    let envelope_b = Envelope::new(&event_b).unwrap();
     broker
-        .publish("stream_b:b.events", Envelope::new(&event_b).unwrap())
+        .publish(&topic_b, &envelope_b)
         .await
         .expect("publish b");
 

@@ -1,3 +1,8 @@
+[env]
+# Path to Gitaly repository for proto compilation (gitaly-client crate)
+# Adjust if your GDK is in a different location
+GITALY_PROTO_ROOT = "~/gitlab/gdk/gitaly"
+
 [tools]
 "rust" = { version = "1.93.0", components = "rustfmt,clippy" }
 "cargo:cargo-nextest" = "0.9.123"

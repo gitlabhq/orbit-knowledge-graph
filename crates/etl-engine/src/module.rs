@@ -2,7 +2,7 @@
 //!
 //! ```ignore
 //! use etl_engine::module::{Module, Handler, HandlerContext, HandlerError};
-//! use etl_engine::message_broker::Envelope;
+//! use etl_engine::types::{Envelope, Topic};
 //! use async_trait::async_trait;
 //!
 //! struct MyHandler;
@@ -10,11 +10,12 @@
 //! #[async_trait]
 //! impl Handler for MyHandler {
 //!     fn name(&self) -> &str { "my-handler" }
-//!     fn topic(&self) -> &str { "my-topic" }
+//!     fn topic(&self) -> Topic { Topic::new("my-stream", "my-subject") }
 //!
 //!     async fn handle(&self, ctx: HandlerContext, msg: Envelope) -> Result<(), HandlerError> {
 //!         // ctx.destination has your writers
 //!         // ctx.metrics has the metric collector
+//!         // ctx.nats has NATS services for publishing
 //!         Ok(())
 //!     }
 //! }
@@ -36,7 +37,11 @@ use parking_lot::RwLock;
 use thiserror::Error;
 
 use crate::{
-    destination::Destination, entities::Entity, message_broker::Envelope, metrics::MetricCollector,
+    destination::Destination,
+    entities::Entity,
+    metrics::MetricCollector,
+    nats::NatsServices,
+    types::{Envelope, Topic},
 };
 
 /// Errors that can occur during message handling.
@@ -62,14 +67,22 @@ pub struct HandlerContext {
 
     /// The metric collector for recording metrics.
     pub metrics: Arc<dyn MetricCollector>,
+
+    /// NATS services for publishing messages and other NATS operations.
+    pub nats: Arc<dyn NatsServices>,
 }
 
 impl HandlerContext {
-    /// Creates a new handler context with the given destination and metrics collector.
-    pub fn new(destination: Arc<dyn Destination>, metrics: Arc<dyn MetricCollector>) -> Self {
+    /// Creates a new handler context with the given resources.
+    pub fn new(
+        destination: Arc<dyn Destination>,
+        metrics: Arc<dyn MetricCollector>,
+        nats: Arc<dyn NatsServices>,
+    ) -> Self {
         HandlerContext {
             destination,
             metrics,
+            nats,
         }
     }
 }
@@ -82,7 +95,7 @@ impl HandlerContext {
 ///
 /// ```ignore
 /// use etl_engine::module::{Handler, HandlerContext, HandlerError};
-/// use etl_engine::message_broker::Envelope;
+/// use etl_engine::types::{Envelope, Topic};
 /// use async_trait::async_trait;
 ///
 /// struct OrderHandler;
@@ -93,8 +106,8 @@ impl HandlerContext {
 ///         "order-handler"
 ///     }
 ///
-///     fn topic(&self) -> &str {
-///         "orders"
+///     fn topic(&self) -> Topic {
+///         Topic::new("orders", "orders.placed")
 ///     }
 ///
 ///     async fn handle(&self, ctx: HandlerContext, msg: Envelope) -> Result<(), HandlerError> {
@@ -114,7 +127,7 @@ pub trait Handler: Send + Sync {
     fn name(&self) -> &str;
 
     /// Returns the topic this handler subscribes to.
-    fn topic(&self) -> &str;
+    fn topic(&self) -> Topic;
 
     /// Processes a message from the subscribed topic.
     ///
@@ -202,7 +215,7 @@ struct RegisteredHandler {
 /// ```
 #[derive(Default)]
 pub struct ModuleRegistry {
-    handlers_by_topic: RwLock<HashMap<String, Vec<RegisteredHandler>>>,
+    handlers_by_topic: RwLock<HashMap<Topic, Vec<RegisteredHandler>>>,
 }
 
 impl ModuleRegistry {
@@ -215,7 +228,7 @@ impl ModuleRegistry {
 
         let mut handlers_by_topic = self.handlers_by_topic.write();
         for handler in module.handlers() {
-            let topic = handler.topic().to_owned();
+            let topic = handler.topic();
             let registered = RegisteredHandler {
                 handler: Arc::from(handler),
                 module_name: module_name.clone(),
@@ -228,7 +241,7 @@ impl ModuleRegistry {
     ///
     /// Each handler is returned with its associated module name for
     /// worker pool permit acquisition.
-    pub fn handlers_for(&self, topic: &str) -> Vec<(Arc<dyn Handler>, Arc<str>)> {
+    pub fn handlers_for(&self, topic: &Topic) -> Vec<(Arc<dyn Handler>, Arc<str>)> {
         self.handlers_by_topic
             .read()
             .get(topic)
@@ -242,9 +255,9 @@ impl ModuleRegistry {
     }
 
     /// Returns all unique topics that have registered handlers.
-    pub fn topics(&self) -> Vec<String> {
+    pub fn topics(&self) -> Vec<Topic> {
         let mut topics: Vec<_> = self.handlers_by_topic.read().keys().cloned().collect();
-        topics.sort();
+        topics.sort_by(|a, b| (&*a.stream, &*a.subject).cmp(&(&*b.stream, &*b.subject)));
         topics
     }
 }
@@ -257,40 +270,48 @@ mod tests {
     #[test]
     fn test_registry_operations() {
         let registry = ModuleRegistry::default();
-        let m1 = MockModule::new("m1").with_handler(MockHandler::new("t1"));
-        let m2 = MockModule::new("m2").with_handler(MockHandler::new("t1")); // same topic
+        let m1 = MockModule::new("m1").with_handler(MockHandler::new("stream1", "subject1"));
+        let m2 = MockModule::new("m2").with_handler(MockHandler::new("stream1", "subject1"));
 
         registry.register_module(&m1);
         registry.register_module(&m2);
 
-        // Lookup returns handlers with module names
-        let handlers = registry.handlers_for("t1");
+        let topic = Topic::new("stream1", "subject1");
+        let handlers = registry.handlers_for(&topic);
         assert_eq!(handlers.len(), 2);
         assert_eq!(&*handlers[0].1, "m1");
 
-        // Unknown topic returns empty
-        assert!(registry.handlers_for("unknown").is_empty());
+        let unknown = Topic::new("unknown", "unknown");
+        assert!(registry.handlers_for(&unknown).is_empty());
 
-        // Topics are deduplicated
-        assert_eq!(registry.topics(), vec!["t1"]);
+        assert_eq!(registry.topics(), vec![topic]);
     }
 
     #[tokio::test]
     async fn test_concurrent_registry_reads() {
         let registry = Arc::new(ModuleRegistry::default());
-        for i in 0..10 {
-            registry.register_module(
-                &MockModule::new(&format!("m{i}")).with_handler(MockHandler::new(&format!("t{i}"))),
-            );
-        }
+
+        registry
+            .register_module(&MockModule::new("m0").with_handler(MockHandler::new("stream", "s0")));
+        registry
+            .register_module(&MockModule::new("m1").with_handler(MockHandler::new("stream", "s1")));
+        registry
+            .register_module(&MockModule::new("m2").with_handler(MockHandler::new("stream", "s2")));
+
+        let t0 = Topic::new("stream", "s0");
+        let t1 = Topic::new("stream", "s1");
+        let t2 = Topic::new("stream", "s2");
 
         let handles: Vec<_> = (0..50)
             .map(|_| {
                 let r = registry.clone();
+                let t0 = t0.clone();
+                let t1 = t1.clone();
+                let t2 = t2.clone();
                 tokio::spawn(async move {
-                    for i in 0..10 {
-                        let _ = r.handlers_for(&format!("t{i}"));
-                    }
+                    let _ = r.handlers_for(&t0);
+                    let _ = r.handlers_for(&t1);
+                    let _ = r.handlers_for(&t2);
                 })
             })
             .collect();
