@@ -91,7 +91,7 @@ cargo nextest run -p gitaly-client --features integration
 
 ### CI
 
-Integration tests run in CI using a Gitaly Docker service. Tests require the `gitlab-org/gitlab-test` repository to be present in Gitaly. CI uses `grpcurl` to clone the test repository before running tests. Tests skip gracefully if the repository doesn't exist.
+Integration tests run in CI using a Gitaly Docker service. Tests skip gracefully if a test repository doesn't exist in the Gitaly instance.
 
 ## License
 
