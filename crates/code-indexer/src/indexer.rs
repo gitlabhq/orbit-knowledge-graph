@@ -109,6 +109,8 @@ impl std::fmt::Display for FatalIndexingError {
     }
 }
 
+impl std::error::Error for FatalIndexingError {}
+
 pub struct RepositoryIndexer {
     pub name: String,
     pub path: String,
