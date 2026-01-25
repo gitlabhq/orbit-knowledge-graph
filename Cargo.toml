@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/treesitter-visit",
   "crates/code-parser",
+  "crates/code-indexer",
   "crates/labkit-rs",
   "crates/etl-engine",
 ]
@@ -11,7 +12,7 @@ members = [
 arrow = "57.2.0"
 async-trait = "0.1.89"
 bytes = "1.11"
-chrono = "0.4.43"
+chrono = { version = "0.4.43", features = ["serde"] }
 futures = "0.3.31"
 internment = "0.8.6"
 mimalloc = "0.1.48"
@@ -24,10 +25,35 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 smallvec = "1.15.1"
 tempfile = "3.24.0"
-thiserror = "2.0.17"
-tokio = { version = "1.45", features = ["rt", "sync", "macros"] }
-tokio-stream = "0.1.18"
+
+# Indexer dependencies
+anyhow = "1.0"
+log = "0.4"
+num_cpus = "1.16"
+parquet = { version = "54.2", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
+tokio = { version = "1.43", features = ["full"] }
+strum = { version = "0.27.2", features = ["derive"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tokio-util = "0.7"
+tokio-rayon = "2.1"
+ignore = "0.4"
+rayon = "1.10"
+miette = { version = "7.5", features = ["fancy"] }
+walkdir = "2.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+tracing-test = "0.2"
+
+# Parser-core
+parser-core = { path = "crates/code-parser" }
+gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.7.0" }
+thiserror = "2.0.17"
+tokio-stream = "0.1.18"
 toml = "0.9.10"
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
