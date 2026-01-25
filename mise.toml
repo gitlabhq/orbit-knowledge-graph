@@ -34,8 +34,19 @@ description = "Run clippy lint checks and fix applicable issues"
 run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --fix"
 description = "Fix newlines formatting in the codebase"
 
-# [tasks."perf:gtime"]
-# run = "./scripts/devtools/gtime.sh"
+[tasks."local:index:repo"]
+run = 'cargo run --release --bin gkg -- index ${usage_repo_path?} --stats'
+description = "Index a local repository"
+usage = 'arg "<repo_path>"'
 
-# [tasks."perf:rss"]
-# run = "./scripts/devtools/average_rss.sh"
+[tasks."perf:gtime"]
+run = "./scripts/devtools/gtime.sh"
+
+[tasks."perf:rss"]
+run = './scripts/devtools/average_rss.sh ${usage_repo_path?} ${usage_interval:-0.025}'
+description = "Measure average RSS memory usage during indexing"
+usage = '''
+arg "<repo_path>"
+arg "[interval]" default="0.025" help="Sampling interval in seconds"
+'''
+
