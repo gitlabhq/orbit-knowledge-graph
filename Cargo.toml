@@ -57,8 +57,9 @@ toml = "0.9.10"
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = "0.46"
+clickhouse-arrow = "0.2"
 testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["nats"] }
+testcontainers-modules = { version = "0.11", features = ["nats", "clickhouse"] }
 serial_test = "3.3.1"
 
 # Query engine dependencies

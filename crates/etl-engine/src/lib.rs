@@ -59,7 +59,9 @@
 //! - [`metrics`] - metric collection
 //! - [`configuration`] - concurrency limits
 //!
+pub mod clickhouse;
 pub mod configuration;
+pub mod constants;
 pub mod destination;
 pub mod engine;
 pub mod entities;

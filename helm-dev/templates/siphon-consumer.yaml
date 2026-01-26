@@ -1,0 +1,104 @@
+{{- if .Values.consumer.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: siphon-consumer-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "siphon-consumer") | nindent 4 }}
+data:
+  config.yaml: |
+    application_identifier: {{ .Values.consumer.applicationIdentifier | quote }}
+
+    queueing:
+      driver: nats
+      url: {{ include "gkg.natsUrl" . | quote }}
+      stream_name: {{ .Values.nats.streamName | quote }}
+      oversize_bucket_name: repl_events_bucket
+
+    clickhouse:
+      host: {{ .Values.clickhouse.host | quote }}
+      port: {{ .Values.clickhouse.port }}
+      database: {{ .Values.clickhouse.database | quote }}
+      username: {{ .Values.clickhouse.user | quote }}
+      password: ${CH_DB_PASSWORD}
+      ssl: {{ .Values.clickhouse.ssl }}
+      {{- if .Values.consumer.insertBatchSize }}
+      insert_batch_size: {{ .Values.consumer.insertBatchSize }}
+      {{- end }}
+
+    prometheus:
+      port: 8081
+
+    streams:
+      {{- range .Values.tableMappings }}
+      - identifier: {{ .table | quote }}
+        subject: {{ .subject | quote }}
+        target: {{ .target | quote }}
+      {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: siphon-consumer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "siphon-consumer") | nindent 4 }}
+spec:
+  replicas: {{ .Values.consumer.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "siphon-consumer") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "siphon-consumer") | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.consumer | sha256sum }}-{{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.tableMappings | sha256sum }}
+    spec:
+      serviceAccountName: gcp-secrets-sa
+      securityContext:
+        {{- include "gkg.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: siphon-consumer
+          image: "{{ .Values.siphon.image.repository }}:{{ .Values.siphon.image.tag }}"
+          imagePullPolicy: {{ .Values.siphon.image.pullPolicy }}
+          command: ["/app/clickhouse_consumer"]
+          args:
+            - "--config=/config/config.yaml"
+            - "--log-level={{ .Values.consumer.logLevel }}"
+          ports:
+            - name: metrics
+              containerPort: 8081
+          env:
+            - name: CH_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-credentials
+                  key: password
+          securityContext:
+            {{- include "gkg.securityContext" . | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.consumer.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: siphon-consumer-config
+{{- end }}
