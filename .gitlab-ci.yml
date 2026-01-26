@@ -229,20 +229,6 @@ helm-lint:
     - helm template ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
 
 helm-dry-run:
-  extends:
-    - .helm-base
-    - .mr-only-rules
-  stage: lint
-  needs: []
-  script:
-    - |
-      helm upgrade ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} \
-        -f ${HELM_CHART_PATH}/values-sandbox.yaml \
-        --namespace ${HELM_NAMESPACE} \
-        --install \
-        --dry-run=client
-
-helm-dry-run-main:
   extends: .helm-with-gke-auth
   stage: lint
   needs: []
@@ -264,7 +250,7 @@ deploy-sandbox:
   stage: deploy
   needs:
     - helm-lint
-    - helm-dry-run-main
+    - helm-dry-run
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
