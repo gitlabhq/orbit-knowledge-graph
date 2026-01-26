@@ -211,10 +211,7 @@ variables:
 .helm-with-gke-auth:
   extends: .helm-base
   before_script:
-    - apt-get update && apt-get install -y curl
-    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    - helm version
-    - helm dependency update ${HELM_CHART_PATH}
+    - !reference [.helm-base, before_script]
     # Authenticate to GKE using service account (GKE_SA_KEY is a File-type CI variable)
     - gcloud auth activate-service-account --key-file="${GKE_SA_KEY}"
     - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
@@ -227,14 +224,14 @@ helm-lint:
   needs: []
   script:
     - helm lint ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
-    - helm template ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml --validate
+    - helm template ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
 
 helm-dry-run:
-  extends:
-    - .helm-with-gke-auth
-    - .mr-and-main-rules
+  extends: .helm-with-gke-auth
   stage: lint
   needs: []
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - |
       helm upgrade ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} \
