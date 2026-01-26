@@ -208,11 +208,19 @@ variables:
     - helm version
     - helm dependency update ${HELM_CHART_PATH}
 
+.helm-with-gke-auth-readonly:
+  extends: .helm-base
+  before_script:
+    - !reference [.helm-base, before_script]
+    # Read-only access for MR validation (GKE_SA_KEY_READONLY is unprotected)
+    - gcloud auth activate-service-account --key-file="${GKE_SA_KEY_READONLY}"
+    - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
+
 .helm-with-gke-auth:
   extends: .helm-base
   before_script:
     - !reference [.helm-base, before_script]
-    # Authenticate to GKE using service account (GKE_SA_KEY is a File-type CI variable)
+    # Write access for deployment (GKE_SA_KEY is protected, main branch only)
     - gcloud auth activate-service-account --key-file="${GKE_SA_KEY}"
     - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
 
@@ -227,6 +235,23 @@ helm-lint:
     - helm template ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
 
 helm-dry-run:
+  extends:
+    - .helm-with-gke-auth-readonly
+    - .mr-only-rules
+  stage: lint
+  needs: []
+  script:
+    - |
+      helm upgrade ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} \
+        -f ${HELM_CHART_PATH}/values-sandbox.yaml \
+        --namespace ${HELM_NAMESPACE} \
+        --install \
+        --dry-run=client
+  environment:
+    name: sandbox
+    action: prepare
+
+helm-dry-run-main:
   extends: .helm-with-gke-auth
   stage: lint
   needs: []
@@ -248,7 +273,7 @@ deploy-sandbox:
   stage: deploy
   needs:
     - helm-lint
-    - helm-dry-run
+    - helm-dry-run-main
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
