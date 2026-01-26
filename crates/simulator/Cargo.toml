@@ -1,0 +1,30 @@
+[package]
+name = "simulator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Workspace dependencies
+anyhow.workspace = true
+arrow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# Simulator-specific dependencies
+clickhouse = { version = "0.14", features = ["inserter"] }
+fake = { version = "3.0", features = ["derive", "chrono"] }
+indicatif = "0.18"
+# Note: Use fake::rand re-export to avoid version conflicts
+
+# Internal crates
+ontology = { path = "../ontology" }
+
+[[bin]]
+name = "simulate"
+path = "src/bin/generate.rs"

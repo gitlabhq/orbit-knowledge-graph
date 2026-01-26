@@ -52,6 +52,11 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "simulator"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "etl-engine"
 expression = "LicenseRef-EE"
 license-files = []
