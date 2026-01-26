@@ -1,17 +1,16 @@
 //! ClickHouse data writer with streaming batch inserts.
 
 use super::schema::SchemaGenerator;
-use crate::generator::{EdgeRecord, TenantData};
+use crate::generator::{EdgeRecord, OrganizationData};
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use clickhouse::{Client, Row};
 use ontology::{EDGE_TABLE, Ontology};
 use serde::Serialize;
 
-/// ClickHouse row for edges (matches EdgeEntity + tenant_id).
+/// ClickHouse row for edges (matches EdgeEntity).
 #[derive(Debug, Clone, Serialize, Row)]
 pub struct EdgeRow {
-    pub tenant_id: u32,
     pub relationship_kind: String,
     pub source: i64,
     pub source_kind: String,
@@ -22,7 +21,6 @@ pub struct EdgeRow {
 impl From<&EdgeRecord> for EdgeRow {
     fn from(record: &EdgeRecord) -> Self {
         Self {
-            tenant_id: record.tenant_id,
             relationship_kind: record.relationship_kind.clone(),
             source: record.source,
             source_kind: record.source_kind.clone(),
@@ -64,8 +62,12 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Write all data for a tenant.
-    pub async fn write_tenant_data(&self, ontology: &Ontology, data: &TenantData) -> Result<()> {
+    /// Write all data for an organization.
+    pub async fn write_organization_data(
+        &self,
+        ontology: &Ontology,
+        data: &OrganizationData,
+    ) -> Result<()> {
         // Write node batches
         for (node_name, batches) in &data.nodes {
             let tbl_name = ontology.table_name(node_name)?;

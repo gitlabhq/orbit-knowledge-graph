@@ -5,13 +5,16 @@ use ontology::{DataType, Field, NodeEntity};
 
 /// Extension trait to convert ontology types to Arrow types.
 pub trait ToArrowSchema {
-    /// Convert to an Arrow schema, prepending tenant_id.
+    /// Convert to an Arrow schema, prepending organization_id and traversal_id.
     fn to_arrow_schema(&self) -> Schema;
 }
 
 impl ToArrowSchema for NodeEntity {
     fn to_arrow_schema(&self) -> Schema {
-        let mut fields = vec![ArrowField::new("tenant_id", ArrowDataType::UInt32, false)];
+        let mut fields = vec![
+            ArrowField::new("organization_id", ArrowDataType::UInt32, false),
+            ArrowField::new("traversal_id", ArrowDataType::Utf8, false),
+        ];
 
         for field in &self.fields {
             fields.push(field.to_arrow_field());
@@ -55,8 +58,7 @@ impl ToArrowType for DataType {
 
 /// Create the Arrow schema for the unified edges table.
 ///
-/// Matches `EdgeEntity` from ontology + tenant_id:
-/// - tenant_id: UInt32
+/// Matches `EdgeEntity` from ontology:
 /// - relationship_kind: Utf8 (e.g., "AUTHORED", "CONTAINS")
 /// - source: Int64 (source node ID)
 /// - source_kind: Utf8 (e.g., "User", "Group")
@@ -64,7 +66,6 @@ impl ToArrowType for DataType {
 /// - target_kind: Utf8 (e.g., "MergeRequest", "Project")
 pub fn edge_schema() -> Schema {
     Schema::new(vec![
-        ArrowField::new("tenant_id", ArrowDataType::UInt32, false),
         ArrowField::new("relationship_kind", ArrowDataType::Utf8, false),
         ArrowField::new("source", ArrowDataType::Int64, false),
         ArrowField::new("source_kind", ArrowDataType::Utf8, false),
@@ -151,28 +152,30 @@ mod tests {
         };
 
         let schema = node.to_arrow_schema();
-        assert_eq!(schema.fields().len(), 4); // tenant_id + 3 fields
+        assert_eq!(schema.fields().len(), 5); // organization_id + traversal_id + 3 fields
 
-        assert_eq!(schema.field(0).name(), "tenant_id");
+        assert_eq!(schema.field(0).name(), "organization_id");
         assert_eq!(schema.field(0).data_type(), &ArrowDataType::UInt32);
 
-        assert_eq!(schema.field(1).name(), "id");
-        assert_eq!(schema.field(1).data_type(), &ArrowDataType::Int64);
+        assert_eq!(schema.field(1).name(), "traversal_id");
+        assert_eq!(schema.field(1).data_type(), &ArrowDataType::Utf8);
 
-        assert_eq!(schema.field(2).name(), "username");
-        assert_eq!(schema.field(2).data_type(), &ArrowDataType::Utf8);
+        assert_eq!(schema.field(2).name(), "id");
+        assert_eq!(schema.field(2).data_type(), &ArrowDataType::Int64);
+
+        assert_eq!(schema.field(3).name(), "username");
+        assert_eq!(schema.field(3).data_type(), &ArrowDataType::Utf8);
     }
 
     #[test]
     fn test_edge_schema() {
         let schema = edge_schema();
-        assert_eq!(schema.fields().len(), 6);
+        assert_eq!(schema.fields().len(), 5);
 
         let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert_eq!(
             field_names,
             vec![
-                "tenant_id",
                 "relationship_kind",
                 "source",
                 "source_kind",
@@ -185,11 +188,14 @@ mod tests {
     #[test]
     fn test_to_clickhouse_ddl() {
         let schema = edge_schema();
-        let ddl = to_clickhouse_ddl("kg_edges", &schema, &["tenant_id", "relationship_kind"]);
+        let ddl = to_clickhouse_ddl(
+            "kg_edges",
+            &schema,
+            &["relationship_kind", "source_kind", "source"],
+        );
 
         assert!(ddl.contains("CREATE TABLE IF NOT EXISTS kg_edges"));
-        assert!(ddl.contains("tenant_id UInt32"));
         assert!(ddl.contains("relationship_kind String"));
-        assert!(ddl.contains("ORDER BY (tenant_id, relationship_kind)"));
+        assert!(ddl.contains("ORDER BY (relationship_kind, source_kind, source)"));
     }
 }

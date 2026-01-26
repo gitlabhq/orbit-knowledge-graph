@@ -171,10 +171,13 @@ Commands:
     help        Show this help message
 
 Populate Options (passed to the simulator binary):
-    --tenants N              Number of tenants (default: 2)
+    --organizations N        Number of organizations (default: 2)
+    --traversal-ids N        Traversal IDs per organization (default: 1000)
+    --max-traversal-depth N  Max depth of traversal ID hierarchy (default: 5)
     --nodes-per-type N       Default nodes per type (default: 100)
     --node-count TYPE=N      Override count for specific type (repeatable)
                              Example: --node-count User=500 --node-count Project=200
+                             Error if TYPE doesn't exist in ontology
     --edges-per-source N     Edges per source node (default: 3)
     --batch-size N           Batch size for inserts (default: 10000)
     --dry-run                Print plan without executing
@@ -188,8 +191,9 @@ Environment Variables:
 Examples:
     $(basename "$0")                              # Start ClickHouse
     $(basename "$0") populate                     # Populate with default settings
-    $(basename "$0") populate --tenants 5         # 5 tenants
+    $(basename "$0") populate --organizations 5   # 5 organizations
     $(basename "$0") populate --nodes-per-type 500 --node-count User=1000
+    $(basename "$0") populate --traversal-ids 5000 --max-traversal-depth 6
     $(basename "$0") populate --dry-run           # Preview without executing
     $(basename "$0") status                       # Check status and row counts
     $(basename "$0") clean                        # Remove container and data

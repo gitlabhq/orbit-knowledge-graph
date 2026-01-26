@@ -7,9 +7,11 @@
 
 mod batch;
 mod fake_data;
+mod traversal;
 
 pub use batch::BatchBuilder;
 pub use fake_data::FakeValueGenerator;
+pub use traversal::TraversalIdGenerator;
 
 use crate::arrow_schema::ToArrowSchema;
 use crate::clickhouse::ClickHouseWriter;
@@ -27,7 +29,6 @@ use std::sync::atomic::{AtomicI64, Ordering};
 /// Edge data to be written to ClickHouse.
 #[derive(Debug, Clone)]
 pub struct EdgeRecord {
-    pub tenant_id: u32,
     pub relationship_kind: String,
     pub source: i64,
     pub source_kind: String,
@@ -35,9 +36,9 @@ pub struct EdgeRecord {
     pub target_kind: String,
 }
 
-/// Generated data for a tenant.
+/// Generated data for an organization.
 #[derive(Debug, Default)]
-pub struct TenantData {
+pub struct OrganizationData {
     /// Node batches by node type name.
     pub nodes: HashMap<String, Vec<RecordBatch>>,
     /// Edge records.
@@ -54,15 +55,29 @@ pub struct Generator {
     ontology: Ontology,
     config: Config,
     next_id: Arc<AtomicI64>,
+    /// Traversal ID generators per organization.
+    traversal_ids: HashMap<u32, TraversalIdGenerator>,
 }
 
 impl Generator {
     /// Create a new generator.
     pub fn new(ontology: Ontology, config: Config) -> Self {
+        // Pre-generate traversal IDs for each organization
+        let mut traversal_ids = HashMap::new();
+        for org_id in 1..=config.num_organizations {
+            let traversal_gen = TraversalIdGenerator::new(
+                org_id,
+                config.traversal_ids_per_org,
+                config.max_traversal_depth,
+            );
+            traversal_ids.insert(org_id, traversal_gen);
+        }
+
         Self {
             ontology,
             config,
             next_id: Arc::new(AtomicI64::new(1)),
+            traversal_ids,
         }
     }
 
@@ -79,23 +94,23 @@ impl Generator {
         println!("Creating ClickHouse schemas...");
         writer.create_schemas(&self.ontology).await?;
 
-        // Generate data per tenant
-        let pb = ProgressBar::new(self.config.num_tenants as u64);
+        // Generate data per organization
+        let pb = ProgressBar::new(self.config.num_organizations as u64);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} tenants ({msg})")
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} organizations ({msg})")
                 .unwrap()
                 .progress_chars("##-"),
         );
 
-        for tenant_id in 1..=self.config.num_tenants {
-            pb.set_message(format!("generating tenant {}", tenant_id));
+        for org_id in 1..=self.config.num_organizations {
+            pb.set_message(format!("generating org {}", org_id));
 
-            let tenant_data = self.generate_tenant(tenant_id)?;
+            let org_data = self.generate_organization(org_id)?;
 
-            pb.set_message(format!("writing tenant {} to ClickHouse", tenant_id));
+            pb.set_message(format!("writing org {} to ClickHouse", org_id));
             writer
-                .write_tenant_data(&self.ontology, &tenant_data)
+                .write_organization_data(&self.ontology, &org_data)
                 .await?;
 
             pb.inc(1);
@@ -109,26 +124,27 @@ impl Generator {
         Ok(())
     }
 
-    /// Generate all data for a single tenant.
+    /// Generate all data for a single organization.
     ///
     /// This is fully ontology-driven:
     /// 1. Generate nodes for each type in `ontology.nodes()`
     /// 2. Generate edges for each type in `ontology.edges()`
-    pub fn generate_tenant(&self, tenant_id: u32) -> Result<TenantData> {
-        let mut data = TenantData::default();
+    pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
+        let mut data = OrganizationData::default();
         let mut id_map: HashMap<String, Vec<i64>> = HashMap::new();
+        let traversal_gen = self.traversal_ids.get(&org_id).expect("traversal IDs exist");
 
         // Phase 1: Generate all nodes from ontology
         for node in self.ontology.nodes() {
             let count = self.config.count_for(&node.name);
-            let (batches, ids) = self.generate_node_batches(node, tenant_id, count)?;
+            let (batches, ids) = self.generate_node_batches(node, org_id, traversal_gen, count)?;
             data.nodes.insert(node.name.clone(), batches);
             id_map.insert(node.name.clone(), ids);
         }
 
         // Phase 2: Generate all edges from ontology
         for edge in self.ontology.edges() {
-            self.generate_edges_for_type(tenant_id, edge, &id_map, &mut data.edges);
+            self.generate_edges_for_type(edge, &id_map, &mut data.edges);
         }
 
         Ok(data)
@@ -138,17 +154,20 @@ impl Generator {
     fn generate_node_batches(
         &self,
         node: &NodeEntity,
-        tenant_id: u32,
+        org_id: u32,
+        traversal_gen: &TraversalIdGenerator,
         count: usize,
     ) -> Result<(Vec<RecordBatch>, Vec<i64>)> {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::new(node, schema, self.config.batch_size);
         let mut all_ids = Vec::with_capacity(count);
+        let mut rng = fake::rand::thread_rng();
 
         for _ in 0..count {
             let id = self.next_id();
             all_ids.push(id);
-            builder.add_row(tenant_id, id);
+            let traversal_id = traversal_gen.random(&mut rng).to_string();
+            builder.add_row(org_id, traversal_id, id);
         }
 
         let batches = builder.finish();
@@ -160,7 +179,6 @@ impl Generator {
     /// Uses the edge's `source_kind` and `target_kind` to find the right nodes.
     fn generate_edges_for_type(
         &self,
-        tenant_id: u32,
         edge: &EdgeEntity,
         id_map: &HashMap<String, Vec<i64>>,
         edges: &mut Vec<EdgeRecord>,
@@ -204,7 +222,6 @@ impl Generator {
 
             for target_id in targets {
                 edges.push(EdgeRecord {
-                    tenant_id,
                     relationship_kind: edge.relationship_kind.clone(),
                     source: source_id,
                     source_kind: edge.source_kind.clone(),
@@ -218,15 +235,19 @@ impl Generator {
     /// Print generation plan based on ontology.
     pub fn print_plan(&self) {
         println!("Generation plan (from ontology):");
-        println!("  Tenants: {}", self.config.num_tenants);
+        println!("  Organizations: {}", self.config.num_organizations);
+        println!(
+            "  Traversal IDs: {} per org (max depth {})",
+            self.config.traversal_ids_per_org, self.config.max_traversal_depth
+        );
         println!();
 
         println!("  Node types ({}):", self.ontology.node_count());
         for node in self.ontology.nodes() {
             let count = self.config.count_for(&node.name);
-            let total = count * self.config.num_tenants as usize;
+            let total = count * self.config.num_organizations as usize;
             println!(
-                "    {}: {} per tenant = {} total ({} fields)",
+                "    {}: {} per org = {} total ({} fields)",
                 node.name,
                 count,
                 total,

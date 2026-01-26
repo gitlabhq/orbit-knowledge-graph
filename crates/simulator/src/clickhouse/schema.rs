@@ -18,11 +18,11 @@ impl<'a> SchemaGenerator<'a> {
     pub fn generate_all_ddl(&self) -> Vec<(String, String)> {
         let mut ddl_statements = Vec::new();
 
-        // Node tables
+        // Node tables - ORDER BY (organization_id, traversal_id, id) for efficient auth queries
         for node in self.ontology.nodes() {
             let tbl_name = self.ontology.table_name(&node.name).unwrap();
             let schema = node.to_arrow_schema();
-            let order_by = vec!["tenant_id", "id"];
+            let order_by = vec!["organization_id", "traversal_id", "id"];
             let ddl = to_clickhouse_ddl(&tbl_name, &schema, &order_by);
             ddl_statements.push((tbl_name, ddl));
         }
@@ -32,7 +32,7 @@ impl<'a> SchemaGenerator<'a> {
         let edge_ddl = to_clickhouse_ddl(
             EDGE_TABLE,
             &edge_schema,
-            &["tenant_id", "relationship_kind", "source_kind", "source"],
+            &["relationship_kind", "source_kind", "source"],
         );
         ddl_statements.push((EDGE_TABLE.to_string(), edge_ddl));
 
@@ -85,12 +85,15 @@ mod tests {
         // Check User table
         let (_user_table, user_ddl) = &ddl_statements[1]; // BTreeMap order: Project, User
         assert!(user_ddl.contains("CREATE TABLE IF NOT EXISTS"));
-        assert!(user_ddl.contains("tenant_id UInt32"));
+        assert!(user_ddl.contains("organization_id UInt32"));
+        assert!(user_ddl.contains("traversal_id String"));
 
-        // Check edges table
+        // Check edges table (no organization_id/traversal_id)
         let (edge_table, edge_ddl) = ddl_statements.last().unwrap();
         assert_eq!(edge_table, EDGE_TABLE);
         assert!(edge_ddl.contains("relationship_kind"));
         assert!(edge_ddl.contains("source_kind"));
+        assert!(!edge_ddl.contains("organization_id"));
+        assert!(!edge_ddl.contains("traversal_id"));
     }
 }

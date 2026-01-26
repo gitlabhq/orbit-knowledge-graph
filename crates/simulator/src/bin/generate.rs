@@ -2,11 +2,11 @@
 //!
 //! All data generation is driven by the ontology - no hardcoded entity types.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Parser;
 use ontology::Ontology;
 use simulator::{Config, Generator};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -23,9 +23,17 @@ struct Args {
     #[arg(long, default_value = "http://localhost:8123")]
     clickhouse_url: String,
 
-    /// Number of tenants to generate
+    /// Number of organizations to generate
     #[arg(long, default_value = "2")]
-    tenants: u32,
+    organizations: u32,
+
+    /// Number of traversal IDs per organization
+    #[arg(long, default_value = "1000")]
+    traversal_ids: usize,
+
+    /// Maximum depth of traversal ID hierarchy
+    #[arg(long, default_value = "5")]
+    max_traversal_depth: usize,
 
     /// Default number of nodes per type
     #[arg(long, default_value = "100")]
@@ -61,6 +69,39 @@ fn parse_node_count(s: &str) -> Result<(String, usize), String> {
     Ok((parts[0].to_string(), count))
 }
 
+/// Validate that all node types in node_counts exist in the ontology.
+fn validate_node_counts(ontology: &Ontology, node_counts: &HashMap<String, usize>) -> Result<()> {
+    let valid_types: HashSet<&str> = ontology.nodes().map(|n| n.name.as_str()).collect();
+
+    for node_type in node_counts.keys() {
+        if !valid_types.contains(node_type.as_str()) {
+            let suggestions: Vec<&str> = valid_types
+                .iter()
+                .filter(|t| t.to_lowercase().contains(&node_type.to_lowercase()))
+                .copied()
+                .take(3)
+                .collect();
+
+            let hint = if suggestions.is_empty() {
+                format!(
+                    "Available types: {}",
+                    valid_types.iter().take(10).copied().collect::<Vec<_>>().join(", ")
+                )
+            } else {
+                format!("Did you mean: {}?", suggestions.join(", "))
+            };
+
+            bail!(
+                "Unknown node type '{}' in --node-count. {}",
+                node_type,
+                hint
+            );
+        }
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -82,9 +123,15 @@ async fn main() -> Result<()> {
 
     // Build config
     let node_counts: HashMap<String, usize> = args.node_counts.into_iter().collect();
+
+    // Validate node counts against ontology (fail early)
+    validate_node_counts(&ontology, &node_counts)?;
+
     let config = Config {
         clickhouse_url: args.clickhouse_url,
-        num_tenants: args.tenants,
+        num_organizations: args.organizations,
+        traversal_ids_per_org: args.traversal_ids,
+        max_traversal_depth: args.max_traversal_depth,
         default_nodes_per_type: args.nodes_per_type,
         node_counts,
         edges_per_source: args.edges_per_source,
