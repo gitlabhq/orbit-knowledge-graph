@@ -1,10 +1,21 @@
 use std::net::SocketAddr;
 
-#[derive(Clone)]
+use etl_engine::clickhouse::ClickHouseConfiguration;
+use etl_engine::configuration::EngineConfiguration;
+use etl_engine::nats::NatsConfiguration;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     pub bind_address: SocketAddr,
     pub jwt_secret: String,
     pub jwt_clock_skew_secs: u64,
+    #[serde(default)]
+    pub nats: NatsConfiguration,
+    #[serde(default)]
+    pub clickhouse: ClickHouseConfiguration,
+    #[serde(default)]
+    pub engine: EngineConfiguration,
 }
 
 impl AppConfig {
@@ -30,6 +41,9 @@ impl AppConfig {
             bind_address,
             jwt_secret,
             jwt_clock_skew_secs,
+            nats: NatsConfiguration::from_env(),
+            clickhouse: ClickHouseConfiguration::from_env(),
+            engine: EngineConfiguration::default(),
         })
     }
 }
