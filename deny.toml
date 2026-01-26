@@ -15,6 +15,11 @@ ignore = [
     "RUSTSEC-2025-0134", # rustls-pemfile unmaintained
     "RUSTSEC-2025-0111", # tokio-tar vulnerability (dev-only)
     "RUSTSEC-2024-0436", # paste unmaintained - used by clickhouse-arrow, no alternative
+    # jsonwebtoken pulls in rsa crate, but we ONLY use HS256 (HMAC). The Marvin Attack
+    # timing vulnerability affects RSA operations which we do not use. DO NOT use RSA
+    # algorithms (RS256, RS384, RS512, PS256, PS384, PS512) until jsonwebtoken updates
+    # to rsa 0.10+ with the fix. See: https://github.com/RustCrypto/RSA/pull/394
+    "RUSTSEC-2023-0071",
 ]
 
 [licenses]
