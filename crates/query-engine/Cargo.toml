@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ontology = { path = "../ontology" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-serde_yaml = { workspace = true }
 regex = { workspace = true }
 
 [dev-dependencies]

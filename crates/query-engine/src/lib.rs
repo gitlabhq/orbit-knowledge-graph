@@ -16,14 +16,13 @@
 //! # Example
 //!
 //! ```rust
-//! use query_engine::{compile, Schema};
+//! use query_engine::compile;
+//! use ontology::Ontology;
 //!
-//! // Create a schema with valid node labels and relationship types
-//! let schema = Schema::from_ontology(
-//!     ["User", "Project"],
-//!     ["MEMBER_OF"],
-//!     std::collections::HashMap::new(),
-//! );
+//! // Create an ontology with valid node labels and relationship types
+//! let ontology = Ontology::new()
+//!     .with_nodes(["User", "Project"])
+//!     .with_edges(["MEMBER_OF"]);
 //!
 //! let json = r#"{
 //!     "query_type": "traversal",
@@ -31,7 +30,7 @@
 //!     "limit": 10
 //! }"#;
 //!
-//! let result = compile(json, &schema).unwrap();
+//! let result = compile(json, &ontology).unwrap();
 //! println!("SQL: {}", result.sql);
 //! println!("Params: {:?}", result.params);
 //! ```
@@ -41,29 +40,28 @@ pub mod codegen;
 pub mod error;
 pub mod input;
 pub mod lower;
-pub mod ontology;
-pub mod schema;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, RecursiveCte, SelectExpr, TableRef};
 pub use codegen::ParameterizedQuery;
 pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
-pub use ontology::{load_ontology_from_dir, load_ontology_from_strings, OntologyError};
-pub use schema::Schema;
+
+// Re-export from ontology crate for convenience
+pub use ontology::{Ontology, OntologyError, EDGE_TABLE, RESERVED_COLUMNS};
 
 /// Compile a JSON query into parameterized SQL.
 ///
 /// This is the main entry point for the query engine. It:
 /// 1. Parses the JSON input (with identifier validation)
-/// 2. Lowers to an AST (validates against ontology schema)
+/// 2. Lowers to an AST (validates against ontology)
 /// 3. Generates parameterized SQL
 #[must_use = "the compiled query should be used"]
-pub fn compile(json_input: &str, schema: &Schema) -> Result<ParameterizedQuery> {
+pub fn compile(json_input: &str, ontology: &Ontology) -> Result<ParameterizedQuery> {
     // Parse JSON into Input struct (validates identifiers during deserialization)
     let input = parse_input(json_input)?;
 
-    // Lower to AST (validates node labels, relationship types, and columns)
-    let ast = lower::lower(&input, schema)?;
+    // Lower to AST (validates node labels, relationship types, and fields)
+    let ast = lower::lower(&input, ontology)?;
 
     // Generate SQL (no validation needed, AST is already validated)
     codegen::codegen(&ast)
@@ -73,22 +71,37 @@ pub fn compile(json_input: &str, schema: &Schema) -> Result<ParameterizedQuery> 
 ///
 /// Useful for debugging or when you need to manipulate the AST before codegen.
 #[must_use = "the compiled AST should be used"]
-pub fn compile_to_ast(json_input: &str, schema: &Schema) -> Result<Node> {
+pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> Result<Node> {
     let input = parse_input(json_input)?;
-    lower::lower(&input, schema)
+    lower::lower(&input, ontology)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
-    fn test_schema() -> Schema {
-        Schema::from_ontology(
-            ["User", "Project", "Note", "Group"],
-            ["AUTHORED", "CONTAINS", "MEMBER_OF"],
-            HashMap::new(),
-        )
+    fn test_ontology() -> Ontology {
+        use ontology::DataType;
+
+        Ontology::new()
+            .with_nodes(["User", "Project", "Note", "Group"])
+            .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
+            .with_fields(
+                "User",
+                [
+                    ("username", DataType::String),
+                    ("state", DataType::String),
+                    ("created_at", DataType::DateTime),
+                ],
+            )
+            .with_fields(
+                "Note",
+                [
+                    ("confidential", DataType::Bool),
+                    ("created_at", DataType::DateTime),
+                ],
+            )
+            .with_fields("Project", [("name", DataType::String)])
     }
 
     #[test]
@@ -107,7 +120,7 @@ mod tests {
             "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
         }"#;
 
-        let result = compile(json, &test_schema()).unwrap();
+        let result = compile(json, &test_ontology()).unwrap();
 
         // Basic assertions
         assert!(result.sql.contains("SELECT"));
@@ -172,7 +185,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &test_schema()).unwrap();
+        let result = compile(json, &test_ontology()).unwrap();
 
         assert!(result.sql.contains("COUNT"));
         assert!(result.sql.contains("GROUP BY"));
@@ -189,7 +202,7 @@ mod tests {
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#;
 
-        let result = compile(json, &test_schema()).unwrap();
+        let result = compile(json, &test_ontology()).unwrap();
 
         assert!(result.sql.contains("WITH RECURSIVE"));
         assert!(result.sql.contains("path_cte"));
@@ -212,7 +225,7 @@ mod tests {
             "limit": 30
         }"#;
 
-        let result = compile(json, &test_schema()).unwrap();
+        let result = compile(json, &test_ontology()).unwrap();
 
         assert!(result.sql.contains("WHERE"));
         assert!(result.sql.contains(">="));
@@ -228,7 +241,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let ast = compile_to_ast(json, &test_schema()).unwrap();
+        let ast = compile_to_ast(json, &test_ontology()).unwrap();
 
         match ast {
             Node::Query(q) => {
@@ -242,14 +255,14 @@ mod tests {
     #[test]
     fn test_invalid_json() {
         let json = "not valid json";
-        let result = compile(json, &test_schema());
+        let result = compile(json, &test_ontology());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_missing_required_fields() {
         let json = r#"{"query_type": "traversal"}"#;
-        let result = compile(json, &test_schema());
+        let result = compile(json, &test_ontology());
         assert!(result.is_err());
     }
 }
@@ -258,11 +271,23 @@ mod tests {
 #[cfg(test)]
 mod ontology_integration_tests {
     use super::*;
-    use crate::ontology::load_test_ontology;
+    use std::path::Path;
+
+    fn load_test_ontology() -> Ontology {
+        let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/ontology");
+
+        Ontology::load_from_dir(&fixtures_dir)
+            .unwrap_or_else(|e| panic!("Failed to load test ontology: {e}"))
+    }
 
     #[test]
     fn test_valid_column_in_order_by() {
-        let schema = load_test_ontology();
+        let ontology = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "label": "User"}],
@@ -270,7 +295,7 @@ mod ontology_integration_tests {
             "order_by": {"node": "u", "property": "username", "direction": "ASC"}
         }"#;
 
-        let result = compile(json, &schema);
+        let result = compile(json, &ontology);
         assert!(
             result.is_ok(),
             "expected no error for valid column, got: {:?}",
@@ -280,7 +305,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_invalid_column_in_order_by() {
-        let schema = load_test_ontology();
+        let ontology = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "label": "User"}],
@@ -288,7 +313,7 @@ mod ontology_integration_tests {
             "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
         }"#;
 
-        let result = compile(json, &schema);
+        let result = compile(json, &ontology);
         assert!(result.is_err(), "expected error for invalid column");
         let err = result.unwrap_err();
         assert!(
@@ -299,7 +324,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_valid_column_in_filter() {
-        let schema = load_test_ontology();
+        let ontology = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [{
@@ -310,7 +335,7 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &schema);
+        let result = compile(json, &ontology);
         assert!(
             result.is_ok(),
             "expected no error for valid column, got: {:?}",
@@ -320,7 +345,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_invalid_column_in_filter() {
-        let schema = load_test_ontology();
+        let ontology = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [{
@@ -331,7 +356,7 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &schema);
+        let result = compile(json, &ontology);
         assert!(result.is_err(), "expected error for invalid column");
         let err = result.unwrap_err();
         assert!(
@@ -342,7 +367,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_valid_column_in_aggregation() {
-        let schema = load_test_ontology();
+        let ontology = load_test_ontology();
         let json = r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "label": "Project"}],
@@ -352,7 +377,7 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &schema);
+        let result = compile(json, &ontology);
         assert!(
             result.is_ok(),
             "expected no error for valid column, got: {:?}",
@@ -362,7 +387,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_invalid_column_in_aggregation() {
-        let schema = load_test_ontology();
+        let ontology = load_test_ontology();
         let json = r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "label": "Project"}],
@@ -372,7 +397,7 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &schema);
+        let result = compile(json, &ontology);
         assert!(result.is_err(), "expected error for invalid column");
         let err = result.unwrap_err();
         assert!(
@@ -383,7 +408,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_invalid_type_filter_rejected() {
-        let schema = load_test_ontology();
+        let ontology = load_test_ontology();
 
         // Test that invalid node labels are rejected during lowering
         let json = r#"{
@@ -392,7 +417,7 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &schema);
+        let result = compile(json, &ontology);
         assert!(result.is_err(), "expected error for invalid type filter");
         let err = result.unwrap_err();
         assert!(
@@ -403,7 +428,7 @@ mod ontology_integration_tests {
 
     #[test]
     fn test_full_pipeline_with_ontology() {
-        let schema = load_test_ontology();
+        let ontology = load_test_ontology();
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -417,7 +442,7 @@ mod ontology_integration_tests {
             "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
         }"#;
 
-        let result = compile(json, &schema).unwrap();
+        let result = compile(json, &ontology).unwrap();
 
         assert!(result.sql.contains("SELECT"));
         assert!(result.sql.contains("INNER JOIN"));
