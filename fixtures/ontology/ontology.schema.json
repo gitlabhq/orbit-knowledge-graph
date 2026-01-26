@@ -1,0 +1,220 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gitlab.com/knowledge-graph/ontology.schema.json",
+  "title": "GitLab Knowledge Graph Ontology Schema",
+
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["main", "node", "edge"],
+      "description": "Discriminator for schema type."
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/definitions/mainSchema" },
+    { "$ref": "#/definitions/nodeDefinition" },
+    { "$ref": "#/definitions/edgeDefinition" }
+  ],
+
+  "definitions": {
+    "domainName": {
+      "type": "string",
+      "enum": ["core", "code"]
+    },
+
+    "propertyType": {
+      "type": "string",
+      "enum": ["string", "int64", "boolean", "timestamp", "date", "enum"]
+    },
+
+    "sourceDefinition": {
+      "type": "object",
+      "properties": {
+        "system": {
+          "type": "string",
+          "enum": ["postgres", "clickhouse", "rails"],
+          "description": "The source system where this data originates."
+        },
+        "database": {
+          "type": "string",
+          "description": "Database name (for postgres sources)."
+        },
+        "table": {
+          "type": ["string", "null"],
+          "description": "Table name in the database."
+        },
+        "column": {
+          "type": "string",
+          "description": "Column name in the table."
+        },
+        "column_type": {
+          "type": "string",
+          "description": "The database column type (e.g., varchar, smallint)."
+        },
+        "from_column": {
+          "type": "string",
+          "description": "Column representing the source node in an edge relationship."
+        },
+        "to_column": {
+          "type": "string",
+          "description": "Column representing the target node in an edge relationship."
+        },
+        "filter": {
+          "type": "string",
+          "description": "SQL filter condition for this source (e.g., type = 'GroupMember')."
+        },
+        "file": {
+          "type": "string",
+          "description": "Source file path (for rails sources)."
+        },
+        "class": {
+          "type": "string",
+          "description": "Ruby class name (for rails sources)."
+        },
+        "type": {
+          "type": "string",
+          "description": "Source type modifier (e.g., derived)."
+        }
+      },
+      "required": ["system"],
+      "additionalProperties": false
+    },
+
+    "internalDefinition": {
+      "type": "object",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/sourceDefinition" },
+          "minItems": 1,
+          "description": "List of internal data sources for this property."
+        }
+      },
+      "required": ["sources"],
+      "additionalProperties": false
+    },
+
+    "propertyStatus": {
+      "type": "string",
+      "enum": ["pending", "indexed"],
+      "description": "Indicates whether this property is being indexed."
+    },
+
+    "propertyDefinition": {
+      "type": "object",
+      "properties": {
+        "type": { "$ref": "#/definitions/propertyType" },
+        "description": { "type": "string" },
+        "nullable": { "type": "boolean" },
+        "status": { "$ref": "#/definitions/propertyStatus" },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "internal": { "$ref": "#/definitions/internalDefinition" }
+      },
+      "required": ["type", "status"],
+      "additionalProperties": false
+    },
+
+    "propertiesMap": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/propertyDefinition" }
+    },
+
+    "nodeReference": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "id": { "type": "string" }
+      },
+      "required": ["type", "id"],
+      "additionalProperties": false
+    },
+
+    "edgeVariant": {
+      "type": "object",
+      "properties": {
+        "from_node": { "$ref": "#/definitions/nodeReference" },
+        "to_node": { "$ref": "#/definitions/nodeReference" },
+        "meaning": { "type": "string" },
+        "status": { "$ref": "#/definitions/propertyStatus" },
+        "cypher_example": {
+          "type": "string",
+          "description": "Example Cypher query demonstrating this edge variant."
+        },
+        "internal": { "$ref": "#/definitions/internalDefinition" }
+      },
+      "required": ["from_node", "to_node", "meaning", "status"],
+      "additionalProperties": false
+    },
+
+    "domainDefinition": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "nodes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["description", "nodes"],
+      "additionalProperties": false
+    },
+
+    "mainSchema": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "main" },
+        "schema_version": {
+          "type": ["string", "number"]
+        },
+        "description": { "type": "string" },
+        "domains": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/definitions/domainName" },
+          "additionalProperties": { "$ref": "#/definitions/domainDefinition" }
+        },
+        "edges": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["type", "schema_version", "domains", "edges"],
+      "additionalProperties": false
+    },
+
+    "nodeDefinition": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "node" },
+        "domain": { "$ref": "#/definitions/domainName" },
+        "description": { "type": "string" },
+        "example_output": { "type": "string" },
+        "properties": { "$ref": "#/definitions/propertiesMap" },
+        "additional_properties": { "$ref": "#/definitions/propertiesMap" }
+      },
+      "required": ["type", "domain", "description", "properties"],
+      "additionalProperties": false
+    },
+
+    "edgeDefinition": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "edge" },
+        "description": { "type": "string" },
+        "properties": { "$ref": "#/definitions/propertiesMap" },
+        "variants": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/edgeVariant" },
+          "minItems": 1
+        }
+      },
+      "required": ["type", "description", "variants"],
+      "additionalProperties": false
+    }
+  }
+}

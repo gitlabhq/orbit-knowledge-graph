@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: User created project.
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Project, id: id }
+    meaning: "User created project."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, from_column: creator_id, to_column: id },
+          { system: clickhouse, table: siphon_projects, from_column: creator_id, to_column: id },
+        ]

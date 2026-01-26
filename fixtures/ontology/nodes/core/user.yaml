@@ -1,0 +1,263 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: core
+description: A GitLab user account.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the user."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: id },
+          { system: clickhouse, table: null },
+        ]
+  username:
+    type: string
+    nullable: true
+    description: "The user's handle (unique in GitLab)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: username },
+          { system: clickhouse, table: null },
+        ]
+  email:
+    type: string
+    description: "Primary email address."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: email },
+          { system: clickhouse, table: null },
+        ]
+  name:
+    type: string
+    nullable: true
+    description: "Display name."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: name },
+          { system: clickhouse, table: null },
+        ]
+  first_name:
+    type: string
+    nullable: true
+    description: "First name, if provided."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: first_name },
+          { system: clickhouse, table: null },
+        ]
+  last_name:
+    type: string
+    nullable: true
+    description: "Last name, if provided."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: last_name },
+          { system: clickhouse, table: null },
+        ]
+additional_properties:
+  created_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the user was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  updated_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the user record was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: updated_at },
+          { system: clickhouse, table: null },
+        ]
+  state:
+    type: enum
+    values:
+      [
+        active,
+        blocked,
+        ldap_blocked,
+        blocked_pending_approval,
+        banned,
+        deactivated,
+      ]
+    nullable: true
+    description: "Account state."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: users,
+            column: state,
+            column_type: varchar,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/user.rb, class: User },
+        ]
+  avatar_url:
+    type: string
+    nullable: true
+    description: "URL to the user's avatar image."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: avatar },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/user.rb, class: User, type: derived },
+        ]
+  public_email:
+    type: string
+    nullable: true
+    description: "Publicly visible email, if set."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: users,
+            column: public_email,
+          },
+          { system: clickhouse, table: null },
+        ]
+  preferred_language:
+    type: string
+    nullable: true
+    description: "User's preferred UI language."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: users,
+            column: preferred_language,
+          },
+          { system: clickhouse, table: null },
+        ]
+  last_activity_on:
+    type: date
+    nullable: true
+    description: "Most recent recorded activity date."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: users,
+            column: last_activity_on,
+          },
+          { system: clickhouse, table: null },
+        ]
+  private_profile:
+    type: boolean
+    description: "Whether the user profile is private."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: users,
+            column: private_profile,
+          },
+          { system: clickhouse, table: null },
+        ]
+  is_admin:
+    type: boolean
+    description: "Whether the user is an instance administrator."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: admin },
+          { system: clickhouse, table: null },
+        ]
+  is_auditor:
+    type: boolean
+    description: "Whether the user has auditor role."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: auditor },
+          { system: clickhouse, table: null },
+        ]
+  is_external:
+    type: boolean
+    description: "Whether the user is marked as external."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: users, column: external },
+          { system: clickhouse, table: null },
+        ]
+  user_type:
+    type: enum
+    values:
+      [
+        human,
+        support_bot,
+        alert_bot,
+        visual_review_bot,
+        service_user,
+        ghost,
+        project_bot,
+        security_bot,
+        automation_bot,
+        security_policy_bot,
+        admin_bot,
+        service_account,
+        placeholder,
+        duo_code_review_bot,
+        import_user,
+      ]
+    description: "Type of user account."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: users,
+            column: user_type,
+            column_type: smallint,
+          },
+          { system: clickhouse, table: null },
+          {
+            system: rails,
+            file: app/models/concerns/has_user_type.rb,
+            class: HasUserType,
+          },
+        ]
