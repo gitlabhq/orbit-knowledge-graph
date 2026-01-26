@@ -1,5 +1,6 @@
 //! ClickHouse connection configuration.
 
+use clickhouse_arrow::{ArrowFormat, Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
 
 use crate::destination::DestinationError;
@@ -70,6 +71,19 @@ impl ClickHouseConfiguration {
         }
 
         Ok(())
+    }
+
+    pub async fn build_client(&self) -> Result<Client<ArrowFormat>, clickhouse_arrow::Error> {
+        let mut builder = ClientBuilder::new()
+            .with_endpoint(&self.url)
+            .with_database(&self.database)
+            .with_username(&self.username);
+
+        if let Some(password) = &self.password {
+            builder = builder.with_password(password);
+        }
+
+        builder.build_arrow().await
     }
 }
 

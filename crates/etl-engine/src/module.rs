@@ -56,6 +56,18 @@ pub enum HandlerError {
     Deserialization(#[from] serde_json::Error),
 }
 
+/// Errors that can occur during module initialization.
+#[derive(Debug, Error)]
+#[error("{0}")]
+pub struct ModuleInitError(#[from] Box<dyn std::error::Error + Send + Sync>);
+
+impl ModuleInitError {
+    /// Creates a new module initialization error from any error type.
+    pub fn new<E: std::error::Error + Send + Sync + 'static>(error: E) -> Self {
+        Self(Box::new(error))
+    }
+}
+
 /// Context provided to handlers during message processing.
 ///
 /// Contains shared resources that handlers need to process messages

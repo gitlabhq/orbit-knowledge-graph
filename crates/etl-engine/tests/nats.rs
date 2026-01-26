@@ -21,8 +21,8 @@ struct TestEvent {
 }
 
 impl Event for TestEvent {
-    fn topic() -> &'static str {
-        "test_stream:test.events"
+    fn topic() -> Topic {
+        Topic::new(TEST_STREAM, TEST_SUBJECT)
     }
 }
 

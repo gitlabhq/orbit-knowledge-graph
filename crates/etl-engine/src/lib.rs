@@ -71,5 +71,5 @@ pub mod nats;
 pub mod types;
 pub mod worker_pool;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
