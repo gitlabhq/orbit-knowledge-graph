@@ -4,3 +4,9 @@ description: Knowledge Graph sandbox deployment with NATS, Siphon producer and c
 type: application
 version: 0.1.0
 appVersion: "1.0.0"
+
+dependencies:
+  - name: gitlab-runner
+    version: "0.85.0"
+    repository: "https://charts.gitlab.io"
+    condition: gitlab-runner.enabled

@@ -10,6 +10,24 @@ secrets:
   gcpServiceAccount: gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com
   postgresSecretName: postgres-password
   clickhouseSecretName: clickhouse-password
+  runnerTokenSecretName: runner_authentication_token
+
+# GitLab Runner Configuration (subchart)
+gitlab-runner:
+  enabled: true
+  gitlabUrl: https://gitlab.gkg.dev
+  unregisterRunners: true
+  concurrent: 10
+  rbac:
+    create: true
+  runners:
+    secret: gitlab-runner-token
+    config: |
+      [[runners]]
+        [runners.kubernetes]
+          namespace = "{{.Release.Namespace}}"
+          image = "alpine:latest"
+          helper_image = "registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-v18.8.0"
 
 # PostgreSQL Configuration (GitLab Omnibus VM)
 postgres:
