@@ -8,6 +8,7 @@ members = [
   "crates/etl-engine",
   "crates/cli",
   "crates/gitaly-client",
+  "crates/gkg-server",
 ]
 
 [workspace.dependencies]
@@ -76,6 +77,13 @@ tonic-build = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 tower = "0.5"
+
+# Server dependencies
+axum = { version = "0.8.8", features = ["macros"] }
+axum-extra = { version = "0.12", features = ["typed-header"] }
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+http = "1.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
