@@ -2,7 +2,7 @@
   "List active users": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "u", "label": "User", "filters": {"state": "active"}}
+      {"id": "u", "entity": "User", "filters": {"state": "active"}}
     ],
     "limit": 30,
     "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
@@ -11,8 +11,8 @@
   "Open merge requests in a project": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "mr", "label": "MergeRequest", "filters": {"state": "opened"}},
-      {"id": "p", "label": "Project", "node_ids": [123]}
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+      {"id": "p", "entity": "Project", "node_ids": [123]}
     ],
     "relationships": [
       {"type": "IN_PROJECT", "from": "mr", "to": "p"}
@@ -24,8 +24,8 @@
   "Draft MRs awaiting review": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "mr", "label": "MergeRequest", "filters": {"state": "opened", "draft": true}},
-      {"id": "author", "label": "User"}
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened", "draft": true}},
+      {"id": "author", "entity": "User"}
     ],
     "relationships": [
       {"type": "AUTHORED", "from": "author", "to": "mr"}
@@ -36,8 +36,8 @@
   "MRs merged by a specific user": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "mr", "label": "MergeRequest", "filters": {"state": "merged"}},
-      {"id": "merger", "label": "User", "node_ids": [42]}
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "merger", "entity": "User", "node_ids": [42]}
     ],
     "relationships": [
       {"type": "MERGED_BY", "from": "mr", "to": "merger"}
@@ -49,8 +49,8 @@
   "Count MRs per project": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "mr", "label": "MergeRequest"},
-      {"id": "p", "label": "Project"}
+      {"id": "mr", "entity": "MergeRequest"},
+      {"id": "p", "entity": "Project"}
     ],
     "relationships": [
       {"type": "IN_PROJECT", "from": "mr", "to": "p"}
@@ -65,11 +65,11 @@
   "Failed pipelines in last week": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "pipe", "label": "Pipeline", "filters": {
+      {"id": "pipe", "entity": "Pipeline", "filters": {
         "status": "failed",
         "created_at": {"op": "gte", "value": "2026-01-19"}
       }},
-      {"id": "p", "label": "Project"}
+      {"id": "p", "entity": "Project"}
     ],
     "relationships": [
       {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
@@ -81,8 +81,8 @@
   "Pipeline success rate by project": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "pipe", "label": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
-      {"id": "p", "label": "Project"}
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
+      {"id": "p", "entity": "Project"}
     ],
     "relationships": [
       {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
@@ -96,7 +96,7 @@
   "Long-running pipelines": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "pipe", "label": "Pipeline", "filters": {
+      {"id": "pipe", "entity": "Pipeline", "filters": {
         "status": "success",
         "duration": {"op": "gt", "value": 3600}
       }}
@@ -108,11 +108,11 @@
   "Critical vulnerabilities detected": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "v", "label": "Vulnerability", "filters": {
+      {"id": "v", "entity": "Vulnerability", "filters": {
         "severity": "critical",
         "state": "detected"
       }},
-      {"id": "p", "label": "Project"}
+      {"id": "p", "entity": "Project"}
     ],
     "relationships": [
       {"type": "IN_PROJECT", "from": "v", "to": "p"}
@@ -124,7 +124,7 @@
   "Unresolved high-severity vulns by report type": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "v", "label": "Vulnerability", "filters": {
+      {"id": "v", "entity": "Vulnerability", "filters": {
         "severity": {"op": "in", "value": ["high", "critical"]},
         "state": {"op": "in", "value": ["detected", "confirmed"]}
       }}
@@ -138,8 +138,8 @@
   "Vulnerabilities fixed by MRs": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "v", "label": "Vulnerability", "filters": {"state": "resolved"}},
-      {"id": "mr", "label": "MergeRequest", "filters": {"state": "merged"}}
+      {"id": "v", "entity": "Vulnerability", "filters": {"state": "resolved"}},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}
     ],
     "relationships": [
       {"type": "FIXES", "from": "mr", "to": "v"}
@@ -150,7 +150,7 @@
   "Open work items (issues) by type": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "wi", "label": "WorkItem", "filters": {"state": "opened"}}
+      {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}}
     ],
     "aggregations": [
       {"function": "count", "target": "wi", "alias": "count"}
@@ -161,7 +161,7 @@
   "Overdue work items": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "wi", "label": "WorkItem", "filters": {
+      {"id": "wi", "entity": "WorkItem", "filters": {
         "state": "opened",
         "due_date": {"op": "lt", "value": "2026-01-26"}
       }}
@@ -173,11 +173,11 @@
   "High weight work items assigned to user": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "wi", "label": "WorkItem", "filters": {
+      {"id": "wi", "entity": "WorkItem", "filters": {
         "state": "opened",
         "weight": {"op": "gte", "value": 5}
       }},
-      {"id": "assignee", "label": "User", "node_ids": [100]}
+      {"id": "assignee", "entity": "User", "node_ids": [100]}
     ],
     "relationships": [
       {"type": "ASSIGNED", "from": "wi", "to": "assignee"}
@@ -188,8 +188,8 @@
   "Work items closing MRs": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "mr", "label": "MergeRequest", "filters": {"state": "merged"}},
-      {"id": "wi", "label": "WorkItem"}
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "wi", "entity": "WorkItem"}
     ],
     "relationships": [
       {"type": "CLOSES", "from": "mr", "to": "wi"}
@@ -200,8 +200,8 @@
   "Notes (comments) on MRs by user": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "note", "label": "Note", "filters": {"system": false, "noteable_type": "MergeRequest"}},
-      {"id": "author", "label": "User", "node_ids": [42]}
+      {"id": "note", "entity": "Note", "filters": {"system": false, "noteable_type": "MergeRequest"}},
+      {"id": "author", "entity": "User", "node_ids": [42]}
     ],
     "relationships": [
       {"type": "AUTHORED", "from": "author", "to": "note"}
@@ -213,8 +213,8 @@
   "Comment activity per user": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "note", "label": "Note", "filters": {"system": false}},
-      {"id": "author", "label": "User"}
+      {"id": "note", "entity": "Note", "filters": {"system": false}},
+      {"id": "author", "entity": "User"}
     ],
     "relationships": [
       {"type": "AUTHORED", "from": "author", "to": "note"}
@@ -229,8 +229,8 @@
   "Projects in a group": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "p", "label": "Project", "filters": {"archived": false}},
-      {"id": "g", "label": "Group", "node_ids": [9970]}
+      {"id": "p", "entity": "Project", "filters": {"archived": false}},
+      {"id": "g", "entity": "Group", "node_ids": [9970]}
     ],
     "relationships": [
       {"type": "IN_GROUP", "from": "p", "to": "g"}
@@ -242,7 +242,7 @@
   "Public projects with stars": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "p", "label": "Project", "filters": {
+      {"id": "p", "entity": "Project", "filters": {
         "visibility_level": "public",
         "archived": false,
         "star_count": {"op": "gte", "value": 100}
@@ -255,8 +255,8 @@
   "User contributions - authored MRs": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "mr", "label": "MergeRequest"},
-      {"id": "author", "label": "User"}
+      {"id": "mr", "entity": "MergeRequest"},
+      {"id": "author", "entity": "User"}
     ],
     "relationships": [
       {"type": "AUTHORED", "from": "author", "to": "mr"}
@@ -271,9 +271,9 @@
   "MR reviewers per project": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "mr", "label": "MergeRequest"},
-      {"id": "reviewer", "label": "User"},
-      {"id": "p", "label": "Project"}
+      {"id": "mr", "entity": "MergeRequest"},
+      {"id": "reviewer", "entity": "User"},
+      {"id": "p", "entity": "Project"}
     ],
     "relationships": [
       {"type": "REVIEWER", "from": "mr", "to": "reviewer"},
@@ -288,8 +288,8 @@
   "Work items in milestone": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "wi", "label": "WorkItem", "filters": {"state": "opened"}},
-      {"id": "m", "label": "Milestone", "node_ids": [500]}
+      {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
+      {"id": "m", "entity": "Milestone", "node_ids": [500]}
     ],
     "relationships": [
       {"type": "IN_MILESTONE", "from": "wi", "to": "m"}
@@ -297,11 +297,11 @@
     "limit": 30
   },
 
-  "Work items with specific label": {
+  "Work items with specific entity": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "wi", "label": "WorkItem", "filters": {"state": "opened"}},
-      {"id": "lbl", "label": "Label", "node_ids": [1234]}
+      {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
+      {"id": "lbl", "entity": "Label", "node_ids": [1234]}
     ],
     "relationships": [
       {"type": "HAS_LABEL", "from": "wi", "to": "lbl"}
@@ -312,8 +312,8 @@
   "Pipeline triggered by MR": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "pipe", "label": "Pipeline", "filters": {"source": "merge_request_event"}},
-      {"id": "mr", "label": "MergeRequest", "node_ids": [99999]}
+      {"id": "pipe", "entity": "Pipeline", "filters": {"source": "merge_request_event"}},
+      {"id": "mr", "entity": "MergeRequest", "node_ids": [99999]}
     ],
     "relationships": [
       {"type": "TRIGGERED", "from": "mr", "to": "pipe"}
@@ -325,8 +325,8 @@
   "Shortest path between two projects": {
     "query_type": "path_finding",
     "nodes": [
-      {"id": "start", "label": "Project", "node_ids": [100]},
-      {"id": "end", "label": "Project", "node_ids": [200]}
+      {"id": "start", "entity": "Project", "node_ids": [100]},
+      {"id": "end", "entity": "Project", "node_ids": [200]}
     ],
     "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
   },
@@ -334,7 +334,7 @@
   "Users searching by username pattern": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "u", "label": "User", "filters": {
+      {"id": "u", "entity": "User", "filters": {
         "username": {"op": "contains", "value": "admin"},
         "state": "active"
       }}
@@ -345,7 +345,7 @@
   "Recently created bot accounts": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "u", "label": "User", "filters": {
+      {"id": "u", "entity": "User", "filters": {
         "user_type": {"op": "in", "value": ["project_bot", "service_account", "automation_bot"]},
         "created_at": {"op": "gte", "value": "2026-01-01"}
       }}
@@ -357,11 +357,11 @@
   "Confidential work items": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "wi", "label": "WorkItem", "filters": {
+      {"id": "wi", "entity": "WorkItem", "filters": {
         "confidential": true,
         "state": "opened"
       }},
-      {"id": "p", "label": "Project"}
+      {"id": "p", "entity": "Project"}
     ],
     "relationships": [
       {"type": "IN_PROJECT", "from": "wi", "to": "p"}
@@ -372,7 +372,7 @@
   "SAST vulnerabilities by severity": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "v", "label": "Vulnerability", "filters": {"report_type": "sast"}}
+      {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
     ],
     "aggregations": [
       {"function": "count", "target": "v", "alias": "total"}
