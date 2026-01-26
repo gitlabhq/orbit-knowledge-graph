@@ -93,9 +93,9 @@
         "description": "Type of graph query to execute",
         "enum": ["traversal", "aggregation", "path_finding", "pattern"]
       },
-      "NodeLabel": {
+      "EntityType": {
         "type": "string",
-        "description": "Valid node labels corresponding to GitLab entity types. Validated against ontology at runtime.",
+        "description": "Valid entity types corresponding to GitLab data types (e.g., User, Project, MergeRequest). Validated against ontology at runtime.",
         "minLength": 1
       },
       "NodeProperties": {
@@ -138,9 +138,9 @@
             "$ref": "#/$defs/Identifier",
             "description": "Variable identifier for this node (e.g., 'i', 'mr', 'user'). Used to reference this node in relationships and aggregations."
           },
-          "label": {
-            "$ref": "#/$defs/NodeLabel",
-            "description": "Label/type of the node. Strongly recommended for query optimization."
+          "entity": {
+            "$ref": "#/$defs/EntityType",
+            "description": "Entity type (e.g., User, Project, MergeRequest). Determines which table to query. Required for most queries."
           },
           "filters": {
             "type": "object",

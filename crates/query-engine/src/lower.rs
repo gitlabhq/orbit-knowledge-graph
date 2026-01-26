@@ -26,9 +26,9 @@ fn missing_node(id: &str, context: &str) -> QueryError {
     ))
 }
 
-fn needs_label(id: &str) -> QueryError {
+fn needs_entity(id: &str) -> QueryError {
     err(format!(
-        "node \"{id}\" requires a label to determine which table to query"
+        "node \"{id}\" requires an entity type to determine which table to query"
     ))
 }
 
@@ -88,8 +88,8 @@ fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
     for agg in &input.aggregations {
         // Validate property against ontology
         if let (Some(prop), Some(target)) = (&agg.property, &agg.target) {
-            if let Some(label) = find_node_label(&input.nodes, target) {
-                ontology.validate_field(&label, prop)?;
+            if let Some(entity) = find_node_entity(&input.nodes, target) {
+                ontology.validate_field(&entity, prop)?;
             }
         }
 
@@ -164,22 +164,23 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
     let end =
         find_node(&input.nodes, &path.to).ok_or_else(|| missing_node(&path.to, "path 'to'"))?;
 
-    let start_label = start.label.as_ref().ok_or_else(|| needs_label(&start.id))?;
-    let end_label = end.label.as_ref().ok_or_else(|| needs_label(&end.id))?;
+    let start_entity = start.entity.as_ref().ok_or_else(|| needs_entity(&start.id))?;
+    let end_entity = end.entity.as_ref().ok_or_else(|| needs_entity(&end.id))?;
 
-    let start_table = ontology.table_name(start_label)?;
-    let end_table = ontology.table_name(end_label)?;
+    // Get table names from ontology (validates that entity types exist)
+    let start_table = ontology.table_name(start_entity)?;
+    let end_table = ontology.table_name(end_entity)?;
 
     Ok(Node::RecursiveCte(Box::new(RecursiveCte {
         name: "path_cte".into(),
-        base: build_path_base(&start.node_ids, &start_table, start_label),
-        recursive: build_path_recursive(&end_table, end_label, path.max_depth),
+        base: build_path_base(&start.node_ids, &start_table),
+        recursive: build_path_recursive(&end_table, path.max_depth),
         max_depth: path.max_depth,
         final_query: build_path_final(&end.node_ids, input.limit),
     })))
 }
 
-fn build_path_base(start_ids: &[i64], table: &str, label: &str) -> Query {
+fn build_path_base(start_ids: &[i64], table: &str) -> Query {
     Query {
         select: vec![
             SelectExpr {
@@ -195,7 +196,8 @@ fn build_path_base(start_ids: &[i64], table: &str, label: &str) -> Query {
                 alias: Some("depth".into()),
             },
         ],
-        from: TableRef::scan_with_filter(table, "n", label),
+        // Node tables are entity-specific, no type filter needed
+        from: TableRef::scan(table, "n"),
         where_clause: node_ids_condition("n", "id", start_ids),
         group_by: vec![],
         order_by: vec![],
@@ -203,7 +205,7 @@ fn build_path_base(start_ids: &[i64], table: &str, label: &str) -> Query {
     }
 }
 
-fn build_path_recursive(table: &str, label: &str, max_depth: u32) -> Query {
+fn build_path_recursive(table: &str, max_depth: u32) -> Query {
     Query {
         select: vec![
             SelectExpr {
@@ -231,10 +233,13 @@ fn build_path_recursive(table: &str, label: &str, max_depth: u32) -> Query {
                 JoinType::Inner,
                 TableRef::scan("path_cte", "p"),
                 TableRef::scan(EDGE_TABLE, "e"),
-                Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "from_id")),
+                // Edge table uses "source" column
+                Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source")),
             ),
-            TableRef::scan_with_filter(table, "n", label),
-            Expr::eq(Expr::col("e", "to_id"), Expr::col("n", "id")),
+            // Node tables are entity-specific, no type filter needed
+            TableRef::scan(table, "n"),
+            // Edge table uses "target" column
+            Expr::eq(Expr::col("e", "target"), Expr::col("n", "id")),
         ),
         where_clause: Expr::and_all([
             Some(Expr::binary(
@@ -313,9 +318,10 @@ fn build_joins(
         None => &nodes[0],
     };
 
-    let start_label = start.label.as_ref().ok_or_else(|| needs_label(&start.id))?;
-    let start_table = ontology.table_name(start_label)?;
-    let mut result = TableRef::scan_with_filter(&start_table, &start.id, start_label);
+    let start_entity = start.entity.as_ref().ok_or_else(|| needs_entity(&start.id))?;
+    let start_table = ontology.table_name(start_entity)?;
+    // Node tables are entity-specific, no type filter needed
+    let mut result = TableRef::scan(&start_table, &start.id);
 
     let mut edge_aliases = HashMap::new();
 
@@ -334,11 +340,11 @@ fn build_joins(
         };
         result = TableRef::join(JoinType::Inner, result, edge_table, edge_cond);
 
-        // Join target node
-        let target_label = find_node_label(nodes, &rel.to).ok_or_else(|| needs_label(&rel.to))?;
-        let target_table = ontology.table_name(&target_label)?;
+        // Join target node (no type filter needed - table is entity-specific)
+        let target_entity = find_node_entity(nodes, &rel.to).ok_or_else(|| needs_entity(&rel.to))?;
+        let target_table = ontology.table_name(&target_entity)?;
         let target_cond = target_join_condition(&edge_alias, &rel.to, rel.direction);
-        let target_ref = TableRef::scan_with_filter(&target_table, &rel.to, &target_label);
+        let target_ref = TableRef::scan(&target_table, &rel.to);
         result = TableRef::join(JoinType::Inner, result, target_ref, target_cond);
     }
 
@@ -360,19 +366,20 @@ fn validate_rel_types(types: &[String], ontology: &Ontology) -> Result<Option<St
 }
 
 fn edge_join_condition(from_node: &str, edge_alias: &str, dir: Direction) -> Expr {
+    // Edge table columns: source (from), target (to), relationship_kind (type)
     match dir {
         Direction::Outgoing => {
-            Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "from_id"))
+            Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "source"))
         }
-        Direction::Incoming => Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "to_id")),
+        Direction::Incoming => Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "target")),
         Direction::Both => Expr::or_all([
             Some(Expr::eq(
                 Expr::col(from_node, "id"),
-                Expr::col(edge_alias, "from_id"),
+                Expr::col(edge_alias, "source"),
             )),
             Some(Expr::eq(
                 Expr::col(from_node, "id"),
-                Expr::col(edge_alias, "to_id"),
+                Expr::col(edge_alias, "target"),
             )),
         ])
         .unwrap(),
@@ -381,15 +388,15 @@ fn edge_join_condition(from_node: &str, edge_alias: &str, dir: Direction) -> Exp
 
 fn target_join_condition(edge_alias: &str, to_node: &str, dir: Direction) -> Expr {
     match dir {
-        Direction::Outgoing => Expr::eq(Expr::col(edge_alias, "to_id"), Expr::col(to_node, "id")),
-        Direction::Incoming => Expr::eq(Expr::col(edge_alias, "from_id"), Expr::col(to_node, "id")),
+        Direction::Outgoing => Expr::eq(Expr::col(edge_alias, "target"), Expr::col(to_node, "id")),
+        Direction::Incoming => Expr::eq(Expr::col(edge_alias, "source"), Expr::col(to_node, "id")),
         Direction::Both => Expr::or_all([
             Some(Expr::eq(
-                Expr::col(edge_alias, "to_id"),
+                Expr::col(edge_alias, "target"),
                 Expr::col(to_node, "id"),
             )),
             Some(Expr::eq(
-                Expr::col(edge_alias, "from_id"),
+                Expr::col(edge_alias, "source"),
                 Expr::col(to_node, "id"),
             )),
         ])
@@ -419,8 +426,8 @@ fn build_where(
 
         // Property filters
         for (prop, filter) in &node.filters {
-            if let Some(label) = &node.label {
-                ontology.validate_field(label, prop)?;
+            if let Some(entity) = &node.entity {
+                ontology.validate_field(entity, prop)?;
             }
             conds.push(filter_to_expr(&node.id, prop, filter));
         }
@@ -507,8 +514,8 @@ fn build_order_by(
         return Ok(vec![]);
     };
 
-    if let Some(label) = find_node_label(nodes, &ob.node) {
-        ontology.validate_field(&label, &ob.property)?;
+    if let Some(entity) = find_node_entity(nodes, &ob.node) {
+        ontology.validate_field(&entity, &ob.property)?;
     }
 
     Ok(vec![OrderExpr {
@@ -525,8 +532,8 @@ fn find_node<'a>(nodes: &'a [InputNode], id: &str) -> Option<&'a InputNode> {
     nodes.iter().find(|n| n.id == id)
 }
 
-fn find_node_label(nodes: &[InputNode], id: &str) -> Option<String> {
-    find_node(nodes, id).and_then(|n| n.label.clone())
+fn find_node_entity(nodes: &[InputNode], id: &str) -> Option<String> {
+    find_node(nodes, id).and_then(|n| n.entity.clone())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -567,8 +574,8 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "n", "label": "Note"},
-                {"id": "u", "label": "User"}
+                {"id": "n", "entity": "Note"},
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25
@@ -587,7 +594,7 @@ mod tests {
     fn test_lower_aggregation() {
         let input = parse_input(r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "n", "label": "Note"}, {"id": "u", "label": "User"}],
+            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User"}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
             "limit": 10
@@ -609,8 +616,8 @@ mod tests {
             r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "label": "Project", "node_ids": [100]},
-                {"id": "end", "label": "Project", "node_ids": [200]}
+                {"id": "start", "entity": "Project", "node_ids": [100]},
+                {"id": "end", "entity": "Project", "node_ids": [200]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#,
@@ -631,7 +638,7 @@ mod tests {
             "query_type": "traversal",
             "nodes": [{
                 "id": "u",
-                "label": "User",
+                "entity": "User",
                 "filters": {
                     "created_at": {"op": "gte", "value": "2024-01-01"},
                     "state": {"op": "in", "value": ["active", "blocked"]}
@@ -654,9 +661,9 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "label": "User"},
-                {"id": "n", "label": "Note"},
-                {"id": "p", "label": "Project"}
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "n"},

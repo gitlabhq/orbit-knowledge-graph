@@ -20,7 +20,7 @@
 //!
 //! let json = r#"{
 //!     "query_type": "traversal",
-//!     "nodes": [{"id": "u", "label": "User"}],
+//!     "nodes": [{"id": "u", "entity": "User"}],
 //!     "limit": 10
 //! }"#;
 //!
@@ -165,8 +165,8 @@ mod tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "n", "label": "Note", "filters": {"confidential": true}},
-                {"id": "u", "label": "User"}
+                {"id": "n", "entity": "Note", "filters": {"confidential": true}},
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25,
@@ -178,18 +178,17 @@ mod tests {
         assert!(result.sql.contains("SELECT"));
         assert!(result.sql.contains("kg_user AS u"));
         assert!(result.sql.contains("INNER JOIN kg_edges AS e0 ON"));
-        assert!(result.sql.contains("u.id = e0.from_id"));
+        // Edge table uses "source" column
+        assert!(result.sql.contains("u.id = e0.source"), "expected source column: {}", result.sql);
         assert!(result.sql.contains("INNER JOIN kg_note AS n ON"));
-        assert!(result.sql.contains("e0.label = {type_e0:String}"));
-        assert!(result.sql.contains("n.label = {type_n:String}"));
+        // Edge type filter uses relationship_kind column
+        assert!(result.sql.contains("e0.relationship_kind = {type_e0:String}"), "expected relationship_kind: {}", result.sql);
+        // Node tables don't have type filters (entity-specific tables)
+        assert!(!result.sql.contains("n.label"), "node should not have type filter: {}", result.sql);
         assert!(result.sql.contains("LIMIT 25"));
         assert_eq!(
             result.params.get("type_e0"),
             Some(&serde_json::json!("AUTHORED"))
-        );
-        assert_eq!(
-            result.params.get("type_n"),
-            Some(&serde_json::json!("Note"))
         );
     }
 
@@ -197,7 +196,7 @@ mod tests {
     fn aggregation_query() {
         let json = r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "n", "label": "Note"}, {"id": "u", "label": "User"}],
+            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User"}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
             "limit": 10
@@ -213,8 +212,8 @@ mod tests {
         let json = r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "label": "Project", "node_ids": [100]},
-                {"id": "end", "label": "Project", "node_ids": [200]}
+                {"id": "start", "entity": "Project", "node_ids": [100]},
+                {"id": "end", "entity": "Project", "node_ids": [200]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#;
@@ -231,7 +230,7 @@ mod tests {
             "query_type": "traversal",
             "nodes": [{
                 "id": "u",
-                "label": "User",
+                "entity": "User",
                 "filters": {
                     "created_at": {"op": "gte", "value": "2024-01-01"},
                     "state": {"op": "in", "value": ["active", "blocked"]},
@@ -252,7 +251,7 @@ mod tests {
     fn compile_to_ast_works() {
         let json = r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "label": "User"}],
+            "nodes": [{"id": "u", "entity": "User"}],
             "limit": 10
         }"#;
 
@@ -310,7 +309,7 @@ mod tests {
     fn sql_injection_in_filter_property() {
         let json = r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "label": "User", "filters": {"foo; DROP TABLE--": "value"}}]
+            "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]
         }"#;
         let err = compile(json, &test_ontology()).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
@@ -321,10 +320,10 @@ mod tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "user_node", "label": "User"},
-                {"id": "_private", "label": "Note"},
-                {"id": "CamelCase", "label": "Project"},
-                {"id": "node123", "label": "Group"}
+                {"id": "user_node", "entity": "User"},
+                {"id": "_private", "entity": "Note"},
+                {"id": "CamelCase", "entity": "Project"},
+                {"id": "node123", "entity": "Group"}
             ]
         }"#;
         assert!(compile(json, &test_ontology()).is_ok());
@@ -350,7 +349,7 @@ mod ontology_integration_tests {
     fn valid_column_in_order_by() {
         let json = r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "label": "User"}],
+            "nodes": [{"id": "u", "entity": "User"}],
             "limit": 10,
             "order_by": {"node": "u", "property": "username", "direction": "ASC"}
         }"#;
@@ -361,7 +360,7 @@ mod ontology_integration_tests {
     fn invalid_column_in_order_by() {
         let json = r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "label": "User"}],
+            "nodes": [{"id": "u", "entity": "User"}],
             "limit": 10,
             "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
         }"#;
@@ -373,7 +372,7 @@ mod ontology_integration_tests {
     fn valid_column_in_filter() {
         let json = r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "label": "User", "filters": {"username": "admin"}}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"username": "admin"}}],
             "limit": 10
         }"#;
         assert!(compile(json, &load_test_ontology()).is_ok());
@@ -383,7 +382,7 @@ mod ontology_integration_tests {
     fn invalid_column_in_filter() {
         let json = r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "label": "User", "filters": {"nonexistent_column": "value"}}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"nonexistent_column": "value"}}],
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology()).unwrap_err();
@@ -394,7 +393,7 @@ mod ontology_integration_tests {
     fn valid_column_in_aggregation() {
         let json = r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "p", "label": "Project"}],
+            "nodes": [{"id": "p", "entity": "Project"}],
             "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
             "limit": 10
         }"#;
@@ -405,7 +404,7 @@ mod ontology_integration_tests {
     fn invalid_column_in_aggregation() {
         let json = r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "p", "label": "Project"}],
+            "nodes": [{"id": "p", "entity": "Project"}],
             "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
             "limit": 10
         }"#;
@@ -414,16 +413,19 @@ mod ontology_integration_tests {
     }
 
     #[test]
-    fn invalid_node_label_rejected() {
+    fn invalid_entity_type_rejected() {
         let json = r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "n", "label": "NonexistentType"}],
+            "nodes": [{"id": "n", "entity": "NonexistentType"}],
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology()).unwrap_err();
+        // Schema validation catches invalid entity types
         assert!(
             err.to_string().contains("NonexistentType")
-                && err.to_string().contains("is not one of")
+                && err.to_string().contains("is not one of"),
+            "expected validation error with valid options: {}",
+            err
         );
     }
 
@@ -432,8 +434,8 @@ mod ontology_integration_tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "n", "label": "Note", "filters": {"confidential": true}},
-                {"id": "u", "label": "User"}
+                {"id": "n", "entity": "Note", "filters": {"confidential": true}},
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25,

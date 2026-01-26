@@ -45,8 +45,9 @@ pub enum QueryType {
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputNode {
     pub id: String,
+    /// Entity type (e.g., "User", "Project"). Determines which table to query.
     #[serde(default)]
-    pub label: Option<String>,
+    pub entity: Option<String>,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, InputFilter>,
     #[serde(default)]
@@ -283,8 +284,8 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "n", "label": "Note", "filters": {"system": false}},
-                {"id": "u", "label": "User"}
+                {"id": "n", "entity": "Note", "filters": {"system": false}},
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25
@@ -294,6 +295,7 @@ mod tests {
 
         assert_eq!(input.query_type, QueryType::Traversal);
         assert_eq!(input.nodes.len(), 2);
+        assert_eq!(input.nodes[0].entity, Some("Note".into()));
         assert_eq!(input.relationships.len(), 1);
         assert_eq!(input.limit, 25);
     }
@@ -304,7 +306,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [{
-                "id": "u", "label": "User",
+                "id": "u", "entity": "User",
                 "filters": {
                     "created_at": {"op": "gte", "value": "2024-01-01"},
                     "state": {"op": "in", "value": ["active", "blocked"]}
@@ -353,8 +355,8 @@ mod tests {
             r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "label": "Project", "node_ids": [100]},
-                {"id": "end", "label": "Project", "node_ids": [200]}
+                {"id": "start", "entity": "Project", "node_ids": [100]},
+                {"id": "end", "entity": "Project", "node_ids": [200]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#,

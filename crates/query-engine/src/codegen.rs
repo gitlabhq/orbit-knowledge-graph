@@ -174,10 +174,12 @@ impl Context {
                 type_filter,
             } => {
                 let mut type_conditions = Vec::new();
+                // Type filters only apply to edge tables (relationship_kind column)
+                // Node tables are entity-specific so no type filter needed
                 if let Some(tf) = type_filter {
                     let param = format!("type_{alias}");
                     self.params.insert(param.clone(), Value::String(tf.clone()));
-                    type_conditions.push(format!("({alias}.label = {{{param}:String}})"));
+                    type_conditions.push(format!("({alias}.relationship_kind = {{{param}:String}})"));
                 }
                 Ok(TableRefResult {
                     sql: format!("{table} AS {alias}"),
@@ -428,29 +430,9 @@ mod tests {
     }
 
     #[test]
-    fn type_filter_in_where() {
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "id"),
-                alias: Some("user_id".into()),
-            }],
-            from: TableRef::scan_with_filter("nodes", "u", "User"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
-            limit: Some(10),
-        };
-
-        let result = codegen(&Node::Query(Box::new(q))).unwrap();
-        assert!(result.sql.contains("WHERE (u.label = {type_u:String})"));
-        assert_eq!(
-            result.params.get("type_u"),
-            Some(&Value::String("User".into()))
-        );
-    }
-
-    #[test]
-    fn type_filter_in_join() {
+    fn edge_type_filter() {
+        // Type filters are only used for edge tables (relationship_kind column)
+        // Node tables are entity-specific so don't need type filters
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("u", "id"),
@@ -458,9 +440,9 @@ mod tests {
             }],
             from: TableRef::join(
                 JoinType::Inner,
-                TableRef::scan_with_filter("nodes", "u", "User"),
-                TableRef::scan_with_filter("edges", "e", "AUTHORED"),
-                Expr::eq(Expr::col("u", "id"), Expr::col("e", "from_id")),
+                TableRef::scan("kg_user", "u"),
+                TableRef::scan_with_filter("kg_edges", "e", "AUTHORED"),
+                Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
             ),
             where_clause: None,
             group_by: vec![],
@@ -469,9 +451,21 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(q))).unwrap();
-        assert!(result
-            .sql
-            .contains("ON ((u.id = e.from_id) AND (e.label = {type_e:String}))"));
-        assert!(result.sql.contains("WHERE (u.label = {type_u:String})"));
+        // Edge type filter uses relationship_kind column
+        assert!(
+            result.sql.contains("ON ((u.id = e.source) AND (e.relationship_kind = {type_e:String}))"),
+            "expected relationship_kind filter: {}",
+            result.sql
+        );
+        // No node type filter (node tables are entity-specific)
+        assert!(
+            !result.sql.contains("WHERE"),
+            "node tables should not have type filters: {}",
+            result.sql
+        );
+        assert_eq!(
+            result.params.get("type_e"),
+            Some(&Value::String("AUTHORED".into()))
+        );
     }
 }
