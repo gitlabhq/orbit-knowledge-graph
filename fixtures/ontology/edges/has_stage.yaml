@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Pipeline contains stage relationship.
+variants:
+  - from_node: { type: Pipeline, id: id }
+    to_node: { type: Stage, id: id }
+    meaning: "Pipeline contains stage."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_stages, from_column: pipeline_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]

@@ -21,7 +21,7 @@
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "code"]
+      "enum": ["core", "source_code", "code_review", "ci", "security", "plan"]
     },
 
     "propertyType": {
@@ -34,7 +34,7 @@
       "properties": {
         "system": {
           "type": "string",
-          "enum": ["postgres", "clickhouse", "rails"],
+          "enum": ["postgres", "clickhouse", "rails", "code_indexer"],
           "description": "The source system where this data originates."
         },
         "database": {
@@ -76,6 +76,18 @@
         "type": {
           "type": "string",
           "description": "Source type modifier (e.g., derived)."
+        },
+        "relationship": {
+          "type": "string",
+          "description": "Relationship name in code indexer graph."
+        },
+        "from_table": {
+          "type": "string",
+          "description": "Source node table in code indexer graph."
+        },
+        "to_table": {
+          "type": "string",
+          "description": "Target node table in code indexer graph."
         }
       },
       "required": ["system"],

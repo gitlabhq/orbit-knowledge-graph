@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Related or blocking relationship between work items.
+properties:
+  link_type:
+    type: enum
+    values: [relates_to, blocks]
+    description: "Type of relationship between work items."
+    status: pending
+variants:
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: WorkItem, id: id }
+    meaning: "Work item is related to another work item."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: issue_links, from_column: source_id, to_column: target_id },
+          { system: clickhouse, table: null },
+        ]

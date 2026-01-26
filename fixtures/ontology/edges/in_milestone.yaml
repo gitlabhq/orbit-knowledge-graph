@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Entity belongs to a milestone.
+variants:
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: Milestone, id: id }
+    meaning: "Work item assigned to milestone."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: issues, from_column: id, to_column: milestone_id },
+          { system: clickhouse, table: null },
+        ]
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Milestone, id: id }
+    meaning: "Merge request assigned to milestone."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, from_column: id, to_column: milestone_id },
+          { system: clickhouse, table: null },
+        ]

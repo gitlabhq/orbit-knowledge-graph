@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: security
+description: A vulnerability identifier such as a CVE, CWE, or other external reference.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the vulnerability identifier."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_identifiers, column: id },
+          { system: clickhouse, table: null },
+        ]
+  external_type:
+    type: string
+    description: "Type of external identifier (e.g., cve, cwe, gemnasium)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_identifiers, column: external_type },
+          { system: clickhouse, table: null },
+        ]
+  external_id:
+    type: string
+    description: "External identifier value (e.g., CVE-2021-44228)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_identifiers, column: external_id },
+          { system: clickhouse, table: null },
+        ]
+  name:
+    type: string
+    description: "Human-readable name of the identifier."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_identifiers, column: name },
+          { system: clickhouse, table: null },
+        ]
+  url:
+    type: string
+    nullable: true
+    description: "URL with more information about the identifier."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_identifiers, column: url },
+          { system: clickhouse, table: null },
+        ]
+additional_properties:
+  created_at:
+    type: timestamp
+    description: "Timestamp when the identifier was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_identifiers, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  updated_at:
+    type: timestamp
+    description: "Timestamp when the identifier was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_identifiers, column: updated_at },
+          { system: clickhouse, table: null },
+        ]

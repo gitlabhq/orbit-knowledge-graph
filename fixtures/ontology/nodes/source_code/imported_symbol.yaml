@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: source_code
+description: An imported symbol or module reference within a source file.
+properties:
+  id:
+    type: int64
+    description: "Internal identifier for the imported symbol node."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: ImportedSymbolNode, column: id },
+        ]
+  name:
+    type: string
+    description: "Name of the imported symbol."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: ImportedSymbolNode, column: name },
+        ]
+  import_path:
+    type: string
+    nullable: true
+    description: "Path or module from which the symbol is imported."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: ImportedSymbolNode, column: import_path },
+        ]
+  import_type:
+    type: enum
+    values: [module, symbol, wildcard, default, namespace, relative, absolute]
+    description: "Type of import statement."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: ImportedSymbolNode, column: import_type },
+        ]
+additional_properties:
+  alias:
+    type: string
+    nullable: true
+    description: "Alias used for the import (e.g., 'import numpy as np')."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: ImportedSymbolNode, column: alias },
+        ]
+  file_path:
+    type: string
+    nullable: true
+    description: "Path of the file containing this import."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: ImportedSymbolNode, column: file_path },
+        ]
+  start_line:
+    type: int64
+    nullable: true
+    description: "Starting line number of the import statement."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: ImportedSymbolNode, column: start_line },
+        ]
+  end_line:
+    type: int64
+    nullable: true
+    description: "Ending line number of the import statement."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: ImportedSymbolNode, column: end_line },
+        ]

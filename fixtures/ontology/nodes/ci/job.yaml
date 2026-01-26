@@ -1,0 +1,236 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: ci
+description: A CI/CD job that executes scripts within a pipeline stage.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the job."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: id },
+          { system: clickhouse, table: null },
+        ]
+  name:
+    type: string
+    nullable: true
+    description: "Name of the job as defined in .gitlab-ci.yml."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: name },
+          { system: clickhouse, table: null },
+        ]
+  status:
+    type: enum
+    values:
+      [
+        created,
+        pending,
+        running,
+        success,
+        failed,
+        canceled,
+        skipped,
+        manual,
+        scheduled,
+        preparing,
+        waiting_for_resource,
+        waiting_for_callback,
+        canceling,
+      ]
+    description: "Current execution status of the job."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: ci,
+            table: p_ci_builds,
+            column: status,
+            column_type: varchar,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/ci/has_status.rb, class: "Ci::HasStatus" },
+        ]
+  ref:
+    type: string
+    nullable: true
+    description: "Branch or tag name the job runs for."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: ref },
+          { system: clickhouse, table: null },
+        ]
+  tag:
+    type: boolean
+    nullable: true
+    description: "Whether this job runs on a git tag."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: tag },
+          { system: clickhouse, table: null },
+        ]
+  allow_failure:
+    type: boolean
+    description: "Whether job failure is allowed without failing the pipeline."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: allow_failure },
+          { system: clickhouse, table: null },
+        ]
+  coverage:
+    type: string
+    nullable: true
+    description: "Code coverage percentage reported by the job."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: coverage },
+          { system: clickhouse, table: null },
+        ]
+  environment:
+    type: string
+    nullable: true
+    description: "Deployment environment name (e.g., production, staging)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: environment },
+          { system: clickhouse, table: null },
+        ]
+  when:
+    type: enum
+    nullable: true
+    values: [on_success, on_failure, always, manual, delayed, never]
+    description: "Condition that determines when the job runs."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: ci,
+            table: p_ci_builds,
+            column: when,
+            column_type: varchar,
+          },
+          { system: clickhouse, table: null },
+        ]
+  retried:
+    type: boolean
+    nullable: true
+    description: "Whether this job was retried (superseded by a newer attempt)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: retried },
+          { system: clickhouse, table: null },
+        ]
+  failure_reason:
+    type: enum
+    nullable: true
+    values:
+      [
+        unknown_failure,
+        script_failure,
+        api_failure,
+        stuck_or_timeout_failure,
+        runner_system_failure,
+        missing_dependency_failure,
+        runner_unsupported,
+        stale_schedule,
+        job_execution_timeout,
+        archived_failure,
+        unmet_prerequisites,
+        scheduler_failure,
+        data_integrity_failure,
+        forward_deployment_failure,
+        user_blocked,
+        project_deleted,
+        ci_quota_exceeded,
+        pipeline_loop_detected,
+        no_matching_runner,
+        trace_size_exceeded,
+        builds_disabled,
+        environment_creation_failure,
+        deployment_rejected,
+        failed_outdated_deployment_job,
+        protected_environment_failure,
+        insufficient_bridge_permissions,
+        downstream_bridge_project_not_found,
+        invalid_bridge_trigger,
+        upstream_bridge_project_not_found,
+      ]
+    description: "Reason the job failed, if applicable."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: ci,
+            table: p_ci_builds,
+            column: failure_reason,
+            column_type: integer,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/enums/ci/commit_status.rb, class: "Enums::Ci::CommitStatus" },
+        ]
+  created_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the job was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  started_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the job started executing."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: started_at },
+          { system: clickhouse, table: null },
+        ]
+  finished_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the job finished executing."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: finished_at },
+          { system: clickhouse, table: null },
+        ]
+  queued_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the job was queued for execution."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, column: queued_at },
+          { system: clickhouse, table: null },
+        ]

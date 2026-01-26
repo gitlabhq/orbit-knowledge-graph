@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: plan
+description: A label for categorizing and filtering work items.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the label."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: labels, column: id },
+          { system: clickhouse, table: null },
+        ]
+  title:
+    type: string
+    nullable: true
+    description: "Title/name of the label."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: labels, column: title },
+          { system: clickhouse, table: null },
+        ]
+  description:
+    type: string
+    nullable: true
+    description: "Description of the label."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: labels, column: description },
+          { system: clickhouse, table: null },
+        ]
+  color:
+    type: string
+    nullable: true
+    description: "Hex color code for the label."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: labels, column: color },
+          { system: clickhouse, table: null },
+        ]
+additional_properties:
+  created_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the label was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: labels, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  updated_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the label was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: labels, column: updated_at },
+          { system: clickhouse, table: null },
+        ]

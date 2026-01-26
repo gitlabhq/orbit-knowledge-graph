@@ -1,0 +1,92 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: ci
+description: A stage within a CI/CD pipeline that groups related jobs (e.g., build, test, deploy).
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the stage."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_stages, column: id },
+          { system: clickhouse, table: null },
+        ]
+  name:
+    type: string
+    nullable: true
+    description: "Name of the stage (e.g., build, test, deploy)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_stages, column: name },
+          { system: clickhouse, table: null },
+        ]
+  status:
+    type: enum
+    values:
+      [
+        created,
+        pending,
+        running,
+        success,
+        failed,
+        canceled,
+        skipped,
+        manual,
+        scheduled,
+        preparing,
+        waiting_for_resource,
+        waiting_for_callback,
+        canceling,
+      ]
+    description: "Current execution status of the stage."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: ci,
+            table: p_ci_stages,
+            column: status,
+            column_type: integer,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/ci/has_status.rb, class: "Ci::HasStatus" },
+        ]
+  position:
+    type: int64
+    nullable: true
+    description: "Order of the stage within the pipeline (0-indexed)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_stages, column: position },
+          { system: clickhouse, table: null },
+        ]
+  created_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the stage was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_stages, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  updated_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the stage was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_stages, column: updated_at },
+          { system: clickhouse, table: null },
+        ]

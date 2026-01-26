@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Entity has a note/comment attached.
+variants:
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Note, id: id }
+    meaning: "Merge request has note."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: notes, from_column: noteable_id, to_column: id, filter: "noteable_type = 'MergeRequest'" },
+          { system: clickhouse, table: null },
+        ]
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: Note, id: id }
+    meaning: "Work item has note."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: notes, from_column: noteable_id, to_column: id, filter: "noteable_type = 'Issue'" },
+          { system: clickhouse, table: null },
+        ]
+  - from_node: { type: Vulnerability, id: id }
+    to_node: { type: Note, id: id }
+    meaning: "Vulnerability has note."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: notes, from_column: noteable_id, to_column: id, filter: "noteable_type = 'Vulnerability'" },
+          { system: clickhouse, table: null },
+        ]
