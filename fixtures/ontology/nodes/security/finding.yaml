@@ -1,0 +1,166 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: security
+description: A security scan finding (occurrence) that may be linked to a vulnerability.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the finding."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: id },
+          { system: clickhouse, table: null },
+        ]
+  uuid:
+    type: string
+    description: "UUID uniquely identifying the finding."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: uuid },
+          { system: clickhouse, table: null },
+        ]
+  name:
+    type: string
+    description: "Name of the finding."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: name },
+          { system: clickhouse, table: null },
+        ]
+  description:
+    type: string
+    nullable: true
+    description: "Detailed description of the finding."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: description },
+          { system: clickhouse, table: null },
+        ]
+  severity:
+    type: enum
+    values: [info, unknown, low, medium, high, critical]
+    description: "Severity level of the finding."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: vulnerability_occurrences,
+            column: severity,
+            column_type: smallint,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/enums/vulnerability.rb, class: "Enums::Vulnerability" },
+        ]
+  report_type:
+    type: enum
+    values:
+      [
+        sast,
+        dependency_scanning,
+        container_scanning,
+        dast,
+        secret_detection,
+        coverage_fuzzing,
+        api_fuzzing,
+        cluster_image_scanning,
+        container_scanning_for_registry,
+        generic,
+      ]
+    description: "Type of security scan that detected the finding."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: vulnerability_occurrences,
+            column: report_type,
+            column_type: smallint,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: ee/app/models/concerns/ee/enums/vulnerability.rb, class: "EE::Enums::Vulnerability" },
+        ]
+  detection_method:
+    type: enum
+    values: [gitlab_security_report, external_security_report, bug_bounty, code_review, security_audit]
+    description: "Method by which the finding was detected."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: vulnerability_occurrences,
+            column: detection_method,
+            column_type: smallint,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/enums/vulnerability.rb, class: "Enums::Vulnerability" },
+        ]
+  solution:
+    type: string
+    nullable: true
+    description: "Suggested solution or remediation for the finding."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: solution },
+          { system: clickhouse, table: null },
+        ]
+  cve:
+    type: string
+    nullable: true
+    description: "CVE identifier if applicable."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: cve },
+          { system: clickhouse, table: null },
+        ]
+additional_properties:
+  created_at:
+    type: timestamp
+    description: "Timestamp when the finding was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  updated_at:
+    type: timestamp
+    description: "Timestamp when the finding was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: updated_at },
+          { system: clickhouse, table: null },
+        ]
+  detected_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the finding was first detected."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, column: detected_at },
+          { system: clickhouse, table: null },
+        ]

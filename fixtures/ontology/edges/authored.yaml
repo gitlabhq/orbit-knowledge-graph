@@ -1,14 +1,44 @@
 # yaml-language-server: $schema=../ontology.schema.json
 type: edge
-description: Authorship relationship between entities and users.
+description: Authorship relationship between users and entities.
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Note, id: id }
-    meaning: "User authored the note."
+    meaning: "User authored note."
     status: pending
     internal:
       sources:
         [
           { system: postgres, database: main, table: notes, from_column: author_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    meaning: "User authored merge request."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, from_column: author_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]
+  - from_node: { type: User, id: id }
+    to_node: { type: Vulnerability, id: id }
+    meaning: "User reported vulnerability."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerabilities, from_column: author_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]
+  - from_node: { type: User, id: id }
+    to_node: { type: WorkItem, id: id }
+    meaning: "User authored work item."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: issues, from_column: author_id, to_column: id },
           { system: clickhouse, table: null },
         ]

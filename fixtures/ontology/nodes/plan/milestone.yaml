@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: plan
+description: A milestone for tracking progress toward a goal within a project or group.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the milestone."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, column: id },
+          { system: clickhouse, table: null },
+        ]
+  iid:
+    type: int64
+    nullable: true
+    description: "Project or group-scoped milestone number."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, column: iid },
+          { system: clickhouse, table: null },
+        ]
+  title:
+    type: string
+    description: "Title of the milestone."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, column: title },
+          { system: clickhouse, table: null },
+        ]
+  description:
+    type: string
+    nullable: true
+    description: "Description of the milestone."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, column: description },
+          { system: clickhouse, table: null },
+        ]
+  state:
+    type: enum
+    nullable: true
+    values: [active, closed]
+    description: "Current state of the milestone."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: milestones,
+            column: state,
+            column_type: varchar,
+          },
+          { system: clickhouse, table: null },
+        ]
+  due_date:
+    type: date
+    nullable: true
+    description: "Due date for the milestone."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, column: due_date },
+          { system: clickhouse, table: null },
+        ]
+  start_date:
+    type: date
+    nullable: true
+    description: "Start date for the milestone."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, column: start_date },
+          { system: clickhouse, table: null },
+        ]
+additional_properties:
+  created_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the milestone was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  updated_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the milestone was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, column: updated_at },
+          { system: clickhouse, table: null },
+        ]

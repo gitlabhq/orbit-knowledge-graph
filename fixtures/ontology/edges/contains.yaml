@@ -32,3 +32,13 @@ variants:
           { system: postgres, database: main, table: projects, from_column: namespace_id, to_column: id },
           { system: clickhouse, table: siphon_projects, from_column: namespace_id, to_column: id },
         ]
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: WorkItem, id: id }
+    meaning: "Work item contains child work item (e.g., epic contains issue, epic contains epic, etc.)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: work_item_parent_links, from_column: work_item_parent_id, to_column: work_item_id },
+          { system: clickhouse, table: null },
+        ]

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: User who dismissed an entity.
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Vulnerability, id: id }
+    meaning: "User dismissed vulnerability."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerabilities, from_column: dismissed_by_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]

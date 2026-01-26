@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Stage contains job relationship.
+variants:
+  - from_node: { type: Stage, id: id }
+    to_node: { type: Job, id: id }
+    meaning: "Stage contains job."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_builds, from_column: stage_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]

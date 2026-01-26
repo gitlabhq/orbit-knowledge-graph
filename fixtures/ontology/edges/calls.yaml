@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Call relationships in source code representing function/method invocations.
+variants:
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Definition, id: id }
+    meaning: "Definition calls another definition (method/function invocation)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, relationship: DEFINITION_CALLS_DEFINITION, from_table: DefinitionNode, to_table: DefinitionNode },
+        ]
+  - from_node: { type: File, id: id }
+    to_node: { type: Definition, id: id }
+    meaning: "File contains a call to a definition (top-level call)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, relationship: FILE_CALLS_DEFINITION, from_table: FileNode, to_table: DefinitionNode },
+        ]
+  - from_node: { type: File, id: id }
+    to_node: { type: ImportedSymbol, id: id }
+    meaning: "File contains a call to an imported symbol (top-level call to import)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, relationship: FILE_CALLS_IMPORTED_SYMBOL, from_table: FileNode, to_table: ImportedSymbolNode },
+        ]
+  - from_node: { type: Definition, id: id }
+    to_node: { type: ImportedSymbol, id: id }
+    meaning: "Definition calls an imported symbol."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, relationship: DEFINITION_CALLS_IMPORTED_SYMBOL, from_table: DefinitionNode, to_table: ImportedSymbolNode },
+        ]

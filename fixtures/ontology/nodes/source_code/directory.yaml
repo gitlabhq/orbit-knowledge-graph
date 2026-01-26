@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: source_code
+description: A directory within a repository's file structure.
+properties:
+  id:
+    type: int64
+    description: "Internal identifier for the directory node."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: DirectoryNode, column: id },
+        ]
+  path:
+    type: string
+    description: "Relative path of the directory within the repository."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: DirectoryNode, column: path },
+        ]
+  name:
+    type: string
+    description: "Name of the directory."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: DirectoryNode, column: name },
+        ]
+additional_properties:
+  absolute_path:
+    type: string
+    nullable: true
+    description: "Absolute path of the directory on the filesystem."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: DirectoryNode, column: absolute_path },
+        ]
+  repository_name:
+    type: string
+    nullable: true
+    description: "Name of the repository this directory belongs to."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: DirectoryNode, column: repository_name },
+        ]

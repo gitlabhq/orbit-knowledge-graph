@@ -1,0 +1,207 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: code_review
+description: A merge request for code review and merging changes into a target branch.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the merge request."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: id },
+          { system: clickhouse, table: null },
+        ]
+  iid:
+    type: int64
+    nullable: true
+    description: "Project-scoped merge request number."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: iid },
+          { system: clickhouse, table: null },
+        ]
+  full_path:
+    type: string
+    nullable: true
+    description: "Full path to the merge request (e.g., gitlab-org/gitlab/-/merge_requests/123)."
+    status: pending
+    internal:
+      # Derived: routes.path (via projects.id = routes.source_id WHERE source_type='Project') + '/-/merge_requests/' + iid
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: routes,
+            column: path,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/merge_request.rb, class: MergeRequest, type: derived },
+        ]
+  title:
+    type: string
+    nullable: true
+    description: "Title of the merge request."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: title },
+          { system: clickhouse, table: null },
+        ]
+  description:
+    type: string
+    nullable: true
+    description: "Description body (markdown)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: description },
+          { system: clickhouse, table: null },
+        ]
+  source_branch:
+    type: string
+    description: "Name of the source branch."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: source_branch },
+          { system: clickhouse, table: null },
+        ]
+  target_branch:
+    type: string
+    description: "Name of the target branch."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: target_branch },
+          { system: clickhouse, table: null },
+        ]
+  state:
+    type: enum
+    values: [opened, closed, merged, locked]
+    description: "Current state of the merge request."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: merge_requests,
+            column: state_id,
+            column_type: smallint,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/issuable.rb, class: Issuable },
+        ]
+  merge_status:
+    type: enum
+    values:
+      [
+        unchecked,
+        preparing,
+        checking,
+        can_be_merged,
+        cannot_be_merged,
+        cannot_be_merged_recheck,
+        cannot_be_merged_rechecking,
+      ]
+    description: "Mergeability check status."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: main,
+            table: merge_requests,
+            column: merge_status,
+            column_type: varchar,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/merge_request.rb, class: MergeRequest },
+        ]
+  draft:
+    type: boolean
+    description: "Whether this is a draft/WIP merge request."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: draft },
+          { system: clickhouse, table: null },
+        ]
+  squash:
+    type: boolean
+    description: "Whether to squash commits on merge."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: squash },
+          { system: clickhouse, table: null },
+        ]
+additional_properties:
+  created_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the merge request was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  updated_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the merge request was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: updated_at },
+          { system: clickhouse, table: null },
+        ]
+  merge_commit_sha:
+    type: string
+    nullable: true
+    description: "SHA of the merge commit."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: merge_commit_sha },
+          { system: clickhouse, table: null },
+        ]
+  discussion_locked:
+    type: boolean
+    nullable: true
+    description: "Whether discussions are locked."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: discussion_locked },
+          { system: clickhouse, table: null },
+        ]
+  prepared_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the merge request was prepared."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, column: prepared_at },
+          { system: clickhouse, table: null },
+        ]

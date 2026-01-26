@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Vulnerability has associated scan finding.
+variants:
+  - from_node: { type: Vulnerability, id: id }
+    to_node: { type: Finding, id: id }
+    meaning: "Vulnerability has finding."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrences, from_column: vulnerability_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]

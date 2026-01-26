@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Source branch relationships.
+variants:
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Branch, id: name }
+    meaning: "Merge request originates from source branch."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: merge_requests, from_column: id, to_column: source_branch },
+        ]

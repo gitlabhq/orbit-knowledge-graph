@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Finding has associated vulnerability identifier (CVE, CWE, etc.).
+variants:
+  - from_node: { type: Finding, id: id }
+    to_node: { type: VulnerabilityIdentifier, id: id }
+    meaning: "Finding has identifier."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_occurrence_identifiers, from_column: occurrence_id, to_column: identifier_id },
+          { system: clickhouse, table: null },
+        ]
