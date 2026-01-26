@@ -228,22 +228,6 @@ helm-lint:
     - helm lint ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
     - helm template ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
 
-# TODO: Remove this temporary job after verifying GKE connection works
-helm-dry-run-test:
-  extends:
-    - .helm-with-gke-auth
-    - .mr-only-rules
-  stage: lint
-  needs: []
-  script:
-    - kubectl cluster-info
-    - |
-      helm upgrade ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} \
-        -f ${HELM_CHART_PATH}/values-sandbox.yaml \
-        --namespace ${HELM_NAMESPACE} \
-        --install \
-        --dry-run
-
 helm-dry-run:
   extends: .helm-with-gke-auth
   stage: lint
