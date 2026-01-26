@@ -1,6 +1,7 @@
 //! SQL-oriented Abstract Syntax Tree
 //!
 //! Intermediate representation between JSON input and SQL output.
+//! Each node maps directly to ClickHouse SQL constructs.
 
 use serde_json::Value;
 
@@ -8,28 +9,39 @@ use serde_json::Value;
 // Expressions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Expression that produces a value in SQL.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    /// Column reference → `table.column`
     Column {
         table: String,
         column: String,
     },
+    /// Constant value → parameterized as `{p0:Type}`
     Literal(Value),
+    /// Function call → `NAME(arg1, arg2, ...)`
+    /// Used for aggregates (COUNT, SUM) and ClickHouse functions (arrayConcat, has).
     FuncCall {
         name: String,
         args: Vec<Expr>,
     },
+    /// Binary operation → `(left OP right)`
+    /// Examples: `x = y`, `a AND b`, `col IN (1, 2, 3)`
     BinaryOp {
         op: Op,
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    /// Unary operation → `(OP expr)` or `(expr OP)` for postfix ops
+    /// Prefix: `NOT active` → `(NOT t.active)`
+    /// Postfix: `IS NULL` → `(t.deleted_at IS NULL)`
     UnaryOp {
         op: Op,
         expr: Box<Expr>,
     },
 }
 
+/// SQL operators for expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     // Comparison
@@ -79,13 +91,17 @@ impl Op {
 // Table references
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Source of rows in a FROM clause.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
+    /// Read from a physical table → `table AS alias`
+    /// If type_filter is set, adds `alias.label = {type_alias:String}` to WHERE/ON.
     Scan {
         table: String,
         alias: String,
         type_filter: Option<String>,
     },
+    /// Combine two sources → `left JOIN_TYPE JOIN right ON condition`
     Join {
         join_type: JoinType,
         left: Box<TableRef>,
@@ -94,6 +110,11 @@ pub enum TableRef {
     },
 }
 
+/// SQL JOIN types.
+/// - Inner: only matching rows from both sides
+/// - Left: all rows from left, matching from right (NULLs if no match)
+/// - Right: all rows from right, matching from left
+/// - Full: all rows from both sides
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinType {
     Inner,
@@ -117,18 +138,24 @@ impl JoinType {
 // Query structures
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Expression in SELECT clause → `expr AS alias` or just `expr`
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectExpr {
     pub expr: Expr,
     pub alias: Option<String>,
 }
 
+/// Ordering specification → `expr ASC` or `expr DESC`
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrderExpr {
     pub expr: Expr,
     pub desc: bool,
 }
 
+/// Complete SQL query:
+/// ```sql
+/// SELECT ... FROM ... WHERE ... GROUP BY ... ORDER BY ... LIMIT ...
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     pub select: Vec<SelectExpr>,
@@ -139,6 +166,15 @@ pub struct Query {
     pub limit: Option<u32>,
 }
 
+/// Recursive CTE for path finding:
+/// ```sql
+/// WITH RECURSIVE name AS (
+///   base_query
+///   UNION ALL
+///   recursive_query
+/// )
+/// final_query
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecursiveCte {
     pub name: String,
@@ -148,6 +184,7 @@ pub struct RecursiveCte {
     pub final_query: Query,
 }
 
+/// Top-level AST node - either a simple query or a recursive CTE.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Query(Box<Query>),
