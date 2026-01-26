@@ -24,8 +24,7 @@ stages:
   variables:
     RUST_BACKTRACE: "1"
   before_script:
-    - apt-get update && apt-get install -y libclang-dev
-    - cargo install cargo-nextest --locked
+    - !reference [.job-template, before_script]
   artifacts:
     when: always
     reports:
@@ -158,7 +157,7 @@ integration-test:
   needs: []
   before_script:
     - !reference [.test-template, before_script]
-    - apt-get install -y docker.io
+    - apt-get update && apt-get install -y docker.io
   script:
     - cargo nextest run --profile ci --all-features --test '*' -j 1 --ignore-default-filter -E 'not package(gitaly-client)'
 
