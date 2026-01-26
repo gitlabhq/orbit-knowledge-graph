@@ -91,3 +91,16 @@ impl fmt::Display for DataType {
         }
     }
 }
+
+impl DataType {
+    /// Convert to JSON Schema type string.
+    #[must_use]
+    pub fn to_json_schema_type(self) -> String {
+        match self {
+            DataType::String | DataType::Date | DataType::DateTime => "string".to_string(),
+            DataType::Int => "integer".to_string(),
+            DataType::Float => "number".to_string(),
+            DataType::Bool => "boolean".to_string(),
+        }
+    }
+}

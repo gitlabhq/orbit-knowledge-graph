@@ -1,6 +1,6 @@
 //! Error types for the query engine
 
-use crate::ontology::OntologyError;
+use ontology::OntologyError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

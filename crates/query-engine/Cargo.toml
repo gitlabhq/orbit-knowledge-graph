@@ -9,6 +9,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 serde_yaml = { workspace = true }
 regex = { workspace = true }
+ontology = { path = "../ontology" }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

@@ -17,12 +17,20 @@ mod entities;
 pub use entities::{DataType, EdgeEntity, Field, NodeEntity};
 
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
 /// Primary key field name used by default.
 const DEFAULT_PRIMARY_KEY: &str = "id";
+
+/// Reserved columns that exist on all nodes and edges.
+/// These are always valid for filtering/projection regardless of ontology definition.
+pub const RESERVED_COLUMNS: &[&str] = &["id", "label", "from_id", "to_id", "type"];
+
+/// Edge table name in ClickHouse.
+pub const EDGE_TABLE: &str = "kg_edges";
 
 /// Errors that can occur when loading an ontology.
 #[derive(Debug)]
@@ -86,6 +94,53 @@ impl Ontology {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
         }
+    }
+
+    /// Add nodes by name.
+    #[must_use]
+    pub fn with_nodes(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        for name in names {
+            let name = name.into();
+            self.nodes.insert(
+                name.clone(),
+                NodeEntity {
+                    name,
+                    fields: vec![],
+                    primary_keys: vec!["id".to_string()],
+                },
+            );
+        }
+        self
+    }
+
+    /// Add edge types by name.
+    #[must_use]
+    pub fn with_edges(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        for name in names {
+            self.edges.insert(name.into(), vec![]);
+        }
+        self
+    }
+
+    /// Add fields to an existing node. Panics if the node doesn't exist.
+    #[must_use]
+    pub fn with_fields(
+        mut self,
+        node_name: &str,
+        fields: impl IntoIterator<Item = (impl Into<String>, DataType)>,
+    ) -> Self {
+        let node = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node '{node_name}' does not exist"));
+        for (field_name, data_type) in fields {
+            node.fields.push(Field {
+                name: field_name.into(),
+                data_type,
+                nullable: true,
+            });
+        }
+        self
     }
 
     /// Load ontology from a directory containing schema.yaml and referenced files.
@@ -210,6 +265,161 @@ impl Ontology {
     #[must_use]
     pub fn edge_count(&self) -> usize {
         self.edges.len()
+    }
+
+    // --- Query validation helpers ---
+
+    /// Check if a field exists on a node, including reserved columns.
+    ///
+    /// Returns `true` if:
+    /// - The field is a reserved column (`id`, `label`, etc.)
+    /// - The field exists in the node's field definitions
+    #[must_use]
+    pub fn has_field(&self, node_name: &str, field_name: &str) -> bool {
+        // Reserved columns exist on all nodes
+        if RESERVED_COLUMNS.contains(&field_name) {
+            return true;
+        }
+
+        // Check if the node exists and has this field
+        self.nodes
+            .get(node_name)
+            .map(|node| node.fields.iter().any(|f| f.name == field_name))
+            .unwrap_or(false)
+    }
+
+    /// Validate that a field exists on a node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The node label is empty
+    /// - The node doesn't exist in the ontology
+    /// - The field doesn't exist on the node (and isn't a reserved column)
+    pub fn validate_field(&self, node_name: &str, field_name: &str) -> Result<(), OntologyError> {
+        // Reserved columns exist on all nodes
+        if RESERVED_COLUMNS.contains(&field_name) {
+            return Ok(());
+        }
+
+        if node_name.is_empty() {
+            return Err(OntologyError::Validation(format!(
+                "cannot validate field \"{field_name}\" without a node label"
+            )));
+        }
+
+        let node = self.nodes.get(node_name).ok_or_else(|| {
+            OntologyError::Validation(format!("unknown node type \"{node_name}\""))
+        })?;
+
+        if node.fields.iter().any(|f| f.name == field_name) {
+            return Ok(());
+        }
+
+        Err(OntologyError::Validation(format!(
+            "field \"{field_name}\" does not exist on node type \"{node_name}\""
+        )))
+    }
+
+    /// Validate that a type is a valid node label or edge type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the type is neither a node label nor an edge type.
+    pub fn validate_type(&self, type_name: &str) -> Result<(), OntologyError> {
+        if self.has_node(type_name) || self.has_edge(type_name) {
+            return Ok(());
+        }
+        Err(OntologyError::Validation(format!(
+            "type \"{type_name}\" is not a valid node label or relationship type"
+        )))
+    }
+
+    /// Get the ClickHouse table name for a node label.
+    ///
+    /// Node tables follow the pattern `kg_{lowercase_label}`.
+    /// Example: `User` → `kg_user`, `Project` → `kg_project`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node label is unknown.
+    pub fn table_name(&self, node_label: &str) -> Result<String, OntologyError> {
+        if !self.has_node(node_label) {
+            return Err(OntologyError::Validation(format!(
+                "unknown node label: {node_label}"
+            )));
+        }
+        Ok(format!("kg_{}", node_label.to_lowercase()))
+    }
+
+    /// Generate a JSON Schema with ontology values populated.
+    ///
+    /// Given a base schema template, this populates:
+    /// - `$defs.NodeLabel.enum` with valid node labels
+    /// - `$defs.RelationshipTypeName.enum` with valid relationship types
+    /// - `$defs.NodeProperties` with property definitions per node type
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the base schema is invalid JSON or missing required sections.
+    pub fn derive_json_schema(&self, base_schema_json: &str) -> Result<Value, OntologyError> {
+        let mut schema: Value = serde_json::from_str(base_schema_json).map_err(|e| {
+            OntologyError::Validation(format!("failed to parse base schema: {e}"))
+        })?;
+
+        let defs = schema
+            .get_mut("$defs")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| OntologyError::Validation("schema missing $defs".into()))?;
+
+        // Populate NodeLabel enum
+        if let Some(node_label) = defs.get_mut("NodeLabel").and_then(Value::as_object_mut) {
+            let labels: Vec<Value> = self
+                .node_names()
+                .map(|s| Value::String(s.to_string()))
+                .collect();
+            node_label.insert("enum".to_string(), Value::Array(labels));
+        }
+
+        // Populate RelationshipTypeName enum
+        if let Some(rel_type) = defs
+            .get_mut("RelationshipTypeName")
+            .and_then(Value::as_object_mut)
+        {
+            let types: Vec<Value> = self
+                .edge_names()
+                .map(|s| Value::String(s.to_string()))
+                .collect();
+            rel_type.insert("enum".to_string(), Value::Array(types));
+        }
+
+        // Populate NodeProperties with property definitions per node type
+        let node_props = self.build_node_properties_schema();
+        defs.insert("NodeProperties".to_string(), node_props);
+
+        Ok(schema)
+    }
+
+    /// Build the NodeProperties schema object from node field definitions.
+    fn build_node_properties_schema(&self) -> Value {
+        let mut node_props = Map::new();
+
+        for node in self.nodes() {
+            let mut prop_map = Map::new();
+
+            for field in &node.fields {
+                let mut prop_schema = Map::new();
+                prop_schema.insert(
+                    "type".to_string(),
+                    Value::String(field.data_type.to_json_schema_type()),
+                );
+                prop_map.insert(field.name.clone(), Value::Object(prop_schema));
+            }
+
+            node_props.insert(node.name.clone(), Value::Object(prop_map));
+        }
+
+        Value::Object(node_props)
     }
 }
 

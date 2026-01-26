@@ -8,23 +8,23 @@ use crate::input::{
     Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode, InputRelationship,
     OrderDirection, QueryType,
 };
-use crate::schema::{Schema, EDGE_TABLE};
+use ontology::{Ontology, EDGE_TABLE};
 use serde_json::Value;
 use std::collections::HashMap;
 
 /// Lower parsed input into an AST node
-pub fn lower(input: &Input, schema: &Schema) -> Result<Node> {
+pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
     match input.query_type {
-        QueryType::Traversal | QueryType::Pattern => lower_traversal(input, schema),
-        QueryType::Aggregation => lower_aggregation(input, schema),
-        QueryType::PathFinding => lower_path_finding(input, schema),
+        QueryType::Traversal | QueryType::Pattern => lower_traversal(input, ontology),
+        QueryType::Aggregation => lower_aggregation(input, ontology),
+        QueryType::PathFinding => lower_path_finding(input, ontology),
     }
 }
 
 /// Lower a traversal query: SELECT ... FROM nodes JOIN edges JOIN nodes ... WHERE ...
-fn lower_traversal(input: &Input, schema: &Schema) -> Result<Node> {
-    let (from, edge_aliases) = build_from(&input.nodes, &input.relationships, schema)?;
-    let where_clause = build_where(&input.nodes, &input.relationships, &edge_aliases, schema)?;
+fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
+    let (from, edge_aliases) = build_from(&input.nodes, &input.relationships, ontology)?;
+    let where_clause = build_where(&input.nodes, &input.relationships, &edge_aliases, ontology)?;
 
     // Build SELECT - return node IDs
     let select: Vec<SelectExpr> = input
@@ -40,7 +40,7 @@ fn lower_traversal(input: &Input, schema: &Schema) -> Result<Node> {
     let order_by = if let Some(ref ob) = input.order_by {
         let node_label = find_node_label(&input.nodes, &ob.node);
         if let Some(ref label) = node_label {
-            schema.validate_column(label, &ob.property)?;
+            ontology.validate_field(label, &ob.property)?;
         }
         vec![OrderExpr {
             expr: Expr::col(&ob.node, &ob.property),
@@ -61,9 +61,9 @@ fn lower_traversal(input: &Input, schema: &Schema) -> Result<Node> {
 }
 
 /// Lower an aggregation query: SELECT agg(...) ... GROUP BY ...
-fn lower_aggregation(input: &Input, schema: &Schema) -> Result<Node> {
-    let (from, edge_aliases) = build_from(&input.nodes, &input.relationships, schema)?;
-    let where_clause = build_where(&input.nodes, &input.relationships, &edge_aliases, schema)?;
+fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
+    let (from, edge_aliases) = build_from(&input.nodes, &input.relationships, ontology)?;
+    let where_clause = build_where(&input.nodes, &input.relationships, &edge_aliases, ontology)?;
 
     let mut select = Vec::with_capacity(input.aggregations.len() * 2);
     let mut group_by = Vec::new();
@@ -74,7 +74,7 @@ fn lower_aggregation(input: &Input, schema: &Schema) -> Result<Node> {
         if let Some(ref prop) = agg.property {
             if let Some(ref target) = agg.target {
                 if let Some(ref label) = find_node_label(&input.nodes, target) {
-                    schema.validate_column(label, prop)?;
+                    ontology.validate_field(label, prop)?;
                 }
             }
         }
@@ -143,7 +143,7 @@ fn build_agg_func(agg: &InputAggregation) -> Expr {
 }
 
 /// Lower a path finding query: WITH RECURSIVE ...
-fn lower_path_finding(input: &Input, schema: &Schema) -> Result<Node> {
+fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
     let path = input.path.as_ref().ok_or_else(|| {
         QueryError::Lowering(
             "path_finding query requires a 'path' configuration with 'from' and 'to' nodes".into(),
@@ -213,7 +213,7 @@ fn lower_path_finding(input: &Input, schema: &Schema) -> Result<Node> {
             let label = start_node.label.as_ref().ok_or_else(|| {
                 QueryError::Lowering("path finding requires node labels to determine table".into())
             })?;
-            let table = schema.table_for_node(label)?;
+            let table = ontology.table_name(label)?;
             TableRef::scan_with_filter(&table, "n", label)
         },
         where_clause: base_where,
@@ -248,7 +248,7 @@ fn lower_path_finding(input: &Input, schema: &Schema) -> Result<Node> {
             let label = end_node.label.as_ref().ok_or_else(|| {
                 QueryError::Lowering("path finding requires node labels to determine table".into())
             })?;
-            let table = schema.table_for_node(label)?;
+            let table = ontology.table_name(label)?;
             TableRef::join(
                 JoinType::Inner,
                 TableRef::join(
@@ -337,7 +337,7 @@ fn lower_path_finding(input: &Input, schema: &Schema) -> Result<Node> {
 fn build_from(
     nodes: &[InputNode],
     rels: &[InputRelationship],
-    schema: &Schema,
+    ontology: &Ontology,
 ) -> Result<(TableRef, HashMap<usize, String>)> {
     if nodes.is_empty() {
         return Err(QueryError::Lowering("at least one node required".into()));
@@ -367,7 +367,7 @@ fn build_from(
             start_node.id
         ))
     })?;
-    let start_table = schema.table_for_node(start_label)?;
+    let start_table = ontology.table_name(start_label)?;
     let mut result = TableRef::scan_with_filter(&start_table, &start_node.id, start_label);
 
     // Join edges and nodes for each relationship
@@ -377,13 +377,13 @@ fn build_from(
 
         // Validate and set relationship type filter
         let type_filter = if rel.types.len() == 1 && rel.types[0] != "*" {
-            schema.validate_type_filter(&rel.types[0])?;
+            ontology.validate_type(&rel.types[0])?;
             Some(rel.types[0].clone())
         } else {
             // Validate all relationship types even if we don't filter by them
             for rel_type in &rel.types {
                 if rel_type != "*" {
-                    schema.validate_type_filter(rel_type)?;
+                    ontology.validate_type(rel_type)?;
                 }
             }
             None
@@ -426,7 +426,7 @@ fn build_from(
                 rel.to
             ))
         })?;
-        let target_table_name = schema.table_for_node(&target_label)?;
+        let target_table_name = ontology.table_name(&target_label)?;
 
         let target_join_cond = match rel.direction {
             Direction::Incoming => {
@@ -468,7 +468,7 @@ fn build_where(
     nodes: &[InputNode],
     rels: &[InputRelationship],
     edge_aliases: &HashMap<usize, String>,
-    schema: &Schema,
+    ontology: &Ontology,
 ) -> Result<Option<Expr>> {
     let mut conds: Vec<Option<Expr>> = Vec::new();
 
@@ -509,7 +509,7 @@ fn build_where(
         // Property filters
         for (prop, filter) in &node.filters {
             if let Some(ref label) = node.label {
-                schema.validate_column(label, prop)?;
+                ontology.validate_field(label, prop)?;
             }
             conds.push(Some(filter_to_expr(&node.id, prop, filter)));
         }
@@ -590,12 +590,12 @@ mod tests {
     use super::*;
     use crate::input::parse_input;
 
-    fn test_schema() -> Schema {
-        Schema::from_ontology(
-            ["User", "Project", "Note", "Group"],
-            ["AUTHORED", "CONTAINS", "MEMBER_OF"],
-            std::collections::HashMap::new(),
-        )
+    fn test_ontology() -> Ontology {
+        use ontology::DataType::{DateTime, String};
+        Ontology::new()
+            .with_nodes(["User", "Project", "Note", "Group"])
+            .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
+            .with_fields("User", [("username", String), ("state", String), ("created_at", DateTime)])
     }
 
     #[test]
@@ -615,7 +615,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &test_schema()).unwrap();
+        let ast = lower(&input, &test_ontology()).unwrap();
         if let Node::Query(q) = ast {
             assert_eq!(q.limit, Some(25));
             assert_eq!(q.select.len(), 2);
@@ -639,7 +639,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &test_schema()).unwrap();
+        let ast = lower(&input, &test_ontology()).unwrap();
         if let Node::Query(q) = ast {
             assert!(!q.group_by.is_empty());
             // Check for COUNT in select
@@ -667,7 +667,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &test_schema()).unwrap();
+        let ast = lower(&input, &test_ontology()).unwrap();
         if let Node::RecursiveCte(cte) = ast {
             assert_eq!(cte.max_depth, 3);
             assert_eq!(cte.name, "path_cte");
@@ -694,7 +694,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &test_schema()).unwrap();
+        let ast = lower(&input, &test_ontology()).unwrap();
         if let Node::Query(q) = ast {
             assert!(q.where_clause.is_some());
         } else {
@@ -728,7 +728,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &test_schema()).unwrap();
+        let ast = lower(&input, &test_ontology()).unwrap();
         if let Node::Query(q) = ast {
             let joins = count_joins(&q.from);
             assert!(joins >= 4, "expected >= 4 joins, got {joins}");
