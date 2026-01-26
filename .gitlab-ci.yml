@@ -208,18 +208,12 @@ variables:
     - helm version
     - helm dependency update ${HELM_CHART_PATH}
 
-.helm-with-gke-auth-readonly:
-  extends: .helm-base
-  before_script:
-    - !reference [.helm-base, before_script]
-    # Read-only access for MR validation (GKE_SA_KEY_READONLY is unprotected)
-    - gcloud auth activate-service-account --key-file="${GKE_SA_KEY_READONLY}"
-    - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
-
 .helm-with-gke-auth:
   extends: .helm-base
   before_script:
     - !reference [.helm-base, before_script]
+    # Install GKE auth plugin and kubectl
+    - gcloud components install gke-gcloud-auth-plugin kubectl --quiet
     # Write access for deployment (GKE_SA_KEY is protected, main branch only)
     - gcloud auth activate-service-account --key-file="${GKE_SA_KEY}"
     - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
@@ -236,7 +230,7 @@ helm-lint:
 
 helm-dry-run:
   extends:
-    - .helm-with-gke-auth-readonly
+    - .helm-base
     - .mr-only-rules
   stage: lint
   needs: []
@@ -247,9 +241,6 @@ helm-dry-run:
         --namespace ${HELM_NAMESPACE} \
         --install \
         --dry-run=client
-  environment:
-    name: sandbox
-    action: prepare
 
 helm-dry-run-main:
   extends: .helm-with-gke-auth
