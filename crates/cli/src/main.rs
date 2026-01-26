@@ -289,10 +289,8 @@ fn run_query(
 ) -> Result<()> {
     // Load JSON payload
     let json_str = match (file, json_input) {
-        (Some(path), None) => {
-            std::fs::read_to_string(&path)
-                .with_context(|| format!("failed to read file: {}", path.display()))?
-        }
+        (Some(path), None) => std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read file: {}", path.display()))?,
         (None, Some(json)) => json,
         (None, None) => anyhow::bail!("either FILE or --json must be provided"),
         (Some(_), Some(_)) => unreachable!("clap prevents this"),
@@ -324,8 +322,7 @@ fn run_query(
     sorted_queries.sort_by(|a, b| a.0.cmp(&b.0));
 
     for (label, input) in sorted_queries {
-        let input_json = serde_json::to_string(&input)
-            .context("failed to serialize input")?;
+        let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
 
         match query_engine::compile(&input_json, &ontology) {
             Ok(result) => {
@@ -359,15 +356,24 @@ fn run_query(
                 match result {
                     QueryOutput::Success(r) => {
                         println!("\n### {}\n", r.label);
-                        println!("**Input:**\n```json\n{}\n```\n", serde_json::to_string_pretty(&r.input)?);
+                        println!(
+                            "**Input:**\n```json\n{}\n```\n",
+                            serde_json::to_string_pretty(&r.input)?
+                        );
                         println!("**SQL:**\n```sql\n{}\n```\n", r.sql);
                         if !r.params.is_empty() {
-                            println!("**Params:**\n```json\n{}\n```", serde_json::to_string_pretty(&r.params)?);
+                            println!(
+                                "**Params:**\n```json\n{}\n```",
+                                serde_json::to_string_pretty(&r.params)?
+                            );
                         }
                     }
                     QueryOutput::Error(e) => {
                         println!("\n### {} [ERROR]\n", e.label);
-                        println!("**Input:**\n```json\n{}\n```\n", serde_json::to_string_pretty(&e.input)?);
+                        println!(
+                            "**Input:**\n```json\n{}\n```\n",
+                            serde_json::to_string_pretty(&e.input)?
+                        );
                         println!("**Error:** {}", e.error);
                     }
                 }

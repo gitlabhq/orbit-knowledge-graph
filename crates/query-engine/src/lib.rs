@@ -75,7 +75,10 @@ fn validate_ontology(value: &serde_json::Value, ontology: &Ontology) -> Result<(
     collect_schema_errors(&validator, value)
 }
 
-fn collect_schema_errors(validator: &jsonschema::Validator, value: &serde_json::Value) -> Result<()> {
+fn collect_schema_errors(
+    validator: &jsonschema::Validator,
+    value: &serde_json::Value,
+) -> Result<()> {
     let errors: Vec<_> = validator
         .iter_errors(value)
         .map(|e| format!("{} at {}", e, e.instance_path))
@@ -139,15 +142,21 @@ mod tests {
         Ontology::new()
             .with_nodes(["User", "Project", "Note", "Group"])
             .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
-            .with_fields("User", [
-                ("username", DataType::String),
-                ("state", DataType::String),
-                ("created_at", DataType::DateTime),
-            ])
-            .with_fields("Note", [
-                ("confidential", DataType::Bool),
-                ("created_at", DataType::DateTime),
-            ])
+            .with_fields(
+                "User",
+                [
+                    ("username", DataType::String),
+                    ("state", DataType::String),
+                    ("created_at", DataType::DateTime),
+                ],
+            )
+            .with_fields(
+                "Note",
+                [
+                    ("confidential", DataType::Bool),
+                    ("created_at", DataType::DateTime),
+                ],
+            )
             .with_fields("Project", [("name", DataType::String)])
     }
 
@@ -174,8 +183,14 @@ mod tests {
         assert!(result.sql.contains("e0.label = {type_e0:String}"));
         assert!(result.sql.contains("n.label = {type_n:String}"));
         assert!(result.sql.contains("LIMIT 25"));
-        assert_eq!(result.params.get("type_e0"), Some(&serde_json::json!("AUTHORED")));
-        assert_eq!(result.params.get("type_n"), Some(&serde_json::json!("Note")));
+        assert_eq!(
+            result.params.get("type_e0"),
+            Some(&serde_json::json!("AUTHORED"))
+        );
+        assert_eq!(
+            result.params.get("type_n"),
+            Some(&serde_json::json!("Note"))
+        );
     }
 
     #[test]
@@ -323,8 +338,10 @@ mod ontology_integration_tests {
 
     fn load_test_ontology() -> Ontology {
         let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap()
-            .parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("fixtures/ontology");
         Ontology::load_from_dir(&fixtures_dir).expect("Failed to load test ontology")
     }
@@ -404,7 +421,10 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("NonexistentType") && err.to_string().contains("is not one of"));
+        assert!(
+            err.to_string().contains("NonexistentType")
+                && err.to_string().contains("is not one of")
+        );
     }
 
     #[test]

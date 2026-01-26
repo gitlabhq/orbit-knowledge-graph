@@ -25,7 +25,9 @@ pub struct Input {
     pub aggregation_sort: Option<InputAggSort>,
 }
 
-fn default_limit() -> u32 { 30 }
+fn default_limit() -> u32 {
+    30
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,7 +56,9 @@ pub struct InputNode {
     pub id_property: String,
 }
 
-fn default_id_property() -> String { "id".into() }
+fn default_id_property() -> String {
+    "id".into()
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputIdRange {
@@ -75,11 +79,23 @@ pub struct InputFilter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterOp {
-    Eq, Gt, Lt, Gte, Lte, In, Contains, StartsWith, EndsWith, IsNull, IsNotNull,
+    Eq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    In,
+    Contains,
+    StartsWith,
+    EndsWith,
+    IsNull,
+    IsNotNull,
 }
 
 fn deserialize_filters<'de, D>(deserializer: D) -> Result<HashMap<String, InputFilter>, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
     Ok(raw.into_iter().map(|(k, v)| (k, parse_filter(v))).collect())
 }
@@ -88,11 +104,17 @@ fn parse_filter(value: Value) -> InputFilter {
     if let Value::Object(ref obj) = value {
         if let Some(op_val) = obj.get("op") {
             if let Ok(op) = serde_json::from_value::<FilterOp>(op_val.clone()) {
-                return InputFilter { op: Some(op), value: obj.get("value").cloned() };
+                return InputFilter {
+                    op: Some(op),
+                    value: obj.get("value").cloned(),
+                };
             }
         }
     }
-    InputFilter { op: None, value: Some(value) }
+    InputFilter {
+        op: None,
+        value: Some(value),
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,14 +137,23 @@ pub struct InputRelationship {
     pub filters: HashMap<String, InputFilter>,
 }
 
-fn default_hops() -> u32 { 1 }
+fn default_hops() -> u32 {
+    1
+}
 
 fn deserialize_rel_types<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     match Value::deserialize(deserializer)? {
         Value::String(s) => Ok(vec![s]),
-        Value::Array(arr) => arr.into_iter()
-            .map(|v| v.as_str().map(String::from).ok_or_else(|| serde::de::Error::custom("expected string")))
+        Value::Array(arr) => arr
+            .into_iter()
+            .map(|v| {
+                v.as_str()
+                    .map(String::from)
+                    .ok_or_else(|| serde::de::Error::custom("expected string"))
+            })
             .collect(),
         _ => Err(serde::de::Error::custom("type must be string or array")),
     }
@@ -131,7 +162,8 @@ where D: Deserializer<'de> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
-    #[default] Outgoing,
+    #[default]
+    Outgoing,
     Incoming,
     Both,
 }
@@ -156,7 +188,12 @@ pub struct InputAggregation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AggFunction {
-    Count, Sum, Avg, Min, Max, Collect,
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+    Collect,
 }
 
 impl AggFunction {
@@ -190,7 +227,9 @@ pub struct InputPath {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PathType {
-    Shortest, AllShortest, Any,
+    Shortest,
+    AllShortest,
+    Any,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -208,7 +247,8 @@ pub struct InputOrderBy {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum OrderDirection {
-    #[default] Asc,
+    #[default]
+    Asc,
     Desc,
 }
 
@@ -239,7 +279,8 @@ mod tests {
 
     #[test]
     fn simple_traversal() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "traversal",
             "nodes": [
                 {"id": "n", "label": "Note", "filters": {"system": false}},
@@ -247,7 +288,9 @@ mod tests {
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         assert_eq!(input.query_type, QueryType::Traversal);
         assert_eq!(input.nodes.len(), 2);
@@ -257,7 +300,8 @@ mod tests {
 
     #[test]
     fn operator_filter() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "traversal",
             "nodes": [{
                 "id": "u", "label": "User",
@@ -266,7 +310,9 @@ mod tests {
                     "state": {"op": "in", "value": ["active", "blocked"]}
                 }
             }]
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         let filters = &input.nodes[0].filters;
         assert_eq!(filters.get("created_at").unwrap().op, Some(FilterOp::Gte));
@@ -275,11 +321,14 @@ mod tests {
 
     #[test]
     fn multiple_rel_types() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "traversal",
             "nodes": [{"id": "a"}, {"id": "b"}],
             "relationships": [{"type": ["BLOCKS", "RELATES_TO"], "from": "a", "to": "b"}]
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         assert_eq!(input.relationships[0].types, vec!["BLOCKS", "RELATES_TO"]);
     }
@@ -300,14 +349,17 @@ mod tests {
 
     #[test]
     fn path_finding() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "label": "Project", "node_ids": [100]},
                 {"id": "end", "label": "Project", "node_ids": [200]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         assert_eq!(input.query_type, QueryType::PathFinding);
         let path = input.path.unwrap();

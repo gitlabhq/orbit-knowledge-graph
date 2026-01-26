@@ -23,7 +23,10 @@ pub fn codegen(ast: &Node) -> Result<ParameterizedQuery> {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::RecursiveCte(cte) => ctx.emit_cte(cte)?,
     };
-    Ok(ParameterizedQuery { sql, params: ctx.params })
+    Ok(ParameterizedQuery {
+        sql,
+        params: ctx.params,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -36,7 +39,9 @@ struct Context {
 
 impl Context {
     fn new() -> Self {
-        Self { params: HashMap::new() }
+        Self {
+            params: HashMap::new(),
+        }
     }
 
     fn emit_query(&mut self, q: &Query) -> Result<String> {
@@ -45,7 +50,9 @@ impl Context {
         // SELECT
         sql.push_str("SELECT ");
         for (i, sel) in q.select.iter().enumerate() {
-            if i > 0 { sql.push_str(", "); }
+            if i > 0 {
+                sql.push_str(", ");
+            }
             sql.push_str(&self.emit_expr(&sel.expr)?);
             if let Some(alias) = &sel.alias {
                 write!(sql, " AS {alias}").unwrap();
@@ -69,7 +76,9 @@ impl Context {
         if !q.group_by.is_empty() {
             sql.push_str(" GROUP BY ");
             for (i, g) in q.group_by.iter().enumerate() {
-                if i > 0 { sql.push_str(", "); }
+                if i > 0 {
+                    sql.push_str(", ");
+                }
                 sql.push_str(&self.emit_expr(g)?);
             }
         }
@@ -78,7 +87,9 @@ impl Context {
         if !q.order_by.is_empty() {
             sql.push_str(" ORDER BY ");
             for (i, o) in q.order_by.iter().enumerate() {
-                if i > 0 { sql.push_str(", "); }
+                if i > 0 {
+                    sql.push_str(", ");
+                }
                 sql.push_str(&self.emit_expr(&o.expr)?);
                 sql.push_str(if o.desc { " DESC" } else { " ASC" });
             }
@@ -107,7 +118,10 @@ impl Context {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Literal(v) => self.emit_literal(v)?,
             Expr::FuncCall { name, args } => {
-                let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect::<Result<_>>()?;
+                let args: Vec<_> = args
+                    .iter()
+                    .map(|a| self.emit_expr(a))
+                    .collect::<Result<_>>()?;
                 format!("{}({})", name, args.join(", "))
             }
             Expr::BinaryOp { op, left, right } => {
@@ -134,11 +148,14 @@ impl Context {
         match v {
             Value::Null => Ok("NULL".into()),
             Value::Array(arr) => {
-                let placeholders: Vec<_> = arr.iter().map(|item| {
-                    let name = format!("p{}", self.params.len());
-                    self.params.insert(name.clone(), item.clone());
-                    format!("{{{name}:{}}}", ch_type(item))
-                }).collect();
+                let placeholders: Vec<_> = arr
+                    .iter()
+                    .map(|item| {
+                        let name = format!("p{}", self.params.len());
+                        self.params.insert(name.clone(), item.clone());
+                        format!("{{{name}:{}}}", ch_type(item))
+                    })
+                    .collect();
                 Ok(format!("({})", placeholders.join(", ")))
             }
             _ => {
@@ -151,7 +168,11 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<TableRefResult> {
         match t {
-            TableRef::Scan { table, alias, type_filter } => {
+            TableRef::Scan {
+                table,
+                alias,
+                type_filter,
+            } => {
                 let mut type_conditions = Vec::new();
                 if let Some(tf) = type_filter {
                     let param = format!("type_{alias}");
@@ -163,7 +184,12 @@ impl Context {
                     type_conditions,
                 })
             }
-            TableRef::Join { join_type, left, right, on } => {
+            TableRef::Join {
+                join_type,
+                left,
+                right,
+                on,
+            } => {
                 let left_res = self.emit_table_ref(left)?;
                 let right_res = self.emit_table_ref(right)?;
                 let on_expr = self.emit_expr(on)?;
@@ -171,11 +197,21 @@ impl Context {
                 let on_clause = if right_res.type_conditions.is_empty() {
                     on_expr
                 } else {
-                    format!("({} AND {})", on_expr, right_res.type_conditions.join(" AND "))
+                    format!(
+                        "({} AND {})",
+                        on_expr,
+                        right_res.type_conditions.join(" AND ")
+                    )
                 };
 
                 Ok(TableRefResult {
-                    sql: format!("{} {} JOIN {} ON {}", left_res.sql, join_type.as_sql(), right_res.sql, on_clause),
+                    sql: format!(
+                        "{} {} JOIN {} ON {}",
+                        left_res.sql,
+                        join_type.as_sql(),
+                        right_res.sql,
+                        on_clause
+                    ),
                     type_conditions: left_res.type_conditions,
                 })
             }
@@ -211,8 +247,14 @@ mod tests {
     fn simple_select() {
         let q = Query {
             select: vec![
-                SelectExpr { expr: Expr::col("n", "id"), alias: Some("node_id".into()) },
-                SelectExpr { expr: Expr::col("n", "label"), alias: Some("node_type".into()) },
+                SelectExpr {
+                    expr: Expr::col("n", "id"),
+                    alias: Some("node_id".into()),
+                },
+                SelectExpr {
+                    expr: Expr::col("n", "label"),
+                    alias: Some("node_type".into()),
+                },
             ],
             from: TableRef::scan("nodes", "n"),
             where_clause: Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
@@ -233,8 +275,14 @@ mod tests {
     fn with_join() {
         let q = Query {
             select: vec![
-                SelectExpr { expr: Expr::col("n", "id"), alias: Some("node_id".into()) },
-                SelectExpr { expr: Expr::col("e", "label"), alias: Some("rel_type".into()) },
+                SelectExpr {
+                    expr: Expr::col("n", "id"),
+                    alias: Some("node_id".into()),
+                },
+                SelectExpr {
+                    expr: Expr::col("e", "label"),
+                    alias: Some("rel_type".into()),
+                },
             ],
             from: TableRef::join(
                 JoinType::Inner,
@@ -259,13 +307,22 @@ mod tests {
     fn aggregation() {
         let q = Query {
             select: vec![
-                SelectExpr { expr: Expr::col("n", "label"), alias: Some("type".into()) },
-                SelectExpr { expr: Expr::func("COUNT", vec![Expr::col("n", "id")]), alias: Some("count".into()) },
+                SelectExpr {
+                    expr: Expr::col("n", "label"),
+                    alias: Some("type".into()),
+                },
+                SelectExpr {
+                    expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                    alias: Some("count".into()),
+                },
             ],
             from: TableRef::scan("nodes", "n"),
             where_clause: None,
             group_by: vec![Expr::col("n", "label")],
-            order_by: vec![OrderExpr { expr: Expr::func("COUNT", vec![Expr::col("n", "id")]), desc: true }],
+            order_by: vec![OrderExpr {
+                expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                desc: true,
+            }],
             limit: None,
         };
 
@@ -279,7 +336,10 @@ mod tests {
     #[test]
     fn in_operator() {
         let q = Query {
-            select: vec![SelectExpr { expr: Expr::col("n", "id"), alias: None }],
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
             from: TableRef::scan("nodes", "n"),
             where_clause: Some(Expr::binary(
                 Op::In,
@@ -305,12 +365,19 @@ mod tests {
     #[test]
     fn and_or_conditions() {
         let q = Query {
-            select: vec![SelectExpr { expr: Expr::col("n", "id"), alias: None }],
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
             from: TableRef::scan("nodes", "n"),
             where_clause: Expr::and_all([
                 Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
                 Expr::or_all([
-                    Some(Expr::binary(Op::Gt, Expr::col("n", "created_at"), Expr::lit("2024-01-01"))),
+                    Some(Expr::binary(
+                        Op::Gt,
+                        Expr::col("n", "created_at"),
+                        Expr::lit("2024-01-01"),
+                    )),
                     Some(Expr::unary(Op::IsNull, Expr::col("n", "deleted_at"))),
                 ]),
             ]),
@@ -330,12 +397,16 @@ mod tests {
     fn literals() {
         let mut ctx = Context::new();
 
-        assert_eq!(ctx.emit_literal(&Value::from("hello")).unwrap(), "{p0:String}");
+        assert_eq!(
+            ctx.emit_literal(&Value::from("hello")).unwrap(),
+            "{p0:String}"
+        );
         assert_eq!(ctx.emit_literal(&Value::from(42)).unwrap(), "{p1:Int64}");
         assert_eq!(ctx.emit_literal(&Value::from(true)).unwrap(), "{p2:Bool}");
         assert_eq!(ctx.emit_literal(&Value::Null).unwrap(), "NULL");
         assert_eq!(
-            ctx.emit_literal(&Value::Array(vec![Value::from(1), Value::from(2)])).unwrap(),
+            ctx.emit_literal(&Value::Array(vec![Value::from(1), Value::from(2)]))
+                .unwrap(),
             "({p3:Int64}, {p4:Int64})"
         );
     }
@@ -345,11 +416,13 @@ mod tests {
         let mut ctx = Context::new();
 
         assert_eq!(
-            ctx.emit_expr(&Expr::unary(Op::IsNull, Expr::col("t", "deleted_at"))).unwrap(),
+            ctx.emit_expr(&Expr::unary(Op::IsNull, Expr::col("t", "deleted_at")))
+                .unwrap(),
             "(t.deleted_at IS NULL)"
         );
         assert_eq!(
-            ctx.emit_expr(&Expr::unary(Op::Not, Expr::col("t", "active"))).unwrap(),
+            ctx.emit_expr(&Expr::unary(Op::Not, Expr::col("t", "active")))
+                .unwrap(),
             "(NOT t.active)"
         );
     }
@@ -357,7 +430,10 @@ mod tests {
     #[test]
     fn type_filter_in_where() {
         let q = Query {
-            select: vec![SelectExpr { expr: Expr::col("u", "id"), alias: Some("user_id".into()) }],
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: Some("user_id".into()),
+            }],
             from: TableRef::scan_with_filter("nodes", "u", "User"),
             where_clause: None,
             group_by: vec![],
@@ -367,13 +443,19 @@ mod tests {
 
         let result = codegen(&Node::Query(Box::new(q))).unwrap();
         assert!(result.sql.contains("WHERE (u.label = {type_u:String})"));
-        assert_eq!(result.params.get("type_u"), Some(&Value::String("User".into())));
+        assert_eq!(
+            result.params.get("type_u"),
+            Some(&Value::String("User".into()))
+        );
     }
 
     #[test]
     fn type_filter_in_join() {
         let q = Query {
-            select: vec![SelectExpr { expr: Expr::col("u", "id"), alias: None }],
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
             from: TableRef::join(
                 JoinType::Inner,
                 TableRef::scan_with_filter("nodes", "u", "User"),
@@ -387,7 +469,9 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(q))).unwrap();
-        assert!(result.sql.contains("ON ((u.id = e.from_id) AND (e.label = {type_e:String}))"));
+        assert!(result
+            .sql
+            .contains("ON ((u.id = e.from_id) AND (e.label = {type_e:String}))"));
         assert!(result.sql.contains("WHERE (u.label = {type_u:String})"));
     }
 }

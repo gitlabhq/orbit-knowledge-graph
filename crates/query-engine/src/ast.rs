@@ -10,21 +10,45 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Column { table: String, column: String },
+    Column {
+        table: String,
+        column: String,
+    },
     Literal(Value),
-    FuncCall { name: String, args: Vec<Expr> },
-    BinaryOp { op: Op, left: Box<Expr>, right: Box<Expr> },
-    UnaryOp { op: Op, expr: Box<Expr> },
+    FuncCall {
+        name: String,
+        args: Vec<Expr>,
+    },
+    BinaryOp {
+        op: Op,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    UnaryOp {
+        op: Op,
+        expr: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     // Comparison
-    Eq, Ne, Lt, Le, Gt, Ge, In, Like, ILike,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    In,
+    Like,
+    ILike,
     // Logical
-    And, Or, Not,
+    And,
+    Or,
+    Not,
     // Null checks
-    IsNull, IsNotNull,
+    IsNull,
+    IsNotNull,
     // Arithmetic
     Add,
 }
@@ -57,12 +81,26 @@ impl Op {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
-    Scan { table: String, alias: String, type_filter: Option<String> },
-    Join { join_type: JoinType, left: Box<TableRef>, right: Box<TableRef>, on: Expr },
+    Scan {
+        table: String,
+        alias: String,
+        type_filter: Option<String>,
+    },
+    Join {
+        join_type: JoinType,
+        left: Box<TableRef>,
+        right: Box<TableRef>,
+        on: Expr,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JoinType { Inner, Left, Right, Full }
+pub enum JoinType {
+    Inner,
+    Left,
+    Right,
+    Full,
+}
 
 impl JoinType {
     pub fn as_sql(&self) -> &'static str {
@@ -122,7 +160,10 @@ pub enum Node {
 
 impl Expr {
     pub fn col(table: impl Into<String>, column: impl Into<String>) -> Self {
-        Expr::Column { table: table.into(), column: column.into() }
+        Expr::Column {
+            table: table.into(),
+            column: column.into(),
+        }
     }
 
     pub fn lit(value: impl Into<Value>) -> Self {
@@ -130,42 +171,79 @@ impl Expr {
     }
 
     pub fn func(name: impl Into<String>, args: Vec<Expr>) -> Self {
-        Expr::FuncCall { name: name.into(), args }
+        Expr::FuncCall {
+            name: name.into(),
+            args,
+        }
     }
 
     pub fn eq(left: Expr, right: Expr) -> Self {
-        Expr::BinaryOp { op: Op::Eq, left: Box::new(left), right: Box::new(right) }
+        Expr::BinaryOp {
+            op: Op::Eq,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
     }
 
     pub fn binary(op: Op, left: Expr, right: Expr) -> Self {
-        Expr::BinaryOp { op, left: Box::new(left), right: Box::new(right) }
+        Expr::BinaryOp {
+            op,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
     }
 
     pub fn unary(op: Op, expr: Expr) -> Self {
-        Expr::UnaryOp { op, expr: Box::new(expr) }
+        Expr::UnaryOp {
+            op,
+            expr: Box::new(expr),
+        }
     }
 
     /// Combine expressions with AND, ignoring None values.
     pub fn and_all(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
-        exprs.into_iter().flatten().reduce(|a, b| Expr::binary(Op::And, a, b))
+        exprs
+            .into_iter()
+            .flatten()
+            .reduce(|a, b| Expr::binary(Op::And, a, b))
     }
 
     /// Combine expressions with OR, ignoring None values.
     pub fn or_all(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
-        exprs.into_iter().flatten().reduce(|a, b| Expr::binary(Op::Or, a, b))
+        exprs
+            .into_iter()
+            .flatten()
+            .reduce(|a, b| Expr::binary(Op::Or, a, b))
     }
 }
 
 impl TableRef {
     pub fn scan(table: impl Into<String>, alias: impl Into<String>) -> Self {
-        TableRef::Scan { table: table.into(), alias: alias.into(), type_filter: None }
+        TableRef::Scan {
+            table: table.into(),
+            alias: alias.into(),
+            type_filter: None,
+        }
     }
 
-    pub fn scan_with_filter(table: impl Into<String>, alias: impl Into<String>, type_filter: impl Into<String>) -> Self {
-        TableRef::Scan { table: table.into(), alias: alias.into(), type_filter: Some(type_filter.into()) }
+    pub fn scan_with_filter(
+        table: impl Into<String>,
+        alias: impl Into<String>,
+        type_filter: impl Into<String>,
+    ) -> Self {
+        TableRef::Scan {
+            table: table.into(),
+            alias: alias.into(),
+            type_filter: Some(type_filter.into()),
+        }
     }
 
     pub fn join(join_type: JoinType, left: TableRef, right: TableRef, on: Expr) -> Self {
-        TableRef::Join { join_type, left: Box::new(left), right: Box::new(right), on }
+        TableRef::Join {
+            join_type,
+            left: Box::new(left),
+            right: Box::new(right),
+            on,
+        }
     }
 }

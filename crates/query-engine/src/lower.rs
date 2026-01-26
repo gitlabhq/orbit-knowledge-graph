@@ -21,11 +21,15 @@ fn err(msg: impl Into<String>) -> QueryError {
 }
 
 fn missing_node(id: &str, context: &str) -> QueryError {
-    err(format!("{context} references node \"{id}\" which is not defined"))
+    err(format!(
+        "{context} references node \"{id}\" which is not defined"
+    ))
 }
 
 fn needs_label(id: &str) -> QueryError {
-    err(format!("node \"{id}\" requires a label to determine which table to query"))
+    err(format!(
+        "node \"{id}\" requires a label to determine which table to query"
+    ))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,7 +107,11 @@ fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
         // Add aggregate expression
         select.push(SelectExpr {
             expr: build_agg_expr(agg),
-            alias: Some(agg.alias.clone().unwrap_or_else(|| agg.function.as_sql().to_lowercase())),
+            alias: Some(
+                agg.alias
+                    .clone()
+                    .unwrap_or_else(|| agg.function.as_sql().to_lowercase()),
+            ),
         });
     }
 
@@ -153,8 +161,8 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
 
     let start = find_node(&input.nodes, &path.from)
         .ok_or_else(|| missing_node(&path.from, "path 'from'"))?;
-    let end = find_node(&input.nodes, &path.to)
-        .ok_or_else(|| missing_node(&path.to, "path 'to'"))?;
+    let end =
+        find_node(&input.nodes, &path.to).ok_or_else(|| missing_node(&path.to, "path 'to'"))?;
 
     let start_label = start.label.as_ref().ok_or_else(|| needs_label(&start.id))?;
     let end_label = end.label.as_ref().ok_or_else(|| needs_label(&end.id))?;
@@ -174,9 +182,18 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
 fn build_path_base(start_ids: &[i64], table: &str, label: &str) -> Query {
     Query {
         select: vec![
-            SelectExpr { expr: Expr::col("n", "id"), alias: Some("node_id".into()) },
-            SelectExpr { expr: Expr::func("ARRAY", vec![Expr::col("n", "id")]), alias: Some("path".into()) },
-            SelectExpr { expr: Expr::lit(0), alias: Some("depth".into()) },
+            SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: Some("node_id".into()),
+            },
+            SelectExpr {
+                expr: Expr::func("ARRAY", vec![Expr::col("n", "id")]),
+                alias: Some("path".into()),
+            },
+            SelectExpr {
+                expr: Expr::lit(0),
+                alias: Some("depth".into()),
+            },
         ],
         from: TableRef::scan_with_filter(table, "n", label),
         where_clause: node_ids_condition("n", "id", start_ids),
@@ -189,12 +206,18 @@ fn build_path_base(start_ids: &[i64], table: &str, label: &str) -> Query {
 fn build_path_recursive(table: &str, label: &str, max_depth: u32) -> Query {
     Query {
         select: vec![
-            SelectExpr { expr: Expr::col("n", "id"), alias: Some("node_id".into()) },
             SelectExpr {
-                expr: Expr::func("arrayConcat", vec![
-                    Expr::col("p", "path"),
-                    Expr::func("ARRAY", vec![Expr::col("n", "id")]),
-                ]),
+                expr: Expr::col("n", "id"),
+                alias: Some("node_id".into()),
+            },
+            SelectExpr {
+                expr: Expr::func(
+                    "arrayConcat",
+                    vec![
+                        Expr::col("p", "path"),
+                        Expr::func("ARRAY", vec![Expr::col("n", "id")]),
+                    ],
+                ),
                 alias: Some("path".into()),
             },
             SelectExpr {
@@ -214,8 +237,15 @@ fn build_path_recursive(table: &str, label: &str, max_depth: u32) -> Query {
             Expr::eq(Expr::col("e", "to_id"), Expr::col("n", "id")),
         ),
         where_clause: Expr::and_all([
-            Some(Expr::binary(Op::Lt, Expr::col("p", "depth"), Expr::lit(max_depth as i64))),
-            Some(Expr::unary(Op::Not, Expr::func("has", vec![Expr::col("p", "path"), Expr::col("n", "id")]))),
+            Some(Expr::binary(
+                Op::Lt,
+                Expr::col("p", "depth"),
+                Expr::lit(max_depth as i64),
+            )),
+            Some(Expr::unary(
+                Op::Not,
+                Expr::func("has", vec![Expr::col("p", "path"), Expr::col("n", "id")]),
+            )),
         ]),
         group_by: vec![],
         order_by: vec![],
@@ -226,13 +256,22 @@ fn build_path_recursive(table: &str, label: &str, max_depth: u32) -> Query {
 fn build_path_final(end_ids: &[i64], limit: u32) -> Query {
     Query {
         select: vec![
-            SelectExpr { expr: Expr::col("path_cte", "path"), alias: Some("path".into()) },
-            SelectExpr { expr: Expr::col("path_cte", "depth"), alias: Some("depth".into()) },
+            SelectExpr {
+                expr: Expr::col("path_cte", "path"),
+                alias: Some("path".into()),
+            },
+            SelectExpr {
+                expr: Expr::col("path_cte", "depth"),
+                alias: Some("depth".into()),
+            },
         ],
         from: TableRef::scan("path_cte", "path_cte"),
         where_clause: node_ids_condition("path_cte", "node_id", end_ids),
         group_by: vec![],
-        order_by: vec![OrderExpr { expr: Expr::col("path_cte", "depth"), desc: false }],
+        order_by: vec![OrderExpr {
+            expr: Expr::col("path_cte", "depth"),
+            desc: false,
+        }],
         limit: Some(limit),
     }
 }
@@ -244,7 +283,11 @@ fn node_ids_condition(table: &str, column: &str, ids: &[i64]) -> Option<Expr> {
         1 => Some(Expr::eq(Expr::col(table, column), Expr::lit(ids[0]))),
         _ => {
             let arr = Value::Array(ids.iter().map(|&id| Value::from(id)).collect());
-            Some(Expr::binary(Op::In, Expr::col(table, column), Expr::lit(arr)))
+            Some(Expr::binary(
+                Op::In,
+                Expr::col(table, column),
+                Expr::lit(arr),
+            ))
         }
     }
 }
@@ -264,8 +307,9 @@ fn build_joins(
 
     // Start from the "from" node of first relationship, or first node
     let start = match rels.first() {
-        Some(rel) => find_node(nodes, &rel.from)
-            .ok_or_else(|| missing_node(&rel.from, "relationship"))?,
+        Some(rel) => {
+            find_node(nodes, &rel.from).ok_or_else(|| missing_node(&rel.from, "relationship"))?
+        }
         None => &nodes[0],
     };
 
@@ -317,12 +361,21 @@ fn validate_rel_types(types: &[String], ontology: &Ontology) -> Result<Option<St
 
 fn edge_join_condition(from_node: &str, edge_alias: &str, dir: Direction) -> Expr {
     match dir {
-        Direction::Outgoing => Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "from_id")),
+        Direction::Outgoing => {
+            Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "from_id"))
+        }
         Direction::Incoming => Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "to_id")),
         Direction::Both => Expr::or_all([
-            Some(Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "from_id"))),
-            Some(Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "to_id"))),
-        ]).unwrap(),
+            Some(Expr::eq(
+                Expr::col(from_node, "id"),
+                Expr::col(edge_alias, "from_id"),
+            )),
+            Some(Expr::eq(
+                Expr::col(from_node, "id"),
+                Expr::col(edge_alias, "to_id"),
+            )),
+        ])
+        .unwrap(),
     }
 }
 
@@ -331,9 +384,16 @@ fn target_join_condition(edge_alias: &str, to_node: &str, dir: Direction) -> Exp
         Direction::Outgoing => Expr::eq(Expr::col(edge_alias, "to_id"), Expr::col(to_node, "id")),
         Direction::Incoming => Expr::eq(Expr::col(edge_alias, "from_id"), Expr::col(to_node, "id")),
         Direction::Both => Expr::or_all([
-            Some(Expr::eq(Expr::col(edge_alias, "to_id"), Expr::col(to_node, "id"))),
-            Some(Expr::eq(Expr::col(edge_alias, "from_id"), Expr::col(to_node, "id"))),
-        ]).unwrap(),
+            Some(Expr::eq(
+                Expr::col(edge_alias, "to_id"),
+                Expr::col(to_node, "id"),
+            )),
+            Some(Expr::eq(
+                Expr::col(edge_alias, "from_id"),
+                Expr::col(to_node, "id"),
+            )),
+        ])
+        .unwrap(),
     }
 }
 
@@ -351,7 +411,11 @@ fn build_where(
 
     for node in nodes {
         // Node ID filters
-        conds.extend(build_id_conditions(&node.id, &node.node_ids, &node.id_range));
+        conds.extend(build_id_conditions(
+            &node.id,
+            &node.node_ids,
+            &node.id_range,
+        ));
 
         // Property filters
         for (prop, filter) in &node.filters {
@@ -391,8 +455,16 @@ fn build_id_conditions(
     }
 
     if let Some(r) = range {
-        conds.push(Expr::binary(Op::Ge, Expr::col(table, "id"), Expr::lit(r.start)));
-        conds.push(Expr::binary(Op::Le, Expr::col(table, "id"), Expr::lit(r.end)));
+        conds.push(Expr::binary(
+            Op::Ge,
+            Expr::col(table, "id"),
+            Expr::lit(r.start),
+        ));
+        conds.push(Expr::binary(
+            Op::Le,
+            Expr::col(table, "id"),
+            Expr::lit(r.end),
+        ));
     }
 
     conds
@@ -431,7 +503,9 @@ fn build_order_by(
     nodes: &[InputNode],
     ontology: &Ontology,
 ) -> Result<Vec<OrderExpr>> {
-    let Some(ob) = order_by else { return Ok(vec![]) };
+    let Some(ob) = order_by else {
+        return Ok(vec![]);
+    };
 
     if let Some(label) = find_node_label(nodes, &ob.node) {
         ontology.validate_field(&label, &ob.property)?;
@@ -469,21 +543,28 @@ mod tests {
         Ontology::new()
             .with_nodes(["User", "Project", "Note", "Group"])
             .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
-            .with_fields("User", [
-                ("username", DataType::String),
-                ("state", DataType::String),
-                ("created_at", DataType::DateTime),
-            ])
-            .with_fields("Note", [
-                ("confidential", DataType::Bool),
-                ("created_at", DataType::DateTime),
-            ])
+            .with_fields(
+                "User",
+                [
+                    ("username", DataType::String),
+                    ("state", DataType::String),
+                    ("created_at", DataType::DateTime),
+                ],
+            )
+            .with_fields(
+                "Note",
+                [
+                    ("confidential", DataType::Bool),
+                    ("created_at", DataType::DateTime),
+                ],
+            )
             .with_fields("Project", [("name", DataType::String)])
     }
 
     #[test]
     fn test_lower_simple_traversal() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "traversal",
             "nodes": [
                 {"id": "n", "label": "Note"},
@@ -491,7 +572,9 @@ mod tests {
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
             panic!("expected Query");
@@ -514,19 +597,25 @@ mod tests {
             panic!("expected Query");
         };
         assert!(!q.group_by.is_empty());
-        assert!(q.select.iter().any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
+        assert!(q
+            .select
+            .iter()
+            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
     }
 
     #[test]
     fn test_lower_path_finding() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "label": "Project", "node_ids": [100]},
                 {"id": "end", "label": "Project", "node_ids": [200]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         let Node::RecursiveCte(cte) = lower(&input, &test_ontology()).unwrap() else {
             panic!("expected RecursiveCte");
@@ -537,7 +626,8 @@ mod tests {
 
     #[test]
     fn test_lower_with_filters() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "traversal",
             "nodes": [{
                 "id": "u",
@@ -548,7 +638,9 @@ mod tests {
                 }
             }],
             "limit": 30
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
             panic!("expected Query");
@@ -558,7 +650,8 @@ mod tests {
 
     #[test]
     fn test_lower_multi_hop() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "label": "User"},
@@ -570,7 +663,9 @@ mod tests {
                 {"type": "CONTAINS", "from": "p", "to": "n"}
             ],
             "limit": 20
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
             panic!("expected Query");
