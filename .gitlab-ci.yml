@@ -215,11 +215,9 @@ variables:
     - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
     - helm version
     - helm dependency update ${HELM_CHART_PATH}
-    # Authenticate to GKE using service account
-    - echo "${GKE_SA_KEY}" | base64 -d > /tmp/gke-sa-key.json
-    - gcloud auth activate-service-account --key-file=/tmp/gke-sa-key.json
+    # Authenticate to GKE using service account (GKE_SA_KEY is a File-type CI variable)
+    - gcloud auth activate-service-account --key-file="${GKE_SA_KEY}"
     - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
-    - rm /tmp/gke-sa-key.json
 
 helm-lint:
   extends:

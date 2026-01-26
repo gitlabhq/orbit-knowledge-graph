@@ -62,21 +62,15 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
 | `roles/container.admin` | Full control including namespace creation |
 | `roles/container.clusterViewer` | Read-only (for dry-run only pipelines) |
 
-## Step 3: Create and Encode Service Account Key
+## Step 3: Create Service Account Key
 
 ```bash
 PROJECT_ID="gl-knowledgegraph-prj-f2eec59d"
 SA_EMAIL="gitlab-ci-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Create JSON key
-gcloud iam service-accounts keys create /tmp/gke-sa-key.json \
+gcloud iam service-accounts keys create gke-sa-key.json \
   --iam-account="${SA_EMAIL}"
-
-# Base64 encode for GitLab variable
-base64 -i /tmp/gke-sa-key.json > GKE_SA_KEY.txt
-
-# Clean up the original JSON key
-rm /tmp/gke-sa-key.json
 ```
 
 ## Step 4: Add GitLab CI Variable
@@ -89,15 +83,15 @@ rm /tmp/gke-sa-key.json
 | Field | Value |
 |-------|-------|
 | Key | `GKE_SA_KEY` |
-| Value | Contents of `GKE_SA_KEY.txt` |
-| Type | Variable |
+| Value | Upload `gke-sa-key.json` file |
+| Type | File |
 | Protected | Yes |
-| Masked | Yes |
+| Masked | No (file variables cannot be masked) |
 
 5. Click **Add variable**
 6. Delete the local key file:
    ```bash
-   rm GKE_SA_KEY.txt
+   rm gke-sa-key.json
    ```
 
 ## Step 5: Protect the Main Branch
