@@ -1,74 +1,12 @@
 //! Input types representing the JSON format that the LLM produces.
 //!
-//! This is NOT the AST - it's a structured representation of the input that
-//! gets validated and then lowered to the AST.
+//! This module defines the typed Rust structures that JSON queries deserialize into.
+//! Security validation (identifier patterns, SQL injection prevention) is handled by
+//! JSON Schema validation in lib.rs before deserialization.
 
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::HashMap;
-
-use regex::Regex;
-use std::sync::LazyLock;
-
-/// Valid SQL identifier: starts with letter/underscore, then alphanumeric/underscore, max 64 chars.
-static IDENTIFIER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$").unwrap());
-
-fn validate_identifier(s: &str) -> Result<(), String> {
-    if IDENTIFIER_RE.is_match(s) {
-        Ok(())
-    } else {
-        Err(format!("invalid identifier: {s}"))
-    }
-}
-
-/// Deserialize and validate a node/relationship ID as a safe identifier
-fn deserialize_safe_id<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    validate_identifier(&s)
-        .map_err(|e| serde::de::Error::custom(format!("invalid id \"{s}\": {e}")))?;
-    Ok(s)
-}
-
-/// Deserialize and validate an optional node/relationship ID
-fn deserialize_optional_safe_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let opt: Option<String> = Option::deserialize(deserializer)?;
-    if let Some(ref s) = opt {
-        validate_identifier(s)
-            .map_err(|e| serde::de::Error::custom(format!("invalid id \"{s}\": {e}")))?;
-    }
-    Ok(opt)
-}
-
-/// Deserialize and validate a property name as a safe identifier
-fn deserialize_property_name<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    validate_identifier(&s)
-        .map_err(|e| serde::de::Error::custom(format!("invalid property \"{s}\": {e}")))?;
-    Ok(s)
-}
-
-/// Deserialize and validate an optional property name
-fn deserialize_optional_property<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let opt: Option<String> = Option::deserialize(deserializer)?;
-    if let Some(ref s) = opt {
-        validate_identifier(s)
-            .map_err(|e| serde::de::Error::custom(format!("invalid property \"{s}\": {e}")))?;
-    }
-    Ok(opt)
-}
 
 /// Parsed JSON query from the LLM
 #[derive(Debug, Clone, Deserialize)]
@@ -97,7 +35,6 @@ pub enum QueryType {
     /// Standard graph traversal: walk nodes and relationships
     Traversal,
     /// Pattern matching query (currently an alias for Traversal).
-    /// Future: may support more expressive pattern matching syntax.
     Pattern,
     /// Aggregation query with GROUP BY
     Aggregation,
@@ -108,7 +45,6 @@ pub enum QueryType {
 /// Node selector in the input
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputNode {
-    #[serde(deserialize_with = "deserialize_safe_id")]
     pub id: String,
     #[serde(default)]
     pub label: Option<String>,
@@ -155,27 +91,22 @@ pub enum FilterOp {
     IsNotNull,
 }
 
+/// Deserialize filters from either simple values or operator objects.
+/// JSON Schema has already validated the structure and property names.
 fn deserialize_filters<'de, D>(deserializer: D) -> Result<HashMap<String, InputFilter>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
-    let mut filters = HashMap::with_capacity(raw.len());
-
-    for (key, value) in raw {
-        // Validate property name is a safe identifier
-        validate_identifier(&key).map_err(|e| {
-            serde::de::Error::custom(format!("invalid filter property \"{key}\": {e}"))
-        })?;
-        let filter = parse_filter(value);
-        filters.insert(key, filter);
-    }
-
+    let filters = raw
+        .into_iter()
+        .map(|(key, value)| (key, parse_filter(value)))
+        .collect();
     Ok(filters)
 }
 
 fn parse_filter(value: Value) -> InputFilter {
-    // Try operator-based filter first
+    // Try operator-based filter first: {"op": "...", "value": "..."}
     if let Value::Object(ref obj) = value {
         if let Some(op_value) = obj.get("op") {
             if let Ok(op) = serde_json::from_value::<FilterOp>(op_value.clone()) {
@@ -195,31 +126,23 @@ fn parse_filter(value: Value) -> InputFilter {
 }
 
 /// Relationship selector for graph traversal.
-///
-/// Defines how to traverse edges between nodes, including direction
-/// and type filtering.
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputRelationship {
     /// Relationship type(s) to match. Use `["*"]` for any type.
     #[serde(rename = "type", deserialize_with = "deserialize_rel_types")]
     pub types: Vec<String>,
     /// Source node ID (must match an InputNode.id)
-    #[serde(deserialize_with = "deserialize_safe_id")]
     pub from: String,
     /// Target node ID (must match an InputNode.id)
-    #[serde(deserialize_with = "deserialize_safe_id")]
     pub to: String,
     /// Minimum hops (default: 1).
-    /// NOTE: Variable-length paths (min_hops != max_hops) are not yet implemented.
-    /// Currently only single-hop traversals are supported.
     #[serde(default = "default_hops")]
     pub min_hops: u32,
     /// Maximum hops (default: 1).
-    /// NOTE: Variable-length paths are not yet implemented.
     #[serde(default = "default_hops")]
     pub max_hops: u32,
     /// Edge direction: "outgoing" (default), "incoming", or "both"
-    #[serde(default = "default_direction")]
+    #[serde(default)]
     pub direction: Direction,
     /// Property filters to apply to edges
     #[serde(default, deserialize_with = "deserialize_filters")]
@@ -230,10 +153,8 @@ fn default_hops() -> u32 {
     1
 }
 
-fn default_direction() -> Direction {
-    Direction::Outgoing
-}
-
+/// Deserialize relationship types from either a string or array of strings.
+/// JSON Schema has already validated the values.
 fn deserialize_rel_types<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -253,9 +174,10 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
+    #[default]
     Outgoing,
     Incoming,
     Both,
@@ -265,13 +187,13 @@ pub enum Direction {
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputAggregation {
     pub function: AggFunction,
-    #[serde(default, deserialize_with = "deserialize_optional_safe_id")]
+    #[serde(default)]
     pub target: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_safe_id")]
+    #[serde(default)]
     pub group_by: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_property")]
+    #[serde(default)]
     pub property: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_safe_id")]
+    #[serde(default)]
     pub alias: Option<String>,
 }
 
@@ -304,9 +226,7 @@ impl AggFunction {
 pub struct InputPath {
     #[serde(rename = "type")]
     pub path_type: PathType,
-    #[serde(deserialize_with = "deserialize_safe_id")]
     pub from: String,
-    #[serde(deserialize_with = "deserialize_safe_id")]
     pub to: String,
     pub max_depth: u32,
     #[serde(default)]
@@ -324,9 +244,7 @@ pub enum PathType {
 /// Ordering specification
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputOrderBy {
-    #[serde(deserialize_with = "deserialize_safe_id")]
     pub node: String,
-    #[serde(deserialize_with = "deserialize_property_name")]
     pub property: String,
     #[serde(default)]
     pub direction: OrderDirection,
@@ -350,7 +268,8 @@ pub struct InputAggSort {
 
 /// Parse JSON into Input structure.
 ///
-/// This validates identifier safety during deserialization to prevent SQL injection.
+/// Note: For full validation including identifier safety, use `compile()` in lib.rs
+/// which validates against JSON Schema first.
 #[must_use = "the parsed input should be used"]
 pub fn parse_input(json_data: &str) -> Result<Input, serde_json::Error> {
     serde_json::from_str(json_data)
@@ -463,79 +382,8 @@ mod tests {
         }"#;
 
         let input = parse_input(json).unwrap();
-        assert_eq!(input.limit, 30); // default limit
+        assert_eq!(input.limit, 30);
         assert!(input.relationships.is_empty());
         assert!(input.aggregations.is_empty());
-    }
-
-    #[test]
-    fn test_rejects_sql_injection_in_node_id() {
-        let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "n; DROP TABLE users; --"}]
-        }"#;
-
-        let result = parse_input(json);
-        assert!(result.is_err(), "should reject SQL injection in node id");
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("invalid id"),
-            "error should mention invalid id: {err}"
-        );
-    }
-
-    #[test]
-    fn test_rejects_sql_injection_in_relationship() {
-        let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "a"}, {"id": "b"}],
-            "relationships": [
-                {"type": "REL", "from": "a' OR '1'='1", "to": "b"}
-            ]
-        }"#;
-
-        let result = parse_input(json);
-        assert!(
-            result.is_err(),
-            "should reject SQL injection in relationship from"
-        );
-    }
-
-    #[test]
-    fn test_rejects_empty_node_id() {
-        let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": ""}]
-        }"#;
-
-        let result = parse_input(json);
-        assert!(result.is_err(), "should reject empty node id");
-    }
-
-    #[test]
-    fn test_rejects_id_starting_with_number() {
-        let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "123abc"}]
-        }"#;
-
-        let result = parse_input(json);
-        assert!(result.is_err(), "should reject id starting with number");
-    }
-
-    #[test]
-    fn test_valid_identifiers_accepted() {
-        let json = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "user_node"},
-                {"id": "_private"},
-                {"id": "CamelCase"},
-                {"id": "node123"}
-            ]
-        }"#;
-
-        let result = parse_input(json);
-        assert!(result.is_ok(), "should accept valid identifiers");
     }
 }

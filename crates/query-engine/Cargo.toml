@@ -8,7 +8,7 @@ ontology = { path = "../ontology" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-regex = { workspace = true }
+jsonschema = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
