@@ -8,14 +8,15 @@ members = [
   "crates/etl-engine",
   "crates/cli",
   "crates/gitaly-client",
+  "crates/gkg-server",
 ]
 
 [workspace.dependencies]
 arrow = "57.2.0"
-clap = { version = "4.5", features = ["derive"] }
-dunce = "1.0"
+clap = { version = "4.5.54", features = ["derive", "env"] }
+dunce = "1.0.5"
 async-trait = "0.1.89"
-bytes = "1.11"
+bytes = "1.11.0"
 chrono = { version = "0.4.43", features = ["serde"] }
 futures = "0.3.31"
 internment = "0.8.6"
@@ -23,7 +24,7 @@ mimalloc = "0.1.48"
 once_cell = "1.21.3"
 parking_lot = "0.12.5"
 pastey = "0.2.1"
-rust-lapper = "=1.2.0"
+rust-lapper = "1.2.0"
 rustc-hash = "2.1.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -31,52 +32,57 @@ smallvec = "1.15.1"
 tempfile = "3.24.0"
 
 # Indexer dependencies
-anyhow = "1.0"
-log = "0.4"
-num_cpus = "1.16"
-parquet = { version = "54.2", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
-tokio = { version = "1.43", features = ["full"] }
+anyhow = "1.0.100"
+log = "0.4.29"
+num_cpus = "1.17.0"
+parquet = { version = "57.2.0", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
+tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.27.2", features = ["derive"] }
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-tokio-util = "0.7"
-tokio-rayon = "2.1"
-ignore = "0.4"
-rayon = "1.10"
-miette = { version = "7.5", features = ["fancy"] }
-walkdir = "2.5"
-criterion = { version = "0.5", features = ["html_reports"] }
-tracing-test = "0.2"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+tokio-util = "0.7.18"
+tokio-rayon = "2.1.0"
+ignore = "0.4.25"
+rayon = "1.11.0"
+miette = { version = "7.6.0", features = ["fancy"] }
+walkdir = "2.5.0"
+criterion = { version = "0.8.1", features = ["html_reports"] }
+tracing-test = "0.2.5"
 
 # Parser-core
 parser-core = { path = "crates/code-parser" }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.7.0" }
-thiserror = "2.0.17"
+thiserror = "2.0.18"
 tokio-stream = "0.1.18"
-toml = "0.9.10"
+toml = "0.9.8"
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
-async-nats = "0.46"
-clickhouse-arrow = "0.2"
-testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["nats", "clickhouse"] }
+async-nats = "0.46.0"
+clickhouse-arrow = "0.2.1"
+testcontainers = "0.26.3"
+testcontainers-modules = { version = "0.14.0", features = ["nats", "clickhouse"] }
 serial_test = "3.3.1"
 
 # Gitaly client dependencies
-regex = "1.11"
-hex = "0.4"
-hmac = "0.12"
+regex = "1.12.2"
+hex = "0.4.3"
+hmac = "0.12.1"
 hyper-util = { version = "0.1", features = ["client", "tokio"] }
-prost = "0.14"
-prost-build = "0.14"
-prost-types = "0.14"
-protoc-bin-vendored = "3.0"
-sha2 = "0.10"
-tar = "0.4"
-tonic = "0.14"
-tonic-build = "0.14"
-tonic-prost = "0.14"
-tonic-prost-build = "0.14"
-tower = "0.5"
+prost = "0.14.3"
+prost-build = "0.14.3"
+prost-types = "0.14.3"
+protoc-bin-vendored = "3.2.0"
+sha2 = "0.10.9"
+tar = "0.4.44"
+tonic = "0.14.2"
+tonic-build = "0.14.2"
+tonic-prost = "0.14.2"
+tonic-prost-build = "0.14.2"
+tower = "0.5.3"
+
+# Server dependencies
+axum = { version = "0.8.8", features = ["macros"] }
+jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
+tower-http = { version = "0.6.8", features = ["trace"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
