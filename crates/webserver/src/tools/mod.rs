@@ -36,7 +36,10 @@ impl ToolRegistry {
     }
 
     pub fn list_tools(&self) -> Vec<ToolInfo> {
-        self.tools.values().map(|tool| tool.to_tool_info()).collect()
+        self.tools
+            .values()
+            .map(|tool| tool.to_tool_info())
+            .collect()
     }
 
     pub fn get_tool(&self, name: &str) -> Option<Arc<dyn KnowledgeGraphTool>> {
@@ -156,12 +159,13 @@ mod tests {
         let registry = ToolRegistry::new();
         let claims = create_test_claims();
 
-        let result = registry
-            .call_tool("nonexistent", json!({}), &claims)
-            .await;
+        let result = registry.call_tool("nonexistent", json!({}), &claims).await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), WebserverError::ToolNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            WebserverError::ToolNotFound(_)
+        ));
     }
 
     #[test]

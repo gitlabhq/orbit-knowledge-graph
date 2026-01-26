@@ -31,20 +31,24 @@ impl JwtValidator {
     }
 
     pub fn validate(&self, token: &str) -> Result<Claims, WebserverError> {
-        let token_data = decode::<Claims>(token, &self.decoding_key, &self.validation)
-            .map_err(|e| match e.kind() {
-                jsonwebtoken::errors::ErrorKind::ExpiredSignature => WebserverError::TokenExpired,
-                jsonwebtoken::errors::ErrorKind::InvalidToken
-                | jsonwebtoken::errors::ErrorKind::InvalidSignature => {
-                    WebserverError::InvalidToken(e.to_string())
+        let token_data =
+            decode::<Claims>(token, &self.decoding_key, &self.validation).map_err(|e| {
+                match e.kind() {
+                    jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                        WebserverError::TokenExpired
+                    }
+                    jsonwebtoken::errors::ErrorKind::InvalidToken
+                    | jsonwebtoken::errors::ErrorKind::InvalidSignature => {
+                        WebserverError::InvalidToken(e.to_string())
+                    }
+                    jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
+                        WebserverError::InvalidToken("invalid issuer".into())
+                    }
+                    jsonwebtoken::errors::ErrorKind::InvalidAudience => {
+                        WebserverError::InvalidToken("invalid audience".into())
+                    }
+                    _ => WebserverError::Auth(e.to_string()),
                 }
-                jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
-                    WebserverError::InvalidToken("invalid issuer".into())
-                }
-                jsonwebtoken::errors::ErrorKind::InvalidAudience => {
-                    WebserverError::InvalidToken("invalid audience".into())
-                }
-                _ => WebserverError::Auth(e.to_string()),
             })?;
 
         Ok(token_data.claims)
