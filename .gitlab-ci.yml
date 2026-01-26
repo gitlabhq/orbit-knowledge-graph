@@ -5,6 +5,7 @@ stages:
   - lint
   - security
   - test
+  - deploy
 
 # ------------------------------------------------------------------------------
 # Job Templates
@@ -183,3 +184,89 @@ gitaly-integration-test:
     GITALY_CONNECTION_INFO: '{"address":"tcp://gitaly:8075","storage":"default","token":"secret_token"}'
   script:
     - cargo nextest run --profile ci -p gitaly-client --features integration
+
+# ------------------------------------------------------------------------------
+# Deploy Stage - Helm Charts
+# ------------------------------------------------------------------------------
+
+# GKE cluster configuration
+variables:
+  GKE_PROJECT: gl-knowledgegraph-prj-f2eec59d
+  GKE_CLUSTER: knowledge-graph-test
+  GKE_ZONE: us-central1
+  HELM_CHART_PATH: helm-dev
+  HELM_RELEASE_NAME: gkg-sandbox
+  HELM_NAMESPACE: gkg-sandbox
+
+.helm-base:
+  image: google/cloud-sdk:slim
+  tags:
+    - saas-linux-small-amd64
+  before_script:
+    - apt-get update && apt-get install -y curl
+    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    - helm version
+    - helm dependency update ${HELM_CHART_PATH}
+
+.helm-with-gke-auth:
+  extends: .helm-base
+  before_script:
+    - apt-get update && apt-get install -y curl
+    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    - helm version
+    - helm dependency update ${HELM_CHART_PATH}
+    # Authenticate to GKE using service account
+    - echo "${GKE_SA_KEY}" | base64 -d > /tmp/gke-sa-key.json
+    - gcloud auth activate-service-account --key-file=/tmp/gke-sa-key.json
+    - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
+    - rm /tmp/gke-sa-key.json
+
+helm-lint:
+  extends:
+    - .helm-base
+    - .mr-and-main-rules
+  stage: lint
+  needs: []
+  script:
+    - helm lint ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
+    - helm template ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml --validate
+
+helm-dry-run:
+  extends:
+    - .helm-with-gke-auth
+    - .mr-and-main-rules
+  stage: lint
+  needs: []
+  script:
+    - |
+      helm upgrade ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} \
+        -f ${HELM_CHART_PATH}/values-sandbox.yaml \
+        --namespace ${HELM_NAMESPACE} \
+        --install \
+        --dry-run
+  environment:
+    name: sandbox
+    action: prepare
+
+deploy-sandbox:
+  extends: .helm-with-gke-auth
+  stage: deploy
+  needs:
+    - helm-lint
+    - helm-dry-run
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  script:
+    - |
+      helm upgrade ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} \
+        -f ${HELM_CHART_PATH}/values-sandbox.yaml \
+        --namespace ${HELM_NAMESPACE} \
+        --create-namespace \
+        --install \
+        --wait \
+        --timeout 5m
+    - kubectl get pods -n ${HELM_NAMESPACE}
+  environment:
+    name: sandbox
+    url: https://console.cloud.google.com/kubernetes/workload?project=${GKE_PROJECT}
