@@ -58,7 +58,7 @@ impl MessageId {
 /// # Creating an Envelope
 ///
 /// ```ignore
-/// use etl_engine::types::{Envelope, Event};
+/// use etl_engine::types::{Envelope, Event, Topic};
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Serialize, Deserialize)]
@@ -68,8 +68,8 @@ impl MessageId {
 /// }
 ///
 /// impl Event for UserCreated {
-///     fn topic() -> &'static str {
-///         "user-events"
+///     fn topic() -> Topic {
+///         Topic::new("users-stream", "user.created")
 ///     }
 /// }
 ///
@@ -99,7 +99,7 @@ pub struct Envelope {
 /// # Example
 ///
 /// ```ignore
-/// use etl_engine::types::Event;
+/// use etl_engine::types::{Event, Topic};
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Serialize, Deserialize)]
@@ -109,14 +109,14 @@ pub struct Envelope {
 /// }
 ///
 /// impl Event for OrderPlaced {
-///     fn topic() -> &'static str {
-///         "orders"
+///     fn topic() -> Topic {
+///         Topic::new("orders-stream", "orders.placed")
 ///     }
 /// }
 /// ```
 pub trait Event: Serialize + DeserializeOwned + Send + Sync + 'static {
     /// Returns the topic this event should be published to.
-    fn topic() -> &'static str;
+    fn topic() -> Topic;
 }
 
 impl Envelope {
@@ -158,8 +158,8 @@ mod tests {
     }
 
     impl Event for TestEvent {
-        fn topic() -> &'static str {
-            "test-events"
+        fn topic() -> Topic {
+            Topic::new("test-stream", "test-events")
         }
     }
 

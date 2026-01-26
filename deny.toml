@@ -38,6 +38,7 @@ allow = [
     "CDLA-Permissive-2.0",
     "LicenseRef-EE",
     "OpenSSL", # aws-lc-sys via testcontainers (dev dependency)
+    "bzip2-1.0.6", # libbz2-rs-sys via datafusion -> async-compression
 ]
 confidence-threshold = 0.8
 
