@@ -112,6 +112,23 @@ impl NatsConfiguration {
     pub fn batch_size(&self) -> usize {
         self.batch_size.max(1)
     }
+
+    /// Creates configuration from environment variables.
+    ///
+    /// Uses defaults for any unset variables:
+    /// - `NATS_URL`: Server address (default: "localhost:4222")
+    /// - `NATS_USERNAME`: Optional username
+    /// - `NATS_PASSWORD`: Optional password
+    /// - `NATS_CONSUMER_NAME`: Optional consumer name for durable subscriptions
+    pub fn from_env() -> Self {
+        Self {
+            url: std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".into()),
+            username: std::env::var("NATS_USERNAME").ok(),
+            password: std::env::var("NATS_PASSWORD").ok(),
+            consumer_name: std::env::var("NATS_CONSUMER_NAME").ok(),
+            ..Default::default()
+        }
+    }
 }
 
 impl Default for NatsConfiguration {

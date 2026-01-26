@@ -46,6 +46,11 @@ ignore = true
 registries = []
 
 [[licenses.clarify]]
+name = "ontology"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "etl-engine"
 expression = "LicenseRef-EE"
 license-files = []

@@ -1725,13 +1725,17 @@ name = "gkg-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow",
+ "async-trait",
  "axum",
  "clap",
+ "etl-engine",
  "jsonwebtoken",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -2746,6 +2750,14 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "ontology"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+]
 
 [[package]]
 name = "oorandom"
