@@ -164,7 +164,10 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
     let end =
         find_node(&input.nodes, &path.to).ok_or_else(|| missing_node(&path.to, "path 'to'"))?;
 
-    let start_entity = start.entity.as_ref().ok_or_else(|| needs_entity(&start.id))?;
+    let start_entity = start
+        .entity
+        .as_ref()
+        .ok_or_else(|| needs_entity(&start.id))?;
     let end_entity = end.entity.as_ref().ok_or_else(|| needs_entity(&end.id))?;
 
     // Get table names from ontology (validates that entity types exist)
@@ -318,7 +321,10 @@ fn build_joins(
         None => &nodes[0],
     };
 
-    let start_entity = start.entity.as_ref().ok_or_else(|| needs_entity(&start.id))?;
+    let start_entity = start
+        .entity
+        .as_ref()
+        .ok_or_else(|| needs_entity(&start.id))?;
     let start_table = ontology.table_name(start_entity)?;
     // Node tables are entity-specific, no type filter needed
     let mut result = TableRef::scan(&start_table, &start.id);
@@ -341,7 +347,8 @@ fn build_joins(
         result = TableRef::join(JoinType::Inner, result, edge_table, edge_cond);
 
         // Join target node (no type filter needed - table is entity-specific)
-        let target_entity = find_node_entity(nodes, &rel.to).ok_or_else(|| needs_entity(&rel.to))?;
+        let target_entity =
+            find_node_entity(nodes, &rel.to).ok_or_else(|| needs_entity(&rel.to))?;
         let target_table = ontology.table_name(&target_entity)?;
         let target_cond = target_join_condition(&edge_alias, &rel.to, rel.direction);
         let target_ref = TableRef::scan(&target_table, &rel.to);
@@ -371,7 +378,9 @@ fn edge_join_condition(from_node: &str, edge_alias: &str, dir: Direction) -> Exp
         Direction::Outgoing => {
             Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "source"))
         }
-        Direction::Incoming => Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "target")),
+        Direction::Incoming => {
+            Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "target"))
+        }
         Direction::Both => Expr::or_all([
             Some(Expr::eq(
                 Expr::col(from_node, "id"),

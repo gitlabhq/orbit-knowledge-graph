@@ -29,8 +29,13 @@ const DEFAULT_PRIMARY_KEY: &str = "id";
 pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];
 
 /// Reserved columns on the edge table (matches EdgeEntity schema).
-pub const EDGE_RESERVED_COLUMNS: &[&str] =
-    &["relationship_kind", "source", "source_kind", "target", "target_kind"];
+pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
+    "relationship_kind",
+    "source",
+    "source_kind",
+    "target",
+    "target_kind",
+];
 
 /// All reserved columns (for backward compatibility).
 pub const RESERVED_COLUMNS: &[&str] = &[

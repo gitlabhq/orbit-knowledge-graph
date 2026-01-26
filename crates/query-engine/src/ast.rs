@@ -13,18 +13,12 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// Column reference → `table.column`
-    Column {
-        table: String,
-        column: String,
-    },
+    Column { table: String, column: String },
     /// Constant value → parameterized as `{p0:Type}`
     Literal(Value),
     /// Function call → `NAME(arg1, arg2, ...)`
     /// Used for aggregates (COUNT, SUM) and ClickHouse functions (arrayConcat, has).
-    FuncCall {
-        name: String,
-        args: Vec<Expr>,
-    },
+    FuncCall { name: String, args: Vec<Expr> },
     /// Binary operation → `(left OP right)`
     /// Examples: `x = y`, `a AND b`, `col IN (1, 2, 3)`
     BinaryOp {
@@ -35,10 +29,7 @@ pub enum Expr {
     /// Unary operation → `(OP expr)` or `(expr OP)` for postfix ops
     /// Prefix: `NOT active` → `(NOT t.active)`
     /// Postfix: `IS NULL` → `(t.deleted_at IS NULL)`
-    UnaryOp {
-        op: Op,
-        expr: Box<Expr>,
-    },
+    UnaryOp { op: Op, expr: Box<Expr> },
 }
 
 /// SQL operators for expressions.

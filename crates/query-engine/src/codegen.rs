@@ -179,7 +179,8 @@ impl Context {
                 if let Some(tf) = type_filter {
                     let param = format!("type_{alias}");
                     self.params.insert(param.clone(), Value::String(tf.clone()));
-                    type_conditions.push(format!("({alias}.relationship_kind = {{{param}:String}})"));
+                    type_conditions
+                        .push(format!("({alias}.relationship_kind = {{{param}:String}})"));
                 }
                 Ok(TableRefResult {
                     sql: format!("{table} AS {alias}"),
@@ -453,7 +454,9 @@ mod tests {
         let result = codegen(&Node::Query(Box::new(q))).unwrap();
         // Edge type filter uses relationship_kind column
         assert!(
-            result.sql.contains("ON ((u.id = e.source) AND (e.relationship_kind = {type_e:String}))"),
+            result
+                .sql
+                .contains("ON ((u.id = e.source) AND (e.relationship_kind = {type_e:String}))"),
             "expected relationship_kind filter: {}",
             result.sql
         );

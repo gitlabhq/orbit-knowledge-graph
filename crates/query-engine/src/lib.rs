@@ -179,12 +179,26 @@ mod tests {
         assert!(result.sql.contains("kg_user AS u"));
         assert!(result.sql.contains("INNER JOIN kg_edges AS e0 ON"));
         // Edge table uses "source" column
-        assert!(result.sql.contains("u.id = e0.source"), "expected source column: {}", result.sql);
+        assert!(
+            result.sql.contains("u.id = e0.source"),
+            "expected source column: {}",
+            result.sql
+        );
         assert!(result.sql.contains("INNER JOIN kg_note AS n ON"));
         // Edge type filter uses relationship_kind column
-        assert!(result.sql.contains("e0.relationship_kind = {type_e0:String}"), "expected relationship_kind: {}", result.sql);
+        assert!(
+            result
+                .sql
+                .contains("e0.relationship_kind = {type_e0:String}"),
+            "expected relationship_kind: {}",
+            result.sql
+        );
         // Node tables don't have type filters (entity-specific tables)
-        assert!(!result.sql.contains("n.label"), "node should not have type filter: {}", result.sql);
+        assert!(
+            !result.sql.contains("n.label"),
+            "node should not have type filter: {}",
+            result.sql
+        );
         assert!(result.sql.contains("LIMIT 25"));
         assert_eq!(
             result.params.get("type_e0"),
