@@ -83,7 +83,15 @@ mod tests {
         Ontology::new()
             .with_nodes(["User", "Project", "Note", "Group"])
             .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
-            .with_fields("User", [("username", String), ("email", String), ("state", String), ("created_at", DateTime)])
+            .with_fields(
+                "User",
+                [
+                    ("username", String),
+                    ("email", String),
+                    ("state", String),
+                    ("created_at", DateTime),
+                ],
+            )
             .with_fields("Project", [("name", String)])
             .with_fields("Note", [("confidential", Bool), ("created_at", DateTime)])
     }

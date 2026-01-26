@@ -363,9 +363,8 @@ impl Ontology {
     ///
     /// Returns an error if the base schema is invalid JSON or missing required sections.
     pub fn derive_json_schema(&self, base_schema_json: &str) -> Result<Value, OntologyError> {
-        let mut schema: Value = serde_json::from_str(base_schema_json).map_err(|e| {
-            OntologyError::Validation(format!("failed to parse base schema: {e}"))
-        })?;
+        let mut schema: Value = serde_json::from_str(base_schema_json)
+            .map_err(|e| OntologyError::Validation(format!("failed to parse base schema: {e}")))?;
 
         let defs = schema
             .get_mut("$defs")
