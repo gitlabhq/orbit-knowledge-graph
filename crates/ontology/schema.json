@@ -1,0 +1,731 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://gitlab.com/gitlab-org/knowledge-graph/gkg-service",
+    "title": "GraphQueryAsJSON",
+    "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
+    "type": "object",
+    "required": ["query_type", "nodes"],
+    "properties": {
+      "query_type": {
+        "$ref": "#/$defs/QueryType"
+      },
+      "nodes": {
+        "type": "array",
+        "description": "Nodes to match in the query. At least one node is required.",
+        "minItems": 1,
+        "items": {
+          "$ref": "#/$defs/NodeSelector"
+        }
+      },
+      "relationships": {
+        "type": "array",
+        "description": "Relationships between nodes to traverse",
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RelationshipSelector"
+        }
+      },
+      "aggregations": {
+        "type": "array",
+        "description": "Aggregation functions to apply. Required when query_type is 'aggregation'.",
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Aggregation"
+        }
+      },
+      "path": {
+        "$ref": "#/$defs/PathConfig",
+        "description": "Path finding configuration. Required when query_type is 'path_finding'."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of results to return",
+        "minimum": 1,
+        "maximum": 30,
+        "default": 30
+      },
+      "order_by": {
+        "$ref": "#/$defs/OrderBy",
+        "description": "Result ordering specification"
+      },
+      "aggregation_sort": {
+        "$ref": "#/$defs/AggregationSort",
+        "description": "Ordering for aggregation outputs"
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "query_type": { "const": "aggregation" }
+          }
+        },
+        "then": {
+          "required": ["aggregations"],
+          "properties": {
+            "aggregations": {
+              "minItems": 1
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "query_type": { "const": "path_finding" }
+          }
+        },
+        "then": {
+          "required": ["path"]
+        }
+      }
+    ],
+    "$defs": {
+      "QueryType": {
+        "type": "string",
+        "description": "Type of graph query to execute",
+        "enum": ["traversal", "aggregation", "path_finding", "pattern"]
+      },
+      "NodeLabel": {
+        "type": "string",
+        "description": "Valid node labels corresponding to GitLab entity types",
+        "enum": []
+      },
+      "NodeProperties": {
+        "type": "object",
+        "description": "Property definitions per node label. Populated dynamically from ontology.",
+        "additionalProperties": {
+          "type": "object",
+          "description": "Properties available for a specific node label. Keys are property names, values are property schemas.",
+          "additionalProperties": {
+            "type": "object",
+            "description": "Schema for a single property",
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "JSON Schema type of the property",
+                "enum": ["string", "integer", "number", "boolean", "array", "object", "null"]
+              },
+              "description": {
+                "type": "string",
+                "description": "Human-readable description of the property"
+              },
+              "format": {
+                "type": "string",
+                "description": "Optional format hint (e.g., 'date-time', 'email', 'uri')"
+              },
+              "items": {
+                "type": "object",
+                "description": "For array types, describes the items"
+              }
+            }
+          }
+        }
+      },
+      "NodeSelector": {
+        "type": "object",
+        "description": "Selector for matching nodes in the graph",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Variable identifier for this node (e.g., 'i', 'mr', 'user'). Used to reference this node in relationships and aggregations.",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "label": {
+            "$ref": "#/$defs/NodeLabel",
+            "description": "Label/type of the node. Strongly recommended for query optimization."
+          },
+          "filters": {
+            "type": "object",
+            "description": "Property filters. Keys are property names, values are Filter objects.",
+            "additionalProperties": {
+              "$ref": "#/$defs/Filter"
+            },
+            "default": {}
+          },
+          "node_ids": {
+            "type": "array",
+            "description": "Specific node IDs to filter by",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1
+          },
+          "id_range": {
+            "$ref": "#/$defs/IdRange",
+            "description": "ID range filter (inclusive)"
+          },
+          "id_property": {
+            "type": "string",
+            "description": "Which property to use as ID (default: 'id')",
+            "default": "id"
+          }
+        }
+      },
+      "IdRange": {
+        "type": "object",
+        "description": "Inclusive ID range filter",
+        "required": ["start", "end"],
+        "properties": {
+          "start": {
+            "type": "integer",
+            "description": "Start of ID range (inclusive)"
+          },
+          "end": {
+            "type": "integer",
+            "description": "End of ID range (inclusive)"
+          }
+        }
+      },
+      "Filter": {
+        "description": "Property filter - supports both simple equality and advanced operators",
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FilterValue",
+            "description": "Simple equality filter (backward compatible)"
+          },
+          {
+            "$ref": "#/$defs/PropertyFilter",
+            "description": "Advanced operator-based filter"
+          }
+        ]
+      },
+      "FilterValue": {
+        "description": "A filter value - can be integer, string, boolean, or list",
+        "oneOf": [
+          {
+            "type": "integer",
+            "description": "Integer value"
+          },
+          {
+            "type": "string",
+            "description": "String value"
+          },
+          {
+            "type": "boolean",
+            "description": "Boolean value"
+          },
+          {
+            "type": "array",
+            "description": "List of values",
+            "items": {
+              "$ref": "#/$defs/FilterValue"
+            }
+          }
+        ]
+      },
+      "PropertyFilter": {
+        "type": "object",
+        "description": "Advanced filter with operator",
+        "required": ["op"],
+        "oneOf": [
+          {
+            "properties": {
+              "op": { "const": "eq" },
+              "value": { "$ref": "#/$defs/FilterValue" }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "gt" },
+              "value": { "$ref": "#/$defs/FilterValue" }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "lt" },
+              "value": { "$ref": "#/$defs/FilterValue" }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "gte" },
+              "value": { "$ref": "#/$defs/FilterValue" }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "lte" },
+              "value": { "$ref": "#/$defs/FilterValue" }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "in" },
+              "value": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/FilterValue" },
+                "minItems": 1
+              }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "contains" },
+              "value": { "type": "string" }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "starts_with" },
+              "value": { "type": "string" }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "ends_with" },
+              "value": { "type": "string" }
+            },
+            "required": ["op", "value"]
+          },
+          {
+            "properties": {
+              "op": { "const": "is_null" }
+            },
+            "required": ["op"]
+          },
+          {
+            "properties": {
+              "op": { "const": "is_not_null" }
+            },
+            "required": ["op"]
+          }
+        ]
+      },
+      "RelationshipSelector": {
+        "type": "object",
+        "description": "Selector for relationship traversal between nodes",
+        "required": ["type", "from", "to"],
+        "properties": {
+          "type": {
+            "$ref": "#/$defs/RelationshipType",
+            "description": "Relationship type(s) to traverse"
+          },
+          "from": {
+            "type": "string",
+            "description": "Source node variable ID (must match a node's id field)",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "description": "Target node variable ID (must match a node's id field)",
+            "minLength": 1
+          },
+          "min_hops": {
+            "type": "integer",
+            "description": "Minimum number of relationship hops",
+            "minimum": 0,
+            "maximum": 3,
+            "default": 1
+          },
+          "max_hops": {
+            "type": "integer",
+            "description": "Maximum number of relationship hops. SECURITY: Limited to 3 to prevent resource exhaustion.",
+            "minimum": 1,
+            "maximum": 3,
+            "default": 1
+          },
+          "direction": {
+            "$ref": "#/$defs/Direction",
+            "description": "Direction to traverse the relationship",
+            "default": "outgoing"
+          },
+          "filters": {
+            "type": "object",
+            "description": "Filters on relationship properties",
+            "additionalProperties": {
+              "$ref": "#/$defs/Filter"
+            },
+            "default": {}
+          }
+        }
+      },
+      "RelationshipType": {
+        "description": "Relationship type specification - single, multiple, or wildcard",
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Single relationship type",
+            "$ref": "#/$defs/RelationshipTypeName"
+          },
+          {
+            "type": "array",
+            "description": "Multiple relationship types (UNION ALL)",
+            "items": {
+              "$ref": "#/$defs/RelationshipTypeName"
+            },
+            "minItems": 1
+          }
+        ]
+      },
+      "RelationshipTypeName": {
+        "type": "string",
+        "description": "Valid relationship type names",
+        "enum": []
+      },
+      "Direction": {
+        "type": "string",
+        "description": "Direction to traverse relationships. 'outgoing' follows from_table → to_table, 'incoming' reverses it.",
+        "enum": ["outgoing", "incoming", "both"],
+        "default": "outgoing"
+      },
+      "Aggregation": {
+        "type": "object",
+        "description": "Aggregation function specification",
+        "required": ["function"],
+        "properties": {
+          "function": {
+            "$ref": "#/$defs/AggFunction",
+            "description": "Aggregation function to apply"
+          },
+          "target": {
+            "type": "string",
+            "description": "Node variable to aggregate over. If omitted, aggregates all matching nodes.",
+            "minLength": 1
+          },
+          "group_by": {
+            "type": "string",
+            "description": "Node variable to group by. If omitted, no grouping is applied.",
+            "minLength": 1
+          },
+          "property": {
+            "type": "string",
+            "description": "Property to aggregate. Required for sum, avg, min, max functions.",
+            "minLength": 1
+          },
+          "alias": {
+            "type": "string",
+            "description": "Output column alias for the aggregation result",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "function": { "enum": ["sum", "avg", "min", "max"] }
+              }
+            },
+            "then": {
+              "required": ["property"]
+            }
+          }
+        ]
+      },
+      "AggFunction": {
+        "type": "string",
+        "description": "Available aggregation functions",
+        "enum": ["count", "sum", "avg", "min", "max", "collect"]
+      },
+      "PathConfig": {
+        "type": "object",
+        "description": "Configuration for path finding queries",
+        "required": ["type", "from", "to", "max_depth"],
+        "properties": {
+          "type": {
+            "$ref": "#/$defs/PathType",
+            "description": "Type of path finding algorithm"
+          },
+          "from": {
+            "type": "string",
+            "description": "Source node variable ID",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "description": "Target node variable ID",
+            "minLength": 1
+          },
+          "max_depth": {
+            "type": "integer",
+            "description": "Maximum path length (number of hops). SECURITY: Maximum 3 enforced.",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "rel_types": {
+            "type": "array",
+            "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
+            "items": {
+              "$ref": "#/$defs/RelationshipTypeName"
+            }
+          }
+        }
+      },
+      "PathType": {
+        "type": "string",
+        "description": "Path finding algorithm type",
+        "enum": ["shortest", "all_shortest", "any"]
+      },
+      "OrderBy": {
+        "type": "object",
+        "description": "Result ordering specification",
+        "required": ["node", "property"],
+        "properties": {
+          "node": {
+            "type": "string",
+            "description": "Node variable to order by",
+            "minLength": 1
+          },
+          "property": {
+            "type": "string",
+            "description": "Property name to order by",
+            "minLength": 1
+          },
+          "direction": {
+            "$ref": "#/$defs/OrderDirection",
+            "description": "Sort direction",
+            "default": "ASC"
+          }
+        }
+      },
+      "AggregationSort": {
+        "type": "object",
+        "description": "Ordering for aggregation outputs",
+        "required": ["agg_index"],
+        "properties": {
+          "agg_index": {
+            "type": "integer",
+            "description": "Index of the aggregation in the aggregations array (0-based)",
+            "minimum": 0
+          },
+          "direction": {
+            "$ref": "#/$defs/OrderDirection",
+            "description": "Sort direction",
+            "default": "ASC"
+          }
+        }
+      },
+      "OrderDirection": {
+        "type": "string",
+        "description": "Sort direction",
+        "enum": ["ASC", "DESC"],
+        "default": "ASC"
+      }
+    },
+    "examples": [
+      {
+        "title": "Simple Traversal - Find open issues in projects",
+        "value": {
+          "query_type": "traversal",
+          "nodes": [
+            {
+              "id": "i",
+              "label": "Issue",
+              "filters": {
+                "state": "opened"
+              }
+            },
+            {
+              "id": "p",
+              "label": "Project"
+            }
+          ],
+          "relationships": [
+            {
+              "type": "ISSUE_IN_PROJECT",
+              "from": "i",
+              "to": "p"
+            }
+          ],
+          "limit": 25,
+          "order_by": {
+            "node": "i",
+            "property": "created_at",
+            "direction": "DESC"
+          }
+        }
+      },
+      {
+        "title": "Aggregation - Count issues per project",
+        "value": {
+          "query_type": "aggregation",
+          "nodes": [
+            {
+              "id": "i",
+              "label": "Issue"
+            },
+            {
+              "id": "p",
+              "label": "Project"
+            }
+          ],
+          "relationships": [
+            {
+              "type": "ISSUE_IN_PROJECT",
+              "from": "i",
+              "to": "p"
+            }
+          ],
+          "aggregations": [
+            {
+              "function": "count",
+              "target": "i",
+              "group_by": "p",
+              "alias": "issue_count"
+            }
+          ],
+          "aggregation_sort": {
+            "agg_index": 0,
+            "direction": "DESC"
+          },
+          "limit": 10
+        }
+      },
+      {
+        "title": "Path Finding - Shortest path between two issues",
+        "value": {
+          "query_type": "path_finding",
+          "nodes": [
+            {
+              "id": "start",
+              "label": "Issue",
+              "node_ids": [100]
+            },
+            {
+              "id": "end",
+              "label": "Issue",
+              "node_ids": [200]
+            }
+          ],
+          "relationships": [],
+          "path": {
+            "type": "shortest",
+            "from": "start",
+            "to": "end",
+            "max_depth": 3
+          }
+        }
+      },
+      {
+        "title": "Variable-Length Traversal - Find transitively blocked issues",
+        "value": {
+          "query_type": "traversal",
+          "nodes": [
+            {
+              "id": "start",
+              "label": "Issue",
+              "node_ids": [100]
+            },
+            {
+              "id": "blocked",
+              "label": "Issue"
+            }
+          ],
+          "relationships": [
+            {
+              "type": "BLOCKS",
+              "from": "start",
+              "to": "blocked",
+              "min_hops": 1,
+              "max_hops": 3
+            }
+          ],
+          "limit": 20
+        }
+      },
+      {
+        "title": "Advanced Filters - Issues created after date with state filter",
+        "value": {
+          "query_type": "traversal",
+          "nodes": [
+            {
+              "id": "i",
+              "label": "Issue",
+              "filters": {
+                "created_at": {
+                  "op": "gte",
+                  "value": "2024-01-01"
+                },
+                "state": {
+                  "op": "in",
+                  "value": ["opened", "reopened"]
+                },
+                "title": {
+                  "op": "contains",
+                  "value": "bug"
+                }
+              }
+            }
+          ],
+          "relationships": [],
+          "limit": 30
+        }
+      },
+      {
+        "title": "Multi-Relationship Union - Find issues with any link type",
+        "value": {
+          "query_type": "traversal",
+          "nodes": [
+            {
+              "id": "source",
+              "label": "Issue",
+              "node_ids": [42]
+            },
+            {
+              "id": "related",
+              "label": "Issue"
+            }
+          ],
+          "relationships": [
+            {
+              "type": ["BLOCKS", "RELATES_TO"],
+              "from": "source",
+              "to": "related",
+              "direction": "both"
+            }
+          ],
+          "limit": 30
+        }
+      },
+      {
+        "title": "Collect Aggregation - Get list of usernames per project",
+        "value": {
+          "query_type": "aggregation",
+          "nodes": [
+            {
+              "id": "u",
+              "label": "User"
+            },
+            {
+              "id": "p",
+              "label": "Project"
+            }
+          ],
+          "relationships": [
+            {
+              "type": "PROJECT_MEMBER",
+              "from": "u",
+              "to": "p"
+            }
+          ],
+          "aggregations": [
+            {
+              "function": "collect",
+              "target": "u",
+              "property": "username",
+              "group_by": "p",
+              "alias": "members"
+            },
+            {
+              "function": "count",
+              "target": "u",
+              "group_by": "p",
+              "alias": "member_count"
+            }
+          ],
+          "limit": 10
+        }
+      }
+    ]
+}
