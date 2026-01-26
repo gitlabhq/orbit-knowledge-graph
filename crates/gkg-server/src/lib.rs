@@ -1,3 +1,4 @@
+pub mod indexer;
 pub mod webserver;
 
 mod config;
