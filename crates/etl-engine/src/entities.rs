@@ -21,14 +21,14 @@ pub enum Entity {
     Edge {
         /// The field containing the source node identifier.
         source: String,
-        /// The type of the source node.
-        source_type: String,
+        /// The kind of the source node.
+        source_kind: String,
         /// The name of the relationship.
-        relationship_type: String,
+        relationship_kind: String,
         /// The field containing the target node identifier.
         target: String,
-        /// The type of the target node.
-        target_type: String,
+        /// The kind of the target node.
+        target_kind: String,
     },
 }
 
@@ -50,9 +50,9 @@ pub struct Field {
 pub enum DataType {
     /// A UTF-8 string.
     String,
-    /// A 32-bit signed integer.
+    /// A 64-bit signed integer.
     Int,
-    /// A 32-bit floating point number.
+    /// A 64-bit floating point number.
     Float,
     /// A boolean value.
     Bool,
@@ -68,9 +68,9 @@ pub enum DefaultValue {
     /// A string default value.
     String(String),
     /// An integer default value.
-    Int(i32),
+    Int(i64),
     /// A float default value.
-    Float(f32),
+    Float(f64),
     /// A boolean default value.
     Bool(bool),
     /// The current timestamp.

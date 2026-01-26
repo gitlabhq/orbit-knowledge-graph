@@ -6,4 +6,6 @@ ignore = [
     # Transitive dev dependencies from testcontainers - no safe upgrade available
     "RUSTSEC-2025-0134", # rustls-pemfile unmaintained
     "RUSTSEC-2025-0111", # tokio-tar vulnerability (dev-only)
+    # jsonwebtoken pulls in rsa crate, but we ONLY use HS256 (HMAC). See #17.
+    "RUSTSEC-2023-0071",
 ]

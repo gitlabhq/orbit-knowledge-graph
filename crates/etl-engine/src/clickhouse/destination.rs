@@ -80,10 +80,10 @@ mod tests {
     fn test_extract_table_name_from_edge() {
         let entity = Entity::Edge {
             source: "user_id".to_string(),
-            source_type: "User".to_string(),
-            relationship_type: "user_follows".to_string(),
+            source_kind: "User".to_string(),
+            relationship_kind: "user_follows".to_string(),
             target: "follows_id".to_string(),
-            target_type: "User".to_string(),
+            target_kind: "User".to_string(),
         };
 
         assert_eq!(ClickHouseDestination::extract_table_name(&entity), "edges");
