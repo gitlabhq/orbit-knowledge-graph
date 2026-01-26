@@ -41,6 +41,17 @@ The Knowledge Graph builds a property graph from GitLab data and exposes it thro
 
 ## Crates
 
+### etl-engine
+
+Message processing framework for the Knowledge Graph. Consumes events from NATS JetStream, routes them through handlers, and writes to destinations:
+
+- Handler and Module traits for message processing
+- Two-level concurrency control (global + per-module)
+- BatchWriter and StreamWriter destination abstractions
+- Comprehensive test utilities in `testkit/`
+
+Integration tests require Docker for NATS testcontainers.
+
 ### gitaly-client
 
 Rust gRPC client for Gitaly. Provides repository operations for the code indexer:
