@@ -98,7 +98,9 @@ impl Generator {
         let pb = ProgressBar::new(self.config.num_organizations as u64);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} organizations ({msg})")
+                .template(
+                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} organizations ({msg})",
+                )
                 .unwrap()
                 .progress_chars("##-"),
         );
@@ -132,7 +134,10 @@ impl Generator {
     pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
         let mut data = OrganizationData::default();
         let mut id_map: HashMap<String, Vec<i64>> = HashMap::new();
-        let traversal_gen = self.traversal_ids.get(&org_id).expect("traversal IDs exist");
+        let traversal_gen = self
+            .traversal_ids
+            .get(&org_id)
+            .expect("traversal IDs exist");
 
         // Phase 1: Generate all nodes from ontology
         for node in self.ontology.nodes() {

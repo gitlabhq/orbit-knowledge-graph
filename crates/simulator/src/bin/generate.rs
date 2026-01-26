@@ -2,7 +2,7 @@
 //!
 //! All data generation is driven by the ontology - no hardcoded entity types.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Parser;
 use ontology::Ontology;
 use simulator::{Config, Generator};
@@ -85,7 +85,12 @@ fn validate_node_counts(ontology: &Ontology, node_counts: &HashMap<String, usize
             let hint = if suggestions.is_empty() {
                 format!(
                     "Available types: {}",
-                    valid_types.iter().take(10).copied().collect::<Vec<_>>().join(", ")
+                    valid_types
+                        .iter()
+                        .take(10)
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             } else {
                 format!("Did you mean: {}?", suggestions.join(", "))

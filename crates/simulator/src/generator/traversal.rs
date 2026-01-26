@@ -82,7 +82,9 @@ fn generate_hierarchy(org_id: u32, count: usize, max_depth: usize) -> Vec<String
             let children_per_level = if levels_needed == 1 {
                 target_count.min(remaining_slots)
             } else {
-                (target_count as f64).powf(1.0 / levels_needed as f64).ceil() as usize
+                (target_count as f64)
+                    .powf(1.0 / levels_needed as f64)
+                    .ceil() as usize
             };
 
             // Generate sequential IDs using recursive approach
