@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Import relationships in source code.
+variants:
+  - from_node: { type: File, id: id }
+    to_node: { type: ImportedSymbol, id: id }
+    meaning: "File contains an import statement."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, relationship: FILE_IMPORTS, from_table: FileNode, to_table: ImportedSymbolNode },
+        ]
+  - from_node: { type: ImportedSymbol, id: id }
+    to_node: { type: Definition, id: id }
+    meaning: "Imported symbol resolves to a definition."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, relationship: IMPORTED_SYMBOL_TO_DEFINITION, from_table: ImportedSymbolNode, to_table: DefinitionNode },
+        ]
+  - from_node: { type: ImportedSymbol, id: id }
+    to_node: { type: ImportedSymbol, id: id }
+    meaning: "Imported symbol references another imported symbol (re-exports)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, relationship: IMPORTED_SYMBOL_TO_IMPORTED_SYMBOL, from_table: ImportedSymbolNode, to_table: ImportedSymbolNode },
+        ]
+  - from_node: { type: ImportedSymbol, id: id }
+    to_node: { type: File, id: id }
+    meaning: "Imported symbol references a file (module import)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, relationship: IMPORTED_SYMBOL_TO_FILE, from_table: ImportedSymbolNode, to_table: FileNode },
+        ]

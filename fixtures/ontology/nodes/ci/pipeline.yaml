@@ -1,0 +1,207 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: ci
+description: A CI/CD pipeline that runs a series of stages and jobs to build, test, and deploy code.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the pipeline."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: id },
+          { system: clickhouse, table: null },
+        ]
+  iid:
+    type: int64
+    nullable: true
+    description: "Project-scoped pipeline number."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: iid },
+          { system: clickhouse, table: null },
+        ]
+  sha:
+    type: string
+    nullable: true
+    description: "Git commit SHA that the pipeline runs against."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: sha },
+          { system: clickhouse, table: null },
+        ]
+  ref:
+    type: string
+    nullable: true
+    description: "Branch or tag name the pipeline runs for."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: ref },
+          { system: clickhouse, table: null },
+        ]
+  status:
+    type: enum
+    values:
+      [
+        created,
+        pending,
+        running,
+        success,
+        failed,
+        canceled,
+        skipped,
+        manual,
+        scheduled,
+        preparing,
+        waiting_for_resource,
+        waiting_for_callback,
+        canceling,
+      ]
+    description: "Current execution status of the pipeline."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: ci,
+            table: p_ci_pipelines,
+            column: status,
+            column_type: varchar,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/ci/has_status.rb, class: "Ci::HasStatus" },
+        ]
+  source:
+    type: enum
+    values:
+      [
+        unknown,
+        push,
+        web,
+        trigger,
+        schedule,
+        api,
+        external,
+        pipeline,
+        chat,
+        webide,
+        merge_request_event,
+        external_pull_request_event,
+        parent_pipeline,
+        ondemand_dast_scan,
+        ondemand_dast_validation,
+        security_orchestration_policy,
+        container_registry_push,
+        duo_workflow,
+        pipeline_execution_policy_schedule,
+      ]
+    description: "What triggered the pipeline (push, merge request, schedule, etc.)."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: ci,
+            table: p_ci_pipelines,
+            column: source,
+            column_type: integer,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/enums/ci/pipeline.rb, class: "Enums::Ci::Pipeline" },
+        ]
+  tag:
+    type: boolean
+    description: "Whether this pipeline runs on a git tag."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: tag },
+          { system: clickhouse, table: null },
+        ]
+  duration:
+    type: int64
+    nullable: true
+    description: "Total duration of the pipeline in seconds."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: duration },
+          { system: clickhouse, table: null },
+        ]
+  failure_reason:
+    type: enum
+    nullable: true
+    values:
+      [
+        unknown_failure,
+        config_error,
+        external_validation_failure,
+        user_not_verified,
+        size_limit_exceeded,
+        job_activity_limit_exceeded,
+        deployments_limit_exceeded,
+        project_deleted,
+        filtered_by_rules,
+        filtered_by_workflow_rules,
+        composite_identity_forbidden,
+        pipeline_ref_creation_failure,
+      ]
+    description: "Reason the pipeline failed, if applicable."
+    status: pending
+    internal:
+      sources:
+        [
+          {
+            system: postgres,
+            database: ci,
+            table: p_ci_pipelines,
+            column: failure_reason,
+            column_type: integer,
+          },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/enums/ci/pipeline.rb, class: "Enums::Ci::Pipeline" },
+        ]
+  created_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the pipeline was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  started_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the pipeline started executing."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: started_at },
+          { system: clickhouse, table: null },
+        ]
+  finished_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the pipeline finished executing."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, column: finished_at },
+          { system: clickhouse, table: null },
+        ]

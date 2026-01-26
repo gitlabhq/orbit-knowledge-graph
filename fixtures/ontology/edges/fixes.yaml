@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Merge request fixes a vulnerability.
+variants:
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Vulnerability, id: id }
+    meaning: "Merge request fixes vulnerability."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_merge_request_links, from_column: merge_request_id, to_column: vulnerability_id },
+          { system: clickhouse, table: null },
+        ]

@@ -17,9 +17,68 @@ domains:
       Group: nodes/core/group.yaml
       Project: nodes/core/project.yaml
       Note: nodes/core/note.yaml
+  code_review:
+    description: "Entities related to code review and merge requests."
+    nodes:
+      MergeRequest: nodes/code_review/merge_request.yaml
+      MergeRequestFile: nodes/code_review/merge_request_file.yaml
+  ci:
+    description: "Entities related to CI/CD pipelines, stages, and jobs."
+    nodes:
+      Pipeline: nodes/ci/pipeline.yaml
+      Stage: nodes/ci/stage.yaml
+      Job: nodes/ci/job.yaml
+  security:
+    description: "Entities related to security vulnerabilities and findings."
+    nodes:
+      Vulnerability: nodes/security/vulnerability.yaml
+      Finding: nodes/security/finding.yaml
+      Scanner: nodes/security/scanner.yaml
+      VulnerabilityIdentifier: nodes/security/identifier.yaml
+  plan:
+    description: "Entities related to planning, tracking, and organizing work."
+    nodes:
+      WorkItem: nodes/plan/work_item.yaml
+      Milestone: nodes/plan/milestone.yaml
+      Label: nodes/plan/label.yaml
+  source_code:
+    description: "Entities related to source code structure, definitions, and imports."
+    nodes:
+      Branch: nodes/source_code/branch.yaml
+      Directory: nodes/source_code/directory.yaml
+      File: nodes/source_code/file.yaml
+      Definition: nodes/source_code/definition.yaml
+      ImportedSymbol: nodes/source_code/imported_symbol.yaml
 edges:
   CONTAINS: edges/contains.yaml
   MEMBER_OF: edges/member_of.yaml
   CREATOR: edges/creator.yaml
   OWNER: edges/owner.yaml
   AUTHORED: edges/authored.yaml
+  IN_PROJECT: edges/in_project.yaml
+  REVIEWER: edges/reviewer.yaml
+  ASSIGNED: edges/assigned.yaml
+  MERGED_BY: edges/merged_by.yaml
+  HAS_FILE: edges/has_file.yaml
+  HAS_STAGE: edges/has_stage.yaml
+  HAS_JOB: edges/has_job.yaml
+  TRIGGERED: edges/triggered.yaml
+  HAS_FINDING: edges/has_finding.yaml
+  DETECTED_BY: edges/detected_by.yaml
+  HAS_IDENTIFIER: edges/has_identifier.yaml
+  DETECTED_IN: edges/detected_in.yaml
+  RESOLVED_BY: edges/resolved_by.yaml
+  CONFIRMED_BY: edges/confirmed_by.yaml
+  DISMISSED_BY: edges/dismissed_by.yaml
+  FIXES: edges/fixes.yaml
+  IN_GROUP: edges/in_group.yaml
+  IN_MILESTONE: edges/in_milestone.yaml
+  HAS_LABEL: edges/has_label.yaml
+  RELATED_TO: edges/related_to.yaml
+  CLOSES: edges/closes.yaml
+  HAS_NOTE: edges/has_note.yaml
+  DEFINES: edges/defines.yaml
+  IMPORTS: edges/imports.yaml
+  TARGETS: edges/targets.yaml
+  FROM_BRANCH: edges/from_branch.yaml
+  ON_BRANCH: edges/on_branch.yaml

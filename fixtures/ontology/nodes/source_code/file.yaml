@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: source_code
+description: A source code file within a repository.
+properties:
+  id:
+    type: int64
+    description: "Internal identifier for the file node."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: FileNode, column: id },
+        ]
+  path:
+    type: string
+    description: "Relative path of the file within the repository."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: FileNode, column: path },
+        ]
+  name:
+    type: string
+    description: "Name of the file including extension."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: FileNode, column: name },
+        ]
+  language:
+    type: string
+    nullable: true
+    description: "Programming language of the file (e.g., ruby, python, java)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: FileNode, column: language },
+        ]
+  extension:
+    type: string
+    nullable: true
+    description: "File extension (e.g., rb, py, java)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: FileNode, column: extension },
+        ]
+additional_properties:
+  absolute_path:
+    type: string
+    nullable: true
+    description: "Absolute path of the file on the filesystem."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: FileNode, column: absolute_path },
+        ]
+  repository_name:
+    type: string
+    nullable: true
+    description: "Name of the repository this file belongs to."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: code_indexer, table: FileNode, column: repository_name },
+        ]

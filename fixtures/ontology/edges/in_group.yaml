@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Entity belongs to a group.
+variants:
+  - from_node: { type: Milestone, id: id }
+    to_node: { type: Group, id: id }
+    meaning: "Milestone belongs to group."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: milestones, from_column: id, to_column: group_id },
+          { system: clickhouse, table: null },
+        ]
+  - from_node: { type: Label, id: id }
+    to_node: { type: Group, id: id }
+    meaning: "Label belongs to group."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: labels, from_column: id, to_column: group_id },
+          { system: clickhouse, table: null },
+        ]

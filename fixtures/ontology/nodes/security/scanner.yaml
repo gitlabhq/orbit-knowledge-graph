@@ -1,0 +1,66 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: security
+description: A security scanner that detects vulnerabilities in projects.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the scanner."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_scanners, column: id },
+          { system: clickhouse, table: null },
+        ]
+  external_id:
+    type: string
+    description: "External identifier for the scanner (e.g., gemnasium, bandit)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_scanners, column: external_id },
+          { system: clickhouse, table: null },
+        ]
+  name:
+    type: string
+    description: "Human-readable name of the scanner."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_scanners, column: name },
+          { system: clickhouse, table: null },
+        ]
+  vendor:
+    type: string
+    description: "Vendor that provides the scanner (default: GitLab)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_scanners, column: vendor },
+          { system: clickhouse, table: null },
+        ]
+additional_properties:
+  created_at:
+    type: timestamp
+    description: "Timestamp when the scanner was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_scanners, column: created_at },
+          { system: clickhouse, table: null },
+        ]
+  updated_at:
+    type: timestamp
+    description: "Timestamp when the scanner was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: vulnerability_scanners, column: updated_at },
+          { system: clickhouse, table: null },
+        ]

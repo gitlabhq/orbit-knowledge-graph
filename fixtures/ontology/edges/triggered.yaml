@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../ontology.schema.json
+type: edge
+description: Trigger relationship between entities.
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Pipeline, id: id }
+    meaning: "User triggered pipeline."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, from_column: user_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Pipeline, id: id }
+    meaning: "Merge request triggered pipeline."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: ci, table: p_ci_pipelines, from_column: merge_request_id, to_column: id },
+          { system: clickhouse, table: null },
+        ]
