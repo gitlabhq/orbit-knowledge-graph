@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=ontology.schema.json
+type: main
+schema_version: 0.1
+description: >
+  User and AI facing GitLab Knowledge Graph schema (nouns = nodes, verbs = edges).
+  Notes:
+  - This schema is a property graph representation of the GitLab and Code Graph entities.
+  - This schema is not intended to be a 1:1 mapping of GitLab database tables.
+  - This schema is intended to exposed to the LLM for understanding the Knowledge Graph
+  data model (ontology) and to help generate queries via the Knowledge Graph DSL (LLM Cypher JSON).
+  
+domains:
+  core:
+    description: "Entities which represent the structure of a GitLab instance."
+    nodes:
+      User: nodes/core/user.yaml
+      Group: nodes/core/group.yaml
+      Project: nodes/core/project.yaml
+      Note: nodes/core/note.yaml
+edges:
+  CONTAINS: edges/contains.yaml
+  MEMBER_OF: edges/member_of.yaml
+  CREATOR: edges/creator.yaml
+  OWNER: edges/owner.yaml
+  AUTHORED: edges/authored.yaml

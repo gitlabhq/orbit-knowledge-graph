@@ -1,0 +1,115 @@
+# yaml-language-server: $schema=../../ontology.schema.json
+type: node
+domain: core
+description: A GitLab project/repository.
+properties:
+  id:
+    type: int64
+    description: "Global identifier for the project."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: id },
+          { system: clickhouse, table: siphon_projects, column: id },
+        ]
+  full_path:
+    type: string
+    nullable: true
+    description: "Full path for the project (e.g. gitlab-org/gitlab)."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: routes, column: path },
+          { system: clickhouse, table: null },
+          { system: rails, file: app/models/concerns/routable.rb, class: Routable, type: derived },
+        ]
+  name:
+    type: string
+    nullable: true
+    description: "Display name."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: name },
+          { system: clickhouse, table: siphon_projects, column: name },
+        ]
+  description:
+    type: string
+    nullable: true
+    description: "Project description."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: description },
+          { system: clickhouse, table: siphon_projects, column: description },
+        ]
+additional_properties:
+  created_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the project was created."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: created_at },
+          { system: clickhouse, table: siphon_projects, column: created_at },
+        ]
+  updated_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp when the project was last updated."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: updated_at },
+          { system: clickhouse, table: siphon_projects, column: updated_at },
+        ]
+  visibility_level:
+    type: enum
+    values: [private, internal, public]
+    description: "Visibility of the project."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: visibility_level, column_type: integer },
+          { system: clickhouse, table: siphon_projects, column: visibility_level, column_type: Int64 },
+          { system: rails, file: lib/gitlab/visibility_level.rb, class: VisibilityLevel },
+        ]
+  archived:
+    type: boolean
+    description: "Whether the project is archived."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: archived },
+          { system: clickhouse, table: siphon_projects, column: archived },
+        ]
+  star_count:
+    type: int64
+    description: "Star count for the project."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: star_count, column_type: integer },
+          { system: clickhouse, table: siphon_projects, column: star_count },
+        ]
+  last_activity_at:
+    type: timestamp
+    nullable: true
+    description: "Timestamp of last activity in the project."
+    status: pending
+    internal:
+      sources:
+        [
+          { system: postgres, database: main, table: projects, column: last_activity_at },
+          { system: clickhouse, table: siphon_projects, column: last_activity_at },
+        ]
