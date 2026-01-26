@@ -54,32 +54,27 @@ pub use schema::Schema;
 /// Compile a JSON query into parameterized SQL.
 ///
 /// This is the main entry point for the query engine. It:
-/// 1. Parses the JSON input
-/// 2. Validates against the schema
-/// 3. Lowers to an AST
-/// 4. Generates parameterized SQL
+/// 1. Parses the JSON input (with identifier validation)
+/// 2. Lowers to an AST (validates against ontology schema)
+/// 3. Generates parameterized SQL
+#[must_use = "the compiled query should be used"]
 pub fn compile(json_input: &str, schema: &Schema) -> Result<ParameterizedQuery> {
-    // Parse JSON into Input struct
+    // Parse JSON into Input struct (validates identifiers during deserialization)
     let input = parse_input(json_input)?;
 
-    // Validate the parsed input (basic structure validation)
-    let json_value: serde_json::Value = serde_json::from_str(json_input)?;
-    schema.validate_json(&json_value)?;
-
-    // Lower to AST
+    // Lower to AST (validates node labels, relationship types, and columns)
     let ast = lower::lower(&input, schema)?;
 
-    // Generate SQL
-    codegen::codegen(&ast, schema)
+    // Generate SQL (no validation needed, AST is already validated)
+    codegen::codegen(&ast)
 }
 
 /// Compile JSON input and return the AST without generating SQL.
 ///
 /// Useful for debugging or when you need to manipulate the AST before codegen.
+#[must_use = "the compiled AST should be used"]
 pub fn compile_to_ast(json_input: &str, schema: &Schema) -> Result<Node> {
     let input = parse_input(json_input)?;
-    let json_value: serde_json::Value = serde_json::from_str(json_input)?;
-    schema.validate_json(&json_value)?;
     lower::lower(&input, schema)
 }
 
@@ -115,13 +110,43 @@ mod tests {
 
         // Basic assertions
         assert!(result.sql.contains("SELECT"));
-        assert!(result
-            .sql
-            .contains("INNER JOIN edges AS e0 ON (u.id = e0.from_id)"));
-        assert!(result
-            .sql
-            .contains("INNER JOIN nodes AS n ON (e0.to_id = n.id)"));
+        // Joins now include type filters in ON clause
+        assert!(
+            result.sql.contains("INNER JOIN edges AS e0 ON"),
+            "expected INNER JOIN edges: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("u.id = e0.from_id"),
+            "expected join condition: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("INNER JOIN nodes AS n ON"),
+            "expected INNER JOIN nodes: {}",
+            result.sql
+        );
+        // Type filters are now applied
+        assert!(
+            result.sql.contains("e0.label = {type_e0:String}"),
+            "expected edge type filter: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("n.label = {type_n:String}"),
+            "expected node type filter: {}",
+            result.sql
+        );
         assert!(result.sql.contains("LIMIT 25"));
+        // Verify type filter params are set
+        assert_eq!(
+            result.params.get("type_e0"),
+            Some(&serde_json::Value::String("AUTHORED".into()))
+        );
+        assert_eq!(
+            result.params.get("type_n"),
+            Some(&serde_json::Value::String("Note".into()))
+        );
     }
 
     #[test]
@@ -351,23 +376,17 @@ mod ontology_integration_tests {
     }
 
     #[test]
-    fn test_invalid_type_filter_in_codegen() {
+    fn test_invalid_type_filter_rejected() {
         let schema = load_test_ontology();
 
-        // This test creates an AST directly to test codegen validation
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan_with_filter("nodes", "n", "NonexistentType"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
-            limit: Some(10),
-        };
+        // Test that invalid node labels are rejected during lowering
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "n", "label": "NonexistentType"}],
+            "limit": 10
+        }"#;
 
-        let result = codegen::codegen(&Node::Query(Box::new(query)), &schema);
+        let result = compile(json, &schema);
         assert!(result.is_err(), "expected error for invalid type filter");
         let err = result.unwrap_err();
         assert!(

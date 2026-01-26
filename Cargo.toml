@@ -66,7 +66,7 @@ jsonschema = "0.29"
 serde_yaml = "0.9"
 
 # Gitaly client dependencies
-regex = "1.11"
+regex = "1.12.2"
 hex = "0.4"
 hmac = "0.12"
 hyper-util = { version = "0.1", features = ["client", "tokio"] }
