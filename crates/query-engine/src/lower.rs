@@ -23,7 +23,7 @@ pub fn lower(input: &Input, schema: &Schema) -> Result<Node> {
 
 /// Lower a traversal query: SELECT ... FROM nodes JOIN edges JOIN nodes ... WHERE ...
 fn lower_traversal(input: &Input, schema: &Schema) -> Result<Node> {
-    let (from, edge_aliases) = build_from(&input.nodes, &input.relationships)?;
+    let (from, edge_aliases) = build_from(&input.nodes, &input.relationships, schema)?;
     let where_clause = build_where(&input.nodes, &input.relationships, &edge_aliases, schema)?;
 
     // Build SELECT - return node IDs
@@ -62,7 +62,7 @@ fn lower_traversal(input: &Input, schema: &Schema) -> Result<Node> {
 
 /// Lower an aggregation query: SELECT agg(...) ... GROUP BY ...
 fn lower_aggregation(input: &Input, schema: &Schema) -> Result<Node> {
-    let (from, edge_aliases) = build_from(&input.nodes, &input.relationships)?;
+    let (from, edge_aliases) = build_from(&input.nodes, &input.relationships, schema)?;
     let where_clause = build_where(&input.nodes, &input.relationships, &edge_aliases, schema)?;
 
     let mut select = Vec::with_capacity(input.aggregations.len() * 2);
@@ -144,28 +144,51 @@ fn build_agg_func(agg: &InputAggregation) -> Expr {
 
 /// Lower a path finding query: WITH RECURSIVE ...
 fn lower_path_finding(input: &Input, _schema: &Schema) -> Result<Node> {
-    let path = input
-        .path
-        .as_ref()
-        .ok_or_else(|| QueryError::Lowering("path config required".into()))?;
+    let path = input.path.as_ref().ok_or_else(|| {
+        QueryError::Lowering(
+            "path_finding query requires a 'path' configuration with 'from' and 'to' nodes".into(),
+        )
+    })?;
 
     let start_node = input
         .nodes
         .iter()
         .find(|n| n.id == path.from)
-        .ok_or_else(|| QueryError::Lowering("path 'from' node not found".into()))?;
+        .ok_or_else(|| {
+            QueryError::Lowering(format!(
+                "path 'from' references node \"{}\" which is not defined in nodes",
+                path.from
+            ))
+        })?;
 
     let end_node = input
         .nodes
         .iter()
         .find(|n| n.id == path.to)
-        .ok_or_else(|| QueryError::Lowering("path 'to' node not found".into()))?;
+        .ok_or_else(|| {
+            QueryError::Lowering(format!(
+                "path 'to' references node \"{}\" which is not defined in nodes",
+                path.to
+            ))
+        })?;
 
-    // Base case: start node
-    let base_where = if !start_node.node_ids.is_empty() {
+    // Base case: start node - support multiple node IDs with IN clause
+    let base_where = if start_node.node_ids.len() == 1 {
         Some(Expr::eq(
             Expr::col("n", "id"),
             Expr::lit(start_node.node_ids[0]),
+        ))
+    } else if start_node.node_ids.len() > 1 {
+        Some(Expr::binary(
+            Op::In,
+            Expr::col("n", "id"),
+            Expr::lit(Value::Array(
+                start_node
+                    .node_ids
+                    .iter()
+                    .map(|&id| Value::from(id))
+                    .collect(),
+            )),
         ))
     } else {
         None
@@ -250,11 +273,23 @@ fn lower_path_finding(input: &Input, _schema: &Schema) -> Result<Node> {
         limit: None,
     };
 
-    // Final query
-    let final_where = if !end_node.node_ids.is_empty() {
+    // Final query - support multiple end node IDs with IN clause
+    let final_where = if end_node.node_ids.len() == 1 {
         Some(Expr::eq(
             Expr::col("path_cte", "node_id"),
             Expr::lit(end_node.node_ids[0]),
+        ))
+    } else if end_node.node_ids.len() > 1 {
+        Some(Expr::binary(
+            Op::In,
+            Expr::col("path_cte", "node_id"),
+            Expr::lit(Value::Array(
+                end_node
+                    .node_ids
+                    .iter()
+                    .map(|&id| Value::from(id))
+                    .collect(),
+            )),
         ))
     } else {
         None
@@ -294,6 +329,7 @@ fn lower_path_finding(input: &Input, _schema: &Schema) -> Result<Node> {
 fn build_from(
     nodes: &[InputNode],
     rels: &[InputRelationship],
+    schema: &Schema,
 ) -> Result<(TableRef, HashMap<usize, String>)> {
     if nodes.is_empty() {
         return Err(QueryError::Lowering("at least one node required".into()));
@@ -302,8 +338,9 @@ fn build_from(
     let mut edge_aliases = HashMap::new();
     let first_node = &nodes[0];
 
-    // Start with first node
+    // Start with first node - validate label if present
     let mut result = if let Some(ref label) = first_node.label {
+        schema.validate_type_filter(label)?;
         TableRef::scan_with_filter("nodes", &first_node.id, label)
     } else {
         TableRef::scan("nodes", &first_node.id)
@@ -314,9 +351,17 @@ fn build_from(
         let edge_alias = format!("e{i}");
         edge_aliases.insert(i, edge_alias.clone());
 
+        // Validate and set relationship type filter
         let type_filter = if rel.types.len() == 1 && rel.types[0] != "*" {
+            schema.validate_type_filter(&rel.types[0])?;
             Some(rel.types[0].clone())
         } else {
+            // Validate all relationship types even if we don't filter by them
+            for rel_type in &rel.types {
+                if rel_type != "*" {
+                    schema.validate_type_filter(rel_type)?;
+                }
+            }
             None
         };
 
@@ -350,8 +395,11 @@ fn build_from(
 
         result = TableRef::join(JoinType::Inner, result, edge_table, edge_join_cond);
 
-        // Join target node
+        // Join target node - validate label if present
         let target_label = find_node_label(nodes, &rel.to);
+        if let Some(ref label) = target_label {
+            schema.validate_type_filter(label)?;
+        }
         let target_join_cond = match rel.direction {
             Direction::Incoming => {
                 Expr::eq(Expr::col(&edge_alias, "from_id"), Expr::col(&rel.to, "id"))
@@ -518,8 +566,12 @@ mod tests {
     use super::*;
     use crate::input::parse_input;
 
-    fn empty_schema() -> Schema {
-        Schema::new()
+    fn test_schema() -> Schema {
+        Schema::from_ontology(
+            ["User", "Project", "Note", "Group"],
+            ["AUTHORED", "CONTAINS", "MEMBER_OF"],
+            std::collections::HashMap::new(),
+        )
     }
 
     #[test]
@@ -539,7 +591,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &empty_schema()).unwrap();
+        let ast = lower(&input, &test_schema()).unwrap();
         if let Node::Query(q) = ast {
             assert_eq!(q.limit, Some(25));
             assert_eq!(q.select.len(), 2);
@@ -563,7 +615,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &empty_schema()).unwrap();
+        let ast = lower(&input, &test_schema()).unwrap();
         if let Node::Query(q) = ast {
             assert!(!q.group_by.is_empty());
             // Check for COUNT in select
@@ -591,7 +643,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &empty_schema()).unwrap();
+        let ast = lower(&input, &test_schema()).unwrap();
         if let Node::RecursiveCte(cte) = ast {
             assert_eq!(cte.max_depth, 3);
             assert_eq!(cte.name, "path_cte");
@@ -617,7 +669,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &empty_schema()).unwrap();
+        let ast = lower(&input, &test_schema()).unwrap();
         if let Node::Query(q) = ast {
             assert!(q.where_clause.is_some());
         } else {
@@ -651,7 +703,7 @@ mod tests {
         )
         .unwrap();
 
-        let ast = lower(&input, &empty_schema()).unwrap();
+        let ast = lower(&input, &test_schema()).unwrap();
         if let Node::Query(q) = ast {
             let joins = count_joins(&q.from);
             assert!(joins >= 4, "expected >= 4 joins, got {joins}");

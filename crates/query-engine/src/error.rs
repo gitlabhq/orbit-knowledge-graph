@@ -1,5 +1,6 @@
 //! Error types for the query engine
 
+use crate::ontology::OntologyError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -15,6 +16,9 @@ pub enum QueryError {
 
     #[error("codegen error: {0}")]
     Codegen(String),
+
+    #[error("ontology error: {0}")]
+    Ontology(#[from] OntologyError),
 }
 
 pub type Result<T> = std::result::Result<T, QueryError>;

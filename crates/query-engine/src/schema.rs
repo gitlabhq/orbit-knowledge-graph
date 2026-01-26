@@ -9,6 +9,10 @@ use std::collections::{HashMap, HashSet};
 /// Base JSON schema embedded at compile time
 const BASE_SCHEMA_JSON: &str = include_str!("../conf/schema.json");
 
+/// Reserved columns that exist on all nodes and edges.
+/// These are always valid for filtering/projection regardless of ontology.
+const RESERVED_COLUMNS: &[&str] = &["id", "label", "from_id", "to_id", "type"];
+
 /// Schema for validating queries against the ontology
 #[derive(Debug, Clone)]
 pub struct Schema {
@@ -40,9 +44,7 @@ impl Schema {
             node_labels: HashSet::new(),
             relationship_types: HashSet::new(),
             node_properties: HashMap::new(),
-            reserved_columns: ["id", "label", "from_id", "to_id", "type"]
-                .into_iter()
-                .collect(),
+            reserved_columns: RESERVED_COLUMNS.iter().copied().collect(),
         }
     }
 
@@ -56,9 +58,7 @@ impl Schema {
             node_labels: node_labels.into_iter().map(Into::into).collect(),
             relationship_types: relationship_types.into_iter().map(Into::into).collect(),
             node_properties,
-            reserved_columns: ["id", "label", "from_id", "to_id", "type"]
-                .into_iter()
-                .collect(),
+            reserved_columns: RESERVED_COLUMNS.iter().copied().collect(),
         }
     }
 
@@ -69,11 +69,11 @@ impl Schema {
             return Ok(());
         }
 
-        // If no label specified, we can't validate
+        // If no label specified, we can't validate against ontology
         if node_label.is_empty() {
-            return Err(QueryError::Validation(
-                "no node label specified for column validation".into(),
-            ));
+            return Err(QueryError::Validation(format!(
+                "cannot validate column \"{column}\" without a node label"
+            )));
         }
 
         // If we don't have property definitions for this node, skip validation
@@ -103,29 +103,6 @@ impl Schema {
         Err(QueryError::Validation(format!(
             "type \"{type_filter}\" is not a valid node label or relationship type"
         )))
-    }
-
-    /// Validate JSON data against the base JSON schema
-    pub fn validate_json(&self, json_data: &Value) -> Result<(), QueryError> {
-        // For now, just check that it's an object with required fields
-        // Full JSON schema validation can be added later
-        let obj = json_data
-            .as_object()
-            .ok_or_else(|| QueryError::Validation("input must be an object".into()))?;
-
-        if !obj.contains_key("query_type") {
-            return Err(QueryError::Validation(
-                "missing required field: query_type".into(),
-            ));
-        }
-
-        if !obj.contains_key("nodes") {
-            return Err(QueryError::Validation(
-                "missing required field: nodes".into(),
-            ));
-        }
-
-        Ok(())
     }
 
     /// Derive the full JSON schema with ontology values populated.

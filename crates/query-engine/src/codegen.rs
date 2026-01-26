@@ -1,10 +1,13 @@
 //! Codegen: AST → SQL
 //!
 //! Converts AST nodes to parameterized ClickHouse SQL.
+//!
+//! Note: All validation (identifier safety, ontology checks) is performed at
+//! earlier stages (input parsing in `input.rs`, lowering in `lower.rs`).
+//! By the time data reaches codegen, the AST is fully validated.
 
 use crate::ast::{Expr, Node, Op, Query, RecursiveCte, TableRef};
 use crate::error::Result;
-use crate::schema::Schema;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -17,18 +20,19 @@ pub struct ParameterizedQuery {
 }
 
 /// Convert an AST node to parameterized SQL
-pub fn codegen(ast: &Node, schema: &Schema) -> Result<ParameterizedQuery> {
+#[must_use = "the generated SQL should be used"]
+pub fn codegen(ast: &Node) -> Result<ParameterizedQuery> {
     let mut params = HashMap::new();
 
     let sql = match ast {
-        Node::Query(q) => emit_query(q.as_ref(), &mut params, schema)?,
-        Node::RecursiveCte(cte) => emit_recursive_cte(cte.as_ref(), &mut params, schema)?,
+        Node::Query(q) => emit_query(q.as_ref(), &mut params)?,
+        Node::RecursiveCte(cte) => emit_recursive_cte(cte.as_ref(), &mut params)?,
     };
 
     Ok(ParameterizedQuery { sql, params })
 }
 
-fn emit_query(q: &Query, params: &mut HashMap<String, Value>, schema: &Schema) -> Result<String> {
+fn emit_query(q: &Query, params: &mut HashMap<String, Value>) -> Result<String> {
     let mut sql = String::new();
 
     // SELECT clause
@@ -45,12 +49,27 @@ fn emit_query(q: &Query, params: &mut HashMap<String, Value>, schema: &Schema) -
 
     // FROM clause
     sql.push_str(" FROM ");
-    sql.push_str(&emit_table_ref(&q.from, params, schema)?);
+    let from_result = emit_table_ref(&q.from, params)?;
+    sql.push_str(&from_result.sql);
 
-    // WHERE clause
-    if let Some(ref w) = q.where_clause {
+    // WHERE clause - combine original WHERE with any base table type conditions
+    let has_where = q.where_clause.is_some();
+    let has_type_conds = !from_result.type_conditions.is_empty();
+
+    if has_where || has_type_conds {
         sql.push_str(" WHERE ");
-        sql.push_str(&emit_expr(w, params)?);
+
+        let mut conditions = Vec::new();
+
+        // Add base table type conditions
+        conditions.extend(from_result.type_conditions);
+
+        // Add original WHERE clause
+        if let Some(ref w) = q.where_clause {
+            conditions.push(emit_expr(w, params)?);
+        }
+
+        sql.push_str(&conditions.join(" AND "));
     }
 
     // GROUP BY clause
@@ -84,11 +103,7 @@ fn emit_query(q: &Query, params: &mut HashMap<String, Value>, schema: &Schema) -
     Ok(sql)
 }
 
-fn emit_recursive_cte(
-    cte: &RecursiveCte,
-    params: &mut HashMap<String, Value>,
-    schema: &Schema,
-) -> Result<String> {
+fn emit_recursive_cte(cte: &RecursiveCte, params: &mut HashMap<String, Value>) -> Result<String> {
     let mut sql = String::new();
 
     sql.push_str("WITH RECURSIVE ");
@@ -96,17 +111,17 @@ fn emit_recursive_cte(
     sql.push_str(" AS (\n  ");
 
     // Base case
-    sql.push_str(&emit_query(&cte.base, params, schema)?);
+    sql.push_str(&emit_query(&cte.base, params)?);
 
     sql.push_str("\n  UNION ALL\n  ");
 
     // Recursive case
-    sql.push_str(&emit_query(&cte.recursive, params, schema)?);
+    sql.push_str(&emit_query(&cte.recursive, params)?);
 
     sql.push_str("\n)\n");
 
     // Final query
-    sql.push_str(&emit_query(&cte.final_query, params, schema)?);
+    sql.push_str(&emit_query(&cte.final_query, params)?);
 
     Ok(sql)
 }
@@ -201,22 +216,39 @@ fn ch_type_of(v: &Value) -> &'static str {
     }
 }
 
-fn emit_table_ref(
-    t: &TableRef,
-    params: &mut HashMap<String, Value>,
-    schema: &Schema,
-) -> Result<String> {
+/// Result of emitting a table reference, including any type filter conditions
+struct TableRefResult {
+    sql: String,
+    /// Type filter conditions that need to be added to WHERE/ON clauses
+    type_conditions: Vec<String>,
+}
+
+fn emit_table_ref(t: &TableRef, params: &mut HashMap<String, Value>) -> Result<TableRefResult> {
     match t {
         TableRef::Scan {
             table,
             alias,
             type_filter,
         } => {
-            // Validate type filter if present
+            let mut type_conditions = Vec::new();
+
+            // Type filters are validated in lower.rs when building the AST
             if let Some(tf) = type_filter {
-                schema.validate_type_filter(tf)?;
+                // Both nodes and edges use "label" column for type filtering
+                let label_column = "label";
+
+                // Add parameterized type filter condition
+                let param_name = format!("type_{alias}");
+                params.insert(param_name.clone(), Value::String(tf.clone()));
+                type_conditions.push(format!(
+                    "({alias}.{label_column} = {{{param_name}:String}})"
+                ));
             }
-            Ok(format!("{table} AS {alias}"))
+
+            Ok(TableRefResult {
+                sql: format!("{table} AS {alias}"),
+                type_conditions,
+            })
         }
 
         TableRef::Join {
@@ -228,17 +260,34 @@ fn emit_table_ref(
             let mut sql = String::new();
 
             // Left side
-            sql.push_str(&emit_table_ref(left, params, schema)?);
+            let left_result = emit_table_ref(left, params)?;
+            sql.push_str(&left_result.sql);
 
             // Join type and right side
             write!(sql, " {} JOIN ", join_type.as_sql()).unwrap();
-            sql.push_str(&emit_table_ref(right, params, schema)?);
+            let right_result = emit_table_ref(right, params)?;
+            sql.push_str(&right_result.sql);
 
-            // ON clause
+            // ON clause - combine original condition with any type filters from right side
             sql.push_str(" ON ");
-            sql.push_str(&emit_expr(on, params)?);
+            let on_expr = emit_expr(on, params)?;
 
-            Ok(sql)
+            // Add right-side type conditions to the ON clause
+            if right_result.type_conditions.is_empty() {
+                sql.push_str(&on_expr);
+            } else {
+                sql.push_str(&format!(
+                    "({} AND {})",
+                    on_expr,
+                    right_result.type_conditions.join(" AND ")
+                ));
+            }
+
+            // Propagate left-side type conditions up (right-side are in ON clause)
+            Ok(TableRefResult {
+                sql,
+                type_conditions: left_result.type_conditions,
+            })
         }
     }
 }
@@ -248,10 +297,6 @@ mod tests {
     use super::*;
     use crate::ast::{JoinType, OrderExpr, SelectExpr};
     use std::collections::HashMap;
-
-    fn empty_schema() -> Schema {
-        Schema::new()
-    }
 
     #[test]
     fn test_emit_simple_select() {
@@ -273,7 +318,7 @@ mod tests {
             limit: Some(10),
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), &empty_schema()).unwrap();
+        let result = codegen(&Node::Query(Box::new(q))).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
@@ -306,7 +351,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), &empty_schema()).unwrap();
+        let result = codegen(&Node::Query(Box::new(q))).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, e.label AS rel_type FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id)"
@@ -336,7 +381,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), &empty_schema()).unwrap();
+        let result = codegen(&Node::Query(Box::new(q))).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label ORDER BY COUNT(n.id) DESC"
@@ -365,7 +410,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), &empty_schema()).unwrap();
+        let result = codegen(&Node::Query(Box::new(q))).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE n.label IN ({p0:String}, {p1:String}, {p2:String})"
@@ -399,7 +444,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), &empty_schema()).unwrap();
+        let result = codegen(&Node::Query(Box::new(q))).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE ((n.label = {p0:String}) AND ((n.created_at > {p1:String}) OR (n.deleted_at IS NULL)))"
@@ -451,5 +496,72 @@ mod tests {
         // NOT
         let sql = emit_expr(&Expr::unary(Op::Not, Expr::col("t", "active")), &mut params).unwrap();
         assert_eq!(sql, "(NOT t.active)");
+    }
+
+    #[test]
+    fn test_type_filter_emitted_in_sql() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: Some("user_id".into()),
+            }],
+            from: TableRef::scan_with_filter("nodes", "u", "User"),
+            where_clause: None,
+            group_by: vec![],
+            order_by: vec![],
+            limit: Some(10),
+        };
+
+        // Type filter validation now happens in lower.rs, codegen just emits the filter
+        let result = codegen(&Node::Query(Box::new(q))).unwrap();
+
+        // Type filter should be in WHERE clause
+        assert!(
+            result.sql.contains("WHERE (u.label = {type_u:String})"),
+            "type filter should be in WHERE: {}",
+            result.sql
+        );
+        assert_eq!(
+            result.params.get("type_u"),
+            Some(&Value::String("User".into()))
+        );
+    }
+
+    #[test]
+    fn test_type_filter_in_join() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan_with_filter("nodes", "u", "User"),
+                TableRef::scan_with_filter("edges", "e", "AUTHORED"),
+                Expr::eq(Expr::col("u", "id"), Expr::col("e", "from_id")),
+            ),
+            where_clause: None,
+            group_by: vec![],
+            order_by: vec![],
+            limit: None,
+        };
+
+        // Type filter validation now happens in lower.rs, codegen just emits the filter
+        let result = codegen(&Node::Query(Box::new(q))).unwrap();
+
+        // Edge type filter should be in ON clause
+        assert!(
+            result
+                .sql
+                .contains("ON ((u.id = e.from_id) AND (e.label = {type_e:String}))"),
+            "edge type filter should be in ON clause: {}",
+            result.sql
+        );
+        // Base table type filter should be in WHERE
+        assert!(
+            result.sql.contains("WHERE (u.label = {type_u:String})"),
+            "base type filter should be in WHERE: {}",
+            result.sql
+        );
     }
 }

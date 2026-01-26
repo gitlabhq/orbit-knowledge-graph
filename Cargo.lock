@@ -2716,6 +2716,7 @@ name = "query-engine"
 version = "0.1.0"
 dependencies = [
  "pretty_assertions",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",
