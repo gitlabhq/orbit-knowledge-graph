@@ -5,8 +5,10 @@
 //! # Pipeline
 //!
 //! ```text
-//! JSON → Schema Validate → Parse → Lower → AST → Codegen → SQL
+//! JSON → Schema Validate → Parse → Validate → Lower → Codegen → SQL
 //! ```
+//!
+//! After validation, lowering and codegen are pure transformations that cannot fail.
 //!
 //! # Example
 //!
@@ -33,6 +35,7 @@ pub mod codegen;
 pub mod error;
 pub mod input;
 pub mod lower;
+pub mod validate;
 
 use std::sync::OnceLock;
 
@@ -103,8 +106,9 @@ pub fn compile(json_input: &str, ontology: &Ontology) -> Result<ParameterizedQue
     let value = validate_json(json_input)?;
     validate_ontology(&value, ontology)?;
     let input: Input = serde_json::from_value(value)?;
-    let ast = lower::lower(&input, ontology)?;
-    codegen::codegen(&ast)
+    validate::validate(&input, ontology)?;
+    let ast = lower::lower(&input, ontology);
+    Ok(codegen::codegen(&ast))
 }
 
 /// Compile JSON and return the AST without generating SQL.
@@ -113,7 +117,8 @@ pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> Result<Node> {
     let value = validate_json(json_input)?;
     validate_ontology(&value, ontology)?;
     let input: Input = serde_json::from_value(value)?;
-    lower::lower(&input, ontology)
+    validate::validate(&input, ontology)?;
+    Ok(lower::lower(&input, ontology))
 }
 
 /// Get the base JSON schema template (without ontology values).
