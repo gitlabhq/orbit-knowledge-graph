@@ -7,6 +7,8 @@ bindings/go/.idea/
 .idea/
 profile.json.gz
 output/
+*.cdx.xml
+*.cdx.json
 
 # auto-summarization files
 git_diff_full.txt

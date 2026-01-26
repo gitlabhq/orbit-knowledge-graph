@@ -1,4 +1,5 @@
 use axum::{Json, Router, routing::get};
+use labkit_rs::correlation::http::{CorrelationIdLayer, PropagateCorrelationIdLayer};
 use serde::Serialize;
 use tower_http::trace::TraceLayer;
 
@@ -26,5 +27,8 @@ pub fn create_router(mode: Mode, _validator: JwtValidator) -> Router {
         Mode::Indexer => router,
     };
 
-    router.layer(TraceLayer::new_for_http())
+    router
+        .layer(CorrelationIdLayer::new())
+        .layer(TraceLayer::new_for_http())
+        .layer(PropagateCorrelationIdLayer::new())
 }

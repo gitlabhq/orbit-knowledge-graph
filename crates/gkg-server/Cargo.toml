@@ -16,6 +16,7 @@ axum = { workspace = true }
 clap = { workspace = true }
 etl-engine = { path = "../etl-engine" }
 jsonwebtoken = { workspace = true }
+labkit-rs = { path = "../labkit-rs", features = ["http"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
