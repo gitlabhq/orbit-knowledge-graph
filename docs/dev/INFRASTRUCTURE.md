@@ -23,6 +23,7 @@ For Kubernetes deployments, see `helm-dev/` charts (source of truth for componen
 |------|---------|
 | clickhouse-password | ClickHouse default user |
 | postgres-password | PostgreSQL gitlab user |
+| runner_authentication_token | GitLab Runner registration token (glrt-) |
 
 ## Firewall Rules
 
