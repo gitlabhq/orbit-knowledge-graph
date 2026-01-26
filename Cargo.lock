@@ -1719,13 +1719,17 @@ name = "gkg-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow",
+ "async-trait",
  "axum",
  "clap",
+ "etl-engine",
  "jsonwebtoken",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tower-http",
  "tracing",
  "tracing-subscriber",

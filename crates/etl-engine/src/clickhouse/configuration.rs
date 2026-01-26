@@ -21,7 +21,34 @@ pub struct ClickHouseConfiguration {
     pub password: Option<String>,
 }
 
+impl Default for ClickHouseConfiguration {
+    fn default() -> Self {
+        Self {
+            database: "default".to_string(),
+            url: "127.0.0.1:9000".to_string(),
+            username: "default".to_string(),
+            password: None,
+        }
+    }
+}
+
 impl ClickHouseConfiguration {
+    /// Creates configuration from environment variables.
+    ///
+    /// Uses defaults for any unset variables:
+    /// - `CLICKHOUSE_URL`: Server address (default: "127.0.0.1:9000")
+    /// - `CLICKHOUSE_DATABASE`: Database name (default: "default")
+    /// - `CLICKHOUSE_USERNAME`: Username (default: "default")
+    /// - `CLICKHOUSE_PASSWORD`: Optional password
+    pub fn from_env() -> Self {
+        Self {
+            url: std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "127.0.0.1:9000".into()),
+            database: std::env::var("CLICKHOUSE_DATABASE").unwrap_or_else(|_| "default".into()),
+            username: std::env::var("CLICKHOUSE_USERNAME").unwrap_or_else(|_| "default".into()),
+            password: std::env::var("CLICKHOUSE_PASSWORD").ok(),
+        }
+    }
+
     /// Validates the configuration fields.
     pub fn validate(&self) -> Result<(), DestinationError> {
         if self.database.is_empty() {
