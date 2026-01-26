@@ -213,7 +213,7 @@ variables:
   before_script:
     - !reference [.helm-base, before_script]
     # Install GKE auth plugin and kubectl
-    - gcloud components install gke-gcloud-auth-plugin kubectl --quiet
+    - apt-get install -y google-cloud-cli-gke-gcloud-auth-plugin kubectl
     # Write access for deployment (GKE_SA_KEY is protected, main branch only)
     - gcloud auth activate-service-account --key-file="${GKE_SA_KEY}"
     - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
