@@ -8,7 +8,7 @@ use crate::input::{
     Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode, InputRelationship,
     OrderDirection, QueryType,
 };
-use crate::schema::Schema;
+use crate::schema::{Schema, EDGE_TABLE};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -143,7 +143,7 @@ fn build_agg_func(agg: &InputAggregation) -> Expr {
 }
 
 /// Lower a path finding query: WITH RECURSIVE ...
-fn lower_path_finding(input: &Input, _schema: &Schema) -> Result<Node> {
+fn lower_path_finding(input: &Input, schema: &Schema) -> Result<Node> {
     let path = input.path.as_ref().ok_or_else(|| {
         QueryError::Lowering(
             "path_finding query requires a 'path' configuration with 'from' and 'to' nodes".into(),
@@ -209,10 +209,12 @@ fn lower_path_finding(input: &Input, _schema: &Schema) -> Result<Node> {
                 alias: Some("depth".into()),
             },
         ],
-        from: if let Some(ref label) = start_node.label {
-            TableRef::scan_with_filter("nodes", "n", label)
-        } else {
-            TableRef::scan("nodes", "n")
+        from: {
+            let label = start_node.label.as_ref().ok_or_else(|| {
+                QueryError::Lowering("path finding requires node labels to determine table".into())
+            })?;
+            let table = schema.table_for_node(label)?;
+            TableRef::scan_with_filter(&table, "n", label)
         },
         where_clause: base_where,
         group_by: vec![],
@@ -242,21 +244,23 @@ fn lower_path_finding(input: &Input, _schema: &Schema) -> Result<Node> {
                 alias: Some("depth".into()),
             },
         ],
-        from: TableRef::join(
-            JoinType::Inner,
+        from: {
+            let label = end_node.label.as_ref().ok_or_else(|| {
+                QueryError::Lowering("path finding requires node labels to determine table".into())
+            })?;
+            let table = schema.table_for_node(label)?;
             TableRef::join(
                 JoinType::Inner,
-                TableRef::scan("path_cte", "p"),
-                TableRef::scan("edges", "e"),
-                Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "from_id")),
-            ),
-            if let Some(ref label) = end_node.label {
-                TableRef::scan_with_filter("nodes", "n", label)
-            } else {
-                TableRef::scan("nodes", "n")
-            },
-            Expr::eq(Expr::col("e", "to_id"), Expr::col("n", "id")),
-        ),
+                TableRef::join(
+                    JoinType::Inner,
+                    TableRef::scan("path_cte", "p"),
+                    TableRef::scan(EDGE_TABLE, "e"),
+                    Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "from_id")),
+                ),
+                TableRef::scan_with_filter(&table, "n", label),
+                Expr::eq(Expr::col("e", "to_id"), Expr::col("n", "id")),
+            )
+        },
         where_clause: Expr::and_all([
             Some(Expr::binary(
                 Op::Lt,
@@ -325,7 +329,11 @@ fn lower_path_finding(input: &Input, _schema: &Schema) -> Result<Node> {
     })))
 }
 
-/// Build the FROM clause with joins
+/// Build the FROM clause with joins.
+///
+/// The starting node is determined by:
+/// 1. If there are relationships, use the "from" node of the first relationship
+/// 2. Otherwise, use the first node in the array
 fn build_from(
     nodes: &[InputNode],
     rels: &[InputRelationship],
@@ -336,15 +344,31 @@ fn build_from(
     }
 
     let mut edge_aliases = HashMap::new();
-    let first_node = &nodes[0];
 
-    // Start with first node - validate label if present
-    let mut result = if let Some(ref label) = first_node.label {
-        schema.validate_type_filter(label)?;
-        TableRef::scan_with_filter("nodes", &first_node.id, label)
+    // Determine starting node: "from" of first relationship, or first node if no relationships
+    let start_node = if let Some(first_rel) = rels.first() {
+        nodes
+            .iter()
+            .find(|n| n.id == first_rel.from)
+            .ok_or_else(|| {
+                QueryError::Lowering(format!(
+                    "relationship references node \"{}\" which is not defined",
+                    first_rel.from
+                ))
+            })?
     } else {
-        TableRef::scan("nodes", &first_node.id)
+        &nodes[0]
     };
+
+    // Start with the starting node - label required to determine table
+    let start_label = start_node.label.as_ref().ok_or_else(|| {
+        QueryError::Lowering(format!(
+            "node \"{}\" requires a label to determine which table to query",
+            start_node.id
+        ))
+    })?;
+    let start_table = schema.table_for_node(start_label)?;
+    let mut result = TableRef::scan_with_filter(&start_table, &start_node.id, start_label);
 
     // Join edges and nodes for each relationship
     for (i, rel) in rels.iter().enumerate() {
@@ -388,18 +412,22 @@ fn build_from(
         };
 
         let edge_table = if let Some(ref tf) = type_filter {
-            TableRef::scan_with_filter("edges", &edge_alias, tf)
+            TableRef::scan_with_filter(EDGE_TABLE, &edge_alias, tf)
         } else {
-            TableRef::scan("edges", &edge_alias)
+            TableRef::scan(EDGE_TABLE, &edge_alias)
         };
 
         result = TableRef::join(JoinType::Inner, result, edge_table, edge_join_cond);
 
-        // Join target node - validate label if present
-        let target_label = find_node_label(nodes, &rel.to);
-        if let Some(ref label) = target_label {
-            schema.validate_type_filter(label)?;
-        }
+        // Join target node - label required to determine table
+        let target_label = find_node_label(nodes, &rel.to).ok_or_else(|| {
+            QueryError::Lowering(format!(
+                "node \"{}\" requires a label to determine which table to query",
+                rel.to
+            ))
+        })?;
+        let target_table_name = schema.table_for_node(&target_label)?;
+
         let target_join_cond = match rel.direction {
             Direction::Incoming => {
                 Expr::eq(Expr::col(&edge_alias, "from_id"), Expr::col(&rel.to, "id"))
@@ -420,11 +448,7 @@ fn build_from(
             }
         };
 
-        let target_table = if let Some(ref label) = target_label {
-            TableRef::scan_with_filter("nodes", &rel.to, label)
-        } else {
-            TableRef::scan("nodes", &rel.to)
-        };
+        let target_table = TableRef::scan_with_filter(&target_table_name, &rel.to, &target_label);
 
         result = TableRef::join(JoinType::Inner, result, target_table, target_join_cond);
     }
@@ -605,7 +629,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "n"}, {"id": "u"}],
+            "nodes": [{"id": "n", "label": "Note"}, {"id": "u", "label": "User"}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [
                 {"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}
@@ -659,6 +683,7 @@ mod tests {
             "query_type": "traversal",
             "nodes": [{
                 "id": "u",
+                "label": "User",
                 "filters": {
                     "created_at": {"op": "gte", "value": "2024-01-01"},
                     "state": {"op": "in", "value": ["active", "blocked"]}

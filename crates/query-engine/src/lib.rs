@@ -93,6 +93,7 @@ mod tests {
 
     #[test]
     fn test_compile_traversal() {
+        // Node order doesn't matter - we automatically start from the "from" node
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -110,10 +111,15 @@ mod tests {
 
         // Basic assertions
         assert!(result.sql.contains("SELECT"));
-        // Joins now include type filters in ON clause
+        // Entity-specific tables: kg_user, kg_note, kg_edges
         assert!(
-            result.sql.contains("INNER JOIN edges AS e0 ON"),
-            "expected INNER JOIN edges: {}",
+            result.sql.contains("kg_user AS u"),
+            "expected kg_user table: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("INNER JOIN kg_edges AS e0 ON"),
+            "expected INNER JOIN kg_edges: {}",
             result.sql
         );
         assert!(
@@ -122,8 +128,8 @@ mod tests {
             result.sql
         );
         assert!(
-            result.sql.contains("INNER JOIN nodes AS n ON"),
-            "expected INNER JOIN nodes: {}",
+            result.sql.contains("INNER JOIN kg_note AS n ON"),
+            "expected INNER JOIN kg_note: {}",
             result.sql
         );
         // Type filters are now applied
@@ -390,8 +396,8 @@ mod ontology_integration_tests {
         assert!(result.is_err(), "expected error for invalid type filter");
         let err = result.unwrap_err();
         assert!(
-            err.to_string().contains("not a valid"),
-            "error should mention invalid type: {err}"
+            err.to_string().contains("unknown node label"),
+            "error should mention unknown node label: {err}"
         );
     }
 

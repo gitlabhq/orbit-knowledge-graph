@@ -13,6 +13,9 @@ const BASE_SCHEMA_JSON: &str = include_str!("../conf/schema.json");
 /// These are always valid for filtering/projection regardless of ontology.
 const RESERVED_COLUMNS: &[&str] = &["id", "label", "from_id", "to_id", "type"];
 
+/// Edge table name
+pub const EDGE_TABLE: &str = "kg_edges";
+
 /// Schema for validating queries against the ontology
 #[derive(Debug, Clone)]
 pub struct Schema {
@@ -103,6 +106,19 @@ impl Schema {
         Err(QueryError::Validation(format!(
             "type \"{type_filter}\" is not a valid node label or relationship type"
         )))
+    }
+
+    /// Get the ClickHouse table name for a node label.
+    ///
+    /// Node tables follow the pattern `kg_{lowercase_label}`.
+    /// Example: `User` → `kg_user`, `Project` → `kg_project`
+    pub fn table_for_node(&self, label: &str) -> Result<String, QueryError> {
+        if !self.node_labels.contains(label) {
+            return Err(QueryError::Validation(format!(
+                "unknown node label: {label}"
+            )));
+        }
+        Ok(format!("kg_{}", label.to_lowercase()))
     }
 
     /// Derive the full JSON schema with ontology values populated.
