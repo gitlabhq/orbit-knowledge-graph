@@ -17,6 +17,7 @@ mod entities;
 pub use entities::{DataType, EdgeEntity, Field, NodeEntity};
 
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
@@ -24,7 +25,14 @@ use std::path::Path;
 /// Primary key field name used by default.
 const DEFAULT_PRIMARY_KEY: &str = "id";
 
-/// Errors that can occur when loading an ontology.
+/// Reserved columns that exist on all nodes and edges.
+/// These are always valid for filtering/projection regardless of ontology definition.
+pub const RESERVED_COLUMNS: &[&str] = &["id", "label", "from_id", "to_id", "type"];
+
+/// Edge table name in ClickHouse.
+pub const EDGE_TABLE: &str = "kg_edges";
+
+/// Errors that can occur when loading or validating an ontology.
 #[derive(Debug)]
 pub enum OntologyError {
     /// Failed to read a file.
@@ -86,6 +94,72 @@ impl Ontology {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
         }
+    }
+
+    /// Add nodes by name.
+    #[must_use]
+    pub fn with_nodes(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        for name in names {
+            let name = name.into();
+            self.nodes.insert(
+                name.clone(),
+                NodeEntity {
+                    name,
+                    fields: vec![],
+                    primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
+                },
+            );
+        }
+        self
+    }
+
+    /// Add edge types by name.
+    #[must_use]
+    pub fn with_edges(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        for name in names {
+            self.edges.insert(name.into(), vec![]);
+        }
+        self
+    }
+
+    /// Add fields to an existing node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node doesn't exist.
+    pub fn try_with_fields(
+        mut self,
+        node_name: &str,
+        fields: impl IntoIterator<Item = (impl Into<String>, DataType, bool)>,
+    ) -> Result<Self, OntologyError> {
+        let node = self.nodes.get_mut(node_name).ok_or_else(|| {
+            OntologyError::Validation(format!("node \"{node_name}\" does not exist"))
+        })?;
+        for (field_name, data_type, nullable) in fields {
+            node.fields.push(Field {
+                name: field_name.into(),
+                data_type,
+                nullable,
+            });
+        }
+        Ok(self)
+    }
+
+    /// Add fields to an existing node (convenience method, fields default to nullable).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node doesn't exist. Use [`try_with_fields`](Self::try_with_fields)
+    /// for fallible version.
+    #[must_use]
+    pub fn with_fields(
+        self,
+        node_name: &str,
+        fields: impl IntoIterator<Item = (impl Into<String>, DataType)>,
+    ) -> Self {
+        let fields_with_nullable = fields.into_iter().map(|(n, t)| (n, t, true));
+        self.try_with_fields(node_name, fields_with_nullable)
+            .unwrap_or_else(|e| panic!("{e}"))
     }
 
     /// Load ontology from a directory containing schema.yaml and referenced files.
@@ -210,6 +284,164 @@ impl Ontology {
     #[must_use]
     pub fn edge_count(&self) -> usize {
         self.edges.len()
+    }
+
+    // --- Query validation helpers ---
+
+    /// Check if a field exists on a node, including reserved columns.
+    ///
+    /// Returns `true` if:
+    /// - The node exists AND the field is a reserved column (`id`, `label`, etc.)
+    /// - The node exists AND the field exists in the node's field definitions
+    ///
+    /// Returns `false` if the node doesn't exist.
+    #[must_use]
+    pub fn has_field(&self, node_name: &str, field_name: &str) -> bool {
+        // Node must exist first
+        let Some(node) = self.nodes.get(node_name) else {
+            return false;
+        };
+
+        // Reserved columns exist on all nodes
+        if RESERVED_COLUMNS.contains(&field_name) {
+            return true;
+        }
+
+        // Check defined fields
+        node.fields.iter().any(|f| f.name == field_name)
+    }
+
+    /// Validate that a field exists on a node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The node label is empty
+    /// - The node doesn't exist in the ontology
+    /// - The field doesn't exist on the node (and isn't a reserved column)
+    pub fn validate_field(&self, node_name: &str, field_name: &str) -> Result<(), OntologyError> {
+        if node_name.is_empty() {
+            return Err(OntologyError::Validation(format!(
+                "cannot validate field \"{field_name}\" without a node label"
+            )));
+        }
+
+        let node = self.nodes.get(node_name).ok_or_else(|| {
+            OntologyError::Validation(format!("unknown node type \"{node_name}\""))
+        })?;
+
+        // Reserved columns exist on all nodes
+        if RESERVED_COLUMNS.contains(&field_name) {
+            return Ok(());
+        }
+
+        if node.fields.iter().any(|f| f.name == field_name) {
+            return Ok(());
+        }
+
+        Err(OntologyError::Validation(format!(
+            "field \"{field_name}\" does not exist on node type \"{node_name}\""
+        )))
+    }
+
+    /// Validate that a type is a valid node label or edge type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the type is neither a node label nor an edge type.
+    pub fn validate_type(&self, type_name: &str) -> Result<(), OntologyError> {
+        if self.has_node(type_name) || self.has_edge(type_name) {
+            return Ok(());
+        }
+        Err(OntologyError::Validation(format!(
+            "\"{type_name}\" is not a valid node label or relationship type"
+        )))
+    }
+
+    /// Get the ClickHouse table name for a node label.
+    ///
+    /// Node tables follow the pattern `kg_{lowercase_label}`.
+    /// Example: `User` → `kg_user`, `Project` → `kg_project`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node label is unknown.
+    pub fn table_name(&self, node_label: &str) -> Result<String, OntologyError> {
+        if !self.has_node(node_label) {
+            return Err(OntologyError::Validation(format!(
+                "unknown node label \"{node_label}\""
+            )));
+        }
+        Ok(format!("kg_{}", node_label.to_lowercase()))
+    }
+
+    /// Generate a JSON Schema with ontology values populated.
+    ///
+    /// Given a base schema template, this populates:
+    /// - `$defs.NodeLabel.enum` with valid node labels
+    /// - `$defs.RelationshipTypeName.enum` with valid relationship types
+    /// - `$defs.NodeProperties` with property definitions per node type
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the base schema is invalid JSON or missing required sections.
+    pub fn derive_json_schema(&self, base_schema_json: &str) -> Result<Value, OntologyError> {
+        let mut schema: Value = serde_json::from_str(base_schema_json)
+            .map_err(|e| OntologyError::Validation(format!("failed to parse base schema: {e}")))?;
+
+        let defs = schema
+            .get_mut("$defs")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| OntologyError::Validation("schema missing $defs".into()))?;
+
+        // Populate NodeLabel enum
+        if let Some(node_label) = defs.get_mut("NodeLabel").and_then(Value::as_object_mut) {
+            let labels: Vec<Value> = self
+                .node_names()
+                .map(|s| Value::String(s.to_string()))
+                .collect();
+            node_label.insert("enum".to_string(), Value::Array(labels));
+        }
+
+        // Populate RelationshipTypeName enum
+        if let Some(rel_type) = defs
+            .get_mut("RelationshipTypeName")
+            .and_then(Value::as_object_mut)
+        {
+            let types: Vec<Value> = self
+                .edge_names()
+                .map(|s| Value::String(s.to_string()))
+                .collect();
+            rel_type.insert("enum".to_string(), Value::Array(types));
+        }
+
+        // Populate NodeProperties with property definitions per node type
+        let node_props = self.build_node_properties_schema();
+        defs.insert("NodeProperties".to_string(), node_props);
+
+        Ok(schema)
+    }
+
+    /// Build the NodeProperties schema object from node field definitions.
+    fn build_node_properties_schema(&self) -> Value {
+        let mut node_props = Map::new();
+
+        for node in self.nodes() {
+            let mut prop_map = Map::new();
+
+            for field in &node.fields {
+                let mut prop_schema = Map::new();
+                prop_schema.insert(
+                    "type".to_string(),
+                    Value::String(field.data_type.to_json_schema_type().to_string()),
+                );
+                prop_map.insert(field.name.clone(), Value::Object(prop_schema));
+            }
+
+            node_props.insert(node.name.clone(), Value::Object(prop_map));
+        }
+
+        Value::Object(node_props)
     }
 }
 
@@ -401,99 +633,81 @@ mod tests {
     }
 
     #[test]
-    fn test_get_node() {
+    fn test_getters_and_iterators() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
+        // get_node
         let user = ontology.get_node("User").expect("User should exist");
         assert_eq!(user.name, "User");
-
         let field_names: Vec<_> = user.fields.iter().map(|f| f.name.as_str()).collect();
         assert!(field_names.contains(&"id"));
         assert!(field_names.contains(&"username"));
         assert!(field_names.contains(&"email"));
         assert!(user.primary_keys.contains(&"id".to_string()));
-    }
 
-    #[test]
-    fn test_get_edge() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
+        // get_edge
         let authored = ontology
             .get_edge("AUTHORED")
             .expect("AUTHORED should exist");
         assert!(!authored.is_empty());
+        assert_eq!(authored[0].relationship_kind, "AUTHORED");
 
-        let first = &authored[0];
-        assert_eq!(first.relationship_kind, "AUTHORED");
-    }
-
-    #[test]
-    fn test_node_iterators() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
+        // node iterators
         let names: Vec<_> = ontology.node_names().collect();
         assert!(names.contains(&"User"));
         assert!(names.contains(&"Project"));
-
         let nodes: Vec<_> = ontology.nodes().collect();
         assert_eq!(nodes.len(), ontology.node_count());
-    }
 
-    #[test]
-    fn test_edge_iterators() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        let names: Vec<_> = ontology.edge_names().collect();
-        assert!(names.contains(&"AUTHORED"));
-
+        // edge iterators
+        let edge_names: Vec<_> = ontology.edge_names().collect();
+        assert!(edge_names.contains(&"AUTHORED"));
         let edges: Vec<_> = ontology.edges().collect();
         assert!(!edges.is_empty());
     }
 
     #[test]
     fn test_display() {
+        // Ontology display
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        let display = format!("{}", ontology);
+        let display = format!("{ontology}");
         assert!(display.contains("nodes"));
         assert!(display.contains("edge types"));
 
+        // NodeEntity display
         let user = ontology.get_node("User").expect("User should exist");
-        let display = format!("{}", user);
-        assert!(display.contains("User"));
-    }
+        assert!(format!("{user}").contains("User"));
 
-    #[test]
-    fn test_data_type_display() {
+        // DataType display
         assert_eq!(format!("{}", DataType::String), "String");
         assert_eq!(format!("{}", DataType::Int), "Int");
         assert_eq!(format!("{}", DataType::Date), "Date");
         assert_eq!(format!("{}", DataType::DateTime), "DateTime");
-    }
 
-    #[test]
-    fn test_field_display() {
+        // Field display
         let field = Field {
-            name: "email".to_string(),
+            name: "email".into(),
             data_type: DataType::String,
             nullable: true,
         };
-        assert_eq!(format!("{}", field), "email: String?");
-
+        assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
-            name: "id".to_string(),
+            name: "id".into(),
             data_type: DataType::Int,
             nullable: false,
         };
-        assert_eq!(format!("{}", field), "id: Int");
+        assert_eq!(format!("{field}"), "id: Int");
     }
 
     #[test]
-    fn test_deterministic_order() {
-        // Load twice and verify order is consistent
+    fn test_determinism_and_equality() {
         let ontology1 = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
         let ontology2 = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
+        // Equality
+        assert_eq!(ontology1, ontology2);
+
+        // Deterministic order
         let names1: Vec<_> = ontology1.node_names().collect();
         let names2: Vec<_> = ontology2.node_names().collect();
         assert_eq!(names1, names2);
@@ -503,10 +717,183 @@ mod tests {
         assert_eq!(edge_names1, edge_names2);
     }
 
+    // --- Builder method tests ---
+
     #[test]
-    fn test_equality() {
-        let ontology1 = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-        let ontology2 = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-        assert_eq!(ontology1, ontology2);
+    fn test_builder_methods() {
+        let ontology = Ontology::new()
+            .with_nodes(["User", "Project", "Note"])
+            .with_edges(["AUTHORED", "CONTAINS"])
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("age", DataType::Int)],
+            );
+
+        // with_nodes
+        assert_eq!(ontology.node_count(), 3);
+        assert!(ontology.has_node("User"));
+        assert!(ontology.has_node("Project"));
+        assert!(ontology.has_node("Note"));
+        assert!(!ontology.has_node("Group"));
+
+        // with_edges
+        assert_eq!(ontology.edge_count(), 2);
+        assert!(ontology.has_edge("AUTHORED"));
+        assert!(ontology.has_edge("CONTAINS"));
+        assert!(!ontology.has_edge("MEMBER_OF"));
+
+        // with_fields
+        let user = ontology.get_node("User").unwrap();
+        assert_eq!(user.fields.len(), 2);
+        let field_names: Vec<_> = user.fields.iter().map(|f| f.name.as_str()).collect();
+        assert!(field_names.contains(&"username"));
+        assert!(field_names.contains(&"age"));
+        let username_field = user.fields.iter().find(|f| f.name == "username").unwrap();
+        assert_eq!(username_field.data_type, DataType::String);
+    }
+
+    #[test]
+    #[should_panic(expected = "node \"NonExistent\" does not exist")]
+    fn test_with_fields_panics_on_missing_node() {
+        let _ = Ontology::new().with_fields("NonExistent", [("field", DataType::String)]);
+    }
+
+    // --- Validation method tests ---
+
+    #[test]
+    fn test_has_field() {
+        let ontology = Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("username", DataType::String)]);
+
+        // Reserved columns return true for existing nodes
+        assert!(ontology.has_field("User", "id"));
+        assert!(ontology.has_field("User", "label"));
+        assert!(ontology.has_field("User", "from_id"));
+        assert!(ontology.has_field("User", "to_id"));
+        assert!(ontology.has_field("User", "type"));
+
+        // Defined fields
+        assert!(ontology.has_field("User", "username"));
+        assert!(!ontology.has_field("User", "nonexistent"));
+
+        // Unknown node returns false even for reserved columns
+        assert!(!ontology.has_field("Unknown", "id"));
+        assert!(!ontology.has_field("Unknown", "field"));
+    }
+
+    #[test]
+    fn test_validate_field() {
+        let ontology = Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("username", DataType::String)]);
+
+        // Reserved columns pass for existing nodes
+        assert!(ontology.validate_field("User", "id").is_ok());
+        assert!(ontology.validate_field("User", "label").is_ok());
+
+        // Defined fields pass
+        assert!(ontology.validate_field("User", "username").is_ok());
+
+        // Unknown node fails (even for reserved columns)
+        let err = ontology.validate_field("Unknown", "id").unwrap_err();
+        assert!(err.to_string().contains("unknown node type"));
+        let err = ontology.validate_field("Unknown", "field").unwrap_err();
+        assert!(err.to_string().contains("unknown node type"));
+
+        // Unknown field fails
+        let err = ontology.validate_field("User", "nonexistent").unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+
+        // Empty node name fails
+        let err = Ontology::new().validate_field("", "field").unwrap_err();
+        assert!(err.to_string().contains("without a node label"));
+    }
+
+    #[test]
+    fn test_validate_type() {
+        let ontology = Ontology::new()
+            .with_nodes(["User"])
+            .with_edges(["AUTHORED"]);
+
+        // Valid node
+        assert!(ontology.validate_type("User").is_ok());
+
+        // Valid edge
+        assert!(ontology.validate_type("AUTHORED").is_ok());
+
+        // Invalid type
+        let err = ontology.validate_type("Invalid").unwrap_err();
+        assert!(err.to_string().contains("not a valid node label"));
+    }
+
+    #[test]
+    fn test_table_name() {
+        let ontology = Ontology::new().with_nodes(["User", "Project"]);
+
+        // Valid nodes
+        assert_eq!(ontology.table_name("User").unwrap(), "kg_user");
+        assert_eq!(ontology.table_name("Project").unwrap(), "kg_project");
+
+        // Unknown node
+        let err = ontology.table_name("Unknown").unwrap_err();
+        assert!(err.to_string().contains("unknown node label"));
+    }
+
+    // --- JSON Schema tests ---
+
+    #[test]
+    fn test_data_type_to_json_schema_type() {
+        assert_eq!(DataType::String.to_json_schema_type(), "string");
+        assert_eq!(DataType::Int.to_json_schema_type(), "integer");
+        assert_eq!(DataType::Float.to_json_schema_type(), "number");
+        assert_eq!(DataType::Bool.to_json_schema_type(), "boolean");
+        assert_eq!(DataType::Date.to_json_schema_type(), "string");
+        assert_eq!(DataType::DateTime.to_json_schema_type(), "string");
+    }
+
+    fn base_schema() -> &'static str {
+        include_str!("../schema.json")
+    }
+
+    #[test]
+    fn test_derive_json_schema() {
+        let ontology = Ontology::new()
+            .with_nodes(["User", "Project"])
+            .with_edges(["AUTHORED"])
+            .with_fields("User", [("username", DataType::String)]);
+
+        let result = ontology.derive_json_schema(base_schema()).unwrap();
+
+        // Check NodeLabel enum
+        let labels = result["$defs"]["NodeLabel"]["enum"].as_array().unwrap();
+        let label_strs: Vec<_> = labels.iter().filter_map(|v| v.as_str()).collect();
+        assert!(label_strs.contains(&"User"));
+        assert!(label_strs.contains(&"Project"));
+
+        // Check RelationshipTypeName enum
+        let types = result["$defs"]["RelationshipTypeName"]["enum"]
+            .as_array()
+            .unwrap();
+        let type_strs: Vec<_> = types.iter().filter_map(|v| v.as_str()).collect();
+        assert!(type_strs.contains(&"AUTHORED"));
+
+        // Check NodeProperties
+        let user_props = &result["$defs"]["NodeProperties"]["User"];
+        assert!(user_props.is_object());
+        assert_eq!(user_props["username"]["type"], "string");
+    }
+
+    #[test]
+    fn test_derive_json_schema_errors() {
+        let ontology = Ontology::new();
+
+        // Invalid JSON
+        let err = ontology.derive_json_schema("not valid json").unwrap_err();
+        assert!(err.to_string().contains("failed to parse base schema"));
+
+        // Missing $defs
+        let err = ontology.derive_json_schema("{}").unwrap_err();
+        assert!(err.to_string().contains("missing $defs"));
     }
 }
