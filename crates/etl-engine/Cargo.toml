@@ -19,6 +19,7 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 uuid = { workspace = true }
+clickhouse-arrow = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }

@@ -11,7 +11,7 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::destination::{BatchWriter, Destination, DestinationError, StreamWriter};
+use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::entities::Entity;
 use crate::metrics::MetricCollector;
 use crate::module::{Handler, HandlerContext, HandlerError, Module};
@@ -61,14 +61,12 @@ impl NatsServices for MockNatsServices {
 /// Mock destination for testing.
 pub struct MockDestination {
     batch_writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
-    stream_writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
 }
 
 impl MockDestination {
     pub fn new() -> Self {
         Self {
             batch_writes: Arc::new(Mutex::new(Vec::new())),
-            stream_writes: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -79,18 +77,15 @@ impl Default for MockDestination {
     }
 }
 
+#[async_trait]
 impl Destination for MockDestination {
-    fn new_batch_writer(&self, _entity: &Entity) -> Box<dyn BatchWriter> {
-        Box::new(MockBatchWriter {
+    async fn new_batch_writer(
+        &self,
+        _entity: &Entity,
+    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
+        Ok(Box::new(MockBatchWriter {
             writes: self.batch_writes.clone(),
-        })
-    }
-
-    fn new_stream_writer(&self, _entity: &Entity) -> Box<dyn StreamWriter> {
-        Box::new(MockStreamWriter {
-            buffer: Arc::new(Mutex::new(Vec::new())),
-            writes: self.stream_writes.clone(),
-        })
+        }))
     }
 }
 
@@ -98,34 +93,11 @@ pub struct MockBatchWriter {
     writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
 }
 
+#[async_trait]
 impl BatchWriter for MockBatchWriter {
-    fn write_batch(&self, batch: &[RecordBatch]) -> Result<(), DestinationError> {
+    async fn write_batch(&self, batch: &[RecordBatch]) -> Result<(), DestinationError> {
         self.writes.lock().push(batch.to_vec());
         Ok(())
-    }
-}
-
-pub struct MockStreamWriter {
-    buffer: Arc<Mutex<Vec<RecordBatch>>>,
-    writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
-}
-
-impl StreamWriter for MockStreamWriter {
-    fn write(&self, batch: &[RecordBatch]) -> Result<(), DestinationError> {
-        self.buffer.lock().extend(batch.iter().cloned());
-        Ok(())
-    }
-
-    fn flush(&self) -> Result<(), DestinationError> {
-        let buffered: Vec<_> = self.buffer.lock().drain(..).collect();
-        if !buffered.is_empty() {
-            self.writes.lock().push(buffered);
-        }
-        Ok(())
-    }
-
-    fn close(&self) -> Result<(), DestinationError> {
-        self.flush()
     }
 }
 

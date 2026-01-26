@@ -19,6 +19,7 @@ NATS JetStream → Engine → Handler Registry → Destination
 | NatsBroker | `nats/broker.rs` | JetStream connection |
 | WorkerPool | `worker_pool.rs` | Concurrency control |
 | Destination | `destination.rs` | Output abstraction |
+| ClickHouse | `clickhouse/` | ClickHouse destination implementation |
 
 ### Traits
 

@@ -53,7 +53,7 @@ impl Handler for UserCreatedHandler {
     ) -> Result<(), HandlerError> {
         let event: UserCreatedEvent = envelope.to_event()?;
 
-        let writer = context.destination.new_batch_writer(&self.entity());
+        let writer = context.destination.new_batch_writer(&self.entity()).await?;
         writer.write_batch(&[self.to_record_batch(&event)?]).await?;
 
         Ok(())
@@ -114,42 +114,37 @@ The engine handles acking for you based on your handler's return value. If you n
 
 ## Destinations
 
-A destination creates writers for your storage backend. There are two kinds:
-
-`BatchWriter` writes records in one shot:
+A destination creates batch writers for your storage backend:
 
 ```rust
+#[async_trait]
 pub trait BatchWriter: Send + Sync {
     async fn write_batch(&self, batches: &[RecordBatch]) -> Result<(), DestinationError>;
 }
-```
 
-`StreamWriter` keeps a connection open and buffers writes:
-
-```rust
-pub trait StreamWriter: Send + Sync {
-    async fn write(&mut self, batch: RecordBatch) -> Result<(), DestinationError>;
-    async fn flush(&mut self) -> Result<(), DestinationError>;
-    async fn close(&mut self) -> Result<(), DestinationError>;
+#[async_trait]
+pub trait Destination: Send + Sync {
+    async fn new_batch_writer(&self, entity: &Entity) -> Result<Box<dyn BatchWriter>, DestinationError>;
 }
 ```
 
-Here's a ClickHouse example:
+### ClickHouse
+
+A ClickHouse destination is included out of the box:
 
 ```rust
-pub struct ClickHouseDestination {
-    pool: Pool,
-}
+use etl_engine::clickhouse::{ClickHouseConfiguration, ClickHouseDestination};
 
-impl Destination for ClickHouseDestination {
-    fn new_batch_writer(&self, entity: &Entity) -> Box<dyn BatchWriter> {
-        Box::new(ClickHouseBatchWriter::new(self.pool.clone(), entity))
-    }
+let config = ClickHouseConfiguration {
+    database: "analytics".to_string(),
+    url: "127.0.0.1:9000".to_string(),
+    username: "default".to_string(),
+    password: None,
+};
 
-    fn new_stream_writer(&self, entity: &Entity) -> Box<dyn StreamWriter> {
-        Box::new(ClickHouseStreamWriter::new(self.pool.clone(), entity))
-    }
-}
+let destination = ClickHouseDestination::new(config)?;
+let writer = destination.new_batch_writer(&entity).await?;
+writer.write_batch(&batches).await?;
 ```
 
 ## Message brokers
