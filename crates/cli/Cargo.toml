@@ -12,6 +12,8 @@ workspace = true
 
 [dependencies]
 indexer = { path = "../code-indexer" }
+query-engine = { path = "../query-engine" }
+ontology = { path = "../ontology" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

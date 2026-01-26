@@ -1,0 +1,382 @@
+{
+  "List active users": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "label": "User", "filters": {"state": "active"}}
+    ],
+    "limit": 30,
+    "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
+  },
+
+  "Open merge requests in a project": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "label": "MergeRequest", "filters": {"state": "opened"}},
+      {"id": "p", "label": "Project", "node_ids": [123]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "limit": 25,
+    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"}
+  },
+
+  "Draft MRs awaiting review": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "label": "MergeRequest", "filters": {"state": "opened", "draft": true}},
+      {"id": "author", "label": "User"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "author", "to": "mr"}
+    ],
+    "limit": 20
+  },
+
+  "MRs merged by a specific user": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "label": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "merger", "label": "User", "node_ids": [42]}
+    ],
+    "relationships": [
+      {"type": "MERGED_BY", "from": "mr", "to": "merger"}
+    ],
+    "limit": 30,
+    "order_by": {"node": "mr", "property": "updated_at", "direction": "DESC"}
+  },
+
+  "Count MRs per project": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "label": "MergeRequest"},
+      {"id": "p", "label": "Project"}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 10
+  },
+
+  "Failed pipelines in last week": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "pipe", "label": "Pipeline", "filters": {
+        "status": "failed",
+        "created_at": {"op": "gte", "value": "2026-01-19"}
+      }},
+      {"id": "p", "label": "Project"}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
+    ],
+    "limit": 30,
+    "order_by": {"node": "pipe", "property": "created_at", "direction": "DESC"}
+  },
+
+  "Pipeline success rate by project": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "label": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
+      {"id": "p", "label": "Project"}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "pipe", "group_by": "p", "alias": "total_pipelines"}
+    ],
+    "limit": 20
+  },
+
+  "Long-running pipelines": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "pipe", "label": "Pipeline", "filters": {
+        "status": "success",
+        "duration": {"op": "gt", "value": 3600}
+      }}
+    ],
+    "limit": 20,
+    "order_by": {"node": "pipe", "property": "duration", "direction": "DESC"}
+  },
+
+  "Critical vulnerabilities detected": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "v", "label": "Vulnerability", "filters": {
+        "severity": "critical",
+        "state": "detected"
+      }},
+      {"id": "p", "label": "Project"}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "v", "to": "p"}
+    ],
+    "limit": 30,
+    "order_by": {"node": "v", "property": "detected_at", "direction": "DESC"}
+  },
+
+  "Unresolved high-severity vulns by report type": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "v", "label": "Vulnerability", "filters": {
+        "severity": {"op": "in", "value": ["high", "critical"]},
+        "state": {"op": "in", "value": ["detected", "confirmed"]}
+      }}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "v", "alias": "vuln_count"}
+    ],
+    "limit": 10
+  },
+
+  "Vulnerabilities fixed by MRs": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "v", "label": "Vulnerability", "filters": {"state": "resolved"}},
+      {"id": "mr", "label": "MergeRequest", "filters": {"state": "merged"}}
+    ],
+    "relationships": [
+      {"type": "FIXES", "from": "mr", "to": "v"}
+    ],
+    "limit": 25
+  },
+
+  "Open work items (issues) by type": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "wi", "label": "WorkItem", "filters": {"state": "opened"}}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "wi", "alias": "count"}
+    ],
+    "limit": 10
+  },
+
+  "Overdue work items": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "wi", "label": "WorkItem", "filters": {
+        "state": "opened",
+        "due_date": {"op": "lt", "value": "2026-01-26"}
+      }}
+    ],
+    "limit": 30,
+    "order_by": {"node": "wi", "property": "due_date", "direction": "ASC"}
+  },
+
+  "High weight work items assigned to user": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "wi", "label": "WorkItem", "filters": {
+        "state": "opened",
+        "weight": {"op": "gte", "value": 5}
+      }},
+      {"id": "assignee", "label": "User", "node_ids": [100]}
+    ],
+    "relationships": [
+      {"type": "ASSIGNED", "from": "wi", "to": "assignee"}
+    ],
+    "limit": 20
+  },
+
+  "Work items closing MRs": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "label": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "wi", "label": "WorkItem"}
+    ],
+    "relationships": [
+      {"type": "CLOSES", "from": "mr", "to": "wi"}
+    ],
+    "limit": 30
+  },
+
+  "Notes (comments) on MRs by user": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "note", "label": "Note", "filters": {"system": false, "noteable_type": "MergeRequest"}},
+      {"id": "author", "label": "User", "node_ids": [42]}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "author", "to": "note"}
+    ],
+    "limit": 30,
+    "order_by": {"node": "note", "property": "created_at", "direction": "DESC"}
+  },
+
+  "Comment activity per user": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "note", "label": "Note", "filters": {"system": false}},
+      {"id": "author", "label": "User"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "author", "to": "note"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "note", "group_by": "author", "alias": "note_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+
+  "Projects in a group": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p", "label": "Project", "filters": {"archived": false}},
+      {"id": "g", "label": "Group", "node_ids": [9970]}
+    ],
+    "relationships": [
+      {"type": "IN_GROUP", "from": "p", "to": "g"}
+    ],
+    "limit": 30,
+    "order_by": {"node": "p", "property": "last_activity_at", "direction": "DESC"}
+  },
+
+  "Public projects with stars": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p", "label": "Project", "filters": {
+        "visibility_level": "public",
+        "archived": false,
+        "star_count": {"op": "gte", "value": 100}
+      }}
+    ],
+    "limit": 20,
+    "order_by": {"node": "p", "property": "star_count", "direction": "DESC"}
+  },
+
+  "User contributions - authored MRs": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "label": "MergeRequest"},
+      {"id": "author", "label": "User"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "author", "to": "mr"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "mr", "group_by": "author", "alias": "mr_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+
+  "MR reviewers per project": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "label": "MergeRequest"},
+      {"id": "reviewer", "label": "User"},
+      {"id": "p", "label": "Project"}
+    ],
+    "relationships": [
+      {"type": "REVIEWER", "from": "mr", "to": "reviewer"},
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "reviewer", "group_by": "p", "alias": "reviewer_count"}
+    ],
+    "limit": 15
+  },
+
+  "Work items in milestone": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "wi", "label": "WorkItem", "filters": {"state": "opened"}},
+      {"id": "m", "label": "Milestone", "node_ids": [500]}
+    ],
+    "relationships": [
+      {"type": "IN_MILESTONE", "from": "wi", "to": "m"}
+    ],
+    "limit": 30
+  },
+
+  "Work items with specific label": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "wi", "label": "WorkItem", "filters": {"state": "opened"}},
+      {"id": "lbl", "label": "Label", "node_ids": [1234]}
+    ],
+    "relationships": [
+      {"type": "HAS_LABEL", "from": "wi", "to": "lbl"}
+    ],
+    "limit": 30
+  },
+
+  "Pipeline triggered by MR": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "pipe", "label": "Pipeline", "filters": {"source": "merge_request_event"}},
+      {"id": "mr", "label": "MergeRequest", "node_ids": [99999]}
+    ],
+    "relationships": [
+      {"type": "TRIGGERED", "from": "mr", "to": "pipe"}
+    ],
+    "limit": 10,
+    "order_by": {"node": "pipe", "property": "created_at", "direction": "DESC"}
+  },
+
+  "Shortest path between two projects": {
+    "query_type": "path_finding",
+    "nodes": [
+      {"id": "start", "label": "Project", "node_ids": [100]},
+      {"id": "end", "label": "Project", "node_ids": [200]}
+    ],
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+  },
+
+  "Users searching by username pattern": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "label": "User", "filters": {
+        "username": {"op": "contains", "value": "admin"},
+        "state": "active"
+      }}
+    ],
+    "limit": 20
+  },
+
+  "Recently created bot accounts": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "label": "User", "filters": {
+        "user_type": {"op": "in", "value": ["project_bot", "service_account", "automation_bot"]},
+        "created_at": {"op": "gte", "value": "2026-01-01"}
+      }}
+    ],
+    "limit": 30,
+    "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
+  },
+
+  "Confidential work items": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "wi", "label": "WorkItem", "filters": {
+        "confidential": true,
+        "state": "opened"
+      }},
+      {"id": "p", "label": "Project"}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "wi", "to": "p"}
+    ],
+    "limit": 20
+  },
+
+  "SAST vulnerabilities by severity": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "v", "label": "Vulnerability", "filters": {"report_type": "sast"}}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "v", "alias": "total"}
+    ],
+    "limit": 10
+  }
+}

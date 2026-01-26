@@ -60,3 +60,6 @@ arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
+[tasks."test:query:sdlc"]
+run = "cargo run -p gkg -- query fixtures/queries/sdlc_queries.json"
+description = "Run SDLC queries"
