@@ -1,5 +1,5 @@
 ---
-name: generate-issue
+name: write-issue
 description: Write an issue description based on the current git diff with main
 allowed-tools: Bash(git diff*), Bash(git log*), Skill
 ---

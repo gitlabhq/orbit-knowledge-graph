@@ -1,5 +1,5 @@
 ---
-name: generate-merge-request-description
+name: write-merge-request-description
 description: Write a merge request description based on the current git diff with main
 allowed-tools: Bash(git diff*), Bash(git log*), Skill
 ---
