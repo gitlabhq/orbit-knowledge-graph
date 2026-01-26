@@ -1,3 +1,5 @@
-mod placeholder;
+mod sdlc;
+mod utils;
 
-pub use placeholder::PlaceholderModule;
+pub use sdlc::SdlcModule;
+pub use utils::INDEXER_TOPIC;

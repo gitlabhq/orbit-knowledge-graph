@@ -55,8 +55,8 @@ struct TestEvent {
 }
 
 impl Event for TestEvent {
-    fn topic() -> &'static str {
-        "test_stream:test.events"
+    fn topic() -> Topic {
+        test_topic()
     }
 }
 
@@ -79,7 +79,7 @@ impl Handler for TestHandler {
 
         let writer = context
             .destination
-            .new_batch_writer(&test_entity())
+            .new_batch_writer(TABLE)
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 

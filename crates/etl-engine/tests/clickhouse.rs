@@ -10,7 +10,6 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_arrow::{ArrowClient, ClientBuilder};
 use etl_engine::clickhouse::{ClickHouseConfiguration, ClickHouseDestination};
 use etl_engine::destination::Destination;
-use etl_engine::entities::Entity;
 use futures::StreamExt;
 use serial_test::serial;
 use testcontainers::GenericImage;
@@ -174,23 +173,14 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
     }
 }
 
-fn create_entity() -> Entity {
-    Entity::Node {
-        name: TEST_TABLE.to_string(),
-        fields: vec![],
-        primary_keys: vec!["id".to_string()],
-    }
-}
-
 #[tokio::test]
 #[serial]
 async fn write_batch_to_clickhouse() {
     let context = TestContext::new().await;
-    let entity = create_entity();
 
     let writer = context
         .destination
-        .new_batch_writer(&entity)
+        .new_batch_writer(TEST_TABLE)
         .await
         .expect("failed to create batch writer");
 
@@ -211,11 +201,10 @@ async fn write_batch_to_clickhouse() {
 #[serial]
 async fn write_multiple_batches() {
     let context = TestContext::new().await;
-    let entity = create_entity();
 
     let writer = context
         .destination
-        .new_batch_writer(&entity)
+        .new_batch_writer(TEST_TABLE)
         .await
         .expect("failed to create batch writer");
 
@@ -244,11 +233,10 @@ async fn write_multiple_batches() {
 #[serial]
 async fn write_empty_batch_succeeds() {
     let context = TestContext::new().await;
-    let entity = create_entity();
 
     let writer = context
         .destination
-        .new_batch_writer(&entity)
+        .new_batch_writer(TEST_TABLE)
         .await
         .expect("failed to create batch writer");
 
@@ -269,8 +257,7 @@ async fn connection_failure_returns_error() {
     };
 
     let destination = ClickHouseDestination::new(config).expect("failed to create destination");
-    let entity = create_entity();
 
-    let result = destination.new_batch_writer(&entity).await;
+    let result = destination.new_batch_writer(TEST_TABLE).await;
     assert!(result.is_err(), "should fail to connect to invalid address");
 }

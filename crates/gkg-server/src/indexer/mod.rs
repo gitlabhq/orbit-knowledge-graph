@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use etl_engine::clickhouse::ClickHouseDestination;
 use etl_engine::engine::EngineBuilder;
-use etl_engine::module::ModuleRegistry;
+use etl_engine::module::{ModuleInitError, ModuleRegistry};
 use etl_engine::nats::NatsBroker;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -12,7 +12,7 @@ use tracing::info;
 
 use crate::config::AppConfig;
 
-use self::modules::PlaceholderModule;
+use self::modules::SdlcModule;
 
 #[derive(Debug, Error)]
 pub enum IndexerError {
@@ -24,6 +24,9 @@ pub enum IndexerError {
 
     #[error("Engine error: {0}")]
     Engine(#[from] etl_engine::engine::EngineError),
+
+    #[error("Module initialization failed: {0}")]
+    ModuleInit(#[from] ModuleInitError),
 }
 
 /// Runs the indexer until completion or until the token is cancelled.
@@ -34,8 +37,11 @@ pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), 
     info!(url = %config.clickhouse.url, "connecting to ClickHouse");
     let destination = Arc::new(ClickHouseDestination::new(config.clickhouse.clone())?);
 
+    info!("initializing SDLC module");
+    let sdlc_module = SdlcModule::new(&config.clickhouse).await?;
+
     let registry = Arc::new(ModuleRegistry::default());
-    registry.register_module(&PlaceholderModule);
+    registry.register_module(&sdlc_module);
     info!(topics = registry.topics().len(), "registered modules");
 
     let engine = Arc::new(EngineBuilder::new(broker, registry, destination).build());

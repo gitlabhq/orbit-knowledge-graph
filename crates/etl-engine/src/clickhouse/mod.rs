@@ -17,7 +17,7 @@
 //! };
 //!
 //! let destination = ClickHouseDestination::new(config)?;
-//! let writer = destination.new_batch_writer(&entity).await?;
+//! let writer = destination.new_batch_writer("my_table").await?;
 //! writer.write_batch(&batches).await?;
 //! ```
 
