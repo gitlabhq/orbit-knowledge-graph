@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
         ontology.edge_count()
     );
 
-    let generator = Generator::new(ontology.clone(), config.clone());
+    let generator = Generator::new(ontology.clone(), config.clone())?;
     generator.print_plan();
 
     if args.dry_run {
