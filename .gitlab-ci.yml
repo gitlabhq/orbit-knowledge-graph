@@ -14,8 +14,10 @@ stages:
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
+  image: rust:latest
   before_script:
+    - curl https://mise.run | sh
+    - export PATH="$HOME/.local/bin:$PATH"
     - mise install
 
 .test-template:
