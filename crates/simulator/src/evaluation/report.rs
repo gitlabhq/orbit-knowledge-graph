@@ -242,7 +242,11 @@ impl Report {
                 for result in results {
                     output.push_str(&format!("    • {}\n", result.query_name));
                     if let Some(parsed) = &result.parsed_error {
-                        output.push_str(&format!("      {}\n", parsed.summary));
+                        output.push_str(&format!("      Error: {}\n", parsed.summary));
+                    }
+                    if let Some(sql) = &result.sql {
+                        output.push_str("      SQL:\n");
+                        output.push_str(&format_sql(sql, 8));
                     }
                 }
             }
@@ -456,6 +460,42 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len - 3])
     }
+}
+
+/// Format SQL for pretty display with indentation.
+fn format_sql(sql: &str, indent: usize) -> String {
+    let prefix = " ".repeat(indent);
+    let mut output = String::new();
+
+    // Keywords that should start a new line
+    let line_break_before = [
+        "SELECT", "FROM", "WHERE", "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN",
+        "OUTER JOIN", "ON", "AND", "OR", "GROUP BY", "ORDER BY", "HAVING", "LIMIT",
+        "UNION", "EXCEPT", "INTERSECT", "WITH", "AS (", "SETTINGS",
+    ];
+
+    // Simple formatting: break on major keywords
+    let mut formatted = sql.to_string();
+
+    for keyword in &line_break_before {
+        // Case-insensitive replacement with line break
+        let pattern = format!(" {}", keyword);
+        let replacement = format!("\n{}", keyword);
+        formatted = formatted.replace(&pattern, &replacement);
+        formatted = formatted.replace(&pattern.to_lowercase(), &replacement.to_lowercase());
+    }
+
+    // Add indentation to each line
+    for line in formatted.lines() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            output.push_str(&prefix);
+            output.push_str(trimmed);
+            output.push('\n');
+        }
+    }
+
+    output
 }
 
 #[cfg(test)]

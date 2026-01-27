@@ -1,7 +1,8 @@
 //! CLI for query evaluation.
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::Parser;
+use clickhouse::Client;
 use ontology::Ontology;
 use simulator::Config;
 use simulator::evaluation::{QueryExecutor, Report, ReportFormat, load_queries};
@@ -64,6 +65,11 @@ async fn main() -> Result<()> {
     }
 
     tracing::info!("Loaded {} queries", queries.len());
+
+    // Check ClickHouse connectivity before proceeding
+    tracing::info!("Checking ClickHouse connection at {}...", config.clickhouse.url);
+    check_clickhouse_health(&config.clickhouse.url).await?;
+    tracing::info!("ClickHouse is healthy");
 
     let mut executor = QueryExecutor::new(
         &config.clickhouse.url,
@@ -144,4 +150,36 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Check that ClickHouse is running and healthy.
+async fn check_clickhouse_health(url: &str) -> Result<()> {
+    let client = Client::default().with_url(url);
+
+    // Try a simple query to verify connectivity
+    let result: Result<String, _> = client.query("SELECT version()").fetch_one().await;
+
+    match result {
+        Ok(version) => {
+            tracing::debug!("ClickHouse version: {}", version);
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+
+            if error_msg.contains("Connect") || error_msg.contains("connection") {
+                bail!(
+                    "Cannot connect to ClickHouse at {}\n\n\
+                     Make sure ClickHouse is running:\n\
+                     - Docker: docker run -d -p 8123:8123 clickhouse/clickhouse-server\n\
+                     - Local: clickhouse-server\n\n\
+                     Error: {}",
+                    url,
+                    error_msg
+                );
+            } else {
+                Err(e).context(format!("ClickHouse health check failed at {}", url))
+            }
+        }
+    }
 }

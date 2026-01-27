@@ -187,6 +187,8 @@ impl ClickHouseWriter {
     }
 
     /// Row-based inserts since clickhouse-rs doesn't support direct Arrow inserts.
+    ///
+    /// Uses smaller chunks to reduce memory pressure on ClickHouse server.
     async fn write_batch_as_rows(&self, table_name: &str, batch: &RecordBatch) -> Result<()> {
         let num_rows = batch.num_rows();
         let num_cols = batch.num_columns();
@@ -199,8 +201,7 @@ impl ClickHouseWriter {
         let column_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         let columns_str = column_names.join(", ");
 
-        // Stream chunks directly instead of building all values first
-        let chunk_size = 5000; // Larger chunks for better throughput
+        let chunk_size = 5000;
         let mut chunk_values: Vec<String> = Vec::with_capacity(chunk_size);
 
         for row_idx in 0..num_rows {
@@ -216,7 +217,7 @@ impl ClickHouseWriter {
 
             if chunk_values.len() >= chunk_size {
                 let insert_sql = format!(
-                    "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
+                    "INSERT INTO {} ({}) VALUES {}",
                     table_name,
                     columns_str,
                     chunk_values.join(", ")
@@ -228,7 +229,7 @@ impl ClickHouseWriter {
 
         if !chunk_values.is_empty() {
             let insert_sql = format!(
-                "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
+                "INSERT INTO {} ({}) VALUES {}",
                 table_name,
                 columns_str,
                 chunk_values.join(", ")

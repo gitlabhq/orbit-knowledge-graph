@@ -9,9 +9,18 @@ use query_engine::compile;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
-/// Maximum memory per query (500MB) to prevent exhausting server memory.
-/// Keep this well under the ClickHouse server's total memory limit.
-const MAX_MEMORY_USAGE: &str = "500000000";
+/// ClickHouse query settings to prevent server crashes.
+///
+/// - max_memory_usage: 200MB limit per query (fails instead of crashing)
+/// - max_execution_time: 30 second timeout
+/// - max_bytes_before_external_*: Spill to disk instead of using more RAM
+/// - join_algorithm: Use disk-based partial_merge joins for large tables
+const SAFE_QUERY_SETTINGS: &str = "\
+    max_memory_usage = 200000000, \
+    max_execution_time = 30, \
+    max_bytes_before_external_group_by = 100000000, \
+    max_bytes_before_external_sort = 100000000, \
+    join_algorithm = 'partial_merge'";
 
 /// Sample row from query results for peeking.
 pub type SampleRow = Vec<String>;
@@ -74,6 +83,15 @@ impl ExecutionResult {
     }
 
     pub fn failure(query_name: String, error: String, execution_time: Duration) -> Self {
+        Self::failure_with_sql(query_name, error, execution_time, None)
+    }
+
+    pub fn failure_with_sql(
+        query_name: String,
+        error: String,
+        execution_time: Duration,
+        sql: Option<String>,
+    ) -> Self {
         let parsed_error = ParsedError::parse(&error);
         Self {
             query_name,
@@ -84,7 +102,7 @@ impl ExecutionResult {
             sample_rows: None,
             column_names: None,
             execution_time,
-            sql: None,
+            sql,
             params: None,
         }
     }
@@ -183,10 +201,11 @@ impl QueryExecutor {
                 compiled.sql,
                 serde_json::to_value(&compiled.params).unwrap_or_default(),
             ),
-            Err(e) => ExecutionResult::failure(
+            Err(e) => ExecutionResult::failure_with_sql(
                 name.to_string(),
                 format!("Execution failed: {}", e),
                 start.elapsed(),
+                Some(final_sql),
             ),
         }
     }
@@ -261,12 +280,16 @@ impl QueryExecutor {
     /// For correctness testing, we verify the query runs, count results,
     /// and peek at the first few rows. We add memory limits and execution
     /// time limits to prevent resource exhaustion.
+    ///
+    /// Key safety settings:
+    /// - max_memory_usage: Limits RAM per query (fails instead of crashing server)
+    /// - max_bytes_before_external_*: Spills to disk instead of using RAM
+    /// - join_algorithm: Uses disk-based joins for large tables
     async fn execute_sql_with_sample(
         &self,
         sql: &str,
     ) -> Result<(u64, Vec<SampleRow>, Vec<String>)> {
-        let settings =
-            format!("SETTINGS max_memory_usage = {}, max_execution_time = 30", MAX_MEMORY_USAGE);
+        let settings = format!("SETTINGS {}", SAFE_QUERY_SETTINGS);
 
         // Get row count
         let count_sql = format!("SELECT count() FROM ({}) {}", sql, settings);

@@ -1,7 +1,8 @@
 //! CLI for loading Parquet data into ClickHouse.
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Parser;
+use clickhouse::Client;
 use ontology::Ontology;
 use simulator::Config;
 use simulator::clickhouse::ClickHouseWriter;
@@ -48,6 +49,11 @@ async fn main() -> Result<()> {
         config.generation.ontology_path
     );
     let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
+
+    // Check ClickHouse connectivity before proceeding
+    println!("Checking ClickHouse connection at {}...", config.clickhouse.url);
+    check_clickhouse_health(&config.clickhouse.url).await?;
+    println!("ClickHouse is healthy");
 
     let writer = ClickHouseWriter::with_config(&config.clickhouse);
 
@@ -150,4 +156,36 @@ async fn main() -> Result<()> {
     writer.print_statistics(&ontology).await?;
 
     Ok(())
+}
+
+/// Check that ClickHouse is running and healthy.
+async fn check_clickhouse_health(url: &str) -> Result<()> {
+    let client = Client::default().with_url(url);
+
+    // Try a simple query to verify connectivity
+    let result: Result<String, _> = client.query("SELECT version()").fetch_one().await;
+
+    match result {
+        Ok(version) => {
+            println!("ClickHouse version: {}", version);
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+
+            if error_msg.contains("Connect") || error_msg.contains("connection") {
+                bail!(
+                    "Cannot connect to ClickHouse at {}\n\n\
+                     Make sure ClickHouse is running:\n\
+                     - Docker: docker run -d -p 8123:8123 clickhouse/clickhouse-server\n\
+                     - Local: clickhouse-server\n\n\
+                     Error: {}",
+                    url,
+                    error_msg
+                );
+            } else {
+                bail!("ClickHouse health check failed: {}", error_msg)
+            }
+        }
+    }
 }
