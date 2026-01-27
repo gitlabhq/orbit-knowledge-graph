@@ -8,6 +8,10 @@ license = "MIT"
 name = "gkg-server"
 path = "src/main.rs"
 
+[features]
+default = []
+regenerate-protos = []
+
 [dependencies]
 anyhow = { workspace = true }
 arrow = { workspace = true }
