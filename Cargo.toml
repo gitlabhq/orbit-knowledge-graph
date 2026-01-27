@@ -14,7 +14,7 @@ members = [
 
 [workspace.dependencies]
 arrow = "57.2.0"
-datafusion = "52.1.0"
+datafusion = { version = "52.1.0", default-features = false, features = ["sql"] }
 clap = { version = "4.5.54", features = ["derive", "env"] }
 dunce = "1.0.5"
 async-trait = "0.1.89"
@@ -60,7 +60,7 @@ toml = "0.9.8"
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = "0.46.0"
-clickhouse-arrow = "0.2.1"
+clickhouse-arrow = { version = "0.2.1", features = ["pool"] }
 testcontainers = "0.26.3"
 testcontainers-modules = { version = "0.14.0", features = ["nats", "clickhouse"] }
 serial_test = "3.3.1"

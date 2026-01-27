@@ -22,7 +22,7 @@ description = "Run unit tests, requires nextest"
 
 [tasks."test:integration"]
 run = "cargo nextest run --all-features --test '*' -j 1"
-# For Colima users: env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/default/docker.sock" }
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/default/docker.sock" }
 description = "Run integration tests (requires Docker)"
 
 [tasks.clean]

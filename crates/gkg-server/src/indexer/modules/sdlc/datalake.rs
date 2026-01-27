@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-pub(crate) use clickhouse_arrow::prelude::{ParamValue, QueryParams};
 use clickhouse_arrow::{ArrowFormat, Client};
+pub(crate) use clickhouse_arrow::prelude::{ParamValue, QueryParams};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use thiserror::Error;

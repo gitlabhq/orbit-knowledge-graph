@@ -1,0 +1,169 @@
+//! Integration tests for the user handler.
+//!
+//! These tests require a Docker-compatible runtime (Docker, Colima, etc).
+
+mod common;
+
+use std::sync::Arc;
+
+use arrow::array::{BinaryArray, UInt64Array, UInt8Array};
+use chrono::{DateTime, Utc};
+use etl_engine::module::Module;
+use etl_engine::testkit::TestEnvelopeFactory;
+use gkg_server::indexer::modules::SdlcModule;
+use serial_test::serial;
+
+use common::{TestContext, binary_as_str, create_handler_context, create_user_payload};
+
+#[tokio::test]
+#[serial]
+#[ignore = "reason"]
+async fn user_handler_processes_and_transforms_users() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_users (
+                id, username, email, name, first_name, last_name, state,
+                public_email, preferred_language, last_activity_on, private_profile,
+                admin, auditor, external, user_type, created_at, updated_at, _siphon_replicated_at
+            ) VALUES
+            (1, 'alice', 'alice@test.com', 'Alice Smith', 'Alice', 'Smith', 'active',
+             'alice.public@test.com', 'en', '2024-01-15', false, true, false, false, 0,
+             '2023-01-01 00:00:00', '2024-01-15 00:00:00', '2024-01-20 12:00:00'),
+            (2, 'bob', 'bob@test.com', 'Bob Jones', 'Bob', 'Jones', 'active',
+             'bob.public@test.com', 'es', '2024-01-10', true, false, false, true, 1,
+             '2023-06-15 00:00:00', '2024-01-10 00:00:00', '2024-01-20 12:00:00'),
+            (3, 'charlie', 'charlie@test.com', 'Charlie Brown', 'Charlie', 'Brown', 'blocked',
+             '', 'fr', '2024-01-05', false, false, true, false, 4,
+             '2023-09-20 00:00:00', '2024-01-05 00:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let sdlc_module = SdlcModule::new(&context.config)
+        .await
+        .expect("failed to create SDLC module");
+
+    let handlers = sdlc_module.handlers();
+    let user_handler = handlers
+        .iter()
+        .find(|h| h.name() == "user-handler")
+        .expect("user-handler not found");
+
+    let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let envelope = TestEnvelopeFactory::simple(&create_user_payload(watermark));
+    let destination = Arc::new(context.create_destination());
+    let handler_context = create_handler_context(destination);
+
+    user_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    let result = context.query("SELECT * FROM users ORDER BY id").await;
+
+    assert!(!result.is_empty(), "result should not be empty");
+
+    let batch = &result[0];
+    assert_eq!(batch.num_rows(), 3);
+
+    let user_type_column = batch
+        .column_by_name("user_type")
+        .expect("user_type column should exist")
+        .as_any()
+        .downcast_ref::<BinaryArray>()
+        .expect("user_type should be BinaryArray");
+
+    assert_eq!(binary_as_str(user_type_column, 0), "human");
+    assert_eq!(binary_as_str(user_type_column, 1), "support_bot");
+    assert_eq!(binary_as_str(user_type_column, 2), "service_user");
+
+    let is_admin_column = batch
+        .column_by_name("is_admin")
+        .expect("is_admin column should exist")
+        .as_any()
+        .downcast_ref::<UInt8Array>()
+        .expect("is_admin should be UInt8Array");
+
+    assert_eq!(is_admin_column.value(0), 1);
+    assert_eq!(is_admin_column.value(1), 0);
+    assert_eq!(is_admin_column.value(2), 0);
+
+    context.cleanup().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn user_handler_uses_watermark_for_incremental_processing() {
+    let context = TestContext::new().await;
+
+    context
+        .execute("INSERT INTO user_indexing_watermark (watermark) VALUES ('2024-01-19 00:00:00')")
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_users (
+                id, username, email, name, first_name, last_name, state,
+                public_email, preferred_language, last_activity_on, private_profile,
+                admin, auditor, external, user_type, created_at, updated_at, _siphon_replicated_at
+            ) VALUES
+            (1, 'old_user', 'old@test.com', 'Old User', 'Old', 'User', 'active',
+             '', 'en', '2024-01-01', false, false, false, false, 0,
+             '2023-01-01 00:00:00', '2024-01-01 00:00:00', '2024-01-18 12:00:00'),
+            (2, 'new_user', 'new@test.com', 'New User', 'New', 'User', 'active',
+             '', 'en', '2024-01-20', false, false, false, false, 0,
+             '2024-01-19 00:00:00', '2024-01-20 00:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let sdlc_module = SdlcModule::new(&context.config)
+        .await
+        .expect("failed to create SDLC module");
+
+    let handlers = sdlc_module.handlers();
+    let user_handler = handlers
+        .iter()
+        .find(|h| h.name() == "user-handler")
+        .expect("user-handler not found");
+
+    let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let envelope = TestEnvelopeFactory::simple(&create_user_payload(watermark));
+    let destination = Arc::new(context.create_destination());
+    let handler_context = create_handler_context(destination);
+
+    user_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    let result = context.query("SELECT count() as cnt FROM users").await;
+    let count_array = result[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .expect("expected UInt64Array");
+
+    assert_eq!(
+        count_array.value(0),
+        1,
+        "should only process new_user, not old_user"
+    );
+
+    let usernames = context.query("SELECT username FROM users").await;
+    let username_array = usernames[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<BinaryArray>()
+        .expect("username should be BinaryArray");
+
+    assert_eq!(binary_as_str(username_array, 0), "new_user");
+
+    context.cleanup().await;
+}

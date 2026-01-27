@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use crate::indexer::modules::INDEXER_TOPIC;
-use crate::indexer::modules::sdlc::datalake::{
-    Datalake, DatalakeClient, DatalakeQuery, ParamValue, QueryParams,
-};
+use crate::indexer::modules::sdlc::datalake::{Datalake, DatalakeClient, DatalakeQuery, ParamValue, QueryParams};
 use crate::indexer::modules::sdlc::watermark_store::{
     ClickHouseWatermarkStore, WatermarkClient, WatermarkError, WatermarkStore,
 };
@@ -12,6 +10,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
+use etl_engine::destination::BatchWriter;
 use etl_engine::module::{Handler, HandlerContext, HandlerError};
 use etl_engine::types::{Envelope, Event, SerializationError, Topic};
 use futures::StreamExt;
@@ -47,7 +46,9 @@ WHERE _siphon_replicated_at > {last_watermark:String}
 const TRANSFORMATION_SQL: &str = r#"
 SELECT
     id, username, email, name, first_name, last_name, state,
-    public_email, preferred_language, last_activity_on, private_profile,
+    public_email, preferred_language,
+    CAST(last_activity_on AS VARCHAR) AS last_activity_on,
+    private_profile,
     admin AS is_admin,
     auditor AS is_auditor,
     external AS is_external,
@@ -69,7 +70,8 @@ SELECT
         WHEN 14 THEN 'import_user'
         ELSE 'unknown'
     END AS user_type,
-    created_at, updated_at
+    CAST(created_at AS VARCHAR) AS created_at,
+    CAST(updated_at AS VARCHAR) AS updated_at
 FROM source_data
 "#;
 
@@ -88,11 +90,11 @@ fn build_query_params(last_watermark: &DateTime<Utc>, watermark: &DateTime<Utc>)
     QueryParams::from(vec![
         (
             "last_watermark",
-            ParamValue::from(last_watermark.format("%Y-%m-%d %H:%M:%S").to_string()),
+            ParamValue::from(last_watermark.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
         ),
         (
             "watermark",
-            ParamValue::from(watermark.format("%Y-%m-%d %H:%M:%S").to_string()),
+            ParamValue::from(watermark.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
         ),
     ])
 }
@@ -110,30 +112,43 @@ impl UserHandler {
         }
     }
 
-    async fn transform_batch(&self, batch: RecordBatch) -> Result<RecordBatch, HandlerError> {
-        let context = SessionContext::new();
+
+    /// Transforms and writes a batch in a contained scope.
+    /// The input batch and output batch are released as soon as possible.
+    async fn transform_and_write_batch(
+        batch: RecordBatch,
+        writer: &dyn BatchWriter,
+    ) -> Result<(), HandlerError> {
+        let session = SessionContext::new();
 
         let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]])
-            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to create mem table: {e}")))?;
 
-        context
+        session
             .register_table("source_data", Arc::new(mem_table))
-            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to register table: {e}")))?;
 
-        let dataframe = context
+        let dataframe = session
             .sql(TRANSFORMATION_SQL)
             .await
-            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to execute sql: {e}")))?;
 
         let results = dataframe
             .collect()
             .await
-            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to collect results: {e}")))?;
 
-        results
+        let transformed = results
             .into_iter()
             .next()
-            .ok_or_else(|| HandlerError::Processing("No result from transformation".to_string()))
+            .ok_or_else(|| HandlerError::Processing("no result from transformation".to_string()))?;
+
+        writer
+            .write_batch(&[transformed])
+            .await
+            .map_err(|e| HandlerError::Processing(format!("failed to write users: {e}")))?;
+
+        Ok(())
     }
 }
 
@@ -165,7 +180,7 @@ impl Handler for UserHandler {
             .destination
             .new_batch_writer("users")
             .await
-            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to create users writer: {e}")))?;
 
         let mut stream = self
             .datalake
@@ -174,19 +189,16 @@ impl Handler for UserHandler {
                 Some(build_query_params(&last_watermark, &payload.watermark)),
             )
             .await
-            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to query users: {e}")))?;
 
         while let Some(result) = stream.next().await {
-            let source_batch = result.map_err(|e| HandlerError::Processing(e.to_string()))?;
+            let source_batch = result
+                .map_err(|e| HandlerError::Processing(format!("failed to read batch: {e}")))?;
             if source_batch.num_rows() == 0 {
                 continue;
             }
 
-            let transformed = self.transform_batch(source_batch).await?;
-            writer
-                .write_batch(&[transformed])
-                .await
-                .map_err(|e| HandlerError::Processing(e.to_string()))?;
+            Self::transform_and_write_batch(source_batch, writer.as_ref()).await?;
         }
 
         self.watermark_store
@@ -227,6 +239,21 @@ mod tests {
             assert_eq!(watermark, &self.expected_watermark);
             self.watermark_was_set.store(true, Ordering::SeqCst);
             Ok(())
+        }
+
+        async fn get_namespaces_watermark(
+            &self,
+            _namespace_id: i64,
+        ) -> Result<DateTime<Utc>, WatermarkError> {
+            unimplemented!()
+        }
+
+        async fn set_namespaces_watermark(
+            &self,
+            _namespace_id: i64,
+            _watermark: &DateTime<Utc>,
+        ) -> Result<(), WatermarkError> {
+            unimplemented!()
         }
     }
 
