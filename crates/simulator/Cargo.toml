@@ -18,7 +18,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 # Simulator-specific dependencies
-clickhouse = { version = "0.14", features = ["inserter"] }
+clickhouse = { workspace = true }
 fake = { version = "3.0", features = ["derive", "chrono"] }
 indicatif = "0.18"
 parquet = "57"
