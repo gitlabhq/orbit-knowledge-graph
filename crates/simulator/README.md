@@ -9,7 +9,7 @@ Streaming data generator for the GitLab Knowledge Graph. Generates fake SDLC dat
 ./scripts/run.sh populate
 
 # Or with custom parameters
-./scripts/run.sh populate --tenants 5 --nodes-per-type 500
+./scripts/run.sh populate --organizations 5 --nodes-per-type 500
 ```
 
 ## Prerequisites
@@ -37,9 +37,10 @@ brew install colima docker
 ### Populate Options
 
 ```bash
-./scripts/run.sh populate --tenants 5                    # 5 tenants
+./scripts/run.sh populate --organizations 5              # 5 organizations
 ./scripts/run.sh populate --nodes-per-type 500           # 500 nodes per type
 ./scripts/run.sh populate --node-count User=1000         # Override specific types
+./scripts/run.sh populate --traversal-ids 5000           # More traversal IDs per org
 ./scripts/run.sh populate --edges-per-source 5           # More edges per node
 ./scripts/run.sh populate --dry-run                      # Preview plan only
 ```
@@ -50,7 +51,8 @@ brew install colima docker
 cargo run --bin simulate -- \
     --ontology-path fixtures/ontology \
     --clickhouse-url http://localhost:8123 \
-    --tenants 2 \
+    --organizations 2 \
+    --traversal-ids 1000 \
     --nodes-per-type 100 \
     --node-count User=500 \
     --edges-per-source 3
@@ -62,9 +64,11 @@ cargo run --bin simulate -- \
 |--------|---------|-------------|
 | `--ontology-path` | `fixtures/ontology` | Path to ontology YAML files |
 | `--clickhouse-url` | `http://localhost:8123` | ClickHouse HTTP URL |
-| `--tenants` | 2 | Number of tenants to generate |
+| `--organizations` | 2 | Number of organizations to generate |
+| `--traversal-ids` | 1000 | Traversal IDs per organization |
+| `--max-traversal-depth` | 5 | Max depth of traversal ID hierarchy |
 | `--nodes-per-type` | 100 | Default nodes per node type |
-| `--node-count TYPE=N` | - | Override count for specific type (repeatable) |
+| `--node-count TYPE=N` | - | Override count for specific type (validated against ontology) |
 | `--edges-per-source` | 3 | Edges to generate per source node |
 | `--batch-size` | 10000 | Batch size for inserts |
 | `--dry-run` | false | Print plan without executing |
@@ -83,16 +87,23 @@ No hardcoded entity names - all node types, fields, and edge types come from the
 ### Generated Tables
 
 For each node type in the ontology, a table `kg_{node_name}` is created with:
-- `tenant_id` - Tenant identifier
+- `organization_id` - Organization identifier
+- `traversal_id` - Hierarchical authorization path (e.g., "1/2/3")
 - All fields from the ontology definition
 
 A unified `kg_edges` table stores all relationships:
-- `tenant_id` - Tenant identifier
 - `relationship_kind` - Edge type (e.g., "AUTHORED", "CONTAINS")
 - `source` - Source node ID
 - `source_kind` - Source node type
 - `target` - Target node ID
 - `target_kind` - Target node type
+
+### Traversal IDs
+
+Traversal IDs enable efficient row-level authorization using GitLab's namespace hierarchy:
+- Format: `org_id/group1/group2/...` (e.g., `1/42/100`)
+- Tables are ordered by `(organization_id, traversal_id, id)` for efficient range queries
+- Query pattern: `WHERE traversal_id LIKE '1/42/%'` to get all entities in a subtree
 
 ## Querying Generated Data
 

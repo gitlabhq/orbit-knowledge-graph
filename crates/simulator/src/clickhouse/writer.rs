@@ -1,17 +1,16 @@
 //! ClickHouse data writer with streaming batch inserts.
 
 use super::schema::SchemaGenerator;
-use crate::generator::{EdgeRecord, TenantData};
+use crate::generator::{EdgeRecord, OrganizationData};
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use clickhouse::{Client, Row};
 use ontology::{EDGE_TABLE, Ontology};
 use serde::Serialize;
 
-/// ClickHouse row for edges (matches EdgeEntity + tenant_id).
+/// ClickHouse row for edges (matches EdgeEntity).
 #[derive(Debug, Clone, Serialize, Row)]
 pub struct EdgeRow {
-    pub tenant_id: u32,
     pub relationship_kind: String,
     pub source: i64,
     pub source_kind: String,
@@ -22,7 +21,6 @@ pub struct EdgeRow {
 impl From<&EdgeRecord> for EdgeRow {
     fn from(record: &EdgeRecord) -> Self {
         Self {
-            tenant_id: record.tenant_id,
             relationship_kind: record.relationship_kind.clone(),
             source: record.source,
             source_kind: record.source_kind.clone(),
@@ -38,23 +36,19 @@ pub struct ClickHouseWriter {
 }
 
 impl ClickHouseWriter {
-    /// Create a new writer connected to ClickHouse.
     pub fn new(url: &str) -> Self {
         let client = Client::default().with_url(url);
         Self { client }
     }
 
-    /// Create all schemas from ontology.
     pub async fn create_schemas(&self, ontology: &Ontology) -> Result<()> {
         let generator = SchemaGenerator::new(ontology);
 
-        // Drop existing tables
         println!("Dropping existing tables...");
         for drop_sql in generator.generate_drop_all() {
             self.client.query(&drop_sql).execute().await?;
         }
 
-        // Create tables
         println!("Creating tables...");
         for (table_name, ddl) in generator.generate_all_ddl() {
             println!("  Creating {}...", table_name);
@@ -64,32 +58,57 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Write all data for a tenant.
-    pub async fn write_tenant_data(&self, ontology: &Ontology, data: &TenantData) -> Result<()> {
-        // Write node batches
+    pub async fn write_organization_data(
+        &self,
+        ontology: &Ontology,
+        data: &OrganizationData,
+    ) -> Result<()> {
         for (node_name, batches) in &data.nodes {
-            let tbl_name = ontology.table_name(node_name)?;
-            self.write_batches(&tbl_name, batches).await?;
+            if !batches.is_empty() {
+                let tbl_name = ontology.table_name(node_name)?;
+                let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+
+                print!("    {} ({} rows)... ", node_name, total_rows);
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+
+                let start = std::time::Instant::now();
+                self.write_batches(&tbl_name, batches).await?;
+                let elapsed = start.elapsed().as_secs_f64();
+
+                println!(
+                    "✓ {:.1}s ({:.0} rows/s)",
+                    elapsed,
+                    total_rows as f64 / elapsed.max(0.001)
+                );
+            }
         }
 
-        // Write edges
-        self.write_edges(&data.edges).await?;
+        if !data.edges.is_empty() {
+            print!("    edges ({} rows)... ", data.edges.len());
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+
+            let start = std::time::Instant::now();
+            self.write_edges(&data.edges).await?;
+            let elapsed = start.elapsed().as_secs_f64();
+
+            println!(
+                "✓ {:.1}s ({:.0} edges/s)",
+                elapsed,
+                data.edges.len() as f64 / elapsed.max(0.001)
+            );
+        }
 
         Ok(())
     }
 
-    /// Write Arrow RecordBatches to a table.
-    async fn write_batches(&self, table_name: &str, batches: &[RecordBatch]) -> Result<()> {
+    pub async fn write_batches(&self, table_name: &str, batches: &[RecordBatch]) -> Result<()> {
         for batch in batches {
             self.write_batch_as_rows(table_name, batch).await?;
         }
         Ok(())
     }
 
-    /// Write a RecordBatch by converting to row-based inserts.
-    ///
-    /// This is less efficient than native Arrow/Parquet but works with
-    /// the clickhouse-rs driver which doesn't support direct Arrow inserts.
+    /// Row-based inserts since clickhouse-rs doesn't support direct Arrow inserts.
     async fn write_batch_as_rows(&self, table_name: &str, batch: &RecordBatch) -> Result<()> {
         let num_rows = batch.num_rows();
         let num_cols = batch.num_columns();
@@ -98,12 +117,13 @@ impl ClickHouseWriter {
             return Ok(());
         }
 
-        // Build INSERT statement with column names from schema
         let schema = batch.schema();
         let column_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        let columns_str = column_names.join(", ");
 
-        // Build values for each row
-        let mut all_values: Vec<String> = Vec::with_capacity(num_rows);
+        // Stream chunks directly instead of building all values first
+        let chunk_size = 5000; // Larger chunks for better throughput
+        let mut chunk_values: Vec<String> = Vec::with_capacity(chunk_size);
 
         for row_idx in 0..num_rows {
             let mut row_values: Vec<String> = Vec::with_capacity(num_cols);
@@ -114,17 +134,26 @@ impl ClickHouseWriter {
                 row_values.push(value);
             }
 
-            all_values.push(format!("({})", row_values.join(", ")));
+            chunk_values.push(format!("({})", row_values.join(", ")));
+
+            if chunk_values.len() >= chunk_size {
+                let insert_sql = format!(
+                    "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
+                    table_name,
+                    columns_str,
+                    chunk_values.join(", ")
+                );
+                self.client.query(&insert_sql).execute().await?;
+                chunk_values.clear();
+            }
         }
 
-        // Execute INSERT in chunks to avoid query size limits
-        let chunk_size = 1000;
-        for chunk in all_values.chunks(chunk_size) {
+        if !chunk_values.is_empty() {
             let insert_sql = format!(
-                "INSERT INTO {} ({}) VALUES {}",
+                "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
                 table_name,
-                column_names.join(", "),
-                chunk.join(", ")
+                columns_str,
+                chunk_values.join(", ")
             );
             self.client.query(&insert_sql).execute().await?;
         }
@@ -132,8 +161,7 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Write edges using the typed Row interface.
-    async fn write_edges(&self, edges: &[EdgeRecord]) -> Result<()> {
+    pub async fn write_edges(&self, edges: &[EdgeRecord]) -> Result<()> {
         if edges.is_empty() {
             return Ok(());
         }
@@ -148,11 +176,9 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Print statistics about the imported data.
     pub async fn print_statistics(&self, ontology: &Ontology) -> Result<()> {
         println!("\n=== Database Statistics ===");
 
-        // Node counts
         for node in ontology.nodes() {
             let tbl_name = ontology.table_name(&node.name)?;
             let count: u64 = self
@@ -167,7 +193,6 @@ impl ClickHouseWriter {
             println!("{:30} {:>12} rows", tbl_name, count);
         }
 
-        // Edge count
         let edge_count: u64 = self
             .client
             .query(&format!("SELECT count() FROM {}", EDGE_TABLE))
@@ -179,7 +204,6 @@ impl ClickHouseWriter {
             });
         println!("{:30} {:>12} rows", EDGE_TABLE, edge_count);
 
-        // Edge breakdown by type
         println!("\n=== Edge Types ===");
         let edge_types: Vec<(String, u64)> = self
             .client

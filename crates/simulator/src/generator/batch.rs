@@ -19,12 +19,9 @@ pub struct BatchBuilder {
     /// Schema for building batches.
     schema: Arc<Schema>,
     fake_gen: FakeValueGenerator,
-
-    // Column builders (accumulate rows until flush)
-    tenant_ids: Vec<u32>,
+    organization_ids: Vec<u32>,
+    traversal_ids: Vec<String>,
     columns: Vec<ColumnData>,
-
-    // Completed batches
     batches: Vec<RecordBatch>,
 }
 
@@ -44,7 +41,6 @@ enum ColumnValues {
 }
 
 impl BatchBuilder {
-    /// Create a new batch builder for a node type.
     pub fn new(node: &NodeEntity, schema: Arc<Schema>, batch_size: usize) -> Self {
         let columns: Vec<ColumnData> = node
             .fields
@@ -61,21 +57,19 @@ impl BatchBuilder {
             primary_keys,
             batch_size,
             schema,
-            fake_gen: FakeValueGenerator::new(),
-            tenant_ids: Vec::with_capacity(batch_size),
+            fake_gen: FakeValueGenerator::new_fast(), // Fast mode with non-predictable patterns
+            organization_ids: Vec::with_capacity(batch_size),
+            traversal_ids: Vec::with_capacity(batch_size),
             columns,
             batches: Vec::new(),
         }
     }
 
-    /// Add a row with the given tenant_id and primary key id.
-    ///
-    /// Automatically flushes to a batch when `batch_size` is reached.
-    pub fn add_row(&mut self, tenant_id: u32, id: i64) {
-        self.tenant_ids.push(tenant_id);
+    pub fn add_row(&mut self, organization_id: u32, traversal_id: String, id: i64) {
+        self.organization_ids.push(organization_id);
+        self.traversal_ids.push(traversal_id);
 
         for col_data in &mut self.columns {
-            // Use provided id for primary key fields
             if self.primary_keys.contains(&col_data.field.name) {
                 col_data.values.push_int64(Some(id));
             } else {
@@ -86,26 +80,26 @@ impl BatchBuilder {
             }
         }
 
-        // Flush if batch is full
-        if self.tenant_ids.len() >= self.batch_size {
+        if self.organization_ids.len() >= self.batch_size {
             self.flush();
         }
     }
 
-    /// Flush current accumulated rows to a batch.
     fn flush(&mut self) {
-        if self.tenant_ids.is_empty() {
+        if self.organization_ids.is_empty() {
             return;
         }
 
-        let mut arrays: Vec<ArrayRef> = Vec::with_capacity(1 + self.columns.len());
+        let mut arrays: Vec<ArrayRef> = Vec::with_capacity(2 + self.columns.len());
 
-        // tenant_id column
         arrays.push(Arc::new(UInt32Array::from(std::mem::take(
-            &mut self.tenant_ids,
+            &mut self.organization_ids,
         ))));
 
-        // Other columns
+        arrays.push(Arc::new(StringArray::from(std::mem::take(
+            &mut self.traversal_ids,
+        ))));
+
         for col_data in &mut self.columns {
             let array = col_data.values.drain_to_array();
             arrays.push(array);
@@ -115,13 +109,11 @@ impl BatchBuilder {
             self.batches.push(batch);
         }
 
-        // Re-allocate with capacity for next batch
-        self.tenant_ids = Vec::with_capacity(self.batch_size);
+        self.organization_ids = Vec::with_capacity(self.batch_size);
+        self.traversal_ids = Vec::with_capacity(self.batch_size);
     }
 
-    /// Finish building and return all batches.
     pub fn finish(mut self) -> Vec<RecordBatch> {
-        // Flush any remaining rows
         self.flush();
         self.batches
     }
@@ -151,7 +143,7 @@ impl ColumnValues {
             (ColumnValues::String(vec), FakeValue::Null) => vec.push(None),
             (ColumnValues::Date32(vec), FakeValue::Date(v)) => vec.push(Some(*v)),
             (ColumnValues::Date32(vec), FakeValue::Null) => vec.push(None),
-            // Type mismatch - push null
+            // Type mismatch fallback
             (ColumnValues::Int64(vec), _) => vec.push(None),
             (ColumnValues::Float64(vec), _) => vec.push(None),
             (ColumnValues::Bool(vec), _) => vec.push(None),
@@ -230,7 +222,7 @@ mod tests {
 
         // Add some rows (less than batch_size)
         for i in 0..10 {
-            builder.add_row(1, i + 1);
+            builder.add_row(1, format!("1/{}", i), i + 1);
         }
 
         let batches = builder.finish();
@@ -238,19 +230,27 @@ mod tests {
 
         let batch = &batches[0];
         assert_eq!(batch.num_rows(), 10);
-        assert_eq!(batch.num_columns(), 4); // tenant_id + 3 fields
+        assert_eq!(batch.num_columns(), 5); // organization_id + traversal_id + 3 fields
 
-        // Check tenant_id column
-        let tenant_ids = batch
+        // Check organization_id column
+        let org_ids = batch
             .column(0)
             .as_any()
             .downcast_ref::<UInt32Array>()
             .unwrap();
-        assert!(tenant_ids.iter().all(|v| v == Some(1)));
+        assert!(org_ids.iter().all(|v| v == Some(1)));
+
+        // Check traversal_id column
+        let traversal_ids = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert!(traversal_ids.iter().all(|v| v.is_some()));
 
         // Check id column
         let ids = batch
-            .column(1)
+            .column(2)
             .as_any()
             .downcast_ref::<Int64Array>()
             .unwrap();
@@ -268,7 +268,7 @@ mod tests {
 
         // Add 12 rows - should create 3 batches (5, 5, 2)
         for i in 0..12 {
-            builder.add_row(1, i + 1);
+            builder.add_row(1, format!("1/{}", i), i + 1);
         }
 
         let batches = builder.finish();
