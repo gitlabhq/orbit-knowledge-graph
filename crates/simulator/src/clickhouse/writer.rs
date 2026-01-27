@@ -73,15 +73,19 @@ impl ClickHouseWriter {
             if !batches.is_empty() {
                 let tbl_name = ontology.table_name(node_name)?;
                 let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-                
+
                 print!("    {} ({} rows)... ", node_name, total_rows);
                 std::io::Write::flush(&mut std::io::stdout()).ok();
-                
+
                 let start = std::time::Instant::now();
                 self.write_batches(&tbl_name, batches).await?;
                 let elapsed = start.elapsed().as_secs_f64();
-                
-                println!("✓ {:.1}s ({:.0} rows/s)", elapsed, total_rows as f64 / elapsed.max(0.001));
+
+                println!(
+                    "✓ {:.1}s ({:.0} rows/s)",
+                    elapsed,
+                    total_rows as f64 / elapsed.max(0.001)
+                );
             }
         }
 
@@ -89,12 +93,16 @@ impl ClickHouseWriter {
         if !data.edges.is_empty() {
             print!("    edges ({} rows)... ", data.edges.len());
             std::io::Write::flush(&mut std::io::stdout()).ok();
-            
+
             let start = std::time::Instant::now();
             self.write_edges(&data.edges).await?;
             let elapsed = start.elapsed().as_secs_f64();
-            
-            println!("✓ {:.1}s ({:.0} edges/s)", elapsed, data.edges.len() as f64 / elapsed.max(0.001));
+
+            println!(
+                "✓ {:.1}s ({:.0} edges/s)",
+                elapsed,
+                data.edges.len() as f64 / elapsed.max(0.001)
+            );
         }
 
         Ok(())

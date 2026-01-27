@@ -105,7 +105,10 @@ impl Generator {
         let mut total_write_time = 0.0;
 
         for org_id in 1..=self.config.num_organizations {
-            println!("\n=== Organization {}/{} ===", org_id, self.config.num_organizations);
+            println!(
+                "\n=== Organization {}/{} ===",
+                org_id, self.config.num_organizations
+            );
 
             // Generate all data first (no writes during generation)
             println!("  Generating nodes...");
@@ -113,20 +116,28 @@ impl Generator {
             let org_data = self.generate_organization_with_logging(org_id, true)?;
             let gen_elapsed = gen_start.elapsed().as_secs_f64();
             total_gen_time += gen_elapsed;
-            
-            let node_count: usize = org_data.nodes.values()
+
+            let node_count: usize = org_data
+                .nodes
+                .values()
                 .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
                 .sum();
-            println!("  Generation complete: {} nodes + {} edges ({:.1}s)", 
-                node_count, org_data.edges.len(), gen_elapsed);
+            println!(
+                "  Generation complete: {} nodes + {} edges ({:.1}s)",
+                node_count,
+                org_data.edges.len(),
+                gen_elapsed
+            );
 
             // Now write everything to ClickHouse
             println!("  Writing to ClickHouse...");
             let write_start = std::time::Instant::now();
-            writer.write_organization_data(&self.ontology, &org_data).await?;
+            writer
+                .write_organization_data(&self.ontology, &org_data)
+                .await?;
             let write_elapsed = write_start.elapsed().as_secs_f64();
             total_write_time += write_elapsed;
-            
+
             println!("  Write complete ({:.1}s)", write_elapsed);
         }
 
@@ -161,18 +172,20 @@ impl Generator {
         // Generate all organizations in parallel
         println!("\n=== Parallel Generation Phase ===");
         let gen_start = std::time::Instant::now();
-        
+
         let org_data_vec: Vec<_> = (1..=self.config.num_organizations)
             .into_par_iter()
             .map(|org_id| {
                 let start = std::time::Instant::now();
                 println!("  [Org {}] Starting generation...", org_id);
-                
+
                 let result = self.generate_organization(org_id);
-                
+
                 match &result {
                     Ok(data) => {
-                        let node_count: usize = data.nodes.values()
+                        let node_count: usize = data
+                            .nodes
+                            .values()
                             .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
                             .sum();
                         println!(
@@ -187,7 +200,7 @@ impl Generator {
                         eprintln!("  [Org {}] ✗ Error: {}", org_id, e);
                     }
                 }
-                
+
                 (org_id, result)
             })
             .collect();
@@ -198,18 +211,22 @@ impl Generator {
         // Write all organizations sequentially (ClickHouse client isn't Send)
         println!("\n=== Sequential Write Phase ===");
         let write_start = std::time::Instant::now();
-        
+
         for (org_id, result) in org_data_vec {
             let org_data = result?;
-            
+
             let start = std::time::Instant::now();
             println!("  [Org {}] Writing to ClickHouse...", org_id);
-            
+
             writer
                 .write_organization_data(&self.ontology, &org_data)
                 .await?;
-            
-            println!("  [Org {}] ✓ Written in {:.1}s", org_id, start.elapsed().as_secs_f64());
+
+            println!(
+                "  [Org {}] ✓ Written in {:.1}s",
+                org_id,
+                start.elapsed().as_secs_f64()
+            );
         }
 
         let write_elapsed = write_start.elapsed().as_secs_f64();
@@ -238,7 +255,11 @@ impl Generator {
     }
 
     /// Generate all data for a single organization (with optional verbose logging).
-    fn generate_organization_with_logging(&self, org_id: u32, verbose: bool) -> Result<OrganizationData> {
+    fn generate_organization_with_logging(
+        &self,
+        org_id: u32,
+        verbose: bool,
+    ) -> Result<OrganizationData> {
         let mut data = OrganizationData::default();
         let mut id_map: HashMap<String, Vec<i64>> = HashMap::new();
         let traversal_gen = self
@@ -254,14 +275,15 @@ impl Generator {
                     print!("    {} ({} nodes)... ", node.name, count);
                     std::io::Write::flush(&mut std::io::stdout()).ok();
                 }
-                
+
                 let start = std::time::Instant::now();
-                let (batches, ids) = self.generate_node_batches(node, org_id, traversal_gen, count)?;
-                
+                let (batches, ids) =
+                    self.generate_node_batches(node, org_id, traversal_gen, count)?;
+
                 if verbose {
                     println!("✓ {:.1}s", start.elapsed().as_secs_f64());
                 }
-                
+
                 data.nodes.insert(node.name.clone(), batches);
                 id_map.insert(node.name.clone(), ids);
             }
@@ -271,35 +293,43 @@ impl Generator {
         if verbose {
             println!("    Generating edges...");
         }
-        
+
         let edge_start = std::time::Instant::now();
         for edge in self.ontology.edges() {
             if verbose {
-                print!("      {} ({} -> {})... ", 
-                    edge.relationship_kind, edge.source_kind, edge.target_kind);
+                print!(
+                    "      {} ({} -> {})... ",
+                    edge.relationship_kind, edge.source_kind, edge.target_kind
+                );
                 std::io::Write::flush(&mut std::io::stdout()).ok();
             }
-            
+
             let edge_type_start = std::time::Instant::now();
             let edge_count_before = data.edges.len();
             self.generate_edges_for_type(edge, &id_map, &mut data.edges);
             let edges_added = data.edges.len() - edge_count_before;
             let edge_type_elapsed = edge_type_start.elapsed().as_secs_f64();
-            
+
             if verbose {
                 if edges_added > 0 {
-                    println!("{} edges ({:.1}s, {:.0} edges/s)", 
-                        edges_added, 
+                    println!(
+                        "{} edges ({:.1}s, {:.0} edges/s)",
+                        edges_added,
                         edge_type_elapsed,
-                        edges_added as f64 / edge_type_elapsed.max(0.001));
+                        edges_added as f64 / edge_type_elapsed.max(0.001)
+                    );
                 } else {
                     println!("0 edges (skipped)");
                 }
             }
         }
-        
+
         if verbose {
-            println!("    Total edges: {} ({:.1}s)", data.edges.len(), edge_start.elapsed().as_secs_f64());
+            println!(
+                "    Total edges: {} ({:.1}s)",
+                data.edges.len(),
+                edge_start.elapsed().as_secs_f64()
+            );
         }
 
         Ok(data)
@@ -315,11 +345,11 @@ impl Generator {
     ) -> Result<(Vec<RecordBatch>, Vec<i64>)> {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::new(node, schema, self.config.batch_size);
-        
+
         // Pre-allocate IDs efficiently
         let start_id = self.next_id.fetch_add(count as i64, Ordering::SeqCst);
         let all_ids: Vec<i64> = (start_id..(start_id + count as i64)).collect();
-        
+
         let mut rng = fake::rand::thread_rng();
 
         for &id in &all_ids {
@@ -357,18 +387,19 @@ impl Generator {
         for &source_id in source_ids {
             // Determine how many edges to create (1 to edges_per_source)
             let num_edges = rng.gen_range(1..=self.config.edges_per_source);
-            
+
             // Pick random targets
             let targets: Vec<i64> = if same_type {
                 // Optimized self-loop avoidance: sample with retry instead of filtering
                 let mut selected = Vec::with_capacity(num_edges);
                 let max_attempts = num_edges * 3; // Retry limit
                 let mut attempts = 0;
-                
-                while selected.len() < num_edges && attempts < max_attempts && target_ids.len() > 1 {
+
+                while selected.len() < num_edges && attempts < max_attempts && target_ids.len() > 1
+                {
                     let idx = rng.gen_range(0..target_ids.len());
                     let candidate = target_ids[idx];
-                    
+
                     if candidate != source_id && !selected.contains(&candidate) {
                         selected.push(candidate);
                     }

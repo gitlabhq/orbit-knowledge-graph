@@ -70,18 +70,26 @@ impl FakeValueGenerator {
                 // Mix counter with random data to avoid sequential patterns
                 let rand1 = self.rng.r#gen::<u32>();
                 let rand2 = self.rng.r#gen::<u16>();
-                let mixed = (self.counter as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ (rand1 as u64);
-                
+                let mixed = self.counter.wrapping_mul(0x9e3779b97f4a7c15) ^ (rand1 as u64);
+
                 let value = match field.name.to_lowercase().as_str() {
                     name if name.contains("name") || name.contains("title") => {
                         // Random prefixes + hash to avoid patterns
-                        let prefixes = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "theta", "omega"];
+                        let prefixes = [
+                            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "theta", "omega",
+                        ];
                         let prefix = prefixes[rand1 as usize % prefixes.len()];
                         format!("{}_{:x}", prefix, mixed)
                     }
                     name if name.contains("email") => {
                         // Mix domain + random hex
-                        let domains = ["example.com", "test.org", "demo.net", "sample.io", "mock.dev"];
+                        let domains = [
+                            "example.com",
+                            "test.org",
+                            "demo.net",
+                            "sample.io",
+                            "mock.dev",
+                        ];
                         let domain = domains[rand1 as usize % domains.len()];
                         format!("user{:x}@{}", mixed & 0xffffff, domain)
                     }
@@ -90,20 +98,33 @@ impl FakeValueGenerator {
                     }
                     name if name.contains("path") => {
                         // Multi-level paths with random components
-                        format!("/p{:x}/d{:x}/{:x}", 
-                            mixed & 0xff, 
-                            (mixed >> 8) & 0xff, 
-                            rand2)
+                        format!(
+                            "/p{:x}/d{:x}/{:x}",
+                            mixed & 0xff,
+                            (mixed >> 8) & 0xff,
+                            rand2
+                        )
                     }
                     name if name.contains("sha") || name.contains("hash") => {
                         // Use counter + random for SHA-like strings
-                        format!("{:040x}", 
-                            ((mixed as u128) << 64) | (rand1 as u128))
+                        format!("{:040x}", ((mixed as u128) << 64) | (rand1 as u128))
                     }
                     name if name.contains("description") || name.contains("body") => {
                         // Mix words to create varied descriptions
-                        let words = ["Lorem", "ipsum", "dolor", "sit", "amet", "consectetur", 
-                                    "adipiscing", "elit", "sed", "do", "eiusmod", "tempor"];
+                        let words = [
+                            "Lorem",
+                            "ipsum",
+                            "dolor",
+                            "sit",
+                            "amet",
+                            "consectetur",
+                            "adipiscing",
+                            "elit",
+                            "sed",
+                            "do",
+                            "eiusmod",
+                            "tempor",
+                        ];
                         let w1 = words[rand1 as usize % words.len()];
                         let w2 = words[(rand1 >> 8) as usize % words.len()];
                         let w3 = words[(rand1 >> 16) as usize % words.len()];
