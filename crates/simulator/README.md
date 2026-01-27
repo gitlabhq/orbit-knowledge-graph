@@ -1,6 +1,6 @@
 # Simulator
 
-Streaming data generator for the GitLab Knowledge Graph. Generates fake SDLC data from ontology definitions and populates ClickHouse directly.
+Streaming data generator and query evaluator for the GitLab Knowledge Graph. Generates fake SDLC data from ontology definitions and populates ClickHouse directly. Includes tools for correctness testing of SDLC queries.
 
 ## Quick Start
 
@@ -10,6 +10,9 @@ Streaming data generator for the GitLab Knowledge Graph. Generates fake SDLC dat
 
 # Or with custom parameters
 ./scripts/run.sh populate --organizations 5 --nodes-per-type 500
+
+# Evaluate SDLC queries against the generated data
+./scripts/run.sh evaluate
 ```
 
 ## Prerequisites
@@ -32,6 +35,7 @@ brew install colima docker
 ./scripts/run.sh restart     # Restart ClickHouse
 ./scripts/run.sh status      # Show ClickHouse status and table stats
 ./scripts/run.sh populate    # Start ClickHouse and populate with data
+./scripts/run.sh evaluate    # Run SDLC queries and collect statistics
 ```
 
 ### Populate Options
@@ -104,6 +108,65 @@ Traversal IDs enable efficient row-level authorization using GitLab's namespace 
 - Format: `org_id/group1/group2/...` (e.g., `1/42/100`)
 - Tables are ordered by `(organization_id, traversal_id, id)` for efficient range queries
 - Query pattern: `WHERE traversal_id LIKE '1/42/%'` to get all entities in a subtree
+
+## Query Evaluation
+
+The `evaluate` command runs SDLC queries against the database and collects statistics for correctness testing.
+
+### Basic Usage
+
+```bash
+# Run all SDLC queries
+./scripts/run.sh evaluate
+
+# Filter to specific queries
+./scripts/run.sh evaluate --filter "MR"
+
+# Output as markdown report
+./scripts/run.sh evaluate --format markdown --output report.md
+
+# Run multiple iterations
+./scripts/run.sh evaluate --iterations 5
+```
+
+### Direct Binary
+
+```bash
+cargo run --bin evaluate -- \
+    --queries fixtures/queries/sdlc_queries.json \
+    --ontology fixtures/ontology \
+    --clickhouse-url http://localhost:8123 \
+    --sample-size 100 \
+    --format text
+```
+
+### Evaluate Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--queries` | `fixtures/queries/sdlc_queries.json` | Path to queries JSON file |
+| `--ontology` | `fixtures/ontology` | Path to ontology directory |
+| `--clickhouse-url` | `http://localhost:8123` | ClickHouse HTTP URL |
+| `--sample-size` | 100 | IDs to sample per entity type |
+| `--format` | text | Output format: text, json, markdown |
+| `--output` | stdout | Write report to file |
+| `--iterations` | 1 | Run queries multiple times |
+| `--filter` | - | Only run queries matching pattern |
+| `--verbose` | false | Verbose logging |
+
+### How It Works
+
+1. **Parameter Sampling**: Queries with placeholder `node_ids` (e.g., `[42]`) are automatically substituted with real IDs sampled from the database.
+
+2. **Query Compilation**: JSON queries are compiled to SQL using the `query-engine` crate.
+
+3. **Execution**: Each query is executed and statistics are collected:
+   - Success/failure status
+   - Row count
+   - Execution time
+   - Error messages for failures
+
+4. **Reporting**: Results are formatted as text, JSON, or markdown with summary statistics.
 
 ## Querying Generated Data
 

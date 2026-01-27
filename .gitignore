@@ -12,3 +12,7 @@ output/
 
 # auto-summarization files
 git_diff_full.txt
+
+# simulator
+gl_synthetic_data/
+gkg_simulator_manifest.json

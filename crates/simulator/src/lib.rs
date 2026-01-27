@@ -10,6 +10,11 @@
 //! 3. Generating fake data using the `fake` crate
 //! 4. Streaming batches directly to ClickHouse
 //!
+//! # Modules
+//!
+//! - `generator` - Data generation from ontology definitions
+//! - `evaluation` - Query evaluation and correctness testing
+//!
 //! # Example
 //!
 //! ```ignore
@@ -27,6 +32,7 @@ pub mod arrow_schema;
 pub mod clickhouse;
 pub mod config;
 pub mod generator;
+pub mod parquet;
 
 pub use config::Config;
 pub use generator::Generator;
