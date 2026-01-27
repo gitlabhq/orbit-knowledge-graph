@@ -6,10 +6,8 @@ use std::str::FromStr;
 /// Output format for log messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Format {
-    /// Human-readable text format (default for development).
     #[default]
     Text,
-    /// JSON format for production/k8s environments.
     Json,
 }
 
