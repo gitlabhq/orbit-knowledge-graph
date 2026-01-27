@@ -3,15 +3,13 @@ use std::sync::Arc;
 use arrow::array::{Array, TimestampMillisecondArray};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use clickhouse_arrow::prelude::{ParamValue, QueryParams};
-use clickhouse_arrow::{ArrowFormat, Client};
-use futures::StreamExt;
+use etl_engine::clickhouse::ArrowClickHouseClient;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum WatermarkError {
     #[error("query failed: {0}")]
-    Query(#[from] clickhouse_arrow::Error),
+    Query(String),
 
     #[error("no data returned")]
     NoData,
@@ -23,13 +21,19 @@ pub(crate) enum WatermarkError {
     InvalidTimestamp,
 }
 
+impl From<clickhouse::error::Error> for WatermarkError {
+    fn from(err: clickhouse::error::Error) -> Self {
+        WatermarkError::Query(err.to_string())
+    }
+}
+
 #[async_trait]
 pub(crate) trait WatermarkStore: Send + Sync {
     async fn get_users_watermark(&self) -> Result<DateTime<Utc>, WatermarkError>;
     async fn set_users_watermark(&self, watermark: &DateTime<Utc>) -> Result<(), WatermarkError>;
 }
 
-pub(crate) type WatermarkClient = Arc<Client<ArrowFormat>>;
+pub(crate) type WatermarkClient = Arc<ArrowClickHouseClient>;
 
 pub(crate) struct ClickHouseWatermarkStore {
     client: WatermarkClient,
@@ -45,13 +49,14 @@ impl ClickHouseWatermarkStore {
 impl WatermarkStore for ClickHouseWatermarkStore {
     async fn get_users_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
         let query = "SELECT argMax(watermark, _version) as watermark FROM user_indexing_watermark";
-        let mut stream = self.client.query(query, None).await?;
+        let batches = self
+            .client
+            .query_arrow(query)
+            .await
+            .map_err(|e| WatermarkError::Query(e.to_string()))?;
 
-        let Some(result) = stream.next().await else {
-            return Err(WatermarkError::NoData);
-        };
+        let batch = batches.into_iter().next().ok_or(WatermarkError::NoData)?;
 
-        let batch = result?;
         if batch.num_rows() == 0 {
             return Err(WatermarkError::NoData);
         }
@@ -73,16 +78,15 @@ impl WatermarkStore for ClickHouseWatermarkStore {
     }
 
     async fn set_users_watermark(&self, watermark: &DateTime<Utc>) -> Result<(), WatermarkError> {
-        let query = "INSERT INTO user_indexing_watermark (watermark) VALUES ({watermark:String})";
-
-        let params = QueryParams::from(vec![(
-            "watermark",
-            ParamValue::from(watermark.format("%Y-%m-%d %H:%M:%S%.3f").to_string()),
-        )]);
+        let formatted_watermark = watermark.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
 
         self.client
-            .execute_params(query, Some(params), None)
-            .await?;
+            .query("INSERT INTO user_indexing_watermark (watermark) VALUES ({watermark:String})")
+            .param("watermark", formatted_watermark)
+            .execute()
+            .await
+            .map_err(|e| WatermarkError::Query(e.to_string()))?;
+
         Ok(())
     }
 }

@@ -32,7 +32,8 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
-clickhouse-arrow = { workspace = true }
+arrow-ipc = { workspace = true }
+clickhouse = { workspace = true }
 datafusion = { workspace = true }
 futures = { workspace = true }
 prost = { workspace = true }

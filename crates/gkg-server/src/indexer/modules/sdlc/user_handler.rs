@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::indexer::modules::INDEXER_TOPIC;
 use crate::indexer::modules::sdlc::datalake::{
-    Datalake, DatalakeClient, DatalakeQuery, ParamValue, QueryParams,
+    Datalake, DatalakeClient, DatalakeQuery, ToQueryParams,
 };
 use crate::indexer::modules::sdlc::watermark_store::{
     ClickHouseWatermarkStore, WatermarkClient, WatermarkError, WatermarkStore,
@@ -73,6 +73,21 @@ SELECT
 FROM source_data
 "#;
 
+#[derive(Clone, Serialize)]
+pub struct UserQueryParams {
+    pub last_watermark: String,
+    pub watermark: String,
+}
+
+impl UserQueryParams {
+    pub fn new(last_watermark: &DateTime<Utc>, watermark: &DateTime<Utc>) -> Self {
+        Self {
+            last_watermark: last_watermark.format("%Y-%m-%d %H:%M:%S").to_string(),
+            watermark: watermark.format("%Y-%m-%d %H:%M:%S").to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UserHandlerPayload {
     watermark: DateTime<Utc>,
@@ -82,19 +97,6 @@ impl Event for UserHandlerPayload {
     fn topic() -> Topic {
         Topic::new(INDEXER_TOPIC, SUBJECT)
     }
-}
-
-fn build_query_params(last_watermark: &DateTime<Utc>, watermark: &DateTime<Utc>) -> QueryParams {
-    QueryParams::from(vec![
-        (
-            "last_watermark",
-            ParamValue::from(last_watermark.format("%Y-%m-%d %H:%M:%S").to_string()),
-        ),
-        (
-            "watermark",
-            ParamValue::from(watermark.format("%Y-%m-%d %H:%M:%S").to_string()),
-        ),
-    ])
 }
 
 pub struct UserHandler {
@@ -167,12 +169,10 @@ impl Handler for UserHandler {
             .await
             .map_err(|e| HandlerError::Processing(e.to_string()))?;
 
+        let params = UserQueryParams::new(&last_watermark, &payload.watermark);
         let mut stream = self
             .datalake
-            .query_arrow(
-                USER_QUERY,
-                Some(build_query_params(&last_watermark, &payload.watermark)),
-            )
+            .query_arrow(USER_QUERY, params.to_query_params())
             .await
             .map_err(|e| HandlerError::Processing(e.to_string()))?;
 
@@ -237,7 +237,7 @@ mod tests {
         async fn query_arrow(
             &self,
             _sql: &str,
-            _params: Option<QueryParams>,
+            _params: serde_json::Value,
         ) -> Result<RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(stream::empty()))
         }

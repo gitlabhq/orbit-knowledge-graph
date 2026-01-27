@@ -2,16 +2,35 @@ use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-pub(crate) use clickhouse_arrow::prelude::{ParamValue, QueryParams};
-use clickhouse_arrow::{ArrowFormat, Client};
-use futures::StreamExt;
+use etl_engine::clickhouse::ArrowClickHouseClient;
 use futures::stream::BoxStream;
+use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
+
+pub(crate) trait ToQueryParams {
+    fn to_query_params(&self) -> Value;
+}
+
+impl<T: Serialize> ToQueryParams for T {
+    fn to_query_params(&self) -> Value {
+        serde_json::to_value(self).expect("params serialization failed")
+    }
+}
 
 #[derive(Debug, Error)]
 pub(crate) enum DatalakeError {
     #[error("query failed: {0}")]
-    Query(#[from] clickhouse_arrow::Error),
+    Query(String),
+
+    #[error("arrow decode error: {0}")]
+    ArrowDecode(#[from] arrow::error::ArrowError),
+}
+
+impl From<clickhouse::error::Error> for DatalakeError {
+    fn from(err: clickhouse::error::Error) -> Self {
+        DatalakeError::Query(err.to_string())
+    }
 }
 
 pub(crate) type RecordBatchStream<'a> = BoxStream<'a, Result<RecordBatch, DatalakeError>>;
@@ -21,11 +40,11 @@ pub(crate) trait DatalakeQuery: Send + Sync {
     async fn query_arrow(
         &self,
         sql: &str,
-        params: Option<QueryParams>,
+        params: Value,
     ) -> Result<RecordBatchStream<'_>, DatalakeError>;
 }
 
-pub(crate) type DatalakeClient = Arc<Client<ArrowFormat>>;
+pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 
 pub(crate) struct Datalake {
     client: DatalakeClient,
@@ -42,10 +61,21 @@ impl DatalakeQuery for Datalake {
     async fn query_arrow(
         &self,
         sql: &str,
-        params: Option<QueryParams>,
+        params: Value,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-        let stream = self.client.query_params(sql, params, None).await?;
-        let mapped = stream.map(|result| result.map_err(DatalakeError::from));
-        Ok(Box::pin(mapped))
+        let mut query = self.client.query(sql);
+
+        if let Value::Object(map) = params {
+            for (key, value) in map {
+                query = query.param(&key, value);
+            }
+        }
+
+        let batches = query
+            .fetch_arrow()
+            .await
+            .map_err(|e| DatalakeError::Query(e.to_string()))?;
+
+        Ok(Box::pin(futures::stream::iter(batches.into_iter().map(Ok))))
     }
 }

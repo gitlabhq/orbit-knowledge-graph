@@ -17,15 +17,11 @@ pub struct SdlcModule {
 
 impl SdlcModule {
     pub async fn new(configuration: &ClickHouseConfiguration) -> Result<Self, ModuleInitError> {
-        let client = configuration
-            .build_client()
-            .await
-            .map_err(ModuleInitError::new)?;
-        let shared_client = Arc::new(client);
+        let client = Arc::new(configuration.build_client());
 
         Ok(Self {
-            datalake_client: Arc::clone(&shared_client),
-            watermark_client: shared_client,
+            datalake_client: Arc::clone(&client),
+            watermark_client: client,
         })
     }
 }
