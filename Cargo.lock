@@ -2785,6 +2785,9 @@ dependencies = [
  "futures",
  "jsonwebtoken",
  "labkit-rs",
+ "prost",
+ "prost-build",
+ "prost-types",
  "serde",
  "serde_json",
  "serial_test",
@@ -2792,10 +2795,16 @@ dependencies = [
  "testcontainers-modules",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tokio-util",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
