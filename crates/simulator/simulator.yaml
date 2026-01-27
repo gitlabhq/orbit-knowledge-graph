@@ -1,0 +1,49 @@
+# Simulator configuration
+#
+# Run generation: cargo run --bin simulate -- -c simulator.yaml
+# Run evaluation: cargo run --bin evaluate -- -c simulator.yaml
+#
+# All fields have defaults - you only need to specify what you want to override.
+
+clickhouse:
+  url: http://localhost:8123
+  database: default
+  engine:
+    engine_type: ReplacingMergeTree
+    node_order_by: [organization_id, traversal_id, id]
+    edge_order_by: [relationship_kind, source_kind, source]
+    indexes: []
+    # Example index:
+    # - name: idx_source
+    #   table: kg_edges
+    #   expression: source
+    #   type: minmax
+    #   granularity: 1
+
+generation:
+  ontology_path: fixtures/ontology
+  organizations: 2
+  parallel: false
+  batch_size: 10000
+  traversal:
+    ids_per_org: 1000
+    max_depth: 5
+  nodes:
+    default_per_type: 100
+    counts: {}
+    # Override counts for specific types:
+    # counts:
+    #   User: 500
+    #   Project: 200
+  edges:
+    per_source: 3
+
+evaluation:
+  queries_path: fixtures/queries/sdlc_queries.json
+  sample_size: 100
+  iterations: 1
+  skip_cache_warm: false
+  # filter: "merge"  # Only run queries matching this pattern
+  output:
+    format: text
+    # path: report.txt

@@ -46,27 +46,21 @@ pub struct OrganizationData {
 }
 
 /// Main generator that produces fake data from ontology definitions.
-///
-/// This generator is fully ontology-driven:
-/// - Iterates `ontology.nodes()` to generate all node types
-/// - Iterates `ontology.edges()` to generate all edge types
-/// - No hardcoded entity names
 pub struct Generator {
     ontology: Ontology,
     config: Config,
     next_id: Arc<AtomicI64>,
-    /// Traversal ID generators per organization.
     traversal_ids: HashMap<u32, TraversalIdGenerator>,
 }
 
 impl Generator {
     pub fn new(ontology: Ontology, config: Config) -> Self {
         let mut traversal_ids = HashMap::new();
-        for org_id in 1..=config.num_organizations {
+        for org_id in 1..=config.generation.organizations {
             let traversal_gen = TraversalIdGenerator::new(
                 org_id,
-                config.traversal_ids_per_org,
-                config.max_traversal_depth,
+                config.generation.traversal.ids_per_org,
+                config.generation.traversal.max_depth,
             );
             traversal_ids.insert(org_id, traversal_gen);
         }
@@ -84,24 +78,24 @@ impl Generator {
     }
 
     pub async fn run(&self) -> Result<()> {
-        let writer = ClickHouseWriter::new(&self.config.clickhouse_url);
+        let writer = ClickHouseWriter::new(&self.config.clickhouse.url);
 
         println!("Creating ClickHouse schemas...");
         writer.create_schemas(&self.ontology).await?;
 
         println!(
             "\nGenerating data for {} organization(s)...",
-            self.config.num_organizations
+            self.config.generation.organizations
         );
         let overall_start = std::time::Instant::now();
 
         let mut total_gen_time = 0.0;
         let mut total_write_time = 0.0;
 
-        for org_id in 1..=self.config.num_organizations {
+        for org_id in 1..=self.config.generation.organizations {
             println!(
                 "\n=== Organization {}/{} ===",
-                org_id, self.config.num_organizations
+                org_id, self.config.generation.organizations
             );
 
             println!("  Generating nodes...");
@@ -146,21 +140,21 @@ impl Generator {
     }
 
     pub async fn run_parallel(&self) -> Result<()> {
-        let writer = ClickHouseWriter::new(&self.config.clickhouse_url);
+        let writer = ClickHouseWriter::new(&self.config.clickhouse.url);
 
         println!("Creating ClickHouse schemas...");
         writer.create_schemas(&self.ontology).await?;
 
         println!(
             "\nGenerating data for {} organization(s) in parallel...",
-            self.config.num_organizations
+            self.config.generation.organizations
         );
         let overall_start = std::time::Instant::now();
 
         println!("\n=== Parallel Generation Phase ===");
         let gen_start = std::time::Instant::now();
 
-        let org_data_vec: Vec<_> = (1..=self.config.num_organizations)
+        let org_data_vec: Vec<_> = (1..=self.config.generation.organizations)
             .into_par_iter()
             .map(|org_id| {
                 let start = std::time::Instant::now();
@@ -248,7 +242,7 @@ impl Generator {
             .expect("traversal IDs exist");
 
         for node in self.ontology.nodes() {
-            let count = self.config.count_for(&node.name);
+            let count = self.config.node_count(&node.name);
             if count > 0 {
                 if verbose {
                     print!("    {} ({} nodes)... ", node.name, count);
@@ -321,7 +315,7 @@ impl Generator {
         count: usize,
     ) -> Result<(Vec<RecordBatch>, Vec<i64>)> {
         let schema = Arc::new(node.to_arrow_schema());
-        let mut builder = BatchBuilder::new(node, schema, self.config.batch_size);
+        let mut builder = BatchBuilder::new(node, schema, self.config.generation.batch_size);
 
         let start_id = self.next_id.fetch_add(count as i64, Ordering::SeqCst);
         let all_ids: Vec<i64> = (start_id..(start_id + count as i64)).collect();
@@ -357,7 +351,7 @@ impl Generator {
         let same_type = edge.source_kind == edge.target_kind;
 
         for &source_id in source_ids {
-            let num_edges = rng.gen_range(1..=self.config.edges_per_source);
+            let num_edges = rng.gen_range(1..=self.config.generation.edges.per_source);
 
             let targets: Vec<i64> = if same_type {
                 // Sample with retry to avoid self-loops
@@ -397,24 +391,23 @@ impl Generator {
     }
 
     pub fn print_plan(&self) {
-        println!("Generation plan (from ontology):");
-        println!("  Organizations: {}", self.config.num_organizations);
+        let cfg = &self.config.generation;
+
+        println!("Generation plan:");
+        println!("  Organizations: {}", cfg.organizations);
         println!(
             "  Traversal IDs: {} per org (max depth {})",
-            self.config.traversal_ids_per_org, self.config.max_traversal_depth
+            cfg.traversal.ids_per_org, cfg.traversal.max_depth
         );
         println!();
 
         println!("  Node types ({}):", self.ontology.node_count());
         for node in self.ontology.nodes() {
-            let count = self.config.count_for(&node.name);
-            let total = count * self.config.num_organizations as usize;
+            let count = self.config.node_count(&node.name);
+            let total = count * cfg.organizations as usize;
             println!(
                 "    {}: {} per org = {} total ({} fields)",
-                node.name,
-                count,
-                total,
-                node.fields.len()
+                node.name, count, total, node.fields.len()
             );
         }
         println!();
