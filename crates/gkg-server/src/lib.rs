@@ -1,7 +1,10 @@
 pub mod auth;
 pub mod cli;
 pub mod config;
+pub mod context_engine;
 pub mod indexer;
 pub mod proto;
+pub mod redaction;
 pub mod shutdown;
+pub mod tools;
 pub mod webserver;
