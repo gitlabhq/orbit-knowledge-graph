@@ -258,7 +258,11 @@ mod tests {
         let generator = TraversalIdGenerator::new(42, 100, 5);
 
         let unique: HashSet<_> = generator.ids().iter().collect();
-        assert_eq!(unique.len(), generator.len(), "All traversal IDs should be unique");
+        assert_eq!(
+            unique.len(),
+            generator.len(),
+            "All traversal IDs should be unique"
+        );
     }
 
     #[test]
