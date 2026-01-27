@@ -9,13 +9,11 @@ clickhouse:
   url: http://localhost:8123
   database: default
 
-  # Client connection settings
   client:
     send_timeout: 3600
     receive_timeout: 3600
     max_insert_block_size: 100000
 
-  # Schema configuration
   schema:
     engine: MergeTree
     index_granularity: 8192
@@ -31,48 +29,73 @@ clickhouse:
 
     # Data skipping indexes (applied after data load)
     indexes: []
-    # Example indexes:
-    # - name: idx_target
-    #   table: edges
-    #   expression: target
-    #   type: bloom_filter
-    #   granularity: 4
 
     # Projections for reverse traversal (applied after data load)
     projections: []
-    # Example: reverse lookup on edges (find sources by target)
-    # - name: by_target
-    #   table: edges
-    #   columns: [source_kind, source, relationship_kind, target_kind, target]
-    #   order_by: [target_kind, target, relationship_kind]
 
-    # Additional MergeTree SETTINGS clause options
-    # These are appended to CREATE TABLE ... SETTINGS index_granularity=8192, <your settings>
-    # See: https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree#settings
+    # Additional MergeTree SETTINGS options
     settings: {}
-    # Common settings:
-    #   min_bytes_for_wide_part: "10485760"      # 10MB - threshold for wide vs compact parts
-    #   min_rows_for_wide_part: "0"              # Row threshold for wide parts
-    #   merge_with_ttl_timeout: "86400"          # TTL merge interval in seconds
-    #   merge_max_block_size: "8192"             # Max block size for merges
-    #   max_compress_block_size: "1048576"       # Max compression block size
-    #   storage_policy: "default"                # Storage policy name
-    #   ttl_only_drop_parts: "1"                 # Only drop whole parts on TTL expiry
-    #   allow_nullable_key: "1"                  # Allow nullable columns in primary key
 
 generation:
   ontology_path: fixtures/ontology
   output_dir: gl_synthetic_data
   skip_if_present: true
-  organizations: 2
-  parallel: false
-  batch_size: 10000
+  parallel: true
+  batch_size: 50000
+
+  # Scale: 10 organizations (tenants)
+  # Based on graphhouse spike "default" config
+  organizations: 10
+
   traversal:
-    ids_per_org: 1000
-    max_depth: 5
+    ids_per_org: 5000
+    max_depth: 8
+
   nodes:
+    # Default for unlisted types
     default_per_type: 100
-    counts: {}
+
+    # Realistic GitLab-like distribution per organization
+    # Based on graphhouse spike ratios:
+    #   - 100 users per tenant
+    #   - 50 groups (with subgroup hierarchy)
+    #   - 250 projects (5 per group)
+    #   - 7,500 MRs (30 per project)
+    #   - 12,500 issues/work items (50 per project)
+    counts:
+      # Core entities
+      User: 100
+      Group: 50
+      Project: 250
+
+      # SDLC entities (high volume)
+      MergeRequest: 7500
+      WorkItem: 12500
+      Note: 20000          # ~1 per MR + ~1 per WorkItem
+
+      # CI/CD entities
+      Pipeline: 15000      # ~2 per MR
+      Stage: 45000         # ~3 per pipeline
+      Job: 75000           # ~5 per pipeline
+
+      # MR-related
+      MergeRequestFile: 30000  # ~4 files per MR
+      Branch: 500              # ~2 per project
+      Milestone: 100           # ~2 per group
+      Label: 250               # ~5 per group
+
+      # Code intelligence (smaller for now)
+      File: 5000
+      Directory: 1000
+      Definition: 10000
+      ImportedSymbol: 5000
+
+      # Security (moderate)
+      Vulnerability: 1000
+      Finding: 3000
+      Scanner: 10
+      VulnerabilityIdentifier: 500
+
   edges:
     per_source: 3
 

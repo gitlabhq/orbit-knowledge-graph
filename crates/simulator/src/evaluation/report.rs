@@ -1,5 +1,6 @@
 //! Report generation for evaluation results.
 
+use super::error::ErrorCategory;
 use super::ExecutionResult;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -32,11 +33,14 @@ pub struct Summary {
     pub total_queries: usize,
     pub successful: usize,
     pub failed: usize,
+    pub empty_results: usize,
     pub total_rows: u64,
     pub total_time: Duration,
     pub avg_time: Duration,
     pub min_time: Duration,
     pub max_time: Duration,
+    /// Breakdown of failures by error category.
+    pub errors_by_category: std::collections::HashMap<String, usize>,
 }
 
 impl Summary {
@@ -44,6 +48,10 @@ impl Summary {
         let total_queries = results.len();
         let successful = results.iter().filter(|r| r.success).count();
         let failed = total_queries - successful;
+        let empty_results = results
+            .iter()
+            .filter(|r| r.success && r.row_count == Some(0))
+            .count();
 
         let total_rows: u64 = results.iter().filter_map(|r| r.row_count).sum();
 
@@ -57,15 +65,27 @@ impl Summary {
         let min_time = times.iter().min().copied().unwrap_or(Duration::ZERO);
         let max_time = times.iter().max().copied().unwrap_or(Duration::ZERO);
 
+        // Count errors by category
+        let mut errors_by_category = std::collections::HashMap::new();
+        for result in results.iter().filter(|r| !r.success) {
+            let category = result
+                .error_category()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "UNKNOWN".to_string());
+            *errors_by_category.entry(category).or_insert(0) += 1;
+        }
+
         Self {
             total_queries,
             successful,
             failed,
+            empty_results,
             total_rows,
             total_time,
             avg_time,
             min_time,
             max_time,
+            errors_by_category,
         }
     }
 
@@ -111,6 +131,14 @@ impl Report {
             self.summary.successful,
             self.summary.success_rate()
         ));
+        output.push_str(&format!(
+            "  With results:  {:>6}\n",
+            self.summary.successful - self.summary.empty_results
+        ));
+        output.push_str(&format!(
+            "  Empty (0 rows):{:>6}\n",
+            self.summary.empty_results
+        ));
         output.push_str(&format!("Failed:          {:>6}\n", self.summary.failed));
         output.push_str(&format!(
             "Total Rows:      {:>6}\n",
@@ -133,36 +161,89 @@ impl Report {
             self.summary.max_time.as_secs_f64() * 1000.0
         ));
 
+        // Error breakdown
+        if !self.summary.errors_by_category.is_empty() {
+            output.push_str("\nErrors by Category:\n");
+            let mut categories: Vec<_> = self.summary.errors_by_category.iter().collect();
+            categories.sort_by(|a, b| b.1.cmp(a.1));
+            for (category, count) in categories {
+                output.push_str(&format!("  {:18} {:>3}\n", category, count));
+            }
+        }
+
         output.push('\n');
 
         // Individual results
         output.push_str("QUERY RESULTS\n");
         output.push_str("───────────────────────────────────────────────────────────────────\n");
 
-        // Successful queries
-        let mut successful: Vec<_> = self.results.iter().filter(|r| r.success).collect();
-        successful.sort_by(|a, b| b.execution_time.cmp(&a.execution_time));
+        // Successful queries with results
+        let mut with_results: Vec<_> = self
+            .results
+            .iter()
+            .filter(|r| r.success && r.row_count.unwrap_or(0) > 0)
+            .collect();
+        with_results.sort_by(|a, b| b.execution_time.cmp(&a.execution_time));
 
-        if !successful.is_empty() {
-            output.push_str("\n✓ Successful Queries (sorted by execution time):\n\n");
-            for result in &successful {
+        if !with_results.is_empty() {
+            output.push_str("\n✓ Queries with Results:\n\n");
+            for result in &with_results {
                 output.push_str(&format!(
-                    "  {:50} {:>6} rows  {:>8.2}ms\n",
-                    truncate(&result.query_name, 50),
+                    "  {:45} {:>6} rows  {:>8.2}ms\n",
+                    truncate(&result.query_name, 45),
                     result.row_count.unwrap_or(0),
+                    result.execution_time.as_secs_f64() * 1000.0
+                ));
+                // Show sample data
+                if let (Some(cols), Some(rows)) = (&result.column_names, &result.sample_rows) {
+                    if !rows.is_empty() {
+                        output.push_str(&format_sample_data(cols, rows));
+                    }
+                }
+            }
+        }
+
+        // Successful queries with no results (potential issues)
+        let empty: Vec<_> = self
+            .results
+            .iter()
+            .filter(|r| r.success && r.row_count == Some(0))
+            .collect();
+        if !empty.is_empty() {
+            output.push_str("\n⚠ Empty Results (0 rows - may need investigation):\n\n");
+            for result in &empty {
+                output.push_str(&format!(
+                    "  {:45} {:>8.2}ms\n",
+                    truncate(&result.query_name, 45),
                     result.execution_time.as_secs_f64() * 1000.0
                 ));
             }
         }
 
-        // Failed queries
+        // Failed queries grouped by error category
         let failed: Vec<_> = self.results.iter().filter(|r| !r.success).collect();
         if !failed.is_empty() {
-            output.push_str("\n✗ Failed Queries:\n\n");
+            output.push_str("\n✗ Failed Queries:\n");
+
+            // Group by error category
+            let mut by_category: std::collections::HashMap<ErrorCategory, Vec<&ExecutionResult>> =
+                std::collections::HashMap::new();
             for result in &failed {
-                output.push_str(&format!("  {}\n", result.query_name));
-                if let Some(error) = &result.error {
-                    output.push_str(&format!("    Error: {}\n", error));
+                let category = result.error_category().unwrap_or(ErrorCategory::Other);
+                by_category.entry(category).or_default().push(result);
+            }
+
+            // Sort categories for consistent output
+            let mut categories: Vec<_> = by_category.into_iter().collect();
+            categories.sort_by_key(|(cat, _)| format!("{}", cat));
+
+            for (category, results) in categories {
+                output.push_str(&format!("\n  [{:}] ({} queries)\n", category, results.len()));
+                for result in results {
+                    output.push_str(&format!("    • {}\n", result.query_name));
+                    if let Some(parsed) = &result.parsed_error {
+                        output.push_str(&format!("      {}\n", parsed.summary));
+                    }
                 }
             }
         }
@@ -264,6 +345,111 @@ impl Report {
     }
 }
 
+/// Format sample data for display.
+fn format_sample_data(columns: &[String], rows: &[Vec<String>]) -> String {
+    if rows.is_empty() || columns.is_empty() {
+        return String::new();
+    }
+
+    let mut output = String::new();
+
+    // Calculate column widths (max 20 chars per column, max 5 columns)
+    let display_cols: Vec<_> = columns.iter().take(5).collect();
+    let widths: Vec<usize> = display_cols
+        .iter()
+        .enumerate()
+        .map(|(i, col)| {
+            let max_val_width = rows
+                .iter()
+                .filter_map(|row| row.get(i))
+                .map(|v| v.len().min(20))
+                .max()
+                .unwrap_or(0);
+            col.len().max(max_val_width).min(20)
+        })
+        .collect();
+
+    // Header
+    output.push_str("      ┌");
+    for (i, w) in widths.iter().enumerate() {
+        output.push_str(&"─".repeat(*w + 2));
+        if i < widths.len() - 1 {
+            output.push('┬');
+        }
+    }
+    if columns.len() > 5 {
+        output.push_str("─...");
+    }
+    output.push_str("┐\n");
+
+    // Column names
+    output.push_str("      │");
+    for (i, (col, w)) in display_cols.iter().zip(&widths).enumerate() {
+        let truncated = if col.len() > *w {
+            format!("{}…", &col[..*w - 1])
+        } else {
+            col.to_string()
+        };
+        output.push_str(&format!(" {:width$} ", truncated, width = w));
+        if i < widths.len() - 1 {
+            output.push('│');
+        }
+    }
+    if columns.len() > 5 {
+        output.push_str(" ...");
+    }
+    output.push_str("│\n");
+
+    // Separator
+    output.push_str("      ├");
+    for (i, w) in widths.iter().enumerate() {
+        output.push_str(&"─".repeat(*w + 2));
+        if i < widths.len() - 1 {
+            output.push('┼');
+        }
+    }
+    if columns.len() > 5 {
+        output.push_str("─...");
+    }
+    output.push_str("┤\n");
+
+    // Data rows (first row only for brevity)
+    for row in rows.iter().take(1) {
+        output.push_str("      │");
+        for (i, w) in widths.iter().enumerate() {
+            let val = row.get(i).map(|s| s.as_str()).unwrap_or("");
+            let truncated = if val.len() > *w {
+                format!("{}…", &val[..*w - 1])
+            } else {
+                val.to_string()
+            };
+            output.push_str(&format!(" {:width$} ", truncated, width = w));
+            if i < widths.len() - 1 {
+                output.push('│');
+            }
+        }
+        if columns.len() > 5 {
+            output.push_str(" ...");
+        }
+        output.push_str("│\n");
+    }
+
+    // Footer
+    output.push_str("      └");
+    for (i, w) in widths.iter().enumerate() {
+        output.push_str(&"─".repeat(*w + 2));
+        if i < widths.len() - 1 {
+            output.push('┴');
+        }
+    }
+    if columns.len() > 5 {
+        output.push_str("─...");
+    }
+    output.push_str("┘\n");
+
+    output
+}
+
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         format!("{:width$}", s, width = max_len)
@@ -282,6 +468,8 @@ mod tests {
             ExecutionResult::success(
                 "q1".to_string(),
                 10,
+                vec![],
+                vec![],
                 Duration::from_millis(100),
                 "SELECT 1".to_string(),
                 serde_json::json!({}),
@@ -289,6 +477,8 @@ mod tests {
             ExecutionResult::success(
                 "q2".to_string(),
                 20,
+                vec![],
+                vec![],
                 Duration::from_millis(200),
                 "SELECT 2".to_string(),
                 serde_json::json!({}),
@@ -312,6 +502,8 @@ mod tests {
         let results = vec![ExecutionResult::success(
             "test".to_string(),
             10,
+            vec![vec!["val".to_string()]],
+            vec!["col".to_string()],
             Duration::from_millis(100),
             "SELECT 1".to_string(),
             serde_json::json!({}),

@@ -3,11 +3,13 @@
 //! This module loads SDLC queries, samples valid parameter values from the database,
 //! executes queries, and collects statistics.
 
+mod error;
 mod executor;
 mod report;
 mod sampler;
 
-pub use executor::{ExecutionResult, QueryExecutor};
+pub use error::{ErrorCategory, ParsedError};
+pub use executor::{ExecutionResult, QueryExecutor, SampleRow};
 pub use report::{Report, ReportFormat};
 pub use sampler::ParameterSampler;
 

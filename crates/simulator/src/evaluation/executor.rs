@@ -1,5 +1,6 @@
 //! Query execution and statistics collection.
 
+use super::error::{ErrorCategory, ParsedError};
 use super::{ParameterSampler, QueryDefinition};
 use anyhow::Result;
 use clickhouse::Client;
@@ -12,6 +13,9 @@ use std::time::{Duration, Instant};
 /// Keep this well under the ClickHouse server's total memory limit.
 const MAX_MEMORY_USAGE: &str = "500000000";
 
+/// Sample row from query results for peeking.
+pub type SampleRow = Vec<String>;
+
 /// Result of executing a single query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
@@ -21,8 +25,14 @@ pub struct ExecutionResult {
     pub success: bool,
     /// Error message if failed.
     pub error: Option<String>,
+    /// Parsed error with structured information.
+    pub parsed_error: Option<ParsedError>,
     /// Number of rows returned.
     pub row_count: Option<u64>,
+    /// Sample of first row(s) for peeking results.
+    pub sample_rows: Option<Vec<SampleRow>>,
+    /// Column names for sample rows.
+    pub column_names: Option<Vec<String>>,
     /// Execution time.
     pub execution_time: Duration,
     /// The SQL that was executed (for debugging).
@@ -35,6 +45,8 @@ impl ExecutionResult {
     pub fn success(
         query_name: String,
         row_count: u64,
+        sample_rows: Vec<SampleRow>,
+        column_names: Vec<String>,
         execution_time: Duration,
         sql: String,
         params: serde_json::Value,
@@ -43,7 +55,18 @@ impl ExecutionResult {
             query_name,
             success: true,
             error: None,
+            parsed_error: None,
             row_count: Some(row_count),
+            sample_rows: if sample_rows.is_empty() {
+                None
+            } else {
+                Some(sample_rows)
+            },
+            column_names: if column_names.is_empty() {
+                None
+            } else {
+                Some(column_names)
+            },
             execution_time,
             sql: Some(sql),
             params: Some(params),
@@ -51,15 +74,36 @@ impl ExecutionResult {
     }
 
     pub fn failure(query_name: String, error: String, execution_time: Duration) -> Self {
+        let parsed_error = ParsedError::parse(&error);
         Self {
             query_name,
             success: false,
             error: Some(error),
+            parsed_error: Some(parsed_error),
             row_count: None,
+            sample_rows: None,
+            column_names: None,
             execution_time,
             sql: None,
             params: None,
         }
+    }
+
+    /// Get the error category if this is a failure.
+    pub fn error_category(&self) -> Option<ErrorCategory> {
+        self.parsed_error.as_ref().map(|e| e.category)
+    }
+
+    /// Check if this error is transient (can retry).
+    pub fn is_transient_error(&self) -> bool {
+        self.parsed_error.as_ref().is_some_and(|e| e.is_transient())
+    }
+
+    /// Check if this error needs a query fix.
+    pub fn needs_query_fix(&self) -> bool {
+        self.parsed_error
+            .as_ref()
+            .is_some_and(|e| e.needs_query_fix())
     }
 }
 
@@ -128,11 +172,13 @@ impl QueryExecutor {
         // Build the final SQL with parameters substituted
         let final_sql = substitute_params_in_sql(&compiled.sql, &compiled.params);
 
-        // Execute the query
-        match self.execute_sql(&final_sql).await {
-            Ok(row_count) => ExecutionResult::success(
+        // Execute the query and get sample rows
+        match self.execute_sql_with_sample(&final_sql).await {
+            Ok((row_count, sample_rows, column_names)) => ExecutionResult::success(
                 name.to_string(),
                 row_count,
+                sample_rows,
+                column_names,
                 start.elapsed(),
                 compiled.sql,
                 serde_json::to_value(&compiled.params).unwrap_or_default(),
@@ -210,18 +256,87 @@ impl QueryExecutor {
         Ok(query_value)
     }
 
-    /// Execute raw SQL and return row count.
+    /// Execute raw SQL and return row count plus sample rows.
     ///
-    /// For correctness testing, we just verify the query runs and count results.
-    /// We add memory limits and execution time limits to prevent resource exhaustion.
-    async fn execute_sql(&self, sql: &str) -> Result<u64> {
-        let count_sql = format!(
-            "SELECT count() FROM ({}) SETTINGS max_memory_usage = {}, max_execution_time = 30",
-            sql, MAX_MEMORY_USAGE
-        );
+    /// For correctness testing, we verify the query runs, count results,
+    /// and peek at the first few rows. We add memory limits and execution
+    /// time limits to prevent resource exhaustion.
+    async fn execute_sql_with_sample(
+        &self,
+        sql: &str,
+    ) -> Result<(u64, Vec<SampleRow>, Vec<String>)> {
+        let settings =
+            format!("SETTINGS max_memory_usage = {}, max_execution_time = 30", MAX_MEMORY_USAGE);
 
+        // Get row count
+        let count_sql = format!("SELECT count() FROM ({}) {}", sql, settings);
         let count: u64 = self.client.query(&count_sql).fetch_one().await?;
-        Ok(count)
+
+        // Get sample rows (limit 3) with column names using JSONEachRow format
+        let sample_sql = format!("SELECT * FROM ({}) LIMIT 3 {}", sql, settings);
+        let (sample_rows, column_names) = self.fetch_sample_rows(&sample_sql).await?;
+
+        Ok((count, sample_rows, column_names))
+    }
+
+    /// Fetch sample rows as strings for display.
+    async fn fetch_sample_rows(&self, sql: &str) -> Result<(Vec<SampleRow>, Vec<String>)> {
+        // Use FORMAT JSONCompactEachRow to get both column names and values
+        let json_sql = format!("{} FORMAT JSONCompactColumns", sql);
+
+        // Fetch as raw bytes and parse
+        let raw: Vec<u8> = self.client.query(&json_sql).fetch_one().await.unwrap_or_default();
+
+        if raw.is_empty() {
+            return Ok((vec![], vec![]));
+        }
+
+        // Parse the JSONCompactColumns format: [[col1_values...], [col2_values...], ...]
+        // Actually, let's use a simpler approach - fetch column names separately
+        let columns = self.get_column_names(sql).await.unwrap_or_default();
+
+        // Fetch data as tab-separated values which is easier to parse
+        let tsv_sql = format!("{} FORMAT TabSeparated", sql);
+        let tsv_raw: Vec<u8> = self.client.query(&tsv_sql).fetch_one().await.unwrap_or_default();
+
+        if tsv_raw.is_empty() {
+            return Ok((vec![], columns));
+        }
+
+        let tsv_str = String::from_utf8_lossy(&tsv_raw);
+        let rows: Vec<SampleRow> = tsv_str
+            .lines()
+            .take(3)
+            .map(|line| line.split('\t').map(|s| s.to_string()).collect())
+            .collect();
+
+        Ok((rows, columns))
+    }
+
+    /// Get column names from a query.
+    async fn get_column_names(&self, sql: &str) -> Result<Vec<String>> {
+        // Use DESCRIBE to get column info
+        let describe_sql = format!("DESCRIBE ({})", sql);
+        let raw: Vec<u8> = self
+            .client
+            .query(&describe_sql)
+            .fetch_one()
+            .await
+            .unwrap_or_default();
+
+        if raw.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Parse tab-separated output: name\ttype\t...
+        let output = String::from_utf8_lossy(&raw);
+        let columns: Vec<String> = output
+            .lines()
+            .filter_map(|line| line.split('\t').next())
+            .map(|s| s.to_string())
+            .collect();
+
+        Ok(columns)
     }
 
     /// Get sampler cache statistics.
@@ -285,12 +400,15 @@ mod tests {
         let result = ExecutionResult::success(
             "test".to_string(),
             10,
+            vec![vec!["val1".to_string(), "val2".to_string()]],
+            vec!["col1".to_string(), "col2".to_string()],
             Duration::from_millis(100),
             "SELECT 1".to_string(),
             serde_json::json!({}),
         );
         assert!(result.success);
         assert_eq!(result.row_count, Some(10));
+        assert!(result.sample_rows.is_some());
     }
 
     #[test]

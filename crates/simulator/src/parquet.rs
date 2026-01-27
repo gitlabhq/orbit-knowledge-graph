@@ -117,7 +117,7 @@ impl ParquetWriter {
             organizations: num_orgs,
         };
 
-        let manifest_path = self.output_dir.join("manifest.json");
+        let manifest_path = self.output_dir.join("gkg_simulator_manifest.json");
         let file = File::create(&manifest_path)?;
         serde_json::to_writer_pretty(file, &manifest)?;
 
