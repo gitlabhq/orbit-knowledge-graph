@@ -141,20 +141,20 @@ run_populate() {
     
     # Build the command with defaults prepended if needed
     if [ "$has_ontology" = false ] && [ "$has_url" = false ]; then
-        cargo run --bin simulate -- \
+        cargo run --release --bin simulate -- \
             --ontology-path fixtures/ontology \
             --clickhouse-url "http://localhost:${CLICKHOUSE_PORT}" \
             "$@"
     elif [ "$has_ontology" = false ]; then
-        cargo run --bin simulate -- \
+        cargo run --release --bin simulate -- \
             --ontology-path fixtures/ontology \
             "$@"
     elif [ "$has_url" = false ]; then
-        cargo run --bin simulate -- \
+        cargo run --release --bin simulate -- \
             --clickhouse-url "http://localhost:${CLICKHOUSE_PORT}" \
             "$@"
     else
-        cargo run --bin simulate -- "$@"
+        cargo run --release --bin simulate -- "$@"
     fi
 }
 
