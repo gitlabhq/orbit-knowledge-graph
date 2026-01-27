@@ -62,7 +62,7 @@ impl BatchBuilder {
             primary_keys,
             batch_size,
             schema,
-            fake_gen: FakeValueGenerator::new(),
+            fake_gen: FakeValueGenerator::new_fast(), // Fast mode with non-predictable patterns
             organization_ids: Vec::with_capacity(batch_size),
             traversal_ids: Vec::with_capacity(batch_size),
             columns,

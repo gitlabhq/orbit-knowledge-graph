@@ -68,14 +68,18 @@ impl ClickHouseWriter {
         ontology: &Ontology,
         data: &OrganizationData,
     ) -> Result<()> {
-        // Write node batches
+        // Write node batches (quieter for parallel writes)
         for (node_name, batches) in &data.nodes {
-            let tbl_name = ontology.table_name(node_name)?;
-            self.write_batches(&tbl_name, batches).await?;
+            if !batches.is_empty() {
+                let tbl_name = ontology.table_name(node_name)?;
+                self.write_batches(&tbl_name, batches).await?;
+            }
         }
 
         // Write edges
-        self.write_edges(&data.edges).await?;
+        if !data.edges.is_empty() {
+            self.write_edges(&data.edges).await?;
+        }
 
         Ok(())
     }

@@ -180,6 +180,7 @@ Populate Options (passed to the simulator binary):
                              Error if TYPE doesn't exist in ontology
     --edges-per-source N     Edges per source node (default: 3)
     --batch-size N           Batch size for inserts (default: 10000)
+    --parallel               Generate organizations in parallel (faster, more CPU)
     --dry-run                Print plan without executing
 
 Environment Variables:

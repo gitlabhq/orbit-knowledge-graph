@@ -12,6 +12,8 @@ use ontology::{DataType, Field};
 /// Generates fake values for ontology fields.
 pub struct FakeValueGenerator {
     rng: fake::rand::rngs::ThreadRng,
+    fast_mode: bool,
+    counter: u64,
 }
 
 impl Default for FakeValueGenerator {
@@ -25,6 +27,17 @@ impl FakeValueGenerator {
     pub fn new() -> Self {
         Self {
             rng: fake::rand::thread_rng(),
+            fast_mode: false,
+            counter: 0,
+        }
+    }
+
+    /// Create a generator in fast mode (simpler, faster data generation).
+    pub fn new_fast() -> Self {
+        Self {
+            rng: fake::rand::thread_rng(),
+            fast_mode: true,
+            counter: 0,
         }
     }
 
@@ -35,6 +48,11 @@ impl FakeValueGenerator {
             return FakeValue::Null;
         }
 
+        if self.fast_mode {
+            self.counter += 1;
+            return self.generate_fast(field);
+        }
+
         match field.data_type {
             DataType::String => self.generate_string(&field.name),
             DataType::Int => self.generate_int(&field.name),
@@ -42,6 +60,88 @@ impl FakeValueGenerator {
             DataType::Bool => self.generate_bool(&field.name),
             DataType::Date => self.generate_date(),
             DataType::DateTime => self.generate_datetime(),
+        }
+    }
+
+    /// Fast generation mode - randomized patterns for performance without predictability.
+    fn generate_fast(&mut self, field: &Field) -> FakeValue {
+        match field.data_type {
+            DataType::String => {
+                // Mix counter with random data to avoid sequential patterns
+                let rand1 = self.rng.r#gen::<u32>();
+                let rand2 = self.rng.r#gen::<u16>();
+                let mixed = (self.counter as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ (rand1 as u64);
+                
+                let value = match field.name.to_lowercase().as_str() {
+                    name if name.contains("name") || name.contains("title") => {
+                        // Random prefixes + hash to avoid patterns
+                        let prefixes = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "theta", "omega"];
+                        let prefix = prefixes[rand1 as usize % prefixes.len()];
+                        format!("{}_{:x}", prefix, mixed)
+                    }
+                    name if name.contains("email") => {
+                        // Mix domain + random hex
+                        let domains = ["example.com", "test.org", "demo.net", "sample.io", "mock.dev"];
+                        let domain = domains[rand1 as usize % domains.len()];
+                        format!("user{:x}@{}", mixed & 0xffffff, domain)
+                    }
+                    name if name.contains("url") => {
+                        format!("https://example.com/{:x}/{:x}", mixed, rand2)
+                    }
+                    name if name.contains("path") => {
+                        // Multi-level paths with random components
+                        format!("/p{:x}/d{:x}/{:x}", 
+                            mixed & 0xff, 
+                            (mixed >> 8) & 0xff, 
+                            rand2)
+                    }
+                    name if name.contains("sha") || name.contains("hash") => {
+                        // Use counter + random for SHA-like strings
+                        format!("{:040x}", 
+                            ((mixed as u128) << 64) | (rand1 as u128))
+                    }
+                    name if name.contains("description") || name.contains("body") => {
+                        // Mix words to create varied descriptions
+                        let words = ["Lorem", "ipsum", "dolor", "sit", "amet", "consectetur", 
+                                    "adipiscing", "elit", "sed", "do", "eiusmod", "tempor"];
+                        let w1 = words[rand1 as usize % words.len()];
+                        let w2 = words[(rand1 >> 8) as usize % words.len()];
+                        let w3 = words[(rand1 >> 16) as usize % words.len()];
+                        format!("{} {} {} {:x}", w1, w2, w3, mixed & 0xffff)
+                    }
+                    name if name.contains("status") => {
+                        self.pick_enum(&["open", "closed", "merged", "pending", "active"])
+                    }
+                    name if name.contains("state") => {
+                        self.pick_enum(&["pending", "running", "success", "failed", "canceled"])
+                    }
+                    _ => {
+                        // Generic varied strings
+                        format!("val{:x}", mixed)
+                    }
+                };
+                FakeValue::String(value)
+            }
+            DataType::Int => {
+                // Wider range with some clustering
+                FakeValue::Int(self.rng.gen_range(1..100000))
+            }
+            DataType::Float => {
+                // Varied distribution
+                FakeValue::Float(self.rng.gen_range(0.0..10000.0))
+            }
+            DataType::Bool => FakeValue::Bool(self.rng.gen_bool(0.5)),
+            DataType::Date => {
+                // 5 year range instead of 1 year
+                let days_ago = self.rng.gen_range(0..(365 * 5));
+                FakeValue::Date(-days_ago)
+            }
+            DataType::DateTime => {
+                let days_ago = self.rng.gen_range(0..(365 * 5)) as i64;
+                let hour_offset = self.rng.gen_range(0..24) as i64;
+                let millis = (days_ago * 86400 + hour_offset * 3600) * 1000;
+                FakeValue::DateTime(Utc::now().timestamp_millis() - millis)
+            }
         }
     }
 

@@ -55,6 +55,10 @@ struct Args {
     /// Just print the generation plan without executing
     #[arg(long)]
     dry_run: bool,
+
+    /// Generate organizations in parallel (faster but uses more CPU)
+    #[arg(long)]
+    parallel: bool,
 }
 
 /// Parse "NodeType=count" format
@@ -152,8 +156,14 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Run generator
-    generator.run().await?;
+    // Run generator (parallel or sequential)
+    if args.parallel {
+        println!("Running in parallel mode...\n");
+        generator.run_parallel().await?;
+    } else {
+        println!("Running in sequential mode...\n");
+        generator.run().await?;
+    }
 
     println!("\nDone!");
     Ok(())
