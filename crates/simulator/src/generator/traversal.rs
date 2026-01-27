@@ -69,8 +69,8 @@ impl TraversalIdGenerator {
 /// Generate a trie of traversal IDs.
 ///
 /// Builds a tree where each node has a globally unique, monotonically increasing ID.
-/// The tree is built breadth-first to distribute nodes across depths.
-/// Uses a flat Vec with indices to avoid unsafe pointer manipulation.
+/// The tree is built breadth-first to distribute nodes across depths, then output
+/// in depth-first (pre-order) to group children under their parents.
 fn generate_trie(org_id: u32, count: usize, max_depth: usize) -> Vec<String> {
     if count == 0 {
         return vec![];
@@ -82,12 +82,12 @@ fn generate_trie(org_id: u32, count: usize, max_depth: usize) -> Vec<String> {
         return vec![root_id.to_string()];
     }
 
-    // Store nodes as (path, depth) in a flat vec - indices are stable
-    let mut nodes: Vec<String> = Vec::with_capacity(count);
-    nodes.push(root_id.to_string());
+    // Build tree with parent-child relationships
+    // Each node stores: (path, children_indices)
+    let mut nodes: Vec<(String, Vec<usize>)> = Vec::with_capacity(count);
+    nodes.push((root_id.to_string(), Vec::new()));
 
     // Track which nodes at each depth can have children added
-    // Store indices into the nodes vec
     let mut current_level: Vec<usize> = vec![0];
 
     let mut next_id = root_id + 1;
@@ -114,7 +114,7 @@ fn generate_trie(org_id: u32, count: usize, max_depth: usize) -> Vec<String> {
                 max_children.max(1).min(count - nodes.len())
             };
 
-            let parent_path = nodes[parent_idx].clone();
+            let parent_path = nodes[parent_idx].0.clone();
 
             for _ in 0..children_to_add {
                 if nodes.len() >= count {
@@ -124,7 +124,8 @@ fn generate_trie(org_id: u32, count: usize, max_depth: usize) -> Vec<String> {
                 let child_path = format!("{}/{}", parent_path, next_id);
                 next_id += 1;
                 let child_idx = nodes.len();
-                nodes.push(child_path);
+                nodes.push((child_path, Vec::new()));
+                nodes[parent_idx].1.push(child_idx);
                 next_level.push(child_idx);
             }
         }
@@ -132,8 +133,23 @@ fn generate_trie(org_id: u32, count: usize, max_depth: usize) -> Vec<String> {
         current_level = next_level;
     }
 
-    nodes.truncate(count);
-    nodes
+    // DFS pre-order traversal to output children grouped under parents
+    let mut result = Vec::with_capacity(count.min(nodes.len()));
+    let mut stack = vec![0usize];
+
+    while let Some(idx) = stack.pop() {
+        if result.len() >= count {
+            break;
+        }
+        result.push(nodes[idx].0.clone());
+        // Push children in reverse order so first child is processed first
+        for &child_idx in nodes[idx].1.iter().rev() {
+            stack.push(child_idx);
+        }
+    }
+
+    result.truncate(count);
+    result
 }
 
 /// Calculate optimal branching factor to achieve target node count within max_depth.
