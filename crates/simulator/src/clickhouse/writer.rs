@@ -68,24 +68,40 @@ impl ClickHouseWriter {
         ontology: &Ontology,
         data: &OrganizationData,
     ) -> Result<()> {
-        // Write node batches (quieter for parallel writes)
+        // Write node batches with progress
         for (node_name, batches) in &data.nodes {
             if !batches.is_empty() {
                 let tbl_name = ontology.table_name(node_name)?;
+                let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+                
+                print!("    {} ({} rows)... ", node_name, total_rows);
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+                
+                let start = std::time::Instant::now();
                 self.write_batches(&tbl_name, batches).await?;
+                let elapsed = start.elapsed().as_secs_f64();
+                
+                println!("✓ {:.1}s ({:.0} rows/s)", elapsed, total_rows as f64 / elapsed.max(0.001));
             }
         }
 
         // Write edges
         if !data.edges.is_empty() {
+            print!("    edges ({} rows)... ", data.edges.len());
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+            
+            let start = std::time::Instant::now();
             self.write_edges(&data.edges).await?;
+            let elapsed = start.elapsed().as_secs_f64();
+            
+            println!("✓ {:.1}s ({:.0} edges/s)", elapsed, data.edges.len() as f64 / elapsed.max(0.001));
         }
 
         Ok(())
     }
 
     /// Write Arrow RecordBatches to a table.
-    async fn write_batches(&self, table_name: &str, batches: &[RecordBatch]) -> Result<()> {
+    pub async fn write_batches(&self, table_name: &str, batches: &[RecordBatch]) -> Result<()> {
         for batch in batches {
             self.write_batch_as_rows(table_name, batch).await?;
         }
@@ -107,9 +123,11 @@ impl ClickHouseWriter {
         // Build INSERT statement with column names from schema
         let schema = batch.schema();
         let column_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        let columns_str = column_names.join(", ");
 
-        // Build values for each row
-        let mut all_values: Vec<String> = Vec::with_capacity(num_rows);
+        // Stream chunks directly instead of building all values first
+        let chunk_size = 5000; // Larger chunks for better throughput
+        let mut chunk_values: Vec<String> = Vec::with_capacity(chunk_size);
 
         for row_idx in 0..num_rows {
             let mut row_values: Vec<String> = Vec::with_capacity(num_cols);
@@ -120,17 +138,28 @@ impl ClickHouseWriter {
                 row_values.push(value);
             }
 
-            all_values.push(format!("({})", row_values.join(", ")));
+            chunk_values.push(format!("({})", row_values.join(", ")));
+
+            // Flush chunk when full
+            if chunk_values.len() >= chunk_size {
+                let insert_sql = format!(
+                    "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
+                    table_name,
+                    columns_str,
+                    chunk_values.join(", ")
+                );
+                self.client.query(&insert_sql).execute().await?;
+                chunk_values.clear();
+            }
         }
 
-        // Execute INSERT in chunks to avoid query size limits
-        let chunk_size = 1000;
-        for chunk in all_values.chunks(chunk_size) {
+        // Flush remaining rows
+        if !chunk_values.is_empty() {
             let insert_sql = format!(
-                "INSERT INTO {} ({}) VALUES {}",
+                "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
                 table_name,
-                column_names.join(", "),
-                chunk.join(", ")
+                columns_str,
+                chunk_values.join(", ")
             );
             self.client.query(&insert_sql).execute().await?;
         }
@@ -139,7 +168,7 @@ impl ClickHouseWriter {
     }
 
     /// Write edges using the typed Row interface.
-    async fn write_edges(&self, edges: &[EdgeRecord]) -> Result<()> {
+    pub async fn write_edges(&self, edges: &[EdgeRecord]) -> Result<()> {
         if edges.is_empty() {
             return Ok(());
         }

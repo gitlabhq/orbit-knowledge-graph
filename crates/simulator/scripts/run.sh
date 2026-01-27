@@ -76,6 +76,8 @@ start_clickhouse() {
             -p "${CLICKHOUSE_PORT}:8123" \
             -p "${CLICKHOUSE_NATIVE_PORT}:9000" \
             --ulimit nofile=262144:262144 \
+            --memory=32g \
+            --memory-swap=48g \
             -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
             -e CLICKHOUSE_PASSWORD="" \
             "$CLICKHOUSE_IMAGE"
@@ -126,10 +128,34 @@ run_populate() {
     log_info "Building and running data population..."
     cd "$REPO_ROOT"
     
-    cargo run --bin simulate -- \
-        --ontology-path fixtures/ontology \
-        --clickhouse-url "http://localhost:${CLICKHOUSE_PORT}" \
-        "$@"
+    # Check if defaults are already specified
+    local has_ontology=false
+    local has_url=false
+    
+    for arg in "$@"; do
+        case "$arg" in
+            --ontology-path|--ontology-path=*) has_ontology=true ;;
+            --clickhouse-url|--clickhouse-url=*) has_url=true ;;
+        esac
+    done
+    
+    # Build the command with defaults prepended if needed
+    if [ "$has_ontology" = false ] && [ "$has_url" = false ]; then
+        cargo run --bin simulate -- \
+            --ontology-path fixtures/ontology \
+            --clickhouse-url "http://localhost:${CLICKHOUSE_PORT}" \
+            "$@"
+    elif [ "$has_ontology" = false ]; then
+        cargo run --bin simulate -- \
+            --ontology-path fixtures/ontology \
+            "$@"
+    elif [ "$has_url" = false ]; then
+        cargo run --bin simulate -- \
+            --clickhouse-url "http://localhost:${CLICKHOUSE_PORT}" \
+            "$@"
+    else
+        cargo run --bin simulate -- "$@"
+    fi
 }
 
 # Show ClickHouse status

@@ -107,7 +107,7 @@ impl Generator {
         for org_id in 1..=self.config.num_organizations {
             println!("\n=== Organization {}/{} ===", org_id, self.config.num_organizations);
 
-            // Generate with verbose logging
+            // Generate all data first (no writes during generation)
             println!("  Generating nodes...");
             let gen_start = std::time::Instant::now();
             let org_data = self.generate_organization_with_logging(org_id, true)?;
@@ -117,9 +117,10 @@ impl Generator {
             let node_count: usize = org_data.nodes.values()
                 .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
                 .sum();
-            println!("  Total: {} nodes + {} edges ({:.1}s)", node_count, org_data.edges.len(), gen_elapsed);
+            println!("  Generation complete: {} nodes + {} edges ({:.1}s)", 
+                node_count, org_data.edges.len(), gen_elapsed);
 
-            // Write
+            // Now write everything to ClickHouse
             println!("  Writing to ClickHouse...");
             let write_start = std::time::Instant::now();
             writer.write_organization_data(&self.ontology, &org_data).await?;
@@ -314,13 +315,14 @@ impl Generator {
     ) -> Result<(Vec<RecordBatch>, Vec<i64>)> {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::new(node, schema, self.config.batch_size);
-        let mut all_ids = Vec::with_capacity(count);
+        
+        // Pre-allocate IDs efficiently
+        let start_id = self.next_id.fetch_add(count as i64, Ordering::SeqCst);
+        let all_ids: Vec<i64> = (start_id..(start_id + count as i64)).collect();
+        
         let mut rng = fake::rand::thread_rng();
 
-        // No progress bars in parallel mode - they cause interleaved output
-        for _ in 0..count {
-            let id = self.next_id();
-            all_ids.push(id);
+        for &id in &all_ids {
             let traversal_id = traversal_gen.random(&mut rng).to_string();
             builder.add_row(org_id, traversal_id, id);
         }

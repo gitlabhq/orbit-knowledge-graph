@@ -88,7 +88,7 @@ pub fn to_clickhouse_ddl(table_name: &str, schema: &Schema, order_by: &[&str]) -
     let order_by_clause = order_by.join(", ");
 
     format!(
-        "CREATE TABLE IF NOT EXISTS {} (\n{}\n) ENGINE = MergeTree()\nORDER BY ({});",
+        "CREATE TABLE IF NOT EXISTS {} (\n{}\n) ENGINE = ReplacingMergeTree()\nORDER BY ({});",
         table_name,
         columns.join(",\n"),
         order_by_clause
