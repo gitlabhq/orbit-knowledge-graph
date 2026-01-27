@@ -7,10 +7,10 @@ use std::sync::Arc;
 use arrow::array::{Int32Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use clickhouse_arrow::{ArrowClient, ClientBuilder};
-use etl_engine::clickhouse::{ClickHouseConfiguration, ClickHouseDestination};
+use etl_engine::clickhouse::{
+    ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination,
+};
 use etl_engine::destination::Destination;
-use futures::StreamExt;
 use serial_test::serial;
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt};
@@ -27,7 +27,6 @@ const MAX_CONNECTION_ATTEMPTS: u32 = 30;
 const CONNECTION_RETRY_DELAY_MS: u64 = 500;
 
 struct TestContext {
-    // Container must be held to keep it running for the duration of the test
     _container: testcontainers::ContainerAsync<GenericImage>,
     destination: ClickHouseDestination,
     host: String,
@@ -49,37 +48,27 @@ impl TestContext {
         }
     }
 
-    async fn create_client(&self) -> ArrowClient {
-        ClientBuilder::new()
-            .with_endpoint(format!("{}:{}", self.host, self.port))
-            .with_database(TEST_DATABASE)
-            .with_username(TEST_USERNAME)
-            .with_password(TEST_PASSWORD)
-            .build_arrow()
-            .await
-            .expect("failed to connect")
+    fn create_client(&self) -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(
+            &format!("http://{}:{}", self.host, self.port),
+            TEST_DATABASE,
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+        )
     }
 
     async fn query(&self, sql: &str) -> Vec<RecordBatch> {
-        let client = self.create_client().await;
-        client
-            .query(sql, None)
-            .await
-            .expect("query failed")
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .expect("failed to collect results")
+        let client = self.create_client();
+        client.query_arrow(sql).await.expect("query failed")
     }
 }
 
 async fn start_clickhouse_container() -> (testcontainers::ContainerAsync<GenericImage>, String, u16)
 {
-    let native_port = ContainerPort::Tcp(9000);
+    let http_port = ContainerPort::Tcp(8123);
 
     let container = GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
-        .with_exposed_port(native_port)
+        .with_exposed_port(http_port)
         .with_env_var("CLICKHOUSE_USER", TEST_USERNAME)
         .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
         .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
@@ -93,11 +82,10 @@ async fn start_clickhouse_container() -> (testcontainers::ContainerAsync<Generic
         .expect("failed to get container host");
 
     let port = container
-        .get_host_port_ipv4(native_port)
+        .get_host_port_ipv4(http_port)
         .await
-        .expect("failed to get ClickHouse native port");
+        .expect("failed to get ClickHouse HTTP port");
 
-    // Use 127.0.0.1 instead of localhost to avoid IPv6 resolution issues with Colima
     let host = if host.to_string() == "localhost" {
         "127.0.0.1".to_string()
     } else {
@@ -110,14 +98,15 @@ async fn start_clickhouse_container() -> (testcontainers::ContainerAsync<Generic
 async fn setup_database(host: &str, port: u16) {
     let mut attempts = 0;
     let client = loop {
-        match ClientBuilder::new()
-            .with_endpoint(format!("{host}:{port}"))
-            .with_username(TEST_USERNAME)
-            .with_password(TEST_PASSWORD)
-            .build_arrow()
-            .await
-        {
-            Ok(client) => break client,
+        let client = ArrowClickHouseClient::new(
+            &format!("http://{host}:{port}"),
+            "default",
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+        );
+
+        match client.execute("SELECT 1").await {
+            Ok(_) => break client,
             Err(_) if attempts < MAX_CONNECTION_ATTEMPTS => {
                 attempts += 1;
                 tokio::time::sleep(std::time::Duration::from_millis(CONNECTION_RETRY_DELAY_MS))
@@ -128,15 +117,12 @@ async fn setup_database(host: &str, port: u16) {
     };
 
     client
-        .execute(
-            format!(
-                "CREATE TABLE IF NOT EXISTS {TEST_DATABASE}.{TEST_TABLE} (
-                    id Int32,
-                    name String
-                ) ENGINE = MergeTree() ORDER BY id"
-            ),
-            None,
-        )
+        .execute(&format!(
+            "CREATE TABLE IF NOT EXISTS {TEST_DATABASE}.{TEST_TABLE} (
+                id Int32,
+                name String
+            ) ENGINE = MergeTree() ORDER BY id"
+        ))
         .await
         .expect("failed to create table");
 }
@@ -167,7 +153,7 @@ fn create_test_batch_with_data(ids: Vec<i32>, names: Vec<&str>) -> RecordBatch {
 fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
     ClickHouseConfiguration {
         database: TEST_DATABASE.to_string(),
-        url: format!("{host}:{port}"),
+        url: format!("http://{host}:{port}"),
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
     }
@@ -251,13 +237,19 @@ async fn write_empty_batch_succeeds() {
 async fn connection_failure_returns_error() {
     let config = ClickHouseConfiguration {
         database: "nonexistent".to_string(),
-        url: "127.0.0.1:19000".to_string(),
+        url: "http://127.0.0.1:19000".to_string(),
         username: "default".to_string(),
         password: None,
     };
 
     let destination = ClickHouseDestination::new(config).expect("failed to create destination");
 
-    let result = destination.new_batch_writer(TEST_TABLE).await;
-    assert!(result.is_err(), "should fail to connect to invalid address");
+    let writer = destination
+        .new_batch_writer(TEST_TABLE)
+        .await
+        .expect("writer creation should succeed");
+
+    let batch = create_test_batch();
+    let result = writer.write_batch(&[batch]).await;
+    assert!(result.is_err(), "should fail to write to invalid address");
 }

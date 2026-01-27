@@ -1,13 +1,11 @@
 //! ClickHouse destination.
 
 use async_trait::async_trait;
-use clickhouse_arrow::{ArrowFormat, Client, ClientBuilder};
 
-use crate::destination::{BatchWriter, Destination, DestinationError};
-
+use super::arrow_client::ArrowClickHouseClient;
 use super::batch_writer::ClickHouseBatchWriter;
 use super::configuration::ClickHouseConfiguration;
-use super::error::ClickHouseError;
+use crate::destination::{BatchWriter, Destination, DestinationError};
 
 pub struct ClickHouseDestination {
     configuration: ClickHouseConfiguration,
@@ -19,20 +17,8 @@ impl ClickHouseDestination {
         Ok(Self { configuration })
     }
 
-    async fn create_client(&self) -> Result<Client<ArrowFormat>, ClickHouseError> {
-        let mut builder = ClientBuilder::new()
-            .with_endpoint(&self.configuration.url)
-            .with_database(&self.configuration.database)
-            .with_username(&self.configuration.username);
-
-        if let Some(ref password) = self.configuration.password {
-            builder = builder.with_password(password);
-        }
-
-        builder
-            .build_arrow()
-            .await
-            .map_err(ClickHouseError::Connection)
+    fn create_client(&self) -> ArrowClickHouseClient {
+        self.configuration.build_client()
     }
 }
 
@@ -42,7 +28,7 @@ impl Destination for ClickHouseDestination {
         &self,
         table: &str,
     ) -> Result<Box<dyn BatchWriter>, DestinationError> {
-        let client = self.create_client().await?;
+        let client = self.create_client();
 
         Ok(Box::new(ClickHouseBatchWriter::new(
             client,

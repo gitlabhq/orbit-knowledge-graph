@@ -1,8 +1,8 @@
 //! ClickHouse connection configuration.
 
-use clickhouse_arrow::{ArrowFormat, Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
 
+use super::arrow_client::ArrowClickHouseClient;
 use crate::destination::DestinationError;
 
 /// ClickHouse connection settings.
@@ -11,7 +11,7 @@ pub struct ClickHouseConfiguration {
     /// Database name.
     pub database: String,
 
-    /// Server URL, e.g. "127.0.0.1:9000" (native protocol port).
+    /// Server URL, e.g. "http://127.0.0.1:8123" (HTTP protocol).
     pub url: String,
 
     /// Username for authentication.
@@ -26,7 +26,7 @@ impl Default for ClickHouseConfiguration {
     fn default() -> Self {
         Self {
             database: "default".to_string(),
-            url: "127.0.0.1:9000".to_string(),
+            url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
         }
@@ -37,13 +37,13 @@ impl ClickHouseConfiguration {
     /// Creates configuration from environment variables.
     ///
     /// Uses defaults for any unset variables:
-    /// - `CLICKHOUSE_URL`: Server address (default: "127.0.0.1:9000")
+    /// - `CLICKHOUSE_URL`: Server address (default: "http://127.0.0.1:8123")
     /// - `CLICKHOUSE_DATABASE`: Database name (default: "default")
     /// - `CLICKHOUSE_USERNAME`: Username (default: "default")
     /// - `CLICKHOUSE_PASSWORD`: Optional password
     pub fn from_env() -> Self {
         Self {
-            url: std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "127.0.0.1:9000".into()),
+            url: std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://127.0.0.1:8123".into()),
             database: std::env::var("CLICKHOUSE_DATABASE").unwrap_or_else(|_| "default".into()),
             username: std::env::var("CLICKHOUSE_USERNAME").unwrap_or_else(|_| "default".into()),
             password: std::env::var("CLICKHOUSE_PASSWORD").ok(),
@@ -73,17 +73,14 @@ impl ClickHouseConfiguration {
         Ok(())
     }
 
-    pub async fn build_client(&self) -> Result<Client<ArrowFormat>, clickhouse_arrow::Error> {
-        let mut builder = ClientBuilder::new()
-            .with_endpoint(&self.url)
-            .with_database(&self.database)
-            .with_username(&self.username);
-
-        if let Some(password) = &self.password {
-            builder = builder.with_password(password);
-        }
-
-        builder.build_arrow().await
+    /// Builds an Arrow ClickHouse client from this configuration.
+    pub fn build_client(&self) -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(
+            &self.url,
+            &self.database,
+            &self.username,
+            self.password.as_deref(),
+        )
     }
 }
 
@@ -95,7 +92,7 @@ mod tests {
     fn test_optional_password() {
         let json = r#"{
             "database": "test",
-            "url": "127.0.0.1:9000",
+            "url": "http://127.0.0.1:8123",
             "username": "default",
             "password": "secret"
         }"#;
@@ -108,7 +105,7 @@ mod tests {
     fn test_password_defaults_to_none() {
         let json = r#"{
             "database": "test",
-            "url": "127.0.0.1:9000",
+            "url": "http://127.0.0.1:8123",
             "username": "default"
         }"#;
 
@@ -120,7 +117,7 @@ mod tests {
     fn test_validate_success() {
         let config = ClickHouseConfiguration {
             database: "test".to_string(),
-            url: "127.0.0.1:9000".to_string(),
+            url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
         };
@@ -132,7 +129,7 @@ mod tests {
     fn test_validate_empty_database() {
         let config = ClickHouseConfiguration {
             database: "".to_string(),
-            url: "127.0.0.1:9000".to_string(),
+            url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
         };
@@ -160,7 +157,7 @@ mod tests {
     fn test_validate_empty_username() {
         let config = ClickHouseConfiguration {
             database: "test".to_string(),
-            url: "127.0.0.1:9000".to_string(),
+            url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
         };
@@ -168,5 +165,12 @@ mod tests {
         let result = config.validate();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("username"));
+    }
+
+    #[test]
+    fn test_default_uses_http() {
+        let config = ClickHouseConfiguration::default();
+        assert!(config.url.starts_with("http://"));
+        assert!(config.url.contains("8123"));
     }
 }
