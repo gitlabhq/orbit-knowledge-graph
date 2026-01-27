@@ -58,6 +58,12 @@ impl TraversalIdGenerator {
     pub fn len(&self) -> usize {
         self.ids.len()
     }
+
+    /// Returns true if no traversal IDs were generated.
+    /// Required by our clippy config (`-D clippy::len-without-is-empty` implied by `-D warnings`)
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
 }
 
 /// Node in the namespace tree.
