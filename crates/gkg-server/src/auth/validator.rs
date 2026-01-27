@@ -1,4 +1,4 @@
-// SECURITY: Only HS256 (HMAC-SHA256) is supported. Do NOT add RSA algorithms
+// NOTE: Only HS256 (HMAC-SHA256) is supported. Do NOT add RSA algorithms
 // (RS256, RS384, RS512, PS256, PS384, PS512) until jsonwebtoken updates to
 // rsa 0.10+ which fixes RUSTSEC-2023-0071 (Marvin Attack timing vulnerability).
 

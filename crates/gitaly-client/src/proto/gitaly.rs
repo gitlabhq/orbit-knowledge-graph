@@ -30,17 +30,7 @@ pub struct IndexError {
 /// Nested message and enum types in `IndexError`.
 pub mod index_error {
     /// ErrorType is the type of error encountered on the index operation.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum ErrorType {
         /// ERROR_TYPE_UNSPECIFIED is the default error type and should never be set.
@@ -221,17 +211,7 @@ pub struct CustomHookError {
 pub mod custom_hook_error {
     /// HookType is the type of the hook that has been running. Please consult githooks(5) for more
     /// information about the specific types.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum HookType {
         /// HOOK_TYPE_UNSPECIFIED is the default hook type and should never be set.
@@ -289,17 +269,7 @@ pub struct PathError {
 /// Nested message and enum types in `PathError`.
 pub mod path_error {
     /// ErrorType is the type of error encountered.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum ErrorType {
         /// ERROR_TYPE_UNSPECIFIED is the default error type and should never be set.
@@ -406,17 +376,7 @@ pub struct OperationMsg {
 /// Nested message and enum types in `OperationMsg`.
 pub mod operation_msg {
     /// Operation ...
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Operation {
         /// UNKNOWN ...
@@ -461,17 +421,7 @@ pub mod operation_msg {
         }
     }
     /// Scope ...
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Scope {
         /// REPOSITORY ...
@@ -527,9 +477,7 @@ pub struct Repository {
     /// the values of this field. It influences the list of Git object directories which can be used to search
     /// for Git objects.
     #[prost(string, repeated, tag = "5")]
-    pub git_alternate_object_directories: ::prost::alloc::vec::Vec<
-        ::prost::alloc::string::String,
-    >,
+    pub git_alternate_object_directories: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// gl_repository is used in callbacks to GitLab so that it knows what repository the event is
     /// associated with. May be left empty on RPC's that do not perform callbacks.
     /// During project creation, `gl_repository` may not be known.
@@ -972,14 +920,10 @@ pub struct RepositoryInfoResponse {
     pub bitmap: ::core::option::Option<repository_info_response::BitmapInfo>,
     /// multi_pack_index contains information about the multi-pack-index, if any exists.
     #[prost(message, optional, tag = "6")]
-    pub multi_pack_index: ::core::option::Option<
-        repository_info_response::MultiPackIndexInfo,
-    >,
+    pub multi_pack_index: ::core::option::Option<repository_info_response::MultiPackIndexInfo>,
     /// multi_pack_index_bitmap contains information about the bitmap for the multi-pack-index.
     #[prost(message, optional, tag = "7")]
-    pub multi_pack_index_bitmap: ::core::option::Option<
-        repository_info_response::BitmapInfo,
-    >,
+    pub multi_pack_index_bitmap: ::core::option::Option<repository_info_response::BitmapInfo>,
     /// alternates contains information about alternate object directories.
     #[prost(message, optional, tag = "8")]
     pub alternates: ::core::option::Option<repository_info_response::AlternatesInfo>,
@@ -1019,15 +963,7 @@ pub mod repository_info_response {
     pub mod references_info {
         /// ReferenceBackend denotes the type of backend used to store references.
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum ReferenceBackend {
@@ -1349,17 +1285,7 @@ pub struct GetArchiveRequest {
 /// Nested message and enum types in `GetArchiveRequest`.
 pub mod get_archive_request {
     /// Format is the format which the archive should be packaged in.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Format {
         /// ZIP
@@ -1870,15 +1796,7 @@ pub mod get_raw_changes_response {
         /// Operation is the change that occurred on the file. Consult the man pages
         /// for git-diff(1) for additional detail on the semantics of each operation.
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum Operation {
@@ -2091,17 +2009,7 @@ pub struct OptimizeRepositoryRequest {
 /// Nested message and enum types in `OptimizeRepositoryRequest`.
 pub mod optimize_repository_request {
     /// Strategy determines how the repository shall be optimized.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Strategy {
         /// STRATEGY_UNSPECIFIED indicates that the strategy has not been explicitly set by the
@@ -2238,9 +2146,7 @@ pub struct GetFileAttributesResponse {
     ///
     /// protolint:disable:this REPEATED_FIELD_NAMES_PLURALIZED
     #[prost(message, repeated, tag = "1")]
-    pub attribute_infos: ::prost::alloc::vec::Vec<
-        get_file_attributes_response::AttributeInfo,
-    >,
+    pub attribute_infos: ::prost::alloc::vec::Vec<get_file_attributes_response::AttributeInfo>,
 }
 /// Nested message and enum types in `GetFileAttributesResponse`.
 pub mod get_file_attributes_response {
@@ -2290,17 +2196,7 @@ pub struct MigrateReferenceBackendRequest {
 /// Nested message and enum types in `MigrateReferenceBackendRequest`.
 pub mod migrate_reference_backend_request {
     /// ReferenceBackend denotes the type of backend used to store references.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum ReferenceBackend {
         /// REFERENCE_BACKEND_UNSPECIFIED is the default value and should never be set.
@@ -2347,10 +2243,10 @@ pub mod repository_service_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     /// RepositoryService is a service providing RPCs accessing repositories as a whole.
     #[derive(Debug, Clone)]
     pub struct RepositoryServiceClient<T> {
@@ -2390,14 +2286,13 @@ pub mod repository_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-                Response = http::Response<
-                    <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    http::Request<tonic::body::Body>,
+                    Response = http::Response<
+                        <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    >,
                 >,
-            >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::Body>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             RepositoryServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -2436,25 +2331,19 @@ pub mod repository_service_client {
         pub async fn repository_exists(
             &mut self,
             request: impl tonic::IntoRequest<super::RepositoryExistsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RepositoryExistsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::RepositoryExistsResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/RepositoryExists",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/RepositoryExists");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "RepositoryExists"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "RepositoryExists",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// RepositorySize returns information on the complete on-disk repository size. If you need more
@@ -2463,50 +2352,38 @@ pub mod repository_service_client {
         pub async fn repository_size(
             &mut self,
             request: impl tonic::IntoRequest<super::RepositorySizeRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RepositorySizeResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::RepositorySizeResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/RepositorySize",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/RepositorySize");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "RepositorySize"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "RepositorySize",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// RepositoryInfo returns detailed information about a repository and its data structures.
         pub async fn repository_info(
             &mut self,
             request: impl tonic::IntoRequest<super::RepositoryInfoRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RepositoryInfoResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::RepositoryInfoResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/RepositoryInfo",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/RepositoryInfo");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "RepositoryInfo"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "RepositoryInfo",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// ObjectsSize calculates the total on-disk object size of reachable objects in bytes. In contrast
@@ -2533,25 +2410,15 @@ pub mod repository_service_client {
         /// different delta base to be picked, the actual on-disk size of any given object may change.
         pub async fn objects_size(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::ObjectsSizeRequest,
-            >,
-        ) -> std::result::Result<
-            tonic::Response<super::ObjectsSizeResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            request: impl tonic::IntoStreamingRequest<Message = super::ObjectsSizeRequest>,
+        ) -> std::result::Result<tonic::Response<super::ObjectsSizeResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/ObjectsSize",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/ObjectsSize");
             let mut req = request.into_streaming_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "ObjectsSize"));
@@ -2561,22 +2428,14 @@ pub mod repository_service_client {
         pub async fn object_format(
             &mut self,
             request: impl tonic::IntoRequest<super::ObjectFormatRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ObjectFormatResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::ObjectFormatResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/ObjectFormat",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/ObjectFormat");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "ObjectFormat"));
@@ -2588,22 +2447,14 @@ pub mod repository_service_client {
         pub async fn fetch_remote(
             &mut self,
             request: impl tonic::IntoRequest<super::FetchRemoteRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FetchRemoteResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FetchRemoteResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/FetchRemote",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/FetchRemote");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "FetchRemote"));
@@ -2613,25 +2464,19 @@ pub mod repository_service_client {
         pub async fn create_repository(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CreateRepositoryResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CreateRepositoryResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/CreateRepository",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/CreateRepository");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "CreateRepository"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "CreateRepository",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// GetArchive produces and returns an archive of a repository.
@@ -2642,18 +2487,11 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetArchiveResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/GetArchive",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/GetArchive");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "GetArchive"));
@@ -2663,25 +2501,19 @@ pub mod repository_service_client {
         pub async fn has_local_branches(
             &mut self,
             request: impl tonic::IntoRequest<super::HasLocalBranchesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::HasLocalBranchesResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::HasLocalBranchesResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/HasLocalBranches",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/HasLocalBranches");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "HasLocalBranches"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "HasLocalBranches",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// FetchSourceBranch fetches a branch from a second (potentially remote)
@@ -2689,27 +2521,19 @@ pub mod repository_service_client {
         pub async fn fetch_source_branch(
             &mut self,
             request: impl tonic::IntoRequest<super::FetchSourceBranchRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FetchSourceBranchResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FetchSourceBranchResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/FetchSourceBranch",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/FetchSourceBranch");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "FetchSourceBranch"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "FetchSourceBranch",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// Fsck checks the repository for consistency via git-fsck(1). This can be used to check for
@@ -2718,18 +2542,11 @@ pub mod repository_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FsckRequest>,
         ) -> std::result::Result<tonic::Response<super::FsckResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/Fsck",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/Fsck");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "Fsck"));
@@ -2741,22 +2558,12 @@ pub mod repository_service_client {
         pub async fn write_ref(
             &mut self,
             request: impl tonic::IntoRequest<super::WriteRefRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::WriteRefResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::WriteRefResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/WriteRef",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/WriteRef");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "WriteRef"));
@@ -2767,22 +2574,14 @@ pub mod repository_service_client {
         pub async fn find_merge_base(
             &mut self,
             request: impl tonic::IntoRequest<super::FindMergeBaseRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindMergeBaseResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FindMergeBaseResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/FindMergeBase",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/FindMergeBase");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "FindMergeBase"));
@@ -2798,22 +2597,13 @@ pub mod repository_service_client {
         pub async fn create_fork(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateForkRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CreateForkResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CreateForkResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/CreateFork",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/CreateFork");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "CreateFork"));
@@ -2828,26 +2618,18 @@ pub mod repository_service_client {
             tonic::Response<super::CreateRepositoryFromUrlResponse>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/CreateRepositoryFromURL",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "gitaly.RepositoryService",
-                        "CreateRepositoryFromURL",
-                    ),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "CreateRepositoryFromURL",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// CreateBundle creates a bundle from all refs
@@ -2858,18 +2640,12 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::CreateBundleResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/CreateBundle",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/CreateBundle");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "CreateBundle"));
@@ -2879,62 +2655,42 @@ pub mod repository_service_client {
         /// When the bundle would be empty the FailedPrecondition error code is returned.
         pub async fn create_bundle_from_ref_list(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::CreateBundleFromRefListRequest,
-            >,
+            request: impl tonic::IntoStreamingRequest<Message = super::CreateBundleFromRefListRequest>,
         ) -> std::result::Result<
-            tonic::Response<
-                tonic::codec::Streaming<super::CreateBundleFromRefListResponse>,
-            >,
+            tonic::Response<tonic::codec::Streaming<super::CreateBundleFromRefListResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/CreateBundleFromRefList",
             );
             let mut req = request.into_streaming_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "gitaly.RepositoryService",
-                        "CreateBundleFromRefList",
-                    ),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "CreateBundleFromRefList",
+            ));
             self.inner.streaming(req, path, codec).await
         }
         /// GenerateBundleURI generates a bundle on the server for bundle-URI use.
         pub async fn generate_bundle_uri(
             &mut self,
             request: impl tonic::IntoRequest<super::GenerateBundleUriRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GenerateBundleUriResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::GenerateBundleUriResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/GenerateBundleURI",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/GenerateBundleURI");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "GenerateBundleURI"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "GenerateBundleURI",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// FetchBundle fetches references from a bundle into the local repository.
@@ -2942,25 +2698,15 @@ pub mod repository_service_client {
         /// "+refs/*:refs/*" and refs that do not exist in the bundle will be removed.
         pub async fn fetch_bundle(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::FetchBundleRequest,
-            >,
-        ) -> std::result::Result<
-            tonic::Response<super::FetchBundleResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            request: impl tonic::IntoStreamingRequest<Message = super::FetchBundleRequest>,
+        ) -> std::result::Result<tonic::Response<super::FetchBundleResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/FetchBundle",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/FetchBundle");
             let mut req = request.into_streaming_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "FetchBundle"));
@@ -2977,26 +2723,18 @@ pub mod repository_service_client {
             tonic::Response<super::CreateRepositoryFromBundleResponse>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/CreateRepositoryFromBundle",
             );
             let mut req = request.into_streaming_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "gitaly.RepositoryService",
-                        "CreateRepositoryFromBundle",
-                    ),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "CreateRepositoryFromBundle",
+            ));
             self.inner.client_streaming(req, path, codec).await
         }
         /// GetConfig reads the target repository's gitconfig and streams its contents
@@ -3008,18 +2746,11 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetConfigResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/GetConfig",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/GetConfig");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "GetConfig"));
@@ -3030,22 +2761,14 @@ pub mod repository_service_client {
         pub async fn find_license(
             &mut self,
             request: impl tonic::IntoRequest<super::FindLicenseRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindLicenseResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FindLicenseResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/FindLicense",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/FindLicense");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "FindLicense"));
@@ -3061,23 +2784,17 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetInfoAttributesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/GetInfoAttributes",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/GetInfoAttributes");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "GetInfoAttributes"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "GetInfoAttributes",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// CalculateChecksum returns a checksum of the repository by hashing its references. Refs
@@ -3085,27 +2802,19 @@ pub mod repository_service_client {
         pub async fn calculate_checksum(
             &mut self,
             request: impl tonic::IntoRequest<super::CalculateChecksumRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CalculateChecksumResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CalculateChecksumResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/CalculateChecksum",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/CalculateChecksum");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "CalculateChecksum"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "CalculateChecksum",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// GetSnapshot returns a snapshot of the repository. A snapshot comprises all Git references
@@ -3117,18 +2826,12 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetSnapshotResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/GetSnapshot",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/GetSnapshot");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "GetSnapshot"));
@@ -3147,26 +2850,18 @@ pub mod repository_service_client {
             tonic::Response<super::CreateRepositoryFromSnapshotResponse>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/CreateRepositoryFromSnapshot",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "gitaly.RepositoryService",
-                        "CreateRepositoryFromSnapshot",
-                    ),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "CreateRepositoryFromSnapshot",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// GetRawChanges returns metadata in raw format on the changes between two revisions.
@@ -3177,18 +2872,12 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetRawChangesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/GetRawChanges",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/GetRawChanges");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "GetRawChanges"));
@@ -3200,28 +2889,21 @@ pub mod repository_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::SearchFilesByContentRequest>,
         ) -> std::result::Result<
-            tonic::Response<
-                tonic::codec::Streaming<super::SearchFilesByContentResponse>,
-            >,
+            tonic::Response<tonic::codec::Streaming<super::SearchFilesByContentResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/SearchFilesByContent",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "SearchFilesByContent"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "SearchFilesByContent",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// SearchFilesByName searches files in the repository based on its name and an
@@ -3233,23 +2915,17 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::SearchFilesByNameResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/SearchFilesByName",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/SearchFilesByName");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "SearchFilesByName"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "SearchFilesByName",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// RestoreCustomHooks sets the git hooks for a repository. The hooks are sent
@@ -3258,30 +2934,21 @@ pub mod repository_service_client {
         #[deprecated]
         pub async fn restore_custom_hooks(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::RestoreCustomHooksRequest,
-            >,
-        ) -> std::result::Result<
-            tonic::Response<super::RestoreCustomHooksResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            request: impl tonic::IntoStreamingRequest<Message = super::RestoreCustomHooksRequest>,
+        ) -> std::result::Result<tonic::Response<super::RestoreCustomHooksResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/RestoreCustomHooks",
             );
             let mut req = request.into_streaming_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "RestoreCustomHooks"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "RestoreCustomHooks",
+            ));
             self.inner.client_streaming(req, path, codec).await
         }
         /// SetCustomHooks sets the git hooks for a repository. The hooks are sent in a
@@ -3289,28 +2956,20 @@ pub mod repository_service_client {
         /// GetCustomHooksResponse RPC. This directory will be extracted into the repository.
         pub async fn set_custom_hooks(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::SetCustomHooksRequest,
-            >,
-        ) -> std::result::Result<
-            tonic::Response<super::SetCustomHooksResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            request: impl tonic::IntoStreamingRequest<Message = super::SetCustomHooksRequest>,
+        ) -> std::result::Result<tonic::Response<super::SetCustomHooksResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/SetCustomHooks",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/SetCustomHooks");
             let mut req = request.into_streaming_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "SetCustomHooks"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "SetCustomHooks",
+            ));
             self.inner.client_streaming(req, path, codec).await
         }
         /// BackupCustomHooks fetches the git hooks for a repository. The hooks are
@@ -3324,23 +2983,17 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::BackupCustomHooksResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/BackupCustomHooks",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/BackupCustomHooks");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "BackupCustomHooks"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "BackupCustomHooks",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// GetCustomHooks fetches the git hooks for a repository. The hooks are sent
@@ -3353,21 +3006,17 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetCustomHooksResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/GetCustomHooks",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/GetCustomHooks");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "GetCustomHooks"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "GetCustomHooks",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// GetObjectDirectorySize returns the size in kibibytes of the object directory of a repository.
@@ -3378,23 +3027,18 @@ pub mod repository_service_client {
             tonic::Response<super::GetObjectDirectorySizeResponse>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/GetObjectDirectorySize",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "GetObjectDirectorySize"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "GetObjectDirectorySize",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// RemoveRepository will move the repository to `+gitaly/tmp/<relative_path>_removed` and
@@ -3403,25 +3047,19 @@ pub mod repository_service_client {
         pub async fn remove_repository(
             &mut self,
             request: impl tonic::IntoRequest<super::RemoveRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RemoveRepositoryResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::RemoveRepositoryResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/RemoveRepository",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/RemoveRepository");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "RemoveRepository"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "RemoveRepository",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// ReplicateRepository replicates data from a source repository to target repository. On the
@@ -3435,27 +3073,20 @@ pub mod repository_service_client {
         pub async fn replicate_repository(
             &mut self,
             request: impl tonic::IntoRequest<super::ReplicateRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ReplicateRepositoryResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::ReplicateRepositoryResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/ReplicateRepository",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "ReplicateRepository"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "ReplicateRepository",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// OptimizeRepository performs all maintenance tasks in a repository to keep
@@ -3467,27 +3098,20 @@ pub mod repository_service_client {
         pub async fn optimize_repository(
             &mut self,
             request: impl tonic::IntoRequest<super::OptimizeRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OptimizeRepositoryResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::OptimizeRepositoryResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/OptimizeRepository",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "OptimizeRepository"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "OptimizeRepository",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// PruneUnreachableObjects will prune all objects which aren't reachable from
@@ -3508,26 +3132,18 @@ pub mod repository_service_client {
             tonic::Response<super::PruneUnreachableObjectsResponse>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/PruneUnreachableObjects",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "gitaly.RepositoryService",
-                        "PruneUnreachableObjects",
-                    ),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "PruneUnreachableObjects",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// BackupRepository creates a full or incremental backup streamed directly to
@@ -3536,25 +3152,19 @@ pub mod repository_service_client {
         pub async fn backup_repository(
             &mut self,
             request: impl tonic::IntoRequest<super::BackupRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::BackupRepositoryResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::BackupRepositoryResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/BackupRepository",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/BackupRepository");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RepositoryService", "BackupRepository"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "BackupRepository",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// RestoreRepository restores a backup streamed directly from object-storage.
@@ -3563,54 +3173,38 @@ pub mod repository_service_client {
         pub async fn restore_repository(
             &mut self,
             request: impl tonic::IntoRequest<super::RestoreRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RestoreRepositoryResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::RestoreRepositoryResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/RestoreRepository",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/RestoreRepository");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "RestoreRepository"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "RestoreRepository",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// GetFileAttributes queries given file attributes as specified in .gitattributes file
         pub async fn get_file_attributes(
             &mut self,
             request: impl tonic::IntoRequest<super::GetFileAttributesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetFileAttributesResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::GetFileAttributesResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/GetFileAttributes",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/GetFileAttributes");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RepositoryService", "GetFileAttributes"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "GetFileAttributes",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// FastExport runs git-fast-export on the repository, streaming the data back through the response
@@ -3621,18 +3215,11 @@ pub mod repository_service_client {
             tonic::Response<tonic::codec::Streaming<super::FastExportResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RepositoryService/FastExport",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RepositoryService/FastExport");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RepositoryService", "FastExport"));
@@ -3647,26 +3234,18 @@ pub mod repository_service_client {
             tonic::Response<super::MigrateReferenceBackendResponse>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RepositoryService/MigrateReferenceBackend",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "gitaly.RepositoryService",
-                        "MigrateReferenceBackend",
-                    ),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RepositoryService",
+                "MigrateReferenceBackend",
+            ));
             self.inner.unary(req, path, codec).await
         }
     }
@@ -3678,7 +3257,7 @@ pub mod repository_service_server {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
     use tonic::codegen::*;
     /// Generated trait containing gRPC methods that should be implemented for use with RepositoryServiceServer.
@@ -3688,28 +3267,19 @@ pub mod repository_service_server {
         async fn repository_exists(
             &self,
             request: tonic::Request<super::RepositoryExistsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RepositoryExistsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RepositoryExistsResponse>, tonic::Status>;
         /// RepositorySize returns information on the complete on-disk repository size. If you need more
         /// detailed information about the size of various sub-structures you should instead use the
         /// repositoryInfo RPC.
         async fn repository_size(
             &self,
             request: tonic::Request<super::RepositorySizeRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RepositorySizeResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RepositorySizeResponse>, tonic::Status>;
         /// RepositoryInfo returns detailed information about a repository and its data structures.
         async fn repository_info(
             &self,
             request: tonic::Request<super::RepositoryInfoRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RepositoryInfoResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RepositoryInfoResponse>, tonic::Status>;
         /// ObjectsSize calculates the total on-disk object size of reachable objects in bytes. In contrast
         /// to RepositorySize and RepositoryInfo, this RPC performs a graph walk of the specified revisions
         /// and will thus return an accurate view of how large the accumulated on-disk size of reachable
@@ -3735,41 +3305,28 @@ pub mod repository_service_server {
         async fn objects_size(
             &self,
             request: tonic::Request<tonic::Streaming<super::ObjectsSizeRequest>>,
-        ) -> std::result::Result<
-            tonic::Response<super::ObjectsSizeResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::ObjectsSizeResponse>, tonic::Status>;
         /// ObjectFormat determines the object format that is being used by the repository.
         async fn object_format(
             &self,
             request: tonic::Request<super::ObjectFormatRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ObjectFormatResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::ObjectFormatResponse>, tonic::Status>;
         /// FetchRemote fetches references from a remote repository into the local
         /// repository. The remote can be fetched via HTTP or SSH depending on the
         /// request options provided.
         async fn fetch_remote(
             &self,
             request: tonic::Request<super::FetchRemoteRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FetchRemoteResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FetchRemoteResponse>, tonic::Status>;
         /// CreateRepository creates a new empty repository.
         async fn create_repository(
             &self,
             request: tonic::Request<super::CreateRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CreateRepositoryResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CreateRepositoryResponse>, tonic::Status>;
         /// Server streaming response type for the GetArchive method.
         type GetArchiveStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetArchiveResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetArchive produces and returns an archive of a repository.
         async fn get_archive(
@@ -3780,19 +3337,13 @@ pub mod repository_service_server {
         async fn has_local_branches(
             &self,
             request: tonic::Request<super::HasLocalBranchesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::HasLocalBranchesResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::HasLocalBranchesResponse>, tonic::Status>;
         /// FetchSourceBranch fetches a branch from a second (potentially remote)
         /// repository into the given repository.
         async fn fetch_source_branch(
             &self,
             request: tonic::Request<super::FetchSourceBranchRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FetchSourceBranchResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FetchSourceBranchResponse>, tonic::Status>;
         /// Fsck checks the repository for consistency via git-fsck(1). This can be used to check for
         /// repository corruption.
         async fn fsck(
@@ -3805,19 +3356,13 @@ pub mod repository_service_server {
         async fn write_ref(
             &self,
             request: tonic::Request<super::WriteRefRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::WriteRefResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::WriteRefResponse>, tonic::Status>;
         /// FindMergeBase returns the best common ancestor between two or more commits. Consult the man
         /// pages of git-merge-base(1) for more information on how this is calculated.
         async fn find_merge_base(
             &self,
             request: tonic::Request<super::FindMergeBaseRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindMergeBaseResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FindMergeBaseResponse>, tonic::Status>;
         /// CreateFork creates a new repository from a specific source repository. This new repository will
         /// have the same branches and tags as the source repository. Internal references will not be
         /// recreated in the forked repository.
@@ -3828,10 +3373,7 @@ pub mod repository_service_server {
         async fn create_fork(
             &self,
             request: tonic::Request<super::CreateForkRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CreateForkResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CreateForkResponse>, tonic::Status>;
         /// CreateRepositoryFromURL creates a new repo and seeds it with the contents of an existing Git repo
         /// reachable at the provided URL.
         async fn create_repository_from_url(
@@ -3844,62 +3386,41 @@ pub mod repository_service_server {
         /// Server streaming response type for the CreateBundle method.
         type CreateBundleStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::CreateBundleResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// CreateBundle creates a bundle from all refs
         async fn create_bundle(
             &self,
             request: tonic::Request<super::CreateBundleRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::CreateBundleStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::CreateBundleStream>, tonic::Status>;
         /// Server streaming response type for the CreateBundleFromRefList method.
         type CreateBundleFromRefListStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::CreateBundleFromRefListResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::CreateBundleFromRefListResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// CreateBundleFromRefList creates a bundle from a stream of ref patterns.
         /// When the bundle would be empty the FailedPrecondition error code is returned.
         async fn create_bundle_from_ref_list(
             &self,
-            request: tonic::Request<
-                tonic::Streaming<super::CreateBundleFromRefListRequest>,
-            >,
-        ) -> std::result::Result<
-            tonic::Response<Self::CreateBundleFromRefListStream>,
-            tonic::Status,
-        >;
+            request: tonic::Request<tonic::Streaming<super::CreateBundleFromRefListRequest>>,
+        ) -> std::result::Result<tonic::Response<Self::CreateBundleFromRefListStream>, tonic::Status>;
         /// GenerateBundleURI generates a bundle on the server for bundle-URI use.
         async fn generate_bundle_uri(
             &self,
             request: tonic::Request<super::GenerateBundleUriRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GenerateBundleUriResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::GenerateBundleUriResponse>, tonic::Status>;
         /// FetchBundle fetches references from a bundle into the local repository.
         /// refs will be mirrored to the target repository with the refspec
         /// "+refs/*:refs/*" and refs that do not exist in the bundle will be removed.
         async fn fetch_bundle(
             &self,
             request: tonic::Request<tonic::Streaming<super::FetchBundleRequest>>,
-        ) -> std::result::Result<
-            tonic::Response<super::FetchBundleResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FetchBundleResponse>, tonic::Status>;
         /// CreateRepositoryFromBundle creates a Git repository at the specified storage and path, if it
         /// does not already exist, from the provided Git bundle.
         async fn create_repository_from_bundle(
             &self,
-            request: tonic::Request<
-                tonic::Streaming<super::CreateRepositoryFromBundleRequest>,
-            >,
+            request: tonic::Request<tonic::Streaming<super::CreateRepositoryFromBundleRequest>>,
         ) -> std::result::Result<
             tonic::Response<super::CreateRepositoryFromBundleResponse>,
             tonic::Status,
@@ -3907,8 +3428,7 @@ pub mod repository_service_server {
         /// Server streaming response type for the GetConfig method.
         type GetConfigStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetConfigResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetConfig reads the target repository's gitconfig and streams its contents
         /// back. Returns a NotFound error in case no gitconfig was found.
@@ -3921,52 +3441,35 @@ pub mod repository_service_server {
         async fn find_license(
             &self,
             request: tonic::Request<super::FindLicenseRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindLicenseResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FindLicenseResponse>, tonic::Status>;
         /// Server streaming response type for the GetInfoAttributes method.
         type GetInfoAttributesStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::GetInfoAttributesResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::GetInfoAttributesResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// GetInfoAttributes reads the contents from info/attributes.
         /// This RPC will be removed in 17.0.
         async fn get_info_attributes(
             &self,
             request: tonic::Request<super::GetInfoAttributesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetInfoAttributesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetInfoAttributesStream>, tonic::Status>;
         /// CalculateChecksum returns a checksum of the repository by hashing its references. Refs
         /// outside of well-known namespaces are not considered when computing the checksum.
         async fn calculate_checksum(
             &self,
             request: tonic::Request<super::CalculateChecksumRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CalculateChecksumResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CalculateChecksumResponse>, tonic::Status>;
         /// Server streaming response type for the GetSnapshot method.
         type GetSnapshotStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetSnapshotResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetSnapshot returns a snapshot of the repository. A snapshot comprises all Git references
         /// and objects required to recreate the state of a repository at a point in time.
         async fn get_snapshot(
             &self,
             request: tonic::Request<super::GetSnapshotRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetSnapshotStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetSnapshotStream>, tonic::Status>;
         /// CreateRepositoryFromSnapshot creates a new repository based on a snapshot created with
         /// the GetSnapshot RPC. The snapshot is fetched via HTTP.
         ///
@@ -3983,81 +3486,53 @@ pub mod repository_service_server {
         /// Server streaming response type for the GetRawChanges method.
         type GetRawChangesStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetRawChangesResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetRawChanges returns metadata in raw format on the changes between two revisions.
         async fn get_raw_changes(
             &self,
             request: tonic::Request<super::GetRawChangesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetRawChangesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetRawChangesStream>, tonic::Status>;
         /// Server streaming response type for the SearchFilesByContent method.
         type SearchFilesByContentStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::SearchFilesByContentResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::SearchFilesByContentResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// SearchFilesByContent searches files in the repository using the provided grep pattern.
         /// For each result, the matched line is returned along with the two previous and next lines.
         async fn search_files_by_content(
             &self,
             request: tonic::Request<super::SearchFilesByContentRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::SearchFilesByContentStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::SearchFilesByContentStream>, tonic::Status>;
         /// Server streaming response type for the SearchFilesByName method.
         type SearchFilesByNameStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::SearchFilesByNameResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::SearchFilesByNameResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// SearchFilesByName searches files in the repository based on its name and an
         /// optional filter.
         async fn search_files_by_name(
             &self,
             request: tonic::Request<super::SearchFilesByNameRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::SearchFilesByNameStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::SearchFilesByNameStream>, tonic::Status>;
         /// RestoreCustomHooks sets the git hooks for a repository. The hooks are sent
         /// in a tar archive containing a `custom_hooks` directory. This directory is
         /// ultimately extracted to the repository.
         async fn restore_custom_hooks(
             &self,
             request: tonic::Request<tonic::Streaming<super::RestoreCustomHooksRequest>>,
-        ) -> std::result::Result<
-            tonic::Response<super::RestoreCustomHooksResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RestoreCustomHooksResponse>, tonic::Status>;
         /// SetCustomHooks sets the git hooks for a repository. The hooks are sent in a
         /// tar archive containing a `custom_hooks` directory (i.e. the response from the
         /// GetCustomHooksResponse RPC. This directory will be extracted into the repository.
         async fn set_custom_hooks(
             &self,
             request: tonic::Request<tonic::Streaming<super::SetCustomHooksRequest>>,
-        ) -> std::result::Result<
-            tonic::Response<super::SetCustomHooksResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::SetCustomHooksResponse>, tonic::Status>;
         /// Server streaming response type for the BackupCustomHooks method.
         type BackupCustomHooksStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::BackupCustomHooksResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::BackupCustomHooksResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// BackupCustomHooks fetches the git hooks for a repository. The hooks are
         /// sent in a tar archive containing a `custom_hooks` directory. If no hooks
@@ -4065,15 +3540,11 @@ pub mod repository_service_server {
         async fn backup_custom_hooks(
             &self,
             request: tonic::Request<super::BackupCustomHooksRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::BackupCustomHooksStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::BackupCustomHooksStream>, tonic::Status>;
         /// Server streaming response type for the GetCustomHooks method.
         type GetCustomHooksStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetCustomHooksResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetCustomHooks fetches the git hooks for a repository. The hooks are sent
         /// in a tar archive containing a `custom_hooks` directory. If no hooks are
@@ -4081,10 +3552,7 @@ pub mod repository_service_server {
         async fn get_custom_hooks(
             &self,
             request: tonic::Request<super::GetCustomHooksRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetCustomHooksStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetCustomHooksStream>, tonic::Status>;
         /// GetObjectDirectorySize returns the size in kibibytes of the object directory of a repository.
         async fn get_object_directory_size(
             &self,
@@ -4099,10 +3567,7 @@ pub mod repository_service_server {
         async fn remove_repository(
             &self,
             request: tonic::Request<super::RemoveRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RemoveRepositoryResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RemoveRepositoryResponse>, tonic::Status>;
         /// ReplicateRepository replicates data from a source repository to target repository. On the
         /// target repository, this operation ensures synchronization of the following components:
         ///
@@ -4114,10 +3579,7 @@ pub mod repository_service_server {
         async fn replicate_repository(
             &self,
             request: tonic::Request<super::ReplicateRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ReplicateRepositoryResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::ReplicateRepositoryResponse>, tonic::Status>;
         /// OptimizeRepository performs all maintenance tasks in a repository to keep
         /// it in an efficient state. It cleans up stale data, repacks objects,
         /// updates auxiliary caches like commit-graphs and packs references. The
@@ -4127,10 +3589,7 @@ pub mod repository_service_server {
         async fn optimize_repository(
             &self,
             request: tonic::Request<super::OptimizeRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OptimizeRepositoryResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::OptimizeRepositoryResponse>, tonic::Status>;
         /// PruneUnreachableObjects will prune all objects which aren't reachable from
         /// the repository's current set of references. Because pruning can only
         /// happen for objects which aren't packed, you are required to first run
@@ -4155,33 +3614,23 @@ pub mod repository_service_server {
         async fn backup_repository(
             &self,
             request: tonic::Request<super::BackupRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::BackupRepositoryResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::BackupRepositoryResponse>, tonic::Status>;
         /// RestoreRepository restores a backup streamed directly from object-storage.
         /// The repository is restored synchronously. The source object-storage must
         /// be configured in config.backup.go_cloud_url
         async fn restore_repository(
             &self,
             request: tonic::Request<super::RestoreRepositoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RestoreRepositoryResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RestoreRepositoryResponse>, tonic::Status>;
         /// GetFileAttributes queries given file attributes as specified in .gitattributes file
         async fn get_file_attributes(
             &self,
             request: tonic::Request<super::GetFileAttributesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetFileAttributesResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::GetFileAttributesResponse>, tonic::Status>;
         /// Server streaming response type for the FastExport method.
         type FastExportStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::FastExportResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// FastExport runs git-fast-export on the repository, streaming the data back through the response
         async fn fast_export(
@@ -4220,10 +3669,7 @@ pub mod repository_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -4278,23 +3724,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/RepositoryExists" => {
                     #[allow(non_camel_case_types)]
                     struct RepositoryExistsSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::RepositoryExistsRequest>
-                    for RepositoryExistsSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::RepositoryExistsRequest>
+                        for RepositoryExistsSvc<T>
+                    {
                         type Response = super::RepositoryExistsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RepositoryExistsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::repository_exists(&inner, request)
-                                    .await
+                                <T as RepositoryService>::repository_exists(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4324,23 +3766,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/RepositorySize" => {
                     #[allow(non_camel_case_types)]
                     struct RepositorySizeSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::RepositorySizeRequest>
-                    for RepositorySizeSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::RepositorySizeRequest>
+                        for RepositorySizeSvc<T>
+                    {
                         type Response = super::RepositorySizeResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RepositorySizeRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::repository_size(&inner, request)
-                                    .await
+                                <T as RepositoryService>::repository_size(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4370,23 +3808,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/RepositoryInfo" => {
                     #[allow(non_camel_case_types)]
                     struct RepositoryInfoSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::RepositoryInfoRequest>
-                    for RepositoryInfoSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::RepositoryInfoRequest>
+                        for RepositoryInfoSvc<T>
+                    {
                         type Response = super::RepositoryInfoResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RepositoryInfoRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::repository_info(&inner, request)
-                                    .await
+                                <T as RepositoryService>::repository_info(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4416,25 +3850,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/ObjectsSize" => {
                     #[allow(non_camel_case_types)]
                     struct ObjectsSizeSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ClientStreamingService<super::ObjectsSizeRequest>
-                    for ObjectsSizeSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ClientStreamingService<super::ObjectsSizeRequest>
+                        for ObjectsSizeSvc<T>
+                    {
                         type Response = super::ObjectsSizeResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                tonic::Streaming<super::ObjectsSizeRequest>,
-                            >,
+                            request: tonic::Request<tonic::Streaming<super::ObjectsSizeRequest>>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::objects_size(&inner, request)
-                                    .await
+                                <T as RepositoryService>::objects_size(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4464,23 +3892,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/ObjectFormat" => {
                     #[allow(non_camel_case_types)]
                     struct ObjectFormatSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::ObjectFormatRequest>
-                    for ObjectFormatSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::ObjectFormatRequest>
+                        for ObjectFormatSvc<T>
+                    {
                         type Response = super::ObjectFormatResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ObjectFormatRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::object_format(&inner, request)
-                                    .await
+                                <T as RepositoryService>::object_format(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4510,23 +3934,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/FetchRemote" => {
                     #[allow(non_camel_case_types)]
                     struct FetchRemoteSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::FetchRemoteRequest>
-                    for FetchRemoteSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::FetchRemoteRequest>
+                        for FetchRemoteSvc<T>
+                    {
                         type Response = super::FetchRemoteResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FetchRemoteRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::fetch_remote(&inner, request)
-                                    .await
+                                <T as RepositoryService>::fetch_remote(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4556,23 +3976,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/CreateRepository" => {
                     #[allow(non_camel_case_types)]
                     struct CreateRepositorySvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::CreateRepositoryRequest>
-                    for CreateRepositorySvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::CreateRepositoryRequest>
+                        for CreateRepositorySvc<T>
+                    {
                         type Response = super::CreateRepositoryResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CreateRepositoryRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::create_repository(&inner, request)
-                                    .await
+                                <T as RepositoryService>::create_repository(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4602,16 +4018,14 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GetArchive" => {
                     #[allow(non_camel_case_types)]
                     struct GetArchiveSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<super::GetArchiveRequest>
-                    for GetArchiveSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::GetArchiveRequest>
+                        for GetArchiveSvc<T>
+                    {
                         type Response = super::GetArchiveResponse;
                         type ResponseStream = T::GetArchiveStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetArchiveRequest>,
@@ -4648,26 +4062,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/HasLocalBranches" => {
                     #[allow(non_camel_case_types)]
                     struct HasLocalBranchesSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::HasLocalBranchesRequest>
-                    for HasLocalBranchesSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::HasLocalBranchesRequest>
+                        for HasLocalBranchesSvc<T>
+                    {
                         type Response = super::HasLocalBranchesResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::HasLocalBranchesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::has_local_branches(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::has_local_branches(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4697,26 +4104,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/FetchSourceBranch" => {
                     #[allow(non_camel_case_types)]
                     struct FetchSourceBranchSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::FetchSourceBranchRequest>
-                    for FetchSourceBranchSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::FetchSourceBranchRequest>
+                        for FetchSourceBranchSvc<T>
+                    {
                         type Response = super::FetchSourceBranchResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FetchSourceBranchRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::fetch_source_branch(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::fetch_source_branch(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4746,14 +4146,9 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/Fsck" => {
                     #[allow(non_camel_case_types)]
                     struct FsckSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::FsckRequest> for FsckSvc<T> {
+                    impl<T: RepositoryService> tonic::server::UnaryService<super::FsckRequest> for FsckSvc<T> {
                         type Response = super::FsckResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FsckRequest>,
@@ -4790,15 +4185,9 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/WriteRef" => {
                     #[allow(non_camel_case_types)]
                     struct WriteRefSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::WriteRefRequest>
-                    for WriteRefSvc<T> {
+                    impl<T: RepositoryService> tonic::server::UnaryService<super::WriteRefRequest> for WriteRefSvc<T> {
                         type Response = super::WriteRefResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::WriteRefRequest>,
@@ -4835,23 +4224,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/FindMergeBase" => {
                     #[allow(non_camel_case_types)]
                     struct FindMergeBaseSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::FindMergeBaseRequest>
-                    for FindMergeBaseSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::FindMergeBaseRequest>
+                        for FindMergeBaseSvc<T>
+                    {
                         type Response = super::FindMergeBaseResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindMergeBaseRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::find_merge_base(&inner, request)
-                                    .await
+                                <T as RepositoryService>::find_merge_base(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -4881,15 +4266,11 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/CreateFork" => {
                     #[allow(non_camel_case_types)]
                     struct CreateForkSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::CreateForkRequest>
-                    for CreateForkSvc<T> {
+                    impl<T: RepositoryService> tonic::server::UnaryService<super::CreateForkRequest>
+                        for CreateForkSvc<T>
+                    {
                         type Response = super::CreateForkResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CreateForkRequest>,
@@ -4926,28 +4307,22 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/CreateRepositoryFromURL" => {
                     #[allow(non_camel_case_types)]
                     struct CreateRepositoryFromURLSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::CreateRepositoryFromUrlRequest>
-                    for CreateRepositoryFromURLSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::CreateRepositoryFromUrlRequest>
+                        for CreateRepositoryFromURLSvc<T>
+                    {
                         type Response = super::CreateRepositoryFromUrlResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                super::CreateRepositoryFromUrlRequest,
-                            >,
+                            request: tonic::Request<super::CreateRepositoryFromUrlRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
                                 <T as RepositoryService>::create_repository_from_url(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                    &inner, request,
+                                )
+                                .await
                             };
                             Box::pin(fut)
                         }
@@ -4977,24 +4352,21 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/CreateBundle" => {
                     #[allow(non_camel_case_types)]
                     struct CreateBundleSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<super::CreateBundleRequest>
-                    for CreateBundleSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::CreateBundleRequest>
+                        for CreateBundleSvc<T>
+                    {
                         type Response = super::CreateBundleResponse;
                         type ResponseStream = T::CreateBundleStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CreateBundleRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::create_bundle(&inner, request)
-                                    .await
+                                <T as RepositoryService>::create_bundle(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5024,17 +4396,14 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/CreateBundleFromRefList" => {
                     #[allow(non_camel_case_types)]
                     struct CreateBundleFromRefListSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::StreamingService<
-                        super::CreateBundleFromRefListRequest,
-                    > for CreateBundleFromRefListSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::StreamingService<super::CreateBundleFromRefListRequest>
+                        for CreateBundleFromRefListSvc<T>
+                    {
                         type Response = super::CreateBundleFromRefListResponse;
                         type ResponseStream = T::CreateBundleFromRefListStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<
@@ -5044,10 +4413,9 @@ pub mod repository_service_server {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
                                 <T as RepositoryService>::create_bundle_from_ref_list(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                    &inner, request,
+                                )
+                                .await
                             };
                             Box::pin(fut)
                         }
@@ -5077,26 +4445,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GenerateBundleURI" => {
                     #[allow(non_camel_case_types)]
                     struct GenerateBundleURISvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::GenerateBundleUriRequest>
-                    for GenerateBundleURISvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::GenerateBundleUriRequest>
+                        for GenerateBundleURISvc<T>
+                    {
                         type Response = super::GenerateBundleUriResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GenerateBundleUriRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::generate_bundle_uri(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::generate_bundle_uri(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5126,25 +4487,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/FetchBundle" => {
                     #[allow(non_camel_case_types)]
                     struct FetchBundleSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ClientStreamingService<super::FetchBundleRequest>
-                    for FetchBundleSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ClientStreamingService<super::FetchBundleRequest>
+                        for FetchBundleSvc<T>
+                    {
                         type Response = super::FetchBundleResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                tonic::Streaming<super::FetchBundleRequest>,
-                            >,
+                            request: tonic::Request<tonic::Streaming<super::FetchBundleRequest>>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::fetch_bundle(&inner, request)
-                                    .await
+                                <T as RepositoryService>::fetch_bundle(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5173,19 +4528,14 @@ pub mod repository_service_server {
                 }
                 "/gitaly.RepositoryService/CreateRepositoryFromBundle" => {
                     #[allow(non_camel_case_types)]
-                    struct CreateRepositoryFromBundleSvc<T: RepositoryService>(
-                        pub Arc<T>,
-                    );
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ClientStreamingService<
-                        super::CreateRepositoryFromBundleRequest,
-                    > for CreateRepositoryFromBundleSvc<T> {
+                    struct CreateRepositoryFromBundleSvc<T: RepositoryService>(pub Arc<T>);
+                    impl<T: RepositoryService>
+                        tonic::server::ClientStreamingService<
+                            super::CreateRepositoryFromBundleRequest,
+                        > for CreateRepositoryFromBundleSvc<T>
+                    {
                         type Response = super::CreateRepositoryFromBundleResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<
@@ -5195,10 +4545,9 @@ pub mod repository_service_server {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
                                 <T as RepositoryService>::create_repository_from_bundle(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                    &inner, request,
+                                )
+                                .await
                             };
                             Box::pin(fut)
                         }
@@ -5228,16 +4577,14 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GetConfig" => {
                     #[allow(non_camel_case_types)]
                     struct GetConfigSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<super::GetConfigRequest>
-                    for GetConfigSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::GetConfigRequest>
+                        for GetConfigSvc<T>
+                    {
                         type Response = super::GetConfigResponse;
                         type ResponseStream = T::GetConfigStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetConfigRequest>,
@@ -5274,23 +4621,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/FindLicense" => {
                     #[allow(non_camel_case_types)]
                     struct FindLicenseSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::FindLicenseRequest>
-                    for FindLicenseSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::FindLicenseRequest>
+                        for FindLicenseSvc<T>
+                    {
                         type Response = super::FindLicenseResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindLicenseRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::find_license(&inner, request)
-                                    .await
+                                <T as RepositoryService>::find_license(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5320,28 +4663,21 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GetInfoAttributes" => {
                     #[allow(non_camel_case_types)]
                     struct GetInfoAttributesSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<
-                        super::GetInfoAttributesRequest,
-                    > for GetInfoAttributesSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::GetInfoAttributesRequest>
+                        for GetInfoAttributesSvc<T>
+                    {
                         type Response = super::GetInfoAttributesResponse;
                         type ResponseStream = T::GetInfoAttributesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetInfoAttributesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::get_info_attributes(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::get_info_attributes(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5371,26 +4707,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/CalculateChecksum" => {
                     #[allow(non_camel_case_types)]
                     struct CalculateChecksumSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::CalculateChecksumRequest>
-                    for CalculateChecksumSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::CalculateChecksumRequest>
+                        for CalculateChecksumSvc<T>
+                    {
                         type Response = super::CalculateChecksumResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CalculateChecksumRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::calculate_checksum(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::calculate_checksum(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5420,24 +4749,21 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GetSnapshot" => {
                     #[allow(non_camel_case_types)]
                     struct GetSnapshotSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<super::GetSnapshotRequest>
-                    for GetSnapshotSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::GetSnapshotRequest>
+                        for GetSnapshotSvc<T>
+                    {
                         type Response = super::GetSnapshotResponse;
                         type ResponseStream = T::GetSnapshotStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetSnapshotRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::get_snapshot(&inner, request)
-                                    .await
+                                <T as RepositoryService>::get_snapshot(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5466,32 +4792,23 @@ pub mod repository_service_server {
                 }
                 "/gitaly.RepositoryService/CreateRepositoryFromSnapshot" => {
                     #[allow(non_camel_case_types)]
-                    struct CreateRepositoryFromSnapshotSvc<T: RepositoryService>(
-                        pub Arc<T>,
-                    );
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<
-                        super::CreateRepositoryFromSnapshotRequest,
-                    > for CreateRepositoryFromSnapshotSvc<T> {
+                    struct CreateRepositoryFromSnapshotSvc<T: RepositoryService>(pub Arc<T>);
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::CreateRepositoryFromSnapshotRequest>
+                        for CreateRepositoryFromSnapshotSvc<T>
+                    {
                         type Response = super::CreateRepositoryFromSnapshotResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                super::CreateRepositoryFromSnapshotRequest,
-                            >,
+                            request: tonic::Request<super::CreateRepositoryFromSnapshotRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
                                 <T as RepositoryService>::create_repository_from_snapshot(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                    &inner, request,
+                                )
+                                .await
                             };
                             Box::pin(fut)
                         }
@@ -5521,24 +4838,21 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GetRawChanges" => {
                     #[allow(non_camel_case_types)]
                     struct GetRawChangesSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<super::GetRawChangesRequest>
-                    for GetRawChangesSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::GetRawChangesRequest>
+                        for GetRawChangesSvc<T>
+                    {
                         type Response = super::GetRawChangesResponse;
                         type ResponseStream = T::GetRawChangesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetRawChangesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::get_raw_changes(&inner, request)
-                                    .await
+                                <T as RepositoryService>::get_raw_changes(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5568,27 +4882,21 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/SearchFilesByContent" => {
                     #[allow(non_camel_case_types)]
                     struct SearchFilesByContentSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<
-                        super::SearchFilesByContentRequest,
-                    > for SearchFilesByContentSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::SearchFilesByContentRequest>
+                        for SearchFilesByContentSvc<T>
+                    {
                         type Response = super::SearchFilesByContentResponse;
                         type ResponseStream = T::SearchFilesByContentStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::SearchFilesByContentRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::search_files_by_content(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as RepositoryService>::search_files_by_content(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -5619,27 +4927,21 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/SearchFilesByName" => {
                     #[allow(non_camel_case_types)]
                     struct SearchFilesByNameSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<
-                        super::SearchFilesByNameRequest,
-                    > for SearchFilesByNameSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::SearchFilesByNameRequest>
+                        for SearchFilesByNameSvc<T>
+                    {
                         type Response = super::SearchFilesByNameResponse;
                         type ResponseStream = T::SearchFilesByNameStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::SearchFilesByNameRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::search_files_by_name(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as RepositoryService>::search_files_by_name(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -5670,16 +4972,12 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/RestoreCustomHooks" => {
                     #[allow(non_camel_case_types)]
                     struct RestoreCustomHooksSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ClientStreamingService<
-                        super::RestoreCustomHooksRequest,
-                    > for RestoreCustomHooksSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ClientStreamingService<super::RestoreCustomHooksRequest>
+                        for RestoreCustomHooksSvc<T>
+                    {
                         type Response = super::RestoreCustomHooksResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<
@@ -5688,10 +4986,7 @@ pub mod repository_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::restore_custom_hooks(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as RepositoryService>::restore_custom_hooks(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -5722,25 +5017,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/SetCustomHooks" => {
                     #[allow(non_camel_case_types)]
                     struct SetCustomHooksSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ClientStreamingService<super::SetCustomHooksRequest>
-                    for SetCustomHooksSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ClientStreamingService<super::SetCustomHooksRequest>
+                        for SetCustomHooksSvc<T>
+                    {
                         type Response = super::SetCustomHooksResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                tonic::Streaming<super::SetCustomHooksRequest>,
-                            >,
+                            request: tonic::Request<tonic::Streaming<super::SetCustomHooksRequest>>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::set_custom_hooks(&inner, request)
-                                    .await
+                                <T as RepositoryService>::set_custom_hooks(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5770,28 +5059,21 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/BackupCustomHooks" => {
                     #[allow(non_camel_case_types)]
                     struct BackupCustomHooksSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<
-                        super::BackupCustomHooksRequest,
-                    > for BackupCustomHooksSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::BackupCustomHooksRequest>
+                        for BackupCustomHooksSvc<T>
+                    {
                         type Response = super::BackupCustomHooksResponse;
                         type ResponseStream = T::BackupCustomHooksStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::BackupCustomHooksRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::backup_custom_hooks(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::backup_custom_hooks(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5821,24 +5103,21 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GetCustomHooks" => {
                     #[allow(non_camel_case_types)]
                     struct GetCustomHooksSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<super::GetCustomHooksRequest>
-                    for GetCustomHooksSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::GetCustomHooksRequest>
+                        for GetCustomHooksSvc<T>
+                    {
                         type Response = super::GetCustomHooksResponse;
                         type ResponseStream = T::GetCustomHooksStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetCustomHooksRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::get_custom_hooks(&inner, request)
-                                    .await
+                                <T as RepositoryService>::get_custom_hooks(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5868,25 +5147,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GetObjectDirectorySize" => {
                     #[allow(non_camel_case_types)]
                     struct GetObjectDirectorySizeSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::GetObjectDirectorySizeRequest>
-                    for GetObjectDirectorySizeSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::GetObjectDirectorySizeRequest>
+                        for GetObjectDirectorySizeSvc<T>
+                    {
                         type Response = super::GetObjectDirectorySizeResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetObjectDirectorySizeRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::get_object_directory_size(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as RepositoryService>::get_object_directory_size(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -5917,23 +5190,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/RemoveRepository" => {
                     #[allow(non_camel_case_types)]
                     struct RemoveRepositorySvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::RemoveRepositoryRequest>
-                    for RemoveRepositorySvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::RemoveRepositoryRequest>
+                        for RemoveRepositorySvc<T>
+                    {
                         type Response = super::RemoveRepositoryResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RemoveRepositoryRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::remove_repository(&inner, request)
-                                    .await
+                                <T as RepositoryService>::remove_repository(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -5963,25 +5232,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/ReplicateRepository" => {
                     #[allow(non_camel_case_types)]
                     struct ReplicateRepositorySvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::ReplicateRepositoryRequest>
-                    for ReplicateRepositorySvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::ReplicateRepositoryRequest>
+                        for ReplicateRepositorySvc<T>
+                    {
                         type Response = super::ReplicateRepositoryResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ReplicateRepositoryRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::replicate_repository(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as RepositoryService>::replicate_repository(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -6012,26 +5275,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/OptimizeRepository" => {
                     #[allow(non_camel_case_types)]
                     struct OptimizeRepositorySvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::OptimizeRepositoryRequest>
-                    for OptimizeRepositorySvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::OptimizeRepositoryRequest>
+                        for OptimizeRepositorySvc<T>
+                    {
                         type Response = super::OptimizeRepositoryResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::OptimizeRepositoryRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::optimize_repository(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::optimize_repository(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -6061,27 +5317,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/PruneUnreachableObjects" => {
                     #[allow(non_camel_case_types)]
                     struct PruneUnreachableObjectsSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::PruneUnreachableObjectsRequest>
-                    for PruneUnreachableObjectsSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::PruneUnreachableObjectsRequest>
+                        for PruneUnreachableObjectsSvc<T>
+                    {
                         type Response = super::PruneUnreachableObjectsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                super::PruneUnreachableObjectsRequest,
-                            >,
+                            request: tonic::Request<super::PruneUnreachableObjectsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::prune_unreachable_objects(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as RepositoryService>::prune_unreachable_objects(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -6112,23 +5360,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/BackupRepository" => {
                     #[allow(non_camel_case_types)]
                     struct BackupRepositorySvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::BackupRepositoryRequest>
-                    for BackupRepositorySvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::BackupRepositoryRequest>
+                        for BackupRepositorySvc<T>
+                    {
                         type Response = super::BackupRepositoryResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::BackupRepositoryRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::backup_repository(&inner, request)
-                                    .await
+                                <T as RepositoryService>::backup_repository(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -6158,26 +5402,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/RestoreRepository" => {
                     #[allow(non_camel_case_types)]
                     struct RestoreRepositorySvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::RestoreRepositoryRequest>
-                    for RestoreRepositorySvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::RestoreRepositoryRequest>
+                        for RestoreRepositorySvc<T>
+                    {
                         type Response = super::RestoreRepositoryResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RestoreRepositoryRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::restore_repository(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::restore_repository(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -6207,26 +5444,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/GetFileAttributes" => {
                     #[allow(non_camel_case_types)]
                     struct GetFileAttributesSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::GetFileAttributesRequest>
-                    for GetFileAttributesSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::GetFileAttributesRequest>
+                        for GetFileAttributesSvc<T>
+                    {
                         type Response = super::GetFileAttributesResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetFileAttributesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::get_file_attributes(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as RepositoryService>::get_file_attributes(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -6256,16 +5486,14 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/FastExport" => {
                     #[allow(non_camel_case_types)]
                     struct FastExportSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::ServerStreamingService<super::FastExportRequest>
-                    for FastExportSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::ServerStreamingService<super::FastExportRequest>
+                        for FastExportSvc<T>
+                    {
                         type Response = super::FastExportResponse;
                         type ResponseStream = T::FastExportStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FastExportRequest>,
@@ -6302,27 +5530,19 @@ pub mod repository_service_server {
                 "/gitaly.RepositoryService/MigrateReferenceBackend" => {
                     #[allow(non_camel_case_types)]
                     struct MigrateReferenceBackendSvc<T: RepositoryService>(pub Arc<T>);
-                    impl<
-                        T: RepositoryService,
-                    > tonic::server::UnaryService<super::MigrateReferenceBackendRequest>
-                    for MigrateReferenceBackendSvc<T> {
+                    impl<T: RepositoryService>
+                        tonic::server::UnaryService<super::MigrateReferenceBackendRequest>
+                        for MigrateReferenceBackendSvc<T>
+                    {
                         type Response = super::MigrateReferenceBackendResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                super::MigrateReferenceBackendRequest,
-                            >,
+                            request: tonic::Request<super::MigrateReferenceBackendRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RepositoryService>::migrate_reference_backend(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as RepositoryService>::migrate_reference_backend(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -6350,25 +5570,19 @@ pub mod repository_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        let mut response = http::Response::new(
-                            tonic::body::Body::default(),
-                        );
-                        let headers = response.headers_mut();
-                        headers
-                            .insert(
-                                tonic::Status::GRPC_STATUS,
-                                (tonic::Code::Unimplemented as i32).into(),
-                            );
-                        headers
-                            .insert(
-                                http::header::CONTENT_TYPE,
-                                tonic::metadata::GRPC_CONTENT_TYPE,
-                            );
-                        Ok(response)
-                    })
-                }
+                _ => Box::pin(async move {
+                    let mut response = http::Response::new(tonic::body::Body::default());
+                    let headers = response.headers_mut();
+                    headers.insert(
+                        tonic::Status::GRPC_STATUS,
+                        (tonic::Code::Unimplemented as i32).into(),
+                    );
+                    headers.insert(
+                        http::header::CONTENT_TYPE,
+                        tonic::metadata::GRPC_CONTENT_TYPE,
+                    );
+                    Ok(response)
+                }),
             }
         }
     }
@@ -6455,17 +5669,7 @@ pub struct ListCommitsRequest {
 /// Nested message and enum types in `ListCommitsRequest`.
 pub mod list_commits_request {
     /// Order is the order in which commits should be traversed.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Order {
         /// NONE defaults to reverse chronological order.
@@ -6632,17 +5836,7 @@ pub mod tree_entry_response {
     /// ObjectType is the type of the returned tree entry.
     ///
     /// TODO: Replace this enum with ObjectType in shared.proto
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum ObjectType {
         /// COMMIT indicates that the tree entry is a commit, which may be the case for submodules.
@@ -6785,17 +5979,7 @@ pub struct TreeEntry {
 /// Nested message and enum types in `TreeEntry`.
 pub mod tree_entry {
     /// EntryType denotes the different types of tree entry.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum EntryType {
         /// BLOB indicates that the tree entry is a blob.
@@ -6863,17 +6047,7 @@ pub struct GetTreeEntriesRequest {
 /// Nested message and enum types in `GetTreeEntriesRequest`.
 pub mod get_tree_entries_request {
     /// SortBy provides the sorting parameters.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum SortBy {
         /// DEFAULT preserves the order of git ls-tree.
@@ -7020,9 +6194,7 @@ pub struct ListCommitsByRefNameResponse {
     /// commit_refs is a list of CommitForRef objects which provides the commits
     /// against the requested references.
     #[prost(message, repeated, tag = "2")]
-    pub commit_refs: ::prost::alloc::vec::Vec<
-        list_commits_by_ref_name_response::CommitForRef,
-    >,
+    pub commit_refs: ::prost::alloc::vec::Vec<list_commits_by_ref_name_response::CommitForRef>,
 }
 /// Nested message and enum types in `ListCommitsByRefNameResponse`.
 pub mod list_commits_by_ref_name_response {
@@ -7062,17 +6234,7 @@ pub struct FindAllCommitsRequest {
 /// Nested message and enum types in `FindAllCommitsRequest`.
 pub mod find_all_commits_request {
     /// Order is the order in which commits should be traversed.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Order {
         /// NONE denotes the default ordering where the commits are shown in
@@ -7204,17 +6366,7 @@ pub struct FindCommitsRequest {
 /// Nested message and enum types in `FindCommitsRequest`.
 pub mod find_commits_request {
     /// Order is the order in which commits should be traversed.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Order {
         /// NONE defaults to reverse chronological order.
@@ -7470,9 +6622,7 @@ pub struct ListLastCommitsForTreeRequest {
 pub struct ListLastCommitsForTreeResponse {
     /// commits is a set of CommitForTree objects.
     #[prost(message, repeated, tag = "1")]
-    pub commits: ::prost::alloc::vec::Vec<
-        list_last_commits_for_tree_response::CommitForTree,
-    >,
+    pub commits: ::prost::alloc::vec::Vec<list_last_commits_for_tree_response::CommitForTree>,
 }
 /// Nested message and enum types in `ListLastCommitsForTreeResponse`.
 pub mod list_last_commits_for_tree_response {
@@ -7578,17 +6728,7 @@ pub struct GetCommitSignaturesResponse {
 /// Nested message and enum types in `GetCommitSignaturesResponse`.
 pub mod get_commit_signatures_response {
     /// Signer of the commit. A commit can be signed either by a user or by Gitaly itself.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Signer {
         /// SIGNER_UNSPECIFIED indicates that the signer has not been specified.
@@ -7662,9 +6802,7 @@ pub struct CheckObjectsExistResponse {
     /// revisions is the list of RevisionExistence objects used to indicate which
     /// revisions exist.
     #[prost(message, repeated, tag = "1")]
-    pub revisions: ::prost::alloc::vec::Vec<
-        check_objects_exist_response::RevisionExistence,
-    >,
+    pub revisions: ::prost::alloc::vec::Vec<check_objects_exist_response::RevisionExistence>,
 }
 /// Nested message and enum types in `CheckObjectsExistResponse`.
 pub mod check_objects_exist_response {
@@ -7686,10 +6824,10 @@ pub mod commit_service_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     /// CommitService is a service which provides RPCs that interact with Git
     /// commits.
     #[derive(Debug, Clone)]
@@ -7730,14 +6868,13 @@ pub mod commit_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-                Response = http::Response<
-                    <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    http::Request<tonic::body::Body>,
+                    Response = http::Response<
+                        <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    >,
                 >,
-            >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::Body>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             CommitServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -7782,18 +6919,11 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListCommitsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/ListCommits",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/ListCommits");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "ListCommits"));
@@ -7808,18 +6938,11 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListAllCommitsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/ListAllCommits",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/ListAllCommits");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "ListAllCommits"));
@@ -7830,22 +6953,14 @@ pub mod commit_service_client {
         pub async fn commit_is_ancestor(
             &mut self,
             request: impl tonic::IntoRequest<super::CommitIsAncestorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CommitIsAncestorResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CommitIsAncestorResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/CommitIsAncestor",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/CommitIsAncestor");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "CommitIsAncestor"));
@@ -7860,18 +6975,11 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::TreeEntryResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/TreeEntry",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/TreeEntry");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "TreeEntry"));
@@ -7881,22 +6989,13 @@ pub mod commit_service_client {
         pub async fn count_commits(
             &mut self,
             request: impl tonic::IntoRequest<super::CountCommitsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CountCommitsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CountCommitsResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/CountCommits",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/CountCommits");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "CountCommits"));
@@ -7906,27 +7005,19 @@ pub mod commit_service_client {
         pub async fn count_diverging_commits(
             &mut self,
             request: impl tonic::IntoRequest<super::CountDivergingCommitsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CountDivergingCommitsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CountDivergingCommitsResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/CountDivergingCommits",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/CountDivergingCommits");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.CommitService", "CountDivergingCommits"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.CommitService",
+                "CountDivergingCommits",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// GetTreeEntries provides the tree entries for the provided path and revision. This includes
@@ -7938,18 +7029,11 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetTreeEntriesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/GetTreeEntries",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/GetTreeEntries");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "GetTreeEntries"));
@@ -7964,18 +7048,11 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListFilesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/ListFiles",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/ListFiles");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "ListFiles"));
@@ -7985,22 +7062,13 @@ pub mod commit_service_client {
         pub async fn find_commit(
             &mut self,
             request: impl tonic::IntoRequest<super::FindCommitRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindCommitResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FindCommitResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/FindCommit",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/FindCommit");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "FindCommit"));
@@ -8010,22 +7078,13 @@ pub mod commit_service_client {
         pub async fn commit_stats(
             &mut self,
             request: impl tonic::IntoRequest<super::CommitStatsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CommitStatsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CommitStatsResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/CommitStats",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/CommitStats");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "CommitStats"));
@@ -8041,18 +7100,11 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::FindAllCommitsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/FindAllCommits",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/FindAllCommits");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "FindAllCommits"));
@@ -8068,18 +7120,11 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::FindCommitsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/FindCommits",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/FindCommits");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "FindCommits"));
@@ -8090,22 +7135,14 @@ pub mod commit_service_client {
         pub async fn commit_languages(
             &mut self,
             request: impl tonic::IntoRequest<super::CommitLanguagesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CommitLanguagesResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CommitLanguagesResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/CommitLanguages",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/CommitLanguages");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "CommitLanguages"));
@@ -8120,18 +7157,11 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::RawBlameResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/RawBlame",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.CommitService/RawBlame");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "RawBlame"));
@@ -8146,22 +7176,14 @@ pub mod commit_service_client {
         pub async fn last_commit_for_path(
             &mut self,
             request: impl tonic::IntoRequest<super::LastCommitForPathRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::LastCommitForPathResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::LastCommitForPathResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/LastCommitForPath",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/LastCommitForPath");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "LastCommitForPath"));
@@ -8172,28 +7194,21 @@ pub mod commit_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::ListLastCommitsForTreeRequest>,
         ) -> std::result::Result<
-            tonic::Response<
-                tonic::codec::Streaming<super::ListLastCommitsForTreeResponse>,
-            >,
+            tonic::Response<tonic::codec::Streaming<super::ListLastCommitsForTreeResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.CommitService/ListLastCommitsForTree",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.CommitService", "ListLastCommitsForTree"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.CommitService",
+                "ListLastCommitsForTree",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// CommitsByMessage list commits which match the provided query.
@@ -8204,18 +7219,12 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::CommitsByMessageResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/CommitsByMessage",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/CommitsByMessage");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "CommitsByMessage"));
@@ -8229,18 +7238,12 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListCommitsByOidResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/ListCommitsByOid",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/ListCommitsByOid");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "ListCommitsByOid"));
@@ -8251,57 +7254,42 @@ pub mod commit_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::ListCommitsByRefNameRequest>,
         ) -> std::result::Result<
-            tonic::Response<
-                tonic::codec::Streaming<super::ListCommitsByRefNameResponse>,
-            >,
+            tonic::Response<tonic::codec::Streaming<super::ListCommitsByRefNameResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/ListCommitsByRefName",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/ListCommitsByRefName");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.CommitService", "ListCommitsByRefName"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.CommitService",
+                "ListCommitsByRefName",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// FilterShasWithSignatures filters out signed commits.
         pub async fn filter_shas_with_signatures(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::FilterShasWithSignaturesRequest,
-            >,
+            request: impl tonic::IntoStreamingRequest<Message = super::FilterShasWithSignaturesRequest>,
         ) -> std::result::Result<
-            tonic::Response<
-                tonic::codec::Streaming<super::FilterShasWithSignaturesResponse>,
-            >,
+            tonic::Response<tonic::codec::Streaming<super::FilterShasWithSignaturesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.CommitService/FilterShasWithSignatures",
             );
             let mut req = request.into_streaming_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.CommitService", "FilterShasWithSignatures"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.CommitService",
+                "FilterShasWithSignatures",
+            ));
             self.inner.streaming(req, path, codec).await
         }
         /// GetCommitSignatures parses the commit signature information for the provided commitish object IDs.
@@ -8314,21 +7302,17 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetCommitSignaturesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/GetCommitSignatures",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/GetCommitSignatures");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.CommitService", "GetCommitSignatures"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.CommitService",
+                "GetCommitSignatures",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// GetCommitMessages returns the commits messages for the provided commitish object IDs.
@@ -8339,18 +7323,12 @@ pub mod commit_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetCommitMessagesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/GetCommitMessages",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/GetCommitMessages");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "GetCommitMessages"));
@@ -8362,25 +7340,17 @@ pub mod commit_service_client {
         /// revisions from the input it did not find on the repository.
         pub async fn check_objects_exist(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::CheckObjectsExistRequest,
-            >,
+            request: impl tonic::IntoStreamingRequest<Message = super::CheckObjectsExistRequest>,
         ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::CheckObjectsExistResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.CommitService/CheckObjectsExist",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.CommitService/CheckObjectsExist");
             let mut req = request.into_streaming_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.CommitService", "CheckObjectsExist"));
@@ -8395,7 +7365,7 @@ pub mod commit_service_server {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
     use tonic::codegen::*;
     /// Generated trait containing gRPC methods that should be implemented for use with CommitServiceServer.
@@ -8404,8 +7374,7 @@ pub mod commit_service_server {
         /// Server streaming response type for the ListCommits method.
         type ListCommitsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ListCommitsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListCommits lists all commits reachable via a set of references by doing a
         /// graph walk. This deprecates FindAllCommits and FindCommits (except Follow
@@ -8413,39 +7382,28 @@ pub mod commit_service_server {
         async fn list_commits(
             &self,
             request: tonic::Request<super::ListCommitsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ListCommitsStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ListCommitsStream>, tonic::Status>;
         /// Server streaming response type for the ListAllCommits method.
         type ListAllCommitsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ListAllCommitsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListAllCommits lists all commits present in the repository, including
         /// those not reachable by any reference.
         async fn list_all_commits(
             &self,
             request: tonic::Request<super::ListAllCommitsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ListAllCommitsStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ListAllCommitsStream>, tonic::Status>;
         /// CommitIsAncestor checks whether a provided commit is the ancestor of
         /// another commit.
         async fn commit_is_ancestor(
             &self,
             request: tonic::Request<super::CommitIsAncestorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CommitIsAncestorResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CommitIsAncestorResponse>, tonic::Status>;
         /// Server streaming response type for the TreeEntry method.
         type TreeEntryStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::TreeEntryResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// TreeEntry provides the tree entry for the provided path and revision. The data
         /// is broken into chunks and streamed.
@@ -8457,38 +7415,27 @@ pub mod commit_service_server {
         async fn count_commits(
             &self,
             request: tonic::Request<super::CountCommitsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CountCommitsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CountCommitsResponse>, tonic::Status>;
         /// CountDivergingCommits provides the number of diverging commits between two revisions.
         async fn count_diverging_commits(
             &self,
             request: tonic::Request<super::CountDivergingCommitsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CountDivergingCommitsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CountDivergingCommitsResponse>, tonic::Status>;
         /// Server streaming response type for the GetTreeEntries method.
         type GetTreeEntriesStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetTreeEntriesResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetTreeEntries provides the tree entries for the provided path and revision. This includes
         /// subtrees present under the tree with the option of recursive fetching.
         async fn get_tree_entries(
             &self,
             request: tonic::Request<super::GetTreeEntriesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetTreeEntriesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetTreeEntriesStream>, tonic::Status>;
         /// Server streaming response type for the ListFiles method.
         type ListFilesStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ListFilesResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListFiles lists all the files (including files in sub-dirs) present in the working tree
         /// of a given treeish.
@@ -8500,23 +7447,16 @@ pub mod commit_service_server {
         async fn find_commit(
             &self,
             request: tonic::Request<super::FindCommitRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindCommitResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FindCommitResponse>, tonic::Status>;
         /// CommitStats provides the stats for a given commitish.
         async fn commit_stats(
             &self,
             request: tonic::Request<super::CommitStatsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CommitStatsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CommitStatsResponse>, tonic::Status>;
         /// Server streaming response type for the FindAllCommits method.
         type FindAllCommitsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::FindAllCommitsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// FindAllCommits lists all the commits which can be traversed from the
         /// provided commitish.
@@ -8524,15 +7464,11 @@ pub mod commit_service_server {
         async fn find_all_commits(
             &self,
             request: tonic::Request<super::FindAllCommitsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::FindAllCommitsStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::FindAllCommitsStream>, tonic::Status>;
         /// Server streaming response type for the FindCommits method.
         type FindCommitsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::FindCommitsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// FindCommits lists all the commits which are associated with the provided revision
         /// and paths.
@@ -8540,24 +7476,17 @@ pub mod commit_service_server {
         async fn find_commits(
             &self,
             request: tonic::Request<super::FindCommitsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::FindCommitsStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::FindCommitsStream>, tonic::Status>;
         /// CommitLanguages detects the source code languages of the whole tree for a
         /// given commit. Returns an error in case no languages could be detected.
         async fn commit_languages(
             &self,
             request: tonic::Request<super::CommitLanguagesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CommitLanguagesResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CommitLanguagesResponse>, tonic::Status>;
         /// Server streaming response type for the RawBlame method.
         type RawBlameStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::RawBlameResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// RawBlame blames lines in a blob to when they have last been changed. Returns the raw output of the git-blame(1)
         /// command.
@@ -8574,105 +7503,61 @@ pub mod commit_service_server {
         async fn last_commit_for_path(
             &self,
             request: tonic::Request<super::LastCommitForPathRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::LastCommitForPathResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::LastCommitForPathResponse>, tonic::Status>;
         /// Server streaming response type for the ListLastCommitsForTree method.
         type ListLastCommitsForTreeStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::ListLastCommitsForTreeResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::ListLastCommitsForTreeResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// ListLastCommitsForTree lists the last commits for a given tree.
         async fn list_last_commits_for_tree(
             &self,
             request: tonic::Request<super::ListLastCommitsForTreeRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ListLastCommitsForTreeStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ListLastCommitsForTreeStream>, tonic::Status>;
         /// Server streaming response type for the CommitsByMessage method.
         type CommitsByMessageStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::CommitsByMessageResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::CommitsByMessageResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// CommitsByMessage list commits which match the provided query.
         async fn commits_by_message(
             &self,
             request: tonic::Request<super::CommitsByMessageRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::CommitsByMessageStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::CommitsByMessageStream>, tonic::Status>;
         /// Server streaming response type for the ListCommitsByOid method.
         type ListCommitsByOidStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::ListCommitsByOidResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::ListCommitsByOidResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// ListCommitsByOid lists the commits for the provided commitish object IDs.
         async fn list_commits_by_oid(
             &self,
             request: tonic::Request<super::ListCommitsByOidRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ListCommitsByOidStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ListCommitsByOidStream>, tonic::Status>;
         /// Server streaming response type for the ListCommitsByRefName method.
         type ListCommitsByRefNameStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::ListCommitsByRefNameResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::ListCommitsByRefNameResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// ListCommitsByRefName lists the commits for the provided references.
         async fn list_commits_by_ref_name(
             &self,
             request: tonic::Request<super::ListCommitsByRefNameRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ListCommitsByRefNameStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ListCommitsByRefNameStream>, tonic::Status>;
         /// Server streaming response type for the FilterShasWithSignatures method.
         type FilterShasWithSignaturesStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::FilterShasWithSignaturesResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::FilterShasWithSignaturesResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// FilterShasWithSignatures filters out signed commits.
         async fn filter_shas_with_signatures(
             &self,
-            request: tonic::Request<
-                tonic::Streaming<super::FilterShasWithSignaturesRequest>,
-            >,
-        ) -> std::result::Result<
-            tonic::Response<Self::FilterShasWithSignaturesStream>,
-            tonic::Status,
-        >;
+            request: tonic::Request<tonic::Streaming<super::FilterShasWithSignaturesRequest>>,
+        ) -> std::result::Result<tonic::Response<Self::FilterShasWithSignaturesStream>, tonic::Status>;
         /// Server streaming response type for the GetCommitSignatures method.
         type GetCommitSignaturesStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::GetCommitSignaturesResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::GetCommitSignaturesResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// GetCommitSignatures parses the commit signature information for the provided commitish object IDs.
         /// The RPC doesn't use 'mailmap' to ensure that signature verification is done against the original
@@ -8680,35 +7565,21 @@ pub mod commit_service_server {
         async fn get_commit_signatures(
             &self,
             request: tonic::Request<super::GetCommitSignaturesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetCommitSignaturesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetCommitSignaturesStream>, tonic::Status>;
         /// Server streaming response type for the GetCommitMessages method.
         type GetCommitMessagesStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::GetCommitMessagesResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::GetCommitMessagesResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// GetCommitMessages returns the commits messages for the provided commitish object IDs.
         async fn get_commit_messages(
             &self,
             request: tonic::Request<super::GetCommitMessagesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetCommitMessagesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetCommitMessagesStream>, tonic::Status>;
         /// Server streaming response type for the CheckObjectsExist method.
         type CheckObjectsExistStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::CheckObjectsExistResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::CheckObjectsExistResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// CheckObjectsExist will check for the existence of revisions against a
         /// repository. It returns two sets of data. An array containing the revisions
@@ -8717,10 +7588,7 @@ pub mod commit_service_server {
         async fn check_objects_exist(
             &self,
             request: tonic::Request<tonic::Streaming<super::CheckObjectsExistRequest>>,
-        ) -> std::result::Result<
-            tonic::Response<Self::CheckObjectsExistStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::CheckObjectsExistStream>, tonic::Status>;
     }
     /// CommitService is a service which provides RPCs that interact with Git
     /// commits.
@@ -8745,10 +7613,7 @@ pub mod commit_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -8803,16 +7668,14 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/ListCommits" => {
                     #[allow(non_camel_case_types)]
                     struct ListCommitsSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<super::ListCommitsRequest>
-                    for ListCommitsSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::ListCommitsRequest>
+                        for ListCommitsSvc<T>
+                    {
                         type Response = super::ListCommitsResponse;
                         type ResponseStream = T::ListCommitsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListCommitsRequest>,
@@ -8849,24 +7712,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/ListAllCommits" => {
                     #[allow(non_camel_case_types)]
                     struct ListAllCommitsSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<super::ListAllCommitsRequest>
-                    for ListAllCommitsSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::ListAllCommitsRequest>
+                        for ListAllCommitsSvc<T>
+                    {
                         type Response = super::ListAllCommitsResponse;
                         type ResponseStream = T::ListAllCommitsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListAllCommitsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::list_all_commits(&inner, request)
-                                    .await
+                                <T as CommitService>::list_all_commits(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -8896,23 +7756,19 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/CommitIsAncestor" => {
                     #[allow(non_camel_case_types)]
                     struct CommitIsAncestorSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::UnaryService<super::CommitIsAncestorRequest>
-                    for CommitIsAncestorSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::UnaryService<super::CommitIsAncestorRequest>
+                        for CommitIsAncestorSvc<T>
+                    {
                         type Response = super::CommitIsAncestorResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CommitIsAncestorRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::commit_is_ancestor(&inner, request)
-                                    .await
+                                <T as CommitService>::commit_is_ancestor(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -8942,16 +7798,14 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/TreeEntry" => {
                     #[allow(non_camel_case_types)]
                     struct TreeEntrySvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<super::TreeEntryRequest>
-                    for TreeEntrySvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::TreeEntryRequest>
+                        for TreeEntrySvc<T>
+                    {
                         type Response = super::TreeEntryResponse;
                         type ResponseStream = T::TreeEntryStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::TreeEntryRequest>,
@@ -8988,15 +7842,11 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/CountCommits" => {
                     #[allow(non_camel_case_types)]
                     struct CountCommitsSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::UnaryService<super::CountCommitsRequest>
-                    for CountCommitsSvc<T> {
+                    impl<T: CommitService> tonic::server::UnaryService<super::CountCommitsRequest>
+                        for CountCommitsSvc<T>
+                    {
                         type Response = super::CountCommitsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CountCommitsRequest>,
@@ -9033,26 +7883,19 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/CountDivergingCommits" => {
                     #[allow(non_camel_case_types)]
                     struct CountDivergingCommitsSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::UnaryService<super::CountDivergingCommitsRequest>
-                    for CountDivergingCommitsSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::UnaryService<super::CountDivergingCommitsRequest>
+                        for CountDivergingCommitsSvc<T>
+                    {
                         type Response = super::CountDivergingCommitsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CountDivergingCommitsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::count_diverging_commits(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                <T as CommitService>::count_diverging_commits(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9082,24 +7925,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/GetTreeEntries" => {
                     #[allow(non_camel_case_types)]
                     struct GetTreeEntriesSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<super::GetTreeEntriesRequest>
-                    for GetTreeEntriesSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::GetTreeEntriesRequest>
+                        for GetTreeEntriesSvc<T>
+                    {
                         type Response = super::GetTreeEntriesResponse;
                         type ResponseStream = T::GetTreeEntriesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetTreeEntriesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::get_tree_entries(&inner, request)
-                                    .await
+                                <T as CommitService>::get_tree_entries(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9129,16 +7969,14 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/ListFiles" => {
                     #[allow(non_camel_case_types)]
                     struct ListFilesSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<super::ListFilesRequest>
-                    for ListFilesSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::ListFilesRequest>
+                        for ListFilesSvc<T>
+                    {
                         type Response = super::ListFilesResponse;
                         type ResponseStream = T::ListFilesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListFilesRequest>,
@@ -9175,15 +8013,9 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/FindCommit" => {
                     #[allow(non_camel_case_types)]
                     struct FindCommitSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::UnaryService<super::FindCommitRequest>
-                    for FindCommitSvc<T> {
+                    impl<T: CommitService> tonic::server::UnaryService<super::FindCommitRequest> for FindCommitSvc<T> {
                         type Response = super::FindCommitResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindCommitRequest>,
@@ -9220,15 +8052,11 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/CommitStats" => {
                     #[allow(non_camel_case_types)]
                     struct CommitStatsSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::UnaryService<super::CommitStatsRequest>
-                    for CommitStatsSvc<T> {
+                    impl<T: CommitService> tonic::server::UnaryService<super::CommitStatsRequest>
+                        for CommitStatsSvc<T>
+                    {
                         type Response = super::CommitStatsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CommitStatsRequest>,
@@ -9265,24 +8093,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/FindAllCommits" => {
                     #[allow(non_camel_case_types)]
                     struct FindAllCommitsSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<super::FindAllCommitsRequest>
-                    for FindAllCommitsSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::FindAllCommitsRequest>
+                        for FindAllCommitsSvc<T>
+                    {
                         type Response = super::FindAllCommitsResponse;
                         type ResponseStream = T::FindAllCommitsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindAllCommitsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::find_all_commits(&inner, request)
-                                    .await
+                                <T as CommitService>::find_all_commits(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9312,16 +8137,14 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/FindCommits" => {
                     #[allow(non_camel_case_types)]
                     struct FindCommitsSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<super::FindCommitsRequest>
-                    for FindCommitsSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::FindCommitsRequest>
+                        for FindCommitsSvc<T>
+                    {
                         type Response = super::FindCommitsResponse;
                         type ResponseStream = T::FindCommitsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindCommitsRequest>,
@@ -9358,23 +8181,19 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/CommitLanguages" => {
                     #[allow(non_camel_case_types)]
                     struct CommitLanguagesSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::UnaryService<super::CommitLanguagesRequest>
-                    for CommitLanguagesSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::UnaryService<super::CommitLanguagesRequest>
+                        for CommitLanguagesSvc<T>
+                    {
                         type Response = super::CommitLanguagesResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CommitLanguagesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::commit_languages(&inner, request)
-                                    .await
+                                <T as CommitService>::commit_languages(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9404,16 +8223,14 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/RawBlame" => {
                     #[allow(non_camel_case_types)]
                     struct RawBlameSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<super::RawBlameRequest>
-                    for RawBlameSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::RawBlameRequest>
+                        for RawBlameSvc<T>
+                    {
                         type Response = super::RawBlameResponse;
                         type ResponseStream = T::RawBlameStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RawBlameRequest>,
@@ -9450,23 +8267,19 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/LastCommitForPath" => {
                     #[allow(non_camel_case_types)]
                     struct LastCommitForPathSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::UnaryService<super::LastCommitForPathRequest>
-                    for LastCommitForPathSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::UnaryService<super::LastCommitForPathRequest>
+                        for LastCommitForPathSvc<T>
+                    {
                         type Response = super::LastCommitForPathResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::LastCommitForPathRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::last_commit_for_path(&inner, request)
-                                    .await
+                                <T as CommitService>::last_commit_for_path(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9496,27 +8309,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/ListLastCommitsForTree" => {
                     #[allow(non_camel_case_types)]
                     struct ListLastCommitsForTreeSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<
-                        super::ListLastCommitsForTreeRequest,
-                    > for ListLastCommitsForTreeSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::ListLastCommitsForTreeRequest>
+                        for ListLastCommitsForTreeSvc<T>
+                    {
                         type Response = super::ListLastCommitsForTreeResponse;
                         type ResponseStream = T::ListLastCommitsForTreeStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListLastCommitsForTreeRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::list_last_commits_for_tree(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as CommitService>::list_last_commits_for_tree(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -9547,25 +8354,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/CommitsByMessage" => {
                     #[allow(non_camel_case_types)]
                     struct CommitsByMessageSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<
-                        super::CommitsByMessageRequest,
-                    > for CommitsByMessageSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::CommitsByMessageRequest>
+                        for CommitsByMessageSvc<T>
+                    {
                         type Response = super::CommitsByMessageResponse;
                         type ResponseStream = T::CommitsByMessageStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CommitsByMessageRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::commits_by_message(&inner, request)
-                                    .await
+                                <T as CommitService>::commits_by_message(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9595,25 +8398,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/ListCommitsByOid" => {
                     #[allow(non_camel_case_types)]
                     struct ListCommitsByOidSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<
-                        super::ListCommitsByOidRequest,
-                    > for ListCommitsByOidSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::ListCommitsByOidRequest>
+                        for ListCommitsByOidSvc<T>
+                    {
                         type Response = super::ListCommitsByOidResponse;
                         type ResponseStream = T::ListCommitsByOidStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListCommitsByOidRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::list_commits_by_oid(&inner, request)
-                                    .await
+                                <T as CommitService>::list_commits_by_oid(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9643,27 +8442,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/ListCommitsByRefName" => {
                     #[allow(non_camel_case_types)]
                     struct ListCommitsByRefNameSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<
-                        super::ListCommitsByRefNameRequest,
-                    > for ListCommitsByRefNameSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::ListCommitsByRefNameRequest>
+                        for ListCommitsByRefNameSvc<T>
+                    {
                         type Response = super::ListCommitsByRefNameResponse;
                         type ResponseStream = T::ListCommitsByRefNameStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListCommitsByRefNameRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::list_commits_by_ref_name(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as CommitService>::list_commits_by_ref_name(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -9694,17 +8487,14 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/FilterShasWithSignatures" => {
                     #[allow(non_camel_case_types)]
                     struct FilterShasWithSignaturesSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::StreamingService<
-                        super::FilterShasWithSignaturesRequest,
-                    > for FilterShasWithSignaturesSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::StreamingService<super::FilterShasWithSignaturesRequest>
+                        for FilterShasWithSignaturesSvc<T>
+                    {
                         type Response = super::FilterShasWithSignaturesResponse;
                         type ResponseStream = T::FilterShasWithSignaturesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<
@@ -9713,10 +8503,7 @@ pub mod commit_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::filter_shas_with_signatures(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as CommitService>::filter_shas_with_signatures(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -9747,25 +8534,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/GetCommitSignatures" => {
                     #[allow(non_camel_case_types)]
                     struct GetCommitSignaturesSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<
-                        super::GetCommitSignaturesRequest,
-                    > for GetCommitSignaturesSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::GetCommitSignaturesRequest>
+                        for GetCommitSignaturesSvc<T>
+                    {
                         type Response = super::GetCommitSignaturesResponse;
                         type ResponseStream = T::GetCommitSignaturesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetCommitSignaturesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::get_commit_signatures(&inner, request)
-                                    .await
+                                <T as CommitService>::get_commit_signatures(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9795,25 +8578,21 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/GetCommitMessages" => {
                     #[allow(non_camel_case_types)]
                     struct GetCommitMessagesSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::ServerStreamingService<
-                        super::GetCommitMessagesRequest,
-                    > for GetCommitMessagesSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::ServerStreamingService<super::GetCommitMessagesRequest>
+                        for GetCommitMessagesSvc<T>
+                    {
                         type Response = super::GetCommitMessagesResponse;
                         type ResponseStream = T::GetCommitMessagesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetCommitMessagesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::get_commit_messages(&inner, request)
-                                    .await
+                                <T as CommitService>::get_commit_messages(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9843,16 +8622,14 @@ pub mod commit_service_server {
                 "/gitaly.CommitService/CheckObjectsExist" => {
                     #[allow(non_camel_case_types)]
                     struct CheckObjectsExistSvc<T: CommitService>(pub Arc<T>);
-                    impl<
-                        T: CommitService,
-                    > tonic::server::StreamingService<super::CheckObjectsExistRequest>
-                    for CheckObjectsExistSvc<T> {
+                    impl<T: CommitService>
+                        tonic::server::StreamingService<super::CheckObjectsExistRequest>
+                        for CheckObjectsExistSvc<T>
+                    {
                         type Response = super::CheckObjectsExistResponse;
                         type ResponseStream = T::CheckObjectsExistStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<
@@ -9861,8 +8638,7 @@ pub mod commit_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CommitService>::check_objects_exist(&inner, request)
-                                    .await
+                                <T as CommitService>::check_objects_exist(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -9889,25 +8665,19 @@ pub mod commit_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        let mut response = http::Response::new(
-                            tonic::body::Body::default(),
-                        );
-                        let headers = response.headers_mut();
-                        headers
-                            .insert(
-                                tonic::Status::GRPC_STATUS,
-                                (tonic::Code::Unimplemented as i32).into(),
-                            );
-                        headers
-                            .insert(
-                                http::header::CONTENT_TYPE,
-                                tonic::metadata::GRPC_CONTENT_TYPE,
-                            );
-                        Ok(response)
-                    })
-                }
+                _ => Box::pin(async move {
+                    let mut response = http::Response::new(tonic::body::Body::default());
+                    let headers = response.headers_mut();
+                    headers.insert(
+                        tonic::Status::GRPC_STATUS,
+                        (tonic::Code::Unimplemented as i32).into(),
+                    );
+                    headers.insert(
+                        http::header::CONTENT_TYPE,
+                        tonic::metadata::GRPC_CONTENT_TYPE,
+                    );
+                    Ok(response)
+                }),
             }
         }
     }
@@ -9965,17 +8735,7 @@ pub struct FindLocalBranchesRequest {
 pub mod find_local_branches_request {
     /// SortBy defines the allowed field names which references can be sorted by.
     /// <https://git-scm.com/docs/git-for-each-ref#Documentation/git-for-each-ref.txt---sortltkeygt>
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum SortBy {
         /// NAME is for the `--sort=refname` option and is the default option.
@@ -10120,15 +8880,7 @@ pub mod find_all_tags_request {
     pub mod sort_by {
         /// Key is a key used for sorting.
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum Key {
@@ -10493,15 +9245,7 @@ pub mod list_refs_request {
         /// Key is a key used for sorting.
         /// <https://git-scm.com/docs/git-for-each-ref#Documentation/git-for-each-ref.txt---sortltkeygt>
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum Key {
@@ -10613,10 +9357,10 @@ pub mod ref_service_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     /// RefService is a service that provides RPCs to list and modify Git references.
     #[derive(Debug, Clone)]
     pub struct RefServiceClient<T> {
@@ -10656,14 +9400,13 @@ pub mod ref_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-                Response = http::Response<
-                    <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    http::Request<tonic::body::Body>,
+                    Response = http::Response<
+                        <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    >,
                 >,
-            >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::Body>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             RefServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -10710,25 +9453,19 @@ pub mod ref_service_client {
         pub async fn find_default_branch_name(
             &mut self,
             request: impl tonic::IntoRequest<super::FindDefaultBranchNameRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindDefaultBranchNameResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FindDefaultBranchNameResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/FindDefaultBranchName",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RefService/FindDefaultBranchName");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RefService", "FindDefaultBranchName"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RefService",
+                "FindDefaultBranchName",
+            ));
             self.inner.unary(req, path, codec).await
         }
         /// FindLocalBranches finds all the local branches under `refs/heads/` for the specified repository.
@@ -10740,18 +9477,11 @@ pub mod ref_service_client {
             tonic::Response<tonic::codec::Streaming<super::FindLocalBranchesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/FindLocalBranches",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/FindLocalBranches");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "FindLocalBranches"));
@@ -10766,18 +9496,11 @@ pub mod ref_service_client {
             tonic::Response<tonic::codec::Streaming<super::FindAllBranchesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/FindAllBranches",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/FindAllBranches");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "FindAllBranches"));
@@ -10792,18 +9515,11 @@ pub mod ref_service_client {
             tonic::Response<tonic::codec::Streaming<super::FindAllTagsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/FindAllTags",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/FindAllTags");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "FindAllTags"));
@@ -10815,24 +9531,15 @@ pub mod ref_service_client {
         pub async fn find_tag(
             &mut self,
             request: impl tonic::IntoRequest<super::FindTagRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindTagResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FindTagResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/FindTag",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/FindTag");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("gitaly.RefService", "FindTag"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("gitaly.RefService", "FindTag"));
             self.inner.unary(req, path, codec).await
         }
         /// FindAllRemoteBranches finds all the remote branches under `refs/remotes/` for the specified repository.
@@ -10841,48 +9548,32 @@ pub mod ref_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::FindAllRemoteBranchesRequest>,
         ) -> std::result::Result<
-            tonic::Response<
-                tonic::codec::Streaming<super::FindAllRemoteBranchesResponse>,
-            >,
+            tonic::Response<tonic::codec::Streaming<super::FindAllRemoteBranchesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/FindAllRemoteBranches",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.RefService/FindAllRemoteBranches");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("gitaly.RefService", "FindAllRemoteBranches"));
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RefService",
+                "FindAllRemoteBranches",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// RefExists checks if the specified reference exists. The reference must be fully qualified.
         pub async fn ref_exists(
             &mut self,
             request: impl tonic::IntoRequest<super::RefExistsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RefExistsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::RefExistsResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/RefExists",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/RefExists");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "RefExists"));
@@ -10893,22 +9584,13 @@ pub mod ref_service_client {
         pub async fn find_branch(
             &mut self,
             request: impl tonic::IntoRequest<super::FindBranchRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindBranchResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FindBranchResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/FindBranch",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/FindBranch");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "FindBranch"));
@@ -10920,25 +9602,14 @@ pub mod ref_service_client {
         /// Updating symbolic references with this RPC is not allowed.
         pub async fn update_references(
             &mut self,
-            request: impl tonic::IntoStreamingRequest<
-                Message = super::UpdateReferencesRequest,
-            >,
-        ) -> std::result::Result<
-            tonic::Response<super::UpdateReferencesResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            request: impl tonic::IntoStreamingRequest<Message = super::UpdateReferencesRequest>,
+        ) -> std::result::Result<tonic::Response<super::UpdateReferencesResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/UpdateReferences",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/UpdateReferences");
             let mut req = request.into_streaming_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "UpdateReferences"));
@@ -10951,22 +9622,13 @@ pub mod ref_service_client {
         pub async fn delete_refs(
             &mut self,
             request: impl tonic::IntoRequest<super::DeleteRefsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::DeleteRefsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::DeleteRefsResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/DeleteRefs",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/DeleteRefs");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "DeleteRefs"));
@@ -10976,35 +9638,25 @@ pub mod ref_service_client {
         /// The response is streamed back to the client to divide the list of branches into chunks.
         pub async fn list_branch_names_containing_commit(
             &mut self,
-            request: impl tonic::IntoRequest<
-                super::ListBranchNamesContainingCommitRequest,
-            >,
+            request: impl tonic::IntoRequest<super::ListBranchNamesContainingCommitRequest>,
         ) -> std::result::Result<
             tonic::Response<
                 tonic::codec::Streaming<super::ListBranchNamesContainingCommitResponse>,
             >,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RefService/ListBranchNamesContainingCommit",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "gitaly.RefService",
-                        "ListBranchNamesContainingCommit",
-                    ),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RefService",
+                "ListBranchNamesContainingCommit",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// ListTagNamesContainingCommit finds all tags under `refs/tags/` that contain the specified commit.
@@ -11013,28 +9665,21 @@ pub mod ref_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::ListTagNamesContainingCommitRequest>,
         ) -> std::result::Result<
-            tonic::Response<
-                tonic::codec::Streaming<super::ListTagNamesContainingCommitResponse>,
-            >,
+            tonic::Response<tonic::codec::Streaming<super::ListTagNamesContainingCommitResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/gitaly.RefService/ListTagNamesContainingCommit",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("gitaly.RefService", "ListTagNamesContainingCommit"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "gitaly.RefService",
+                "ListTagNamesContainingCommit",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
         /// GetTagSignatures returns signatures for annotated tags resolved from a set of revisions. Revisions
@@ -11048,18 +9693,11 @@ pub mod ref_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetTagSignaturesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/GetTagSignatures",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/GetTagSignatures");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "GetTagSignatures"));
@@ -11076,18 +9714,11 @@ pub mod ref_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetTagMessagesResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/GetTagMessages",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/GetTagMessages");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "GetTagMessages"));
@@ -11103,18 +9734,11 @@ pub mod ref_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListRefsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/ListRefs",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/ListRefs");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "ListRefs"));
@@ -11126,22 +9750,13 @@ pub mod ref_service_client {
         pub async fn find_refs_by_oid(
             &mut self,
             request: impl tonic::IntoRequest<super::FindRefsByOidRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindRefsByOidResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::FindRefsByOidResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.RefService/FindRefsByOID",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.RefService/FindRefsByOID");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.RefService", "FindRefsByOID"));
@@ -11156,7 +9771,7 @@ pub mod ref_service_server {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
     use tonic::codegen::*;
     /// Generated trait containing gRPC methods that should be implemented for use with RefServiceServer.
@@ -11174,58 +9789,40 @@ pub mod ref_service_server {
         async fn find_default_branch_name(
             &self,
             request: tonic::Request<super::FindDefaultBranchNameRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindDefaultBranchNameResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FindDefaultBranchNameResponse>, tonic::Status>;
         /// Server streaming response type for the FindLocalBranches method.
         type FindLocalBranchesStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::FindLocalBranchesResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::FindLocalBranchesResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// FindLocalBranches finds all the local branches under `refs/heads/` for the specified repository.
         /// The response is streamed back to the client to divide the list of branches into chunks.
         async fn find_local_branches(
             &self,
             request: tonic::Request<super::FindLocalBranchesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::FindLocalBranchesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::FindLocalBranchesStream>, tonic::Status>;
         /// Server streaming response type for the FindAllBranches method.
         type FindAllBranchesStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::FindAllBranchesResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// FindAllBranches finds all branches under `refs/heads/` and `refs/remotes/` for the specified repository.
         /// The response is streamed back to the client to divide the list of branches into chunks.
         async fn find_all_branches(
             &self,
             request: tonic::Request<super::FindAllBranchesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::FindAllBranchesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::FindAllBranchesStream>, tonic::Status>;
         /// Server streaming response type for the FindAllTags method.
         type FindAllTagsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::FindAllTagsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// FindAllTags finds all tags under `refs/tags/` for the specified repository.
         /// The response is streamed back to the client to divide the list of tags into chunks.
         async fn find_all_tags(
             &self,
             request: tonic::Request<super::FindAllTagsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::FindAllTagsStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::FindAllTagsStream>, tonic::Status>;
         /// FindTag looks up a tag by its name and returns it to the caller if it exists. This RPC supports
         /// both lightweight and annotated tags. Note: this RPC returns an `Internal` error if the tag was
         /// not found.
@@ -11235,39 +9832,26 @@ pub mod ref_service_server {
         ) -> std::result::Result<tonic::Response<super::FindTagResponse>, tonic::Status>;
         /// Server streaming response type for the FindAllRemoteBranches method.
         type FindAllRemoteBranchesStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::FindAllRemoteBranchesResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::FindAllRemoteBranchesResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// FindAllRemoteBranches finds all the remote branches under `refs/remotes/` for the specified repository.
         /// The response is streamed back to the client to divide the list of branches into chunks.
         async fn find_all_remote_branches(
             &self,
             request: tonic::Request<super::FindAllRemoteBranchesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::FindAllRemoteBranchesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::FindAllRemoteBranchesStream>, tonic::Status>;
         /// RefExists checks if the specified reference exists. The reference must be fully qualified.
         async fn ref_exists(
             &self,
             request: tonic::Request<super::RefExistsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RefExistsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RefExistsResponse>, tonic::Status>;
         /// FindBranch finds a branch by its unqualified name (like "master") and
         /// returns the commit it currently points to.
         async fn find_branch(
             &self,
             request: tonic::Request<super::FindBranchRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindBranchResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FindBranchResponse>, tonic::Status>;
         /// UpdateReferences atomically updates a set of references to a new state. This RPC allows creating
         /// new references, deleting old references and updating existing references in a raceless way.
         ///
@@ -11275,10 +9859,7 @@ pub mod ref_service_server {
         async fn update_references(
             &self,
             request: tonic::Request<tonic::Streaming<super::UpdateReferencesRequest>>,
-        ) -> std::result::Result<
-            tonic::Response<super::UpdateReferencesResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::UpdateReferencesResponse>, tonic::Status>;
         /// DeleteRefs deletes the specified references from its repository. Attempting to delete an
         /// non-existent reference does not result in an error. It is recommended to instead use the
         /// UpdateReferences RPC because it can delete references in a raceless manner via the expected old
@@ -11286,18 +9867,14 @@ pub mod ref_service_server {
         async fn delete_refs(
             &self,
             request: tonic::Request<super::DeleteRefsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::DeleteRefsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::DeleteRefsResponse>, tonic::Status>;
         /// Server streaming response type for the ListBranchNamesContainingCommit method.
         type ListBranchNamesContainingCommitStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<
                     super::ListBranchNamesContainingCommitResponse,
                     tonic::Status,
                 >,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListBranchNamesContainingCommit finds all branches under `refs/heads/` that contain the specified commit.
         /// The response is streamed back to the client to divide the list of branches into chunks.
@@ -11314,8 +9891,7 @@ pub mod ref_service_server {
                     super::ListTagNamesContainingCommitResponse,
                     tonic::Status,
                 >,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListTagNamesContainingCommit finds all tags under `refs/tags/` that contain the specified commit.
         /// The response is streamed back to the client to divide the list of tags into chunks.
@@ -11328,12 +9904,8 @@ pub mod ref_service_server {
         >;
         /// Server streaming response type for the GetTagSignatures method.
         type GetTagSignaturesStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::GetTagSignaturesResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::GetTagSignaturesResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// GetTagSignatures returns signatures for annotated tags resolved from a set of revisions. Revisions
         /// which don't resolve to an annotated tag are silently discarded. Revisions which cannot be resolved
@@ -11342,15 +9914,11 @@ pub mod ref_service_server {
         async fn get_tag_signatures(
             &self,
             request: tonic::Request<super::GetTagSignaturesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetTagSignaturesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetTagSignaturesStream>, tonic::Status>;
         /// Server streaming response type for the GetTagMessages method.
         type GetTagMessagesStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetTagMessagesResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetTagMessages returns tag messages for the annotated tags identified via the given revisions.
         /// The response is streamed back to the client with a response message containing the tag ID
@@ -11359,15 +9927,11 @@ pub mod ref_service_server {
         async fn get_tag_messages(
             &self,
             request: tonic::Request<super::GetTagMessagesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetTagMessagesStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetTagMessagesStream>, tonic::Status>;
         /// Server streaming response type for the ListRefs method.
         type ListRefsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ListRefsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListRefs returns a stream of all references in the repository. By default, pseudo-revisions like HEAD
         /// will not be returned by this RPC. Any symbolic references will be resolved to the object ID it is
@@ -11382,10 +9946,7 @@ pub mod ref_service_server {
         async fn find_refs_by_oid(
             &self,
             request: tonic::Request<super::FindRefsByOidRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindRefsByOidResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::FindRefsByOidResponse>, tonic::Status>;
     }
     /// RefService is a service that provides RPCs to list and modify Git references.
     #[derive(Debug)]
@@ -11409,10 +9970,7 @@ pub mod ref_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -11467,23 +10025,19 @@ pub mod ref_service_server {
                 "/gitaly.RefService/FindDefaultBranchName" => {
                     #[allow(non_camel_case_types)]
                     struct FindDefaultBranchNameSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::UnaryService<super::FindDefaultBranchNameRequest>
-                    for FindDefaultBranchNameSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::UnaryService<super::FindDefaultBranchNameRequest>
+                        for FindDefaultBranchNameSvc<T>
+                    {
                         type Response = super::FindDefaultBranchNameResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindDefaultBranchNameRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RefService>::find_default_branch_name(&inner, request)
-                                    .await
+                                <T as RefService>::find_default_branch_name(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -11513,25 +10067,21 @@ pub mod ref_service_server {
                 "/gitaly.RefService/FindLocalBranches" => {
                     #[allow(non_camel_case_types)]
                     struct FindLocalBranchesSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<
-                        super::FindLocalBranchesRequest,
-                    > for FindLocalBranchesSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<super::FindLocalBranchesRequest>
+                        for FindLocalBranchesSvc<T>
+                    {
                         type Response = super::FindLocalBranchesResponse;
                         type ResponseStream = T::FindLocalBranchesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindLocalBranchesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RefService>::find_local_branches(&inner, request)
-                                    .await
+                                <T as RefService>::find_local_branches(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -11561,17 +10111,14 @@ pub mod ref_service_server {
                 "/gitaly.RefService/FindAllBranches" => {
                     #[allow(non_camel_case_types)]
                     struct FindAllBranchesSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<
-                        super::FindAllBranchesRequest,
-                    > for FindAllBranchesSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<super::FindAllBranchesRequest>
+                        for FindAllBranchesSvc<T>
+                    {
                         type Response = super::FindAllBranchesResponse;
                         type ResponseStream = T::FindAllBranchesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindAllBranchesRequest>,
@@ -11608,16 +10155,14 @@ pub mod ref_service_server {
                 "/gitaly.RefService/FindAllTags" => {
                     #[allow(non_camel_case_types)]
                     struct FindAllTagsSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<super::FindAllTagsRequest>
-                    for FindAllTagsSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<super::FindAllTagsRequest>
+                        for FindAllTagsSvc<T>
+                    {
                         type Response = super::FindAllTagsResponse;
                         type ResponseStream = T::FindAllTagsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindAllTagsRequest>,
@@ -11654,23 +10199,16 @@ pub mod ref_service_server {
                 "/gitaly.RefService/FindTag" => {
                     #[allow(non_camel_case_types)]
                     struct FindTagSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::UnaryService<super::FindTagRequest>
-                    for FindTagSvc<T> {
+                    impl<T: RefService> tonic::server::UnaryService<super::FindTagRequest> for FindTagSvc<T> {
                         type Response = super::FindTagResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindTagRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as RefService>::find_tag(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as RefService>::find_tag(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -11699,25 +10237,21 @@ pub mod ref_service_server {
                 "/gitaly.RefService/FindAllRemoteBranches" => {
                     #[allow(non_camel_case_types)]
                     struct FindAllRemoteBranchesSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<
-                        super::FindAllRemoteBranchesRequest,
-                    > for FindAllRemoteBranchesSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<super::FindAllRemoteBranchesRequest>
+                        for FindAllRemoteBranchesSvc<T>
+                    {
                         type Response = super::FindAllRemoteBranchesResponse;
                         type ResponseStream = T::FindAllRemoteBranchesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindAllRemoteBranchesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RefService>::find_all_remote_branches(&inner, request)
-                                    .await
+                                <T as RefService>::find_all_remote_branches(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -11747,23 +10281,16 @@ pub mod ref_service_server {
                 "/gitaly.RefService/RefExists" => {
                     #[allow(non_camel_case_types)]
                     struct RefExistsSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::UnaryService<super::RefExistsRequest>
-                    for RefExistsSvc<T> {
+                    impl<T: RefService> tonic::server::UnaryService<super::RefExistsRequest> for RefExistsSvc<T> {
                         type Response = super::RefExistsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RefExistsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as RefService>::ref_exists(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as RefService>::ref_exists(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -11792,15 +10319,9 @@ pub mod ref_service_server {
                 "/gitaly.RefService/FindBranch" => {
                     #[allow(non_camel_case_types)]
                     struct FindBranchSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::UnaryService<super::FindBranchRequest>
-                    for FindBranchSvc<T> {
+                    impl<T: RefService> tonic::server::UnaryService<super::FindBranchRequest> for FindBranchSvc<T> {
                         type Response = super::FindBranchResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindBranchRequest>,
@@ -11837,16 +10358,12 @@ pub mod ref_service_server {
                 "/gitaly.RefService/UpdateReferences" => {
                     #[allow(non_camel_case_types)]
                     struct UpdateReferencesSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ClientStreamingService<
-                        super::UpdateReferencesRequest,
-                    > for UpdateReferencesSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ClientStreamingService<super::UpdateReferencesRequest>
+                        for UpdateReferencesSvc<T>
+                    {
                         type Response = super::UpdateReferencesResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<
@@ -11885,15 +10402,9 @@ pub mod ref_service_server {
                 "/gitaly.RefService/DeleteRefs" => {
                     #[allow(non_camel_case_types)]
                     struct DeleteRefsSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::UnaryService<super::DeleteRefsRequest>
-                    for DeleteRefsSvc<T> {
+                    impl<T: RefService> tonic::server::UnaryService<super::DeleteRefsRequest> for DeleteRefsSvc<T> {
                         type Response = super::DeleteRefsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::DeleteRefsRequest>,
@@ -11930,30 +10441,25 @@ pub mod ref_service_server {
                 "/gitaly.RefService/ListBranchNamesContainingCommit" => {
                     #[allow(non_camel_case_types)]
                     struct ListBranchNamesContainingCommitSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<
-                        super::ListBranchNamesContainingCommitRequest,
-                    > for ListBranchNamesContainingCommitSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<
+                            super::ListBranchNamesContainingCommitRequest,
+                        > for ListBranchNamesContainingCommitSvc<T>
+                    {
                         type Response = super::ListBranchNamesContainingCommitResponse;
                         type ResponseStream = T::ListBranchNamesContainingCommitStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                super::ListBranchNamesContainingCommitRequest,
-                            >,
+                            request: tonic::Request<super::ListBranchNamesContainingCommitRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
                                 <T as RefService>::list_branch_names_containing_commit(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
+                                    &inner, request,
+                                )
+                                .await
                             };
                             Box::pin(fut)
                         }
@@ -11983,29 +10489,22 @@ pub mod ref_service_server {
                 "/gitaly.RefService/ListTagNamesContainingCommit" => {
                     #[allow(non_camel_case_types)]
                     struct ListTagNamesContainingCommitSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<
-                        super::ListTagNamesContainingCommitRequest,
-                    > for ListTagNamesContainingCommitSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<
+                            super::ListTagNamesContainingCommitRequest,
+                        > for ListTagNamesContainingCommitSvc<T>
+                    {
                         type Response = super::ListTagNamesContainingCommitResponse;
                         type ResponseStream = T::ListTagNamesContainingCommitStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<
-                                super::ListTagNamesContainingCommitRequest,
-                            >,
+                            request: tonic::Request<super::ListTagNamesContainingCommitRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RefService>::list_tag_names_containing_commit(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as RefService>::list_tag_names_containing_commit(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -12036,17 +10535,14 @@ pub mod ref_service_server {
                 "/gitaly.RefService/GetTagSignatures" => {
                     #[allow(non_camel_case_types)]
                     struct GetTagSignaturesSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<
-                        super::GetTagSignaturesRequest,
-                    > for GetTagSignaturesSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<super::GetTagSignaturesRequest>
+                        for GetTagSignaturesSvc<T>
+                    {
                         type Response = super::GetTagSignaturesResponse;
                         type ResponseStream = T::GetTagSignaturesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetTagSignaturesRequest>,
@@ -12083,16 +10579,14 @@ pub mod ref_service_server {
                 "/gitaly.RefService/GetTagMessages" => {
                     #[allow(non_camel_case_types)]
                     struct GetTagMessagesSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<super::GetTagMessagesRequest>
-                    for GetTagMessagesSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<super::GetTagMessagesRequest>
+                        for GetTagMessagesSvc<T>
+                    {
                         type Response = super::GetTagMessagesResponse;
                         type ResponseStream = T::GetTagMessagesStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetTagMessagesRequest>,
@@ -12129,24 +10623,21 @@ pub mod ref_service_server {
                 "/gitaly.RefService/ListRefs" => {
                     #[allow(non_camel_case_types)]
                     struct ListRefsSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::ServerStreamingService<super::ListRefsRequest>
-                    for ListRefsSvc<T> {
+                    impl<T: RefService>
+                        tonic::server::ServerStreamingService<super::ListRefsRequest>
+                        for ListRefsSvc<T>
+                    {
                         type Response = super::ListRefsResponse;
                         type ResponseStream = T::ListRefsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListRefsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as RefService>::list_refs(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as RefService>::list_refs(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -12175,15 +10666,11 @@ pub mod ref_service_server {
                 "/gitaly.RefService/FindRefsByOID" => {
                     #[allow(non_camel_case_types)]
                     struct FindRefsByOIDSvc<T: RefService>(pub Arc<T>);
-                    impl<
-                        T: RefService,
-                    > tonic::server::UnaryService<super::FindRefsByOidRequest>
-                    for FindRefsByOIDSvc<T> {
+                    impl<T: RefService> tonic::server::UnaryService<super::FindRefsByOidRequest>
+                        for FindRefsByOIDSvc<T>
+                    {
                         type Response = super::FindRefsByOidResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindRefsByOidRequest>,
@@ -12217,25 +10704,19 @@ pub mod ref_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        let mut response = http::Response::new(
-                            tonic::body::Body::default(),
-                        );
-                        let headers = response.headers_mut();
-                        headers
-                            .insert(
-                                tonic::Status::GRPC_STATUS,
-                                (tonic::Code::Unimplemented as i32).into(),
-                            );
-                        headers
-                            .insert(
-                                http::header::CONTENT_TYPE,
-                                tonic::metadata::GRPC_CONTENT_TYPE,
-                            );
-                        Ok(response)
-                    })
-                }
+                _ => Box::pin(async move {
+                    let mut response = http::Response::new(tonic::body::Body::default());
+                    let headers = response.headers_mut();
+                    headers.insert(
+                        tonic::Status::GRPC_STATUS,
+                        (tonic::Code::Unimplemented as i32).into(),
+                    );
+                    headers.insert(
+                        http::header::CONTENT_TYPE,
+                        tonic::metadata::GRPC_CONTENT_TYPE,
+                    );
+                    Ok(response)
+                }),
             }
         }
     }
@@ -12317,10 +10798,8 @@ pub struct CommitDiffRequest {
     /// have an extension (eg Dockerfile), then the file name is used for matching.
     /// For files with more than on extension (eg file.html.tmpl) only the last extension is matched.
     #[prost(map = "string, int32", tag = "16")]
-    pub max_patch_bytes_for_file_extension: ::std::collections::HashMap<
-        ::prost::alloc::string::String,
-        i32,
-    >,
+    pub max_patch_bytes_for_file_extension:
+        ::std::collections::HashMap<::prost::alloc::string::String, i32>,
     /// whitespace_changes states which whitespace changes should be included in the diff.
     /// Please refer to the enum declaration for supported modes.
     #[prost(enumeration = "commit_diff_request::WhitespaceChanges", tag = "17")]
@@ -12335,17 +10814,7 @@ pub struct CommitDiffRequest {
 /// Nested message and enum types in `CommitDiffRequest`.
 pub mod commit_diff_request {
     /// DiffMode determines the type of diff that will be returned.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum DiffMode {
         /// DEFAULT is the standard diff mode and results in a linewise diff for textfiles.
@@ -12379,17 +10848,7 @@ pub mod commit_diff_request {
     }
     /// WhitespaceChanges states which whitespace changes we should ignore. These options correlate to
     /// the ones present in git-diff(1).
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum WhitespaceChanges {
         /// WHITESPACE_CHANGES_UNSPECIFIED is used to not ignore any whitespace changes.
@@ -12612,7 +11071,10 @@ pub struct FindChangedPathsRequest {
     #[prost(message, repeated, tag = "3")]
     pub requests: ::prost::alloc::vec::Vec<find_changed_paths_request::Request>,
     /// merge_commit_diff_mode controls how merge commits are treated.
-    #[prost(enumeration = "find_changed_paths_request::MergeCommitDiffMode", tag = "4")]
+    #[prost(
+        enumeration = "find_changed_paths_request::MergeCommitDiffMode",
+        tag = "4"
+    )]
     pub merge_commit_diff_mode: i32,
     /// find_renames toggles rename detection on the files in the diff.
     #[prost(bool, tag = "5")]
@@ -12620,7 +11082,11 @@ pub struct FindChangedPathsRequest {
     /// diff_filters allows the underlying git-diff-tree(1) to be configured with a specific
     /// --diff-filter flag to filter output for specific diff statuses. When not specified, the
     /// default is "AMDTCR".
-    #[prost(enumeration = "find_changed_paths_request::DiffStatus", repeated, tag = "6")]
+    #[prost(
+        enumeration = "find_changed_paths_request::DiffStatus",
+        repeated,
+        tag = "6"
+    )]
     pub diff_filters: ::prost::alloc::vec::Vec<i32>,
 }
 /// Nested message and enum types in `FindChangedPathsRequest`.
@@ -12657,9 +11123,7 @@ pub mod find_changed_paths_request {
             /// optional field: if not specified, the actual parents of the commit referred to by `commit_revision`
             /// are used.
             #[prost(string, repeated, tag = "2")]
-            pub parent_commit_revisions: ::prost::alloc::vec::Vec<
-                ::prost::alloc::string::String,
-            >,
+            pub parent_commit_revisions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
         }
         #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
         pub enum Type {
@@ -12672,17 +11136,7 @@ pub mod find_changed_paths_request {
         }
     }
     /// MergeCommitDiffMode controls which mode to use to produce diff output for merge commits
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum MergeCommitDiffMode {
         /// MERGE_COMMIT_DIFF_MODE_UNSPECIFIED is the default value.
@@ -12719,17 +11173,7 @@ pub mod find_changed_paths_request {
         }
     }
     /// DiffStatus defines the possible status types for a diff. This is used to filter requested diffs.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum DiffStatus {
         /// DIFF_STATUS_UNSPECIFIED indicates a file with unknown change type.
@@ -12832,17 +11276,7 @@ pub struct ChangedPaths {
 /// Nested message and enum types in `ChangedPaths`.
 pub mod changed_paths {
     /// Status is an enum representing the type of change.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Status {
         /// ADDED indicates a file was added.
@@ -13039,17 +11473,7 @@ pub struct RangeDiffResponse {
 /// Nested message and enum types in `RangeDiffResponse`.
 pub mod range_diff_response {
     /// Comparator is the comparison state of the two commits (= , > , \< , !).
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Comparator {
         /// COMPARATOR_EQUAL_UNSPECIFIED specifies =.
@@ -13126,17 +11550,7 @@ pub mod diff_blobs_request {
         pub right_blob: ::prost::alloc::vec::Vec<u8>,
     }
     /// DiffMode determines the type of diff that will be returned.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum DiffMode {
         /// DIFF_MODE_UNSPECIFIED is the standard diff mode and results in a line diff for text files.
@@ -13167,17 +11581,7 @@ pub mod diff_blobs_request {
     }
     /// WhitespaceChanges states which whitespace changes we should ignore. These options correlate to
     /// the ones present in git-diff(1).
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum WhitespaceChanges {
         /// WHITESPACE_CHANGES_UNSPECIFIED is used to not ignore any whitespace changes.
@@ -13245,17 +11649,7 @@ pub struct DiffBlobsResponse {
 /// Nested message and enum types in `DiffBlobsResponse`.
 pub mod diff_blobs_response {
     /// Status defines the state of a patch at a given response message.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Status {
         /// STATUS_INCOMPLETE indicates the patch has not been completely transmitted. Subsequent
@@ -13295,10 +11689,10 @@ pub mod diff_service_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     /// DiffService is a service which provides RPCs to inspect differences
     /// introduced between a set of commits.
     #[derive(Debug, Clone)]
@@ -13339,14 +11733,13 @@ pub mod diff_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-                Response = http::Response<
-                    <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    http::Request<tonic::body::Body>,
+                    Response = http::Response<
+                        <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    >,
                 >,
-            >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::Body>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             DiffServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -13390,18 +11783,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::CommitDiffResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/CommitDiff",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/CommitDiff");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "CommitDiff"));
@@ -13417,18 +11803,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::CommitDeltaResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/CommitDelta",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/CommitDelta");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "CommitDelta"));
@@ -13444,18 +11823,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::RawDiffResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/RawDiff",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/RawDiff");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "RawDiff"));
@@ -13471,18 +11843,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::RawPatchResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/RawPatch",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/RawPatch");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "RawPatch"));
@@ -13497,18 +11862,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::DiffStatsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/DiffStats",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/DiffStats");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "DiffStats"));
@@ -13522,18 +11880,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::FindChangedPathsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/FindChangedPaths",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/FindChangedPaths");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "FindChangedPaths"));
@@ -13546,22 +11897,13 @@ pub mod diff_service_client {
         pub async fn get_patch_id(
             &mut self,
             request: impl tonic::IntoRequest<super::GetPatchIdRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetPatchIdResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::GetPatchIdResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/GetPatchID",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/GetPatchID");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "GetPatchID"));
@@ -13575,18 +11917,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::RawRangeDiffResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/RawRangeDiff",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/RawRangeDiff");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "RawRangeDiff"));
@@ -13600,18 +11935,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::RangeDiffResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/RangeDiff",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/RangeDiff");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "RangeDiff"));
@@ -13626,18 +11954,11 @@ pub mod diff_service_client {
             tonic::Response<tonic::codec::Streaming<super::DiffBlobsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.DiffService/DiffBlobs",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.DiffService/DiffBlobs");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.DiffService", "DiffBlobs"));
@@ -13652,7 +11973,7 @@ pub mod diff_service_server {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
     use tonic::codegen::*;
     /// Generated trait containing gRPC methods that should be implemented for use with DiffServiceServer.
@@ -13661,8 +11982,7 @@ pub mod diff_service_server {
         /// Server streaming response type for the CommitDiff method.
         type CommitDiffStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::CommitDiffResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// CommitDiff returns a diff between two different commits. The patch data is
         /// chunked across messages and get streamed back to the client.
@@ -13673,8 +11993,7 @@ pub mod diff_service_server {
         /// Server streaming response type for the CommitDelta method.
         type CommitDeltaStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::CommitDeltaResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// CommitDelta returns the deltas between two different commits. A delta
         /// includes everything that changed about a set of paths except for the actual
@@ -13682,15 +12001,11 @@ pub mod diff_service_server {
         async fn commit_delta(
             &self,
             request: tonic::Request<super::CommitDeltaRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::CommitDeltaStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::CommitDeltaStream>, tonic::Status>;
         /// Server streaming response type for the RawDiff method.
         type RawDiffStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::RawDiffResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// RawDiff returns a diff between two commits. The output is the unmodified
         /// output from git-diff(1). This is not to be confused with git-diff(1)'s
@@ -13702,8 +12017,7 @@ pub mod diff_service_server {
         /// Server streaming response type for the RawPatch method.
         type RawPatchStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::RawPatchResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// RawPatch returns a diff between two commits in a formatted patch.The output
         /// is the unmodified output from git-format-patch(1). This is not to be confused with
@@ -13715,8 +12029,7 @@ pub mod diff_service_server {
         /// Server streaming response type for the DiffStats method.
         type DiffStatsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::DiffStatsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// DiffStats returns the diff stats between two commits such as number of lines
         /// changed, etc.
@@ -13726,21 +12039,14 @@ pub mod diff_service_server {
         ) -> std::result::Result<tonic::Response<Self::DiffStatsStream>, tonic::Status>;
         /// Server streaming response type for the FindChangedPaths method.
         type FindChangedPathsStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::FindChangedPathsResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::FindChangedPathsResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// FindChangedPaths returns a list of files changed along with the status of each file
         async fn find_changed_paths(
             &self,
             request: tonic::Request<super::FindChangedPathsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::FindChangedPathsStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::FindChangedPathsStream>, tonic::Status>;
         /// GetPatchID computes a patch ID for a patch. Patch IDs are a unique ID computed by hashing
         /// a patch with some parameters like line numbers ignored. The patch ID can thus be used to compare
         /// whether diffs make the same change. Please refer to git-patch-id(1) for further information.
@@ -13748,29 +12054,21 @@ pub mod diff_service_server {
         async fn get_patch_id(
             &self,
             request: tonic::Request<super::GetPatchIdRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetPatchIdResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::GetPatchIdResponse>, tonic::Status>;
         /// Server streaming response type for the RawRangeDiff method.
         type RawRangeDiffStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::RawRangeDiffResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// RawRangeDiff outputs the raw range diff data for a given range specification.
         async fn raw_range_diff(
             &self,
             request: tonic::Request<super::RawRangeDiffRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::RawRangeDiffStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::RawRangeDiffStream>, tonic::Status>;
         /// Server streaming response type for the RangeDiff method.
         type RangeDiffStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::RangeDiffResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// RangeDiff outputs the parsed commit pairs from range diff for a given range specification.
         async fn range_diff(
@@ -13780,8 +12078,7 @@ pub mod diff_service_server {
         /// Server streaming response type for the DiffBlobs method.
         type DiffBlobsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::DiffBlobsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// DiffBlobs computes diffs between pairs of blobs. A batch of blob pairs is sent to the server.
         /// The resulting patches are then chucked across response messages and streamed to the client.
@@ -13813,10 +12110,7 @@ pub mod diff_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -13871,16 +12165,14 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/CommitDiff" => {
                     #[allow(non_camel_case_types)]
                     struct CommitDiffSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<super::CommitDiffRequest>
-                    for CommitDiffSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::CommitDiffRequest>
+                        for CommitDiffSvc<T>
+                    {
                         type Response = super::CommitDiffResponse;
                         type ResponseStream = T::CommitDiffStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CommitDiffRequest>,
@@ -13917,16 +12209,14 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/CommitDelta" => {
                     #[allow(non_camel_case_types)]
                     struct CommitDeltaSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<super::CommitDeltaRequest>
-                    for CommitDeltaSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::CommitDeltaRequest>
+                        for CommitDeltaSvc<T>
+                    {
                         type Response = super::CommitDeltaResponse;
                         type ResponseStream = T::CommitDeltaStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CommitDeltaRequest>,
@@ -13963,24 +12253,21 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/RawDiff" => {
                     #[allow(non_camel_case_types)]
                     struct RawDiffSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<super::RawDiffRequest>
-                    for RawDiffSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::RawDiffRequest>
+                        for RawDiffSvc<T>
+                    {
                         type Response = super::RawDiffResponse;
                         type ResponseStream = T::RawDiffStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RawDiffRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DiffService>::raw_diff(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DiffService>::raw_diff(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -14009,24 +12296,21 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/RawPatch" => {
                     #[allow(non_camel_case_types)]
                     struct RawPatchSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<super::RawPatchRequest>
-                    for RawPatchSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::RawPatchRequest>
+                        for RawPatchSvc<T>
+                    {
                         type Response = super::RawPatchResponse;
                         type ResponseStream = T::RawPatchStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RawPatchRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DiffService>::raw_patch(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DiffService>::raw_patch(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -14055,16 +12339,14 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/DiffStats" => {
                     #[allow(non_camel_case_types)]
                     struct DiffStatsSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<super::DiffStatsRequest>
-                    for DiffStatsSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::DiffStatsRequest>
+                        for DiffStatsSvc<T>
+                    {
                         type Response = super::DiffStatsResponse;
                         type ResponseStream = T::DiffStatsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::DiffStatsRequest>,
@@ -14101,25 +12383,21 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/FindChangedPaths" => {
                     #[allow(non_camel_case_types)]
                     struct FindChangedPathsSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<
-                        super::FindChangedPathsRequest,
-                    > for FindChangedPathsSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::FindChangedPathsRequest>
+                        for FindChangedPathsSvc<T>
+                    {
                         type Response = super::FindChangedPathsResponse;
                         type ResponseStream = T::FindChangedPathsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::FindChangedPathsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as DiffService>::find_changed_paths(&inner, request)
-                                    .await
+                                <T as DiffService>::find_changed_paths(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -14149,15 +12427,9 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/GetPatchID" => {
                     #[allow(non_camel_case_types)]
                     struct GetPatchIDSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::UnaryService<super::GetPatchIdRequest>
-                    for GetPatchIDSvc<T> {
+                    impl<T: DiffService> tonic::server::UnaryService<super::GetPatchIdRequest> for GetPatchIDSvc<T> {
                         type Response = super::GetPatchIdResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetPatchIdRequest>,
@@ -14194,16 +12466,14 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/RawRangeDiff" => {
                     #[allow(non_camel_case_types)]
                     struct RawRangeDiffSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<super::RawRangeDiffRequest>
-                    for RawRangeDiffSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::RawRangeDiffRequest>
+                        for RawRangeDiffSvc<T>
+                    {
                         type Response = super::RawRangeDiffResponse;
                         type ResponseStream = T::RawRangeDiffStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RawRangeDiffRequest>,
@@ -14240,16 +12510,14 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/RangeDiff" => {
                     #[allow(non_camel_case_types)]
                     struct RangeDiffSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<super::RangeDiffRequest>
-                    for RangeDiffSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::RangeDiffRequest>
+                        for RangeDiffSvc<T>
+                    {
                         type Response = super::RangeDiffResponse;
                         type ResponseStream = T::RangeDiffStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::RangeDiffRequest>,
@@ -14286,16 +12554,14 @@ pub mod diff_service_server {
                 "/gitaly.DiffService/DiffBlobs" => {
                     #[allow(non_camel_case_types)]
                     struct DiffBlobsSvc<T: DiffService>(pub Arc<T>);
-                    impl<
-                        T: DiffService,
-                    > tonic::server::ServerStreamingService<super::DiffBlobsRequest>
-                    for DiffBlobsSvc<T> {
+                    impl<T: DiffService>
+                        tonic::server::ServerStreamingService<super::DiffBlobsRequest>
+                        for DiffBlobsSvc<T>
+                    {
                         type Response = super::DiffBlobsResponse;
                         type ResponseStream = T::DiffBlobsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::DiffBlobsRequest>,
@@ -14329,25 +12595,19 @@ pub mod diff_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        let mut response = http::Response::new(
-                            tonic::body::Body::default(),
-                        );
-                        let headers = response.headers_mut();
-                        headers
-                            .insert(
-                                tonic::Status::GRPC_STATUS,
-                                (tonic::Code::Unimplemented as i32).into(),
-                            );
-                        headers
-                            .insert(
-                                http::header::CONTENT_TYPE,
-                                tonic::metadata::GRPC_CONTENT_TYPE,
-                            );
-                        Ok(response)
-                    })
-                }
+                _ => Box::pin(async move {
+                    let mut response = http::Response::new(tonic::body::Body::default());
+                    let headers = response.headers_mut();
+                    headers.insert(
+                        tonic::Status::GRPC_STATUS,
+                        (tonic::Code::Unimplemented as i32).into(),
+                    );
+                    headers.insert(
+                        http::header::CONTENT_TYPE,
+                        tonic::metadata::GRPC_CONTENT_TYPE,
+                    );
+                    Ok(response)
+                }),
             }
         }
     }
@@ -14656,10 +12916,10 @@ pub mod blob_service_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     /// BlobService is a service which provides RPCs to retrieve Git blobs from a
     /// specific repository.
     #[derive(Debug, Clone)]
@@ -14700,14 +12960,13 @@ pub mod blob_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-                Response = http::Response<
-                    <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    http::Request<tonic::body::Body>,
+                    Response = http::Response<
+                        <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
+                    >,
                 >,
-            >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::Body>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             BlobServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -14752,18 +13011,11 @@ pub mod blob_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetBlobResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.BlobService/GetBlob",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.BlobService/GetBlob");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.BlobService", "GetBlob"));
@@ -14780,18 +13032,11 @@ pub mod blob_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetBlobsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.BlobService/GetBlobs",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.BlobService/GetBlobs");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.BlobService", "GetBlobs"));
@@ -14807,18 +13052,11 @@ pub mod blob_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListBlobsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.BlobService/ListBlobs",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.BlobService/ListBlobs");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.BlobService", "ListBlobs"));
@@ -14833,18 +13071,11 @@ pub mod blob_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListAllBlobsResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.BlobService/ListAllBlobs",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.BlobService/ListAllBlobs");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.BlobService", "ListAllBlobs"));
@@ -14860,18 +13091,11 @@ pub mod blob_service_client {
             tonic::Response<tonic::codec::Streaming<super::GetLfsPointersResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.BlobService/GetLFSPointers",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.BlobService/GetLFSPointers");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.BlobService", "GetLFSPointers"));
@@ -14890,18 +13114,11 @@ pub mod blob_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListLfsPointersResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.BlobService/ListLFSPointers",
-            );
+            let path = http::uri::PathAndQuery::from_static("/gitaly.BlobService/ListLFSPointers");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.BlobService", "ListLFSPointers"));
@@ -14916,18 +13133,12 @@ pub mod blob_service_client {
             tonic::Response<tonic::codec::Streaming<super::ListAllLfsPointersResponse>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/gitaly.BlobService/ListAllLFSPointers",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/gitaly.BlobService/ListAllLFSPointers");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gitaly.BlobService", "ListAllLFSPointers"));
@@ -14942,7 +13153,7 @@ pub mod blob_service_server {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
     use tonic::codegen::*;
     /// Generated trait containing gRPC methods that should be implemented for use with BlobServiceServer.
@@ -14951,8 +13162,7 @@ pub mod blob_service_server {
         /// Server streaming response type for the GetBlob method.
         type GetBlobStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetBlobResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetBlob returns the contents of a blob object referenced by its object
         /// ID. We use a stream to return a chunked arbitrarily large binary
@@ -14964,8 +13174,7 @@ pub mod blob_service_server {
         /// Server streaming response type for the GetBlobs method.
         type GetBlobsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetBlobsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetBlobs returns blobs identified via a revision and path.
         ///
@@ -14978,8 +13187,7 @@ pub mod blob_service_server {
         /// Server streaming response type for the ListBlobs method.
         type ListBlobsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ListBlobsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListBlobs will list all blobs reachable from a given set of revisions by
         /// doing a graph walk. It is not valid to pass revisions which do not resolve
@@ -14991,23 +13199,18 @@ pub mod blob_service_server {
         /// Server streaming response type for the ListAllBlobs method.
         type ListAllBlobsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ListAllBlobsResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListAllBlobs retrieves all blobs pointers in the repository, including
         /// those not reachable by any reference.
         async fn list_all_blobs(
             &self,
             request: tonic::Request<super::ListAllBlobsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ListAllBlobsStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ListAllBlobsStream>, tonic::Status>;
         /// Server streaming response type for the GetLFSPointers method.
         type GetLFSPointersStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::GetLfsPointersResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// GetLFSPointers retrieves LFS pointers from a given set of object IDs.
         /// This RPC filters all requested objects and only returns those which refer
@@ -15015,15 +13218,11 @@ pub mod blob_service_server {
         async fn get_lfs_pointers(
             &self,
             request: tonic::Request<super::GetLfsPointersRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetLFSPointersStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::GetLFSPointersStream>, tonic::Status>;
         /// Server streaming response type for the ListLFSPointers method.
         type ListLFSPointersStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ListLfsPointersResponse, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         /// ListLFSPointers retrieves LFS pointers reachable from a given set of
         /// revisions by doing a graph walk. This includes both normal revisions like
@@ -15034,28 +13233,18 @@ pub mod blob_service_server {
         async fn list_lfs_pointers(
             &self,
             request: tonic::Request<super::ListLfsPointersRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ListLFSPointersStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ListLFSPointersStream>, tonic::Status>;
         /// Server streaming response type for the ListAllLFSPointers method.
         type ListAllLFSPointersStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<
-                    super::ListAllLfsPointersResponse,
-                    tonic::Status,
-                >,
-            >
-            + std::marker::Send
+                Item = std::result::Result<super::ListAllLfsPointersResponse, tonic::Status>,
+            > + std::marker::Send
             + 'static;
         /// ListAllLFSPointers retrieves all LFS pointers in the repository, including
         /// those not reachable by any reference.
         async fn list_all_lfs_pointers(
             &self,
             request: tonic::Request<super::ListAllLfsPointersRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ListAllLFSPointersStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ListAllLFSPointersStream>, tonic::Status>;
     }
     /// BlobService is a service which provides RPCs to retrieve Git blobs from a
     /// specific repository.
@@ -15080,10 +13269,7 @@ pub mod blob_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -15138,24 +13324,21 @@ pub mod blob_service_server {
                 "/gitaly.BlobService/GetBlob" => {
                     #[allow(non_camel_case_types)]
                     struct GetBlobSvc<T: BlobService>(pub Arc<T>);
-                    impl<
-                        T: BlobService,
-                    > tonic::server::ServerStreamingService<super::GetBlobRequest>
-                    for GetBlobSvc<T> {
+                    impl<T: BlobService>
+                        tonic::server::ServerStreamingService<super::GetBlobRequest>
+                        for GetBlobSvc<T>
+                    {
                         type Response = super::GetBlobResponse;
                         type ResponseStream = T::GetBlobStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetBlobRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as BlobService>::get_blob(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as BlobService>::get_blob(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -15184,24 +13367,21 @@ pub mod blob_service_server {
                 "/gitaly.BlobService/GetBlobs" => {
                     #[allow(non_camel_case_types)]
                     struct GetBlobsSvc<T: BlobService>(pub Arc<T>);
-                    impl<
-                        T: BlobService,
-                    > tonic::server::ServerStreamingService<super::GetBlobsRequest>
-                    for GetBlobsSvc<T> {
+                    impl<T: BlobService>
+                        tonic::server::ServerStreamingService<super::GetBlobsRequest>
+                        for GetBlobsSvc<T>
+                    {
                         type Response = super::GetBlobsResponse;
                         type ResponseStream = T::GetBlobsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetBlobsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as BlobService>::get_blobs(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as BlobService>::get_blobs(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -15230,16 +13410,14 @@ pub mod blob_service_server {
                 "/gitaly.BlobService/ListBlobs" => {
                     #[allow(non_camel_case_types)]
                     struct ListBlobsSvc<T: BlobService>(pub Arc<T>);
-                    impl<
-                        T: BlobService,
-                    > tonic::server::ServerStreamingService<super::ListBlobsRequest>
-                    for ListBlobsSvc<T> {
+                    impl<T: BlobService>
+                        tonic::server::ServerStreamingService<super::ListBlobsRequest>
+                        for ListBlobsSvc<T>
+                    {
                         type Response = super::ListBlobsResponse;
                         type ResponseStream = T::ListBlobsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListBlobsRequest>,
@@ -15276,16 +13454,14 @@ pub mod blob_service_server {
                 "/gitaly.BlobService/ListAllBlobs" => {
                     #[allow(non_camel_case_types)]
                     struct ListAllBlobsSvc<T: BlobService>(pub Arc<T>);
-                    impl<
-                        T: BlobService,
-                    > tonic::server::ServerStreamingService<super::ListAllBlobsRequest>
-                    for ListAllBlobsSvc<T> {
+                    impl<T: BlobService>
+                        tonic::server::ServerStreamingService<super::ListAllBlobsRequest>
+                        for ListAllBlobsSvc<T>
+                    {
                         type Response = super::ListAllBlobsResponse;
                         type ResponseStream = T::ListAllBlobsStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListAllBlobsRequest>,
@@ -15322,16 +13498,14 @@ pub mod blob_service_server {
                 "/gitaly.BlobService/GetLFSPointers" => {
                     #[allow(non_camel_case_types)]
                     struct GetLFSPointersSvc<T: BlobService>(pub Arc<T>);
-                    impl<
-                        T: BlobService,
-                    > tonic::server::ServerStreamingService<super::GetLfsPointersRequest>
-                    for GetLFSPointersSvc<T> {
+                    impl<T: BlobService>
+                        tonic::server::ServerStreamingService<super::GetLfsPointersRequest>
+                        for GetLFSPointersSvc<T>
+                    {
                         type Response = super::GetLfsPointersResponse;
                         type ResponseStream = T::GetLFSPointersStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetLfsPointersRequest>,
@@ -15368,17 +13542,14 @@ pub mod blob_service_server {
                 "/gitaly.BlobService/ListLFSPointers" => {
                     #[allow(non_camel_case_types)]
                     struct ListLFSPointersSvc<T: BlobService>(pub Arc<T>);
-                    impl<
-                        T: BlobService,
-                    > tonic::server::ServerStreamingService<
-                        super::ListLfsPointersRequest,
-                    > for ListLFSPointersSvc<T> {
+                    impl<T: BlobService>
+                        tonic::server::ServerStreamingService<super::ListLfsPointersRequest>
+                        for ListLFSPointersSvc<T>
+                    {
                         type Response = super::ListLfsPointersResponse;
                         type ResponseStream = T::ListLFSPointersStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListLfsPointersRequest>,
@@ -15415,25 +13586,21 @@ pub mod blob_service_server {
                 "/gitaly.BlobService/ListAllLFSPointers" => {
                     #[allow(non_camel_case_types)]
                     struct ListAllLFSPointersSvc<T: BlobService>(pub Arc<T>);
-                    impl<
-                        T: BlobService,
-                    > tonic::server::ServerStreamingService<
-                        super::ListAllLfsPointersRequest,
-                    > for ListAllLFSPointersSvc<T> {
+                    impl<T: BlobService>
+                        tonic::server::ServerStreamingService<super::ListAllLfsPointersRequest>
+                        for ListAllLFSPointersSvc<T>
+                    {
                         type Response = super::ListAllLfsPointersResponse;
                         type ResponseStream = T::ListAllLFSPointersStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListAllLfsPointersRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as BlobService>::list_all_lfs_pointers(&inner, request)
-                                    .await
+                                <T as BlobService>::list_all_lfs_pointers(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -15460,25 +13627,19 @@ pub mod blob_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        let mut response = http::Response::new(
-                            tonic::body::Body::default(),
-                        );
-                        let headers = response.headers_mut();
-                        headers
-                            .insert(
-                                tonic::Status::GRPC_STATUS,
-                                (tonic::Code::Unimplemented as i32).into(),
-                            );
-                        headers
-                            .insert(
-                                http::header::CONTENT_TYPE,
-                                tonic::metadata::GRPC_CONTENT_TYPE,
-                            );
-                        Ok(response)
-                    })
-                }
+                _ => Box::pin(async move {
+                    let mut response = http::Response::new(tonic::body::Body::default());
+                    let headers = response.headers_mut();
+                    headers.insert(
+                        tonic::Status::GRPC_STATUS,
+                        (tonic::Code::Unimplemented as i32).into(),
+                    );
+                    headers.insert(
+                        http::header::CONTENT_TYPE,
+                        tonic::metadata::GRPC_CONTENT_TYPE,
+                    );
+                    Ok(response)
+                }),
             }
         }
     }

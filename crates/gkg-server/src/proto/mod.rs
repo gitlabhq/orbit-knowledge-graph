@@ -1,9 +1,22 @@
 #[allow(clippy::all)]
+#[allow(clippy::derive_partial_eq_without_eq)]
 mod gkg_v1 {
     include!("gkg.v1.rs");
 }
 
-pub use gkg_v1::*;
+pub use gkg_v1::ExecuteToolMessage;
+pub use gkg_v1::ExecuteToolRequest;
+pub use gkg_v1::ListToolsRequest;
+pub use gkg_v1::ListToolsResponse;
+pub use gkg_v1::RedactionRequired;
+pub use gkg_v1::RedactionResponse;
+pub use gkg_v1::ResourceAuthorization;
+pub use gkg_v1::ResourceCheck;
+pub use gkg_v1::ToolDefinition;
+pub use gkg_v1::ToolError;
+pub use gkg_v1::ToolResult;
+pub use gkg_v1::execute_tool_message;
+pub use gkg_v1::knowledge_graph_service_server;
 
 #[cfg(test)]
 mod tests {
