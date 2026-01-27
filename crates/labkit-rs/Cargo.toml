@@ -8,7 +8,17 @@ description = "Observability utilities for Rust services"
 default = []
 http = ["dep:tower", "dep:http", "dep:futures-util"]
 grpc = ["dep:tonic", "dep:futures-core"]
-full = ["http", "grpc"]
+metrics = [
+    "opentelemetry/metrics",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry-semantic-conventions",
+    "dep:pin-project",
+]
+metrics-http = ["metrics", "http"]
+metrics-axum = ["metrics-http", "dep:axum"]
+metrics-grpc = ["metrics", "grpc"]
+full = ["http", "grpc", "metrics-http", "metrics-axum", "metrics-grpc"]
 
 [dependencies]
 # Core dependencies (always included)
@@ -19,12 +29,17 @@ chrono = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-opentelemetry = { version = "0.30", default-features = false, features = ["trace"] }
+opentelemetry = { version = "0.31", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.31", features = ["metrics", "grpc-tonic"], optional = true }
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"], optional = true }
+pin-project = { version = "1.1", optional = true }
 
 # HTTP feature dependencies
 tower = { workspace = true, optional = true }
 http = { version = "1.4.0", optional = true }
 futures-util = { version = "0.3.31", optional = true }
+axum = { workspace = true, optional = true }
 
 # gRPC feature dependencies
 tonic = { workspace = true, optional = true }
@@ -35,6 +50,14 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tokio-stream = { workspace = true }
 tower = { workspace = true }
 http = "1.4.0"
+http-body-util = "0.1"
+bytes = "1"
+opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio", "testing"] }
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
+async-stream = "0.3"
+futures-util = "0.3"
+tonic = { workspace = true }
+axum = { workspace = true }
 
 [lints]
 workspace = true

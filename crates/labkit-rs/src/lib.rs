@@ -8,6 +8,9 @@
 //!
 //! - `http` - Tower layers for HTTP middleware (Axum, etc.)
 //! - `grpc` - Tonic interceptors for gRPC
+//! - `metrics` - OpenTelemetry metrics with OTLP export
+//! - `metrics-http` - HTTP server metrics (Tower layer)
+//! - `metrics-grpc` - gRPC server metrics wrapper
 //! - `full` - All features enabled
 //!
 //! # Correlation IDs
@@ -43,6 +46,8 @@
 
 pub mod correlation;
 pub mod logging;
+#[cfg(feature = "metrics")]
+pub mod metrics;
 
 // Re-export commonly used items
 pub use correlation::context;
