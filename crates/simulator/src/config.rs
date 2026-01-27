@@ -7,8 +7,12 @@ use std::collections::HashMap;
 pub struct Config {
     /// ClickHouse connection URL.
     pub clickhouse_url: String,
-    /// Number of tenants to generate.
-    pub num_tenants: u32,
+    /// Number of organizations to generate.
+    pub num_organizations: u32,
+    /// Number of traversal IDs to generate per organization.
+    pub traversal_ids_per_org: usize,
+    /// Maximum depth of traversal ID hierarchy.
+    pub max_traversal_depth: usize,
     /// Default number of nodes per type (if not overridden).
     pub default_nodes_per_type: usize,
     /// Override counts for specific node types.
@@ -23,7 +27,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             clickhouse_url: "http://localhost:8123".to_string(),
-            num_tenants: 2,
+            num_organizations: 2,
+            traversal_ids_per_org: 1000,
+            max_traversal_depth: 5,
             default_nodes_per_type: 100,
             node_counts: HashMap::new(),
             edges_per_source: 3,

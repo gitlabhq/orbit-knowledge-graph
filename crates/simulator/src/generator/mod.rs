@@ -7,9 +7,11 @@
 
 mod batch;
 mod fake_data;
+mod traversal;
 
 pub use batch::BatchBuilder;
 pub use fake_data::FakeValueGenerator;
+pub use traversal::TraversalIdGenerator;
 
 use crate::arrow_schema::ToArrowSchema;
 use crate::clickhouse::ClickHouseWriter;
@@ -18,8 +20,8 @@ use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use fake::rand::Rng;
 use fake::rand::seq::SliceRandom;
-use indicatif::{ProgressBar, ProgressStyle};
 use ontology::{EdgeEntity, NodeEntity, Ontology};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -27,7 +29,6 @@ use std::sync::atomic::{AtomicI64, Ordering};
 /// Edge data to be written to ClickHouse.
 #[derive(Debug, Clone)]
 pub struct EdgeRecord {
-    pub tenant_id: u32,
     pub relationship_kind: String,
     pub source: i64,
     pub source_kind: String,
@@ -35,9 +36,9 @@ pub struct EdgeRecord {
     pub target_kind: String,
 }
 
-/// Generated data for a tenant.
+/// Generated data for an organization.
 #[derive(Debug, Default)]
-pub struct TenantData {
+pub struct OrganizationData {
     /// Node batches by node type name.
     pub nodes: HashMap<String, Vec<RecordBatch>>,
     /// Edge records.
@@ -54,113 +55,290 @@ pub struct Generator {
     ontology: Ontology,
     config: Config,
     next_id: Arc<AtomicI64>,
+    /// Traversal ID generators per organization.
+    traversal_ids: HashMap<u32, TraversalIdGenerator>,
 }
 
 impl Generator {
-    /// Create a new generator.
     pub fn new(ontology: Ontology, config: Config) -> Self {
+        let mut traversal_ids = HashMap::new();
+        for org_id in 1..=config.num_organizations {
+            let traversal_gen = TraversalIdGenerator::new(
+                org_id,
+                config.traversal_ids_per_org,
+                config.max_traversal_depth,
+            );
+            traversal_ids.insert(org_id, traversal_gen);
+        }
+
         Self {
             ontology,
             config,
             next_id: Arc::new(AtomicI64::new(1)),
+            traversal_ids,
         }
     }
 
-    /// Generate a unique ID.
     pub fn next_id(&self) -> i64 {
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    /// Run the full generation and import pipeline.
     pub async fn run(&self) -> Result<()> {
         let writer = ClickHouseWriter::new(&self.config.clickhouse_url);
 
-        // Create schemas
         println!("Creating ClickHouse schemas...");
         writer.create_schemas(&self.ontology).await?;
 
-        // Generate data per tenant
-        let pb = ProgressBar::new(self.config.num_tenants as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} tenants ({msg})")
-                .unwrap()
-                .progress_chars("##-"),
+        println!(
+            "\nGenerating data for {} organization(s)...",
+            self.config.num_organizations
         );
+        let overall_start = std::time::Instant::now();
 
-        for tenant_id in 1..=self.config.num_tenants {
-            pb.set_message(format!("generating tenant {}", tenant_id));
+        let mut total_gen_time = 0.0;
+        let mut total_write_time = 0.0;
 
-            let tenant_data = self.generate_tenant(tenant_id)?;
+        for org_id in 1..=self.config.num_organizations {
+            println!(
+                "\n=== Organization {}/{} ===",
+                org_id, self.config.num_organizations
+            );
 
-            pb.set_message(format!("writing tenant {} to ClickHouse", tenant_id));
+            println!("  Generating nodes...");
+            let gen_start = std::time::Instant::now();
+            let org_data = self.generate_organization_with_logging(org_id, true)?;
+            let gen_elapsed = gen_start.elapsed().as_secs_f64();
+            total_gen_time += gen_elapsed;
+
+            let node_count: usize = org_data
+                .nodes
+                .values()
+                .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
+                .sum();
+            println!(
+                "  Generation complete: {} nodes + {} edges ({:.1}s)",
+                node_count,
+                org_data.edges.len(),
+                gen_elapsed
+            );
+
+            println!("  Writing to ClickHouse...");
+            let write_start = std::time::Instant::now();
             writer
-                .write_tenant_data(&self.ontology, &tenant_data)
+                .write_organization_data(&self.ontology, &org_data)
                 .await?;
+            let write_elapsed = write_start.elapsed().as_secs_f64();
+            total_write_time += write_elapsed;
 
-            pb.inc(1);
+            println!("  Write complete ({:.1}s)", write_elapsed);
         }
 
-        pb.finish_with_message("complete");
+        println!(
+            "\n=== Summary ===\nTotal: gen:{:.1}s + write:{:.1}s = {:.1}s",
+            total_gen_time,
+            total_write_time,
+            overall_start.elapsed().as_secs_f64()
+        );
 
-        // Print statistics
         writer.print_statistics(&self.ontology).await?;
 
         Ok(())
     }
 
-    /// Generate all data for a single tenant.
-    ///
-    /// This is fully ontology-driven:
-    /// 1. Generate nodes for each type in `ontology.nodes()`
-    /// 2. Generate edges for each type in `ontology.edges()`
-    pub fn generate_tenant(&self, tenant_id: u32) -> Result<TenantData> {
-        let mut data = TenantData::default();
-        let mut id_map: HashMap<String, Vec<i64>> = HashMap::new();
+    pub async fn run_parallel(&self) -> Result<()> {
+        let writer = ClickHouseWriter::new(&self.config.clickhouse_url);
 
-        // Phase 1: Generate all nodes from ontology
-        for node in self.ontology.nodes() {
-            let count = self.config.count_for(&node.name);
-            let (batches, ids) = self.generate_node_batches(node, tenant_id, count)?;
-            data.nodes.insert(node.name.clone(), batches);
-            id_map.insert(node.name.clone(), ids);
+        println!("Creating ClickHouse schemas...");
+        writer.create_schemas(&self.ontology).await?;
+
+        println!(
+            "\nGenerating data for {} organization(s) in parallel...",
+            self.config.num_organizations
+        );
+        let overall_start = std::time::Instant::now();
+
+        println!("\n=== Parallel Generation Phase ===");
+        let gen_start = std::time::Instant::now();
+
+        let org_data_vec: Vec<_> = (1..=self.config.num_organizations)
+            .into_par_iter()
+            .map(|org_id| {
+                let start = std::time::Instant::now();
+                println!("  [Org {}] Starting generation...", org_id);
+
+                let result = self.generate_organization(org_id);
+
+                match &result {
+                    Ok(data) => {
+                        let node_count: usize = data
+                            .nodes
+                            .values()
+                            .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
+                            .sum();
+                        println!(
+                            "  [Org {}] ✓ Generated {} nodes + {} edges in {:.1}s",
+                            org_id,
+                            node_count,
+                            data.edges.len(),
+                            start.elapsed().as_secs_f64()
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("  [Org {}] ✗ Error: {}", org_id, e);
+                    }
+                }
+
+                (org_id, result)
+            })
+            .collect();
+
+        let gen_elapsed = gen_start.elapsed().as_secs_f64();
+        println!("\nAll organizations generated in {:.1}s", gen_elapsed);
+
+        // Sequential writes required: ClickHouse client isn't Send
+        println!("\n=== Sequential Write Phase ===");
+        let write_start = std::time::Instant::now();
+
+        for (org_id, result) in org_data_vec {
+            let org_data = result?;
+
+            let start = std::time::Instant::now();
+            println!("  [Org {}] Writing to ClickHouse...", org_id);
+
+            writer
+                .write_organization_data(&self.ontology, &org_data)
+                .await?;
+
+            println!(
+                "  [Org {}] ✓ Written in {:.1}s",
+                org_id,
+                start.elapsed().as_secs_f64()
+            );
         }
 
-        // Phase 2: Generate all edges from ontology
+        let write_elapsed = write_start.elapsed().as_secs_f64();
+        println!("\nAll organizations written in {:.1}s", write_elapsed);
+
+        println!(
+            "\n=== Summary ===\nTotal: gen:{:.1}s + write:{:.1}s = {:.1}s",
+            gen_elapsed,
+            write_elapsed,
+            overall_start.elapsed().as_secs_f64()
+        );
+
+        writer.print_statistics(&self.ontology).await?;
+
+        Ok(())
+    }
+
+    pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
+        self.generate_organization_with_logging(org_id, false)
+    }
+
+    fn generate_organization_with_logging(
+        &self,
+        org_id: u32,
+        verbose: bool,
+    ) -> Result<OrganizationData> {
+        let mut data = OrganizationData::default();
+        let mut id_map: HashMap<String, Vec<i64>> = HashMap::new();
+        let traversal_gen = self
+            .traversal_ids
+            .get(&org_id)
+            .expect("traversal IDs exist");
+
+        for node in self.ontology.nodes() {
+            let count = self.config.count_for(&node.name);
+            if count > 0 {
+                if verbose {
+                    print!("    {} ({} nodes)... ", node.name, count);
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                }
+
+                let start = std::time::Instant::now();
+                let (batches, ids) =
+                    self.generate_node_batches(node, org_id, traversal_gen, count)?;
+
+                if verbose {
+                    println!("✓ {:.1}s", start.elapsed().as_secs_f64());
+                }
+
+                data.nodes.insert(node.name.clone(), batches);
+                id_map.insert(node.name.clone(), ids);
+            }
+        }
+
+        if verbose {
+            println!("    Generating edges...");
+        }
+
+        let edge_start = std::time::Instant::now();
         for edge in self.ontology.edges() {
-            self.generate_edges_for_type(tenant_id, edge, &id_map, &mut data.edges);
+            if verbose {
+                print!(
+                    "      {} ({} -> {})... ",
+                    edge.relationship_kind, edge.source_kind, edge.target_kind
+                );
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+            }
+
+            let edge_type_start = std::time::Instant::now();
+            let edge_count_before = data.edges.len();
+            self.generate_edges_for_type(edge, &id_map, &mut data.edges);
+            let edges_added = data.edges.len() - edge_count_before;
+            let edge_type_elapsed = edge_type_start.elapsed().as_secs_f64();
+
+            if verbose {
+                if edges_added > 0 {
+                    println!(
+                        "{} edges ({:.1}s, {:.0} edges/s)",
+                        edges_added,
+                        edge_type_elapsed,
+                        edges_added as f64 / edge_type_elapsed.max(0.001)
+                    );
+                } else {
+                    println!("0 edges (skipped)");
+                }
+            }
+        }
+
+        if verbose {
+            println!(
+                "    Total edges: {} ({:.1}s)",
+                data.edges.len(),
+                edge_start.elapsed().as_secs_f64()
+            );
         }
 
         Ok(data)
     }
 
-    /// Generate batches for a node type.
     fn generate_node_batches(
         &self,
         node: &NodeEntity,
-        tenant_id: u32,
+        org_id: u32,
+        traversal_gen: &TraversalIdGenerator,
         count: usize,
     ) -> Result<(Vec<RecordBatch>, Vec<i64>)> {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::new(node, schema, self.config.batch_size);
-        let mut all_ids = Vec::with_capacity(count);
 
-        for _ in 0..count {
-            let id = self.next_id();
-            all_ids.push(id);
-            builder.add_row(tenant_id, id);
+        let start_id = self.next_id.fetch_add(count as i64, Ordering::SeqCst);
+        let all_ids: Vec<i64> = (start_id..(start_id + count as i64)).collect();
+
+        let mut rng = fake::rand::thread_rng();
+
+        for &id in &all_ids {
+            let traversal_id = traversal_gen.random(&mut rng).to_string();
+            builder.add_row(org_id, traversal_id, id);
         }
 
         let batches = builder.finish();
         Ok((batches, all_ids))
     }
 
-    /// Generate edges for a specific edge type from the ontology.
-    ///
-    /// Uses the edge's `source_kind` and `target_kind` to find the right nodes.
     fn generate_edges_for_type(
         &self,
-        tenant_id: u32,
         edge: &EdgeEntity,
         id_map: &HashMap<String, Vec<i64>>,
         edges: &mut Vec<EdgeRecord>,
@@ -176,26 +354,30 @@ impl Generator {
         };
 
         let mut rng = fake::rand::thread_rng();
+        let same_type = edge.source_kind == edge.target_kind;
 
-        // For each source node, create edges to random target nodes
         for &source_id in source_ids {
-            // Determine how many edges to create (1 to edges_per_source)
             let num_edges = rng.gen_range(1..=self.config.edges_per_source);
-            let num_edges = num_edges.min(target_ids.len());
 
-            // Pick random targets (avoid self-loops if source_kind == target_kind)
-            let targets: Vec<i64> = if edge.source_kind == edge.target_kind {
-                // Same type: avoid self-loops
-                target_ids
-                    .iter()
-                    .filter(|&&id| id != source_id)
-                    .copied()
-                    .collect::<Vec<_>>()
-                    .choose_multiple(&mut rng, num_edges)
-                    .copied()
-                    .collect()
+            let targets: Vec<i64> = if same_type {
+                // Sample with retry to avoid self-loops
+                let mut selected = Vec::with_capacity(num_edges);
+                let max_attempts = num_edges * 3; // Retry limit
+                let mut attempts = 0;
+
+                while selected.len() < num_edges && attempts < max_attempts && target_ids.len() > 1
+                {
+                    let idx = rng.gen_range(0..target_ids.len());
+                    let candidate = target_ids[idx];
+
+                    if candidate != source_id && !selected.contains(&candidate) {
+                        selected.push(candidate);
+                    }
+                    attempts += 1;
+                }
+                selected
             } else {
-                // Different types: pick any
+                let num_edges = num_edges.min(target_ids.len());
                 target_ids
                     .choose_multiple(&mut rng, num_edges)
                     .copied()
@@ -204,7 +386,6 @@ impl Generator {
 
             for target_id in targets {
                 edges.push(EdgeRecord {
-                    tenant_id,
                     relationship_kind: edge.relationship_kind.clone(),
                     source: source_id,
                     source_kind: edge.source_kind.clone(),
@@ -215,18 +396,21 @@ impl Generator {
         }
     }
 
-    /// Print generation plan based on ontology.
     pub fn print_plan(&self) {
         println!("Generation plan (from ontology):");
-        println!("  Tenants: {}", self.config.num_tenants);
+        println!("  Organizations: {}", self.config.num_organizations);
+        println!(
+            "  Traversal IDs: {} per org (max depth {})",
+            self.config.traversal_ids_per_org, self.config.max_traversal_depth
+        );
         println!();
 
         println!("  Node types ({}):", self.ontology.node_count());
         for node in self.ontology.nodes() {
             let count = self.config.count_for(&node.name);
-            let total = count * self.config.num_tenants as usize;
+            let total = count * self.config.num_organizations as usize;
             println!(
-                "    {}: {} per tenant = {} total ({} fields)",
+                "    {}: {} per org = {} total ({} fields)",
                 node.name,
                 count,
                 total,
