@@ -1,7 +1,7 @@
 //! Report generation for evaluation results.
 
-use super::error::ErrorCategory;
 use super::ExecutionResult;
+use super::error::ErrorCategory;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -195,10 +195,10 @@ impl Report {
                     result.execution_time.as_secs_f64() * 1000.0
                 ));
                 // Show sample data
-                if let (Some(cols), Some(rows)) = (&result.column_names, &result.sample_rows) {
-                    if !rows.is_empty() {
-                        output.push_str(&format_sample_data(cols, rows));
-                    }
+                if let (Some(cols), Some(rows)) = (&result.column_names, &result.sample_rows)
+                    && !rows.is_empty()
+                {
+                    output.push_str(&format_sample_data(cols, rows));
                 }
             }
         }
@@ -238,7 +238,11 @@ impl Report {
             categories.sort_by_key(|(cat, _)| format!("{}", cat));
 
             for (category, results) in categories {
-                output.push_str(&format!("\n  [{:}] ({} queries)\n", category, results.len()));
+                output.push_str(&format!(
+                    "\n  [{:}] ({} queries)\n",
+                    category,
+                    results.len()
+                ));
                 for result in results {
                     output.push_str(&format!("    • {}\n", result.query_name));
                     if let Some(parsed) = &result.parsed_error {
@@ -469,9 +473,27 @@ fn format_sql(sql: &str, indent: usize) -> String {
 
     // Keywords that should start a new line
     let line_break_before = [
-        "SELECT", "FROM", "WHERE", "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN",
-        "OUTER JOIN", "ON", "AND", "OR", "GROUP BY", "ORDER BY", "HAVING", "LIMIT",
-        "UNION", "EXCEPT", "INTERSECT", "WITH", "AS (", "SETTINGS",
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "JOIN",
+        "LEFT JOIN",
+        "RIGHT JOIN",
+        "INNER JOIN",
+        "OUTER JOIN",
+        "ON",
+        "AND",
+        "OR",
+        "GROUP BY",
+        "ORDER BY",
+        "HAVING",
+        "LIMIT",
+        "UNION",
+        "EXCEPT",
+        "INTERSECT",
+        "WITH",
+        "AS (",
+        "SETTINGS",
     ];
 
     // Simple formatting: break on major keywords

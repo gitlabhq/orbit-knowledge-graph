@@ -67,7 +67,10 @@ async fn main() -> Result<()> {
     tracing::info!("Loaded {} queries", queries.len());
 
     // Check ClickHouse connectivity before proceeding
-    tracing::info!("Checking ClickHouse connection at {}...", config.clickhouse.url);
+    tracing::info!(
+        "Checking ClickHouse connection at {}...",
+        config.clickhouse.url
+    );
     check_clickhouse_health(&config.clickhouse.url).await?;
     tracing::info!("ClickHouse is healthy");
 

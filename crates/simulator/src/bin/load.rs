@@ -51,7 +51,10 @@ async fn main() -> Result<()> {
     let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
 
     // Check ClickHouse connectivity before proceeding
-    println!("Checking ClickHouse connection at {}...", config.clickhouse.url);
+    println!(
+        "Checking ClickHouse connection at {}...",
+        config.clickhouse.url
+    );
     check_clickhouse_health(&config.clickhouse.url).await?;
     println!("ClickHouse is healthy");
 

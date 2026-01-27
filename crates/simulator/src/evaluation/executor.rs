@@ -308,7 +308,12 @@ impl QueryExecutor {
         let json_sql = format!("{} FORMAT JSONCompactColumns", sql);
 
         // Fetch as raw bytes and parse
-        let raw: Vec<u8> = self.client.query(&json_sql).fetch_one().await.unwrap_or_default();
+        let raw: Vec<u8> = self
+            .client
+            .query(&json_sql)
+            .fetch_one()
+            .await
+            .unwrap_or_default();
 
         if raw.is_empty() {
             return Ok((vec![], vec![]));
@@ -320,7 +325,12 @@ impl QueryExecutor {
 
         // Fetch data as tab-separated values which is easier to parse
         let tsv_sql = format!("{} FORMAT TabSeparated", sql);
-        let tsv_raw: Vec<u8> = self.client.query(&tsv_sql).fetch_one().await.unwrap_or_default();
+        let tsv_raw: Vec<u8> = self
+            .client
+            .query(&tsv_sql)
+            .fetch_one()
+            .await
+            .unwrap_or_default();
 
         if tsv_raw.is_empty() {
             return Ok((vec![], columns));

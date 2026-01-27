@@ -102,10 +102,10 @@ fn extract_error_code(error: &str) -> Option<u32> {
     // Pattern: "Code: 241." or "Code: 46."
     if let Some(start) = error.find("Code: ") {
         let after_code = &error[start + 6..];
-        if let Some(end) = after_code.find('.') {
-            if let Ok(code) = after_code[..end].trim().parse::<u32>() {
-                return Some(code);
-            }
+        if let Some(end) = after_code.find('.')
+            && let Ok(code) = after_code[..end].trim().parse::<u32>()
+        {
+            return Some(code);
         }
     }
     None
@@ -232,7 +232,7 @@ fn extract_memory_value(error: &str, prefix: &str) -> Option<String> {
     let start = error.find(prefix)?;
     let after = &error[start + prefix.len()..];
     // Find the end of the number (including decimal and unit)
-    let end = after.find(|c: char| c == ',' || c == ':' || c == '(')?;
+    let end = after.find([',', ':', '('])?;
     Some(after[..end].trim().to_string())
 }
 
@@ -261,7 +261,8 @@ mod tests {
 
     #[test]
     fn test_parse_unknown_function() {
-        let error = "bad response: Code: 46. DB::Exception: Function with name 'ARRAY' does not exist.";
+        let error =
+            "bad response: Code: 46. DB::Exception: Function with name 'ARRAY' does not exist.";
         let parsed = ParsedError::parse(error);
 
         assert_eq!(parsed.code, Some(46));
