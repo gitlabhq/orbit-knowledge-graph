@@ -37,6 +37,6 @@ pub use client::{
     inject_to_request,
 };
 pub use server::{
-    CorrelationStream, ServerConfig, create_server_interceptor, extract_from_request,
-    server_interceptor, with_correlation, with_correlation_stream,
+    ServerConfig, context_from_request, create_server_interceptor, extract_from_request,
+    server_interceptor, with_correlation, with_correlation_id_stream, with_correlation_stream,
 };

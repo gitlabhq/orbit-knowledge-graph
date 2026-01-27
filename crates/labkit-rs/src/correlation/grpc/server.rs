@@ -1,31 +1,16 @@
 //! Server-side gRPC interceptor for correlation ID extraction.
-//!
-//! Extracts correlation IDs from incoming gRPC metadata or generates new ones.
-//!
-//! # Primitives
-//!
-//! - [`server_interceptor`] - Extracts correlation ID and stores in request extensions
-//! - [`with_correlation`] - Wraps a handler to set up task-local context (for automatic outgoing propagation)
-//! - [`with_correlation_stream`] - Same but for streaming handlers
 
 use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
-use pin_project_lite::pin_project;
+use opentelemetry::Context as OtelContext;
+use opentelemetry::trace::{FutureExt, WithContext};
 use tonic::{Request, Status};
 
-use crate::correlation::context::{self, CorrelationIdExt};
-use crate::correlation::id::{CorrelationId, GRPC_METADATA_CORRELATION_ID};
+use crate::correlation::context::{CorrelationIdExt, OtelContextExt, with_correlation_id};
+use crate::correlation::id::CorrelationId;
+use crate::correlation::propagator::{ensure_correlation_id, extract_from_grpc_metadata};
 
 /// Server interceptor that extracts correlation ID from incoming gRPC requests.
-///
-/// Extracts from the `x-gitlab-correlation-id` metadata key. If not present,
-/// generates a new ULID-based correlation ID. The correlation ID is stored
-/// in request extensions for handler access.
-///
-/// Use [`with_correlation`] to wrap your handler, which sets up the task-local
-/// context for automatic correlation ID inclusion in logs.
 ///
 /// # Example
 ///
@@ -39,31 +24,20 @@ use crate::correlation::id::{CorrelationId, GRPC_METADATA_CORRELATION_ID};
 ///     .await?;
 /// ```
 pub fn server_interceptor(mut request: Request<()>) -> Result<Request<()>, Status> {
-    let correlation_id = extract_correlation_id(&request);
-    request
-        .extensions_mut()
-        .insert(CorrelationIdExt(correlation_id));
+    let id = extract_from_grpc_metadata(request.metadata());
+    let cx = if let Some(id) = id {
+        crate::correlation::propagator::context_with_id(id)
+    } else {
+        OtelContext::current()
+    };
+    let (cx, id) = ensure_correlation_id(cx);
+
+    request.extensions_mut().insert(OtelContextExt(cx.clone()));
+    request.extensions_mut().insert(CorrelationIdExt(id));
+
     Ok(request)
 }
 
-/// Extract correlation ID from gRPC request metadata.
-///
-/// Returns the correlation ID from `x-gitlab-correlation-id` metadata if present,
-/// otherwise generates a new one.
-fn extract_correlation_id<T>(request: &Request<T>) -> CorrelationId {
-    request
-        .metadata()
-        .get(GRPC_METADATA_CORRELATION_ID)
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .map(CorrelationId::from_string)
-        .unwrap_or_else(CorrelationId::generate)
-}
-
-/// Extract correlation ID from gRPC request extensions.
-///
-/// Returns `None` if no correlation ID was set (e.g., if the interceptor wasn't applied).
-#[must_use]
 pub fn extract_from_request<T>(request: &Request<T>) -> Option<CorrelationId> {
     request
         .extensions()
@@ -71,26 +45,26 @@ pub fn extract_from_request<T>(request: &Request<T>) -> Option<CorrelationId> {
         .map(|ext| ext.0.clone())
 }
 
-/// Configuration for the server interceptor.
+pub fn context_from_request<T>(request: &Request<T>) -> OtelContext {
+    request
+        .extensions()
+        .get::<OtelContextExt>()
+        .map(|ext| ext.0.clone())
+        .unwrap_or_else(OtelContext::current)
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ServerConfig {
-    /// Whether to propagate the correlation ID back in response headers.
     pub reverse_propagation: bool,
 }
 
-/// Create a configurable server interceptor.
-///
-/// For most use cases, the simple [`server_interceptor`] function is sufficient.
 pub fn create_server_interceptor(
     _config: ServerConfig,
 ) -> impl FnMut(Request<()>) -> Result<Request<()>, Status> + Clone {
     move |request| server_interceptor(request)
 }
 
-/// Execute a gRPC handler with the correlation ID in task-local context.
-///
-/// This enables automatic propagation of correlation IDs to outgoing HTTP and
-/// gRPC requests made within the handler.
+/// Execute a gRPC handler with the OpenTelemetry context from the request.
 ///
 /// # Example
 ///
@@ -100,9 +74,9 @@ pub fn create_server_interceptor(
 ///
 /// async fn my_handler(request: Request<MyMessage>) -> Result<Response<MyReply>, Status> {
 ///     with_correlation(&request, async {
+///         // Correlation ID available via context::current()
 ///         // Outgoing requests automatically get the correlation ID
-///         let data = http_client.get("/api").await?;
-///         Ok(Response::new(MyReply { data }))
+///         Ok(Response::new(MyReply { ... }))
 ///     }).await
 /// }
 /// ```
@@ -110,73 +84,42 @@ pub async fn with_correlation<T, F, R>(request: &Request<T>, handler: F) -> R
 where
     F: Future<Output = R>,
 {
-    let id = extract_from_request(request).unwrap_or_else(CorrelationId::generate);
-    context::scope(id, handler).await
+    let cx = request
+        .extensions()
+        .get::<OtelContextExt>()
+        .map(|ext| ext.0.clone())
+        .unwrap_or_else(|| {
+            let id = CorrelationId::generate();
+            with_correlation_id(id)
+        });
+
+    handler.with_context(cx).await
 }
 
-/// Wrap a stream to execute within a correlation ID context.
-///
-/// Use this for streaming gRPC handlers (server streaming, client streaming,
-/// or bidirectional streaming) to ensure the correlation ID is available
-/// throughout stream processing.
+/// Wrap a stream to execute within an OpenTelemetry context.
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// use labkit_rs::correlation::grpc::{with_correlation_stream, extract_from_request};
-/// use tonic::{Request, Response, Status, Streaming};
-/// use futures::Stream;
+/// use labkit_rs::correlation::grpc::{with_correlation_stream, context_from_request};
 ///
-/// async fn my_bidi_stream(
-///     request: Request<Streaming<MyMessage>>,
-/// ) -> Result<Response<impl Stream<Item = Result<MyReply, Status>>>, Status> {
-///     let correlation_id = extract_from_request(&request);
-///     let input_stream = request.into_inner();
-///
-///     let output_stream = async_stream::stream! {
-///         while let Some(msg) = input_stream.message().await? {
-///             // Process message and yield responses
-///             yield Ok(MyReply { ... });
-///         }
-///     };
-///
-///     // Wrap the output stream to run within correlation context
-///     Ok(Response::new(with_correlation_stream(correlation_id, output_stream)))
+/// async fn my_stream(request: Request<Streaming<Msg>>) -> Result<Response<impl Stream<...>>, Status> {
+///     let context = context_from_request(&request);
+///     let stream = async_stream::stream! { ... };
+///     Ok(Response::new(with_correlation_stream(context, stream)))
 /// }
 /// ```
-pub fn with_correlation_stream<S>(
+pub fn with_correlation_stream<S>(context: OtelContext, stream: S) -> WithContext<S> {
+    stream.with_context(context)
+}
+
+pub fn with_correlation_id_stream<S>(
     correlation_id: Option<CorrelationId>,
     stream: S,
-) -> CorrelationStream<S> {
-    CorrelationStream {
-        inner: stream,
-        correlation_id: correlation_id.unwrap_or_else(CorrelationId::generate),
-    }
-}
+) -> WithContext<S> {
+    let context = correlation_id
+        .map(with_correlation_id)
+        .unwrap_or_else(|| with_correlation_id(CorrelationId::generate()));
 
-pin_project! {
-    /// A stream wrapper that provides correlation ID context during polling.
-    ///
-    /// Created by [`with_correlation_stream`].
-    pub struct CorrelationStream<S> {
-        #[pin]
-        inner: S,
-        correlation_id: CorrelationId,
-    }
-}
-
-impl<S> futures_core::Stream for CorrelationStream<S>
-where
-    S: futures_core::Stream,
-{
-    type Item = S::Item;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        context::sync_scope(this.correlation_id.clone(), || this.inner.poll_next(cx))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
+    stream.with_context(context)
 }
