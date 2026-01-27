@@ -6,6 +6,18 @@ Main repository for the GitLab Knowledge Graph (aka "gitlab orbit").
 
 - Run tasks with mise.
 
+## Code Quality
+
+### Minimal Comments
+
+Don't add comments that narrate what code already says. Remove:
+- Obvious narration (`// Create a new vector`)
+- Changelog-style comments (`// Fixed bug where X`)
+- Section markers (`// === HELPERS ===`)
+- Signature restatements (`// Takes X and returns Y`)
+
+Keep comments that explain *why*—business logic, gotchas, or links to specs. Use `/remove-llm-comments` to clean up existing code.
+
 ## Related repositories
 
 The `/related-repositories` skill lists dependent systems and their local paths:
