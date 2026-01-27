@@ -1,149 +1,62 @@
-//! CLI for generating fake data and importing to ClickHouse.
-//!
-//! All data generation is driven by the ontology - no hardcoded entity types.
+//! CLI for generating fake data to Parquet files.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::Parser;
 use ontology::Ontology;
+use simulator::parquet::ParquetWriter;
 use simulator::{Config, Generator};
-use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-#[derive(Parser, Debug)]
-#[command(name = "simulate")]
-#[command(
-    about = "Generate fake GitLab Knowledge Graph data from ontology and import to ClickHouse"
-)]
+#[derive(Parser)]
+#[command(name = "generate")]
+#[command(about = "Generate fake GitLab Knowledge Graph data to Parquet files")]
 struct Args {
-    /// Path to ontology fixtures directory
-    #[arg(long, default_value = "fixtures/ontology")]
-    ontology_path: PathBuf,
-
-    /// ClickHouse URL
-    #[arg(long, default_value = "http://localhost:8123")]
-    clickhouse_url: String,
-
-    /// Number of organizations to generate
-    #[arg(long, default_value = "2")]
-    organizations: u32,
-
-    /// Number of traversal IDs per organization
-    #[arg(long, default_value = "1000")]
-    traversal_ids: usize,
-
-    /// Maximum depth of traversal ID hierarchy
-    #[arg(long, default_value = "5")]
-    max_traversal_depth: usize,
-
-    /// Default number of nodes per type
-    #[arg(long, default_value = "100")]
-    nodes_per_type: usize,
-
-    /// Override count for specific node types (can be repeated)
-    /// Format: NodeType=count (e.g., --node-count User=500 --node-count Project=200)
-    #[arg(long = "node-count", value_parser = parse_node_count)]
-    node_counts: Vec<(String, usize)>,
-
-    /// Number of edges to generate per source node
-    #[arg(long, default_value = "3")]
-    edges_per_source: usize,
-
-    /// Batch size for ClickHouse inserts
-    #[arg(long, default_value = "10000")]
-    batch_size: usize,
+    /// Path to YAML configuration file
+    #[arg(short, long, default_value = "simulator.yaml")]
+    config: PathBuf,
 
     /// Just print the generation plan without executing
     #[arg(long)]
     dry_run: bool,
 
-    /// Generate organizations in parallel (faster but uses more CPU)
+    /// Force regeneration even if data exists
     #[arg(long)]
-    parallel: bool,
-}
-
-/// Parse "NodeType=count" format
-fn parse_node_count(s: &str) -> Result<(String, usize), String> {
-    let parts: Vec<&str> = s.split('=').collect();
-    if parts.len() != 2 {
-        return Err(format!("Invalid format '{}', expected NodeType=count", s));
-    }
-    let count = parts[1]
-        .parse::<usize>()
-        .map_err(|_| format!("Invalid count '{}' in '{}'", parts[1], s))?;
-    Ok((parts[0].to_string(), count))
-}
-
-/// Validate that all node types in node_counts exist in the ontology.
-fn validate_node_counts(ontology: &Ontology, node_counts: &HashMap<String, usize>) -> Result<()> {
-    let valid_types: HashSet<&str> = ontology.nodes().map(|n| n.name.as_str()).collect();
-
-    for node_type in node_counts.keys() {
-        if !valid_types.contains(node_type.as_str()) {
-            let suggestions: Vec<&str> = valid_types
-                .iter()
-                .filter(|t| t.to_lowercase().contains(&node_type.to_lowercase()))
-                .copied()
-                .take(3)
-                .collect();
-
-            let hint = if suggestions.is_empty() {
-                format!(
-                    "Available types: {}",
-                    valid_types
-                        .iter()
-                        .take(10)
-                        .copied()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            } else {
-                format!("Did you mean: {}?", suggestions.join(", "))
-            };
-
-            bail!(
-                "Unknown node type '{}' in --node-count. {}",
-                node_type,
-                hint
-            );
-        }
-    }
-
-    Ok(())
+    force: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    println!("GitLab Knowledge Graph Simulator");
-    println!("================================");
-    println!("(Fully ontology-driven - no hardcoded entities)");
-    println!();
+    println!("GitLab Knowledge Graph Generator");
+    println!("=================================\n");
 
-    println!("Loading ontology from {:?}...", args.ontology_path);
-    let ontology = Ontology::load_from_dir(&args.ontology_path)?;
+    println!("Loading config from {:?}...", args.config);
+    let config = Config::load(&args.config)?;
+
+    let writer = ParquetWriter::new(&config.generation.output_dir);
+
+    if !args.force && config.generation.skip_if_present && writer.data_exists() {
+        println!(
+            "Data already exists in {:?}, skipping generation.",
+            config.generation.output_dir
+        );
+        println!("Use --force to regenerate.");
+        return Ok(());
+    }
+
     println!(
-        "Loaded {} node types and {} edge types",
+        "Loading ontology from {:?}...",
+        config.generation.ontology_path
+    );
+    let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
+    println!(
+        "Loaded {} node types and {} edge types\n",
         ontology.node_count(),
         ontology.edge_count()
     );
-    println!();
 
-    let node_counts: HashMap<String, usize> = args.node_counts.into_iter().collect();
-    validate_node_counts(&ontology, &node_counts)?;
-
-    let config = Config {
-        clickhouse_url: args.clickhouse_url,
-        num_organizations: args.organizations,
-        traversal_ids_per_org: args.traversal_ids,
-        max_traversal_depth: args.max_traversal_depth,
-        default_nodes_per_type: args.nodes_per_type,
-        node_counts,
-        edges_per_source: args.edges_per_source,
-        batch_size: args.batch_size,
-    };
-
-    let generator = Generator::new(ontology, config);
+    let generator = Generator::new(ontology.clone(), config.clone())?;
     generator.print_plan();
 
     if args.dry_run {
@@ -151,14 +64,49 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if args.parallel {
-        println!("Running in parallel mode...\n");
-        generator.run_parallel().await?;
-    } else {
-        println!("Running in sequential mode...\n");
-        generator.run().await?;
+    println!("Output directory: {:?}\n", config.generation.output_dir);
+
+    std::fs::create_dir_all(&config.generation.output_dir)?;
+
+    let overall_start = std::time::Instant::now();
+
+    for org_id in 1..=config.generation.organizations {
+        println!(
+            "=== Organization {}/{} ===",
+            org_id, config.generation.organizations
+        );
+
+        let gen_start = std::time::Instant::now();
+        let org_data = generator.generate_organization(org_id)?;
+        let gen_elapsed = gen_start.elapsed().as_secs_f64();
+
+        let node_count: usize = org_data
+            .nodes
+            .values()
+            .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
+            .sum();
+
+        println!(
+            "  Generated {} nodes + {} edges ({:.1}s)",
+            node_count,
+            org_data.edges.len(),
+            gen_elapsed
+        );
+
+        let write_start = std::time::Instant::now();
+        writer.write_organization_data(&ontology, org_id, &org_data)?;
+        let write_elapsed = write_start.elapsed().as_secs_f64();
+
+        println!("  Written to Parquet ({:.1}s)\n", write_elapsed);
     }
 
-    println!("\nDone!");
+    writer.write_manifest(&ontology, config.generation.organizations)?;
+
+    println!(
+        "Done! Total time: {:.1}s",
+        overall_start.elapsed().as_secs_f64()
+    );
+    println!("Data written to: {:?}", config.generation.output_dir);
+
     Ok(())
 }

@@ -111,8 +111,8 @@ fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> Strin
         ArrowDataType::Float64 => "Float64",
         ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => "String",
         ArrowDataType::Date32 => "Date",
-        ArrowDataType::Date64 => "DateTime64(3)",
-        ArrowDataType::Timestamp(_, _) => "DateTime64(3)",
+        ArrowDataType::Date64 => "DateTime64(6, 'UTC')",
+        ArrowDataType::Timestamp(_, _) => "DateTime64(6, 'UTC')",
         _ => "String", // Fallback
     };
 

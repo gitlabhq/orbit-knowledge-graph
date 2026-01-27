@@ -1,6 +1,7 @@
 //! ClickHouse data writer with streaming batch inserts.
 
 use super::schema::SchemaGenerator;
+use crate::config::ClickHouseConfig;
 use crate::generator::{EdgeRecord, OrganizationData};
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
@@ -41,18 +42,95 @@ impl ClickHouseWriter {
         Self { client }
     }
 
-    pub async fn create_schemas(&self, ontology: &Ontology) -> Result<()> {
-        let generator = SchemaGenerator::new(ontology);
+    pub fn with_config(config: &ClickHouseConfig) -> Self {
+        let client = Client::default()
+            .with_url(&config.url)
+            .with_option("send_timeout", config.client.send_timeout.to_string())
+            .with_option("receive_timeout", config.client.receive_timeout.to_string())
+            .with_option(
+                "max_insert_block_size",
+                config.client.max_insert_block_size.to_string(),
+            );
+        Self { client }
+    }
+
+    pub async fn create_schemas(
+        &self,
+        ontology: &Ontology,
+        config: &ClickHouseConfig,
+    ) -> Result<()> {
+        let generator = SchemaGenerator::new(ontology, &config.schema);
 
         println!("Dropping existing tables...");
-        for drop_sql in generator.generate_drop_all() {
+        for drop_sql in generator.generate_drop_tables() {
             self.client.query(&drop_sql).execute().await?;
         }
 
         println!("Creating tables...");
-        for (table_name, ddl) in generator.generate_all_ddl() {
+        for (table_name, ddl) in generator.generate_create_tables() {
             println!("  Creating {}...", table_name);
             self.client.query(&ddl).execute().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn add_indexes(&self, ontology: &Ontology, config: &ClickHouseConfig) -> Result<()> {
+        let generator = SchemaGenerator::new(ontology, &config.schema);
+
+        let add_statements = generator.generate_add_indexes();
+        if add_statements.is_empty() {
+            return Ok(());
+        }
+
+        println!("Adding indexes...");
+        for sql in add_statements {
+            println!(
+                "  {}",
+                sql.split_whitespace().take(8).collect::<Vec<_>>().join(" ")
+            );
+            self.client.query(&sql).execute().await?;
+        }
+
+        println!("Materializing indexes...");
+        for sql in generator.generate_materialize_indexes() {
+            self.client.query(&sql).execute().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn add_projections(
+        &self,
+        ontology: &Ontology,
+        config: &ClickHouseConfig,
+    ) -> Result<()> {
+        let generator = SchemaGenerator::new(ontology, &config.schema);
+
+        let add_statements = generator.generate_add_projections();
+        if add_statements.is_empty() {
+            return Ok(());
+        }
+
+        println!("Adding projections...");
+        for sql in add_statements {
+            println!(
+                "  {}",
+                sql.split_whitespace().take(8).collect::<Vec<_>>().join(" ")
+            );
+            self.client.query(&sql).execute().await?;
+        }
+
+        println!("Materializing projections (this may take a while)...");
+        for sql in generator.generate_materialize_projections() {
+            let start = std::time::Instant::now();
+            let table = sql.split_whitespace().nth(2).unwrap_or("?");
+            print!("  {}... ", table);
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+
+            self.client.query(&sql).execute().await?;
+
+            println!("done ({:.1}s)", start.elapsed().as_secs_f64());
         }
 
         Ok(())
@@ -109,6 +187,8 @@ impl ClickHouseWriter {
     }
 
     /// Row-based inserts since clickhouse-rs doesn't support direct Arrow inserts.
+    ///
+    /// Uses smaller chunks to reduce memory pressure on ClickHouse server.
     async fn write_batch_as_rows(&self, table_name: &str, batch: &RecordBatch) -> Result<()> {
         let num_rows = batch.num_rows();
         let num_cols = batch.num_columns();
@@ -121,8 +201,7 @@ impl ClickHouseWriter {
         let column_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         let columns_str = column_names.join(", ");
 
-        // Stream chunks directly instead of building all values first
-        let chunk_size = 5000; // Larger chunks for better throughput
+        let chunk_size = 5000;
         let mut chunk_values: Vec<String> = Vec::with_capacity(chunk_size);
 
         for row_idx in 0..num_rows {
@@ -138,7 +217,7 @@ impl ClickHouseWriter {
 
             if chunk_values.len() >= chunk_size {
                 let insert_sql = format!(
-                    "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
+                    "INSERT INTO {} ({}) VALUES {}",
                     table_name,
                     columns_str,
                     chunk_values.join(", ")
@@ -150,7 +229,7 @@ impl ClickHouseWriter {
 
         if !chunk_values.is_empty() {
             let insert_sql = format!(
-                "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
+                "INSERT INTO {} ({}) VALUES {}",
                 table_name,
                 columns_str,
                 chunk_values.join(", ")
