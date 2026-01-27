@@ -298,7 +298,10 @@ async fn text_format_field_order() {
         timestamp_pos < level_pos,
         "timestamp should come before level"
     );
-    assert!(level_pos < correlation_pos, "level should come before correlation_id");
+    assert!(
+        level_pos < correlation_pos,
+        "level should come before correlation_id"
+    );
     assert!(
         correlation_pos < message_pos,
         "correlation_id should come before message"
@@ -322,11 +325,9 @@ async fn json_format_escapes_special_characters() {
     });
 
     let output = test_writer.contents();
-    let json: serde_json::Value = serde_json::from_str(output.trim()).expect("valid JSON after escaping");
-    assert_eq!(
-        json["message"],
-        "message with \"quotes\" and \\ backslash"
-    );
+    let json: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("valid JSON after escaping");
+    assert_eq!(json["message"], "message with \"quotes\" and \\ backslash");
 }
 
 #[tokio::test]
@@ -346,7 +347,8 @@ async fn json_format_handles_newlines() {
     });
 
     let output = test_writer.contents();
-    let json: serde_json::Value = serde_json::from_str(output.trim()).expect("valid JSON with newlines");
+    let json: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("valid JSON with newlines");
     assert_eq!(json["message"], "line1\nline2\nline3");
 }
 
@@ -367,7 +369,8 @@ async fn json_format_handles_unicode() {
     });
 
     let output = test_writer.contents();
-    let json: serde_json::Value = serde_json::from_str(output.trim()).expect("valid JSON with unicode");
+    let json: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("valid JSON with unicode");
     assert_eq!(json["message"], "日本語 émojis 🎉 中文");
 }
 
@@ -388,7 +391,8 @@ async fn json_format_handles_empty_message() {
     });
 
     let output = test_writer.contents();
-    let json: serde_json::Value = serde_json::from_str(output.trim()).expect("valid JSON with empty message");
+    let json: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("valid JSON with empty message");
     assert_eq!(json["message"], "");
 }
 
@@ -413,7 +417,8 @@ async fn json_format_handles_multiple_fields() {
     });
 
     let output = test_writer.contents();
-    let json: serde_json::Value = serde_json::from_str(output.trim()).expect("valid JSON with fields");
+    let json: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("valid JSON with fields");
 
     assert_eq!(json["message"], "processing request");
     assert_eq!(json["user_id"], "user-123");
@@ -436,17 +441,18 @@ async fn json_format_handles_numeric_fields() {
         tracing::info!(
             count = 42_i64,
             size = 1024_u64,
-            ratio = 3.14_f64,
+            ratio = 1.5_f64,
             "numeric fields"
         );
     });
 
     let output = test_writer.contents();
-    let json: serde_json::Value = serde_json::from_str(output.trim()).expect("valid JSON with numerics");
+    let json: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("valid JSON with numerics");
 
     assert_eq!(json["count"], 42);
     assert_eq!(json["size"], 1024);
-    assert!((json["ratio"].as_f64().unwrap() - 3.14).abs() < 0.001);
+    assert!((json["ratio"].as_f64().unwrap() - 1.5).abs() < 0.001);
 }
 
 #[tokio::test]
@@ -466,7 +472,8 @@ async fn json_format_handles_boolean_fields() {
     });
 
     let output = test_writer.contents();
-    let json: serde_json::Value = serde_json::from_str(output.trim()).expect("valid JSON with booleans");
+    let json: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("valid JSON with booleans");
 
     assert_eq!(json["success"], true);
     assert_eq!(json["cached"], false);
