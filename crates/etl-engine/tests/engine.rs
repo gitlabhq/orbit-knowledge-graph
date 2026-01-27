@@ -10,15 +10,15 @@ use arrow::array::{Int32Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-use clickhouse_arrow::{ArrowClient, ClientBuilder};
-use etl_engine::clickhouse::{ClickHouseConfiguration, ClickHouseDestination};
+use etl_engine::clickhouse::{
+    ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination,
+};
 use etl_engine::configuration::EngineConfiguration;
 use etl_engine::engine::{Engine, EngineBuilder};
 use etl_engine::entities::Entity;
 use etl_engine::module::{Handler, HandlerContext, HandlerError, Module, ModuleRegistry};
 use etl_engine::nats::{NatsBroker, NatsConfiguration};
 use etl_engine::types::{Envelope, Event, Topic};
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serial_test::serial;
 use testcontainers::GenericImage;
@@ -178,8 +178,10 @@ impl TestContext {
     }
 
     async fn start_clickhouse() -> (testcontainers::ContainerAsync<GenericImage>, String) {
+        let http_port = ContainerPort::Tcp(8123);
+
         let container = GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
-            .with_exposed_port(ContainerPort::Tcp(9000))
+            .with_exposed_port(http_port)
             .with_env_var("CLICKHOUSE_USER", USERNAME)
             .with_env_var("CLICKHOUSE_PASSWORD", PASSWORD)
             .with_env_var("CLICKHOUSE_DB", DATABASE)
@@ -189,7 +191,7 @@ impl TestContext {
 
         let host = container.get_host().await.expect("failed to get host");
         let port = container
-            .get_host_port_ipv4(9000)
+            .get_host_port_ipv4(http_port)
             .await
             .expect("failed to get port");
 
@@ -199,7 +201,7 @@ impl TestContext {
             host.to_string()
         };
 
-        (container, format!("{host}:{port}"))
+        (container, format!("http://{host}:{port}"))
     }
 
     async fn create_nats_stream(url: &str) {
@@ -220,29 +222,22 @@ impl TestContext {
     async fn setup_clickhouse_table(endpoint: &str) {
         let client = Self::connect_clickhouse_with_retry(endpoint).await;
         client
-            .execute(
-                format!(
-                    "CREATE TABLE IF NOT EXISTS {DATABASE}.{TABLE} (
-                        id Int32,
-                        name String
-                    ) ENGINE = MergeTree() ORDER BY id"
-                ),
-                None,
-            )
+            .execute(&format!(
+                "CREATE TABLE IF NOT EXISTS {DATABASE}.{TABLE} (
+                    id Int32,
+                    name String
+                ) ENGINE = MergeTree() ORDER BY id"
+            ))
             .await
             .expect("failed to create table");
     }
 
-    async fn connect_clickhouse_with_retry(endpoint: &str) -> ArrowClient {
+    async fn connect_clickhouse_with_retry(endpoint: &str) -> ArrowClickHouseClient {
         for attempt in 1..=30 {
-            match ClientBuilder::new()
-                .with_endpoint(endpoint)
-                .with_username(USERNAME)
-                .with_password(PASSWORD)
-                .build_arrow()
-                .await
-            {
-                Ok(client) => return client,
+            let client = ArrowClickHouseClient::new(endpoint, "default", USERNAME, Some(PASSWORD));
+
+            match client.execute("SELECT 1").await {
+                Ok(_) => return client,
                 Err(error) if attempt == 30 => {
                     panic!("failed to connect to ClickHouse after 30 attempts: {error}")
                 }
@@ -288,24 +283,17 @@ impl TestContext {
     }
 
     async fn query_count(&self) -> u64 {
-        let client = ClientBuilder::new()
-            .with_endpoint(&self.clickhouse_endpoint)
-            .with_database(DATABASE)
-            .with_username(USERNAME)
-            .with_password(PASSWORD)
-            .build_arrow()
-            .await
-            .expect("failed to connect");
+        let client = ArrowClickHouseClient::new(
+            &self.clickhouse_endpoint,
+            DATABASE,
+            USERNAME,
+            Some(PASSWORD),
+        );
 
-        let batches: Vec<RecordBatch> = client
-            .query(format!("SELECT count() FROM {TABLE}"), None)
+        let batches = client
+            .query_arrow(&format!("SELECT count() FROM {TABLE}"))
             .await
-            .expect("query failed")
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .expect("failed to collect");
+            .expect("query failed");
 
         batches[0]
             .column(0)
