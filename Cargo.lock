@@ -5553,12 +5553,14 @@ dependencies = [
  "fake",
  "indicatif",
  "ontology",
+ "query-engine",
  "rayon",
  "serde",
  "serde_json",
  "serde_yaml",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

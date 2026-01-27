@@ -158,6 +158,18 @@ run_populate() {
     fi
 }
 
+# Run query evaluation
+run_evaluate() {
+    log_info "Building and running query evaluation..."
+    cd "$REPO_ROOT"
+    
+    cargo run --release --bin evaluate -- \
+        --queries fixtures/queries/sdlc_queries.json \
+        --ontology fixtures/ontology \
+        --clickhouse-url "http://localhost:${CLICKHOUSE_PORT}" \
+        "$@"
+}
+
 # Show ClickHouse status
 show_status() {
     echo ""
@@ -194,6 +206,7 @@ Commands:
     restart     Restart ClickHouse container
     status      Show ClickHouse status and table statistics
     populate    Start ClickHouse and populate with fake data
+    evaluate    Run SDLC queries and collect statistics
     help        Show this help message
 
 Populate Options (passed to the simulator binary):
@@ -209,6 +222,15 @@ Populate Options (passed to the simulator binary):
     --parallel               Generate organizations in parallel (faster, more CPU)
     --dry-run                Print plan without executing
 
+Evaluate Options (passed to the evaluate binary):
+    --queries PATH           Path to queries JSON file (default: fixtures/queries/sdlc_queries.json)
+    --sample-size N          IDs to sample per entity type (default: 100)
+    --format FORMAT          Output format: text, json, markdown (default: text)
+    --output PATH            Write report to file (default: stdout)
+    --iterations N           Run queries multiple times (default: 1)
+    --filter PATTERN         Only run queries matching pattern
+    --verbose                Verbose output
+
 Environment Variables:
     CLICKHOUSE_PORT             HTTP port (default: 8123)
     CLICKHOUSE_NATIVE_PORT      Native port (default: 9000)
@@ -222,6 +244,9 @@ Examples:
     $(basename "$0") populate --nodes-per-type 500 --node-count User=1000
     $(basename "$0") populate --traversal-ids 5000 --max-traversal-depth 6
     $(basename "$0") populate --dry-run           # Preview without executing
+    $(basename "$0") evaluate                     # Evaluate all SDLC queries
+    $(basename "$0") evaluate --format markdown   # Output as markdown
+    $(basename "$0") evaluate --filter "MR"       # Only MR-related queries
     $(basename "$0") status                       # Check status and row counts
     $(basename "$0") clean                        # Remove container and data
 EOF
@@ -266,6 +291,13 @@ main() {
             wait_for_clickhouse
             run_populate "$@"
             show_status
+            ;;
+        evaluate)
+            ensure_colima
+            ensure_docker
+            start_clickhouse
+            wait_for_clickhouse
+            run_evaluate "$@"
             ;;
         help|--help|-h)
             usage

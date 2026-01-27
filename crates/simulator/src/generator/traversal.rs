@@ -66,114 +66,74 @@ impl TraversalIdGenerator {
     }
 }
 
-/// Node in the namespace tree.
-struct TrieNode {
-    /// Full traversal path from root to this node.
-    path: String,
-    /// Child nodes.
-    children: Vec<TrieNode>,
-}
-
-impl TrieNode {
-    fn new(path: String) -> Self {
-        Self {
-            path,
-            children: Vec::new(),
-        }
-    }
-
-    /// Collect all traversal IDs from this subtree (breadth-first for natural ordering).
-    fn collect_ids(&self, result: &mut Vec<String>) {
-        result.push(self.path.clone());
-        for child in &self.children {
-            child.collect_ids(result);
-        }
-    }
-
-    /// Count total nodes in subtree.
-    fn count(&self) -> usize {
-        1 + self.children.iter().map(|c| c.count()).sum::<usize>()
-    }
-}
-
 /// Generate a trie of traversal IDs.
 ///
 /// Builds a tree where each node has a globally unique, monotonically increasing ID.
 /// The tree is built breadth-first to distribute nodes across depths.
+/// Uses a flat Vec with indices to avoid unsafe pointer manipulation.
 fn generate_trie(org_id: u32, count: usize, max_depth: usize) -> Vec<String> {
     if count == 0 {
         return vec![];
     }
 
     let root_id = org_id as u64;
-    let mut root = TrieNode::new(root_id.to_string());
 
     if count == 1 || max_depth == 1 {
-        return vec![root.path];
+        return vec![root_id.to_string()];
     }
 
-    // Next ID to assign (starts after org_id, but we use a separate counter)
-    let mut next_id = root_id + 1;
+    // Store nodes as (path, depth) in a flat vec - indices are stable
+    let mut nodes: Vec<String> = Vec::with_capacity(count);
+    nodes.push(root_id.to_string());
 
-    // Calculate branching factor to achieve target count within max_depth
-    // For a balanced tree: count ≈ (branching_factor^max_depth - 1) / (branching_factor - 1)
-    // Solve for branching_factor given count and max_depth
+    // Track which nodes at each depth can have children added
+    // Store indices into the nodes vec
+    let mut current_level: Vec<usize> = vec![0];
+
+    let mut next_id = root_id + 1;
     let branching_factor = calculate_branching_factor(count, max_depth);
 
-    // Build tree level by level (breadth-first)
-    let mut current_level: Vec<*mut TrieNode> = vec![&mut root as *mut TrieNode];
-
     for depth in 1..max_depth {
-        if root.count() >= count {
+        if nodes.len() >= count {
             break;
         }
 
         let mut next_level = Vec::new();
 
-        for node_ptr in &current_level {
-            if root.count() >= count {
+        for &parent_idx in &current_level {
+            if nodes.len() >= count {
                 break;
             }
 
-            // Determine how many children this node should have
-            // Add some variance to make it more realistic
             let children_to_add = if depth == 1 {
                 // First level gets more children to create wider top
-                branching_factor.min(count - root.count())
+                branching_factor.min(count - nodes.len())
             } else {
                 // Deeper levels get fewer children
                 let max_children = (branching_factor as f64 * 0.7).ceil() as usize;
-                max_children.max(1).min(count - root.count())
+                max_children.max(1).min(count - nodes.len())
             };
 
-            // SAFETY: We only access nodes we've created and don't invalidate pointers
-            let node = unsafe { &mut **node_ptr };
+            let parent_path = nodes[parent_idx].clone();
 
             for _ in 0..children_to_add {
-                if root.count() >= count {
+                if nodes.len() >= count {
                     break;
                 }
 
-                let child_path = format!("{}/{}", node.path, next_id);
-                let child = TrieNode::new(child_path);
+                let child_path = format!("{}/{}", parent_path, next_id);
                 next_id += 1;
-                node.children.push(child);
-            }
-
-            // Add new children to next level
-            for child in &mut node.children {
-                next_level.push(child as *mut TrieNode);
+                let child_idx = nodes.len();
+                nodes.push(child_path);
+                next_level.push(child_idx);
             }
         }
 
         current_level = next_level;
     }
 
-    // Collect all traversal IDs
-    let mut result = Vec::with_capacity(count);
-    root.collect_ids(&mut result);
-    result.truncate(count);
-    result
+    nodes.truncate(count);
+    nodes
 }
 
 /// Calculate optimal branching factor to achieve target node count within max_depth.

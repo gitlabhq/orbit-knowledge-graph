@@ -15,6 +15,7 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 
 # Simulator-specific dependencies
 clickhouse = { version = "0.14", features = ["inserter"] }
@@ -24,7 +25,12 @@ indicatif = "0.18"
 
 # Internal crates
 ontology = { path = "../ontology" }
+query-engine = { path = "../query-engine" }
 
 [[bin]]
 name = "simulate"
 path = "src/bin/generate.rs"
+
+[[bin]]
+name = "evaluate"
+path = "src/bin/evaluate.rs"
