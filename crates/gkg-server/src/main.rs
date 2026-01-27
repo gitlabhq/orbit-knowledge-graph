@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::config::AppConfig;
+use gkg_server::grpc::Server as GrpcServer;
 use gkg_server::indexer;
 use gkg_server::shutdown;
-use gkg_server::webserver::Server;
+use gkg_server::webserver::Server as HttpServer;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -22,14 +25,36 @@ async fn main() -> anyhow::Result<()> {
 
     let result = match args.mode {
         Mode::Indexer => indexer::run(&config, shutdown).await.map_err(Into::into),
-        Mode::Webserver => {
-            let validator = JwtValidator::new(&config.jwt_secret, config.jwt_clock_skew_secs)?;
-            let server = Server::bind(config.bind_address, args.mode, validator).await?;
-            server.run().await.map_err(Into::into)
-        }
+        Mode::Webserver => run_webserver(args.mode, config).await,
     };
 
     signal_task.abort();
 
     result
+}
+
+/// Run both HTTP and gRPC servers in parallel
+async fn run_webserver(mode: Mode, config: AppConfig) -> anyhow::Result<()> {
+    let validator = Arc::new(JwtValidator::new(
+        &config.jwt_secret,
+        config.jwt_clock_skew_secs,
+    )?);
+
+    // HTTP server for health checks and metrics
+    let http_server = HttpServer::bind(config.bind_address, mode, (*validator).clone()).await?;
+    info!(addr = %config.bind_address, "HTTP server bound");
+
+    // gRPC server for Knowledge Graph service
+    let grpc_server = GrpcServer::new(config.grpc_bind_address, validator);
+    info!(addr = %config.grpc_bind_address, "gRPC server starting");
+
+    // Run both servers concurrently
+    tokio::select! {
+        res = http_server.run() => {
+            res.map_err(Into::into)
+        }
+        res = grpc_server.run() => {
+            res.map_err(Into::into)
+        }
+    }
 }
