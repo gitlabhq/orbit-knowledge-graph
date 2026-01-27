@@ -4,14 +4,14 @@
 
 use std::sync::Arc;
 
-use arrow::array::{BinaryArray, UInt8Array, UInt64Array};
+use arrow::array::{BooleanArray, StringArray, UInt64Array};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use clickhouse_arrow::{ArrowClient, ClientBuilder};
-use etl_engine::clickhouse::{ClickHouseConfiguration, ClickHouseDestination};
+use etl_engine::clickhouse::{
+    ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination,
+};
 use etl_engine::module::{HandlerContext, Module};
 use etl_engine::testkit::{MockMetricCollector, MockNatsServices, TestEnvelopeFactory};
-use futures::StreamExt;
 use gkg_server::indexer::modules::SdlcModule;
 use serial_test::serial;
 use testcontainers::GenericImage;
@@ -54,42 +54,32 @@ impl TestContext {
         ClickHouseDestination::new(self.config.clone()).expect("failed to create destination")
     }
 
-    async fn create_client(&self) -> ArrowClient {
-        ClientBuilder::new()
-            .with_endpoint(format!("{}:{}", self.host, self.port))
-            .with_database(TEST_DATABASE)
-            .with_username(TEST_USERNAME)
-            .with_password(TEST_PASSWORD)
-            .build_arrow()
-            .await
-            .expect("failed to connect")
+    fn create_client(&self) -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(
+            &format!("http://{}:{}", self.host, self.port),
+            TEST_DATABASE,
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+        )
     }
 
     async fn query(&self, sql: &str) -> Vec<RecordBatch> {
-        let client = self.create_client().await;
-        client
-            .query(sql, None)
-            .await
-            .expect("query failed")
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .expect("failed to collect results")
+        let client = self.create_client();
+        client.query_arrow(sql).await.expect("query failed")
     }
 
     async fn execute(&self, sql: &str) {
-        let client = self.create_client().await;
-        client.execute(sql, None).await.expect("execute failed");
+        let client = self.create_client();
+        client.execute(sql).await.expect("execute failed");
     }
 }
 
 async fn start_clickhouse_container() -> (testcontainers::ContainerAsync<GenericImage>, String, u16)
 {
-    let native_port = ContainerPort::Tcp(9000);
+    let http_port = ContainerPort::Tcp(8123);
 
     let container = GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
-        .with_exposed_port(native_port)
+        .with_exposed_port(http_port)
         .with_env_var("CLICKHOUSE_USER", TEST_USERNAME)
         .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
         .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
@@ -103,9 +93,9 @@ async fn start_clickhouse_container() -> (testcontainers::ContainerAsync<Generic
         .expect("failed to get container host");
 
     let port = container
-        .get_host_port_ipv4(native_port)
+        .get_host_port_ipv4(http_port)
         .await
-        .expect("failed to get ClickHouse native port");
+        .expect("failed to get ClickHouse HTTP port");
 
     let host = if host.to_string() == "localhost" {
         "127.0.0.1".to_string()
@@ -119,14 +109,15 @@ async fn start_clickhouse_container() -> (testcontainers::ContainerAsync<Generic
 async fn setup_database(host: &str, port: u16) {
     let mut attempts = 0;
     let client = loop {
-        match ClientBuilder::new()
-            .with_endpoint(format!("{host}:{port}"))
-            .with_username(TEST_USERNAME)
-            .with_password(TEST_PASSWORD)
-            .build_arrow()
-            .await
-        {
-            Ok(client) => break client,
+        let client = ArrowClickHouseClient::new(
+            &format!("http://{host}:{port}"),
+            "default",
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+        );
+
+        match client.execute("SELECT 1").await {
+            Ok(_) => break client,
             Err(_) if attempts < MAX_CONNECTION_ATTEMPTS => {
                 attempts += 1;
                 tokio::time::sleep(std::time::Duration::from_millis(CONNECTION_RETRY_DELAY_MS))
@@ -142,7 +133,7 @@ async fn setup_database(host: &str, port: u16) {
             continue;
         }
         client
-            .execute(statement, None)
+            .execute(statement)
             .await
             .unwrap_or_else(|e| panic!("failed to execute schema statement: {e}\n{statement}"));
     }
@@ -151,7 +142,7 @@ async fn setup_database(host: &str, port: u16) {
 fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
     ClickHouseConfiguration {
         database: TEST_DATABASE.to_string(),
-        url: format!("{host}:{port}"),
+        url: format!("http://{host}:{port}"),
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
     }
@@ -170,10 +161,6 @@ fn create_payload(watermark: DateTime<Utc>) -> String {
         "watermark": watermark.to_rfc3339()
     })
     .to_string()
-}
-
-fn binary_as_str(array: &BinaryArray, index: usize) -> &str {
-    std::str::from_utf8(array.value(index)).expect("invalid UTF-8")
 }
 
 #[tokio::test]
@@ -234,23 +221,23 @@ async fn user_handler_processes_and_transforms_users() {
         .column_by_name("user_type")
         .expect("user_type column should exist")
         .as_any()
-        .downcast_ref::<BinaryArray>()
-        .expect("user_type should be BinaryArray");
+        .downcast_ref::<StringArray>()
+        .expect("user_type should be StringArray");
 
-    assert_eq!(binary_as_str(user_type_column, 0), "human");
-    assert_eq!(binary_as_str(user_type_column, 1), "support_bot");
-    assert_eq!(binary_as_str(user_type_column, 2), "service_user");
+    assert_eq!(user_type_column.value(0), "human");
+    assert_eq!(user_type_column.value(1), "support_bot");
+    assert_eq!(user_type_column.value(2), "service_user");
 
     let is_admin_column = batch
         .column_by_name("is_admin")
         .expect("is_admin column should exist")
         .as_any()
-        .downcast_ref::<UInt8Array>()
-        .expect("is_admin should be UInt8Array");
+        .downcast_ref::<BooleanArray>()
+        .expect("is_admin should be BooleanArray");
 
-    assert_eq!(is_admin_column.value(0), 1);
-    assert_eq!(is_admin_column.value(1), 0);
-    assert_eq!(is_admin_column.value(2), 0);
+    assert!(is_admin_column.value(0));
+    assert!(!is_admin_column.value(1));
+    assert!(!is_admin_column.value(2));
 }
 
 #[tokio::test]
@@ -315,8 +302,8 @@ async fn user_handler_uses_watermark_for_incremental_processing() {
     let username_array = usernames[0]
         .column(0)
         .as_any()
-        .downcast_ref::<BinaryArray>()
-        .expect("username should be BinaryArray");
+        .downcast_ref::<StringArray>()
+        .expect("username should be StringArray");
 
-    assert_eq!(binary_as_str(username_array, 0), "new_user");
+    assert_eq!(username_array.value(0), "new_user");
 }

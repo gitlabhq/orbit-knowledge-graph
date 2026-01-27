@@ -1,10 +1,8 @@
 //! Correlation ID generation and propagation.
-//!
-//! This module provides correlation ID support for distributed tracing across
-//! HTTP and gRPC services.
 
 pub mod context;
 pub mod id;
+mod propagator;
 
 #[cfg(feature = "http")]
 pub mod http;

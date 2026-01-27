@@ -1,24 +1,44 @@
-//! Context storage for correlation ID propagation.
-//!
-//! Provides mechanisms to store and retrieve correlation IDs in async contexts.
+//! Context storage for correlation ID propagation using OpenTelemetry.
+
+use opentelemetry::{Context, KeyValue, baggage::BaggageExt};
 
 use crate::correlation::id::CorrelationId;
 
-tokio::task_local! {
-    /// Task-local storage for correlation ID.
-    pub static CORRELATION_ID: CorrelationId;
-}
+pub const BAGGAGE_CORRELATION_ID: &str = "correlation_id";
 
-/// Extension type for storing correlation ID in request extensions.
-///
-/// Used with HTTP request extensions and gRPC request extensions.
 #[derive(Clone, Debug)]
 pub struct CorrelationIdExt(pub CorrelationId);
 
-/// Run a future with a correlation ID in the task-local context.
-///
-/// The correlation ID will be available via [`current`] for the duration
-/// of the future execution.
+#[derive(Clone)]
+pub struct OtelContextExt(pub Context);
+
+/// Get the current correlation ID from OpenTelemetry context.
+#[must_use]
+pub fn current() -> Option<CorrelationId> {
+    get_from_context(&Context::current())
+}
+
+#[must_use]
+pub fn get_from_context(cx: &Context) -> Option<CorrelationId> {
+    cx.baggage()
+        .get(BAGGAGE_CORRELATION_ID)
+        .map(|v| CorrelationId::from_string(v.to_string()))
+}
+
+#[must_use]
+pub fn current_or_generate() -> CorrelationId {
+    current().unwrap_or_else(CorrelationId::generate)
+}
+
+#[must_use]
+pub fn with_correlation_id(id: CorrelationId) -> Context {
+    Context::current().with_baggage(vec![KeyValue::new(
+        BAGGAGE_CORRELATION_ID,
+        id.into_string(),
+    )])
+}
+
+/// Run a future with a correlation ID in the OpenTelemetry context.
 ///
 /// # Example
 ///
@@ -28,8 +48,7 @@ pub struct CorrelationIdExt(pub CorrelationId);
 /// async fn handler() {
 ///     let id = CorrelationId::generate();
 ///     context::scope(id, async {
-///         // correlation ID is available here
-///         let current = context::current();
+///         let current = context::current(); // returns Some(id)
 ///     }).await;
 /// }
 /// ```
@@ -37,34 +56,18 @@ pub async fn scope<F, T>(id: CorrelationId, f: F) -> T
 where
     F: std::future::Future<Output = T>,
 {
-    CORRELATION_ID.scope(id, f).await
+    use opentelemetry::trace::FutureExt;
+    let cx = with_correlation_id(id);
+    f.with_context(cx).await
 }
 
-/// Run synchronous code with a correlation ID in the task-local context.
-///
-/// This is useful for running code in poll methods where async isn't available.
 pub fn sync_scope<F, T>(id: CorrelationId, f: F) -> T
 where
     F: FnOnce() -> T,
 {
-    CORRELATION_ID.sync_scope(id, f)
-}
-
-/// Get the current correlation ID from the task-local context.
-///
-/// Returns `None` if no correlation ID has been set in the current context.
-#[must_use]
-pub fn current() -> Option<CorrelationId> {
-    CORRELATION_ID.try_with(|id| id.clone()).ok()
-}
-
-/// Get the current correlation ID or generate a new one.
-///
-/// If a correlation ID exists in the task-local context, returns it.
-/// Otherwise, generates and returns a new ULID-based correlation ID.
-#[must_use]
-pub fn current_or_generate() -> CorrelationId {
-    current().unwrap_or_else(CorrelationId::generate)
+    let cx = with_correlation_id(id);
+    let _guard = cx.attach();
+    f()
 }
 
 #[cfg(test)]
@@ -94,7 +97,21 @@ mod tests {
     #[tokio::test]
     async fn current_or_generate_creates_new_outside_scope() {
         let result = current_or_generate();
-        // Should return a valid ULID (26 chars)
         assert_eq!(result.as_str().len(), 26);
+    }
+
+    #[test]
+    fn sync_scope_provides_correlation_id() {
+        let id = CorrelationId::from_string("sync-test-id");
+        let result = sync_scope(id.clone(), current);
+        assert_eq!(result, Some(id));
+    }
+
+    #[test]
+    fn with_correlation_id_creates_context() {
+        let id = CorrelationId::from_string("context-test");
+        let cx = with_correlation_id(id.clone());
+        let extracted = get_from_context(&cx);
+        assert_eq!(extracted, Some(id));
     }
 }

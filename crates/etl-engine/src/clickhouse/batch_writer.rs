@@ -14,20 +14,17 @@
 
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-use clickhouse_arrow::{ArrowFormat, Client};
-use futures::StreamExt;
 
+use super::arrow_client::ArrowClickHouseClient;
 use crate::destination::{BatchWriter, DestinationError};
 
-use super::error::ClickHouseError;
-
 pub(crate) struct ClickHouseBatchWriter {
-    client: Client<ArrowFormat>,
+    client: ArrowClickHouseClient,
     table: String,
 }
 
 impl ClickHouseBatchWriter {
-    pub(crate) fn new(client: Client<ArrowFormat>, table: String) -> Self {
+    pub(crate) fn new(client: ArrowClickHouseClient, table: String) -> Self {
         Self { client, table }
     }
 }
@@ -39,17 +36,7 @@ impl BatchWriter for ClickHouseBatchWriter {
             return Ok(());
         }
 
-        let query = format!("INSERT INTO {} FORMAT Native", self.table);
-
-        let mut stream = self
-            .client
-            .insert_many(&query, batches.to_vec(), None)
-            .await
-            .map_err(ClickHouseError::Insert)?;
-
-        while let Some(result) = stream.next().await {
-            result.map_err(ClickHouseError::Insert)?;
-        }
+        self.client.insert_arrow(&self.table, batches).await?;
 
         Ok(())
     }
