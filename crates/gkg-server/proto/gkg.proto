@@ -1,0 +1,90 @@
+// Knowledge Graph gRPC service definition
+// Supports bidirectional streaming for tool execution with redaction flow
+
+syntax = "proto3";
+
+package gkg.v1;
+
+// Knowledge Graph service for tool execution
+service KnowledgeGraphService {
+  // List all available tools with their schemas
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+
+  // Execute a tool with bidirectional streaming for redaction:
+  // 1. Client sends ExecuteToolRequest
+  // 2. Server sends RedactionRequired with resources to check
+  // 3. Client sends RedactionResponse with authorized resources
+  // 4. Server sends ToolResult with redacted, context-engineered response
+  rpc ExecuteTool(stream ExecuteToolMessage) returns (stream ExecuteToolMessage);
+}
+
+message ListToolsRequest {
+  // Empty - user context comes from JWT
+}
+
+message ListToolsResponse {
+  repeated ToolDefinition tools = 1;
+}
+
+message ToolDefinition {
+  string name = 1;
+  string description = 2;
+  string parameters_json_schema = 3; // JSON Schema as string
+}
+
+message ExecuteToolMessage {
+  oneof message {
+    // Client -> Server: Initial tool execution request
+    ExecuteToolRequest request = 1;
+
+    // Server -> Client: Resources that need permission checks
+    RedactionRequired redaction_required = 2;
+
+    // Client -> Server: Results of permission checks
+    RedactionResponse redaction_response = 3;
+
+    // Server -> Client: Final context-engineered result
+    ToolResult result = 4;
+
+    // Either direction: Error
+    ToolError error = 5;
+  }
+}
+
+// Client -> Server: Initial request
+message ExecuteToolRequest {
+  string tool_name = 1;
+  string arguments_json = 2;
+}
+
+// Server -> Client: Resources needing authorization checks
+message RedactionRequired {
+  string result_id = 1;  // Correlation ID for this result
+  repeated ResourceCheck resources = 2;
+}
+
+message ResourceCheck {
+  string resource_type = 1;  // "issues", "merge_requests", "projects", etc.
+  repeated int64 ids = 2;    // Resource IDs to check
+}
+
+// Client -> Server: Authorization results from Rails
+message RedactionResponse {
+  string result_id = 1;  // Must match result_id from RedactionRequired
+  repeated ResourceAuthorization authorizations = 2;
+}
+
+message ResourceAuthorization {
+  string resource_type = 1;
+  map<int64, bool> authorized = 2;  // id -> authorized (true/false)
+}
+
+// Server -> Client: Final redacted and context-engineered result
+message ToolResult {
+  string result_json = 1;  // Redacted, context-engineered result
+}
+
+message ToolError {
+  string code = 1;    // e.g., "tool_not_found", "invalid_arguments", "execution_error"
+  string message = 2;
+}
