@@ -3498,16 +3498,15 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures-core",
+ "futures-util",
  "http",
- "http-body",
- "pin-project-lite",
+ "opentelemetry",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tonic",
  "tower",
- "tower-http",
  "tracing",
  "tracing-subscriber",
  "ulid",
@@ -4030,6 +4029,19 @@ name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+
+[[package]]
+name = "opentelemetry"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaf416e4cb72756655126f7dd7bb0af49c674f4c1b9903e80c009e0c37e552e6"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "opentelemetry-semantic-conventions"
@@ -6391,7 +6403,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
- "uuid",
 ]
 
 [[package]]
