@@ -7,13 +7,10 @@ use gkg_server::shutdown;
 use gkg_server::webserver::Server;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    labkit_rs::logging::init();
 
     let args = Args::parse();
     let config = AppConfig::from_env()?;

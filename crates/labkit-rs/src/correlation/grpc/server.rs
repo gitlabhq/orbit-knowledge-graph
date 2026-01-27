@@ -16,15 +16,16 @@ use pin_project_lite::pin_project;
 use tonic::{Request, Status};
 
 use crate::correlation::context::{self, CorrelationIdExt};
-use crate::correlation::id::{
-    CorrelationId, GRPC_METADATA_CORRELATION_ID, LOG_FIELD_CORRELATION_ID,
-};
+use crate::correlation::id::{CorrelationId, GRPC_METADATA_CORRELATION_ID};
 
 /// Server interceptor that extracts correlation ID from incoming gRPC requests.
 ///
 /// Extracts from the `x-gitlab-correlation-id` metadata key. If not present,
 /// generates a new ULID-based correlation ID. The correlation ID is stored
-/// in request extensions and recorded on the current tracing span.
+/// in request extensions for handler access.
+///
+/// Use [`with_correlation`] to wrap your handler, which sets up the task-local
+/// context for automatic correlation ID inclusion in logs.
 ///
 /// # Example
 ///
@@ -39,15 +40,9 @@ use crate::correlation::id::{
 /// ```
 pub fn server_interceptor(mut request: Request<()>) -> Result<Request<()>, Status> {
     let correlation_id = extract_correlation_id(&request);
-
-    // Record on tracing span
-    tracing::Span::current().record(LOG_FIELD_CORRELATION_ID, correlation_id.as_str());
-
-    // Store in request extensions for handler access
     request
         .extensions_mut()
         .insert(CorrelationIdExt(correlation_id));
-
     Ok(request)
 }
 
