@@ -14,11 +14,13 @@ stages:
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: rust:latest
+  image: debian:bookworm-slim
   before_script:
+    - apt-get update && apt-get install -y curl build-essential pkg-config libssl-dev
     - curl https://mise.run | sh
     - export PATH="$HOME/.local/bin:$PATH"
-    - mise install
+    - eval "$(~/.local/bin/mise activate bash)"
+    - MISE_JOBS=1 mise install
 
 .test-template:
   extends:
