@@ -18,13 +18,26 @@ stages:
   before_script:
     - mise install
 
+.sccache-template:
+  variables:
+    CARGO_INCREMENTAL: "0"
+    SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
+    SCCACHE_GCS_KEY_PATH: "${SCCACHE_GCS_KEY}"
+    SCCACHE_GCS_RW_MODE: "READ_WRITE"
+  before_script:
+    - mise install
+    - |
+      if [ -n "${SCCACHE_GCS_KEY}" ]; then
+        export RUSTC_WRAPPER="sccache"
+        sccache --start-server || true
+      fi
+
 .test-template:
   extends:
     - .job-template
+    - .sccache-template
   variables:
     RUST_BACKTRACE: "1"
-  before_script:
-    - !reference [.job-template, before_script]
   artifacts:
     when: always
     reports:
@@ -68,9 +81,11 @@ lint-check:
   stage: lint
   extends:
     - .job-template
+    - .sccache-template
     - .mr-only-rules
   script:
     - cargo clippy --all-targets --all-features -- -D warnings
+    - sccache --show-stats || true
 
 # ------------------------------------------------------------------------------
 # Security Stage
@@ -142,6 +157,7 @@ unit-test:
   needs: []
   script:
     - cargo nextest run --profile ci --lib --bins
+    - sccache --show-stats || true
 
 integration-test:
   stage: test
@@ -156,10 +172,10 @@ integration-test:
     TESTCONTAINERS_HOST_OVERRIDE: docker
   needs: []
   before_script:
-    - !reference [.test-template, before_script]
-    - apt-get update && apt-get install -y docker.io
+    - !reference [.sccache-template, before_script]
   script:
     - cargo nextest run --profile ci --all-features --test '*' -j 1 --ignore-default-filter -E 'not package(gitaly-client)'
+    - sccache --show-stats || true
 
 gitaly-integration-test:
   stage: test
@@ -183,6 +199,7 @@ gitaly-integration-test:
     GITALY_CONNECTION_INFO: '{"address":"tcp://gitaly:8075","storage":"default","token":"secret_token"}'
   script:
     - cargo nextest run --profile ci -p gitaly-client --features integration
+    - sccache --show-stats || true
 
 # ------------------------------------------------------------------------------
 # Deploy Stage - Helm Charts
