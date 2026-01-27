@@ -11,6 +11,7 @@ GITALY_PROTO_ROOT = "~/gitlab/gdk/gitaly"
 "cargo:cargo-deny" = "0.19.0"
 "cargo:cargo-geiger" = "0.13.0"
 "cargo:cargo-cyclonedx" = "0.5.7"
+"sccache" = "0.13.0"
 
 [tasks.build]
 run = "cargo build --release"
