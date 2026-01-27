@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::array::{Array, TimestampMillisecondArray};
+use arrow::array::{Array, TimestampMicrosecondArray};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use etl_engine::clickhouse::ArrowClickHouseClient;
@@ -64,7 +64,7 @@ impl WatermarkStore for ClickHouseWatermarkStore {
         let timestamps = batch
             .column(0)
             .as_any()
-            .downcast_ref::<TimestampMillisecondArray>()
+            .downcast_ref::<TimestampMicrosecondArray>()
             .ok_or(WatermarkError::InvalidType)?;
 
         if timestamps.is_null(0) {
@@ -72,13 +72,13 @@ impl WatermarkStore for ClickHouseWatermarkStore {
         }
 
         let millis = timestamps.value(0);
-        Utc.timestamp_millis_opt(millis)
+        Utc.timestamp_micros(millis)
             .single()
             .ok_or(WatermarkError::InvalidTimestamp)
     }
 
     async fn set_users_watermark(&self, watermark: &DateTime<Utc>) -> Result<(), WatermarkError> {
-        let formatted_watermark = watermark.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+        let formatted_watermark = watermark.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
 
         self.client
             .query("INSERT INTO user_indexing_watermark (watermark) VALUES ({watermark:String})")
