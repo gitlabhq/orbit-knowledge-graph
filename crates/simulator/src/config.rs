@@ -67,9 +67,12 @@ pub struct ClickHouseConfig {
     /// Database name.
     #[serde(default = "default_database")]
     pub database: String,
-    /// Table engine settings.
+    /// Client connection settings.
     #[serde(default)]
-    pub engine: TableEngineConfig,
+    pub client: ClientConfig,
+    /// Schema settings.
+    #[serde(default)]
+    pub schema: SchemaConfig,
 }
 
 fn default_clickhouse_url() -> String {
@@ -85,84 +88,162 @@ impl Default for ClickHouseConfig {
         Self {
             url: default_clickhouse_url(),
             database: default_database(),
-            engine: TableEngineConfig::default(),
+            client: ClientConfig::default(),
+            schema: SchemaConfig::default(),
         }
     }
 }
 
-/// Table engine configuration for ClickHouse schemas.
+/// Client connection settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TableEngineConfig {
-    /// Engine type: ReplacingMergeTree, MergeTree, etc.
+pub struct ClientConfig {
+    /// Send timeout in seconds.
+    #[serde(default = "default_timeout")]
+    pub send_timeout: u32,
+    /// Receive timeout in seconds.
+    #[serde(default = "default_timeout")]
+    pub receive_timeout: u32,
+    /// Max rows per insert batch.
+    #[serde(default = "default_insert_block_size")]
+    pub max_insert_block_size: usize,
+}
+
+fn default_timeout() -> u32 {
+    3600
+}
+
+fn default_insert_block_size() -> usize {
+    100_000
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            send_timeout: default_timeout(),
+            receive_timeout: default_timeout(),
+            max_insert_block_size: default_insert_block_size(),
+        }
+    }
+}
+
+/// Schema configuration for tables.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaConfig {
+    /// Table engine type: MergeTree, ReplacingMergeTree, etc.
     #[serde(default = "default_engine_type")]
-    pub engine_type: String,
-    /// ORDER BY columns for node tables.
+    pub engine: String,
+    /// PRIMARY KEY columns for node tables (sparse index, not uniqueness constraint).
+    /// If empty, defaults to ORDER BY columns.
+    #[serde(default)]
+    pub node_primary_key: Vec<String>,
+    /// ORDER BY columns for node tables (physical sort order on disk).
     #[serde(default = "default_node_order_by")]
     pub node_order_by: Vec<String>,
+    /// PRIMARY KEY columns for edge table.
+    /// If empty, defaults to ORDER BY columns.
+    #[serde(default)]
+    pub edge_primary_key: Vec<String>,
     /// ORDER BY columns for edge table.
     #[serde(default = "default_edge_order_by")]
     pub edge_order_by: Vec<String>,
-    /// Additional indexes to create.
+    /// Index granularity (rows per granule).
+    #[serde(default = "default_index_granularity")]
+    pub index_granularity: u32,
+    /// Data skipping indexes.
     #[serde(default)]
     pub indexes: Vec<IndexConfig>,
-    /// Additional engine settings (TTL, partition by, etc).
+    /// Projections for bidirectional traversal.
+    #[serde(default)]
+    pub projections: Vec<ProjectionConfig>,
+    /// Additional MergeTree SETTINGS options.
+    ///
+    /// These are appended to the CREATE TABLE SETTINGS clause.
+    /// Common options:
+    /// - `min_bytes_for_wide_part`: Threshold for wide vs compact parts (default: 10MB)
+    /// - `merge_with_ttl_timeout`: TTL merge interval in seconds
+    /// - `storage_policy`: Named storage policy for tiered storage
+    /// - `ttl_only_drop_parts`: Only drop whole parts on TTL expiry (0 or 1)
+    ///
+    /// See: https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree#settings
     #[serde(default)]
     pub settings: HashMap<String, String>,
 }
 
 fn default_engine_type() -> String {
-    "ReplacingMergeTree".to_string()
+    "MergeTree".to_string()
 }
 
 fn default_node_order_by() -> Vec<String> {
     vec![
         "organization_id".to_string(),
-        "traversal_id".to_string(),
         "id".to_string(),
     ]
 }
 
 fn default_edge_order_by() -> Vec<String> {
     vec![
-        "relationship_kind".to_string(),
         "source_kind".to_string(),
         "source".to_string(),
+        "relationship_kind".to_string(),
     ]
 }
 
-impl Default for TableEngineConfig {
+fn default_index_granularity() -> u32 {
+    8192
+}
+
+impl Default for SchemaConfig {
     fn default() -> Self {
         Self {
-            engine_type: default_engine_type(),
+            engine: default_engine_type(),
+            node_primary_key: vec![],
             node_order_by: default_node_order_by(),
+            edge_primary_key: vec![],
             edge_order_by: default_edge_order_by(),
+            index_granularity: default_index_granularity(),
             indexes: vec![],
+            projections: vec![],
             settings: HashMap::new(),
         }
     }
 }
 
-/// Index configuration.
+/// Data skipping index configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndexConfig {
     /// Index name.
     pub name: String,
-    /// Target table (or "*" for all node tables).
+    /// Target table ("*" for all node tables, "edges" for edge table).
     pub table: String,
     /// Column expression to index.
     pub expression: String,
-    /// Index type: bloom_filter, minmax, set, etc.
+    /// Index type: bloom_filter, minmax, set, tokenbf_v1, ngrambf_v1.
     #[serde(rename = "type")]
     pub index_type: String,
-    /// Granularity.
-    #[serde(default = "default_granularity")]
+    /// Granularity (typically 1-8 for good selectivity).
+    #[serde(default = "default_index_granularity_small")]
     pub granularity: u32,
 }
 
-fn default_granularity() -> u32 {
-    1
+fn default_index_granularity_small() -> u32 {
+    4
+}
+
+/// Projection configuration for reverse lookups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectionConfig {
+    /// Projection name.
+    pub name: String,
+    /// Target table.
+    pub table: String,
+    /// Columns to include in projection (SELECT clause).
+    pub columns: Vec<String>,
+    /// ORDER BY columns for projection.
+    pub order_by: Vec<String>,
 }
 
 /// Data generation settings.

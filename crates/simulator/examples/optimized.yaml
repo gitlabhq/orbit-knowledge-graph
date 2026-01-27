@@ -1,0 +1,81 @@
+# Optimized configuration based on graphhouse spike learnings
+#
+# Key optimizations:
+# 1. MergeTree (not ReplacingMergeTree) for better write performance
+# 2. organization_id first in ORDER BY for tenant isolation
+# 3. Projections for reverse traversal (e.g., find MRs by author)
+# 4. Bloom filter indexes for FK lookups
+
+clickhouse:
+  url: http://localhost:8123
+  database: default
+
+  client:
+    send_timeout: 3600
+    receive_timeout: 3600
+    max_insert_block_size: 100000
+
+  schema:
+    engine: MergeTree
+    index_granularity: 8192
+
+    # Node tables: organization_id first for tenant isolation
+    # PRIMARY KEY = sparse index, ORDER BY = disk sort order
+    node_primary_key: [organization_id, id]
+    node_order_by: [organization_id, id]
+
+    # Edge table: ordered for forward traversal (source -> target)
+    edge_primary_key: [source_kind, source]
+    edge_order_by: [source_kind, source, relationship_kind]
+
+    # Data skipping indexes for FK lookups not in primary key
+    indexes:
+      # Bloom filter for target lookups (reverse traversal)
+      - name: idx_target
+        table: edges
+        expression: target
+        type: bloom_filter
+        granularity: 4
+
+      # Bloom filter for relationship filtering
+      - name: idx_relationship
+        table: edges
+        expression: relationship_kind
+        type: bloom_filter
+        granularity: 4
+
+    # Projections for reverse traversal (5x+ speedup)
+    projections:
+      # Find edges by target (reverse of source -> target)
+      - name: by_target
+        table: edges
+        columns: [source_kind, source, relationship_kind, target_kind, target]
+        order_by: [target_kind, target, relationship_kind]
+
+generation:
+  ontology_path: fixtures/ontology
+  output_dir: data
+  skip_if_present: true
+  organizations: 2
+  parallel: true
+  batch_size: 50000
+  traversal:
+    ids_per_org: 10000
+    max_depth: 5
+  nodes:
+    default_per_type: 1000
+    counts:
+      User: 5000
+      MergeRequest: 10000
+      Project: 500
+  edges:
+    per_source: 5
+
+evaluation:
+  queries_path: fixtures/queries/sdlc_queries.json
+  sample_size: 100
+  iterations: 3
+  skip_cache_warm: false
+  output:
+    format: markdown
+    path: benchmark_results.md

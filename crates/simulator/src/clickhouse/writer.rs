@@ -1,6 +1,7 @@
 //! ClickHouse data writer with streaming batch inserts.
 
 use super::schema::SchemaGenerator;
+use crate::config::ClickHouseConfig;
 use crate::generator::{EdgeRecord, OrganizationData};
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
@@ -41,18 +42,81 @@ impl ClickHouseWriter {
         Self { client }
     }
 
-    pub async fn create_schemas(&self, ontology: &Ontology) -> Result<()> {
-        let generator = SchemaGenerator::new(ontology);
+    pub fn with_config(config: &ClickHouseConfig) -> Self {
+        let client = Client::default()
+            .with_url(&config.url)
+            .with_option("send_timeout", config.client.send_timeout.to_string())
+            .with_option("receive_timeout", config.client.receive_timeout.to_string())
+            .with_option(
+                "max_insert_block_size",
+                config.client.max_insert_block_size.to_string(),
+            );
+        Self { client }
+    }
+
+    pub async fn create_schemas(&self, ontology: &Ontology, config: &ClickHouseConfig) -> Result<()> {
+        let generator = SchemaGenerator::new(ontology, &config.schema);
 
         println!("Dropping existing tables...");
-        for drop_sql in generator.generate_drop_all() {
+        for drop_sql in generator.generate_drop_tables() {
             self.client.query(&drop_sql).execute().await?;
         }
 
         println!("Creating tables...");
-        for (table_name, ddl) in generator.generate_all_ddl() {
+        for (table_name, ddl) in generator.generate_create_tables() {
             println!("  Creating {}...", table_name);
             self.client.query(&ddl).execute().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn add_indexes(&self, ontology: &Ontology, config: &ClickHouseConfig) -> Result<()> {
+        let generator = SchemaGenerator::new(ontology, &config.schema);
+
+        let add_statements = generator.generate_add_indexes();
+        if add_statements.is_empty() {
+            return Ok(());
+        }
+
+        println!("Adding indexes...");
+        for sql in add_statements {
+            println!("  {}", sql.split_whitespace().take(8).collect::<Vec<_>>().join(" "));
+            self.client.query(&sql).execute().await?;
+        }
+
+        println!("Materializing indexes...");
+        for sql in generator.generate_materialize_indexes() {
+            self.client.query(&sql).execute().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn add_projections(&self, ontology: &Ontology, config: &ClickHouseConfig) -> Result<()> {
+        let generator = SchemaGenerator::new(ontology, &config.schema);
+
+        let add_statements = generator.generate_add_projections();
+        if add_statements.is_empty() {
+            return Ok(());
+        }
+
+        println!("Adding projections...");
+        for sql in add_statements {
+            println!("  {}", sql.split_whitespace().take(8).collect::<Vec<_>>().join(" "));
+            self.client.query(&sql).execute().await?;
+        }
+
+        println!("Materializing projections (this may take a while)...");
+        for sql in generator.generate_materialize_projections() {
+            let start = std::time::Instant::now();
+            let table = sql.split_whitespace().nth(2).unwrap_or("?");
+            print!("  {}... ", table);
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+
+            self.client.query(&sql).execute().await?;
+
+            println!("done ({:.1}s)", start.elapsed().as_secs_f64());
         }
 
         Ok(())
