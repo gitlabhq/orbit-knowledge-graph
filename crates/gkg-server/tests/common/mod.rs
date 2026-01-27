@@ -1,0 +1,170 @@
+//! Shared test utilities for SDLC integration tests.
+
+#![allow(dead_code)]
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, Utc};
+use etl_engine::clickhouse::{
+    ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination,
+};
+use etl_engine::module::HandlerContext;
+use etl_engine::testkit::{MockMetricCollector, MockNatsServices};
+use testcontainers::core::{ContainerPort, ImageExt};
+use testcontainers::runners::AsyncRunner;
+use testcontainers::{ContainerAsync, GenericImage};
+
+const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
+const CLICKHOUSE_TAG: &str = "25.11";
+const CLICKHOUSE_HTTP_PORT: u16 = 8123;
+
+const TEST_DATABASE: &str = "test";
+const TEST_USERNAME: &str = "default";
+const TEST_PASSWORD: &str = "testpass";
+
+const MAX_CONNECTION_ATTEMPTS: u32 = 30;
+const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(500);
+
+const SCHEMA_SQL: &str = include_str!("../fixtures/schema.sql");
+
+pub struct TestContext {
+    _container: ContainerAsync<GenericImage>,
+    pub config: ClickHouseConfiguration,
+    url: String,
+}
+
+impl TestContext {
+    pub async fn new() -> Self {
+        let container = Self::start_container().await;
+        let url = Self::extract_url(&container).await;
+
+        Self::wait_for_ready(&url).await;
+        Self::run_schema(&url).await;
+
+        let config = ClickHouseConfiguration {
+            database: TEST_DATABASE.to_string(),
+            url: url.clone(),
+            username: TEST_USERNAME.to_string(),
+            password: Some(TEST_PASSWORD.to_string()),
+        };
+
+        Self {
+            _container: container,
+            config,
+            url,
+        }
+    }
+
+    pub fn create_destination(&self) -> ClickHouseDestination {
+        ClickHouseDestination::new(self.config.clone()).expect("failed to create destination")
+    }
+
+    pub fn create_handler_context(&self) -> HandlerContext {
+        HandlerContext::new(
+            Arc::new(self.create_destination()),
+            Arc::new(MockMetricCollector::new()),
+            Arc::new(MockNatsServices::new()),
+        )
+    }
+
+    pub async fn query(&self, sql: &str) -> Vec<RecordBatch> {
+        self.create_client()
+            .query_arrow(sql)
+            .await
+            .expect("query failed")
+    }
+
+    pub async fn execute(&self, sql: &str) {
+        self.create_client()
+            .execute(sql)
+            .await
+            .expect("execute failed");
+    }
+
+    fn create_client(&self) -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(&self.url, TEST_DATABASE, TEST_USERNAME, Some(TEST_PASSWORD))
+    }
+
+    async fn start_container() -> ContainerAsync<GenericImage> {
+        let port = ContainerPort::Tcp(CLICKHOUSE_HTTP_PORT);
+
+        GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
+            .with_exposed_port(port)
+            .with_env_var("CLICKHOUSE_USER", TEST_USERNAME)
+            .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
+            .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
+            .start()
+            .await
+            .expect("failed to start ClickHouse container")
+    }
+
+    async fn extract_url(container: &ContainerAsync<GenericImage>) -> String {
+        let host = container
+            .get_host()
+            .await
+            .expect("failed to get container host");
+
+        let port = container
+            .get_host_port_ipv4(ContainerPort::Tcp(CLICKHOUSE_HTTP_PORT))
+            .await
+            .expect("failed to get ClickHouse HTTP port");
+
+        let host = match host.to_string().as_str() {
+            "localhost" => "127.0.0.1".to_string(),
+            other => other.to_string(),
+        };
+
+        format!("http://{host}:{port}")
+    }
+
+    async fn wait_for_ready(url: &str) {
+        let client = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+
+        for attempt in 1..=MAX_CONNECTION_ATTEMPTS {
+            if client.execute("SELECT 1").await.is_ok() {
+                return;
+            }
+            if attempt == MAX_CONNECTION_ATTEMPTS {
+                panic!("ClickHouse not ready after {MAX_CONNECTION_ATTEMPTS} attempts");
+            }
+            tokio::time::sleep(CONNECTION_RETRY_DELAY).await;
+        }
+    }
+
+    async fn run_schema(url: &str) {
+        let client = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+
+        for statement in SCHEMA_SQL.split(';') {
+            let statement = statement.trim();
+            if statement.is_empty() {
+                continue;
+            }
+            client
+                .execute(statement)
+                .await
+                .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
+        }
+    }
+}
+
+pub fn create_user_payload(watermark: DateTime<Utc>) -> String {
+    serde_json::json!({
+        "watermark": watermark.to_rfc3339()
+    })
+    .to_string()
+}
+
+pub fn create_namespace_payload(
+    organization: i64,
+    namespace: i64,
+    watermark: DateTime<Utc>,
+) -> String {
+    serde_json::json!({
+        "organization": organization,
+        "namespace": namespace,
+        "watermark": watermark.to_rfc3339()
+    })
+    .to_string()
+}
