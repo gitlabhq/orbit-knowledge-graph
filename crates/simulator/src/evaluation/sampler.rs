@@ -100,10 +100,7 @@ impl ParameterSampler {
     ) -> Result<Vec<String>> {
         let table_name = ontology.table_name(entity)?;
 
-        let query = format!(
-            "SELECT DISTINCT {} FROM {} LIMIT 100",
-            field, table_name
-        );
+        let query = format!("SELECT DISTINCT {} FROM {} LIMIT 100", field, table_name);
 
         #[derive(Debug, Row, Deserialize)]
         struct StringRow {

@@ -1,6 +1,6 @@
 //! Query execution and statistics collection.
 
-use super::{QueryDefinition, ParameterSampler};
+use super::{ParameterSampler, QueryDefinition};
 use anyhow::Result;
 use clickhouse::Client;
 use ontology::Ontology;
@@ -87,11 +87,7 @@ impl QueryExecutor {
     }
 
     /// Execute a single query with sampled parameters.
-    pub async fn execute_query(
-        &mut self,
-        name: &str,
-        query: &QueryDefinition,
-    ) -> ExecutionResult {
+    pub async fn execute_query(&mut self, name: &str, query: &QueryDefinition) -> ExecutionResult {
         let start = Instant::now();
 
         // Substitute parameters with sampled values
@@ -150,7 +146,7 @@ impl QueryExecutor {
     }
 
     /// Execute all queries and return results.
-    /// 
+    ///
     /// Includes a small delay between queries to allow ClickHouse to recover
     /// from memory pressure.
     pub async fn execute_all(
@@ -161,16 +157,15 @@ impl QueryExecutor {
 
         for (name, query) in queries {
             let result = self.execute_query(name, query).await;
-            
+
             // If we hit a memory error, give ClickHouse time to recover
-            if !result.success {
-                if let Some(ref err) = result.error {
-                    if err.contains("MEMORY_LIMIT") || err.contains("network error") {
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    }
-                }
+            if !result.success
+                && let Some(ref err) = result.error
+                && (err.contains("MEMORY_LIMIT") || err.contains("network error"))
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
-            
+
             results.push(result);
         }
 
@@ -188,27 +183,24 @@ impl QueryExecutor {
             for node in nodes.iter_mut() {
                 if let Some(obj) = node.as_object_mut() {
                     // Check if this node has node_ids
-                    if obj.contains_key("node_ids") {
-                        if let Some(entity) = obj.get("entity").and_then(|e| e.as_str()) {
-                            // Get the current node_ids to determine how many we need
-                            let count = obj
-                                .get("node_ids")
-                                .and_then(|ids| ids.as_array())
-                                .map(|arr| arr.len())
-                                .unwrap_or(1);
+                    if obj.contains_key("node_ids")
+                        && let Some(entity) = obj.get("entity").and_then(|e| e.as_str())
+                    {
+                        // Get the current node_ids to determine how many we need
+                        let count = obj
+                            .get("node_ids")
+                            .and_then(|ids| ids.as_array())
+                            .map(|arr| arr.len())
+                            .unwrap_or(1);
 
-                            // Sample new IDs
-                            let sampled_ids = self
-                                .sampler
-                                .random_ids(entity, count, &self.ontology)
-                                .await?;
+                        // Sample new IDs
+                        let sampled_ids = self
+                            .sampler
+                            .random_ids(entity, count, &self.ontology)
+                            .await?;
 
-                            if !sampled_ids.is_empty() {
-                                obj.insert(
-                                    "node_ids".to_string(),
-                                    serde_json::to_value(&sampled_ids)?,
-                                );
-                            }
+                        if !sampled_ids.is_empty() {
+                            obj.insert("node_ids".to_string(), serde_json::to_value(&sampled_ids)?);
                         }
                     }
                 }
@@ -219,7 +211,7 @@ impl QueryExecutor {
     }
 
     /// Execute raw SQL and return row count.
-    /// 
+    ///
     /// For correctness testing, we just verify the query runs and count results.
     /// We add memory limits and execution time limits to prevent resource exhaustion.
     async fn execute_sql(&self, sql: &str) -> Result<u64> {
@@ -303,8 +295,11 @@ mod tests {
 
     #[test]
     fn test_execution_result_failure() {
-        let result =
-            ExecutionResult::failure("test".to_string(), "error".to_string(), Duration::from_millis(50));
+        let result = ExecutionResult::failure(
+            "test".to_string(),
+            "error".to_string(),
+            Duration::from_millis(50),
+        );
         assert!(!result.success);
         assert_eq!(result.error, Some("error".to_string()));
     }

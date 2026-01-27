@@ -5,9 +5,9 @@
 use anyhow::Result;
 use clap::Parser;
 use ontology::Ontology;
-use simulator::evaluation::{load_queries, QueryExecutor, Report, ReportFormat};
+use simulator::evaluation::{QueryExecutor, Report, ReportFormat, load_queries};
 use std::path::PathBuf;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Parser)]
 #[command(name = "evaluate")]
@@ -80,7 +80,11 @@ async fn main() -> Result<()> {
     if let Some(pattern) = &args.filter {
         let pattern_lower = pattern.to_lowercase();
         queries.retain(|name, _| name.to_lowercase().contains(&pattern_lower));
-        tracing::info!("Filtered to {} queries matching '{}'", queries.len(), pattern);
+        tracing::info!(
+            "Filtered to {} queries matching '{}'",
+            queries.len(),
+            pattern
+        );
     }
 
     if queries.is_empty() {

@@ -56,17 +56,16 @@ pub fn extract_parameters(query: &QueryDefinition) -> QueryParameters {
     for node in &query.nodes {
         if let Some(obj) = node.as_object() {
             // Check if this node has node_ids that are placeholders
-            if obj.contains_key("node_ids") {
-                if let Some(entity) = obj.get("entity").and_then(|e| e.as_str()) {
-                    if let Some(id) = obj.get("id").and_then(|i| i.as_str()) {
-                        // Store the node alias and entity type
-                        params
-                            .node_ids
-                            .entry(entity.to_string())
-                            .or_default()
-                            .push(id.to_string());
-                    }
-                }
+            if obj.contains_key("node_ids")
+                && let Some(entity) = obj.get("entity").and_then(|e| e.as_str())
+                && let Some(id) = obj.get("id").and_then(|i| i.as_str())
+            {
+                // Store the node alias and entity type
+                params
+                    .node_ids
+                    .entry(entity.to_string())
+                    .or_default()
+                    .push(id.to_string());
             }
         }
     }

@@ -133,7 +133,7 @@ impl Report {
             self.summary.max_time.as_secs_f64() * 1000.0
         ));
 
-        output.push_str("\n");
+        output.push('\n');
 
         // Individual results
         output.push_str("QUERY RESULTS\n");
