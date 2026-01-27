@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use arrow::array::{Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::Schema;
 use ontology::Ontology;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use std::fs::{self, File};
@@ -78,7 +78,10 @@ impl ParquetWriter {
     fn write_edges(&self, path: &Path, edges: &[EdgeRecord]) -> Result<()> {
         let schema = Arc::new(edge_schema());
 
-        let relationship_kind: StringArray = edges.iter().map(|e| Some(e.relationship_kind.as_str())).collect();
+        let relationship_kind: StringArray = edges
+            .iter()
+            .map(|e| Some(e.relationship_kind.as_str()))
+            .collect();
         let source: Int64Array = edges.iter().map(|e| Some(e.source)).collect();
         let source_kind: StringArray = edges.iter().map(|e| Some(e.source_kind.as_str())).collect();
         let target: Int64Array = edges.iter().map(|e| Some(e.target)).collect();
@@ -143,10 +146,10 @@ impl ParquetReader {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
 
-            if name_str.starts_with("org_") {
-                if let Ok(org_id) = name_str[4..].parse::<u32>() {
-                    orgs.push(org_id);
-                }
+            if name_str.starts_with("org_")
+                && let Ok(org_id) = name_str[4..].parse::<u32>()
+            {
+                orgs.push(org_id);
             }
         }
 

@@ -3,9 +3,9 @@
 use anyhow::Result;
 use clap::Parser;
 use ontology::Ontology;
+use simulator::Config;
 use simulator::clickhouse::ClickHouseWriter;
 use simulator::parquet::ParquetReader;
-use simulator::Config;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -43,7 +43,10 @@ async fn main() -> Result<()> {
     println!("Loading config from {:?}...", args.config);
     let config = Config::load(&args.config)?;
 
-    println!("Loading ontology from {:?}...", config.generation.ontology_path);
+    println!(
+        "Loading ontology from {:?}...",
+        config.generation.ontology_path
+    );
     let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
 
     let writer = ClickHouseWriter::with_config(&config.clickhouse);
@@ -67,7 +70,11 @@ async fn main() -> Result<()> {
             return Ok(());
         }
 
-        println!("Found {} organization(s) in {:?}", orgs.len(), config.generation.output_dir);
+        println!(
+            "Found {} organization(s) in {:?}",
+            orgs.len(),
+            config.generation.output_dir
+        );
 
         let overall_start = std::time::Instant::now();
 
@@ -133,7 +140,9 @@ async fn main() -> Result<()> {
     // Add projections (after data load for efficiency)
     if !args.no_projections && !config.clickhouse.schema.projections.is_empty() {
         println!("\n=== Projections ===");
-        writer.add_projections(&ontology, &config.clickhouse).await?;
+        writer
+            .add_projections(&ontology, &config.clickhouse)
+            .await?;
     }
 
     // Print statistics

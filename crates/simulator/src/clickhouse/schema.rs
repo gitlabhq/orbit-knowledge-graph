@@ -24,16 +24,36 @@ impl<'a> SchemaGenerator<'a> {
         for node in self.ontology.nodes() {
             let tbl_name = self.ontology.table_name(&node.name).unwrap();
             let schema = node.to_arrow_schema();
-            let primary_key: Vec<&str> = self.config.node_primary_key.iter().map(|s| s.as_str()).collect();
-            let order_by: Vec<&str> = self.config.node_order_by.iter().map(|s| s.as_str()).collect();
+            let primary_key: Vec<&str> = self
+                .config
+                .node_primary_key
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+            let order_by: Vec<&str> = self
+                .config
+                .node_order_by
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
             let ddl = self.schema_to_ddl(&tbl_name, &schema, &primary_key, &order_by);
             statements.push((tbl_name, ddl));
         }
 
         // Edge table
         let edge_schema = edge_schema();
-        let primary_key: Vec<&str> = self.config.edge_primary_key.iter().map(|s| s.as_str()).collect();
-        let order_by: Vec<&str> = self.config.edge_order_by.iter().map(|s| s.as_str()).collect();
+        let primary_key: Vec<&str> = self
+            .config
+            .edge_primary_key
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        let order_by: Vec<&str> = self
+            .config
+            .edge_order_by
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
         let ddl = self.schema_to_ddl(EDGE_TABLE, &edge_schema, &primary_key, &order_by);
         statements.push((EDGE_TABLE.to_string(), ddl));
 
@@ -167,7 +187,10 @@ impl<'a> SchemaGenerator<'a> {
             format!("\nPRIMARY KEY ({})", primary_key.join(", "))
         };
 
-        let mut settings = vec![format!("index_granularity = {}", self.config.index_granularity)];
+        let mut settings = vec![format!(
+            "index_granularity = {}",
+            self.config.index_granularity
+        )];
         for (key, value) in &self.config.settings {
             settings.push(format!("{} = {}", key, value));
         }
@@ -226,8 +249,14 @@ mod tests {
     fn test_generate_create_tables() {
         let ontology = Ontology::new()
             .with_nodes(["User", "Project"])
-            .with_fields("User", [("id", DataType::Int), ("username", DataType::String)])
-            .with_fields("Project", [("id", DataType::Int), ("name", DataType::String)]);
+            .with_fields(
+                "User",
+                [("id", DataType::Int), ("username", DataType::String)],
+            )
+            .with_fields(
+                "Project",
+                [("id", DataType::Int), ("name", DataType::String)],
+            );
 
         let config = test_config();
         let generator = SchemaGenerator::new(&ontology, &config);

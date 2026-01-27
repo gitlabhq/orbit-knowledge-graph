@@ -39,7 +39,10 @@ async fn main() -> Result<()> {
     tracing::info!("Loading config from {:?}", args.config);
     let config = Config::load(&args.config)?;
 
-    tracing::info!("Loading ontology from {:?}", config.generation.ontology_path);
+    tracing::info!(
+        "Loading ontology from {:?}",
+        config.generation.ontology_path
+    );
     let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
 
     tracing::info!("Loading queries from {:?}", config.evaluation.queries_path);
@@ -48,7 +51,11 @@ async fn main() -> Result<()> {
     if let Some(pattern) = &config.evaluation.filter {
         let pattern_lower = pattern.to_lowercase();
         queries.retain(|name, _| name.to_lowercase().contains(&pattern_lower));
-        tracing::info!("Filtered to {} queries matching '{}'", queries.len(), pattern);
+        tracing::info!(
+            "Filtered to {} queries matching '{}'",
+            queries.len(),
+            pattern
+        );
     }
 
     if queries.is_empty() {
@@ -85,7 +92,11 @@ async fn main() -> Result<()> {
 
     for iteration in 0..config.evaluation.iterations {
         if config.evaluation.iterations > 1 {
-            tracing::info!("Iteration {}/{}", iteration + 1, config.evaluation.iterations);
+            tracing::info!(
+                "Iteration {}/{}",
+                iteration + 1,
+                config.evaluation.iterations
+            );
         }
 
         let results = executor.execute_all(&queries).await;

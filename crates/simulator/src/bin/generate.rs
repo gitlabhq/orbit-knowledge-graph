@@ -45,7 +45,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    println!("Loading ontology from {:?}...", config.generation.ontology_path);
+    println!(
+        "Loading ontology from {:?}...",
+        config.generation.ontology_path
+    );
     let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
     println!(
         "Loaded {} node types and {} edge types\n",

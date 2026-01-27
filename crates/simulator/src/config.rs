@@ -8,6 +8,7 @@ use std::path::Path;
 /// Root configuration for the simulator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct Config {
     /// ClickHouse connection and schema settings.
     pub clickhouse: ClickHouseConfig,
@@ -44,16 +45,6 @@ impl Config {
             .get(node_type)
             .copied()
             .unwrap_or(self.generation.nodes.default_per_type)
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            clickhouse: ClickHouseConfig::default(),
-            generation: GenerationConfig::default(),
-            evaluation: EvaluationConfig::default(),
-        }
     }
 }
 
@@ -176,10 +167,7 @@ fn default_engine_type() -> String {
 }
 
 fn default_node_order_by() -> Vec<String> {
-    vec![
-        "organization_id".to_string(),
-        "id".to_string(),
-    ]
+    vec!["organization_id".to_string(), "id".to_string()]
 }
 
 fn default_edge_order_by() -> Vec<String> {

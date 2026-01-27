@@ -54,7 +54,11 @@ impl ClickHouseWriter {
         Self { client }
     }
 
-    pub async fn create_schemas(&self, ontology: &Ontology, config: &ClickHouseConfig) -> Result<()> {
+    pub async fn create_schemas(
+        &self,
+        ontology: &Ontology,
+        config: &ClickHouseConfig,
+    ) -> Result<()> {
         let generator = SchemaGenerator::new(ontology, &config.schema);
 
         println!("Dropping existing tables...");
@@ -81,7 +85,10 @@ impl ClickHouseWriter {
 
         println!("Adding indexes...");
         for sql in add_statements {
-            println!("  {}", sql.split_whitespace().take(8).collect::<Vec<_>>().join(" "));
+            println!(
+                "  {}",
+                sql.split_whitespace().take(8).collect::<Vec<_>>().join(" ")
+            );
             self.client.query(&sql).execute().await?;
         }
 
@@ -93,7 +100,11 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    pub async fn add_projections(&self, ontology: &Ontology, config: &ClickHouseConfig) -> Result<()> {
+    pub async fn add_projections(
+        &self,
+        ontology: &Ontology,
+        config: &ClickHouseConfig,
+    ) -> Result<()> {
         let generator = SchemaGenerator::new(ontology, &config.schema);
 
         let add_statements = generator.generate_add_projections();
@@ -103,7 +114,10 @@ impl ClickHouseWriter {
 
         println!("Adding projections...");
         for sql in add_statements {
-            println!("  {}", sql.split_whitespace().take(8).collect::<Vec<_>>().join(" "));
+            println!(
+                "  {}",
+                sql.split_whitespace().take(8).collect::<Vec<_>>().join(" ")
+            );
             self.client.query(&sql).execute().await?;
         }
 

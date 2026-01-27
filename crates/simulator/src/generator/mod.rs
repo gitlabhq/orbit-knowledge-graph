@@ -192,7 +192,10 @@ impl Generator {
             let total = count * cfg.organizations as usize;
             println!(
                 "    {}: {} per org = {} total ({} fields)",
-                node.name, count, total, node.fields.len()
+                node.name,
+                count,
+                total,
+                node.fields.len()
             );
         }
         println!();
