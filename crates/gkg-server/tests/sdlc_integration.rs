@@ -299,6 +299,7 @@ async fn user_handler_uses_watermark_for_incremental_processing() {
     );
 
     let usernames = context.query("SELECT username FROM users").await;
+
     let username_array = usernames[0]
         .column(0)
         .as_any()
