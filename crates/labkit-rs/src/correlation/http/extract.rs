@@ -18,7 +18,9 @@ use crate::correlation::id::{CorrelationId, HTTP_HEADER_CORRELATION_ID};
 /// 1. Checks for an existing `X-Request-Id` header
 /// 2. If not present, generates a new ULID-based correlation ID
 /// 3. Stores the correlation ID in request extensions (accessible via [`CorrelationIdExt`])
-/// 4. Records the correlation ID on the current tracing span
+/// 4. Sets the correlation ID in task-local context for the request duration
+///
+/// The correlation ID is automatically included in logs when using `labkit_rs::logging::init()`.
 ///
 /// # Example
 ///
@@ -97,13 +99,6 @@ where
             .map(CorrelationId::from_string)
             .unwrap_or_else(CorrelationId::generate);
 
-        // Record on tracing span
-        tracing::Span::current().record(
-            crate::correlation::id::LOG_FIELD_CORRELATION_ID,
-            correlation_id.as_str(),
-        );
-
-        // Store in request extensions for handler access
         request
             .extensions_mut()
             .insert(CorrelationIdExt(correlation_id.clone()));
