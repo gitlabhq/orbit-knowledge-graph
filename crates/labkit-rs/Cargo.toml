@@ -14,6 +14,9 @@ full = ["http", "grpc"]
 # Core dependencies (always included)
 ulid = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["json", "env-filter", "fmt"] }
+chrono = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 

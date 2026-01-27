@@ -40,6 +40,7 @@
 //! ```
 
 pub mod correlation;
+pub mod logging;
 
 // Re-export commonly used items
 pub use correlation::context;
@@ -47,3 +48,4 @@ pub use correlation::id::{
     CorrelationId, GRPC_METADATA_CLIENT_NAME, GRPC_METADATA_CORRELATION_ID,
     HTTP_HEADER_CLIENT_NAME, HTTP_HEADER_CORRELATION_ID, LOG_FIELD_CORRELATION_ID,
 };
+pub use logging::{Format, LogConfig, init_logging};

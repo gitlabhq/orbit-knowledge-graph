@@ -134,7 +134,7 @@ impl Visit for SwcDefinitionExtractor {
             let name = name.sym.as_ref();
             self.add_definition(name, TypeScriptDefinitionType::Method, node.span());
         } else {
-            println!("No name found for class method: {:?}", node);
+            tracing::debug!(?node, "No name found for class method");
         }
     }
 

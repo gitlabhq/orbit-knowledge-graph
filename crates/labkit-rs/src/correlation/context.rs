@@ -2,8 +2,7 @@
 //!
 //! Provides mechanisms to store and retrieve correlation IDs in async contexts.
 
-use crate::correlation::id::{CorrelationId, LOG_FIELD_CORRELATION_ID};
-use tracing::Span;
+use crate::correlation::id::CorrelationId;
 
 tokio::task_local! {
     /// Task-local storage for correlation ID.
@@ -66,19 +65,6 @@ pub fn current() -> Option<CorrelationId> {
 #[must_use]
 pub fn current_or_generate() -> CorrelationId {
     current().unwrap_or_else(CorrelationId::generate)
-}
-
-/// Record the correlation ID on the current tracing span.
-///
-/// This makes the correlation ID available in structured logs for all
-/// log statements within this span's context.
-pub fn record_on_span(id: &CorrelationId) {
-    Span::current().record(LOG_FIELD_CORRELATION_ID, id.as_str());
-}
-
-/// Record the correlation ID on a specific span.
-pub fn record_on_span_ref(span: &Span, id: &CorrelationId) {
-    span.record(LOG_FIELD_CORRELATION_ID, id.as_str());
 }
 
 #[cfg(test)]
