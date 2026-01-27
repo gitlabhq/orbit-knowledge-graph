@@ -39,7 +39,9 @@ mod inject;
 #[cfg(test)]
 mod tests;
 
-pub use extract::{CorrelationIdLayer, CorrelationIdService, extract_from_request};
+pub use extract::{
+    CorrelationIdLayer, CorrelationIdService, context_from_request, extract_from_request,
+};
 pub use inject::{
     InjectCorrelationIdLayer, InjectCorrelationIdService, PropagateCorrelationIdLayer,
     PropagateCorrelationIdService,

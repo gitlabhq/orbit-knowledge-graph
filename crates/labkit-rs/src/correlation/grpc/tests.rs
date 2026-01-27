@@ -10,7 +10,7 @@ use crate::CorrelationId;
 use crate::correlation::context::{current, scope};
 use crate::correlation::grpc::{
     ClientConfig, client_interceptor, create_client_interceptor, extract_from_request,
-    inject_correlation_id, server_interceptor, with_correlation, with_correlation_stream,
+    inject_correlation_id, server_interceptor, with_correlation, with_correlation_id_stream,
 };
 use crate::correlation::id::{GRPC_METADATA_CLIENT_NAME, GRPC_METADATA_CORRELATION_ID};
 
@@ -209,7 +209,7 @@ async fn with_correlation_stream_provides_context_during_poll() {
         }
     }
 
-    let wrapped_stream = with_correlation_stream(correlation_id, ContextCapturingStream);
+    let wrapped_stream = with_correlation_id_stream(correlation_id, ContextCapturingStream);
     let mut wrapped_stream = Box::pin(wrapped_stream);
 
     // Poll once and check the captured ID
@@ -222,7 +222,7 @@ async fn with_correlation_stream_works_with_real_stream() {
     let correlation_id = Some(CorrelationId::from_string("real-stream-jkl"));
     let inner_stream = TestStream::new(vec![1, 2, 3]);
 
-    let wrapped_stream = with_correlation_stream(correlation_id, inner_stream);
+    let wrapped_stream = with_correlation_id_stream(correlation_id, inner_stream);
     let items: Vec<_> = tokio_stream::StreamExt::collect(wrapped_stream).await;
 
     assert_eq!(items, vec![1, 2, 3]);
@@ -248,7 +248,7 @@ async fn with_correlation_stream_generates_id_if_none() {
     }
 
     // Pass None - should generate an ID
-    let wrapped_stream = with_correlation_stream(None, ContextCapturingStream { polled: false });
+    let wrapped_stream = with_correlation_id_stream(None, ContextCapturingStream { polled: false });
     let items: Vec<_> = tokio_stream::StreamExt::collect(wrapped_stream).await;
 
     assert_eq!(items.len(), 1);
