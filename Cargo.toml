@@ -15,7 +15,7 @@ members = [
 
 [workspace.dependencies]
 arrow = "57.2.0"
-datafusion = "52.1.0"
+datafusion = { version = "52.1.0", default-features = false, features = ["sql"] }
 ulid = "1.1"
 clap = { version = "4.5.54", features = ["derive", "env"] }
 dunce = "1.0.5"
