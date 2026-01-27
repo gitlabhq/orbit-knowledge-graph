@@ -23,7 +23,6 @@ impl Default for FakeValueGenerator {
 }
 
 impl FakeValueGenerator {
-    /// Create a new generator.
     pub fn new() -> Self {
         Self {
             rng: fake::rand::thread_rng(),
@@ -32,7 +31,6 @@ impl FakeValueGenerator {
         }
     }
 
-    /// Create a generator in fast mode (simpler, faster data generation).
     pub fn new_fast() -> Self {
         Self {
             rng: fake::rand::thread_rng(),
@@ -41,9 +39,8 @@ impl FakeValueGenerator {
         }
     }
 
-    /// Generate a fake value for a field.
     pub fn generate(&mut self, field: &Field) -> FakeValue {
-        // Handle nullable fields - 10% chance of null
+        // 10% null for nullable fields
         if field.nullable && self.rng.gen_bool(0.1) {
             return FakeValue::Null;
         }
@@ -63,18 +60,15 @@ impl FakeValueGenerator {
         }
     }
 
-    /// Fast generation mode - randomized patterns for performance without predictability.
     fn generate_fast(&mut self, field: &Field) -> FakeValue {
         match field.data_type {
             DataType::String => {
-                // Mix counter with random data to avoid sequential patterns
                 let rand1 = self.rng.r#gen::<u32>();
                 let rand2 = self.rng.r#gen::<u16>();
                 let mixed = self.counter.wrapping_mul(0x9e3779b97f4a7c15) ^ (rand1 as u64);
 
                 let value = match field.name.to_lowercase().as_str() {
                     name if name.contains("name") || name.contains("title") => {
-                        // Random prefixes + hash to avoid patterns
                         let prefixes = [
                             "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "theta", "omega",
                         ];
@@ -82,7 +76,6 @@ impl FakeValueGenerator {
                         format!("{}_{:x}", prefix, mixed)
                     }
                     name if name.contains("email") => {
-                        // Mix domain + random hex
                         let domains = [
                             "example.com",
                             "test.org",
@@ -97,7 +90,6 @@ impl FakeValueGenerator {
                         format!("https://example.com/{:x}/{:x}", mixed, rand2)
                     }
                     name if name.contains("path") => {
-                        // Multi-level paths with random components
                         format!(
                             "/p{:x}/d{:x}/{:x}",
                             mixed & 0xff,
@@ -106,11 +98,9 @@ impl FakeValueGenerator {
                         )
                     }
                     name if name.contains("sha") || name.contains("hash") => {
-                        // Use counter + random for SHA-like strings
                         format!("{:040x}", ((mixed as u128) << 64) | (rand1 as u128))
                     }
                     name if name.contains("description") || name.contains("body") => {
-                        // Mix words to create varied descriptions
                         let words = [
                             "Lorem",
                             "ipsum",
@@ -137,23 +127,15 @@ impl FakeValueGenerator {
                         self.pick_enum(&["pending", "running", "success", "failed", "canceled"])
                     }
                     _ => {
-                        // Generic varied strings
                         format!("val{:x}", mixed)
                     }
                 };
                 FakeValue::String(value)
             }
-            DataType::Int => {
-                // Wider range with some clustering
-                FakeValue::Int(self.rng.gen_range(1..100000))
-            }
-            DataType::Float => {
-                // Varied distribution
-                FakeValue::Float(self.rng.gen_range(0.0..10000.0))
-            }
+            DataType::Int => FakeValue::Int(self.rng.gen_range(1..100000)),
+            DataType::Float => FakeValue::Float(self.rng.gen_range(0.0..10000.0)),
             DataType::Bool => FakeValue::Bool(self.rng.gen_bool(0.5)),
             DataType::Date => {
-                // 5 year range instead of 1 year
                 let days_ago = self.rng.gen_range(0..(365 * 5));
                 FakeValue::Date(-days_ago)
             }
@@ -166,7 +148,6 @@ impl FakeValueGenerator {
         }
     }
 
-    /// Generate a string value based on field name hints.
     fn generate_string(&mut self, field_name: &str) -> FakeValue {
         let value = match field_name.to_lowercase().as_str() {
             "username" => Username().fake_with_rng(&mut self.rng),
@@ -207,7 +188,6 @@ impl FakeValueGenerator {
         FakeValue::String(value)
     }
 
-    /// Generate an int value based on field name hints.
     fn generate_int(&mut self, field_name: &str) -> FakeValue {
         let value = match field_name.to_lowercase().as_str() {
             "iid" => self.rng.gen_range(1..10000) as i64,
@@ -219,14 +199,12 @@ impl FakeValueGenerator {
         FakeValue::Int(value)
     }
 
-    /// Generate a float value.
     fn generate_float(&mut self, _field_name: &str) -> FakeValue {
         FakeValue::Float(self.rng.gen_range(0.0..100.0))
     }
 
-    /// Generate a bool value based on field name hints.
     fn generate_bool(&mut self, field_name: &str) -> FakeValue {
-        // Some fields have semantic defaults
+        // Semantic probabilities for common boolean fields
         let probability = match field_name.to_lowercase().as_str() {
             "archived" => 0.05,    // 5% archived
             "confidential" => 0.1, // 10% confidential
@@ -242,16 +220,13 @@ impl FakeValueGenerator {
         FakeValue::Bool(self.rng.gen_bool(probability))
     }
 
-    /// Generate a date value (days since epoch).
     fn generate_date(&mut self) -> FakeValue {
-        let days_ago = self.rng.gen_range(1..365 * 3); // Last 3 years
+        let days_ago = self.rng.gen_range(1..365 * 3);
         let date = Utc::now() - Duration::days(days_ago);
-        // Date32 is days since epoch
         let days_since_epoch = (date.timestamp() / 86400) as i32;
         FakeValue::Date(days_since_epoch)
     }
 
-    /// Generate a datetime value (unix timestamp in milliseconds).
     fn generate_datetime(&mut self) -> FakeValue {
         let days_ago = self.rng.gen_range(1..365 * 3);
         let hours_offset = self.rng.gen_range(0..24);
@@ -259,7 +234,6 @@ impl FakeValueGenerator {
         FakeValue::DateTime(date.timestamp_millis())
     }
 
-    /// Generate a path-like string.
     fn generate_path(&mut self) -> String {
         let count = self.rng.gen_range(2..5);
         let mut parts: Vec<String> = Vec::with_capacity(count);
@@ -270,14 +244,12 @@ impl FakeValueGenerator {
         parts.join("/")
     }
 
-    /// Generate a git SHA.
     fn generate_sha(&mut self) -> String {
         (0..40)
             .map(|_| format!("{:x}", self.rng.r#gen::<u8>() % 16))
             .collect()
     }
 
-    /// Generate a branch name.
     fn generate_branch_name(&mut self) -> String {
         let prefixes = ["feature", "fix", "hotfix", "release", "main", "develop"];
         let prefix = prefixes[self.rng.gen_range(0..prefixes.len())];
@@ -287,7 +259,6 @@ impl FakeValueGenerator {
         format!("{}/{}", prefix, suffix.to_lowercase())
     }
 
-    /// Pick a random value from an enum list.
     fn pick_enum(&mut self, values: &[&str]) -> String {
         values[self.rng.gen_range(0..values.len())].to_string()
     }

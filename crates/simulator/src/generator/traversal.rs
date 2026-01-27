@@ -42,11 +42,6 @@ impl TraversalIdGenerator {
     pub fn len(&self) -> usize {
         self.ids.len()
     }
-
-    /// Check if empty.
-    pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
-    }
 }
 
 /// Generate a hierarchical set of traversal IDs.
@@ -56,13 +51,11 @@ impl TraversalIdGenerator {
 fn generate_hierarchy(org_id: u32, count: usize, max_depth: usize) -> Vec<String> {
     let mut traversal_ids = Vec::with_capacity(count);
 
-    // Calculate dimensions for each level to generate approximately count IDs
     for depth in 1..=max_depth {
         if traversal_ids.len() >= count {
             break;
         }
 
-        // Calculate how many IDs to generate at this depth
         let remaining_depths = max_depth - depth + 1;
         let remaining_slots = count.saturating_sub(traversal_ids.len());
         let slots_per_depth = remaining_slots / remaining_depths;
@@ -72,13 +65,11 @@ fn generate_hierarchy(org_id: u32, count: usize, max_depth: usize) -> Vec<String
             slots_per_depth
         };
 
-        // Number of levels after org_id
         let levels_needed = depth - 1;
         if levels_needed == 0 {
-            // Depth 1: just the org_id itself
             traversal_ids.push(format!("{}", org_id));
         } else {
-            // Calculate children per level: (levels_needed)th root of target_count
+            // (levels_needed)th root of target_count
             let children_per_level = if levels_needed == 1 {
                 target_count.min(remaining_slots)
             } else {
@@ -87,7 +78,6 @@ fn generate_hierarchy(org_id: u32, count: usize, max_depth: usize) -> Vec<String
                     .ceil() as usize
             };
 
-            // Generate sequential IDs using recursive approach
             generate_recursive(
                 org_id,
                 &mut vec![org_id as u64],
@@ -119,7 +109,6 @@ fn generate_recursive(
     let current_depth = path.len();
 
     if current_depth == target_depth {
-        // Reached target depth - add this traversal ID
         let traversal_id_str = path
             .iter()
             .map(|id| id.to_string())
@@ -129,7 +118,6 @@ fn generate_recursive(
         return;
     }
 
-    // Generate children at this level sequentially
     for child_id in 1..=children_per_level as u64 {
         if traversal_ids.len() >= global_max {
             break;

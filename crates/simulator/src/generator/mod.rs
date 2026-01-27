@@ -60,9 +60,7 @@ pub struct Generator {
 }
 
 impl Generator {
-    /// Create a new generator.
     pub fn new(ontology: Ontology, config: Config) -> Self {
-        // Pre-generate traversal IDs for each organization
         let mut traversal_ids = HashMap::new();
         for org_id in 1..=config.num_organizations {
             let traversal_gen = TraversalIdGenerator::new(
@@ -81,20 +79,16 @@ impl Generator {
         }
     }
 
-    /// Generate a unique ID.
     pub fn next_id(&self) -> i64 {
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    /// Run the full generation and import pipeline (sequential).
     pub async fn run(&self) -> Result<()> {
         let writer = ClickHouseWriter::new(&self.config.clickhouse_url);
 
-        // Create schemas
         println!("Creating ClickHouse schemas...");
         writer.create_schemas(&self.ontology).await?;
 
-        // Generate data per organization
         println!(
             "\nGenerating data for {} organization(s)...",
             self.config.num_organizations
@@ -110,7 +104,6 @@ impl Generator {
                 org_id, self.config.num_organizations
             );
 
-            // Generate all data first (no writes during generation)
             println!("  Generating nodes...");
             let gen_start = std::time::Instant::now();
             let org_data = self.generate_organization_with_logging(org_id, true)?;
@@ -129,7 +122,6 @@ impl Generator {
                 gen_elapsed
             );
 
-            // Now write everything to ClickHouse
             println!("  Writing to ClickHouse...");
             let write_start = std::time::Instant::now();
             writer
@@ -148,28 +140,23 @@ impl Generator {
             overall_start.elapsed().as_secs_f64()
         );
 
-        // Print statistics
         writer.print_statistics(&self.ontology).await?;
 
         Ok(())
     }
 
-    /// Run the full generation and import pipeline (parallel generation).
     pub async fn run_parallel(&self) -> Result<()> {
         let writer = ClickHouseWriter::new(&self.config.clickhouse_url);
 
-        // Create schemas
         println!("Creating ClickHouse schemas...");
         writer.create_schemas(&self.ontology).await?;
 
-        // Generate data per organization
         println!(
             "\nGenerating data for {} organization(s) in parallel...",
             self.config.num_organizations
         );
         let overall_start = std::time::Instant::now();
 
-        // Generate all organizations in parallel
         println!("\n=== Parallel Generation Phase ===");
         let gen_start = std::time::Instant::now();
 
@@ -208,7 +195,7 @@ impl Generator {
         let gen_elapsed = gen_start.elapsed().as_secs_f64();
         println!("\nAll organizations generated in {:.1}s", gen_elapsed);
 
-        // Write all organizations sequentially (ClickHouse client isn't Send)
+        // Sequential writes required: ClickHouse client isn't Send
         println!("\n=== Sequential Write Phase ===");
         let write_start = std::time::Instant::now();
 
@@ -239,22 +226,15 @@ impl Generator {
             overall_start.elapsed().as_secs_f64()
         );
 
-        // Print statistics
         writer.print_statistics(&self.ontology).await?;
 
         Ok(())
     }
 
-    /// Generate all data for a single organization.
-    ///
-    /// This is fully ontology-driven:
-    /// 1. Generate nodes for each type in `ontology.nodes()`
-    /// 2. Generate edges for each type in `ontology.edges()`
     pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
         self.generate_organization_with_logging(org_id, false)
     }
 
-    /// Generate all data for a single organization (with optional verbose logging).
     fn generate_organization_with_logging(
         &self,
         org_id: u32,
@@ -267,7 +247,6 @@ impl Generator {
             .get(&org_id)
             .expect("traversal IDs exist");
 
-        // Phase 1: Generate all nodes from ontology
         for node in self.ontology.nodes() {
             let count = self.config.count_for(&node.name);
             if count > 0 {
@@ -289,7 +268,6 @@ impl Generator {
             }
         }
 
-        // Phase 2: Generate all edges from ontology
         if verbose {
             println!("    Generating edges...");
         }
@@ -335,7 +313,6 @@ impl Generator {
         Ok(data)
     }
 
-    /// Generate batches for a node type.
     fn generate_node_batches(
         &self,
         node: &NodeEntity,
@@ -346,7 +323,6 @@ impl Generator {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::new(node, schema, self.config.batch_size);
 
-        // Pre-allocate IDs efficiently
         let start_id = self.next_id.fetch_add(count as i64, Ordering::SeqCst);
         let all_ids: Vec<i64> = (start_id..(start_id + count as i64)).collect();
 
@@ -361,9 +337,6 @@ impl Generator {
         Ok((batches, all_ids))
     }
 
-    /// Generate edges for a specific edge type from the ontology.
-    ///
-    /// Uses the edge's `source_kind` and `target_kind` to find the right nodes.
     fn generate_edges_for_type(
         &self,
         edge: &EdgeEntity,
@@ -383,14 +356,11 @@ impl Generator {
         let mut rng = fake::rand::thread_rng();
         let same_type = edge.source_kind == edge.target_kind;
 
-        // For each source node, create edges to random target nodes
         for &source_id in source_ids {
-            // Determine how many edges to create (1 to edges_per_source)
             let num_edges = rng.gen_range(1..=self.config.edges_per_source);
 
-            // Pick random targets
             let targets: Vec<i64> = if same_type {
-                // Optimized self-loop avoidance: sample with retry instead of filtering
+                // Sample with retry to avoid self-loops
                 let mut selected = Vec::with_capacity(num_edges);
                 let max_attempts = num_edges * 3; // Retry limit
                 let mut attempts = 0;
@@ -407,7 +377,6 @@ impl Generator {
                 }
                 selected
             } else {
-                // Different types: direct sampling
                 let num_edges = num_edges.min(target_ids.len());
                 target_ids
                     .choose_multiple(&mut rng, num_edges)
@@ -427,7 +396,6 @@ impl Generator {
         }
     }
 
-    /// Print generation plan based on ontology.
     pub fn print_plan(&self) {
         println!("Generation plan (from ontology):");
         println!("  Organizations: {}", self.config.num_organizations);

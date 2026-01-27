@@ -9,16 +9,14 @@ pub struct SchemaGenerator<'a> {
 }
 
 impl<'a> SchemaGenerator<'a> {
-    /// Create a new schema generator.
     pub fn new(ontology: &'a Ontology) -> Self {
         Self { ontology }
     }
 
-    /// Generate all CREATE TABLE statements.
     pub fn generate_all_ddl(&self) -> Vec<(String, String)> {
         let mut ddl_statements = Vec::new();
 
-        // Node tables - ORDER BY (organization_id, traversal_id, id) for efficient auth queries
+        // ORDER BY (organization_id, traversal_id, id) for efficient auth queries
         for node in self.ontology.nodes() {
             let tbl_name = self.ontology.table_name(&node.name).unwrap();
             let schema = node.to_arrow_schema();
@@ -27,7 +25,6 @@ impl<'a> SchemaGenerator<'a> {
             ddl_statements.push((tbl_name, ddl));
         }
 
-        // Edges table
         let edge_schema = edge_schema();
         let edge_ddl = to_clickhouse_ddl(
             EDGE_TABLE,
@@ -39,7 +36,6 @@ impl<'a> SchemaGenerator<'a> {
         ddl_statements
     }
 
-    /// Generate DROP TABLE statements for cleanup.
     pub fn generate_drop_all(&self) -> Vec<String> {
         let mut drops = Vec::new();
 

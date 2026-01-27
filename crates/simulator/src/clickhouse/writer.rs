@@ -36,23 +36,19 @@ pub struct ClickHouseWriter {
 }
 
 impl ClickHouseWriter {
-    /// Create a new writer connected to ClickHouse.
     pub fn new(url: &str) -> Self {
         let client = Client::default().with_url(url);
         Self { client }
     }
 
-    /// Create all schemas from ontology.
     pub async fn create_schemas(&self, ontology: &Ontology) -> Result<()> {
         let generator = SchemaGenerator::new(ontology);
 
-        // Drop existing tables
         println!("Dropping existing tables...");
         for drop_sql in generator.generate_drop_all() {
             self.client.query(&drop_sql).execute().await?;
         }
 
-        // Create tables
         println!("Creating tables...");
         for (table_name, ddl) in generator.generate_all_ddl() {
             println!("  Creating {}...", table_name);
@@ -62,13 +58,11 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Write all data for an organization.
     pub async fn write_organization_data(
         &self,
         ontology: &Ontology,
         data: &OrganizationData,
     ) -> Result<()> {
-        // Write node batches with progress
         for (node_name, batches) in &data.nodes {
             if !batches.is_empty() {
                 let tbl_name = ontology.table_name(node_name)?;
@@ -89,7 +83,6 @@ impl ClickHouseWriter {
             }
         }
 
-        // Write edges
         if !data.edges.is_empty() {
             print!("    edges ({} rows)... ", data.edges.len());
             std::io::Write::flush(&mut std::io::stdout()).ok();
@@ -108,7 +101,6 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Write Arrow RecordBatches to a table.
     pub async fn write_batches(&self, table_name: &str, batches: &[RecordBatch]) -> Result<()> {
         for batch in batches {
             self.write_batch_as_rows(table_name, batch).await?;
@@ -116,10 +108,7 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Write a RecordBatch by converting to row-based inserts.
-    ///
-    /// This is less efficient than native Arrow/Parquet but works with
-    /// the clickhouse-rs driver which doesn't support direct Arrow inserts.
+    /// Row-based inserts since clickhouse-rs doesn't support direct Arrow inserts.
     async fn write_batch_as_rows(&self, table_name: &str, batch: &RecordBatch) -> Result<()> {
         let num_rows = batch.num_rows();
         let num_cols = batch.num_columns();
@@ -128,7 +117,6 @@ impl ClickHouseWriter {
             return Ok(());
         }
 
-        // Build INSERT statement with column names from schema
         let schema = batch.schema();
         let column_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         let columns_str = column_names.join(", ");
@@ -148,7 +136,6 @@ impl ClickHouseWriter {
 
             chunk_values.push(format!("({})", row_values.join(", ")));
 
-            // Flush chunk when full
             if chunk_values.len() >= chunk_size {
                 let insert_sql = format!(
                     "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
@@ -161,7 +148,6 @@ impl ClickHouseWriter {
             }
         }
 
-        // Flush remaining rows
         if !chunk_values.is_empty() {
             let insert_sql = format!(
                 "INSERT INTO {} ({}) SETTINGS max_memory_usage=8000000000 VALUES {}",
@@ -175,7 +161,6 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Write edges using the typed Row interface.
     pub async fn write_edges(&self, edges: &[EdgeRecord]) -> Result<()> {
         if edges.is_empty() {
             return Ok(());
@@ -191,11 +176,9 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    /// Print statistics about the imported data.
     pub async fn print_statistics(&self, ontology: &Ontology) -> Result<()> {
         println!("\n=== Database Statistics ===");
 
-        // Node counts
         for node in ontology.nodes() {
             let tbl_name = ontology.table_name(&node.name)?;
             let count: u64 = self
@@ -210,7 +193,6 @@ impl ClickHouseWriter {
             println!("{:30} {:>12} rows", tbl_name, count);
         }
 
-        // Edge count
         let edge_count: u64 = self
             .client
             .query(&format!("SELECT count() FROM {}", EDGE_TABLE))
@@ -222,7 +204,6 @@ impl ClickHouseWriter {
             });
         println!("{:30} {:>12} rows", EDGE_TABLE, edge_count);
 
-        // Edge breakdown by type
         println!("\n=== Edge Types ===");
         let edge_types: Vec<(String, u64)> = self
             .client

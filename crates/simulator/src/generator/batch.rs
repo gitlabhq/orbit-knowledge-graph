@@ -19,13 +19,9 @@ pub struct BatchBuilder {
     /// Schema for building batches.
     schema: Arc<Schema>,
     fake_gen: FakeValueGenerator,
-
-    // Column builders (accumulate rows until flush)
     organization_ids: Vec<u32>,
     traversal_ids: Vec<String>,
     columns: Vec<ColumnData>,
-
-    // Completed batches
     batches: Vec<RecordBatch>,
 }
 
@@ -45,7 +41,6 @@ enum ColumnValues {
 }
 
 impl BatchBuilder {
-    /// Create a new batch builder for a node type.
     pub fn new(node: &NodeEntity, schema: Arc<Schema>, batch_size: usize) -> Self {
         let columns: Vec<ColumnData> = node
             .fields
@@ -70,15 +65,11 @@ impl BatchBuilder {
         }
     }
 
-    /// Add a row with the given organization_id, traversal_id, and primary key id.
-    ///
-    /// Automatically flushes to a batch when `batch_size` is reached.
     pub fn add_row(&mut self, organization_id: u32, traversal_id: String, id: i64) {
         self.organization_ids.push(organization_id);
         self.traversal_ids.push(traversal_id);
 
         for col_data in &mut self.columns {
-            // Use provided id for primary key fields
             if self.primary_keys.contains(&col_data.field.name) {
                 col_data.values.push_int64(Some(id));
             } else {
@@ -89,13 +80,11 @@ impl BatchBuilder {
             }
         }
 
-        // Flush if batch is full
         if self.organization_ids.len() >= self.batch_size {
             self.flush();
         }
     }
 
-    /// Flush current accumulated rows to a batch.
     fn flush(&mut self) {
         if self.organization_ids.is_empty() {
             return;
@@ -103,17 +92,14 @@ impl BatchBuilder {
 
         let mut arrays: Vec<ArrayRef> = Vec::with_capacity(2 + self.columns.len());
 
-        // organization_id column
         arrays.push(Arc::new(UInt32Array::from(std::mem::take(
             &mut self.organization_ids,
         ))));
 
-        // traversal_id column
         arrays.push(Arc::new(StringArray::from(std::mem::take(
             &mut self.traversal_ids,
         ))));
 
-        // Other columns
         for col_data in &mut self.columns {
             let array = col_data.values.drain_to_array();
             arrays.push(array);
@@ -123,14 +109,11 @@ impl BatchBuilder {
             self.batches.push(batch);
         }
 
-        // Re-allocate with capacity for next batch
         self.organization_ids = Vec::with_capacity(self.batch_size);
         self.traversal_ids = Vec::with_capacity(self.batch_size);
     }
 
-    /// Finish building and return all batches.
     pub fn finish(mut self) -> Vec<RecordBatch> {
-        // Flush any remaining rows
         self.flush();
         self.batches
     }
@@ -160,7 +143,7 @@ impl ColumnValues {
             (ColumnValues::String(vec), FakeValue::Null) => vec.push(None),
             (ColumnValues::Date32(vec), FakeValue::Date(v)) => vec.push(Some(*v)),
             (ColumnValues::Date32(vec), FakeValue::Null) => vec.push(None),
-            // Type mismatch - push null
+            // Type mismatch fallback
             (ColumnValues::Int64(vec), _) => vec.push(None),
             (ColumnValues::Float64(vec), _) => vec.push(None),
             (ColumnValues::Bool(vec), _) => vec.push(None),

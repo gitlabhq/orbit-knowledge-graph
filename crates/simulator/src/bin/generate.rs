@@ -120,7 +120,6 @@ async fn main() -> Result<()> {
     println!("(Fully ontology-driven - no hardcoded entities)");
     println!();
 
-    // Load ontology
     println!("Loading ontology from {:?}...", args.ontology_path);
     let ontology = Ontology::load_from_dir(&args.ontology_path)?;
     println!(
@@ -130,10 +129,7 @@ async fn main() -> Result<()> {
     );
     println!();
 
-    // Build config
     let node_counts: HashMap<String, usize> = args.node_counts.into_iter().collect();
-
-    // Validate node counts against ontology (fail early)
     validate_node_counts(&ontology, &node_counts)?;
 
     let config = Config {
@@ -147,7 +143,6 @@ async fn main() -> Result<()> {
         batch_size: args.batch_size,
     };
 
-    // Create generator and print plan
     let generator = Generator::new(ontology, config);
     generator.print_plan();
 
@@ -156,7 +151,6 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Run generator (parallel or sequential)
     if args.parallel {
         println!("Running in parallel mode...\n");
         generator.run_parallel().await?;
