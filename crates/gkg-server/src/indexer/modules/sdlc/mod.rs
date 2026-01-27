@@ -1,18 +1,22 @@
 mod datalake;
+mod group_handler;
+mod namespace_handler;
+mod project_handler;
 mod user_handler;
 mod watermark_store;
 
 use std::sync::Arc;
 
-use datalake::DatalakeClient;
+use datalake::{Datalake, DatalakeQuery};
 use etl_engine::clickhouse::ClickHouseConfiguration;
 use etl_engine::module::{Handler, Module, ModuleInitError};
+use namespace_handler::NamespaceHandler;
 use user_handler::UserHandler;
-use watermark_store::WatermarkClient;
+use watermark_store::{ClickHouseWatermarkStore, WatermarkStore};
 
 pub struct SdlcModule {
-    datalake_client: DatalakeClient,
-    watermark_client: WatermarkClient,
+    datalake: Arc<dyn DatalakeQuery>,
+    watermark_store: Arc<dyn WatermarkStore>,
 }
 
 impl SdlcModule {
@@ -20,8 +24,8 @@ impl SdlcModule {
         let client = Arc::new(configuration.build_client());
 
         Ok(Self {
-            datalake_client: Arc::clone(&client),
-            watermark_client: client,
+            datalake: Arc::new(Datalake::new(Arc::clone(&client))),
+            watermark_store: Arc::new(ClickHouseWatermarkStore::new(client)),
         })
     }
 }
@@ -32,10 +36,16 @@ impl Module for SdlcModule {
     }
 
     fn handlers(&self) -> Vec<Box<dyn Handler>> {
-        vec![Box::new(UserHandler::new(
-            Arc::clone(&self.datalake_client),
-            Arc::clone(&self.watermark_client),
-        ))]
+        vec![
+            Box::new(UserHandler::new(
+                Arc::clone(&self.datalake),
+                Arc::clone(&self.watermark_store),
+            )),
+            Box::new(NamespaceHandler::new(
+                Arc::clone(&self.datalake),
+                Arc::clone(&self.watermark_store),
+            )),
+        ]
     }
 
     fn entities(&self) -> Vec<etl_engine::entities::Entity> {

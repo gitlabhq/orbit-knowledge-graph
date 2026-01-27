@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
 use crate::indexer::modules::INDEXER_TOPIC;
-use crate::indexer::modules::sdlc::datalake::{
-    Datalake, DatalakeClient, DatalakeQuery, ToQueryParams,
-};
+use crate::indexer::modules::sdlc::datalake::{DatalakeQuery, ToQueryParams};
 use crate::indexer::modules::sdlc::watermark_store::{
-    ClickHouseWatermarkStore, WatermarkClient, WatermarkError, WatermarkStore,
+    TIMESTAMP_FORMAT, WatermarkError, WatermarkStore,
 };
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
@@ -82,8 +80,8 @@ pub struct UserQueryParams {
 impl UserQueryParams {
     pub fn new(last_watermark: &DateTime<Utc>, watermark: &DateTime<Utc>) -> Self {
         Self {
-            last_watermark: last_watermark.format("%Y-%m-%d %H:%M:%S").to_string(),
-            watermark: watermark.format("%Y-%m-%d %H:%M:%S").to_string(),
+            last_watermark: last_watermark.format(TIMESTAMP_FORMAT).to_string(),
+            watermark: watermark.format(TIMESTAMP_FORMAT).to_string(),
         }
     }
 }
@@ -100,15 +98,15 @@ impl Event for UserHandlerPayload {
 }
 
 pub struct UserHandler {
-    watermark_store: Box<dyn WatermarkStore>,
-    datalake: Box<dyn DatalakeQuery>,
+    watermark_store: Arc<dyn WatermarkStore>,
+    datalake: Arc<dyn DatalakeQuery>,
 }
 
 impl UserHandler {
-    pub fn new(datalake_client: DatalakeClient, watermark_client: WatermarkClient) -> Self {
+    pub fn new(datalake: Arc<dyn DatalakeQuery>, watermark_store: Arc<dyn WatermarkStore>) -> Self {
         Self {
-            watermark_store: Box::new(ClickHouseWatermarkStore::new(watermark_client)),
-            datalake: Box::new(Datalake::new(datalake_client)),
+            datalake,
+            watermark_store,
         }
     }
 
@@ -228,6 +226,21 @@ mod tests {
             self.watermark_was_set.store(true, Ordering::SeqCst);
             Ok(())
         }
+
+        async fn get_namespace_watermark(
+            &self,
+            _namespace_id: i64,
+        ) -> Result<DateTime<Utc>, WatermarkError> {
+            unimplemented!()
+        }
+
+        async fn set_namespace_watermark(
+            &self,
+            _namespace_id: i64,
+            _watermark: &DateTime<Utc>,
+        ) -> Result<(), WatermarkError> {
+            unimplemented!()
+        }
     }
 
     struct MockDatalake;
@@ -252,11 +265,11 @@ mod tests {
         let watermark_was_set = Arc::new(AtomicBool::new(false));
 
         let handler = UserHandler {
-            watermark_store: Box::new(MockWatermarkStore {
+            watermark_store: Arc::new(MockWatermarkStore {
                 watermark_was_set: watermark_was_set.clone(),
                 expected_watermark: watermark,
             }),
-            datalake: Box::new(MockDatalake),
+            datalake: Arc::new(MockDatalake),
         };
 
         let payload = serde_json::json!({ "watermark": watermark.to_rfc3339() }).to_string();
