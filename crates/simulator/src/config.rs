@@ -1,6 +1,7 @@
 //! Configuration for the simulator.
 
 use anyhow::{Context, Result};
+use fake::rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -35,16 +36,6 @@ impl Config {
         let contents = serde_yaml::to_string(self)?;
         std::fs::write(path, contents)?;
         Ok(())
-    }
-
-    /// Get the count for a specific node type.
-    pub fn node_count(&self, node_type: &str) -> usize {
-        self.generation
-            .nodes
-            .counts
-            .get(node_type)
-            .copied()
-            .unwrap_or(self.generation.nodes.default_per_type)
     }
 }
 
@@ -234,6 +225,31 @@ pub struct ProjectionConfig {
     pub order_by: Vec<String>,
 }
 
+/// Subgroup hierarchy generation settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubgroupConfig {
+    /// Maximum depth of subgroup hierarchy (0 = no subgroups).
+    #[serde(default)]
+    pub max_depth: usize,
+    /// Number of subgroups per parent group at each level.
+    #[serde(default = "default_subgroups_per_group")]
+    pub per_group: usize,
+}
+
+fn default_subgroups_per_group() -> usize {
+    2
+}
+
+impl Default for SubgroupConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: 0,
+            per_group: default_subgroups_per_group(),
+        }
+    }
+}
+
 /// Data generation settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -250,15 +266,28 @@ pub struct GenerationConfig {
     /// Number of organizations to generate.
     #[serde(default = "default_organizations")]
     pub organizations: u32,
-    /// Traversal ID settings.
+
+    /// Root entities with absolute counts per organization.
+    /// These entities have no parent and are generated first.
+    /// Example: { "User": 100, "Group": 50 }
     #[serde(default)]
-    pub traversal: TraversalConfig,
-    /// Node generation settings.
+    pub roots: HashMap<String, usize>,
+
+    /// Relationship-based generation configuration.
+    /// Defines how child entities are generated based on ontology edges.
     #[serde(default)]
-    pub nodes: NodeGenerationConfig,
-    /// Edge generation settings.
+    pub relationships: RelationshipConfig,
+
+    /// Subgroup hierarchy configuration.
+    /// Controls recursive Group -> Group generation.
     #[serde(default)]
-    pub edges: EdgeGenerationConfig,
+    pub subgroups: SubgroupConfig,
+
+    /// Association edges configuration.
+    /// Creates edges between existing entities (e.g., AUTHORED, MEMBER_OF).
+    #[serde(default)]
+    pub associations: AssociationConfig,
+
     /// Batch size for Parquet row groups.
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
@@ -290,87 +319,170 @@ impl Default for GenerationConfig {
             output_dir: default_output_dir(),
             skip_if_present: false,
             organizations: default_organizations(),
-            traversal: TraversalConfig::default(),
-            nodes: NodeGenerationConfig::default(),
-            edges: EdgeGenerationConfig::default(),
+            roots: HashMap::new(),
+            relationships: RelationshipConfig::default(),
+            subgroups: SubgroupConfig::default(),
+            associations: AssociationConfig::default(),
             batch_size: default_batch_size(),
             parallel: false,
         }
     }
 }
 
-/// Traversal ID generation settings.
+/// Edge ratio for relationship-based generation.
+///
+/// Can be either:
+/// - An integer count (e.g., 5 children per parent)
+/// - A fractional probability (e.g., 0.3 = 30% chance of creating edge)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TraversalConfig {
-    /// Number of traversal IDs per organization.
-    #[serde(default = "default_ids_per_org")]
-    pub ids_per_org: usize,
-    /// Maximum depth of traversal ID hierarchy.
-    #[serde(default = "default_max_depth")]
-    pub max_depth: usize,
+#[serde(untagged)]
+pub enum EdgeRatio {
+    /// Fixed count of children per parent.
+    Count(usize),
+    /// Probability of creating the relationship (0.0-1.0).
+    Probability(f64),
 }
 
-fn default_ids_per_org() -> usize {
-    1000
-}
+impl EdgeRatio {
+    /// Sample a count from this ratio.
+    pub fn sample(&self, rng: &mut impl Rng) -> usize {
+        match self {
+            EdgeRatio::Count(n) => *n,
+            EdgeRatio::Probability(p) => {
+                if rng.gen_bool(*p) {
+                    1
+                } else {
+                    0
+                }
+            }
+        }
+    }
 
-fn default_max_depth() -> usize {
-    5
-}
-
-impl Default for TraversalConfig {
-    fn default() -> Self {
-        Self {
-            ids_per_org: default_ids_per_org(),
-            max_depth: default_max_depth(),
+    /// Sample a count with variance (for more realistic distributions).
+    /// For counts, returns a value in range [count/2, count*1.5].
+    pub fn sample_with_variance(&self, rng: &mut impl Rng) -> usize {
+        match self {
+            EdgeRatio::Count(n) => {
+                let min = (*n as f64 * 0.5).ceil() as usize;
+                let max = (*n as f64 * 1.5).ceil() as usize;
+                rng.gen_range(min.max(1)..=max.max(1))
+            }
+            EdgeRatio::Probability(p) => {
+                if rng.gen_bool(*p) {
+                    1
+                } else {
+                    0
+                }
+            }
         }
     }
 }
 
-/// Node generation settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NodeGenerationConfig {
-    /// Default number of nodes per type.
-    #[serde(default = "default_per_type")]
-    pub default_per_type: usize,
-    /// Override counts for specific node types.
-    #[serde(default)]
-    pub counts: HashMap<String, usize>,
-}
-
-fn default_per_type() -> usize {
-    100
-}
-
-impl Default for NodeGenerationConfig {
+impl Default for EdgeRatio {
     fn default() -> Self {
-        Self {
-            default_per_type: default_per_type(),
-            counts: HashMap::new(),
-        }
+        EdgeRatio::Count(1)
     }
 }
 
-/// Edge generation settings.
+/// Configuration for a single edge relationship variant.
+///
+/// Format in YAML: `"SourceKind -> TargetKind": ratio`
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EdgeGenerationConfig {
-    /// Number of edges per source node.
-    #[serde(default = "default_per_source")]
-    pub per_source: usize,
+pub struct EdgeVariantConfig {
+    /// Source node type (e.g., "Group").
+    pub source: String,
+    /// Target node type (e.g., "Project").
+    pub target: String,
+    /// Ratio or probability for this relationship.
+    pub ratio: EdgeRatio,
 }
 
-fn default_per_source() -> usize {
-    3
+/// Relationship-based generation configuration.
+///
+/// Maps ontology edge types to their generation ratios.
+/// Example:
+/// ```yaml
+/// relationships:
+///   CONTAINS:
+///     "Group -> Group": 3        # 3 subgroups per group
+///     "Group -> Project": 5      # 5 projects per group
+///   IN_PROJECT:
+///     "MergeRequest -> Project": 30
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RelationshipConfig {
+    /// Map of edge type to variant configurations.
+    /// Key: edge relationship kind (e.g., "CONTAINS")
+    /// Value: map of "Source -> Target" to ratio
+    #[serde(flatten)]
+    pub edges: HashMap<String, HashMap<String, EdgeRatio>>,
 }
 
-impl Default for EdgeGenerationConfig {
-    fn default() -> Self {
-        Self {
-            per_source: default_per_source(),
+impl RelationshipConfig {
+    /// Parse a variant key like "Group -> Project" into (source, target).
+    pub fn parse_variant_key(key: &str) -> Option<(String, String)> {
+        let parts: Vec<&str> = key.split("->").map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            Some((parts[0].to_string(), parts[1].to_string()))
+        } else {
+            None
         }
+    }
+
+    /// Get all configured relationships as a flat list.
+    pub fn all_relationships(&self) -> Vec<(String, String, String, EdgeRatio)> {
+        let mut result = Vec::new();
+        for (edge_type, variants) in &self.edges {
+            for (variant_key, ratio) in variants {
+                if let Some((source, target)) = Self::parse_variant_key(variant_key) {
+                    result.push((edge_type.clone(), source, target, ratio.clone()));
+                }
+            }
+        }
+        result
+    }
+}
+
+/// Association edge configuration.
+///
+/// Creates edges between existing entities (does not generate new entities).
+/// Used for relationships like AUTHORED, MEMBER_OF, ASSIGNED, etc.
+///
+/// Format: `"Source -> Target": ratio`
+/// Semantics: For each TARGET entity, sample RATIO source entities to link.
+///
+/// # Example YAML
+/// ```yaml
+/// associations:
+///   AUTHORED:
+///     "User -> MergeRequest": 1    # Each MR has 1 author (sampled from Users)
+///   MEMBER_OF:
+///     "User -> Group": 3           # Each group has 3 members
+///   ASSIGNED:
+///     "User -> WorkItem": 0.7      # 70% of work items have an assignee
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AssociationConfig {
+    /// Map of edge type to variant configurations.
+    /// Key: edge relationship kind (e.g., "AUTHORED")
+    /// Value: map of "Source -> Target" to ratio (iterates over targets)
+    #[serde(flatten)]
+    pub edges: HashMap<String, HashMap<String, EdgeRatio>>,
+}
+
+impl AssociationConfig {
+    /// Get all configured associations as a flat list.
+    /// Returns (edge_type, source_kind, target_kind, ratio).
+    pub fn all_associations(&self) -> Vec<(String, String, String, EdgeRatio)> {
+        let mut result = Vec::new();
+        for (edge_type, variants) in &self.edges {
+            for (variant_key, ratio) in variants {
+                if let Some((source, target)) = RelationshipConfig::parse_variant_key(variant_key) {
+                    result.push((edge_type.clone(), source, target, ratio.clone()));
+                }
+            }
+        }
+        result
     }
 }
 
@@ -457,7 +569,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.clickhouse.url, "http://localhost:8123");
         assert_eq!(config.generation.organizations, 2);
-        assert_eq!(config.generation.nodes.default_per_type, 100);
+        assert!(config.generation.roots.is_empty());
     }
 
     #[test]
@@ -466,23 +578,6 @@ mod tests {
         let yaml = serde_yaml::to_string(&config).unwrap();
         let parsed: Config = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed.clickhouse.url, config.clickhouse.url);
-    }
-
-    #[test]
-    fn test_node_count() {
-        let config = Config {
-            generation: GenerationConfig {
-                nodes: NodeGenerationConfig {
-                    default_per_type: 200,
-                    counts: [("User".to_string(), 500)].into_iter().collect(),
-                },
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        assert_eq!(config.node_count("User"), 500);
-        assert_eq!(config.node_count("Project"), 200);
     }
 
     #[test]
@@ -496,8 +591,85 @@ generation:
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.clickhouse.url, "http://ch:8123");
         assert_eq!(config.generation.organizations, 5);
-        // Defaults should be filled in
-        assert_eq!(config.generation.nodes.default_per_type, 100);
         assert_eq!(config.evaluation.sample_size, 100);
+    }
+
+    #[test]
+    fn test_edge_ratio_count() {
+        let ratio = EdgeRatio::Count(5);
+        let mut rng = fake::rand::thread_rng();
+        assert_eq!(ratio.sample(&mut rng), 5);
+    }
+
+    #[test]
+    fn test_edge_ratio_probability() {
+        let ratio = EdgeRatio::Probability(1.0);
+        let mut rng = fake::rand::thread_rng();
+        assert_eq!(ratio.sample(&mut rng), 1);
+
+        let ratio_zero = EdgeRatio::Probability(0.0);
+        assert_eq!(ratio_zero.sample(&mut rng), 0);
+    }
+
+    #[test]
+    fn test_relationship_config_parse_variant_key() {
+        let (source, target) = RelationshipConfig::parse_variant_key("Group -> Project").unwrap();
+        assert_eq!(source, "Group");
+        assert_eq!(target, "Project");
+
+        let (source, target) =
+            RelationshipConfig::parse_variant_key("MergeRequest->Pipeline").unwrap();
+        assert_eq!(source, "MergeRequest");
+        assert_eq!(target, "Pipeline");
+
+        assert!(RelationshipConfig::parse_variant_key("Invalid").is_none());
+    }
+
+    #[test]
+    fn test_relationship_config_yaml() {
+        let yaml = r#"
+clickhouse:
+  url: http://localhost:8123
+generation:
+  roots:
+    User: 100
+    Group: 50
+  relationships:
+    CONTAINS:
+      "Group -> Group": 3
+      "Group -> Project": 5
+    IN_PROJECT:
+      "MergeRequest -> Project": 30
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(config.generation.roots.get("User"), Some(&100));
+        assert_eq!(config.generation.roots.get("Group"), Some(&50));
+
+        let contains = config
+            .generation
+            .relationships
+            .edges
+            .get("CONTAINS")
+            .unwrap();
+        assert!(matches!(
+            contains.get("Group -> Group"),
+            Some(EdgeRatio::Count(3))
+        ));
+        assert!(matches!(
+            contains.get("Group -> Project"),
+            Some(EdgeRatio::Count(5))
+        ));
+
+        let in_project = config
+            .generation
+            .relationships
+            .edges
+            .get("IN_PROJECT")
+            .unwrap();
+        assert!(matches!(
+            in_project.get("MergeRequest -> Project"),
+            Some(EdgeRatio::Count(30))
+        ));
     }
 }

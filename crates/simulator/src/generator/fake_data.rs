@@ -256,7 +256,7 @@ impl FakeValueGenerator {
         let suffix: String = Words(1..3)
             .fake_with_rng::<Vec<String>, _>(&mut self.rng)
             .join("-");
-        format!("{}/{}", prefix, suffix.to_lowercase())
+        format!("{}/{}/", prefix, suffix.to_lowercase())
     }
 
     fn pick_enum(&mut self, values: &[&str]) -> String {

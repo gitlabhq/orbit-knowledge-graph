@@ -18,23 +18,38 @@ clickhouse:
     engine: MergeTree
     index_granularity: 8192
 
-    # Node tables: PRIMARY KEY defines sparse index, ORDER BY defines disk sort order
-    # PRIMARY KEY must be a prefix of ORDER BY. If omitted, defaults to ORDER BY.
+    # Node tables: organization_id first for tenant isolation
+    # PRIMARY KEY = sparse index, ORDER BY = disk sort order
     node_primary_key: [organization_id, id]
     node_order_by: [organization_id, id]
 
-    # Edge table: source-first for forward traversal
+    # Edge table: ordered for forward traversal (source -> target)
     edge_primary_key: [source_kind, source]
     edge_order_by: [source_kind, source, relationship_kind]
 
-    # Data skipping indexes (applied after data load)
-    indexes: []
+    # Data skipping indexes for FK lookups not in primary key
+    indexes:
+      # Bloom filter for target lookups (reverse traversal)
+      - name: idx_target
+        table: edges
+        expression: target
+        type: bloom_filter
+        granularity: 4
 
-    # Projections for reverse traversal (applied after data load)
-    projections: []
+      # Bloom filter for relationship filtering
+      - name: idx_relationship
+        table: edges
+        expression: relationship_kind
+        type: bloom_filter
+        granularity: 4
 
-    # Additional MergeTree SETTINGS options
-    settings: {}
+    # Projections for reverse traversal (5x+ speedup)
+    projections:
+      # Find edges by target (reverse of source -> target)
+      - name: by_target
+        table: edges
+        columns: [source_kind, source, relationship_kind, target_kind, target]
+        order_by: [target_kind, target, relationship_kind]
 
 generation:
   ontology_path: fixtures/ontology
@@ -44,60 +59,100 @@ generation:
   batch_size: 50000
 
   # Scale: 10 organizations (tenants)
-  # Based on graphhouse spike "default" config
   organizations: 10
 
-  traversal:
-    ids_per_org: 5000
-    max_depth: 8
+  # Root entities (absolute counts per organization)
+  # These have no parent and are generated first.
+  roots:
+    User: 100
+    Group: 50
 
-  nodes:
-    # Default for unlisted types
-    default_per_type: 100
+  # Subgroup hierarchy (Group -> Group)
+  # Generates nested groups under each root group
+  subgroups:
+    max_depth: 3      # 3 levels of nesting
+    per_group: 2      # 2 subgroups per parent group
 
-    # Realistic GitLab-like distribution per organization
-    # Based on graphhouse spike ratios:
-    #   - 100 users per tenant
-    #   - 50 groups (with subgroup hierarchy)
-    #   - 250 projects (5 per group)
-    #   - 7,500 MRs (30 per project)
-    #   - 12,500 issues/work items (50 per project)
-    counts:
-      # Core entities
-      User: 100
-      Group: 50
-      Project: 250
+  # Relationship-based generation
+  # Entities are generated from their parents based on ontology edge types.
+  # Format: EDGE_TYPE: { "Source -> Target": ratio }
+  #
+  # Traversal IDs:
+  # - Groups extend parent's path: "1/2" -> "1/2/3"
+  # - All other entities inherit from their container
+  relationships:
+    # Group -> Project containment
+    # Note: Group -> Group (subgroups) is handled specially via max_subgroup_depth
+    CONTAINS:
+      "Group -> Project": 5      # 5 projects per group
 
-      # SDLC entities (high volume)
-      MergeRequest: 7500
-      WorkItem: 12500
-      Note: 20000          # ~1 per MR + ~1 per WorkItem
+    # SDLC entities belong to projects
+    IN_PROJECT:
+      "MergeRequest -> Project": 30   # 30 MRs per project
+      "WorkItem -> Project": 50       # 50 work items per project
+      "Pipeline -> Project": 60       # 60 pipelines per project
+      "Vulnerability -> Project": 4   # 4 vulnerabilities per project
+      "Finding -> Project": 12        # 12 findings per project
+      "Scanner -> Project": 1         # 1 scanner config per project
+      "Milestone -> Project": 2       # 2 milestones per project
+      "Label -> Project": 5           # 5 labels per project
 
-      # CI/CD entities
-      Pipeline: 15000      # ~2 per MR
-      Stage: 45000         # ~3 per pipeline
-      Job: 75000           # ~5 per pipeline
+    # CI/CD pipeline structure
+    HAS_STAGE:
+      "Pipeline -> Stage": 3          # 3 stages per pipeline
 
-      # MR-related
-      MergeRequestFile: 30000  # ~4 files per MR
-      Branch: 500              # ~2 per project
-      Milestone: 100           # ~2 per group
-      Label: 250               # ~5 per group
+    HAS_JOB:
+      "Stage -> Job": 5               # 5 jobs per stage
 
-      # Code intelligence (smaller for now)
-      File: 5000
-      Directory: 1000
-      Definition: 10000
-      ImportedSymbol: 5000
+    # MR-related files
+    HAS_FILE:
+      "MergeRequest -> MergeRequestFile": 4  # 4 files per MR
 
-      # Security (moderate)
-      Vulnerability: 1000
-      Finding: 3000
-      Scanner: 10
-      VulnerabilityIdentifier: 500
+    # Notes (comments) on entities
+    HAS_NOTE:
+      "MergeRequest -> Note": 2       # 2 notes per MR
+      "WorkItem -> Note": 1           # 1 note per work item
 
-  edges:
-    per_source: 3
+    # Security relationships
+    HAS_FINDING:
+      "Vulnerability -> Finding": 3   # 3 findings per vulnerability
+
+    HAS_IDENTIFIER:
+      "Finding -> VulnerabilityIdentifier": 2  # 2 identifiers per finding
+
+  # Association edges
+  # Connect existing entities together (no new entities generated).
+  # Format: "Source -> Target": ratio
+  # Semantics: For each TARGET entity, sample RATIO source entities.
+  associations:
+    # Authorship - who created what
+    AUTHORED:
+      "User -> MergeRequest": 1       # Each MR has 1 author
+      "User -> WorkItem": 1           # Each work item has 1 author
+      "User -> Note": 1               # Each note has 1 author
+
+    # Membership - who belongs where
+    MEMBER_OF:
+      "User -> Group": 3              # Each group has 3 members
+
+    # Assignment - who is working on what
+    ASSIGNED:
+      "User -> MergeRequest": 0.7     # 70% of MRs have an assignee
+      "User -> WorkItem": 0.8         # 80% of work items have an assignee
+
+    # Review - who reviews what
+    REVIEWER:
+      "User -> MergeRequest": 0.5     # 50% of MRs have a reviewer
+
+    # Pipeline triggers
+    TRIGGERED:
+      "User -> Pipeline": 1           # Each pipeline was triggered by someone
+
+    # Project/Group ownership
+    CREATOR:
+      "User -> Project": 1            # Each project has a creator
+    OWNER:
+      "User -> Group": 1              # Each group has an owner
 
 evaluation:
   queries_path: fixtures/queries/sdlc_queries.json
