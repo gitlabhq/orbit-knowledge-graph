@@ -5562,6 +5562,7 @@ dependencies = [
  "fake",
  "indicatif",
  "ontology",
+ "parquet",
  "query-engine",
  "rayon",
  "serde",

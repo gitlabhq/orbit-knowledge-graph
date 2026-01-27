@@ -21,6 +21,7 @@ tracing-subscriber.workspace = true
 clickhouse = { version = "0.14", features = ["inserter"] }
 fake = { version = "3.0", features = ["derive", "chrono"] }
 indicatif = "0.18"
+parquet = "57"
 # Note: Use fake::rand re-export to avoid version conflicts
 
 # Internal crates
@@ -28,8 +29,12 @@ ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 
 [[bin]]
-name = "simulate"
+name = "generate"
 path = "src/bin/generate.rs"
+
+[[bin]]
+name = "load"
+path = "src/bin/load.rs"
 
 [[bin]]
 name = "evaluate"

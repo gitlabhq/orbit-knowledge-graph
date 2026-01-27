@@ -1,9 +1,4 @@
 //! Data generation from ontology definitions.
-//!
-//! This module generates fake data entirely from ontology definitions:
-//! - Node types and their fields come from `ontology.nodes()`
-//! - Edge types and their source/target kinds come from `ontology.edges()`
-//! - No hardcoded entity names or relationships
 
 mod batch;
 mod fake_data;
@@ -14,19 +9,17 @@ pub use fake_data::FakeValueGenerator;
 pub use traversal::TraversalIdGenerator;
 
 use crate::arrow_schema::ToArrowSchema;
-use crate::clickhouse::ClickHouseWriter;
 use crate::config::Config;
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use fake::rand::Rng;
 use fake::rand::seq::SliceRandom;
 use ontology::{EdgeEntity, NodeEntity, Ontology};
-use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-/// Edge data to be written to ClickHouse.
+/// Edge record for storage.
 #[derive(Debug, Clone)]
 pub struct EdgeRecord {
     pub relationship_kind: String,
@@ -45,7 +38,7 @@ pub struct OrganizationData {
     pub edges: Vec<EdgeRecord>,
 }
 
-/// Main generator that produces fake data from ontology definitions.
+/// Generates fake data from ontology definitions.
 pub struct Generator {
     ontology: Ontology,
     config: Config,
@@ -73,167 +66,8 @@ impl Generator {
         }
     }
 
-    pub fn next_id(&self) -> i64 {
-        self.next_id.fetch_add(1, Ordering::SeqCst)
-    }
-
-    pub async fn run(&self) -> Result<()> {
-        let writer = ClickHouseWriter::new(&self.config.clickhouse.url);
-
-        println!("Creating ClickHouse schemas...");
-        writer.create_schemas(&self.ontology).await?;
-
-        println!(
-            "\nGenerating data for {} organization(s)...",
-            self.config.generation.organizations
-        );
-        let overall_start = std::time::Instant::now();
-
-        let mut total_gen_time = 0.0;
-        let mut total_write_time = 0.0;
-
-        for org_id in 1..=self.config.generation.organizations {
-            println!(
-                "\n=== Organization {}/{} ===",
-                org_id, self.config.generation.organizations
-            );
-
-            println!("  Generating nodes...");
-            let gen_start = std::time::Instant::now();
-            let org_data = self.generate_organization_with_logging(org_id, true)?;
-            let gen_elapsed = gen_start.elapsed().as_secs_f64();
-            total_gen_time += gen_elapsed;
-
-            let node_count: usize = org_data
-                .nodes
-                .values()
-                .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
-                .sum();
-            println!(
-                "  Generation complete: {} nodes + {} edges ({:.1}s)",
-                node_count,
-                org_data.edges.len(),
-                gen_elapsed
-            );
-
-            println!("  Writing to ClickHouse...");
-            let write_start = std::time::Instant::now();
-            writer
-                .write_organization_data(&self.ontology, &org_data)
-                .await?;
-            let write_elapsed = write_start.elapsed().as_secs_f64();
-            total_write_time += write_elapsed;
-
-            println!("  Write complete ({:.1}s)", write_elapsed);
-        }
-
-        println!(
-            "\n=== Summary ===\nTotal: gen:{:.1}s + write:{:.1}s = {:.1}s",
-            total_gen_time,
-            total_write_time,
-            overall_start.elapsed().as_secs_f64()
-        );
-
-        writer.print_statistics(&self.ontology).await?;
-
-        Ok(())
-    }
-
-    pub async fn run_parallel(&self) -> Result<()> {
-        let writer = ClickHouseWriter::new(&self.config.clickhouse.url);
-
-        println!("Creating ClickHouse schemas...");
-        writer.create_schemas(&self.ontology).await?;
-
-        println!(
-            "\nGenerating data for {} organization(s) in parallel...",
-            self.config.generation.organizations
-        );
-        let overall_start = std::time::Instant::now();
-
-        println!("\n=== Parallel Generation Phase ===");
-        let gen_start = std::time::Instant::now();
-
-        let org_data_vec: Vec<_> = (1..=self.config.generation.organizations)
-            .into_par_iter()
-            .map(|org_id| {
-                let start = std::time::Instant::now();
-                println!("  [Org {}] Starting generation...", org_id);
-
-                let result = self.generate_organization(org_id);
-
-                match &result {
-                    Ok(data) => {
-                        let node_count: usize = data
-                            .nodes
-                            .values()
-                            .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
-                            .sum();
-                        println!(
-                            "  [Org {}] ✓ Generated {} nodes + {} edges in {:.1}s",
-                            org_id,
-                            node_count,
-                            data.edges.len(),
-                            start.elapsed().as_secs_f64()
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("  [Org {}] ✗ Error: {}", org_id, e);
-                    }
-                }
-
-                (org_id, result)
-            })
-            .collect();
-
-        let gen_elapsed = gen_start.elapsed().as_secs_f64();
-        println!("\nAll organizations generated in {:.1}s", gen_elapsed);
-
-        // Sequential writes required: ClickHouse client isn't Send
-        println!("\n=== Sequential Write Phase ===");
-        let write_start = std::time::Instant::now();
-
-        for (org_id, result) in org_data_vec {
-            let org_data = result?;
-
-            let start = std::time::Instant::now();
-            println!("  [Org {}] Writing to ClickHouse...", org_id);
-
-            writer
-                .write_organization_data(&self.ontology, &org_data)
-                .await?;
-
-            println!(
-                "  [Org {}] ✓ Written in {:.1}s",
-                org_id,
-                start.elapsed().as_secs_f64()
-            );
-        }
-
-        let write_elapsed = write_start.elapsed().as_secs_f64();
-        println!("\nAll organizations written in {:.1}s", write_elapsed);
-
-        println!(
-            "\n=== Summary ===\nTotal: gen:{:.1}s + write:{:.1}s = {:.1}s",
-            gen_elapsed,
-            write_elapsed,
-            overall_start.elapsed().as_secs_f64()
-        );
-
-        writer.print_statistics(&self.ontology).await?;
-
-        Ok(())
-    }
-
+    /// Generate data for a single organization.
     pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
-        self.generate_organization_with_logging(org_id, false)
-    }
-
-    fn generate_organization_with_logging(
-        &self,
-        org_id: u32,
-        verbose: bool,
-    ) -> Result<OrganizationData> {
         let mut data = OrganizationData::default();
         let mut id_map: HashMap<String, Vec<i64>> = HashMap::new();
         let traversal_gen = self
@@ -244,64 +78,15 @@ impl Generator {
         for node in self.ontology.nodes() {
             let count = self.config.node_count(&node.name);
             if count > 0 {
-                if verbose {
-                    print!("    {} ({} nodes)... ", node.name, count);
-                    std::io::Write::flush(&mut std::io::stdout()).ok();
-                }
-
-                let start = std::time::Instant::now();
                 let (batches, ids) =
                     self.generate_node_batches(node, org_id, traversal_gen, count)?;
-
-                if verbose {
-                    println!("✓ {:.1}s", start.elapsed().as_secs_f64());
-                }
-
                 data.nodes.insert(node.name.clone(), batches);
                 id_map.insert(node.name.clone(), ids);
             }
         }
 
-        if verbose {
-            println!("    Generating edges...");
-        }
-
-        let edge_start = std::time::Instant::now();
         for edge in self.ontology.edges() {
-            if verbose {
-                print!(
-                    "      {} ({} -> {})... ",
-                    edge.relationship_kind, edge.source_kind, edge.target_kind
-                );
-                std::io::Write::flush(&mut std::io::stdout()).ok();
-            }
-
-            let edge_type_start = std::time::Instant::now();
-            let edge_count_before = data.edges.len();
             self.generate_edges_for_type(edge, &id_map, &mut data.edges);
-            let edges_added = data.edges.len() - edge_count_before;
-            let edge_type_elapsed = edge_type_start.elapsed().as_secs_f64();
-
-            if verbose {
-                if edges_added > 0 {
-                    println!(
-                        "{} edges ({:.1}s, {:.0} edges/s)",
-                        edges_added,
-                        edge_type_elapsed,
-                        edges_added as f64 / edge_type_elapsed.max(0.001)
-                    );
-                } else {
-                    println!("0 edges (skipped)");
-                }
-            }
-        }
-
-        if verbose {
-            println!(
-                "    Total edges: {} ({:.1}s)",
-                data.edges.len(),
-                edge_start.elapsed().as_secs_f64()
-            );
         }
 
         Ok(data)

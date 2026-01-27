@@ -1,7 +1,9 @@
 # Simulator configuration
 #
-# Run generation: cargo run --bin simulate -- -c simulator.yaml
-# Run evaluation: cargo run --bin evaluate -- -c simulator.yaml
+# Workflow:
+#   1. Generate data:  cargo run --bin generate -- -c simulator.yaml
+#   2. Load to CH:     cargo run --bin load -- -c simulator.yaml
+#   3. Evaluate:       cargo run --bin evaluate -- -c simulator.yaml
 #
 # All fields have defaults - you only need to specify what you want to override.
 
@@ -22,6 +24,8 @@ clickhouse:
 
 generation:
   ontology_path: fixtures/ontology
+  output_dir: data
+  skip_if_present: true
   organizations: 2
   parallel: false
   batch_size: 10000

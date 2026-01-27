@@ -172,6 +172,12 @@ pub struct GenerationConfig {
     /// Path to ontology fixtures.
     #[serde(default = "default_ontology_path")]
     pub ontology_path: String,
+    /// Output directory for Parquet files.
+    #[serde(default = "default_output_dir")]
+    pub output_dir: String,
+    /// Skip generation if Parquet files already exist.
+    #[serde(default)]
+    pub skip_if_present: bool,
     /// Number of organizations to generate.
     #[serde(default = "default_organizations")]
     pub organizations: u32,
@@ -184,12 +190,16 @@ pub struct GenerationConfig {
     /// Edge generation settings.
     #[serde(default)]
     pub edges: EdgeGenerationConfig,
-    /// Batch size for ClickHouse inserts.
+    /// Batch size for Parquet row groups.
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
     /// Run generation in parallel across organizations.
     #[serde(default)]
     pub parallel: bool,
+}
+
+fn default_output_dir() -> String {
+    "data".to_string()
 }
 
 fn default_ontology_path() -> String {
@@ -208,6 +218,8 @@ impl Default for GenerationConfig {
     fn default() -> Self {
         Self {
             ontology_path: default_ontology_path(),
+            output_dir: default_output_dir(),
+            skip_if_present: false,
             organizations: default_organizations(),
             traversal: TraversalConfig::default(),
             nodes: NodeGenerationConfig::default(),

@@ -33,6 +33,7 @@ pub mod clickhouse;
 pub mod config;
 pub mod evaluation;
 pub mod generator;
+pub mod parquet;
 
 pub use config::Config;
 pub use generator::Generator;
