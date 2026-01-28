@@ -43,7 +43,6 @@ pub struct NamespaceHandler {
 }
 
 impl NamespaceHandler {
-    /// Create a new namespace handler with a list of entity handlers.
     pub fn new(
         entity_handlers: Vec<Box<dyn NamespacedEntityHandler>>,
         watermark_store: Arc<dyn WatermarkStore>,

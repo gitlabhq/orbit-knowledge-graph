@@ -11,7 +11,7 @@ use datalake::{Datalake, DatalakeQuery};
 use etl_engine::clickhouse::ClickHouseConfiguration;
 use etl_engine::module::{Handler, Module, ModuleInitError};
 use handlers::{
-    GenericGlobalEntityHandler, GenericNamespacedHandler, GlobalEntityHandler, GlobalHandler,
+    GlobalEntityHandler, GlobalEntityHandlerImpl, GlobalHandler, NamespacedEntityHandlerImpl,
 };
 use namespace_handler::{NamespaceHandler, NamespacedEntityHandler};
 use ontology::{EtlScope, Ontology};
@@ -64,19 +64,13 @@ impl Module for SdlcModule {
 
             match etl.scope() {
                 EtlScope::Global => {
-                    match GenericGlobalEntityHandler::new(
-                        node.clone(),
-                        Arc::clone(&self.datalake),
-                    ) {
+                    match GlobalEntityHandlerImpl::from_node(node, Arc::clone(&self.datalake)) {
                         Ok(handler) => global_entity_handlers.push(Box::new(handler)),
                         Err(error) => warn!(node = %node.name, %error, "skipping node"),
                     }
                 }
                 EtlScope::Namespaced => {
-                    match GenericNamespacedHandler::new(
-                        node.clone(),
-                        Arc::clone(&self.datalake),
-                    ) {
+                    match NamespacedEntityHandlerImpl::from_node(node, Arc::clone(&self.datalake)) {
                         Ok(handler) => namespaced_entity_handlers.push(Box::new(handler)),
                         Err(error) => warn!(node = %node.name, %error, "skipping node"),
                     }

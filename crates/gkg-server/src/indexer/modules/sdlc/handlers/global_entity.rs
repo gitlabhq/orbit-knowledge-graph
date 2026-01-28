@@ -1,228 +1,62 @@
-//! Global entity handler trait and generic implementation.
-//!
-//! Global entity handlers process entities with a global scope (not per-namespace).
-
 use std::sync::Arc;
 
-use arrow::compute::concat_batches;
-use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use datafusion::datasource::MemTable;
-use datafusion::prelude::*;
 use etl_engine::module::{HandlerContext, HandlerError};
-use futures::StreamExt;
 use ontology::NodeEntity;
 use serde::Serialize;
 
 use super::HandlerCreationError;
-use crate::indexer::modules::sdlc::datalake::{DatalakeQuery, ToQueryParams};
-use crate::indexer::modules::sdlc::transform::TransformEngine;
+use super::ontology_entity_pipeline::OntologyEntityPipeline;
+use crate::indexer::modules::sdlc::datalake::DatalakeQuery;
 use crate::indexer::modules::sdlc::watermark_store::TIMESTAMP_FORMAT;
 
-/// Context for global entity handlers.
 pub struct GlobalEntityContext {
-    /// The standard handler context from etl-engine.
     pub handler_context: HandlerContext,
-    /// The last processed watermark.
     pub last_watermark: DateTime<Utc>,
-    /// The current watermark to process up to.
     pub watermark: DateTime<Utc>,
 }
 
-/// Handler trait for processing global-scoped entities.
 #[async_trait]
 pub trait GlobalEntityHandler: Send + Sync {
-    /// Returns the name of this handler.
     fn name(&self) -> &str;
-
-    /// Process the entity for the given watermark range.
     async fn handle(&self, context: &GlobalEntityContext) -> Result<(), HandlerError>;
 }
 
-/// Query parameters for global entity queries.
 #[derive(Clone, Serialize)]
 struct GlobalQueryParams {
     last_watermark: String,
     watermark: String,
 }
 
-impl GlobalQueryParams {
-    fn new(last_watermark: &DateTime<Utc>, watermark: &DateTime<Utc>) -> Self {
-        Self {
-            last_watermark: last_watermark.format(TIMESTAMP_FORMAT).to_string(),
-            watermark: watermark.format(TIMESTAMP_FORMAT).to_string(),
-        }
-    }
+pub struct GlobalEntityHandlerImpl {
+    pipeline: OntologyEntityPipeline,
 }
 
-/// Generic handler for global-scoped entities.
-///
-/// This handler uses ontology definitions to dynamically generate SQL
-/// and process entities.
-pub struct GenericGlobalEntityHandler {
-    node: NodeEntity,
-    handler_name: String,
-    datalake: Arc<dyn DatalakeQuery>,
-    transform_sql: String,
-    source_query: String,
-    edge_queries: Vec<String>,
-}
-
-impl GenericGlobalEntityHandler {
-    /// Create a new generic global entity handler.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the node has no ETL configuration, source query,
-    /// or if the query is missing required parameters.
-    pub fn new(
-        node: NodeEntity,
+impl GlobalEntityHandlerImpl {
+    pub fn from_node(
+        node: &NodeEntity,
         datalake: Arc<dyn DatalakeQuery>,
     ) -> Result<Self, HandlerCreationError> {
-        let etl = node.etl.as_ref().ok_or_else(|| HandlerCreationError {
-            node_name: node.name.clone(),
-            reason: "node has no ETL configuration".to_string(),
-        })?;
-
-        let missing_params = etl.validate_query_parameters();
-        if !missing_params.is_empty() {
-            return Err(HandlerCreationError {
-                node_name: node.name.clone(),
-                reason: format!("query missing required parameters: {}", missing_params.join(", ")),
-            });
-        }
-
-        let transform_sql = TransformEngine::build_transform_sql(&node);
-        let source_query = TransformEngine::build_source_query(&node).ok_or_else(|| {
-            HandlerCreationError {
-                node_name: node.name.clone(),
-                reason: "failed to build source query".to_string(),
-            }
-        })?;
-
-        let edge_queries: Vec<String> = node
-            .edges
-            .iter()
-            .map(|edge| TransformEngine::build_edge_sql(&node.name, edge))
-            .collect();
-
-        let handler_name = format!("generic-{}-handler", node.name.to_lowercase());
-
-        Ok(Self {
-            node,
-            handler_name,
-            datalake,
-            transform_sql,
-            source_query,
-            edge_queries,
-        })
-    }
-
-    async fn transform_and_write_batch(
-        &self,
-        batch: RecordBatch,
-        entity_writer: &dyn etl_engine::destination::BatchWriter,
-        edge_writer: &dyn etl_engine::destination::BatchWriter,
-    ) -> Result<(), HandlerError> {
-        let session = SessionContext::new();
-
-        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]])
-            .map_err(|e| HandlerError::Processing(format!("failed to create mem table: {e}")))?;
-
-        session
-            .register_table("source_data", Arc::new(mem_table))
-            .map_err(|e| HandlerError::Processing(format!("failed to register table: {e}")))?;
-
-        let entities = Self::execute_query(&session, &self.transform_sql).await?;
-        entity_writer
-            .write_batch(&[entities])
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to write entities: {e}")))?;
-
-        for edge_query in &self.edge_queries {
-            let edges = Self::execute_query(&session, edge_query).await?;
-            if edges.num_rows() > 0 {
-                edge_writer
-                    .write_batch(&[edges])
-                    .await
-                    .map_err(|e| HandlerError::Processing(format!("failed to write edges: {e}")))?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn execute_query(
-        session: &SessionContext,
-        sql: &str,
-    ) -> Result<RecordBatch, HandlerError> {
-        let dataframe = session
-            .sql(sql)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to execute sql: {e}")))?;
-
-        let schema = Arc::new(dataframe.schema().as_arrow().clone());
-
-        let batches = dataframe
-            .collect()
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to collect results: {e}")))?;
-
-        if batches.is_empty() {
-            return Ok(RecordBatch::new_empty(schema));
-        }
-
-        concat_batches(&schema, &batches)
-            .map_err(|e| HandlerError::Processing(format!("failed to concat batches: {e}")))
+        let pipeline = OntologyEntityPipeline::from_node(node, datalake)?;
+        Ok(Self { pipeline })
     }
 }
 
 #[async_trait]
-impl GlobalEntityHandler for GenericGlobalEntityHandler {
+impl GlobalEntityHandler for GlobalEntityHandlerImpl {
     fn name(&self) -> &str {
-        &self.handler_name
+        &self.pipeline.entity_name
     }
 
     async fn handle(&self, context: &GlobalEntityContext) -> Result<(), HandlerError> {
-        let entity_writer = context
-            .handler_context
-            .destination
-            .new_batch_writer(&self.node.destination_table)
+        let params = GlobalQueryParams {
+            last_watermark: context.last_watermark.format(TIMESTAMP_FORMAT).to_string(),
+            watermark: context.watermark.format(TIMESTAMP_FORMAT).to_string(),
+        };
+
+        self.pipeline
+            .run(params, context.handler_context.destination.clone())
             .await
-            .map_err(|e| {
-                HandlerError::Processing(format!("failed to create entity writer: {e}"))
-            })?;
-
-        let edge_writer = context
-            .handler_context
-            .destination
-            .new_batch_writer("edges")
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to create edge writer: {e}")))?;
-
-        let params = GlobalQueryParams::new(&context.last_watermark, &context.watermark);
-        let mut stream = self
-            .datalake
-            .query_arrow(&self.source_query, params.to_query_params())
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to query source: {e}")))?;
-
-        while let Some(result) = stream.next().await {
-            let source_batch = result
-                .map_err(|e| HandlerError::Processing(format!("failed to read batch: {e}")))?;
-            if source_batch.num_rows() == 0 {
-                continue;
-            }
-
-            self.transform_and_write_batch(
-                source_batch,
-                entity_writer.as_ref(),
-                edge_writer.as_ref(),
-            )
-            .await?;
-        }
-
-        Ok(())
     }
 }
