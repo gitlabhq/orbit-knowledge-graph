@@ -7,8 +7,9 @@ use etl_engine::types::{Envelope, Event, SerializationError, Topic};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
+use super::pipeline::OntologyEntityPipeline;
+use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
 use crate::indexer::modules::INDEXER_TOPIC;
-use crate::indexer::modules::sdlc::watermark_store::{WatermarkError, WatermarkStore};
 
 const SUBJECT: &str = "sdlc.namespace.indexing.requested";
 
@@ -25,31 +26,26 @@ impl Event for NamespaceHandlerPayload {
     }
 }
 
-pub struct NamespacedEntityContext {
-    pub handler_context: HandlerContext,
-    pub payload: NamespaceHandlerPayload,
-    pub last_watermark: DateTime<Utc>,
-}
-
-#[async_trait]
-pub trait NamespacedEntityHandler: Send + Sync {
-    fn name(&self) -> &str;
-    async fn handle(&self, context: &NamespacedEntityContext) -> Result<(), HandlerError>;
+#[derive(Clone, Serialize)]
+struct NamespacedQueryParams {
+    traversal_path: String,
+    last_watermark: String,
+    watermark: String,
 }
 
 pub struct NamespaceHandler {
     watermark_store: Arc<dyn WatermarkStore>,
-    entity_handlers: Vec<Box<dyn NamespacedEntityHandler>>,
+    pipelines: Vec<OntologyEntityPipeline>,
 }
 
 impl NamespaceHandler {
     pub fn new(
-        entity_handlers: Vec<Box<dyn NamespacedEntityHandler>>,
+        pipelines: Vec<OntologyEntityPipeline>,
         watermark_store: Arc<dyn WatermarkStore>,
     ) -> Self {
         Self {
             watermark_store,
-            entity_handlers,
+            pipelines,
         }
     }
 }
@@ -86,18 +82,21 @@ impl Handler for NamespaceHandler {
             }
         };
 
-        let context = NamespacedEntityContext {
-            handler_context,
-            payload: payload.clone(),
-            last_watermark,
+        let params = NamespacedQueryParams {
+            traversal_path: format!("{}/{}/", payload.organization, payload.namespace),
+            last_watermark: last_watermark.format(TIMESTAMP_FORMAT).to_string(),
+            watermark: payload.watermark.format(TIMESTAMP_FORMAT).to_string(),
         };
 
         let mut errors = Vec::new();
 
-        for handler in &self.entity_handlers {
-            if let Err(error) = handler.handle(&context).await {
-                warn!(handler = handler.name(), %error, "entity handler failed");
-                errors.push((handler.name(), error));
+        for pipeline in &self.pipelines {
+            if let Err(error) = pipeline
+                .run(params.clone(), handler_context.destination.clone())
+                .await
+            {
+                warn!(pipeline = %pipeline.entity_name, %error, "pipeline failed");
+                errors.push((pipeline.entity_name.as_str(), error));
             }
         }
 
@@ -116,124 +115,11 @@ impl Handler for NamespaceHandler {
                 .map(|(name, err)| format!("{name}: {err}"))
                 .collect();
             return Err(HandlerError::Processing(format!(
-                "entity handlers failed: {}",
+                "pipelines failed: {}",
                 error_details.join("; ")
             )));
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use etl_engine::testkit::{
-        MockDestination, MockMetricCollector, MockNatsServices, TestEnvelopeFactory,
-    };
-
-    struct CountingHandler {
-        call_count: AtomicUsize,
-    }
-
-    impl CountingHandler {
-        fn new() -> Self {
-            Self {
-                call_count: AtomicUsize::new(0),
-            }
-        }
-
-        fn count(&self) -> usize {
-            self.call_count.load(Ordering::SeqCst)
-        }
-    }
-
-    #[async_trait]
-    impl NamespacedEntityHandler for CountingHandler {
-        fn name(&self) -> &str {
-            "counting-handler"
-        }
-
-        async fn handle(&self, _context: &NamespacedEntityContext) -> Result<(), HandlerError> {
-            self.call_count.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
-    struct MockWatermarkStore;
-
-    #[async_trait]
-    impl WatermarkStore for MockWatermarkStore {
-        async fn get_namespace_watermark(&self, _: i64) -> Result<DateTime<Utc>, WatermarkError> {
-            Ok(DateTime::<Utc>::UNIX_EPOCH)
-        }
-
-        async fn set_namespace_watermark(
-            &self,
-            _: i64,
-            _: &DateTime<Utc>,
-        ) -> Result<(), WatermarkError> {
-            Ok(())
-        }
-
-        async fn get_global_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
-            Ok(DateTime::<Utc>::UNIX_EPOCH)
-        }
-
-        async fn set_global_watermark(&self, _: &DateTime<Utc>) -> Result<(), WatermarkError> {
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn handle_delegates_to_all_entity_handlers() {
-        let handler1 = Arc::new(CountingHandler::new());
-        let handler2 = Arc::new(CountingHandler::new());
-
-        let namespace_handler = NamespaceHandler {
-            watermark_store: Arc::new(MockWatermarkStore),
-            entity_handlers: vec![
-                Box::new(CountingHandlerWrapper(Arc::clone(&handler1))),
-                Box::new(CountingHandlerWrapper(Arc::clone(&handler2))),
-            ],
-        };
-
-        let payload = serde_json::json!({
-            "organization": 1,
-            "namespace": 2,
-            "watermark": "2024-01-21T00:00:00Z"
-        })
-        .to_string();
-        let envelope = TestEnvelopeFactory::simple(&payload);
-
-        let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(
-            destination,
-            Arc::new(MockMetricCollector::new()),
-            Arc::new(MockNatsServices::new()),
-        );
-
-        namespace_handler
-            .handle(context, envelope)
-            .await
-            .expect("handler should succeed");
-
-        assert_eq!(handler1.count(), 1, "handler1 should be called once");
-        assert_eq!(handler2.count(), 1, "handler2 should be called once");
-    }
-
-    struct CountingHandlerWrapper(Arc<CountingHandler>);
-
-    #[async_trait]
-    impl NamespacedEntityHandler for CountingHandlerWrapper {
-        fn name(&self) -> &str {
-            self.0.name()
-        }
-
-        async fn handle(&self, context: &NamespacedEntityContext) -> Result<(), HandlerError> {
-            self.0.handle(context).await
-        }
     }
 }

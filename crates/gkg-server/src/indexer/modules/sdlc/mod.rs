@@ -1,6 +1,7 @@
 mod datalake;
-pub mod handlers;
+mod global_handler;
 mod namespace_handler;
+mod pipeline;
 mod transform;
 mod watermark_store;
 
@@ -10,11 +11,10 @@ use std::sync::Arc;
 use datalake::{Datalake, DatalakeQuery};
 use etl_engine::clickhouse::ClickHouseConfiguration;
 use etl_engine::module::{Handler, Module, ModuleInitError};
-use handlers::{
-    GlobalEntityHandler, GlobalEntityHandlerImpl, GlobalHandler, NamespacedEntityHandlerImpl,
-};
-use namespace_handler::{NamespaceHandler, NamespacedEntityHandler};
+use global_handler::GlobalHandler;
+use namespace_handler::NamespaceHandler;
 use ontology::{EtlScope, Ontology};
+use pipeline::OntologyEntityPipeline;
 use tracing::warn;
 use watermark_store::{ClickHouseWatermarkStore, WatermarkStore};
 
@@ -25,12 +25,6 @@ pub struct SdlcModule {
 }
 
 impl SdlcModule {
-    /// Create the SDLC module with ontology-driven handlers.
-    ///
-    /// Dynamically generates handlers from the ontology YAML configuration.
-    /// Nodes with ETL config are automatically registered as handlers based on their scope:
-    /// - Global scope: handled by GlobalHandler orchestrator
-    /// - Namespaced scope: handled by NamespaceHandler orchestrator
     pub async fn new(
         configuration: &ClickHouseConfiguration,
         ontology_path: &Path,
@@ -56,40 +50,33 @@ impl Module for SdlcModule {
     }
 
     fn handlers(&self) -> Vec<Box<dyn Handler>> {
-        let mut global_entity_handlers: Vec<Box<dyn GlobalEntityHandler>> = Vec::new();
-        let mut namespaced_entity_handlers: Vec<Box<dyn NamespacedEntityHandler>> = Vec::new();
+        let mut global_pipelines = Vec::new();
+        let mut namespaced_pipelines = Vec::new();
 
         for node in self.ontology.nodes() {
             let Some(etl) = &node.etl else { continue };
 
-            match etl.scope() {
-                EtlScope::Global => {
-                    match GlobalEntityHandlerImpl::from_node(node, Arc::clone(&self.datalake)) {
-                        Ok(handler) => global_entity_handlers.push(Box::new(handler)),
-                        Err(error) => warn!(node = %node.name, %error, "skipping node"),
-                    }
-                }
-                EtlScope::Namespaced => {
-                    match NamespacedEntityHandlerImpl::from_node(node, Arc::clone(&self.datalake)) {
-                        Ok(handler) => namespaced_entity_handlers.push(Box::new(handler)),
-                        Err(error) => warn!(node = %node.name, %error, "skipping node"),
-                    }
-                }
+            match OntologyEntityPipeline::from_node(node, Arc::clone(&self.datalake)) {
+                Ok(pipeline) => match etl.scope() {
+                    EtlScope::Global => global_pipelines.push(pipeline),
+                    EtlScope::Namespaced => namespaced_pipelines.push(pipeline),
+                },
+                Err(error) => warn!(node = %node.name, %error, "skipping node"),
             }
         }
 
         let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
 
-        if !global_entity_handlers.is_empty() {
+        if !global_pipelines.is_empty() {
             handlers.push(Box::new(GlobalHandler::new(
-                global_entity_handlers,
+                global_pipelines,
                 Arc::clone(&self.watermark_store),
             )));
         }
 
-        if !namespaced_entity_handlers.is_empty() {
+        if !namespaced_pipelines.is_empty() {
             handlers.push(Box::new(NamespaceHandler::new(
-                namespaced_entity_handlers,
+                namespaced_pipelines,
                 Arc::clone(&self.watermark_store),
             )));
         }

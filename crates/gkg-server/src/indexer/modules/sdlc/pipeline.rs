@@ -9,9 +9,10 @@ use etl_engine::module::HandlerError;
 use futures::StreamExt;
 use ontology::NodeEntity;
 
-use super::HandlerCreationError;
-use crate::indexer::modules::sdlc::datalake::{DatalakeQuery, ToQueryParams};
-use crate::indexer::modules::sdlc::transform::TransformEngine;
+use etl_engine::module::HandlerCreationError;
+
+use super::datalake::{DatalakeQuery, ToQueryParams};
+use super::transform::TransformEngine;
 
 pub struct OntologyEntityPipeline {
     pub entity_name: String,

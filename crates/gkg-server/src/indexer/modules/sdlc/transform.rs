@@ -43,15 +43,14 @@ impl TransformEngine {
 
             // Add deleted column if specified in ETL config (if not already defined)
             // Only infer for Table types; Query types should include it in the query
-            if is_table_type {
-                if let Some(deleted_source) = etl.deleted() {
-                    if !node.property_configs.contains_key("deleted") {
-                        if deleted_source == "deleted" {
-                            column_expressions.push("deleted".to_string());
-                        } else {
-                            column_expressions.push(format!("{} AS deleted", deleted_source));
-                        }
-                    }
+            if is_table_type
+                && let Some(deleted_source) = etl.deleted()
+                && !node.property_configs.contains_key("deleted")
+            {
+                if deleted_source == "deleted" {
+                    column_expressions.push("deleted".to_string());
+                } else {
+                    column_expressions.push(format!("{} AS deleted", deleted_source));
                 }
             }
         }
