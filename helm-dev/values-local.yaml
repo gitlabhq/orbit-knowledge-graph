@@ -1,0 +1,94 @@
+# Local development values for use with Tilt
+# PostgreSQL and ClickHouse run on host machine (GDK), siphon services disabled
+
+# Disable GCP integration
+gcp:
+  project: ""
+  region: ""
+  cluster: ""
+
+# Use local secrets from values instead of GCP Secrets Manager
+secrets:
+  enabled: false
+
+# Disable GitLab Runner for local dev
+gitlab-runner:
+  enabled: false
+
+# PostgreSQL on host machine (GDK)
+postgres:
+  host: host.docker.internal
+  port: 5432
+  database: gitlabhq_development
+  user: gitlab
+
+# ClickHouse on host machine (GDK)
+clickhouse:
+  host: host.docker.internal
+  port: 9000
+  database: gitlab_clickhouse_main_development
+  user: default
+  ssl: false
+
+# NOTE: Secrets are managed by Tilt from .tilt-secrets file.
+# See .tilt-secrets.example in the repo root.
+
+# NATS for knowledge graph indexer queue
+nats:
+  enabled: true
+  streamName: gkg_indexer
+  image:
+    repository: nats
+    tag: "2.10-alpine"
+    pullPolicy: IfNotPresent
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Siphon image (not used when producer/consumer disabled)
+siphon:
+  image:
+    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+    tag: "0.0.25-beta"
+    pullPolicy: Always
+
+# No table mappings needed when siphon is disabled
+tableMappings: []
+
+# Disable siphon producer (managed by GDK)
+producer:
+  enabled: false
+  applicationIdentifier: ""
+  publicationName: ""
+  slotName: ""
+  advisoryLockId: 144324
+  maxColumnSizeBytes: 8000000
+  memoryBufferSize: 104857600
+  logLevel: info
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+# Disable siphon consumer (managed by GDK)
+consumer:
+  enabled: false
+  applicationIdentifier: ""
+  replicas: 1
+  logLevel: info
+  insertBatchSize: 10000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi

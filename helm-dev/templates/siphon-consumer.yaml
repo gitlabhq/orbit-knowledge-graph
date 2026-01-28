@@ -57,7 +57,9 @@ spec:
       annotations:
         checksum/config: {{ toJson .Values.consumer | sha256sum }}-{{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.tableMappings | sha256sum }}
     spec:
+      {{- if .Values.secrets.enabled }}
       serviceAccountName: gcp-secrets-sa
+      {{- end }}
       securityContext:
         {{- include "gkg.podSecurityContext" . | nindent 8 }}
       containers:

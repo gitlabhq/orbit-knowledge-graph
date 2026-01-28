@@ -7,9 +7,7 @@ stages:
   - test
   - deploy
 
-# ------------------------------------------------------------------------------
 # Job Templates
-# ------------------------------------------------------------------------------
 
 .job-template:
   tags:
@@ -53,9 +51,7 @@ stages:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# ------------------------------------------------------------------------------
 # Lint Stage
-# ------------------------------------------------------------------------------
 
 mr-title-check:
   stage: lint
@@ -87,9 +83,7 @@ lint-check:
     - cargo clippy --all-targets --all-features -- -D warnings
     - sccache --show-stats || true
 
-# ------------------------------------------------------------------------------
 # Security Stage
-# ------------------------------------------------------------------------------
 
 cargo-audit:
   stage: security
@@ -145,9 +139,7 @@ semgrep-sast:
       exists:
         - "**/*.rs"
 
-# ------------------------------------------------------------------------------
 # Test Stage
-# ------------------------------------------------------------------------------
 
 unit-test:
   stage: test
@@ -201,9 +193,56 @@ gitaly-integration-test:
     - cargo nextest run --profile ci -p gitaly-client --features integration
     - sccache --show-stats || true
 
-# ------------------------------------------------------------------------------
+tilt-ci:
+  stage: test
+  extends:
+    - .mr-only-rules
+  image: docker:29
+  tags:
+    - saas-linux-medium-amd64
+  services:
+    - docker:29-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    KIND_VERSION: "v0.25.0"
+    TILT_VERSION: "0.36.0"
+    KUBECTL_VERSION: "v1.32.0"
+  needs: []
+  before_script:
+    - apk add --no-cache curl bash sed
+    - curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+    - chmod +x kubectl && mv kubectl /usr/local/bin/
+    - curl -Lo ./kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
+    - chmod +x ./kind && mv ./kind /usr/local/bin/kind
+    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    - curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux-alpine.x86_64.tar.gz" | tar -xz -C /usr/local/bin tilt
+  script:
+    - |
+      cat <<EOF | kind create cluster --wait 1m --config=-
+      kind: Cluster
+      apiVersion: kind.x-k8s.io/v1alpha4
+      networking:
+        apiServerAddress: "0.0.0.0"
+      kubeadmConfigPatches:
+        - |
+          kind: ClusterConfiguration
+          apiServer:
+            certSANs:
+              - "docker"
+      EOF
+    - sed -i -E 's#https://0\.0\.0\.0:#https://docker:#' ~/.kube/config
+    - helm repo add gitlab https://charts.gitlab.io
+    - helm dependency build helm-dev
+    # Create dummy secrets for CI (not real credentials)
+    - |
+      cat <<EOF > .tilt-secrets
+      POSTGRES_PASSWORD=ci_test_password
+      CLICKHOUSE_PASSWORD=ci_test_password
+      EOF
+    - tilt ci
+
 # Deploy Stage - Helm Charts
-# ------------------------------------------------------------------------------
 
 # GKE cluster configuration
 variables:
