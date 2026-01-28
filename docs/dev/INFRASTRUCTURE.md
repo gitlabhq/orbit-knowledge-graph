@@ -24,6 +24,18 @@ For Kubernetes deployments, see `helm-dev/` charts (source of truth for componen
 | clickhouse-password | ClickHouse default user |
 | postgres-password | PostgreSQL gitlab user |
 | runner_authentication_token | GitLab Runner registration token (glrt-) |
+| grafana-oauth-client-id | Google OAuth client ID for Grafana |
+| grafana-oauth-client-secret | Google OAuth client secret for Grafana |
+| grafana-gitlab-oauth-client-id | GitLab OAuth client ID for Grafana |
+| grafana-gitlab-oauth-client-secret | GitLab OAuth client secret for Grafana |
+
+## DNS
+
+| Domain | Type | Target |
+|--------|------|--------|
+| grafana.gkg.dev | A | GKE Ingress Load Balancer IP |
+
+DNS for `gkg.dev` is managed externally.
 
 ## Firewall Rules
 

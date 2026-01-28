@@ -58,6 +58,19 @@ k8s_yaml(blob(secrets_yaml))
 local('helm repo add gitlab https://charts.gitlab.io 2>/dev/null || true', quiet=True)
 local('helm dependency build ./helm-dev', quiet=True)
 
+# Install Prometheus Operator CRDs (required for kube-prometheus-stack)
+PROMETHEUS_OPERATOR_VERSION = 'v0.88.1'
+PROMETHEUS_CRDS = [
+    'alertmanagerconfigs', 'alertmanagers', 'podmonitors', 'probes',
+    'prometheusagents', 'prometheuses', 'prometheusrules', 'scrapeconfigs',
+    'servicemonitors', 'thanosrulers'
+]
+for crd in PROMETHEUS_CRDS:
+    local(
+        'kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/{}/example/prometheus-operator-crd/monitoring.coreos.com_{}.yaml 2>/dev/null || true'.format(PROMETHEUS_OPERATOR_VERSION, crd),
+        quiet=True
+    )
+
 # Deploy helm chart with local values
 k8s_yaml(helm(
     './helm-dev',

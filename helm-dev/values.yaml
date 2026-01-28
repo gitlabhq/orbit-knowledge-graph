@@ -79,3 +79,21 @@ consumer:
     limits:
       cpu: 1
       memory: 1Gi
+
+# Observability stack (Prometheus, Grafana, Loki)
+observability:
+  enabled: false
+  grafana:
+    ingress:
+      enabled: false
+      host: ""
+  loki:
+    enabled: false
+
+# kube-prometheus-stack subchart defaults
+kube-prometheus-stack:
+  enabled: false
+
+# loki subchart defaults
+loki:
+  enabled: false

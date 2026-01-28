@@ -115,3 +115,169 @@ consumer:
     limits:
       cpu: 1
       memory: 1Gi
+
+# Observability stack for sandbox
+observability:
+  enabled: true
+  grafana:
+    ingress:
+      enabled: true
+      host: grafana.gkg.dev
+  loki:
+    enabled: true
+
+# Prometheus + Grafana with Google OAuth
+kube-prometheus-stack:
+  enabled: true
+  crds:
+    enabled: false
+  # Disable components incompatible with GKE Autopilot
+  nodeExporter:
+    enabled: false
+  kubeApiServer:
+    enabled: false
+  kubeControllerManager:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeProxy:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+  kubelet:
+    enabled: false
+  coreDns:
+    enabled: false
+  # Reduce chart size for helm secrets limit
+  defaultRules:
+    create: true
+    rules:
+      alertmanager: false
+      etcd: false
+      configReloaders: false
+      general: false
+      kubeApiserverAvailability: false
+      kubeApiserverBurnrate: false
+      kubeApiserverHistogram: false
+      kubeApiserverSlos: false
+      kubeControllerManager: false
+      kubeProxy: false
+      kubeScheduler: false
+      kubeStateMetrics: false
+      kubelet: false
+      network: false
+      node: false
+      nodeExporterAlerting: false
+      nodeExporterRecording: false
+      prometheus: false
+      prometheusOperator: false
+  prometheus:
+    prometheusSpec:
+      retention: 15d
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: standard-rwo
+            resources:
+              requests:
+                storage: 50Gi
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1
+          memory: 2Gi
+  alertmanager:
+    enabled: true
+  grafana:
+    defaultDashboardsEnabled: false
+    envFromSecret: grafana-oauth-credentials
+    additionalDataSources:
+      - name: Loki
+        type: loki
+        url: http://gkg-sandbox-loki:3100
+        access: proxy
+        isDefault: false
+    grafana.ini:
+      server:
+        root_url: https://grafana.gkg.dev
+      auth:
+        disable_login_form: true
+      auth.google:
+        enabled: true
+        allow_sign_up: true
+        skip_org_role_sync: false
+        scopes: openid email profile
+        auth_url: https://accounts.google.com/o/oauth2/v2/auth
+        token_url: https://oauth2.googleapis.com/token
+        api_url: https://openidconnect.googleapis.com/v1/userinfo
+        allowed_domains: gitlab.com
+        role_attribute_path: "contains(['musachenko@gitlab.com','bparkhomchuk@gitlab.com','jgdoyon@gitlab.com','arivera@gitlab.com'], email) && 'Admin' || 'Viewer'"
+      auth.gitlab:
+        enabled: true
+        allow_sign_up: true
+        skip_org_role_sync: false
+        scopes: openid email profile
+        auth_url: https://gitlab.com/oauth/authorize
+        token_url: https://gitlab.com/oauth/token
+        api_url: https://gitlab.com/api/v4
+        allowed_domains: gitlab.com
+        allowed_groups: gitlab-com
+        role_attribute_path: "contains(groups[*], 'gitlab-com') && 'Admin' || 'Viewer'"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# Loki for log aggregation
+loki:
+  enabled: true
+  deploymentMode: SingleBinary
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+  singleBinary:
+    replicas: 1
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: standard-rwo
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  gateway:
+    enabled: false
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+  lokiCanary:
+    enabled: false
+  test:
+    enabled: false

@@ -233,6 +233,8 @@ tilt-ci:
       EOF
     - sed -i -E 's#https://0\.0\.0\.0:#https://docker:#' ~/.kube/config
     - helm repo add gitlab https://charts.gitlab.io
+    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    - helm repo add grafana https://grafana.github.io/helm-charts
     - helm dependency build helm-dev
     # Create dummy secrets for CI (not real credentials)
     - |
@@ -261,6 +263,9 @@ variables:
     - apt-get update && apt-get install -y curl
     - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
     - helm version
+    - helm repo add gitlab https://charts.gitlab.io
+    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    - helm repo add grafana https://grafana.github.io/helm-charts
     - helm dependency update ${HELM_CHART_PATH}
 
 .helm-with-gke-auth:

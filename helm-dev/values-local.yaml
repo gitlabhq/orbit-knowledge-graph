@@ -92,3 +92,87 @@ consumer:
     limits:
       cpu: 1
       memory: 1Gi
+
+# Observability stack for local development
+observability:
+  enabled: true
+  grafana:
+    ingress:
+      enabled: false
+  loki:
+    enabled: true
+
+# Prometheus + Grafana (local config with simple auth)
+kube-prometheus-stack:
+  enabled: true
+  crds:
+    enabled: false
+  prometheus:
+    prometheusSpec:
+      retention: 1d
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+  alertmanager:
+    enabled: false
+  grafana:
+    adminPassword: admin
+    service:
+      type: NodePort
+      nodePort: 30300
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# Loki for local log aggregation
+loki:
+  enabled: true
+  deploymentMode: SingleBinary
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+  singleBinary:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  gateway:
+    enabled: false
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+  lokiCanary:
+    enabled: false
+  test:
+    enabled: false

@@ -19,3 +19,7 @@ gkg_simulator_manifest.json
 
 # Tilt secrets (contains passwords)
 .tilt-secrets
+
+# Helm chart dependencies (downloaded by helm dependency build)
+helm-dev/charts/
+helm-dev/tmpcharts*/
