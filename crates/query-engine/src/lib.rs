@@ -8,17 +8,17 @@
 //! JSON → Schema Validate → Parse → Validate → Lower → Codegen → SQL
 //! ```
 //!
-//! After validation, lowering and codegen are pure transformations that cannot fail.
-//!
 //! # Example
 //!
 //! ```rust
-//! use query_engine::compile;
+//! use query_engine::{compile, SecurityContext};
 //! use ontology::Ontology;
 //!
 //! let ontology = Ontology::new()
 //!     .with_nodes(["User", "Project"])
 //!     .with_edges(["MEMBER_OF"]);
+//!
+//! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
 //! let json = r#"{
 //!     "query_type": "traversal",
@@ -26,11 +26,12 @@
 //!     "limit": 10
 //! }"#;
 //!
-//! let result = compile(json, &ontology).unwrap();
+//! let result = compile(json, &ontology, &ctx).unwrap();
 //! println!("SQL: {}", result.sql);
 //! ```
 
 pub mod ast;
+pub mod codegen;
 pub mod error;
 pub mod input;
 pub mod lower;
@@ -40,6 +41,7 @@ pub mod validate;
 use std::sync::OnceLock;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, RecursiveCte, SelectExpr, TableRef};
+pub use codegen::{codegen, ParameterizedQuery};
 pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
 pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
@@ -102,14 +104,18 @@ fn collect_schema_errors(
 ///
 /// Validates structure, identifiers, and ontology values before generating SQL.
 #[must_use = "the compiled query should be used"]
-pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<()> {
+pub fn compile(
+    json_input: &str,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<ParameterizedQuery> {
     let value = validate_json(json_input)?;
     validate_ontology(&value, ontology)?;
     let input: Input = serde_json::from_value(value)?;
     validate::validate(&input, ontology)?;
     let mut node = lower::lower(&input, ontology)?;
     apply_security_context(&mut node, ctx)?;
-    Ok(())
+    codegen(&node)
 }
 
 /// Get the base JSON schema template (without ontology values).
@@ -184,6 +190,104 @@ mod tests {
         };
         assert_eq!(q.limit, Some(10));
         assert_eq!(q.select.len(), 1);
+    }
+
+    #[test]
+    fn traversal_query() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "n", "entity": "Note", "filters": {"confidential": true}},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 25,
+            "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+
+        assert!(result.sql.contains("SELECT"));
+        assert!(result.sql.contains("kg_user AS u"));
+        assert!(result.sql.contains("INNER JOIN kg_edges AS e0 ON"));
+        assert!(
+            result.sql.contains("u.id = e0.source"),
+            "expected source column: {}",
+            result.sql
+        );
+        assert!(result.sql.contains("INNER JOIN kg_note AS n ON"));
+        assert!(
+            result
+                .sql
+                .contains("e0.relationship_kind = {type_e0:String}"),
+            "expected relationship_kind: {}",
+            result.sql
+        );
+        assert!(
+            !result.sql.contains("n.label"),
+            "node should not have type filter: {}",
+            result.sql
+        );
+        assert!(result.sql.contains("LIMIT 25"));
+        assert_eq!(
+            result.params.get("type_e0"),
+            Some(&serde_json::json!("AUTHORED"))
+        );
+    }
+
+    #[test]
+    fn aggregation_query() {
+        let json = r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User"}],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        assert!(result.sql.contains("COUNT"));
+        assert!(result.sql.contains("GROUP BY"));
+    }
+
+    #[test]
+    fn path_finding_query() {
+        let json = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Project", "node_ids": [100]},
+                {"id": "end", "entity": "Project", "node_ids": [200]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        assert!(result.sql.contains("WITH RECURSIVE"));
+        assert!(result.sql.contains("path_cte"));
+        assert!(result.sql.contains("UNION ALL"));
+    }
+
+    #[test]
+    fn filter_operators() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "u",
+                "entity": "User",
+                "filters": {
+                    "created_at": {"op": "gte", "value": "2024-01-01"},
+                    "state": {"op": "in", "value": ["active", "blocked"]},
+                    "username": {"op": "contains", "value": "admin"}
+                }
+            }],
+            "limit": 30
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        assert!(result.sql.contains("WHERE"));
+        assert!(result.sql.contains(">="));
+        assert!(result.sql.contains("IN"));
+        assert!(result.sql.contains("LIKE"));
     }
 
     #[test]
@@ -359,5 +463,29 @@ mod ontology_integration_tests {
             "expected validation error with valid options: {}",
             err
         );
+    }
+
+    #[test]
+    fn full_pipeline() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "n", "entity": "Note", "filters": {"confidential": true}},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 25,
+            "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Parameterized: {}", result.sql);
+        println!("Params: {:?}", result.params);
+        println!("Inlined: {result}");
+        assert!(result.sql.contains("SELECT"));
+        assert!(result.sql.contains("INNER JOIN"));
+        assert!(result.sql.contains("LIMIT 25"));
+        assert!(result.sql.contains("ORDER BY"));
+        assert!(result.sql.contains("DESC"));
     }
 }

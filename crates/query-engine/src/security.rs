@@ -91,8 +91,12 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
     let security_conds = aliases
         .iter()
         .map(|a| build_path_filter(a, &ctx.traversal_paths));
-    q.where_clause =
-        Expr::and_all(std::iter::once(q.where_clause.take()).chain(security_conds.map(Some)));
+    // Note: Security predicates always applied first for short-circuit filtering
+    q.where_clause = Expr::and_all(
+        security_conds
+            .map(Some)
+            .chain(std::iter::once(q.where_clause.take())),
+    );
     Ok(())
 }
 
