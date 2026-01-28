@@ -1,24 +1,12 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Assignment relationship between users and entities.
+# fixtures/ontology/edges/assigned.yaml
+
+description: Assignment relationship between users and entities
+
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
-    meaning: "User is assigned to merge request."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_assignees, from_column: user_id, to_column: merge_request_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "User is assigned to merge request."
+
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
-    meaning: "User is assigned to work item."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issue_assignees, from_column: user_id, to_column: issue_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "User is assigned to work item."

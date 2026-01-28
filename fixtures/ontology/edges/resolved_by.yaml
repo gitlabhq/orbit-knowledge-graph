@@ -1,14 +1,8 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: User who resolved an entity.
+# fixtures/ontology/edges/resolved_by.yaml
+
+description: User who resolved an entity
+
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Vulnerability, id: id }
-    meaning: "User resolved vulnerability."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerabilities, from_column: resolved_by_id, to_column: id },
-          { system: clickhouse, table: null },
-        ]
+    description: "User resolved vulnerability."

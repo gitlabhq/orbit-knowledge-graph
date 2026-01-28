@@ -1,14 +1,8 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Finding was detected by a scanner.
+# fixtures/ontology/edges/detected_by.yaml
+
+description: Finding was detected by a scanner
+
 variants:
   - from_node: { type: Finding, id: id }
     to_node: { type: Scanner, id: id }
-    meaning: "Finding detected by scanner."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_occurrences, from_column: id, to_column: scanner_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Finding detected by scanner."
