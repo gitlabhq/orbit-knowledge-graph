@@ -56,6 +56,13 @@ pub enum HandlerError {
     Deserialization(#[from] serde_json::Error),
 }
 
+#[derive(Debug, Clone, Error)]
+#[error("failed to create handler '{handler_name}': {reason}")]
+pub struct HandlerCreationError {
+    pub handler_name: String,
+    pub reason: String,
+}
+
 /// Errors that can occur during module initialization.
 #[derive(Debug, Error)]
 #[error("{0}")]
