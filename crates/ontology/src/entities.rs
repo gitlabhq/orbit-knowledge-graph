@@ -1,6 +1,9 @@
 //! Data model definitions for ontology entities.
 
+use std::collections::BTreeMap;
 use std::fmt;
+
+use crate::etl::{EdgeGenerationConfig, EtlConfig, PropertyConfig};
 
 /// A node entity representing a record or row in the knowledge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,6 +14,14 @@ pub struct NodeEntity {
     pub fields: Vec<Field>,
     /// The field names that form the primary key.
     pub primary_keys: Vec<String>,
+    /// The destination table name for this entity.
+    pub destination_table: String,
+    /// ETL configuration for indexing this entity.
+    pub etl: Option<EtlConfig>,
+    /// Edge generation configurations for this entity.
+    pub edge_generation: Vec<EdgeGenerationConfig>,
+    /// Property configurations with source mappings and enum values.
+    pub property_configs: BTreeMap<String, PropertyConfig>,
 }
 
 impl fmt::Display for NodeEntity {

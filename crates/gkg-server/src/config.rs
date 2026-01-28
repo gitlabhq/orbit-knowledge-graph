@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use etl_engine::clickhouse::ClickHouseConfiguration;
 use etl_engine::configuration::EngineConfiguration;
@@ -10,6 +11,7 @@ pub struct AppConfig {
     pub bind_address: SocketAddr,
     pub jwt_secret: String,
     pub jwt_clock_skew_secs: u64,
+    pub ontology_path: PathBuf,
     #[serde(default)]
     pub nats: NatsConfiguration,
     #[serde(default)]
@@ -37,10 +39,15 @@ impl AppConfig {
             .parse()
             .unwrap_or(60);
 
+        let ontology_path = std::env::var("GKG_ONTOLOGY_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("fixtures/ontology"));
+
         Ok(Self {
             bind_address,
             jwt_secret,
             jwt_clock_skew_secs,
+            ontology_path,
             nats: NatsConfiguration::from_env(),
             clickhouse: ClickHouseConfiguration::from_env(),
             engine: EngineConfiguration::default(),

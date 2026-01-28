@@ -20,6 +20,7 @@ axum = { workspace = true }
 clap = { workspace = true }
 etl-engine = { path = "../etl-engine" }
 jsonwebtoken = { workspace = true }
+ontology = { path = "../ontology" }
 labkit-rs = { path = "../labkit-rs", features = ["http", "grpc"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

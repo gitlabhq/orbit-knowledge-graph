@@ -3,7 +3,13 @@
 node_type: User
 domain: core
 description: A GitLab user account
-destination_table: gl_user
+destination_table: gl_users
+
+etl:
+  type: table
+  scope: global
+  source: siphon_users
+  watermark: _siphon_replicated_at
 
 properties:
   id:

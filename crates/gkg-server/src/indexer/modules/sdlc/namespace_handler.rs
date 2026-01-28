@@ -8,9 +8,6 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::indexer::modules::INDEXER_TOPIC;
-use crate::indexer::modules::sdlc::datalake::DatalakeQuery;
-use crate::indexer::modules::sdlc::group_handler::GroupHandler;
-use crate::indexer::modules::sdlc::project_handler::ProjectHandler;
 use crate::indexer::modules::sdlc::watermark_store::{WatermarkError, WatermarkStore};
 
 const SUBJECT: &str = "sdlc.namespace.indexing.requested";
@@ -36,7 +33,7 @@ pub struct NamespacedEntityContext {
 
 #[async_trait]
 pub trait NamespacedEntityHandler: Send + Sync {
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
     async fn handle(&self, context: &NamespacedEntityContext) -> Result<(), HandlerError>;
 }
 
@@ -46,13 +43,14 @@ pub struct NamespaceHandler {
 }
 
 impl NamespaceHandler {
-    pub fn new(datalake: Arc<dyn DatalakeQuery>, watermark_store: Arc<dyn WatermarkStore>) -> Self {
+    /// Create a new namespace handler with a list of entity handlers.
+    pub fn new(
+        entity_handlers: Vec<Box<dyn NamespacedEntityHandler>>,
+        watermark_store: Arc<dyn WatermarkStore>,
+    ) -> Self {
         Self {
             watermark_store,
-            entity_handlers: vec![
-                Box::new(GroupHandler::new(Arc::clone(&datalake))),
-                Box::new(ProjectHandler::new(Arc::clone(&datalake))),
-            ],
+            entity_handlers,
         }
     }
 }
@@ -155,7 +153,7 @@ mod tests {
 
     #[async_trait]
     impl NamespacedEntityHandler for CountingHandler {
-        fn name(&self) -> &'static str {
+        fn name(&self) -> &str {
             "counting-handler"
         }
 
@@ -169,14 +167,6 @@ mod tests {
 
     #[async_trait]
     impl WatermarkStore for MockWatermarkStore {
-        async fn get_users_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
-            Ok(DateTime::<Utc>::UNIX_EPOCH)
-        }
-
-        async fn set_users_watermark(&self, _: &DateTime<Utc>) -> Result<(), WatermarkError> {
-            Ok(())
-        }
-
         async fn get_namespace_watermark(&self, _: i64) -> Result<DateTime<Utc>, WatermarkError> {
             Ok(DateTime::<Utc>::UNIX_EPOCH)
         }
@@ -186,6 +176,14 @@ mod tests {
             _: i64,
             _: &DateTime<Utc>,
         ) -> Result<(), WatermarkError> {
+            Ok(())
+        }
+
+        async fn get_global_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
+            Ok(DateTime::<Utc>::UNIX_EPOCH)
+        }
+
+        async fn set_global_watermark(&self, _: &DateTime<Utc>) -> Result<(), WatermarkError> {
             Ok(())
         }
     }
@@ -231,7 +229,7 @@ mod tests {
 
     #[async_trait]
     impl NamespacedEntityHandler for CountingHandlerWrapper {
-        fn name(&self) -> &'static str {
+        fn name(&self) -> &str {
             self.0.name()
         }
 

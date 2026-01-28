@@ -66,7 +66,7 @@ PRIMARY KEY id
 ORDER BY id
 SETTINGS index_granularity = 8192;
 
-CREATE TABLE IF NOT EXISTS test.users (
+CREATE TABLE IF NOT EXISTS test.gl_users (
     id Int64,
     username String DEFAULT '',
     email String DEFAULT '',
@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS test.users (
     updated_at Nullable(DateTime64(6, 'UTC'))
 ) ENGINE = MergeTree() ORDER BY id;
 
-CREATE TABLE IF NOT EXISTS test.user_indexing_watermark (
+CREATE TABLE IF NOT EXISTS test.global_indexing_watermark (
     watermark DateTime64(6, 'UTC'),
     _version DateTime64(6, 'UTC') DEFAULT now64()
 ) ENGINE = ReplacingMergeTree(_version) ORDER BY tuple();
@@ -142,11 +142,12 @@ ORDER BY id
 SETTINGS index_granularity = 512;
 
 -- Group destination table
-CREATE TABLE IF NOT EXISTS test.groups (
+CREATE TABLE IF NOT EXISTS test.gl_groups (
     id Int64,
     name Nullable(String),
     description Nullable(String),
     visibility_level Nullable(String),
+    full_path Nullable(String),
     path Nullable(String),
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
@@ -198,12 +199,12 @@ ORDER BY id
 SETTINGS index_granularity = 512;
 
 -- Project destination table
-CREATE TABLE IF NOT EXISTS test.projects (
+CREATE TABLE IF NOT EXISTS test.gl_projects (
     id Int64,
     name Nullable(String),
     description Nullable(String),
     visibility_level Nullable(String),
-    path Nullable(String),
+    full_path Nullable(String),
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     archived Nullable(Bool),

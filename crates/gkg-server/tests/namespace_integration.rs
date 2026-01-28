@@ -48,7 +48,7 @@ async fn namespace_handler_processes_and_transforms_groups() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, &context.ontology_path)
         .await
         .expect("failed to create SDLC module");
 
@@ -70,8 +70,8 @@ async fn namespace_handler_processes_and_transforms_groups() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM groups ORDER BY id").await;
-    assert!(!result.is_empty(), "groups result should not be empty");
+    let result = context.query("SELECT * FROM gl_groups ORDER BY id").await;
+    assert!(!result.is_empty(), "gl_groups result should not be empty");
 
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 3);
@@ -116,7 +116,7 @@ async fn namespace_handler_creates_group_edges() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, &context.ontology_path)
         .await
         .expect("failed to create SDLC module");
 
@@ -203,7 +203,7 @@ async fn namespace_handler_processes_projects() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, &context.ontology_path)
         .await
         .expect("failed to create SDLC module");
 
@@ -225,8 +225,8 @@ async fn namespace_handler_processes_projects() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM projects ORDER BY id").await;
-    assert!(!result.is_empty(), "projects result should not be empty");
+    let result = context.query("SELECT * FROM gl_projects ORDER BY id").await;
+    assert!(!result.is_empty(), "gl_projects result should not be empty");
 
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 2);
@@ -292,7 +292,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, &context.ontology_path)
         .await
         .expect("failed to create SDLC module");
 
@@ -314,7 +314,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT count() as cnt FROM groups").await;
+    let result = context.query("SELECT count() as cnt FROM gl_groups").await;
     let count_array = result[0]
         .column(0)
         .as_any()
@@ -327,7 +327,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         "should only process new-team, not org1"
     );
 
-    let names = context.query("SELECT name FROM groups").await;
+    let names = context.query("SELECT name FROM gl_groups").await;
     let name_array = names[0]
         .column(0)
         .as_any()

@@ -37,8 +37,8 @@ pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), 
     info!(url = %config.clickhouse.url, "connecting to ClickHouse");
     let destination = Arc::new(ClickHouseDestination::new(config.clickhouse.clone())?);
 
-    info!("initializing SDLC module");
-    let sdlc_module = SdlcModule::new(&config.clickhouse).await?;
+    info!(ontology_path = %config.ontology_path.display(), "initializing SDLC module");
+    let sdlc_module = SdlcModule::new(&config.clickhouse, &config.ontology_path).await?;
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);

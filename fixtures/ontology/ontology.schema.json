@@ -114,6 +114,90 @@
       "description": "Indicates whether this property is being indexed."
     },
 
+    "etlScope": {
+      "type": "string",
+      "enum": ["global", "namespaced"],
+      "description": "Scope of ETL processing - global (all records) or namespaced (per-namespace)."
+    },
+
+    "etlTableConfig": {
+      "type": "object",
+      "description": "ETL configuration for simple table-based extraction.",
+      "properties": {
+        "type": { "const": "table" },
+        "scope": { "$ref": "#/definitions/etlScope" },
+        "source": {
+          "type": "string",
+          "description": "Source table name in ClickHouse."
+        },
+        "watermark": {
+          "type": "string",
+          "description": "Column name for watermark-based incremental processing."
+        },
+        "deleted": {
+          "type": "string",
+          "description": "Optional column name indicating soft-deleted records."
+        }
+      },
+      "required": ["type", "scope", "source", "watermark"],
+      "additionalProperties": false
+    },
+
+    "etlQueryConfig": {
+      "type": "object",
+      "description": "ETL configuration for complex query-based extraction (JOINs, etc.).",
+      "properties": {
+        "type": { "const": "query" },
+        "scope": { "$ref": "#/definitions/etlScope" },
+        "source": {
+          "type": "string",
+          "description": "Primary source table for watermark tracking."
+        },
+        "watermark": {
+          "type": "string",
+          "description": "Column name for watermark-based incremental processing."
+        },
+        "deleted": {
+          "type": "string",
+          "description": "Optional column name indicating soft-deleted records."
+        },
+        "query": {
+          "type": "string",
+          "description": "SQL query template with {last_watermark:String}, {watermark:String}, and optional {traversal_path:String} placeholders."
+        }
+      },
+      "required": ["type", "scope", "source", "watermark", "query"],
+      "additionalProperties": false
+    },
+
+    "etlConfig": {
+      "oneOf": [
+        { "$ref": "#/definitions/etlTableConfig" },
+        { "$ref": "#/definitions/etlQueryConfig" }
+      ]
+    },
+
+    "edgeGenerationConfig": {
+      "type": "object",
+      "description": "Configuration for generating edges from source data.",
+      "properties": {
+        "relationship_type": {
+          "type": "string",
+          "description": "Type of relationship (e.g., 'owner', 'contains', 'creator')."
+        },
+        "source_column": {
+          "type": "string",
+          "description": "Column in source data containing the related entity ID."
+        },
+        "source_kind": {
+          "type": "string",
+          "description": "Node type of the source entity (e.g., 'User', 'Group')."
+        }
+      },
+      "required": ["relationship_type", "source_column", "source_kind"],
+      "additionalProperties": false
+    },
+
     "propertyDefinition": {
       "type": "object",
       "properties": {
@@ -207,7 +291,13 @@
         "description": { "type": "string" },
         "example_output": { "type": "string" },
         "properties": { "$ref": "#/definitions/propertiesMap" },
-        "additional_properties": { "$ref": "#/definitions/propertiesMap" }
+        "additional_properties": { "$ref": "#/definitions/propertiesMap" },
+        "etl": { "$ref": "#/definitions/etlConfig" },
+        "edge_generation": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/edgeGenerationConfig" },
+          "description": "List of edges to generate from source data during ETL."
+        }
       },
       "required": ["type", "domain", "description", "properties"],
       "additionalProperties": false

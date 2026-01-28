@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +33,7 @@ const SCHEMA_SQL: &str = include_str!("../fixtures/schema.sql");
 pub struct TestContext {
     _container: ContainerAsync<GenericImage>,
     pub config: ClickHouseConfiguration,
+    pub ontology_path: PathBuf,
     url: String,
 }
 
@@ -50,9 +52,17 @@ impl TestContext {
             password: Some(TEST_PASSWORD.to_string()),
         };
 
+        let ontology_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates directory should exist")
+            .parent()
+            .expect("workspace root should exist")
+            .join("fixtures/ontology");
+
         Self {
             _container: container,
             config,
+            ontology_path,
             url,
         }
     }
@@ -149,7 +159,7 @@ impl TestContext {
     }
 }
 
-pub fn create_user_payload(watermark: DateTime<Utc>) -> String {
+pub fn create_global_payload(watermark: DateTime<Utc>) -> String {
     serde_json::json!({
         "watermark": watermark.to_rfc3339()
     })

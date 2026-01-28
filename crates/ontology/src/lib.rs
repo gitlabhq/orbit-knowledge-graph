@@ -13,8 +13,10 @@
 //! ```
 
 mod entities;
+pub mod etl;
 
 pub use entities::{DataType, EdgeEntity, Field, NodeEntity};
+pub use etl::{EdgeGenerationConfig, EtlConfig, EtlScope, PropertyConfig};
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -104,9 +106,13 @@ impl Ontology {
             self.nodes.insert(
                 name.clone(),
                 NodeEntity {
-                    name,
+                    name: name.clone(),
                     fields: vec![],
                     primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
+                    destination_table: format!("gl_{}", name.to_lowercase()),
+                    etl: None,
+                    edge_generation: vec![],
+                    property_configs: BTreeMap::new(),
                 },
             );
         }
@@ -512,23 +518,47 @@ struct NodeYaml {
     #[serde(default)]
     #[allow(dead_code)]
     description: String,
-    #[allow(dead_code)]
     destination_table: String,
     #[serde(default)]
     properties: BTreeMap<String, PropertyYaml>,
+    #[serde(default)]
+    etl: Option<EtlYaml>,
+    #[serde(default)]
+    edge_generation: Vec<EdgeGenerationYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EtlYaml {
+    #[serde(rename = "type")]
+    etl_type: String,
+    scope: String,
+    source: String,
+    watermark: String,
+    #[serde(default)]
+    deleted: Option<String>,
+    #[serde(default)]
+    query: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeGenerationYaml {
+    relationship_type: String,
+    source_column: String,
+    source_kind: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct PropertyYaml {
     #[serde(rename = "type")]
     property_type: String,
-    #[allow(dead_code)]
     source: String,
     #[serde(default)]
     nullable: bool,
     #[serde(default)]
     #[allow(dead_code)]
     description: String,
+    #[serde(default)]
+    values: Option<BTreeMap<i64, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -555,6 +585,7 @@ struct EdgeNodeRef {
 impl NodeYaml {
     fn into_entity(self, name: String) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
+        let mut property_configs = BTreeMap::new();
 
         let fields: Result<Vec<Field>, OntologyError> = self
             .properties
@@ -563,6 +594,17 @@ impl NodeYaml {
                 if prop_name == DEFAULT_PRIMARY_KEY {
                     primary_keys.push(prop_name.clone());
                 }
+
+                property_configs.insert(
+                    prop_name.clone(),
+                    PropertyConfig {
+                        property_type: prop_def.property_type.clone(),
+                        source: prop_def.source.clone(),
+                        nullable: prop_def.nullable,
+                        values: prop_def.values.clone(),
+                    },
+                );
+
                 Ok(Field {
                     data_type: parse_data_type(&prop_def.property_type, &prop_name)?,
                     name: prop_name,
@@ -588,11 +630,71 @@ impl NodeYaml {
             }
         }
 
+        // Convert ETL config
+        let etl = self.etl.map(|e| e.into_config()).transpose()?;
+
+        // Convert edge generation configs
+        let edge_generation = self
+            .edge_generation
+            .into_iter()
+            .map(|e| EdgeGenerationConfig {
+                relationship_type: e.relationship_type,
+                source_column: e.source_column,
+                source_kind: e.source_kind,
+            })
+            .collect();
+
         Ok(NodeEntity {
             name,
             fields,
             primary_keys,
+            destination_table: self.destination_table,
+            etl,
+            edge_generation,
+            property_configs,
         })
+    }
+}
+
+impl EtlYaml {
+    fn into_config(self) -> Result<EtlConfig, OntologyError> {
+        let scope = match self.scope.as_str() {
+            "global" => EtlScope::Global,
+            "namespaced" => EtlScope::Namespaced,
+            other => {
+                return Err(OntologyError::Validation(format!(
+                    "invalid ETL scope: '{}', expected 'global' or 'namespaced'",
+                    other
+                )))
+            }
+        };
+
+        match self.etl_type.as_str() {
+            "table" => Ok(EtlConfig::Table {
+                scope,
+                source: self.source,
+                watermark: self.watermark,
+                deleted: self.deleted,
+            }),
+            "query" => {
+                let query = self.query.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'query' requires a 'query' field".to_string(),
+                    )
+                })?;
+                Ok(EtlConfig::Query {
+                    scope,
+                    source: self.source,
+                    watermark: self.watermark,
+                    deleted: self.deleted,
+                    query,
+                })
+            }
+            other => Err(OntologyError::Validation(format!(
+                "invalid ETL type: '{}', expected 'table' or 'query'",
+                other
+            ))),
+        }
     }
 }
 

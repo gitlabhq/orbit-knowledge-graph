@@ -26,9 +26,6 @@ pub(crate) enum WatermarkError {
 
 #[async_trait]
 pub(crate) trait WatermarkStore: Send + Sync {
-    async fn get_users_watermark(&self) -> Result<DateTime<Utc>, WatermarkError>;
-    async fn set_users_watermark(&self, watermark: &DateTime<Utc>) -> Result<(), WatermarkError>;
-
     async fn get_namespace_watermark(
         &self,
         namespace_id: i64,
@@ -39,6 +36,9 @@ pub(crate) trait WatermarkStore: Send + Sync {
         namespace_id: i64,
         watermark: &DateTime<Utc>,
     ) -> Result<(), WatermarkError>;
+
+    async fn get_global_watermark(&self) -> Result<DateTime<Utc>, WatermarkError>;
+    async fn set_global_watermark(&self, watermark: &DateTime<Utc>) -> Result<(), WatermarkError>;
 }
 
 pub(crate) type WatermarkClient = Arc<ArrowClickHouseClient>;
@@ -78,30 +78,6 @@ impl ClickHouseWatermarkStore {
 
 #[async_trait]
 impl WatermarkStore for ClickHouseWatermarkStore {
-    async fn get_users_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
-        let query = "SELECT argMax(watermark, _version) as watermark FROM user_indexing_watermark";
-        let batches = self
-            .client
-            .query_arrow(query)
-            .await
-            .map_err(|e| WatermarkError::Query(e.to_string()))?;
-
-        Self::extract_timestamp(batches)
-    }
-
-    async fn set_users_watermark(&self, watermark: &DateTime<Utc>) -> Result<(), WatermarkError> {
-        let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
-
-        self.client
-            .query("INSERT INTO user_indexing_watermark (watermark) VALUES ({watermark:String})")
-            .param("watermark", formatted_watermark)
-            .execute()
-            .await
-            .map_err(|e| WatermarkError::Query(e.to_string()))?;
-
-        Ok(())
-    }
-
     async fn get_namespace_watermark(
         &self,
         namespace_id: i64,
@@ -129,6 +105,31 @@ impl WatermarkStore for ClickHouseWatermarkStore {
         self.client
             .query("INSERT INTO namespace_indexing_watermark (namespace, watermark) VALUES ({namespace:Int64}, {watermark:String})")
             .param("namespace", namespace_id)
+            .param("watermark", formatted_watermark)
+            .execute()
+            .await
+            .map_err(|e| WatermarkError::Query(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn get_global_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
+        let query =
+            "SELECT argMax(watermark, _version) as watermark FROM global_indexing_watermark";
+        let batches = self
+            .client
+            .query_arrow(query)
+            .await
+            .map_err(|e| WatermarkError::Query(e.to_string()))?;
+
+        Self::extract_timestamp(batches)
+    }
+
+    async fn set_global_watermark(&self, watermark: &DateTime<Utc>) -> Result<(), WatermarkError> {
+        let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
+
+        self.client
+            .query("INSERT INTO global_indexing_watermark (watermark) VALUES ({watermark:String})")
             .param("watermark", formatted_watermark)
             .execute()
             .await
