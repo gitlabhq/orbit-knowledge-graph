@@ -1,98 +1,66 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/code_review/merge_request_file.yaml
+
+node_type: MergeRequestFile
 domain: code_review
-description: A file changed in a merge request diff.
+description: A file changed in a merge request diff
+destination_table: gl_merge_request_file
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "TODO: Derived identifier for the merge request diff file (needs to be computed from merge_request_diff_id + relative_order or similar)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: id, type: derived },
-          { system: clickhouse, table: null },
-        ]
+
   merge_request_diff_id:
     type: int64
+    source: merge_request_diff_id
+    nullable: false
     description: "ID of the merge request diff this file belongs to."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: merge_request_diff_id },
-          { system: clickhouse, table: null },
-        ]
+
   too_large:
     type: boolean
+    source: too_large
+    nullable: false
     description: "Whether the diff is too large to display."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: too_large },
-          { system: clickhouse, table: null },
-        ]
+
   new_path:
     type: string
+    source: new_path
     nullable: true
     description: "Path to the file after the change."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: new_path },
-          { system: clickhouse, table: null },
-        ]
+
   old_path:
     type: string
+    source: old_path
+    nullable: false
     description: "Path to the file before the change."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: old_path },
-          { system: clickhouse, table: null },
-        ]
+
   new_file:
     type: boolean
+    source: new_file
+    nullable: false
     description: "Whether this is a newly added file."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: new_file },
-          { system: clickhouse, table: null },
-        ]
+
   renamed_file:
     type: boolean
+    source: renamed_file
+    nullable: false
     description: "Whether this file was renamed."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: renamed_file },
-          { system: clickhouse, table: null },
-        ]
+
   deleted_file:
     type: boolean
+    source: deleted_file
+    nullable: false
     description: "Whether this file was deleted."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: deleted_file },
-          { system: clickhouse, table: null },
-        ]
-additional_properties:
+
   binary:
     type: boolean
+    source: binary
     nullable: true
     description: "Whether this is a binary file."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_request_diff_files, column: binary },
-          { system: clickhouse, table: null },
-        ]
+
+# edges:
+#   - type: IN_MERGE_REQUEST
+#     source_id: merge_request_diff_id
+#     target_kind: MergeRequest

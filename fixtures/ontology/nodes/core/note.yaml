@@ -1,166 +1,106 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/core/note.yaml
+
+node_type: Note
 domain: core
-description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.).
+description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
+destination_table: gl_note
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "Global identifier for the note."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: id },
-          { system: clickhouse, table: null },
-        ]
+
   note:
     type: string
+    source: note
     nullable: true
     description: "The text content of the note (markdown)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: note },
-          { system: clickhouse, table: null },
-        ]
+
   noteable_type:
     type: enum
-    values:
-      [
-        Issue,
-        MergeRequest,
-        Commit,
-        Snippet,
-        "WikiPage::Meta",
-        "DesignManagement::Design",
-        "AlertManagement::Alert",
-        Vulnerability,
-        AbuseReport,
-        "ComplianceManagement::Projects::ComplianceViolation",
-      ]
+    source: noteable_type
+    nullable: false
     description: "Type of object this note is attached to."
-    status: pending
-    internal:
-      sources:
-        [
-          {
-            system: postgres,
-            database: main,
-            table: notes,
-            column: noteable_type,
-            column_type: varchar,
-          },
-          { system: clickhouse, table: null },
-          { system: rails, file: app/models/note.rb, class: Note },
-        ]
+    values:
+      0: Issue
+      1: MergeRequest
+      2: Commit
+      3: Snippet
+      4: "WikiPage::Meta"
+      5: "DesignManagement::Design"
+      6: "AlertManagement::Alert"
+      7: Vulnerability
+      8: AbuseReport
+      9: "ComplianceManagement::Projects::ComplianceViolation"
+
   noteable_id:
     type: int64
+    source: noteable_id
     nullable: true
     description: "ID of the object this note is attached to (null for commits)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: noteable_id },
-          { system: clickhouse, table: null },
-        ]
+
   system:
     type: boolean
+    source: system
+    nullable: false
     description: "Whether this is a system-generated note."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: system },
-          { system: clickhouse, table: null },
-        ]
-additional_properties:
+
   line_code:
     type: string
+    source: line_code
     nullable: true
     description: "Code identifying the line position for diff notes."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: line_code },
-          { system: clickhouse, table: null },
-        ]
+
   created_at:
     type: timestamp
+    source: created_at
     nullable: true
     description: "Timestamp when the note was created."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: created_at },
-          { system: clickhouse, table: null },
-        ]
+
   updated_at:
     type: timestamp
+    source: updated_at
     nullable: true
     description: "Timestamp when the note was last updated."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: updated_at },
-          { system: clickhouse, table: null },
-        ]
+
   discussion_id:
     type: string
+    source: discussion_id
     nullable: true
     description: "ID grouping notes into a discussion thread."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: discussion_id },
-          { system: clickhouse, table: null },
-        ]
+
   resolved_at:
     type: timestamp
+    source: resolved_at
     nullable: true
     description: "Timestamp when the note/discussion was resolved."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: resolved_at },
-          { system: clickhouse, table: null },
-        ]
+
   internal:
     type: boolean
+    source: internal
+    nullable: false
     description: "Whether this note is only visible to project members."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: internal },
-          { system: clickhouse, table: null },
-        ]
+
   confidential:
     type: boolean
+    source: confidential
     nullable: true
     description: "Whether this note is confidential."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: confidential },
-          { system: clickhouse, table: null },
-        ]
+
   commit_id:
     type: string
+    source: commit_id
     nullable: true
     description: "SHA of the commit this note is on (for commit notes)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, column: commit_id },
-          { system: clickhouse, table: null },
-        ]
+
+# edges:
+#   - type: AUTHOR
+#     source_id: author_id
+#     target_kind: User
+#
+#   - type: ON
+#     source_id: noteable_id
+#     target_kind: [Issue, MergeRequest, Commit]
 

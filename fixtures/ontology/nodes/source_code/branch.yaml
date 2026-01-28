@@ -1,46 +1,37 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/source_code/branch.yaml
+
+node_type: Branch
 domain: source_code
-description: A Git branch in a repository.
+description: A Git branch in a repository
+destination_table: gl_branch
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "TODO: Derived identifier for the branch (needs to be computed from project_id + branch_name hash or similar)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, type: derived },
-        ]
+
   name:
     type: string
+    source: name
+    nullable: false
     description: "Name of the branch (e.g., main, feature/new-login)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_requests, column: source_branch, type: derived },
-          { system: postgres, database: ci, table: p_ci_pipelines, column: ref, type: derived },
-          { system: code_indexer, type: derived },
-        ]
-additional_properties:
+
   protected:
     type: boolean
+    source: protected
     nullable: true
     description: "Whether the branch is protected."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: protected_branches, column: name, type: derived },
-        ]
+
   default:
     type: boolean
+    source: default
     nullable: true
     description: "Whether this is the default branch of the project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: project_settings, column: default_branch, type: derived },
-        ]
+
+# edges:
+#   - type: IN_PROJECT
+#     source_id: project_id
+#     target_kind: Project
+

@@ -1,66 +1,48 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/security/scanner.yaml
+
+node_type: Scanner
 domain: security
-description: A security scanner that detects vulnerabilities in projects.
+description: A security scanner that detects vulnerabilities in projects
+destination_table: gl_scanner
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "Global identifier for the scanner."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_scanners, column: id },
-          { system: clickhouse, table: null },
-        ]
+
   external_id:
     type: string
+    source: external_id
+    nullable: false
     description: "External identifier for the scanner (e.g., gemnasium, bandit)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_scanners, column: external_id },
-          { system: clickhouse, table: null },
-        ]
+
   name:
     type: string
+    source: name
+    nullable: false
     description: "Human-readable name of the scanner."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_scanners, column: name },
-          { system: clickhouse, table: null },
-        ]
+
   vendor:
     type: string
+    source: vendor
+    nullable: false
     description: "Vendor that provides the scanner (default: GitLab)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_scanners, column: vendor },
-          { system: clickhouse, table: null },
-        ]
-additional_properties:
+
   created_at:
     type: timestamp
+    source: created_at
+    nullable: false
     description: "Timestamp when the scanner was created."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_scanners, column: created_at },
-          { system: clickhouse, table: null },
-        ]
+
   updated_at:
     type: timestamp
+    source: updated_at
+    nullable: false
     description: "Timestamp when the scanner was last updated."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_scanners, column: updated_at },
-          { system: clickhouse, table: null },
-        ]
+
+# edges:
+#   - type: SCANS
+#     source_id: project_id
+#     target_kind: Project
