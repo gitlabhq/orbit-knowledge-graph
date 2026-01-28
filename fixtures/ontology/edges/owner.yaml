@@ -1,14 +1,8 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Ownership relationship between users and groups/projects.
+# fixtures/ontology/edges/owner.yaml
+
+description: Ownership relationship between users and groups/projects
+
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Group, id: id }
-    meaning: "User owns group."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, from_column: owner_id, to_column: id },
-          { system: clickhouse, table: siphon_namespaces, from_column: owner_id, to_column: id },
-        ]
+    description: "User owns group."

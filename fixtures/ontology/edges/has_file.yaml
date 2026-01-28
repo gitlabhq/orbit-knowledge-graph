@@ -1,21 +1,8 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Files changed in a merge request.
+# fixtures/ontology/edges/has_file.yaml
+
+description: Files changed in a merge request
+
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: MergeRequestFile, id: merge_request_diff_id }
-    meaning: "Merge request contains changed file."
-    status: pending
-    internal:
-      # Join path: merge_requests.latest_merge_request_diff_id -> merge_request_diff_files.merge_request_diff_id
-      sources:
-        [
-          {
-            system: postgres,
-            database: main,
-            table: merge_requests,
-            from_column: latest_merge_request_diff_id,
-            to_column: merge_request_diff_id,
-          },
-          { system: clickhouse, table: null },
-        ]
+    description: "Merge request contains changed file."

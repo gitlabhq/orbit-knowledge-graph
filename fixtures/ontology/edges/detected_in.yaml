@@ -1,30 +1,22 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Pipeline where finding was detected.
+# fixtures/ontology/edges/detected_in.yaml
+
+description: Pipeline where finding was detected
+
 properties:
   detection_type:
     type: enum
-    values: [initial, latest]
+    source: detection_type
+    nullable: false
     description: "Whether this is the first or most recent detection."
-    status: pending
+    values:
+      0: initial
+      1: latest
+
 variants:
   - from_node: { type: Finding, id: id }
     to_node: { type: Pipeline, id: id }
-    meaning: "Finding was first detected in pipeline."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_occurrences, from_column: id, to_column: initial_pipeline_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Finding was first detected in pipeline."
+
   - from_node: { type: Finding, id: id }
     to_node: { type: Pipeline, id: id }
-    meaning: "Finding was last detected in pipeline."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_occurrences, from_column: id, to_column: latest_pipeline_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Finding was last detected in pipeline."

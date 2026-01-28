@@ -16,11 +16,13 @@ serde_yaml.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tracing-subscriber.workspace = true
 
 # Simulator-specific dependencies
-clickhouse = { version = "0.14", features = ["inserter"] }
+clickhouse = { workspace = true }
 fake = { version = "3.0", features = ["derive", "chrono"] }
 indicatif = "0.18"
+parquet = "57"
 # Note: Use fake::rand re-export to avoid version conflicts
 
 # Internal crates
@@ -28,9 +30,9 @@ ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 
 [[bin]]
-name = "simulate"
+name = "generate"
 path = "src/bin/generate.rs"
 
 [[bin]]
-name = "evaluate"
-path = "src/bin/evaluate.rs"
+name = "load"
+path = "src/bin/load.rs"

@@ -1,44 +1,20 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Container relationship for core entities (hierarchy/ownership).
+# fixtures/ontology/edges/contains.yaml
+
+description: Container relationship for core entities (hierarchy/ownership)
+
 variants:
   - from_node: { type: Group, id: id }
     to_node: { type: Group, id: id }
-    meaning: "Group contains subgroup."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, from_column: parent_id, to_column: id },
-          { system: clickhouse, table: siphon_namespaces, from_column: parent_id, to_column: id },
-        ]
+    description: "Group contains subgroup."
+
   - from_node: { type: Group, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Group contains project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: projects, from_column: namespace_id, to_column: id },
-          { system: clickhouse, table: siphon_projects, from_column: namespace_id, to_column: id },
-        ]
+    description: "Group contains project."
+
   - from_node: { type: User, id: id }
     to_node: { type: Project, id: id }
-    meaning: "User namespace contains project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: projects, from_column: namespace_id, to_column: id },
-          { system: clickhouse, table: siphon_projects, from_column: namespace_id, to_column: id },
-        ]
+    description: "User namespace contains project."
+
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }
-    meaning: "Work item contains child work item (e.g., epic contains issue, epic contains epic, etc.)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: work_item_parent_links, from_column: work_item_parent_id, to_column: work_item_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Work item contains child work item (e.g., epic contains issue, epic contains epic, etc.)."

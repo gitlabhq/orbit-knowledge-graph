@@ -1,31 +1,16 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Definition relationships in source code.
+# fixtures/ontology/edges/defines.yaml
+
+description: Definition relationships in source code
+
 variants:
   - from_node: { type: File, id: id }
     to_node: { type: Definition, id: id }
-    meaning: "File defines a code definition (class, function, etc.)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, relationship: FILE_DEFINES, from_table: FileNode, to_table: DefinitionNode },
-        ]
+    description: "File defines a code definition (class, function, etc.)."
+
   - from_node: { type: Definition, id: id }
     to_node: { type: Definition, id: id }
-    meaning: "Definition contains or calls another definition (inheritance, composition, method calls)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, relationship: DEFINES_DEFINITION, from_table: DefinitionNode, to_table: DefinitionNode },
-        ]
+    description: "Definition contains or calls another definition (inheritance, composition, method calls)."
+
   - from_node: { type: Definition, id: id }
     to_node: { type: ImportedSymbol, id: id }
-    meaning: "Definition exports or is source of an imported symbol."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, relationship: DEFINES_IMPORTED_SYMBOL, from_table: DefinitionNode, to_table: ImportedSymbolNode },
-        ]
+    description: "Definition exports or is source of an imported symbol."

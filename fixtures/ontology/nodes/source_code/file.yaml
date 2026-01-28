@@ -1,73 +1,58 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/source_code/file.yaml
+
+node_type: File
 domain: source_code
-description: A source code file within a repository.
+description: A source code file within a repository
+destination_table: gl_file
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "Internal identifier for the file node."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: FileNode, column: id },
-        ]
+
   path:
     type: string
+    source: path
+    nullable: false
     description: "Relative path of the file within the repository."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: FileNode, column: path },
-        ]
+
   name:
     type: string
+    source: name
+    nullable: false
     description: "Name of the file including extension."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: FileNode, column: name },
-        ]
+
   language:
     type: string
+    source: language
     nullable: true
     description: "Programming language of the file (e.g., ruby, python, java)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: FileNode, column: language },
-        ]
+
   extension:
     type: string
+    source: extension
     nullable: true
     description: "File extension (e.g., rb, py, java)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: FileNode, column: extension },
-        ]
-additional_properties:
+
   absolute_path:
     type: string
+    source: absolute_path
     nullable: true
     description: "Absolute path of the file on the filesystem."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: FileNode, column: absolute_path },
-        ]
+
   repository_name:
     type: string
+    source: repository_name
     nullable: true
     description: "Name of the repository this file belongs to."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: FileNode, column: repository_name },
-        ]
+
+# edges:
+#   - type: IN_DIRECTORY
+#     source_id: directory_id
+#     target_kind: Directory
+#
+#   - type: IN_PROJECT
+#     source_id: project_id
+#     target_kind: Project

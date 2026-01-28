@@ -523,18 +523,30 @@ struct DomainYaml {
 
 #[derive(Debug, Deserialize)]
 struct NodeYaml {
+    #[allow(dead_code)]
+    node_type: String,
+    #[allow(dead_code)]
+    domain: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    description: String,
+    #[allow(dead_code)]
+    destination_table: String,
     #[serde(default)]
     properties: BTreeMap<String, PropertyYaml>,
-    #[serde(default)]
-    additional_properties: BTreeMap<String, PropertyYaml>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PropertyYaml {
     #[serde(rename = "type")]
     property_type: String,
+    #[allow(dead_code)]
+    source: String,
     #[serde(default)]
     nullable: bool,
+    #[serde(default)]
+    #[allow(dead_code)]
+    description: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -562,11 +574,9 @@ impl NodeYaml {
     fn into_entity(self, name: String) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
 
-        // Chain properties and additional_properties for single-pass collection
         let fields: Result<Vec<Field>, OntologyError> = self
             .properties
             .into_iter()
-            .chain(self.additional_properties)
             .map(|(prop_name, prop_def)| {
                 if prop_name == DEFAULT_PRIMARY_KEY {
                     primary_keys.push(prop_name.clone());

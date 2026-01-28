@@ -1,40 +1,20 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Code entities belong to a specific branch.
+# fixtures/ontology/edges/on_branch.yaml
+
+description: Code entities belong to a specific branch
+
 variants:
   - from_node: { type: Directory, id: id }
     to_node: { type: Branch, id: name }
-    meaning: "Directory exists on branch."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, relationship: DIR_ON_BRANCH, from_table: DirectoryNode, to_table: Branch },
-        ]
+    description: "Directory exists on branch."
+
   - from_node: { type: File, id: id }
     to_node: { type: Branch, id: name }
-    meaning: "File exists on branch."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, relationship: FILE_ON_BRANCH, from_table: FileNode, to_table: Branch },
-        ]
+    description: "File exists on branch."
+
   - from_node: { type: Definition, id: id }
     to_node: { type: Branch, id: name }
-    meaning: "Definition exists on branch."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, relationship: DEFINITION_ON_BRANCH, from_table: DefinitionNode, to_table: Branch, type: derived },
-        ]
+    description: "Definition exists on branch."
+
   - from_node: { type: ImportedSymbol, id: id }
     to_node: { type: Branch, id: name }
-    meaning: "Imported symbol exists on branch."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, relationship: IMPORTED_SYMBOL_ON_BRANCH, from_table: ImportedSymbolNode, to_table: Branch, type: derived },
-        ]
+    description: "Imported symbol exists on branch."

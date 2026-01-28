@@ -1,61 +1,43 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: A user is a member of a group or project.
+# fixtures/ontology/edges/member_of.yaml
+
+description: A user is a member of a group or project
+
 properties:
   access_level:
     type: enum
-    values: [no_access, minimal_access, guest, planner, reporter, developer, maintainer, owner]
+    source: access_level
+    nullable: false
     description: "User's access level in the group or project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: members, column: access_level, column_type: integer },
-          { system: clickhouse, table: null },
-          { system: rails, file: lib/gitlab/access.rb, class: Access },
-        ]
+    values:
+      0: no_access
+      10: minimal_access
+      20: guest
+      25: planner
+      30: reporter
+      40: developer
+      50: maintainer
+      60: owner
+
   expires_at:
     type: date
+    source: expires_at
     nullable: true
     description: "Membership expiration date, if any."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: members, column: expires_at },
-          { system: clickhouse, table: null },
-        ]
+
   state:
     type: enum
-    values: [active, awaiting]
+    source: state
     nullable: true
     description: "Membership state."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: members, column: state, column_type: smallint },
-          { system: clickhouse, table: null },
-          { system: rails, file: app/models/member.rb, class: Member },
-        ]
+    values:
+      0: active
+      1: awaiting
+
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Group, id: id }
-    meaning: "User is a member of group."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: members, from_column: user_id, to_column: source_id, filter: "type = 'GroupMember'" },
-          { system: clickhouse, table: null },
-        ]
+    description: "User is a member of group."
+
   - from_node: { type: User, id: id }
     to_node: { type: Project, id: id }
-    meaning: "User has access to project (via direct membership or group inheritance)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: project_authorizations, from_column: user_id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "User has access to project (via direct membership or group inheritance)."

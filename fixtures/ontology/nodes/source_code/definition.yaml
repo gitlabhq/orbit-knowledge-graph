@@ -1,103 +1,88 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/source_code/definition.yaml
+
+node_type: Definition
 domain: source_code
-description: A code definition such as a class, function, method, or module.
+description: A code definition such as a class, function, method, or module
+destination_table: gl_definition
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "Internal identifier for the definition node."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: id },
-        ]
+
   fqn:
     type: string
+    source: fqn
+    nullable: false
     description: "Fully qualified name of the definition (e.g., MyModule::MyClass#my_method)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: fqn },
-        ]
+
   name:
     type: string
+    source: name
+    nullable: false
     description: "Short name of the definition."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: name },
-        ]
+
   definition_type:
     type: enum
-    values: [class, module, method, function, variable, constant, interface, struct, enum, trait, type_alias]
+    source: definition_type
+    nullable: false
     description: "Type of code definition."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: definition_type },
-        ]
+    values:
+      0: class
+      1: module
+      2: method
+      3: function
+      4: variable
+      5: constant
+      6: interface
+      7: struct
+      8: enum
+      9: trait
+      10: type_alias
+
   file_path:
     type: string
+    source: primary_file_path
     nullable: true
     description: "Primary file path where the definition is located."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: primary_file_path },
-        ]
-additional_properties:
+
   start_line:
     type: int64
+    source: start_line
     nullable: true
     description: "Starting line number of the definition."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: start_line },
-        ]
+
   end_line:
     type: int64
+    source: end_line
     nullable: true
     description: "Ending line number of the definition."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: end_line },
-        ]
+
   start_col:
     type: int64
+    source: start_col
     nullable: true
     description: "Starting column of the definition."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: start_col },
-        ]
+
   end_col:
     type: int64
+    source: end_col
     nullable: true
     description: "Ending column of the definition."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: end_col },
-        ]
+
   total_locations:
     type: int64
+    source: total_locations
     nullable: true
     description: "Number of locations where this definition appears (for partial classes, etc.)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DefinitionNode, column: total_locations },
-        ]
+
+# edges:
+#   - type: IN_FILE
+#     source_id: file_id
+#     target_kind: File
+#
+#   - type: CALLS
+#     source_id: caller_id
+#     target_kind: Definition

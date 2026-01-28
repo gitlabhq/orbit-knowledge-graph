@@ -1,53 +1,46 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/source_code/directory.yaml
+
+node_type: Directory
 domain: source_code
-description: A directory within a repository's file structure.
+description: A directory within a repository's file structure
+destination_table: gl_directory
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "Internal identifier for the directory node."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DirectoryNode, column: id },
-        ]
+
   path:
     type: string
+    source: path
+    nullable: false
     description: "Relative path of the directory within the repository."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DirectoryNode, column: path },
-        ]
+
   name:
     type: string
+    source: name
+    nullable: false
     description: "Name of the directory."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DirectoryNode, column: name },
-        ]
-additional_properties:
+
   absolute_path:
     type: string
+    source: absolute_path
     nullable: true
     description: "Absolute path of the directory on the filesystem."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DirectoryNode, column: absolute_path },
-        ]
+
   repository_name:
     type: string
+    source: repository_name
     nullable: true
     description: "Name of the repository this directory belongs to."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: code_indexer, table: DirectoryNode, column: repository_name },
-        ]
+
+# edges:
+#   - type: PARENT_DIRECTORY
+#     source_id: parent_directory_id
+#     target_kind: Directory
+#
+#   - type: IN_PROJECT
+#     source_id: project_id
+#     target_kind: Project
