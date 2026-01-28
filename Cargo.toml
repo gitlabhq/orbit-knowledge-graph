@@ -6,6 +6,7 @@ members = [
   "crates/code-indexer",
   "crates/labkit-rs",
   "crates/etl-engine",
+  "crates/query-engine",
   "crates/cli",
   "crates/gitaly-client",
   "crates/gkg-server",
@@ -67,6 +68,9 @@ clickhouse = { version = "0.14", features = ["inserter"] }
 testcontainers = "0.26.3"
 testcontainers-modules = { version = "0.14.0", features = ["nats", "clickhouse"] }
 serial_test = "3.3.1"
+
+# Query engine dependencies
+jsonschema = "0.40.0"
 
 # Gitaly client dependencies
 regex = "1.12.2"

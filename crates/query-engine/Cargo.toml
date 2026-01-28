@@ -1,0 +1,17 @@
+[package]
+name = "query-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ontology = { path = "../ontology" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+jsonschema = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[lints]
+workspace = true
