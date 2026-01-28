@@ -33,13 +33,13 @@ etl:
         AND project._siphon_replicated_at > {last_watermark:String}
         AND project._siphon_replicated_at <= {watermark:String}
 
-edge_generation:
-  - relationship_type: creator
+edges:
+  - relationship_kind: creator
     source_column: creator_id
-    source_kind: User
-  - relationship_type: contains
+    target_kind: User
+  - relationship_kind: contains
     source_column: namespace_id
-    source_kind: Group
+    target_kind: Group
 
 properties:
   id:

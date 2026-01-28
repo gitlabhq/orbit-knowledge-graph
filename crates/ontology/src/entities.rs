@@ -19,7 +19,7 @@ pub struct NodeEntity {
     /// ETL configuration for indexing this entity.
     pub etl: Option<EtlConfig>,
     /// Edge generation configurations for this entity.
-    pub edge_generation: Vec<EdgeGenerationConfig>,
+    pub edges: Vec<EdgeGenerationConfig>,
     /// Property configurations with source mappings and enum values.
     pub property_configs: BTreeMap<String, PropertyConfig>,
 }

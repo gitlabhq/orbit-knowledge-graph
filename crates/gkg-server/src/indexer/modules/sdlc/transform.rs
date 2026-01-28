@@ -115,8 +115,8 @@ impl TransformEngine {
 FROM source_data
 WHERE {} IS NOT NULL"#,
             edge.source_column,
-            edge.source_kind,
-            edge.relationship_type,
+            edge.target_kind,
+            edge.relationship_kind,
             node_type,
             edge.source_column
         )
@@ -227,7 +227,7 @@ mod tests {
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: None,
             }),
-            edge_generation: vec![],
+            edges: vec![],
             property_configs,
         }
     }
@@ -265,9 +265,9 @@ mod tests {
     #[test]
     fn test_build_edge_sql_generates_correct_edge_extraction() {
         let edge = EdgeGenerationConfig {
-            relationship_type: "owner".to_string(),
+            relationship_kind: "owner".to_string(),
             source_column: "owner_id".to_string(),
-            source_kind: "User".to_string(),
+            target_kind: "User".to_string(),
         };
 
         let sql = TransformEngine::build_edge_sql("Group", &edge);

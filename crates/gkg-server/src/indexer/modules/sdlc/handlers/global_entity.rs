@@ -102,7 +102,7 @@ impl GenericGlobalEntityHandler {
         })?;
 
         let edge_queries: Vec<String> = node
-            .edge_generation
+            .edges
             .iter()
             .map(|edge| TransformEngine::build_edge_sql(&node.name, edge))
             .collect();

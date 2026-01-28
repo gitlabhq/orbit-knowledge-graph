@@ -111,7 +111,7 @@ impl Ontology {
                     primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
                     destination_table: format!("gl_{}", name.to_lowercase()),
                     etl: None,
-                    edge_generation: vec![],
+                    edges: vec![],
                     property_configs: BTreeMap::new(),
                 },
             );
@@ -524,7 +524,7 @@ struct NodeYaml {
     #[serde(default)]
     etl: Option<EtlYaml>,
     #[serde(default)]
-    edge_generation: Vec<EdgeGenerationYaml>,
+    edges: Vec<EdgeGenerationYaml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -542,9 +542,9 @@ struct EtlYaml {
 
 #[derive(Debug, Deserialize)]
 struct EdgeGenerationYaml {
-    relationship_type: String,
+    relationship_kind: String,
     source_column: String,
-    source_kind: String,
+    target_kind: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -634,13 +634,13 @@ impl NodeYaml {
         let etl = self.etl.map(|e| e.into_config()).transpose()?;
 
         // Convert edge generation configs
-        let edge_generation = self
-            .edge_generation
+        let edges = self
+            .edges
             .into_iter()
             .map(|e| EdgeGenerationConfig {
-                relationship_type: e.relationship_type,
+                relationship_kind: e.relationship_kind,
                 source_column: e.source_column,
-                source_kind: e.source_kind,
+                target_kind: e.target_kind,
             })
             .collect();
 
@@ -650,7 +650,7 @@ impl NodeYaml {
             primary_keys,
             destination_table: self.destination_table,
             etl,
-            edge_generation,
+            edges,
             property_configs,
         })
     }

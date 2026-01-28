@@ -111,11 +111,11 @@ impl EtlConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeGenerationConfig {
     /// Type of relationship (e.g., "owner", "contains", "creator").
-    pub relationship_type: String,
+    pub relationship_kind: String,
     /// Column in source data containing the related entity ID.
     pub source_column: String,
-    /// Node type of the source entity (e.g., "User", "Group").
-    pub source_kind: String,
+    /// Node type of the target entity (e.g., "User", "Group").
+    pub target_kind: String,
 }
 
 /// Configuration for a property, including source mapping and enum values.

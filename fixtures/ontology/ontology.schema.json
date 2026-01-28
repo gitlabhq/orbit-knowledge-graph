@@ -181,7 +181,7 @@
       "type": "object",
       "description": "Configuration for generating edges from source data.",
       "properties": {
-        "relationship_type": {
+        "relationship_kind": {
           "type": "string",
           "description": "Type of relationship (e.g., 'owner', 'contains', 'creator')."
         },
@@ -189,12 +189,12 @@
           "type": "string",
           "description": "Column in source data containing the related entity ID."
         },
-        "source_kind": {
+        "target_kind": {
           "type": "string",
-          "description": "Node type of the source entity (e.g., 'User', 'Group')."
+          "description": "Node type of the target entity (e.g., 'User', 'Group')."
         }
       },
-      "required": ["relationship_type", "source_column", "source_kind"],
+      "required": ["relationship_kind", "source_column", "target_kind"],
       "additionalProperties": false
     },
 
@@ -293,7 +293,7 @@
         "properties": { "$ref": "#/definitions/propertiesMap" },
         "additional_properties": { "$ref": "#/definitions/propertiesMap" },
         "etl": { "$ref": "#/definitions/etlConfig" },
-        "edge_generation": {
+        "edges": {
           "type": "array",
           "items": { "$ref": "#/definitions/edgeGenerationConfig" },
           "description": "List of edges to generate from source data during ETL."
