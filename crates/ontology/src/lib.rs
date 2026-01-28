@@ -25,9 +25,17 @@ use std::path::Path;
 /// Primary key field name used by default.
 const DEFAULT_PRIMARY_KEY: &str = "id";
 
-/// Reserved columns that exist on all nodes and edges.
-/// These are always valid for filtering/projection regardless of ontology definition.
-pub const RESERVED_COLUMNS: &[&str] = &["id", "label", "from_id", "to_id", "type"];
+/// Reserved columns that exist on all nodes.
+pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];
+
+/// Reserved columns on the edge table (matches EdgeEntity schema).
+pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
+    "relationship_kind",
+    "source",
+    "source_kind",
+    "target",
+    "target_kind",
+];
 
 /// Edge table name in ClickHouse.
 pub const EDGE_TABLE: &str = "kg_edges";
@@ -291,7 +299,7 @@ impl Ontology {
     /// Check if a field exists on a node, including reserved columns.
     ///
     /// Returns `true` if:
-    /// - The node exists AND the field is a reserved column (`id`, `label`, etc.)
+    /// - The node exists AND the field is a reserved column (`id`)
     /// - The node exists AND the field exists in the node's field definitions
     ///
     /// Returns `false` if the node doesn't exist.
@@ -302,8 +310,8 @@ impl Ontology {
             return false;
         };
 
-        // Reserved columns exist on all nodes
-        if RESERVED_COLUMNS.contains(&field_name) {
+        // Reserved columns on node tables
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
             return true;
         }
 
@@ -316,13 +324,13 @@ impl Ontology {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The node label is empty
+    /// - The entity name is empty
     /// - The node doesn't exist in the ontology
     /// - The field doesn't exist on the node (and isn't a reserved column)
     pub fn validate_field(&self, node_name: &str, field_name: &str) -> Result<(), OntologyError> {
         if node_name.is_empty() {
             return Err(OntologyError::Validation(format!(
-                "cannot validate field \"{field_name}\" without a node label"
+                "cannot validate field \"{field_name}\" without an entity type"
             )));
         }
 
@@ -330,8 +338,8 @@ impl Ontology {
             OntologyError::Validation(format!("unknown node type \"{node_name}\""))
         })?;
 
-        // Reserved columns exist on all nodes
-        if RESERVED_COLUMNS.contains(&field_name) {
+        // Reserved columns on node tables
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
             return Ok(());
         }
 
@@ -378,7 +386,7 @@ impl Ontology {
     /// Generate a JSON Schema with ontology values populated.
     ///
     /// Given a base schema template, this populates:
-    /// - `$defs.NodeLabel.enum` with valid node labels
+    /// - `$defs.EntityType.enum` with valid entity types
     /// - `$defs.RelationshipTypeName.enum` with valid relationship types
     /// - `$defs.NodeProperties` with property definitions per node type
     ///
@@ -394,13 +402,13 @@ impl Ontology {
             .and_then(Value::as_object_mut)
             .ok_or_else(|| OntologyError::Validation("schema missing $defs".into()))?;
 
-        // Populate NodeLabel enum
-        if let Some(node_label) = defs.get_mut("NodeLabel").and_then(Value::as_object_mut) {
-            let labels: Vec<Value> = self
+        // Populate EntityType enum with valid entity names
+        if let Some(entity_type) = defs.get_mut("EntityType").and_then(Value::as_object_mut) {
+            let types: Vec<Value> = self
                 .node_names()
                 .map(|s| Value::String(s.to_string()))
                 .collect();
-            node_label.insert("enum".to_string(), Value::Array(labels));
+            entity_type.insert("enum".to_string(), Value::Array(types));
         }
 
         // Populate RelationshipTypeName enum
@@ -773,12 +781,8 @@ mod tests {
             .with_nodes(["User"])
             .with_fields("User", [("username", DataType::String)]);
 
-        // Reserved columns return true for existing nodes
+        // Reserved columns on nodes (only "id")
         assert!(ontology.has_field("User", "id"));
-        assert!(ontology.has_field("User", "label"));
-        assert!(ontology.has_field("User", "from_id"));
-        assert!(ontology.has_field("User", "to_id"));
-        assert!(ontology.has_field("User", "type"));
 
         // Defined fields
         assert!(ontology.has_field("User", "username"));
@@ -797,7 +801,6 @@ mod tests {
 
         // Reserved columns pass for existing nodes
         assert!(ontology.validate_field("User", "id").is_ok());
-        assert!(ontology.validate_field("User", "label").is_ok());
 
         // Defined fields pass
         assert!(ontology.validate_field("User", "username").is_ok());
@@ -812,9 +815,9 @@ mod tests {
         let err = ontology.validate_field("User", "nonexistent").unwrap_err();
         assert!(err.to_string().contains("does not exist"));
 
-        // Empty node name fails
+        // Empty entity name fails
         let err = Ontology::new().validate_field("", "field").unwrap_err();
-        assert!(err.to_string().contains("without a node label"));
+        assert!(err.to_string().contains("without an entity type"));
     }
 
     #[test]
@@ -872,8 +875,8 @@ mod tests {
 
         let result = ontology.derive_json_schema(base_schema()).unwrap();
 
-        // Check NodeLabel enum
-        let labels = result["$defs"]["NodeLabel"]["enum"].as_array().unwrap();
+        // Check EntityType enum
+        let labels = result["$defs"]["EntityType"]["enum"].as_array().unwrap();
         let label_strs: Vec<_> = labels.iter().filter_map(|v| v.as_str()).collect();
         assert!(label_strs.contains(&"User"));
         assert!(label_strs.contains(&"Project"));
