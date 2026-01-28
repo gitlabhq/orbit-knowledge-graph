@@ -10,6 +10,7 @@ etl:
   scope: global
   source: siphon_users
   watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
 
 properties:
   id:

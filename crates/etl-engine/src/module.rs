@@ -56,26 +56,12 @@ pub enum HandlerError {
     Deserialization(#[from] serde_json::Error),
 }
 
-/// Errors that can occur when creating a handler.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
+#[error("failed to create handler '{handler_name}': {reason}")]
 pub struct HandlerCreationError {
-    /// The name of the handler that failed to create.
     pub handler_name: String,
-    /// The reason the handler could not be created.
     pub reason: String,
 }
-
-impl std::fmt::Display for HandlerCreationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "failed to create handler '{}': {}",
-            self.handler_name, self.reason
-        )
-    }
-}
-
-impl std::error::Error for HandlerCreationError {}
 
 /// Errors that can occur during module initialization.
 #[derive(Debug, Error)]
