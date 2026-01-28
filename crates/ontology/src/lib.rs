@@ -37,16 +37,6 @@ pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
     "target_kind",
 ];
 
-/// All reserved columns (for backward compatibility).
-pub const RESERVED_COLUMNS: &[&str] = &[
-    "id",
-    "relationship_kind",
-    "source",
-    "source_kind",
-    "target",
-    "target_kind",
-];
-
 /// Edge table name in ClickHouse.
 pub const EDGE_TABLE: &str = "kg_edges";
 
