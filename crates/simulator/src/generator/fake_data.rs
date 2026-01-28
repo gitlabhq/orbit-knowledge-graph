@@ -57,6 +57,7 @@ impl FakeValueGenerator {
             DataType::Bool => self.generate_bool(&field.name),
             DataType::Date => self.generate_date(),
             DataType::DateTime => self.generate_datetime(),
+            DataType::Enum => self.generate_enum(field),
         }
     }
 
@@ -145,6 +146,7 @@ impl FakeValueGenerator {
                 let millis = (days_ago * 86400 + hour_offset * 3600) * 1000;
                 FakeValue::DateTime(Utc::now().timestamp_millis() - millis)
             }
+            DataType::Enum => self.generate_enum(field),
         }
     }
 
@@ -261,6 +263,17 @@ impl FakeValueGenerator {
 
     fn pick_enum(&mut self, values: &[&str]) -> String {
         values[self.rng.gen_range(0..values.len())].to_string()
+    }
+
+    fn generate_enum(&mut self, field: &Field) -> FakeValue {
+        if let Some(enum_values) = &field.enum_values {
+            let values: Vec<&String> = enum_values.values().collect();
+            if !values.is_empty() {
+                let index = self.rng.gen_range(0..values.len());
+                return FakeValue::String(values[index].clone());
+            }
+        }
+        FakeValue::String("unknown".to_string())
     }
 }
 

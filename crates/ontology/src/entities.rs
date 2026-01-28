@@ -1,6 +1,8 @@
 //! Data model definitions for ontology entities.
 
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
+
+use crate::etl::EtlConfig;
 
 /// A node entity representing a record or row in the knowledge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,6 +13,10 @@ pub struct NodeEntity {
     pub fields: Vec<Field>,
     /// The field names that form the primary key.
     pub primary_keys: Vec<String>,
+    /// The destination table name for this entity.
+    pub destination_table: String,
+    /// ETL configuration for indexing this entity.
+    pub etl: Option<EtlConfig>,
 }
 
 impl fmt::Display for NodeEntity {
@@ -53,6 +59,8 @@ pub struct Field {
     pub data_type: DataType,
     /// Whether the field can contain null values.
     pub nullable: bool,
+    /// Integer value to string label mapping for enum types.
+    pub enum_values: Option<BTreeMap<i64, String>>,
 }
 
 impl fmt::Display for Field {
@@ -77,6 +85,8 @@ pub enum DataType {
     Date,
     /// A date and time value.
     DateTime,
+    /// Enum
+    Enum,
 }
 
 impl fmt::Display for DataType {
@@ -88,6 +98,7 @@ impl fmt::Display for DataType {
             DataType::Bool => write!(f, "Bool"),
             DataType::Date => write!(f, "Date"),
             DataType::DateTime => write!(f, "DateTime"),
+            DataType::Enum => write!(f, "Enum"),
         }
     }
 }
@@ -97,7 +108,7 @@ impl DataType {
     #[must_use]
     pub fn to_json_schema_type(self) -> &'static str {
         match self {
-            DataType::String | DataType::Date | DataType::DateTime => "string",
+            DataType::String | DataType::Date | DataType::DateTime | DataType::Enum => "string",
             DataType::Int => "integer",
             DataType::Float => "number",
             DataType::Bool => "boolean",
