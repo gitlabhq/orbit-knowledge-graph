@@ -1,4 +1,4 @@
-//! Integration tests for the user handler.
+//! Integration tests for the global handler (which includes User entities).
 //!
 //! These tests require a Docker-compatible runtime (Docker, Colima, etc).
 
@@ -15,7 +15,7 @@ use common::{TestContext, create_user_payload};
 
 #[tokio::test]
 #[serial]
-async fn user_handler_processes_and_transforms_users() {
+async fn global_handler_processes_and_transforms_users() {
     let context = TestContext::new().await;
 
     context
@@ -37,15 +37,15 @@ async fn user_handler_processes_and_transforms_users() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
         .await
         .expect("failed to create SDLC module");
 
     let handlers = sdlc_module.handlers();
-    let user_handler = handlers
+    let global_handler = handlers
         .iter()
-        .find(|h| h.name() == "user-handler")
-        .expect("user-handler not found");
+        .find(|h| h.name() == "global-handler")
+        .expect("global-handler not found");
 
     let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
         .unwrap()
@@ -54,12 +54,12 @@ async fn user_handler_processes_and_transforms_users() {
     let envelope = TestEnvelopeFactory::simple(&create_user_payload(watermark));
     let handler_context = context.create_handler_context();
 
-    user_handler
+    global_handler
         .handle(handler_context, envelope)
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM users ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_users ORDER BY id").await;
 
     assert!(!result.is_empty(), "result should not be empty");
 
@@ -91,11 +91,11 @@ async fn user_handler_processes_and_transforms_users() {
 
 #[tokio::test]
 #[serial]
-async fn user_handler_uses_watermark_for_incremental_processing() {
+async fn global_handler_uses_watermark_for_incremental_processing() {
     let context = TestContext::new().await;
 
     context
-        .execute("INSERT INTO user_indexing_watermark (watermark) VALUES ('2024-01-19 00:00:00')")
+        .execute("INSERT INTO global_indexing_watermark (watermark) VALUES ('2024-01-19 00:00:00')")
         .await;
 
     context
@@ -114,15 +114,15 @@ async fn user_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
         .await
         .expect("failed to create SDLC module");
 
     let handlers = sdlc_module.handlers();
-    let user_handler = handlers
+    let global_handler = handlers
         .iter()
-        .find(|h| h.name() == "user-handler")
-        .expect("user-handler not found");
+        .find(|h| h.name() == "global-handler")
+        .expect("global-handler not found");
 
     let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
         .unwrap()
@@ -131,12 +131,12 @@ async fn user_handler_uses_watermark_for_incremental_processing() {
     let envelope = TestEnvelopeFactory::simple(&create_user_payload(watermark));
     let handler_context = context.create_handler_context();
 
-    user_handler
+    global_handler
         .handle(handler_context, envelope)
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT count() as cnt FROM users").await;
+    let result = context.query("SELECT count() as cnt FROM gl_users").await;
     let count_array = result[0]
         .column(0)
         .as_any()
@@ -149,7 +149,7 @@ async fn user_handler_uses_watermark_for_incremental_processing() {
         "should only process new_user, not old_user"
     );
 
-    let usernames = context.query("SELECT username FROM users").await;
+    let usernames = context.query("SELECT username FROM gl_users").await;
 
     let username_array = usernames[0]
         .column(0)

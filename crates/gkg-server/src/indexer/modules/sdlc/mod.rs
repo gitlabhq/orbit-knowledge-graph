@@ -1,32 +1,79 @@
 mod datalake;
-mod group_handler;
+mod global_handler;
 mod namespace_handler;
-mod project_handler;
-mod user_handler;
+mod pipeline;
+mod transform;
 mod watermark_store;
 
+use std::path::Path;
 use std::sync::Arc;
 
 use datalake::{Datalake, DatalakeQuery};
 use etl_engine::clickhouse::ClickHouseConfiguration;
 use etl_engine::module::{Handler, Module, ModuleInitError};
+use global_handler::GlobalHandler;
 use namespace_handler::NamespaceHandler;
-use user_handler::UserHandler;
+use ontology::{EtlScope, NodeEntity, Ontology};
+use pipeline::OntologyEntityPipeline;
+use tracing::warn;
 use watermark_store::{ClickHouseWatermarkStore, WatermarkStore};
 
 pub struct SdlcModule {
     datalake: Arc<dyn DatalakeQuery>,
     watermark_store: Arc<dyn WatermarkStore>,
+    ontology: Arc<Ontology>,
 }
 
 impl SdlcModule {
-    pub async fn new(configuration: &ClickHouseConfiguration) -> Result<Self, ModuleInitError> {
+    pub async fn new(
+        configuration: &ClickHouseConfiguration,
+        ontology_path: impl AsRef<Path>,
+    ) -> Result<Self, ModuleInitError> {
         let client = Arc::new(configuration.build_client());
+
+        // TODO: This is placeholder for now, it will eventually be received from Rails.
+        let ontology = Ontology::load_from_dir(ontology_path).map_err(ModuleInitError::new)?;
 
         Ok(Self {
             datalake: Arc::new(Datalake::new(Arc::clone(&client))),
             watermark_store: Arc::new(ClickHouseWatermarkStore::new(client)),
+            ontology: Arc::new(ontology),
         })
+    }
+
+    fn create_global_pipelines(&self) -> Vec<OntologyEntityPipeline> {
+        self.ontology
+            .nodes()
+            .filter(|node| {
+                node.etl
+                    .as_ref()
+                    .is_some_and(|etl| etl.scope() == EtlScope::Global)
+            })
+            .filter_map(|node| self.try_create_pipeline(node))
+            .collect()
+    }
+
+    fn create_namespace_pipelines(&self) -> Vec<OntologyEntityPipeline> {
+        self.ontology
+            .nodes()
+            .filter(|node| {
+                node.etl
+                    .as_ref()
+                    .is_some_and(|etl| etl.scope() == EtlScope::Namespaced)
+            })
+            .filter_map(|node| self.try_create_pipeline(node))
+            .collect()
+    }
+
+    fn try_create_pipeline(&self, node: &NodeEntity) -> Option<OntologyEntityPipeline> {
+        let pipeline = OntologyEntityPipeline::from_node(node, Arc::clone(&self.datalake));
+        if pipeline.is_none() {
+            warn!(
+                entity = node.name,
+                "failed to create pipeline for entity, skipping"
+            );
+        }
+        pipeline
     }
 }
 
@@ -36,19 +83,129 @@ impl Module for SdlcModule {
     }
 
     fn handlers(&self) -> Vec<Box<dyn Handler>> {
-        vec![
-            Box::new(UserHandler::new(
-                Arc::clone(&self.datalake),
+        let global_pipelines = self.create_global_pipelines();
+        let namespace_pipelines = self.create_namespace_pipelines();
+
+        let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
+
+        if !global_pipelines.is_empty() {
+            handlers.push(Box::new(GlobalHandler::new(
                 Arc::clone(&self.watermark_store),
-            )),
-            Box::new(NamespaceHandler::new(
-                Arc::clone(&self.datalake),
+                global_pipelines,
+            )));
+        }
+
+        if !namespace_pipelines.is_empty() {
+            handlers.push(Box::new(NamespaceHandler::new(
                 Arc::clone(&self.watermark_store),
-            )),
-        ]
+                namespace_pipelines,
+            )));
+        }
+
+        handlers
     }
 
     fn entities(&self) -> Vec<etl_engine::entities::Entity> {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn fixtures_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates directory should exist")
+            .parent()
+            .expect("workspace root should exist")
+            .join("fixtures/ontology")
+    }
+
+    #[test]
+    fn create_global_pipelines_returns_global_entities() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        let module = SdlcModule {
+            datalake: Arc::new(MockDatalake),
+            watermark_store: Arc::new(MockWatermarkStore),
+            ontology: Arc::new(ontology),
+        };
+
+        let pipelines = module.create_global_pipelines();
+
+        // User entity has global scope
+        let entity_names: Vec<_> = pipelines.iter().map(|p| p.entity_name()).collect();
+        assert!(entity_names.contains(&"User"), "should include User entity");
+    }
+
+    #[test]
+    fn create_namespace_pipelines_returns_namespaced_entities() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        let module = SdlcModule {
+            datalake: Arc::new(MockDatalake),
+            watermark_store: Arc::new(MockWatermarkStore),
+            ontology: Arc::new(ontology),
+        };
+
+        let pipelines = module.create_namespace_pipelines();
+
+        // Group and Project entities have namespaced scope
+        let entity_names: Vec<_> = pipelines.iter().map(|p| p.entity_name()).collect();
+        assert!(
+            entity_names.contains(&"Group"),
+            "should include Group entity"
+        );
+        assert!(
+            entity_names.contains(&"Project"),
+            "should include Project entity"
+        );
+    }
+
+    use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
+    use datalake::{DatalakeError, RecordBatchStream};
+    use futures::stream;
+    use watermark_store::WatermarkError;
+
+    struct MockDatalake;
+
+    #[async_trait]
+    impl DatalakeQuery for MockDatalake {
+        async fn query_arrow(
+            &self,
+            _sql: &str,
+            _params: serde_json::Value,
+        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
+            Ok(Box::pin(stream::empty()))
+        }
+    }
+
+    struct MockWatermarkStore;
+
+    #[async_trait]
+    impl WatermarkStore for MockWatermarkStore {
+        async fn get_global_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
+            Ok(DateTime::<Utc>::UNIX_EPOCH)
+        }
+
+        async fn set_global_watermark(&self, _: &DateTime<Utc>) -> Result<(), WatermarkError> {
+            Ok(())
+        }
+
+        async fn get_namespace_watermark(&self, _: i64) -> Result<DateTime<Utc>, WatermarkError> {
+            Ok(DateTime::<Utc>::UNIX_EPOCH)
+        }
+
+        async fn set_namespace_watermark(
+            &self,
+            _: i64,
+            _: &DateTime<Utc>,
+        ) -> Result<(), WatermarkError> {
+            Ok(())
+        }
     }
 }

@@ -61,7 +61,7 @@ etl:
         namespace.name AS name,
         namespace_details.description AS description,
         namespace.visibility_level AS visibility_level,
-        namespace.path AS full_path,
+        namespace.path AS path,
         namespace.parent_id AS parent_id,
         namespace.owner_id AS owner_id,
         namespace.created_at AS created_at,

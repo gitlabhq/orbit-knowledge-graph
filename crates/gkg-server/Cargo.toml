@@ -19,6 +19,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
 etl-engine = { path = "../etl-engine" }
+ontology = { path = "../ontology" }
 jsonwebtoken = { workspace = true }
 labkit-rs = { path = "../labkit-rs", features = ["http", "grpc"] }
 serde = { workspace = true }

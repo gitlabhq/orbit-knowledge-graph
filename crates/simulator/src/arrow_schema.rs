@@ -134,18 +134,21 @@ mod tests {
             fields: vec![
                 Field {
                     name: "id".to_string(),
+                    source: "id".to_string(),
                     data_type: DataType::Int,
                     nullable: false,
                     enum_values: None,
                 },
                 Field {
                     name: "username".to_string(),
+                    source: "username".to_string(),
                     data_type: DataType::String,
                     nullable: false,
                     enum_values: None,
                 },
                 Field {
                     name: "email".to_string(),
+                    source: "email".to_string(),
                     data_type: DataType::String,
                     nullable: true,
                     enum_values: None,

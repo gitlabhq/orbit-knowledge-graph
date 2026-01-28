@@ -66,7 +66,7 @@ PRIMARY KEY id
 ORDER BY id
 SETTINGS index_granularity = 8192;
 
-CREATE TABLE IF NOT EXISTS test.users (
+CREATE TABLE IF NOT EXISTS test.gl_users (
     id Int64,
     username String DEFAULT '',
     email String DEFAULT '',
@@ -83,10 +83,12 @@ CREATE TABLE IF NOT EXISTS test.users (
     is_external Bool DEFAULT false,
     user_type String DEFAULT '',
     created_at Nullable(DateTime64(6, 'UTC')),
-    updated_at Nullable(DateTime64(6, 'UTC'))
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
 ) ENGINE = MergeTree() ORDER BY id;
 
-CREATE TABLE IF NOT EXISTS test.user_indexing_watermark (
+CREATE TABLE IF NOT EXISTS test.global_indexing_watermark (
     watermark DateTime64(6, 'UTC'),
     _version DateTime64(6, 'UTC') DEFAULT now64()
 ) ENGINE = ReplacingMergeTree(_version) ORDER BY tuple();
@@ -142,25 +144,28 @@ ORDER BY id
 SETTINGS index_granularity = 512;
 
 -- Group destination table
-CREATE TABLE IF NOT EXISTS test.groups (
+CREATE TABLE IF NOT EXISTS test.gl_groups (
     id Int64,
     name Nullable(String),
     description Nullable(String),
     visibility_level Nullable(String),
-    path Nullable(String),
+    full_path Nullable(String),
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
-    traversal_path Nullable(String),
-    deleted Nullable(Bool)
+    traversal_path String default '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
 ) ENGINE = MergeTree() ORDER BY id;
 
 -- Edges table for relationships
-CREATE TABLE IF NOT EXISTS test.edges (
+CREATE TABLE IF NOT EXISTS test.kg_edges (
     source_id Int64,
     source_kind String,
     relationship_kind String,
     target_id Int64,
-    target_kind String
+    target_kind String,
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
 ) ENGINE = MergeTree() ORDER BY (source_id, target_id);
 
 -- Project source tables
@@ -198,7 +203,7 @@ ORDER BY id
 SETTINGS index_granularity = 512;
 
 -- Project destination table
-CREATE TABLE IF NOT EXISTS test.projects (
+CREATE TABLE IF NOT EXISTS test.gl_projects (
     id Int64,
     name Nullable(String),
     description Nullable(String),
@@ -209,8 +214,9 @@ CREATE TABLE IF NOT EXISTS test.projects (
     archived Nullable(Bool),
     star_count Nullable(Int64),
     last_activity_at Nullable(DateTime64(6, 'UTC')),
-    traversal_path Nullable(String),
-    deleted Nullable(Bool)
+    traversal_path String default '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
 ) ENGINE = MergeTree() ORDER BY id;
 
 -- Namespace watermark table

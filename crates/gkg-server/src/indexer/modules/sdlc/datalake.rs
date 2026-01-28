@@ -4,19 +4,8 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use etl_engine::clickhouse::ArrowClickHouseClient;
 use futures::stream::BoxStream;
-use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
-
-pub(crate) trait ToQueryParams {
-    fn to_query_params(&self) -> Value;
-}
-
-impl<T: Serialize> ToQueryParams for T {
-    fn to_query_params(&self) -> Value {
-        serde_json::to_value(self).expect("params serialization failed")
-    }
-}
 
 #[derive(Debug, Error)]
 pub(crate) enum DatalakeError {

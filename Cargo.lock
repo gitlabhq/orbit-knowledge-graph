@@ -2574,6 +2574,7 @@ dependencies = [
  "futures",
  "jsonwebtoken",
  "labkit-rs",
+ "ontology",
  "prost",
  "prost-build",
  "prost-types",
