@@ -5,6 +5,10 @@
 
 use std::collections::BTreeMap;
 
+pub const VERSION_COLUMN: &str = "_version";
+pub const DELETED_COLUMN: &str = "_deleted";
+pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EtlScope {
     Global,
@@ -26,7 +30,7 @@ pub enum EtlConfig {
         scope: EtlScope,
         source: String,
         watermark: String,
-        deleted: Option<String>,
+        deleted: String,
         /// Edges to generate from columns. Key is the source column name.
         edges: BTreeMap<String, EdgeMapping>,
     },
@@ -39,6 +43,27 @@ pub enum EtlConfig {
 }
 
 impl EtlConfig {
+    pub fn scope(&self) -> EtlScope {
+        match self {
+            EtlConfig::Table { scope, .. } => *scope,
+            EtlConfig::Query { scope, .. } => *scope,
+        }
+    }
+
+    pub fn deleted(&self) -> Option<&str> {
+        match self {
+            EtlConfig::Table { deleted, .. } => Some(deleted.as_str()),
+            EtlConfig::Query { .. } => None,
+        }
+    }
+
+    pub fn edges(&self) -> &BTreeMap<String, EdgeMapping> {
+        match self {
+            EtlConfig::Table { edges, .. } => edges,
+            EtlConfig::Query { edges, .. } => edges,
+        }
+    }
+
     pub fn validate_query_parameters(&self) -> Vec<&'static str> {
         let EtlConfig::Query { scope, query, .. } = self else {
             return Vec::new();
@@ -58,12 +83,12 @@ impl EtlConfig {
             missing.push("{traversal_path:String}");
         }
 
-        if !query.contains("_deleted") {
-            missing.push("_deleted");
+        if !query.contains(DELETED_COLUMN) {
+            missing.push(DELETED_COLUMN);
         }
 
-        if !query.contains("_version") {
-            missing.push("_version");
+        if !query.contains(VERSION_COLUMN) {
+            missing.push(VERSION_COLUMN);
         }
 
         missing

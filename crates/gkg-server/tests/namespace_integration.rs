@@ -48,7 +48,7 @@ async fn namespace_handler_processes_and_transforms_groups() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
         .await
         .expect("failed to create SDLC module");
 
@@ -70,7 +70,7 @@ async fn namespace_handler_processes_and_transforms_groups() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM groups ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_groups ORDER BY id").await;
     assert!(!result.is_empty(), "groups result should not be empty");
 
     let batch = &result[0];
@@ -116,7 +116,7 @@ async fn namespace_handler_creates_group_edges() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
         .await
         .expect("failed to create SDLC module");
 
@@ -140,7 +140,7 @@ async fn namespace_handler_creates_group_edges() {
 
     // Verify owner edges
     let owner_edges = context
-        .query("SELECT source_id, target_id FROM edges WHERE relationship_kind = 'owner' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'owner' ORDER BY target_id")
         .await;
 
     assert!(!owner_edges.is_empty(), "owner edges should exist");
@@ -149,7 +149,7 @@ async fn namespace_handler_creates_group_edges() {
 
     // Verify parent-child edges
     let parent_edges = context
-        .query("SELECT source_id, target_id FROM edges WHERE relationship_kind = 'contains' AND source_kind = 'Group' AND target_kind = 'Group'")
+        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'contains' AND source_kind = 'Group' AND target_kind = 'Group'")
         .await;
 
     assert!(!parent_edges.is_empty(), "parent edges should exist");
@@ -203,7 +203,7 @@ async fn namespace_handler_processes_projects() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
         .await
         .expect("failed to create SDLC module");
 
@@ -225,7 +225,7 @@ async fn namespace_handler_processes_projects() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM projects ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_projects ORDER BY id").await;
     assert!(!result.is_empty(), "projects result should not be empty");
 
     let batch = &result[0];
@@ -241,16 +241,16 @@ async fn namespace_handler_processes_projects() {
     assert_eq!(visibility_column.value(0), "private");
     assert_eq!(visibility_column.value(1), "public");
 
-    // Verify project edges
+    // Verify project edges (Project is the source, pointing to User/Group as target)
     let creator_edges = context
-        .query("SELECT source_id, target_id FROM edges WHERE relationship_kind = 'creator' AND target_kind = 'Project' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'creator' AND source_kind = 'Project' AND target_kind = 'User' ORDER BY source_id")
         .await;
 
     assert!(!creator_edges.is_empty(), "creator edges should exist");
     assert_eq!(creator_edges[0].num_rows(), 2);
 
     let contains_edges = context
-        .query("SELECT source_id, target_id FROM edges WHERE relationship_kind = 'contains' AND target_kind = 'Project'")
+        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'contains' AND source_kind = 'Project' AND target_kind = 'Group'")
         .await;
 
     assert!(!contains_edges.is_empty(), "contains edges should exist");
@@ -292,7 +292,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
         .await
         .expect("failed to create SDLC module");
 
@@ -314,7 +314,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT count() as cnt FROM groups").await;
+    let result = context.query("SELECT count() as cnt FROM gl_groups").await;
     let count_array = result[0]
         .column(0)
         .as_any()
@@ -327,7 +327,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         "should only process new-team, not org1"
     );
 
-    let names = context.query("SELECT name FROM groups").await;
+    let names = context.query("SELECT name FROM gl_groups").await;
     let name_array = names[0]
         .column(0)
         .as_any()

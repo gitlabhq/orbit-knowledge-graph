@@ -16,7 +16,9 @@ mod entities;
 pub mod etl;
 
 pub use entities::{DataType, EdgeEntity, Field, NodeEntity};
-pub use etl::{EdgeMapping, EtlConfig, EtlScope};
+pub use etl::{
+    DELETED_COLUMN, EdgeMapping, EtlConfig, EtlScope, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+};
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -148,8 +150,10 @@ impl Ontology {
             OntologyError::Validation(format!("node \"{node_name}\" does not exist"))
         })?;
         for (field_name, data_type, nullable) in fields {
+            let field_name_string: String = field_name.into();
             node.fields.push(Field {
-                name: field_name.into(),
+                name: field_name_string.clone(),
+                source: field_name_string,
                 data_type,
                 nullable,
                 enum_values: None,
@@ -501,7 +505,8 @@ fn parse_data_type(s: &str, field_name: &str) -> Result<DataType, OntologyError>
         "boolean" | "bool" => Ok(DataType::Bool),
         "date" => Ok(DataType::Date),
         "timestamp" | "datetime" => Ok(DataType::DateTime),
-        "string" | "enum" => Ok(DataType::String),
+        "string" => Ok(DataType::String),
+        "enum" => Ok(DataType::Enum),
         other => Err(OntologyError::Validation(format!(
             "unknown data type '{}' for field '{}'",
             other, field_name
@@ -570,7 +575,6 @@ struct EdgeMappingYaml {
 struct PropertyYaml {
     #[serde(rename = "type")]
     property_type: String,
-    #[allow(dead_code)]
     source: String,
     #[serde(default)]
     nullable: bool,
@@ -618,6 +622,7 @@ impl NodeYaml {
 
                 Ok(Field {
                     name: prop_name,
+                    source: prop_def.source,
                     data_type,
                     nullable: prop_def.nullable,
                     enum_values: prop_def.values,
@@ -694,11 +699,16 @@ impl EtlYaml {
                         "ETL type 'table' requires a 'watermark' field".to_string(),
                     )
                 })?;
+                let deleted = self.deleted.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'table' requires a 'deleted' field".to_string(),
+                    )
+                })?;
                 Ok(EtlConfig::Table {
                     scope,
                     source,
                     watermark,
-                    deleted: self.deleted,
+                    deleted,
                     edges,
                 })
             }
@@ -820,6 +830,7 @@ mod tests {
         // Field display
         let field = Field {
             name: "email".into(),
+            source: "email".into(),
             data_type: DataType::String,
             nullable: true,
             enum_values: None,
@@ -827,6 +838,7 @@ mod tests {
         assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
             name: "id".into(),
+            source: "id".into(),
             data_type: DataType::Int,
             nullable: false,
             enum_values: None,
@@ -1039,6 +1051,7 @@ mod tests {
             name: "User".to_string(),
             fields: vec![Field {
                 name: "status".to_string(),
+                source: "status".to_string(),
                 data_type: DataType::Enum,
                 nullable: false,
                 enum_values: Some(enum_values),

@@ -55,6 +55,8 @@ impl fmt::Display for EdgeEntity {
 pub struct Field {
     /// The name of the field.
     pub name: String,
+    /// The source column name in the source table.
+    pub source: String,
     /// The data type of the field.
     pub data_type: DataType,
     /// Whether the field can contain null values.

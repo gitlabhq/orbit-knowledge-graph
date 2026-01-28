@@ -1,6 +1,6 @@
-//! Handler for namespace-scoped entities.
+//! Handler for global-scoped entities.
 //!
-//! Processes entities with `EtlScope::Namespaced` using ontology-driven pipelines.
+//! Processes entities with `EtlScope::Global` using ontology-driven pipelines.
 
 use std::sync::Arc;
 
@@ -15,37 +15,28 @@ use super::pipeline::OntologyEntityPipeline;
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
 use crate::indexer::modules::INDEXER_TOPIC;
 
-const SUBJECT: &str = "sdlc.namespace.indexing.requested";
+const SUBJECT: &str = "sdlc.global.indexing.requested";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NamespaceHandlerPayload {
-    pub organization: i64,
-    pub namespace: i64,
+pub struct GlobalHandlerPayload {
     pub watermark: DateTime<Utc>,
 }
 
-impl Event for NamespaceHandlerPayload {
+impl Event for GlobalHandlerPayload {
     fn topic() -> Topic {
         Topic::new(INDEXER_TOPIC, SUBJECT)
     }
 }
 
 #[derive(Clone, Serialize)]
-pub struct NamespaceQueryParams {
-    pub traversal_path: String,
+pub struct GlobalQueryParams {
     pub last_watermark: String,
     pub watermark: String,
 }
 
-impl NamespaceQueryParams {
-    pub fn new(
-        organization: i64,
-        namespace: i64,
-        last_watermark: &DateTime<Utc>,
-        watermark: &DateTime<Utc>,
-    ) -> Self {
+impl GlobalQueryParams {
+    pub fn new(last_watermark: &DateTime<Utc>, watermark: &DateTime<Utc>) -> Self {
         Self {
-            traversal_path: format!("{organization}/{namespace}/"),
             last_watermark: last_watermark.format(TIMESTAMP_FORMAT).to_string(),
             watermark: watermark.format(TIMESTAMP_FORMAT).to_string(),
         }
@@ -56,16 +47,16 @@ impl NamespaceQueryParams {
     }
 }
 
-/// Handles entities owned by a namespace.
+/// Handles entities without namespace ownership.
 ///
-/// These are records like Project, Issue, or Pipeline that live under a namespace
-/// path (e.g., "123/456/"). Queries filter by traversal_path prefix and watermark.
-pub struct NamespaceHandler {
+/// These are instance-wide records like User or Organization that exist outside
+/// the namespace hierarchy. Queries filter by watermark time range only.
+pub struct GlobalHandler {
     watermark_store: Arc<dyn WatermarkStore>,
     pipelines: Vec<OntologyEntityPipeline>,
 }
 
-impl NamespaceHandler {
+impl GlobalHandler {
     pub fn new(
         watermark_store: Arc<dyn WatermarkStore>,
         pipelines: Vec<OntologyEntityPipeline>,
@@ -78,9 +69,9 @@ impl NamespaceHandler {
 }
 
 #[async_trait]
-impl Handler for NamespaceHandler {
+impl Handler for GlobalHandler {
     fn name(&self) -> &str {
-        "namespace-handler"
+        "global-handler"
     }
 
     fn topic(&self) -> Topic {
@@ -88,29 +79,20 @@ impl Handler for NamespaceHandler {
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
-        let payload: NamespaceHandlerPayload = message.to_event().map_err(|error| match error {
+        let payload: GlobalHandlerPayload = message.to_event().map_err(|error| match error {
             SerializationError::Json(e) => HandlerError::Deserialization(e),
         })?;
 
-        let last_watermark = match self
-            .watermark_store
-            .get_namespace_watermark(payload.namespace)
-            .await
-        {
+        let last_watermark = match self.watermark_store.get_global_watermark().await {
             Ok(w) => w,
             Err(WatermarkError::NoData) => DateTime::<Utc>::UNIX_EPOCH,
             Err(error) => {
-                warn!(%error, "failed to fetch namespace watermark, using epoch");
+                warn!(%error, "failed to fetch global watermark, using epoch");
                 DateTime::<Utc>::UNIX_EPOCH
             }
         };
 
-        let params = NamespaceQueryParams::new(
-            payload.organization,
-            payload.namespace,
-            &last_watermark,
-            &payload.watermark,
-        );
+        let params = GlobalQueryParams::new(&last_watermark, &payload.watermark);
 
         let mut errors = Vec::new();
         for pipeline in &self.pipelines {
@@ -125,10 +107,10 @@ impl Handler for NamespaceHandler {
 
         if errors.is_empty() {
             self.watermark_store
-                .set_namespace_watermark(payload.namespace, &payload.watermark)
+                .set_global_watermark(&payload.watermark)
                 .await
                 .map_err(|e| {
-                    HandlerError::Processing(format!("failed to update namespace watermark: {e}"))
+                    HandlerError::Processing(format!("failed to update global watermark: {e}"))
                 })?;
         }
 
@@ -199,7 +181,7 @@ mod tests {
         }
     }
 
-    fn create_test_node(name: &str, destination_table: &str, source_table: &str) -> NodeEntity {
+    fn create_test_node(name: &str, destination_table: &str, source: &str) -> NodeEntity {
         NodeEntity {
             name: name.to_string(),
             fields: vec![Field {
@@ -211,11 +193,11 @@ mod tests {
             }],
             primary_keys: vec!["id".to_string()],
             destination_table: destination_table.to_string(),
-            etl: Some(EtlConfig::Query {
-                scope: EtlScope::Namespaced,
-                query: format!(
-                    "SELECT id, _deleted, _version FROM {source_table} WHERE traversal_path LIKE {{traversal_path:String}}"
-                ),
+            etl: Some(EtlConfig::Table {
+                scope: EtlScope::Global,
+                source: source.to_string(),
+                watermark: "_siphon_replicated_at".to_string(),
+                deleted: "_siphon_deleted".to_string(),
                 edges: BTreeMap::new(),
             }),
         }
@@ -224,19 +206,17 @@ mod tests {
     #[tokio::test]
     async fn handle_processes_pipelines() {
         let datalake = Arc::new(MockDatalake);
-        let group_node = create_test_node("Group", "gl_groups", "groups");
-        let issue_node = create_test_node("Issue", "gl_issues", "issues");
+        let user_node = create_test_node("User", "gl_users", "siphon_users");
+        let project_node = create_test_node("Project", "gl_projects", "siphon_projects");
 
         let pipelines = vec![
-            OntologyEntityPipeline::from_node(&group_node, datalake.clone()).unwrap(),
-            OntologyEntityPipeline::from_node(&issue_node, datalake).unwrap(),
+            OntologyEntityPipeline::from_node(&user_node, datalake.clone()).unwrap(),
+            OntologyEntityPipeline::from_node(&project_node, datalake).unwrap(),
         ];
 
-        let handler = NamespaceHandler::new(Arc::new(MockWatermarkStore), pipelines);
+        let handler = GlobalHandler::new(Arc::new(MockWatermarkStore), pipelines);
 
         let payload = serde_json::json!({
-            "organization": 1,
-            "namespace": 2,
             "watermark": "2024-01-21T00:00:00Z"
         })
         .to_string();

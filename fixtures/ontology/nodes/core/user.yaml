@@ -55,7 +55,7 @@ properties:
     description: "Timestamp when the user record was last updated."
 
   state:
-    type: enum
+    type: string
     source: state
     nullable: true
     description: "Account state."
