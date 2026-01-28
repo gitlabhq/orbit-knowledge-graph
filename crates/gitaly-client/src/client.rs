@@ -17,6 +17,21 @@ static ADDRESS_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         .expect("invalid address regex")
 });
 
+fn normalize_path(path: &Path) -> std::path::PathBuf {
+    use std::path::Component;
+    path.components()
+        .fold(std::path::PathBuf::new(), |mut acc, c| {
+            match c {
+                Component::ParentDir => {
+                    acc.pop();
+                }
+                Component::CurDir => {}
+                _ => acc.push(c),
+            }
+            acc
+        })
+}
+
 /// Gitaly gRPC client for repository operations.
 ///
 /// The client uses tonic's `Channel` which provides built-in HTTP/2 connection
@@ -160,6 +175,29 @@ impl GitalyClient {
                 )));
             }
 
+            let entry_type = entry.header().entry_type();
+            let is_link =
+                entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link;
+            if let (true, Ok(Some(link_name))) = (is_link, entry.link_name()) {
+                let link_target = if link_name.is_absolute() {
+                    link_name.to_path_buf()
+                } else {
+                    dest_canonical
+                        .parent()
+                        .unwrap_or(&target_canonical)
+                        .join(&link_name)
+                };
+
+                let normalized = normalize_path(&link_target);
+                if !normalized.starts_with(&target_canonical) {
+                    return Err(GitalyError::Archive(format!(
+                        "symlink target escapes target directory: {} -> {}",
+                        entry_path.display(),
+                        link_name.display()
+                    )));
+                }
+            }
+
             entry
                 .unpack(&dest_canonical)
                 .map_err(|e| GitalyError::Archive(e.to_string()))?;
@@ -167,5 +205,229 @@ impl GitalyClient {
 
         std::fs::remove_file(&tar_path).map_err(|e| GitalyError::Io(e.to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+    use tar::{Builder, Header};
+    use tempfile::TempDir;
+
+    fn extract_tar_to_dir(tar_data: &[u8], target_dir: &Path) -> Result<(), GitalyError> {
+        std::fs::create_dir_all(target_dir).map_err(|e| GitalyError::Io(e.to_string()))?;
+
+        let cursor = Cursor::new(tar_data);
+        let mut archive = tar::Archive::new(cursor);
+
+        let target_canonical = target_dir
+            .canonicalize()
+            .map_err(|e| GitalyError::Io(e.to_string()))?;
+
+        for entry in archive
+            .entries()
+            .map_err(|e| GitalyError::Archive(e.to_string()))?
+        {
+            let mut entry = entry.map_err(|e| GitalyError::Archive(e.to_string()))?;
+            let entry_path = entry
+                .path()
+                .map_err(|e| GitalyError::Archive(e.to_string()))?;
+
+            let dest = target_canonical.join(&entry_path);
+
+            let dest_canonical = if dest.exists() {
+                dest.canonicalize()
+                    .map_err(|e| GitalyError::Io(e.to_string()))?
+            } else if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| GitalyError::Io(e.to_string()))?;
+                parent
+                    .canonicalize()
+                    .map_err(|e| GitalyError::Io(e.to_string()))?
+                    .join(dest.file_name().unwrap_or_default())
+            } else {
+                dest.clone()
+            };
+
+            if !dest_canonical.starts_with(&target_canonical) {
+                return Err(GitalyError::Archive(format!(
+                    "path traversal detected: {}",
+                    entry_path.display()
+                )));
+            }
+
+            let entry_type = entry.header().entry_type();
+            let is_link =
+                entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link;
+            if let (true, Ok(Some(link_name))) = (is_link, entry.link_name()) {
+                let link_target = if link_name.is_absolute() {
+                    link_name.to_path_buf()
+                } else {
+                    dest_canonical
+                        .parent()
+                        .unwrap_or(&target_canonical)
+                        .join(&link_name)
+                };
+
+                let normalized = normalize_path(&link_target);
+                if !normalized.starts_with(&target_canonical) {
+                    return Err(GitalyError::Archive(format!(
+                        "symlink target escapes target directory: {} -> {}",
+                        entry_path.display(),
+                        link_name.display()
+                    )));
+                }
+            }
+
+            entry
+                .unpack(&dest_canonical)
+                .map_err(|e| GitalyError::Archive(e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
+    fn create_tar_with_file(path: &str, content: &[u8]) -> Vec<u8> {
+        let mut builder = Builder::new(Vec::new());
+        let mut header = Header::new_gnu();
+        header.set_path(path).unwrap();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder.append(&header, content).unwrap();
+        builder.into_inner().unwrap()
+    }
+
+    fn create_tar_with_symlink(link_path: &str, target: &str) -> Vec<u8> {
+        let mut builder = Builder::new(Vec::new());
+        let mut header = Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_path(link_path).unwrap();
+        header.set_link_name(target).unwrap();
+        header.set_size(0);
+        header.set_mode(0o777);
+        header.set_cksum();
+        builder.append(&header, std::io::empty()).unwrap();
+        builder.into_inner().unwrap()
+    }
+
+    fn create_tar_with_symlink_and_file(
+        link_path: &str,
+        link_target: &str,
+        file_path: &str,
+        file_content: &[u8],
+    ) -> Vec<u8> {
+        let mut builder = Builder::new(Vec::new());
+
+        let mut header = Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_path(link_path).unwrap();
+        header.set_link_name(link_target).unwrap();
+        header.set_size(0);
+        header.set_mode(0o777);
+        header.set_cksum();
+        builder.append(&header, std::io::empty()).unwrap();
+
+        let mut header = Header::new_gnu();
+        header.set_path(file_path).unwrap();
+        header.set_size(file_content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder.append(&header, file_content).unwrap();
+
+        builder.into_inner().unwrap()
+    }
+
+    #[test]
+    fn test_normal_file_extraction() {
+        let temp_dir = TempDir::new().unwrap();
+        let tar_data = create_tar_with_file("test.txt", b"hello world");
+
+        let result = extract_tar_to_dir(&tar_data, temp_dir.path());
+        assert!(result.is_ok(), "normal file extraction should succeed");
+
+        let content = std::fs::read_to_string(temp_dir.path().join("test.txt")).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn test_symlink_pointing_outside_target_rejected() {
+        let temp_dir = TempDir::new().unwrap();
+        let tar_data = create_tar_with_symlink("evil_link", "/etc");
+
+        let result = extract_tar_to_dir(&tar_data, temp_dir.path());
+
+        assert!(
+            result.is_err(),
+            "symlink pointing outside target should be rejected"
+        );
+
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("symlink") || err.to_string().contains("path traversal"),
+            "error should mention symlink or path traversal: {}",
+            err
+        );
+
+        let link_path = temp_dir.path().join("evil_link");
+        assert!(
+            !link_path.exists() && !link_path.is_symlink(),
+            "symlink should NOT be created"
+        );
+    }
+
+    #[test]
+    fn test_symlink_with_relative_escape_rejected() {
+        let temp_dir = TempDir::new().unwrap();
+
+        std::fs::create_dir_all(temp_dir.path().join("subdir")).unwrap();
+        let tar_data = create_tar_with_symlink("subdir/evil", "../../etc/passwd");
+
+        let result = extract_tar_to_dir(&tar_data, temp_dir.path());
+
+        assert!(
+            result.is_err(),
+            "symlink with relative path escaping target should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_file_through_symlink_to_existing_path_rejected() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create symlink pointing to /tmp (which exists)
+        let tar_data =
+            create_tar_with_symlink_and_file("evil_link", "/tmp", "evil_link/pwned.txt", b"pwned");
+
+        let result = extract_tar_to_dir(&tar_data, temp_dir.path());
+
+        // This should be rejected because writing through symlink would escape target_dir
+        assert!(
+            result.is_err(),
+            "writing file through symlink to existing path should be rejected"
+        );
+
+        // Verify pwned.txt was NOT written to /tmp
+        assert!(
+            !Path::new("/tmp/pwned.txt").exists(),
+            "/tmp/pwned.txt should not exist"
+        );
+    }
+
+    #[test]
+    fn test_symlink_inside_target_allowed() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create a real file first
+        std::fs::write(temp_dir.path().join("real_file.txt"), "content").unwrap();
+
+        // Create a tar with symlink pointing to relative path inside target
+        let tar_data = create_tar_with_symlink("link_to_real", "real_file.txt");
+
+        let result = extract_tar_to_dir(&tar_data, temp_dir.path());
+        assert!(
+            result.is_ok(),
+            "symlink to relative path inside target should be allowed"
+        );
     }
 }
