@@ -3,7 +3,7 @@
 node_type: Group
 domain: core
 description: A GitLab group (top-level group or subgroup)
-destination_table: gl_group
+destination_table: gl_groups
 
 properties:
   id:
@@ -52,13 +52,33 @@ properties:
       10: internal
       20: public
 
-  path:
-    type: string
-    source: path
-    nullable: false
-    description: "URL-safe group path (slug)."
-
-# edges:
-#   - type: PARENT_GROUP
-#     source_id: parent_id
-#     target_kind: Group
+etl:
+  type: query
+  scope: namespaced
+  query: |
+    SELECT
+        namespace.id AS id,
+        namespace.name AS name,
+        namespace_details.description AS description,
+        namespace.visibility_level AS visibility_level,
+        namespace.path AS full_path,
+        namespace.parent_id AS parent_id,
+        namespace.owner_id AS owner_id,
+        namespace.created_at AS created_at,
+        namespace.updated_at AS updated_at,
+        traversal_paths.traversal_path AS traversal_path,
+        namespace._siphon_deleted AS _deleted,
+        namespace._siphon_replicated_at AS _version
+    FROM siphon_namespaces namespace
+    INNER JOIN siphon_namespace_details namespace_details ON namespace.id = namespace_details.namespace_id
+    INNER JOIN namespace_traversal_paths traversal_paths ON namespace.id = traversal_paths.id
+    WHERE namespace.id IN (SELECT id FROM namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))
+        AND namespace._siphon_replicated_at > {last_watermark:String}
+        AND namespace._siphon_replicated_at <= {watermark:String}
+  edges:
+    owner_id:
+      to: User
+      as: owner
+    parent_id:
+      to: Group
+      as: contains

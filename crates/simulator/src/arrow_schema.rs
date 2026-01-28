@@ -46,7 +46,7 @@ pub trait ToArrowType {
 impl ToArrowType for DataType {
     fn to_arrow_type(&self) -> ArrowDataType {
         match self {
-            DataType::String => ArrowDataType::Utf8,
+            DataType::String | DataType::Enum => ArrowDataType::Utf8,
             DataType::Int => ArrowDataType::Int64,
             DataType::Float => ArrowDataType::Float64,
             DataType::Bool => ArrowDataType::Boolean,
@@ -136,19 +136,24 @@ mod tests {
                     name: "id".to_string(),
                     data_type: DataType::Int,
                     nullable: false,
+                    enum_values: None,
                 },
                 Field {
                     name: "username".to_string(),
                     data_type: DataType::String,
                     nullable: false,
+                    enum_values: None,
                 },
                 Field {
                     name: "email".to_string(),
                     data_type: DataType::String,
                     nullable: true,
+                    enum_values: None,
                 },
             ],
             primary_keys: vec!["id".to_string()],
+            destination_table: "gl_users".to_string(),
+            etl: None,
         };
 
         let schema = node.to_arrow_schema();

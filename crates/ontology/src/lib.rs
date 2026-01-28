@@ -13,8 +13,10 @@
 //! ```
 
 mod entities;
+pub mod etl;
 
 pub use entities::{DataType, EdgeEntity, Field, NodeEntity};
+pub use etl::{EdgeMapping, EtlConfig, EtlScope};
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -112,9 +114,11 @@ impl Ontology {
             self.nodes.insert(
                 name.clone(),
                 NodeEntity {
-                    name,
+                    name: name.clone(),
                     fields: vec![],
                     primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
+                    destination_table: format!("gl_{}", name.to_lowercase()),
+                    etl: None,
                 },
             );
         }
@@ -148,6 +152,7 @@ impl Ontology {
                 name: field_name.into(),
                 data_type,
                 nullable,
+                enum_values: None,
             });
         }
         Ok(self)
@@ -443,6 +448,15 @@ impl Ontology {
                     "type".to_string(),
                     Value::String(field.data_type.to_json_schema_type().to_string()),
                 );
+
+                if let Some(enum_values) = &field.enum_values {
+                    let values: Vec<Value> = enum_values
+                        .values()
+                        .map(|v| Value::String(v.clone()))
+                        .collect();
+                    prop_schema.insert("enum".to_string(), Value::Array(values));
+                }
+
                 prop_map.insert(field.name.clone(), Value::Object(prop_schema));
             }
 
@@ -520,10 +534,36 @@ struct NodeYaml {
     #[serde(default)]
     #[allow(dead_code)]
     description: String,
-    #[allow(dead_code)]
     destination_table: String,
     #[serde(default)]
     properties: BTreeMap<String, PropertyYaml>,
+    #[serde(default)]
+    etl: Option<EtlYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EtlYaml {
+    #[serde(rename = "type")]
+    etl_type: String,
+    scope: String,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    watermark: Option<String>,
+    #[serde(default)]
+    deleted: Option<String>,
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    edges: BTreeMap<String, EdgeMappingYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeMappingYaml {
+    #[serde(rename = "to")]
+    target_kind: String,
+    #[serde(rename = "as")]
+    relationship_kind: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -537,6 +577,8 @@ struct PropertyYaml {
     #[serde(default)]
     #[allow(dead_code)]
     description: String,
+    #[serde(default)]
+    values: Option<BTreeMap<i64, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -571,10 +613,14 @@ impl NodeYaml {
                 if prop_name == DEFAULT_PRIMARY_KEY {
                     primary_keys.push(prop_name.clone());
                 }
+
+                let data_type = parse_data_type(&prop_def.property_type, &prop_name)?;
+
                 Ok(Field {
-                    data_type: parse_data_type(&prop_def.property_type, &prop_name)?,
                     name: prop_name,
+                    data_type,
                     nullable: prop_def.nullable,
+                    enum_values: prop_def.values,
                 })
             })
             .collect();
@@ -596,11 +642,83 @@ impl NodeYaml {
             }
         }
 
+        // Convert ETL config
+        let etl = self.etl.map(|e| e.into_config()).transpose()?;
+
         Ok(NodeEntity {
             name,
             fields,
             primary_keys,
+            destination_table: self.destination_table,
+            etl,
         })
+    }
+}
+
+impl EtlYaml {
+    fn into_config(self) -> Result<EtlConfig, OntologyError> {
+        let scope = match self.scope.as_str() {
+            "global" => EtlScope::Global,
+            "namespaced" => EtlScope::Namespaced,
+            other => {
+                return Err(OntologyError::Validation(format!(
+                    "invalid ETL scope: '{}', expected 'global' or 'namespaced'",
+                    other
+                )));
+            }
+        };
+
+        let edges = self
+            .edges
+            .into_iter()
+            .map(|(column, mapping)| {
+                (
+                    column,
+                    EdgeMapping {
+                        target_kind: mapping.target_kind,
+                        relationship_kind: mapping.relationship_kind,
+                    },
+                )
+            })
+            .collect();
+
+        match self.etl_type.as_str() {
+            "table" => {
+                let source = self.source.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'table' requires a 'source' field".to_string(),
+                    )
+                })?;
+                let watermark = self.watermark.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'table' requires a 'watermark' field".to_string(),
+                    )
+                })?;
+                Ok(EtlConfig::Table {
+                    scope,
+                    source,
+                    watermark,
+                    deleted: self.deleted,
+                    edges,
+                })
+            }
+            "query" => {
+                let query = self.query.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'query' requires a 'query' field".to_string(),
+                    )
+                })?;
+                Ok(EtlConfig::Query {
+                    scope,
+                    query,
+                    edges,
+                })
+            }
+            other => Err(OntologyError::Validation(format!(
+                "invalid ETL type: '{}', expected 'table' or 'query'",
+                other
+            ))),
+        }
     }
 }
 
@@ -704,12 +822,14 @@ mod tests {
             name: "email".into(),
             data_type: DataType::String,
             nullable: true,
+            enum_values: None,
         };
         assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
             name: "id".into(),
             data_type: DataType::Int,
             nullable: false,
+            enum_values: None,
         };
         assert_eq!(format!("{field}"), "id: Int");
     }
@@ -860,6 +980,7 @@ mod tests {
         assert_eq!(DataType::Bool.to_json_schema_type(), "boolean");
         assert_eq!(DataType::Date.to_json_schema_type(), "string");
         assert_eq!(DataType::DateTime.to_json_schema_type(), "string");
+        assert_eq!(DataType::Enum.to_json_schema_type(), "string");
     }
 
     fn base_schema() -> &'static str {
@@ -905,5 +1026,38 @@ mod tests {
         // Missing $defs
         let err = ontology.derive_json_schema("{}").unwrap_err();
         assert!(err.to_string().contains("missing $defs"));
+    }
+
+    #[test]
+    fn test_derive_json_schema_with_enum_field() {
+        let mut enum_values = std::collections::BTreeMap::new();
+        enum_values.insert(1, "active".to_string());
+        enum_values.insert(2, "inactive".to_string());
+        enum_values.insert(3, "pending".to_string());
+
+        let node = NodeEntity {
+            name: "User".to_string(),
+            fields: vec![Field {
+                name: "status".to_string(),
+                data_type: DataType::Enum,
+                nullable: false,
+                enum_values: Some(enum_values),
+            }],
+            primary_keys: vec!["id".to_string()],
+            destination_table: "kg_user".to_string(),
+            etl: None,
+        };
+
+        let mut ontology = Ontology::new();
+        ontology.nodes.insert("User".to_string(), node);
+
+        let result = ontology.derive_json_schema(base_schema()).unwrap();
+
+        let status_schema = &result["$defs"]["NodeProperties"]["User"]["status"];
+        assert_eq!(status_schema["type"], "string");
+
+        let enum_array = status_schema["enum"].as_array().unwrap();
+        let enum_values: Vec<_> = enum_array.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(enum_values, vec!["active", "inactive", "pending"]);
     }
 }

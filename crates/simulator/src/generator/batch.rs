@@ -125,7 +125,7 @@ impl ColumnValues {
             DataType::Int | DataType::DateTime => ColumnValues::Int64(Vec::new()),
             DataType::Float => ColumnValues::Float64(Vec::new()),
             DataType::Bool => ColumnValues::Bool(Vec::new()),
-            DataType::String => ColumnValues::String(Vec::new()),
+            DataType::String | DataType::Enum => ColumnValues::String(Vec::new()),
             DataType::Date => ColumnValues::Date32(Vec::new()),
         }
     }
@@ -196,19 +196,24 @@ mod tests {
                     name: "id".to_string(),
                     data_type: DataType::Int,
                     nullable: false,
+                    enum_values: None,
                 },
                 Field {
                     name: "name".to_string(),
                     data_type: DataType::String,
                     nullable: true,
+                    enum_values: None,
                 },
                 Field {
                     name: "active".to_string(),
                     data_type: DataType::Bool,
                     nullable: false,
+                    enum_values: None,
                 },
             ],
             primary_keys: vec!["id".to_string()],
+            destination_table: "gl_test_nodes".to_string(),
+            etl: None,
         }
     }
 

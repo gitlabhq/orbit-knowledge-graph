@@ -3,7 +3,7 @@
 node_type: User
 domain: core
 description: A GitLab user account
-destination_table: gl_user
+destination_table: gl_users
 
 properties:
   id:
@@ -137,11 +137,9 @@ properties:
       13: duo_code_review_bot
       14: import_user
 
-# edges:
-#   - type: OWNER
-#     source_id: owner_id
-#     target_kind: User
-#
-#   - type: CONTAINS
-#     source: parent_id
-#     target_kind: Group
+etl:
+  type: table
+  scope: global
+  source: siphon_users
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
