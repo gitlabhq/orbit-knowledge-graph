@@ -17,6 +17,9 @@ pub enum QueryError {
     #[error("codegen error: {0}")]
     Codegen(String),
 
+    #[error("security error: {0}")]
+    Security(String),
+
     #[error("ontology error: {0}")]
     Ontology(#[from] OntologyError),
 }
