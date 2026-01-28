@@ -26,6 +26,7 @@ parquet = "57"
 
 # Internal crates
 ontology = { path = "../ontology" }
+query-engine = { path = "../query-engine" }
 
 [[bin]]
 name = "generate"
