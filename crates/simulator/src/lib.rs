@@ -31,7 +31,6 @@
 pub mod arrow_schema;
 pub mod clickhouse;
 pub mod config;
-pub mod evaluation;
 pub mod generator;
 pub mod parquet;
 
