@@ -1,93 +1,64 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/core/group.yaml
+
+node_type: Group
 domain: core
-description: A GitLab group (top-level group or subgroup).
+description: A GitLab group (top-level group or subgroup)
+destination_table: gl_group
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "Global identifier for the group."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, column: id },
-          { system: clickhouse, table: siphon_namespaces, column: id },
-        ]
+
   full_path:
     type: string
+    source: path
     nullable: true
     description: "Full path for the group (e.g. gitlab-org/quality)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: routes, column: path },
-          { system: clickhouse, table: null },
-          { system: rails, file: app/models/concerns/routable.rb, class: Routable, type: derived },
-        ]
+
   name:
     type: string
+    source: name
+    nullable: false
     description: "Display name."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, column: name },
-          { system: clickhouse, table: siphon_namespaces, column: name },
-        ]
+
   description:
     type: string
+    source: description
     nullable: true
     description: "Group description."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, column: description },
-          { system: clickhouse, table: siphon_namespaces, column: description },
-        ]
-additional_properties:
+
   created_at:
     type: timestamp
+    source: created_at
     nullable: true
     description: "Timestamp when the group was created."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, column: created_at },
-          { system: clickhouse, table: siphon_namespaces, column: created_at },
-        ]
+
   updated_at:
     type: timestamp
+    source: updated_at
     nullable: true
     description: "Timestamp when the group was last updated."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, column: updated_at },
-          { system: clickhouse, table: siphon_namespaces, column: updated_at },
-        ]
+
   visibility_level:
     type: enum
-    values: [private, internal, public]
+    source: visibility_level
+    nullable: false
     description: "Visibility of the group."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, column: visibility_level, column_type: integer },
-          { system: clickhouse, table: siphon_namespaces, column: visibility_level, column_type: Int64 },
-          { system: rails, file: lib/gitlab/visibility_level.rb, class: VisibilityLevel },
-        ]
+    values:
+      0: private
+      10: internal
+      20: public
+
   path:
     type: string
+    source: path
+    nullable: false
     description: "URL-safe group path (slug)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: namespaces, column: path },
-          { system: clickhouse, table: siphon_namespaces, column: path },
-        ]
+
+# edges:
+#   - type: PARENT_GROUP
+#     source_id: parent_id
+#     target_kind: Group

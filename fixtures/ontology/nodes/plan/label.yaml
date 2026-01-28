@@ -1,71 +1,52 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/plan/label.yaml
+
+node_type: Label
 domain: plan
-description: A label for categorizing and filtering work items.
+description: A label for categorizing and filtering work items
+destination_table: gl_label
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "Global identifier for the label."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: labels, column: id },
-          { system: clickhouse, table: null },
-        ]
+
   title:
     type: string
+    source: title
     nullable: true
     description: "Title/name of the label."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: labels, column: title },
-          { system: clickhouse, table: null },
-        ]
+
   description:
     type: string
+    source: description
     nullable: true
     description: "Description of the label."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: labels, column: description },
-          { system: clickhouse, table: null },
-        ]
+
   color:
     type: string
+    source: color
     nullable: true
     description: "Hex color code for the label."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: labels, column: color },
-          { system: clickhouse, table: null },
-        ]
-additional_properties:
+
   created_at:
     type: timestamp
+    source: created_at
     nullable: true
     description: "Timestamp when the label was created."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: labels, column: created_at },
-          { system: clickhouse, table: null },
-        ]
+
   updated_at:
     type: timestamp
+    source: updated_at
     nullable: true
     description: "Timestamp when the label was last updated."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: labels, column: updated_at },
-          { system: clickhouse, table: null },
-        ]
+
+# edges:
+#   - type: IN_PROJECT
+#     source_id: project_id
+#     target_kind: Project
+#
+#   - type: IN_GROUP
+#     source_id: group_id
+#     target_kind: Group

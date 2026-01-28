@@ -1,161 +1,113 @@
-# yaml-language-server: $schema=../../ontology.schema.json
-type: node
+# fixtures/ontology/nodes/plan/work_item.yaml
+
+node_type: WorkItem
 domain: plan
-description: A work item representing an issue, epic, task, incident, or other trackable unit of work.
+description: A work item representing an issue, epic, task, incident, or other trackable unit of work
+destination_table: gl_work_item
+
 properties:
   id:
     type: int64
+    source: id
+    nullable: false
     description: "Global identifier for the work item."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: id },
-          { system: clickhouse, table: null },
-        ]
+
   iid:
     type: int64
+    source: iid
     nullable: true
     description: "Project or group-scoped work item number."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: iid },
-          { system: clickhouse, table: null },
-        ]
+
   title:
     type: string
+    source: title
     nullable: true
     description: "Title of the work item."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: title },
-          { system: clickhouse, table: null },
-        ]
+
   description:
     type: string
+    source: description
     nullable: true
     description: "Description body (markdown)."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: description },
-          { system: clickhouse, table: null },
-        ]
+
   state:
     type: enum
-    values: [opened, closed, merged, locked]
+    source: state_id
+    nullable: false
     description: "Current state of the work item."
-    status: pending
-    internal:
-      sources:
-        [
-          {
-            system: postgres,
-            database: main,
-            table: issues,
-            column: state_id,
-            column_type: smallint,
-          },
-          { system: clickhouse, table: null },
-          { system: rails, file: app/models/concerns/issuable.rb, class: Issuable },
-        ]
+    values:
+      1: opened
+      2: closed
+      3: merged
+      4: locked
+
   work_item_type:
     type: enum
-    values: [issue, incident, test_case, requirement, task, objective, key_result, epic, ticket]
+    source: work_item_type_id
+    nullable: false
     description: "Type of work item."
-    status: pending
-    internal:
-      sources:
-        [
-          {
-            system: postgres,
-            database: main,
-            table: issues,
-            column: work_item_type_id,
-            column_type: bigint,
-          },
-          { system: clickhouse, table: null },
-          { system: rails, file: app/models/work_items/type.rb, class: "WorkItems::Type" },
-        ]
+    values:
+      0: issue
+      1: incident
+      2: test_case
+      3: requirement
+      4: task
+      5: objective
+      6: key_result
+      7: epic
+      8: ticket
+
   confidential:
     type: boolean
+    source: confidential
+    nullable: false
     description: "Whether the work item is confidential."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: confidential },
-          { system: clickhouse, table: null },
-        ]
+
   due_date:
     type: date
+    source: due_date
     nullable: true
     description: "Due date for the work item."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: due_date },
-          { system: clickhouse, table: null },
-        ]
+
   start_date:
     type: date
+    source: start_date
     nullable: true
     description: "Start date for the work item."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: start_date },
-          { system: clickhouse, table: null },
-        ]
+
   weight:
     type: int64
+    source: weight
     nullable: true
     description: "Weight/points assigned to the work item."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: weight },
-          { system: clickhouse, table: null },
-        ]
-additional_properties:
+
   created_at:
     type: timestamp
+    source: created_at
     nullable: true
     description: "Timestamp when the work item was created."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: created_at },
-          { system: clickhouse, table: null },
-        ]
+
   updated_at:
     type: timestamp
+    source: updated_at
     nullable: true
     description: "Timestamp when the work item was last updated."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: updated_at },
-          { system: clickhouse, table: null },
-        ]
+
   closed_at:
     type: timestamp
+    source: closed_at
     nullable: true
     description: "Timestamp when the work item was closed."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, column: closed_at },
-          { system: clickhouse, table: null },
-        ]
+
+# edges:
+#   - type: IN_PROJECT
+#     source_id: project_id
+#     target_kind: Project
+#
+#   - type: ASSIGNED_TO
+#     source_id: assignee_id
+#     target_kind: User
+#
+#   - type: AUTHOR
+#     source_id: author_id
+#     target_kind: User
