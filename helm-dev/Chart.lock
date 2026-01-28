@@ -2,5 +2,11 @@ dependencies:
 - name: gitlab-runner
   repository: https://charts.gitlab.io
   version: 0.85.0
-digest: sha256:441710e7abdf73951fcc43fda0322ac6c317af4203b9680397a077609db918a2
-generated: "2026-01-25T16:51:42.321862-08:00"
+- name: kube-prometheus-stack
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 81.2.2
+- name: loki
+  repository: https://grafana.github.io/helm-charts
+  version: 6.51.0
+digest: sha256:b86e0637a3d0fed6a756b0ea0098f937536ece40f005c3d6ce133e8df4b4738b
+generated: "2026-01-27T20:20:17.324022-08:00"

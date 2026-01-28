@@ -10,3 +10,11 @@ dependencies:
     version: "0.85.0"
     repository: "https://charts.gitlab.io"
     condition: gitlab-runner.enabled
+  - name: kube-prometheus-stack
+    version: "81.2.2"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: observability.enabled
+  - name: loki
+    version: "6.51.0"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: observability.loki.enabled
