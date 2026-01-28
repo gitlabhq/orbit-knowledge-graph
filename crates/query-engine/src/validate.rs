@@ -102,7 +102,7 @@ fn validate_relationships(input: &Input, ontology: &Ontology) -> Result<()> {
 
 fn validate_filters(input: &Input, ontology: &Ontology) -> Result<()> {
     for node in &input.nodes {
-        let entity = node.entity.as_ref().expect("entity validated above");
+        let entity = node.entity.as_ref().ok_or_else(|| err(format!("entity validated above")))?;
 
         for prop in node.filters.keys() {
             ontology
