@@ -26,13 +26,15 @@
 //!     "limit": 10
 //! }"#;
 //!
-// ! let result = compile(json, &ontology).unwrap();
-// ! println!("SQL: {}", result.sql);
+//! let result = compile(json, &ontology).unwrap();
+//! println!("SQL: {}", result.sql);
 //! ```
 
 pub mod ast;
 pub mod error;
 pub mod input;
+pub mod lower;
+pub mod security;
 pub mod validate;
 
 use std::sync::OnceLock;
@@ -41,6 +43,7 @@ pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, RecursiveCte, SelectEx
 pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
 pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
+pub use security::{apply_security_context, SecurityContext};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schema validation
@@ -99,11 +102,13 @@ fn collect_schema_errors(
 ///
 /// Validates structure, identifiers, and ontology values before generating SQL.
 #[must_use = "the compiled query should be used"]
-pub fn compile(json_input: &str, ontology: &Ontology) -> Result<()> {
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<()> {
     let value = validate_json(json_input)?;
     validate_ontology(&value, ontology)?;
     let input: Input = serde_json::from_value(value)?;
     validate::validate(&input, ontology)?;
+    let mut node = lower::lower(&input, ontology)?;
+    apply_security_context(&mut node, ctx)?;
     Ok(())
 }
 
@@ -128,6 +133,10 @@ pub fn derive_schema(ontology: &Ontology) -> Result<serde_json::Value> {
 mod tests {
     use super::*;
 
+    fn test_ctx() -> SecurityContext {
+        SecurityContext::new(1, vec!["1/".into()]).unwrap()
+    }
+
     fn test_ontology() -> Ontology {
         use ontology::DataType;
         Ontology::new()
@@ -151,14 +160,44 @@ mod tests {
             .with_fields("Project", [("name", DataType::String)])
     }
 
+    /// Compile JSON and return the AST without generating SQL.
+    #[must_use = "the compiled AST should be used"]
+    pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> Result<Node> {
+        let value = validate_json(json_input)?;
+        validate_ontology(&value, ontology)?;
+        let input: Input = serde_json::from_value(value)?;
+        validate::validate(&input, ontology)?;
+        let node = lower::lower(&input, ontology)?;
+        Ok(node)
+    }
+
+    #[test]
+    fn compile_to_ast_works() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "limit": 10
+        }"#;
+
+        let Node::Query(q) = compile_to_ast(json, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.limit, Some(10));
+        assert_eq!(q.select.len(), 1);
+    }
+
     #[test]
     fn invalid_json_rejected() {
-        assert!(compile("not valid json", &test_ontology()).is_err());
+        assert!(compile("not valid json", &test_ontology(), &test_ctx()).is_err());
     }
 
     #[test]
     fn missing_required_fields_rejected() {
-        let result = compile(r#"{"query_type": "traversal"}"#, &test_ontology());
+        let result = compile(
+            r#"{"query_type": "traversal"}"#,
+            &test_ontology(),
+            &test_ctx(),
+        );
         assert!(result.is_err());
     }
 
@@ -166,7 +205,7 @@ mod tests {
     #[test]
     fn sql_injection_in_node_id() {
         let json = r#"{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}"#;
-        let err = compile(json, &test_ontology()).unwrap_err();
+        let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
     }
 
@@ -177,20 +216,20 @@ mod tests {
             "nodes": [{"id": "a"}, {"id": "b"}],
             "relationships": [{"type": "REL", "from": "a' OR '1'='1", "to": "b"}]
         }"#;
-        let err = compile(json, &test_ontology()).unwrap_err();
+        let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
     }
 
     #[test]
     fn empty_node_id_rejected() {
         let json = r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#;
-        assert!(compile(json, &test_ontology()).is_err());
+        assert!(compile(json, &test_ontology(), &test_ctx()).is_err());
     }
 
     #[test]
     fn id_starting_with_number_rejected() {
         let json = r#"{"query_type": "traversal", "nodes": [{"id": "123abc"}]}"#;
-        let err = compile(json, &test_ontology()).unwrap_err();
+        let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
     }
 
@@ -200,7 +239,7 @@ mod tests {
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]
         }"#;
-        let err = compile(json, &test_ontology()).unwrap_err();
+        let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
     }
 
@@ -215,7 +254,7 @@ mod tests {
                 {"id": "node123", "entity": "Group"}
             ]
         }"#;
-        assert!(compile(json, &test_ontology()).is_ok());
+        assert!(compile(json, &test_ontology(), &test_ctx()).is_ok());
     }
 }
 
@@ -223,6 +262,10 @@ mod tests {
 mod ontology_integration_tests {
     use super::*;
     use std::path::Path;
+
+    fn test_ctx() -> SecurityContext {
+        SecurityContext::new(1, vec!["1/".into()]).unwrap()
+    }
 
     fn load_test_ontology() -> Ontology {
         let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -242,7 +285,7 @@ mod ontology_integration_tests {
             "limit": 10,
             "order_by": {"node": "u", "property": "username", "direction": "ASC"}
         }"#;
-        assert!(compile(json, &load_test_ontology()).is_ok());
+        assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
     }
 
     #[test]
@@ -253,7 +296,7 @@ mod ontology_integration_tests {
             "limit": 10,
             "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
         }"#;
-        let err = compile(json, &load_test_ontology()).unwrap_err();
+        let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
         assert!(err.to_string().contains("does not exist"));
     }
 
@@ -264,7 +307,7 @@ mod ontology_integration_tests {
             "nodes": [{"id": "u", "entity": "User", "filters": {"username": "admin"}}],
             "limit": 10
         }"#;
-        assert!(compile(json, &load_test_ontology()).is_ok());
+        assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
     }
 
     #[test]
@@ -274,7 +317,7 @@ mod ontology_integration_tests {
             "nodes": [{"id": "u", "entity": "User", "filters": {"nonexistent_column": "value"}}],
             "limit": 10
         }"#;
-        let err = compile(json, &load_test_ontology()).unwrap_err();
+        let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
         assert!(err.to_string().contains("does not exist"));
     }
 
@@ -286,7 +329,7 @@ mod ontology_integration_tests {
             "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
             "limit": 10
         }"#;
-        assert!(compile(json, &load_test_ontology()).is_ok());
+        assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
     }
 
     #[test]
@@ -297,7 +340,7 @@ mod ontology_integration_tests {
             "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
             "limit": 10
         }"#;
-        let err = compile(json, &load_test_ontology()).unwrap_err();
+        let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
         assert!(err.to_string().contains("does not exist"));
     }
 
@@ -308,7 +351,7 @@ mod ontology_integration_tests {
             "nodes": [{"id": "n", "entity": "NonexistentType"}],
             "limit": 10
         }"#;
-        let err = compile(json, &load_test_ontology()).unwrap_err();
+        let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
         // Schema validation catches invalid entity types
         assert!(
             err.to_string().contains("NonexistentType")
