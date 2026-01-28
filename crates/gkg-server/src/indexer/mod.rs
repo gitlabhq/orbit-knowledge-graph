@@ -34,11 +34,11 @@ pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), 
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 
-    info!(url = %config.clickhouse.url, "connecting to ClickHouse");
-    let destination = Arc::new(ClickHouseDestination::new(config.clickhouse.clone())?);
+    info!(url = %config.graph.url, "connecting to graph ClickHouse");
+    let destination = Arc::new(ClickHouseDestination::new(config.graph.clone())?);
 
     info!(path = %config.ontology_path.display(), "initializing SDLC module");
-    let sdlc_module = SdlcModule::new(&config.clickhouse, &config.ontology_path).await?;
+    let sdlc_module = SdlcModule::new(&config.datalake, &config.ontology_path).await?;
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);
