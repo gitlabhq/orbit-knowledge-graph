@@ -1,14 +1,8 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: User who merged the merge request.
+# fixtures/ontology/edges/merged_by.yaml
+
+description: User who merged the merge request
+
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
-    meaning: "User merged merge request."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_requests, from_column: merge_user_id, to_column: id },
-          { system: clickhouse, table: null },
-        ]
+    description: "User merged merge request."

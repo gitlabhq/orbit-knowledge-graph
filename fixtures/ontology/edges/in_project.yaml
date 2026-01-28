@@ -1,124 +1,52 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Project association for entities.
+# fixtures/ontology/edges/in_project.yaml
+
+description: Project association for entities
+
 variants:
   - from_node: { type: Note, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Note belongs to project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: notes, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Note belongs to project."
+
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Merge request targets project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_requests, from_column: id, to_column: target_project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Merge request targets project."
+
   - from_node: { type: Pipeline, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Pipeline belongs to project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: ci, table: p_ci_pipelines, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Pipeline belongs to project."
+
   - from_node: { type: Stage, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Stage belongs to project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: ci, table: p_ci_stages, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Stage belongs to project."
+
   - from_node: { type: Job, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Job belongs to project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: ci, table: p_ci_builds, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Job belongs to project."
+
   - from_node: { type: Vulnerability, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Vulnerability found in project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerabilities, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Vulnerability found in project."
+
   - from_node: { type: Finding, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Finding detected in project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_occurrences, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Finding detected in project."
+
   - from_node: { type: Scanner, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Scanner configured for project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_scanners, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Scanner configured for project."
+
   - from_node: { type: VulnerabilityIdentifier, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Vulnerability identifier found in project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: vulnerability_identifiers, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Vulnerability identifier found in project."
+
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Work item belongs to project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: issues, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Work item belongs to project."
+
   - from_node: { type: Milestone, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Milestone belongs to project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: milestones, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Milestone belongs to project."
+
   - from_node: { type: Label, id: id }
     to_node: { type: Project, id: id }
-    meaning: "Label belongs to project."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: labels, from_column: id, to_column: project_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Label belongs to project."

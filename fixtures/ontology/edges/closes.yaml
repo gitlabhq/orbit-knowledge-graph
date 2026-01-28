@@ -1,14 +1,8 @@
-# yaml-language-server: $schema=../ontology.schema.json
-type: edge
-description: Merge request closes a work item when merged.
+# fixtures/ontology/edges/closes.yaml
+
+description: Merge request closes a work item when merged
+
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: WorkItem, id: id }
-    meaning: "Merge request closes work item."
-    status: pending
-    internal:
-      sources:
-        [
-          { system: postgres, database: main, table: merge_requests_closing_issues, from_column: merge_request_id, to_column: issue_id },
-          { system: clickhouse, table: null },
-        ]
+    description: "Merge request closes work item."
