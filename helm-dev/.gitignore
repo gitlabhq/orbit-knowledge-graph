@@ -1,2 +1,5 @@
 # Helm dependency downloads (regenerate with: helm dependency update)
 charts/*.tgz
+
+# Local secrets (contains passwords)
+.tilt-secrets
