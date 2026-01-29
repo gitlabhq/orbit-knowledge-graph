@@ -4,8 +4,8 @@
 //! extract, transform, and edge SQL statements.
 
 use ontology::{
-    DELETED_COLUMN, DataType, EtlConfig, EtlScope, Field, NodeEntity, TRAVERSAL_PATH_COLUMN,
-    VERSION_COLUMN,
+    DELETED_COLUMN, DataType, EdgeDirection, EtlConfig, EtlScope, Field, NodeEntity,
+    TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 
 pub const SOURCE_DATA_TABLE: &str = "source_data";
@@ -73,23 +73,36 @@ pub fn build_all_edge_sql(node: &NodeEntity) -> Vec<String> {
         return Vec::new();
     };
 
-    let source_kind = &node.name;
+    let node_kind = &node.name;
     etl.edges()
         .iter()
-        .map(|(source_column, mapping)| {
-            let target_kind = &mapping.target_kind;
+        .map(|(fk_column, mapping)| {
+            let (source_kind, source_id, target_kind, target_id) = match mapping.direction {
+                EdgeDirection::Outgoing => (
+                    node_kind.as_str(),
+                    "id",
+                    mapping.target_kind.as_str(),
+                    fk_column.as_str(),
+                ),
+                EdgeDirection::Incoming => (
+                    mapping.target_kind.as_str(),
+                    fk_column.as_str(),
+                    node_kind.as_str(),
+                    "id",
+                ),
+            };
             let relationship_kind = &mapping.relationship_kind;
             format!(
                 r#"SELECT
-    id AS source_id,
+    {source_id} AS source_id,
     '{source_kind}' AS source_kind,
     '{relationship_kind}' AS relationship_kind,
-    {source_column} AS target_id,
+    {target_id} AS target_id,
     '{target_kind}' AS target_kind,
     {VERSION_COLUMN},
     {DELETED_COLUMN}
 FROM {SOURCE_DATA_TABLE}
-WHERE {source_column} IS NOT NULL"#
+WHERE {fk_column} IS NOT NULL"#
             )
         })
         .collect()
@@ -121,7 +134,7 @@ fn build_field_expression(field: &Field) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::{EdgeMapping, EtlScope};
+    use ontology::{EdgeDirection, EdgeMapping, EtlScope};
     use std::collections::BTreeMap;
 
     fn create_user_node() -> NodeEntity {
@@ -274,13 +287,14 @@ mod tests {
     }
 
     #[test]
-    fn build_all_edge_sql_generates_correct_structure() {
+    fn build_all_edge_sql_generates_correct_structure_for_outgoing() {
         let mut edges = BTreeMap::new();
         edges.insert(
             "owner_id".to_string(),
             EdgeMapping {
                 target_kind: "User".to_string(),
-                relationship_kind: "owner".to_string(),
+                relationship_kind: "owns".to_string(),
+                direction: EdgeDirection::Outgoing,
             },
         );
 
@@ -308,10 +322,55 @@ mod tests {
 
         assert_eq!(edge_sqls.len(), 1);
         let sql = &edge_sqls[0];
+        assert!(sql.contains("id AS source_id"));
         assert!(sql.contains("'Group' AS source_kind"));
-        assert!(sql.contains("'owner' AS relationship_kind"));
+        assert!(sql.contains("'owns' AS relationship_kind"));
         assert!(sql.contains("owner_id AS target_id"));
         assert!(sql.contains("'User' AS target_kind"));
+        assert!(sql.contains("WHERE owner_id IS NOT NULL"));
+    }
+
+    #[test]
+    fn build_all_edge_sql_generates_correct_structure_for_incoming() {
+        let mut edges = BTreeMap::new();
+        edges.insert(
+            "owner_id".to_string(),
+            EdgeMapping {
+                target_kind: "User".to_string(),
+                relationship_kind: "owner".to_string(),
+                direction: EdgeDirection::Incoming,
+            },
+        );
+
+        let node = NodeEntity {
+            name: "Group".to_string(),
+            fields: vec![Field {
+                name: "id".to_string(),
+                source: "id".to_string(),
+                data_type: DataType::Int,
+                nullable: false,
+                enum_values: None,
+            }],
+            primary_keys: vec!["id".to_string()],
+            destination_table: "gl_groups".to_string(),
+            etl: Some(EtlConfig::Table {
+                scope: EtlScope::Namespaced,
+                source: "siphon_namespaces".to_string(),
+                watermark: "_siphon_replicated_at".to_string(),
+                deleted: "_siphon_deleted".to_string(),
+                edges,
+            }),
+        };
+
+        let edge_sqls = build_all_edge_sql(&node);
+
+        assert_eq!(edge_sqls.len(), 1);
+        let sql = &edge_sqls[0];
+        assert!(sql.contains("owner_id AS source_id"));
+        assert!(sql.contains("'User' AS source_kind"));
+        assert!(sql.contains("'owner' AS relationship_kind"));
+        assert!(sql.contains("id AS target_id"));
+        assert!(sql.contains("'Group' AS target_kind"));
         assert!(sql.contains("WHERE owner_id IS NOT NULL"));
     }
 }

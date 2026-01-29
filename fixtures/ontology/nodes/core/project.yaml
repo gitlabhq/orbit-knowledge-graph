@@ -99,6 +99,8 @@ etl:
     creator_id:
       to: User
       as: creator
+      direction: incoming
     namespace_id:
       to: Group
       as: contains
+      direction: incoming

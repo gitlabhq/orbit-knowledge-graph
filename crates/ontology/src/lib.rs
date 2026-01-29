@@ -21,7 +21,8 @@ pub mod etl;
 
 pub use entities::{DataType, EdgeEntity, Field, NodeEntity};
 pub use etl::{
-    DELETED_COLUMN, EdgeMapping, EtlConfig, EtlScope, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+    DELETED_COLUMN, EdgeDirection, EdgeMapping, EtlConfig, EtlScope, TRAVERSAL_PATH_COLUMN,
+    VERSION_COLUMN,
 };
 
 use rust_embed::Embed;
@@ -618,6 +619,8 @@ struct EdgeMappingYaml {
     target_kind: String,
     #[serde(rename = "as")]
     relationship_kind: String,
+    #[serde(default)]
+    direction: EdgeDirection,
 }
 
 #[derive(Debug, Deserialize)]
@@ -731,6 +734,7 @@ impl EtlYaml {
                     EdgeMapping {
                         target_kind: mapping.target_kind,
                         relationship_kind: mapping.relationship_kind,
+                        direction: mapping.direction,
                     },
                 )
             })
