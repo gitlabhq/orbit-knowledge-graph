@@ -2,6 +2,7 @@
 # Requires: colima with kubernetes enabled
 
 update_settings(k8s_upsert_timeout_secs=600)
+ci_settings(readiness_timeout='10m')
 
 # Only allow local contexts to prevent accidental GCP deployments
 # Change context with: kubectl config use-context <context>
@@ -100,4 +101,4 @@ k8s_yaml(helm(
 
 # Skip readiness checks for components that may take time to connect
 k8s_resource('gkg-indexer', pod_readiness='ignore')
-k8s_resource('gkg-webserver', pod_readiness='ignore')
+k8s_resource('gkg-webserver', pod_readiness='ignore', port_forwards=['8080:8080'])

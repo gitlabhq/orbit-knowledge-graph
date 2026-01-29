@@ -25,10 +25,18 @@ spec:
           args:
             - "--mode=indexer"
           env:
+            - name: LOG_FORMAT
+              value: "json"
             - name: NATS_URL
               value: {{ include "gkg.natsUrl" . | quote }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 12 }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
+            {{- if .Values.observability.alloy.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://{{ .Release.Name }}-alloy:4317"
+            - name: OTEL_SERVICE_NAME
+              value: "gkg-indexer"
+            {{- end }}
           securityContext:
             {{- include "gkg.securityContext" . | nindent 12 }}
           resources:

@@ -21,7 +21,7 @@ clap = { workspace = true }
 etl-engine = { path = "../etl-engine" }
 ontology = { path = "../ontology" }
 jsonwebtoken = { workspace = true }
-labkit-rs = { path = "../labkit-rs", features = ["http", "grpc"] }
+labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

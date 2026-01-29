@@ -28,5 +28,6 @@ tilt up
 
 ### 4. Access services
 
-- **Grafana**: http://localhost:30300 (admin/admin)
+- **Grafana**: http://localhost:30300 (login: admin/admin)
+- **GKG Webserver**: http://localhost:8080
 - **Tilt UI**: http://localhost:10350

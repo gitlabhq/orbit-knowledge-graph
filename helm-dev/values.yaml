@@ -80,7 +80,7 @@ consumer:
       cpu: 1
       memory: 1Gi
 
-# Observability stack (Prometheus, Grafana, Loki)
+# Observability stack (Prometheus, Grafana, Loki, Alloy)
 observability:
   enabled: false
   grafana:
@@ -88,6 +88,8 @@ observability:
       enabled: false
       host: ""
   loki:
+    enabled: false
+  alloy:
     enabled: false
 
 # kube-prometheus-stack subchart defaults
