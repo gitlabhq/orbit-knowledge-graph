@@ -97,6 +97,72 @@ impl ParameterSampler {
         Ok(ids.choose_multiple(&mut rng, count).copied().collect())
     }
 
+    /// Get multiple random IDs for an entity type within a specific traversal path.
+    ///
+    /// This ensures sampled IDs exist within the security context's scope,
+    /// preventing empty results from path mismatches.
+    pub async fn random_ids_in_path(
+        &self,
+        entity: &str,
+        count: usize,
+        traversal_path: &str,
+        ontology: &Ontology,
+    ) -> Result<Vec<i64>> {
+        let table_name = ontology.table_name(entity)?;
+
+        // Sample IDs that exist within the given traversal path
+        let query = format!(
+            "SELECT id FROM {} WHERE startsWith(traversal_path, '{}') \
+             ORDER BY cityHash64(rand()) LIMIT {}",
+            table_name, traversal_path, count
+        );
+
+        let ids: Vec<i64> = self
+            .client
+            .inner()
+            .query(&query)
+            .fetch_all::<IdRow>()
+            .await?
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+
+        Ok(ids)
+    }
+
+    /// Get multiple random IDs for an entity type within a specific organization.
+    ///
+    /// This is used as a fallback when path-scoped sampling returns no results,
+    /// ensuring we still sample from the correct organization.
+    pub async fn random_ids_in_org(
+        &self,
+        entity: &str,
+        count: usize,
+        org_id: i64,
+        ontology: &Ontology,
+    ) -> Result<Vec<i64>> {
+        let table_name = ontology.table_name(entity)?;
+
+        // Sample IDs where traversal_path starts with "org_id/"
+        let query = format!(
+            "SELECT id FROM {} WHERE startsWith(traversal_path, '{}/') \
+             ORDER BY cityHash64(rand()) LIMIT {}",
+            table_name, org_id, count
+        );
+
+        let ids: Vec<i64> = self
+            .client
+            .inner()
+            .query(&query)
+            .fetch_all::<IdRow>()
+            .await?
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+
+        Ok(ids)
+    }
+
     /// Sample valid values for string enum fields (e.g., state, status).
     pub async fn sample_enum_values(
         &mut self,
