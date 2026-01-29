@@ -167,6 +167,11 @@ fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
 
 /// Determines if a table should have traversal path security filters applied.
 fn should_apply_security_filter(table: &str) -> bool {
+    // Only apply to actual node tables (gl_ prefix)
+    // This excludes CTEs like "path_cte" which don't have traversal_path
+    if !table.starts_with("gl_") {
+        return false;
+    }
     // Skip edge table
     if table == EDGE_TABLE {
         return false;
@@ -186,10 +191,10 @@ mod tests {
     fn simple_query() -> Node {
         Node::Query(Box::new(Query {
             select: vec![SelectExpr {
-                expr: Expr::col("u", "id"),
+                expr: Expr::col("p", "id"),
                 alias: None,
             }],
-            from: TableRef::scan("nodes_user", "u"),
+            from: TableRef::scan("gl_project", "p"),
             where_clause: None,
             group_by: vec![],
             order_by: vec![],
@@ -310,5 +315,14 @@ mod tests {
         assert!(!should_apply_security_filter(EDGE_TABLE));
         assert!(should_apply_security_filter("gl_project"));
         assert!(should_apply_security_filter("gl_mergerequest"));
+    }
+
+    #[test]
+    fn should_apply_security_filter_skips_ctes() {
+        // CTEs like path_cte don't have traversal_path column
+        assert!(!should_apply_security_filter("path_cte"));
+        assert!(!should_apply_security_filter("some_cte"));
+        // Only gl_ prefixed tables should have security filters
+        assert!(!should_apply_security_filter("nodes"));
     }
 }

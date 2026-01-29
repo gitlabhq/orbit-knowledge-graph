@@ -142,9 +142,9 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
     Ok(Node::RecursiveCte(Box::new(RecursiveCte {
         name: "path_cte".into(),
         base: build_path_base(&start.node_ids, &start_table),
-        recursive: build_path_recursive(&end_table, path.max_depth),
+        recursive: build_path_recursive(path.max_depth),
         max_depth: path.max_depth,
-        final_query: build_path_final(&end.node_ids, input.limit),
+        final_query: build_path_final(&end.node_ids, &end_table, input.limit),
     })))
 }
 
@@ -172,11 +172,29 @@ fn build_path_base(start_ids: &[i64], table: &str) -> Query {
     }
 }
 
-fn build_path_recursive(table: &str, max_depth: u32) -> Query {
+/// Build recursive part that traverses through ANY entity type in BOTH directions.
+/// Uses edges directly without joining to specific entity tables,
+/// enabling multi-hop paths across different entity types.
+/// Follows edges bidirectionally: both source->target and target->source.
+fn build_path_recursive(max_depth: u32) -> Query {
+    // We use a subquery to UNION both edge directions, then join with path_cte
+    // next_node = e.target when p.node_id = e.source (forward)
+    // next_node = e.source when p.node_id = e.target (backward)
+    //
+    // Using CASE expression: if(p.node_id = e.source, e.target, e.source)
+    let next_node = Expr::func(
+        "if",
+        vec![
+            Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source")),
+            Expr::col("e", "target"),
+            Expr::col("e", "source"),
+        ],
+    );
+
     Query {
         select: vec![
             SelectExpr {
-                expr: Expr::col("n", "id"),
+                expr: next_node.clone(),
                 alias: Some("node_id".into()),
             },
             SelectExpr {
@@ -184,7 +202,7 @@ fn build_path_recursive(table: &str, max_depth: u32) -> Query {
                     "arrayConcat",
                     vec![
                         Expr::col("p", "path"),
-                        Expr::func("array", vec![Expr::col("n", "id")]),
+                        Expr::func("array", vec![next_node.clone()]),
                     ],
                 ),
                 alias: Some("path".into()),
@@ -196,14 +214,20 @@ fn build_path_recursive(table: &str, max_depth: u32) -> Query {
         ],
         from: TableRef::join(
             JoinType::Inner,
-            TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("path_cte", "p"),
-                TableRef::scan(EDGE_TABLE, "e"),
-                Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source")),
-            ),
-            TableRef::scan(table, "n"),
-            Expr::eq(Expr::col("e", "target"), Expr::col("n", "id")),
+            TableRef::scan("path_cte", "p"),
+            TableRef::scan(EDGE_TABLE, "e"),
+            // Join on either direction: node_id matches source OR target
+            Expr::or_all([
+                Some(Expr::eq(
+                    Expr::col("p", "node_id"),
+                    Expr::col("e", "source"),
+                )),
+                Some(Expr::eq(
+                    Expr::col("p", "node_id"),
+                    Expr::col("e", "target"),
+                )),
+            ])
+            .expect("or_all has elements"),
         ),
         where_clause: Expr::and_all([
             Some(Expr::binary(
@@ -213,7 +237,7 @@ fn build_path_recursive(table: &str, max_depth: u32) -> Query {
             )),
             Some(Expr::unary(
                 Op::Not,
-                Expr::func("has", vec![Expr::col("p", "path"), Expr::col("n", "id")]),
+                Expr::func("has", vec![Expr::col("p", "path"), next_node]),
             )),
         ]),
         group_by: vec![],
@@ -222,7 +246,10 @@ fn build_path_recursive(table: &str, max_depth: u32) -> Query {
     }
 }
 
-fn build_path_final(end_ids: &[i64], limit: u32) -> Query {
+/// Build final query that filters paths ending at the target entity.
+/// Joins with the end entity table to ensure the final node is of the correct type
+/// and to apply security filters.
+fn build_path_final(end_ids: &[i64], end_table: &str, limit: u32) -> Query {
     Query {
         select: vec![
             SelectExpr {
@@ -234,8 +261,16 @@ fn build_path_final(end_ids: &[i64], limit: u32) -> Query {
                 alias: Some("depth".into()),
             },
         ],
-        from: TableRef::scan("path_cte", "path_cte"),
-        where_clause: node_ids_condition("path_cte", "node_id", end_ids),
+        from: TableRef::join(
+            JoinType::Inner,
+            TableRef::scan("path_cte", "path_cte"),
+            TableRef::scan(end_table, "end_node"),
+            Expr::eq(
+                Expr::col("path_cte", "node_id"),
+                Expr::col("end_node", "id"),
+            ),
+        ),
+        where_clause: node_ids_condition("end_node", "id", end_ids),
         group_by: vec![],
         order_by: vec![OrderExpr {
             expr: Expr::col("path_cte", "depth"),

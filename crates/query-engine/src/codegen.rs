@@ -134,6 +134,9 @@ impl Context {
         sql.push_str(&self.emit_query(&cte.recursive)?);
         sql.push_str("\n)\n");
         sql.push_str(&self.emit_query(&cte.final_query)?);
+        // Force hash join to support OR conditions in JOIN ON clause
+        // (ClickHouse's default join algorithm doesn't support multiple ORs in recursive CTEs)
+        sql.push_str(" SETTINGS join_algorithm = 'hash'");
         Ok(sql)
     }
 
