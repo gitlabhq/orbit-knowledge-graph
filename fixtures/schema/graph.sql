@@ -109,6 +109,39 @@ CREATE TABLE IF NOT EXISTS gl_merge_requests (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
+CREATE TABLE IF NOT EXISTS gl_merge_request_diffs (
+    id Int64,
+    merge_request_id Int64,
+    state Nullable(String),
+    base_commit_sha Nullable(String),
+    head_commit_sha Nullable(String),
+    start_commit_sha Nullable(String),
+    commits_count Nullable(Int64),
+    files_count Nullable(Int64),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS gl_merge_request_diff_files (
+    id Int64,
+    merge_request_diff_id Int64,
+    too_large Bool DEFAULT false,
+    new_path Nullable(String),
+    old_path String DEFAULT '',
+    new_file Bool DEFAULT false,
+    renamed_file Bool DEFAULT false,
+    deleted_file Bool DEFAULT false,
+    binary Nullable(Bool),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
 CREATE TABLE IF NOT EXISTS gl_edges (
     source_id Int64,
     source_kind String,

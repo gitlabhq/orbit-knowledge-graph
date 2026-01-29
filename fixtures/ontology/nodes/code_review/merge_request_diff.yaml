@@ -1,0 +1,79 @@
+# fixtures/ontology/nodes/code_review/merge_request_diff.yaml
+
+node_type: MergeRequestDiff
+domain: code_review
+description: A snapshot of changes (commits and file diffs) associated with a merge request at a point in time
+destination_table: gl_merge_request_diffs
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the merge request diff."
+
+  merge_request_id:
+    type: int64
+    source: merge_request_id
+    nullable: false
+    description: "ID of the parent merge request."
+
+  state:
+    type: string
+    source: state
+    nullable: true
+    description: "State of the diff (empty, without_files, collected, overflow, etc.)."
+
+  base_commit_sha:
+    type: string
+    source: base_commit_sha
+    nullable: true
+    description: "SHA of the base commit (common ancestor)."
+
+  head_commit_sha:
+    type: string
+    source: head_commit_sha
+    nullable: true
+    description: "SHA of the head commit (latest on source branch)."
+
+  start_commit_sha:
+    type: string
+    source: start_commit_sha
+    nullable: true
+    description: "SHA of the start commit (target branch tip at diff creation)."
+
+  commits_count:
+    type: int64
+    source: commits_count
+    nullable: true
+    description: "Number of commits in this diff."
+
+  files_count:
+    type: int64
+    source: files_count
+    nullable: true
+    description: "Number of files changed in this diff."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the diff was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Timestamp when the diff was last updated."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_merge_request_diffs
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    merge_request_id:
+      to: MergeRequest
+      as: has_diff
+      direction: incoming

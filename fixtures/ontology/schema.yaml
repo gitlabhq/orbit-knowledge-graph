@@ -21,7 +21,8 @@ domains:
     description: "Entities related to code review and merge requests."
     nodes:
       MergeRequest: nodes/code_review/merge_request.yaml
-      MergeRequestFile: nodes/code_review/merge_request_file.yaml
+      MergeRequestDiff: nodes/code_review/merge_request_diff.yaml
+      MergeRequestDiffFile: nodes/code_review/merge_request_diff_file.yaml
   ci:
     description: "Entities related to CI/CD pipelines, stages, and jobs."
     nodes:
@@ -51,6 +52,7 @@ domains:
       ImportedSymbol: nodes/source_code/imported_symbol.yaml
 edges:
   CONTAINS: edges/contains.yaml
+  HAS_DIFF: edges/has_diff.yaml
   MEMBER_OF: edges/member_of.yaml
   CREATOR: edges/creator.yaml
   OWNER: edges/owner.yaml
