@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::path::PathBuf;
 
 use etl_engine::clickhouse::ClickHouseConfiguration;
 use etl_engine::configuration::EngineConfiguration;
@@ -11,7 +10,6 @@ pub struct AppConfig {
     pub bind_address: SocketAddr,
     pub jwt_secret: String,
     pub jwt_clock_skew_secs: u64,
-    pub ontology_path: PathBuf,
     #[serde(default)]
     pub nats: NatsConfiguration,
     #[serde(default)]
@@ -41,15 +39,10 @@ impl AppConfig {
             .parse()
             .unwrap_or(60);
 
-        let ontology_path = std::env::var("GKG_ONTOLOGY_PATH")
-            .map(PathBuf::from)
-            .map_err(|_| ConfigError::MissingOntologyPath)?;
-
         Ok(Self {
             bind_address,
             jwt_secret,
             jwt_clock_skew_secs,
-            ontology_path,
             nats: NatsConfiguration::from_env(),
             datalake: ClickHouseConfiguration::from_env_with_prefix("DATALAKE"),
             graph: ClickHouseConfiguration::from_env_with_prefix("GRAPH"),
@@ -66,6 +59,4 @@ pub enum ConfigError {
     MissingJwtSecret,
     #[error("JWT secret must be at least 32 bytes")]
     JwtSecretTooShort,
-    #[error("GKG_ONTOLOGY_PATH environment variable is required")]
-    MissingOntologyPath,
 }

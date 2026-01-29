@@ -37,8 +37,8 @@ pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), 
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
     let destination = Arc::new(ClickHouseDestination::new(config.graph.clone())?);
 
-    info!(path = %config.ontology_path.display(), "initializing SDLC module");
-    let sdlc_module = SdlcModule::new(&config.datalake, &config.ontology_path).await?;
+    info!("initializing SDLC module");
+    let sdlc_module = SdlcModule::new(&config.datalake).await?;
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);

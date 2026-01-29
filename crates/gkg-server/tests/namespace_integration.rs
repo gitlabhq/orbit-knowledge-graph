@@ -48,7 +48,7 @@ async fn namespace_handler_processes_and_transforms_groups() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
+    let sdlc_module = SdlcModule::new(&context.config)
         .await
         .expect("failed to create SDLC module");
 
@@ -116,7 +116,7 @@ async fn namespace_handler_creates_group_edges() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
+    let sdlc_module = SdlcModule::new(&context.config)
         .await
         .expect("failed to create SDLC module");
 
@@ -203,7 +203,7 @@ async fn namespace_handler_processes_projects() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
+    let sdlc_module = SdlcModule::new(&context.config)
         .await
         .expect("failed to create SDLC module");
 
@@ -292,7 +292,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
+    let sdlc_module = SdlcModule::new(&context.config)
         .await
         .expect("failed to create SDLC module");
 

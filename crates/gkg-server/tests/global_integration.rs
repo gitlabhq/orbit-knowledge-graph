@@ -37,7 +37,7 @@ async fn global_handler_processes_and_transforms_users() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
+    let sdlc_module = SdlcModule::new(&context.config)
         .await
         .expect("failed to create SDLC module");
 
@@ -114,7 +114,7 @@ async fn global_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, TestContext::ontology_path())
+    let sdlc_module = SdlcModule::new(&context.config)
         .await
         .expect("failed to create SDLC module");
 

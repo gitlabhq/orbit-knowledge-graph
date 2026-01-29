@@ -8,6 +8,10 @@
 //! ```ignore
 //! use ontology::Ontology;
 //!
+//! // Load from embedded files (compiled into binary)
+//! let ontology = Ontology::load_embedded()?;
+//!
+//! // Or load from a directory on disk
 //! let ontology = Ontology::load_from_dir("fixtures/ontology")?;
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
@@ -20,11 +24,17 @@ pub use etl::{
     DELETED_COLUMN, EdgeMapping, EtlConfig, EtlScope, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 
+use rust_embed::Embed;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
+
+/// Embedded ontology files from `fixtures/ontology/`.
+#[derive(Embed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../fixtures/ontology/"]
+struct EmbeddedOntology;
 
 /// Primary key field name used by default.
 const DEFAULT_PRIMARY_KEY: &str = "id";
@@ -189,15 +199,31 @@ impl Ontology {
     /// - Validation fails (duplicate nodes, invalid edge references, etc.)
     #[must_use = "this returns the loaded ontology, which should not be discarded"]
     pub fn load_from_dir(dir: impl AsRef<Path>) -> Result<Self, OntologyError> {
-        let dir = dir.as_ref();
-        let schema_path = dir.join("schema.yaml");
-        let schema_content = read_file(&schema_path)?;
-        let schema: SchemaYaml =
-            parse_yaml(&schema_content, schema_path.to_string_lossy().as_ref())?;
+        Self::load_with(&DirReader(dir.as_ref()))
+    }
+
+    /// Load ontology from embedded files compiled into the binary.
+    ///
+    /// This uses the ontology files from `fixtures/ontology/` that were
+    /// embedded at compile time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Any referenced file cannot be found in embedded assets
+    /// - YAML parsing fails
+    /// - Validation fails (duplicate nodes, invalid edge references, etc.)
+    #[must_use = "this returns the loaded ontology, which should not be discarded"]
+    pub fn load_embedded() -> Result<Self, OntologyError> {
+        Self::load_with(&EmbeddedReader)
+    }
+
+    fn load_with(reader: &impl ReadOntologyFile) -> Result<Self, OntologyError> {
+        let schema_content = reader.read("schema.yaml")?;
+        let schema: SchemaYaml = parse_yaml(&schema_content, "schema.yaml")?;
 
         let mut ontology = Ontology::new();
 
-        // Load nodes from each domain (BTreeMap ensures deterministic order)
         for domain in schema.domains.values() {
             for (node_name, node_path) in &domain.nodes {
                 if ontology.nodes.contains_key(node_name) {
@@ -207,25 +233,20 @@ impl Ontology {
                     )));
                 }
 
-                let node_file = dir.join(node_path);
-                let content = read_file(&node_file)?;
-                let node_def: NodeYaml =
-                    parse_yaml(&content, node_file.to_string_lossy().as_ref())?;
+                let content = reader.read(node_path)?;
+                let node_def: NodeYaml = parse_yaml(&content, node_path)?;
 
                 let entity = node_def.into_entity(node_name.clone())?;
                 ontology.nodes.insert(node_name.clone(), entity);
             }
         }
 
-        // Load edges
         for (edge_name, edge_path) in &schema.edges {
-            let edge_file = dir.join(edge_path);
-            let content = read_file(&edge_file)?;
-            let edge_def: EdgeYaml = parse_yaml(&content, edge_file.to_string_lossy().as_ref())?;
+            let content = reader.read(edge_path)?;
+            let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
             let entities = edge_def.into_entities(edge_name.clone());
 
-            // Validate edge references
             for entity in &entities {
                 if !ontology.nodes.contains_key(&entity.source_kind) {
                     return Err(OntologyError::Validation(format!(
@@ -482,13 +503,41 @@ impl fmt::Display for Ontology {
     }
 }
 
-// --- Helper functions ---
+// --- File reading ---
 
-fn read_file(path: &Path) -> Result<String, OntologyError> {
-    std::fs::read_to_string(path).map_err(|e| OntologyError::Io {
-        path: path.to_string_lossy().to_string(),
-        source: e,
-    })
+trait ReadOntologyFile {
+    fn read(&self, path: &str) -> Result<String, OntologyError>;
+}
+
+struct DirReader<'a>(&'a Path);
+
+impl ReadOntologyFile for DirReader<'_> {
+    fn read(&self, path: &str) -> Result<String, OntologyError> {
+        let full_path = self.0.join(path);
+        std::fs::read_to_string(&full_path).map_err(|e| OntologyError::Io {
+            path: full_path.to_string_lossy().to_string(),
+            source: e,
+        })
+    }
+}
+
+struct EmbeddedReader;
+
+impl ReadOntologyFile for EmbeddedReader {
+    fn read(&self, path: &str) -> Result<String, OntologyError> {
+        let file = EmbeddedOntology::get(path).ok_or_else(|| OntologyError::Io {
+            path: path.to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("embedded file not found: {}", path),
+            ),
+        })?;
+
+        String::from_utf8(file.data.to_vec()).map_err(|e| OntologyError::Io {
+            path: path.to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+        })
+    }
 }
 
 fn parse_yaml<T: for<'de> Deserialize<'de>>(content: &str, path: &str) -> Result<T, OntologyError> {
@@ -773,6 +822,15 @@ mod tests {
             ontology.edge_count() > 0,
             "ontology should have at least one edge"
         );
+    }
+
+    #[test]
+    fn test_load_embedded() {
+        let embedded = Ontology::load_embedded().expect("should load embedded ontology");
+        let from_dir = Ontology::load_from_dir(fixtures_dir()).expect("should load from dir");
+
+        // Embedded and directory-loaded ontologies should be identical
+        assert_eq!(embedded, from_dir);
     }
 
     #[test]
