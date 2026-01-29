@@ -1,12 +1,22 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use indexer::indexer::{IndexingConfig, RepositoryIndexer};
 use indexer::loading::DirectoryFileSource;
+use ontology::Ontology;
+use query_engine::SecurityContext;
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
+
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+enum OutputFormat {
+    #[default]
+    Pretty,
+    Json,
+}
 
 #[derive(Serialize)]
 struct IndexOutput {
@@ -84,6 +94,32 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Execute query engine on JSON payloads and output SQL
+    ///
+    /// Takes a JSON object where each key is a query description and each value
+    /// is a query payload for the query engine. Outputs the label, input JSON,
+    /// and generated SQL for each query.
+    Query {
+        /// Path to JSON file containing queries, or use --json for inline JSON
+        #[arg(value_name = "FILE")]
+        file: Option<PathBuf>,
+
+        /// Inline JSON payload (alternative to file path)
+        #[arg(long, conflicts_with = "file")]
+        json: Option<String>,
+
+        /// Traversal paths for security context (e.g., "1/2/3/"). Org ID is parsed from the first segment.
+        #[arg(long, short, required = true, num_args = 1..)]
+        traversal_paths: Vec<String>,
+
+        /// Path to ontology directory (default: fixtures/ontology)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+
+        /// Output format: pretty (default) or json
+        #[arg(long, default_value = "pretty")]
+        format: OutputFormat,
+    },
 }
 
 #[tokio::main]
@@ -116,6 +152,13 @@ async fn main() -> Result<()> {
 
             run_index(path, threads, stats).await
         }
+        Commands::Query {
+            file,
+            json,
+            traversal_paths,
+            ontology,
+            format,
+        } => run_query(file, json, traversal_paths, ontology, format),
     }
 }
 
@@ -219,5 +262,138 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
     };
 
     info!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct QueryResult {
+    label: String,
+    input: Value,
+    sql: String,
+    params: HashMap<String, Value>,
+}
+
+#[derive(Serialize)]
+struct QueryError {
+    label: String,
+    input: Value,
+    error: String,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum QueryOutput {
+    Success(QueryResult),
+    Error(QueryError),
+}
+
+fn run_query(
+    file: Option<PathBuf>,
+    json_input: Option<String>,
+    traversal_paths: Vec<String>,
+    ontology_path: Option<PathBuf>,
+    format: OutputFormat,
+) -> Result<()> {
+    let json_str = match (file, json_input) {
+        (Some(path), None) => std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read file: {}", path.display()))?,
+        (None, Some(json)) => json,
+        (None, None) => anyhow::bail!("either FILE or --json must be provided"),
+        (Some(_), Some(_)) => unreachable!("clap prevents this"),
+    };
+
+    // Parse org_id from first segment of first traversal path
+    let first_path = traversal_paths
+        .first()
+        .context("at least one traversal path is required")?;
+    let org_id: i64 = first_path
+        .split('/')
+        .next()
+        .context("traversal path is empty")?
+        .parse()
+        .context("first segment of traversal path must be a valid org ID")?;
+
+    let security_ctx = SecurityContext::new(org_id, traversal_paths)
+        .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?;
+
+    let queries: HashMap<String, Value> = serde_json::from_str(&json_str)
+        .context("failed to parse JSON as object with string keys")?;
+
+    let ontology_dir = ontology_path.unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/ontology")
+    });
+
+    let ontology = Ontology::load_from_dir(&ontology_dir)
+        .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
+
+    let mut results: Vec<QueryOutput> = Vec::with_capacity(queries.len());
+
+    let mut sorted_queries: Vec<_> = queries.into_iter().collect();
+    sorted_queries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (label, input) in sorted_queries {
+        let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
+
+        match query_engine::compile(&input_json, &ontology, &security_ctx) {
+            Ok(result) => {
+                results.push(QueryOutput::Success(QueryResult {
+                    label,
+                    input,
+                    sql: result.sql,
+                    params: result.params,
+                }));
+            }
+            Err(e) => {
+                results.push(QueryOutput::Error(QueryError {
+                    label,
+                    input,
+                    error: e.to_string(),
+                }));
+            }
+        }
+    }
+
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&results)?);
+        }
+        OutputFormat::Pretty => {
+            for (i, result) in results.iter().enumerate() {
+                if i > 0 {
+                    println!("\n{}", "=".repeat(80));
+                }
+                match result {
+                    QueryOutput::Success(r) => {
+                        println!("\n### {}\n", r.label);
+                        println!(
+                            "**Input:**\n```json\n{}\n```\n",
+                            serde_json::to_string_pretty(&r.input)?
+                        );
+                        println!("**SQL:**\n```sql\n{}\n```\n", r.sql);
+                        if !r.params.is_empty() {
+                            println!(
+                                "**Params:**\n```json\n{}\n```",
+                                serde_json::to_string_pretty(&r.params)?
+                            );
+                        }
+                    }
+                    QueryOutput::Error(e) => {
+                        println!("\n### {} [ERROR]\n", e.label);
+                        println!(
+                            "**Input:**\n```json\n{}\n```\n",
+                            serde_json::to_string_pretty(&e.input)?
+                        );
+                        println!("**Error:** {}", e.error);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }

@@ -32,6 +32,34 @@ GROUP BY relationship_kind ORDER BY count(*) DESC
 SELECT traversal_path FROM kg_<entity> LIMIT 10
 ```
 
+## Inspect the generated SQL directly
+
+The `gkg query` command lets you see what SQL the query engine produces without running the full simulator. The query input format is defined in `crates/ontology/schema.json`.
+
+First, sample some traversal paths from your data:
+
+```sql
+SELECT DISTINCT traversal_path FROM kg_group LIMIT 5
+```
+
+Then pass them to the query command (org ID is parsed from the first segment):
+
+```bash
+# From the SDLC queries file
+cargo run -p gkg -- query -t "1/2/3/" fixtures/queries/sdlc_queries.json
+
+# Multiple traversal paths
+cargo run -p gkg -- query -t "1/2/" -t "1/3/" fixtures/queries/sdlc_queries.json
+
+# Single query inline
+cargo run -p gkg -- query -t "1/" --json '{"test": {"nodes": [{"type": "Pipeline"}]}}'
+
+# JSON output for scripting
+cargo run -p gkg -- query -t "1/" --format json fixtures/queries/sdlc_queries.json
+```
+
+This shows each query's input JSON, generated SQL, and parameters. You can then run the SQL directly in ClickHouse to see what's happening and use it to guide your investigations.
+
 ## Hypothesis testing
 
 The evaluate report shows the SQL and parameters for each query. Take a failing query and run it manually, then start removing predicates to narrow down what's breaking.
