@@ -76,6 +76,63 @@ impl NatsBroker {
         options
     }
 
+    pub async fn ensure_streams(&self, topics: &[Topic]) -> Result<(), NatsError> {
+        if !self.config.auto_create_streams {
+            return Ok(());
+        }
+
+        let mut streams: HashMap<&Arc<str>, Vec<String>> = HashMap::new();
+        for topic in topics {
+            streams
+                .entry(&topic.stream)
+                .or_default()
+                .push(topic.subject.to_string());
+        }
+
+        for (stream_name, subjects) in streams {
+            self.get_or_create_stream(stream_name, subjects).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn get_or_create_stream(
+        &self,
+        stream_name: &Arc<str>,
+        subjects: Vec<String>,
+    ) -> Result<Stream, NatsError> {
+        match self.get_stream(stream_name).await {
+            Ok(stream) => return Ok(stream),
+            Err(NatsError::StreamNotFound { .. }) => {}
+            Err(e) => return Err(e),
+        }
+
+        let stream_config = async_nats::jetstream::stream::Config {
+            name: stream_name.to_string(),
+            subjects,
+            num_replicas: self.config.stream_replicas,
+            max_age: self.config.stream_max_age().unwrap_or_default(),
+            max_bytes: self.config.stream_max_bytes.unwrap_or(-1),
+            max_messages: self.config.stream_max_messages.unwrap_or(-1),
+            storage: async_nats::jetstream::stream::StorageType::File,
+            retention: async_nats::jetstream::stream::RetentionPolicy::Limits,
+            ..Default::default()
+        };
+
+        let stream = self
+            .jetstream
+            .create_stream(stream_config)
+            .await
+            .map_err(|e| NatsError::StreamCreationFailed {
+                stream: stream_name.to_string(),
+                source: e,
+            })?;
+
+        let mut cache = self.streams.write().await;
+        cache.insert(stream_name.clone(), stream.clone());
+        Ok(stream)
+    }
+
     async fn get_stream(&self, stream_name: &Arc<str>) -> Result<Stream, NatsError> {
         {
             let cache = self.streams.read().await;

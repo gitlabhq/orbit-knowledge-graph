@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::env::{env_var_opt, env_var_or};
+
 /// NATS connection settings.
 ///
 /// Matches siphon's QueuingConfig fields.
@@ -68,6 +70,27 @@ pub struct NatsConfiguration {
     /// but increase memory usage. Defaults to 10.
     #[serde(default = "NatsConfiguration::default_batch_size")]
     pub batch_size: usize,
+
+    /// Whether to auto-create streams on startup. Defaults to true.
+    #[serde(default = "NatsConfiguration::default_auto_create_streams")]
+    pub auto_create_streams: bool,
+
+    /// Number of stream replicas for fault tolerance. Defaults to 1.
+    /// Production should use 3 for fault tolerance.
+    #[serde(default = "NatsConfiguration::default_stream_replicas")]
+    pub stream_replicas: usize,
+
+    /// Maximum age of messages in seconds before deletion. Defaults to None (unlimited).
+    #[serde(default)]
+    pub stream_max_age_secs: Option<u64>,
+
+    /// Maximum bytes per stream before oldest messages are deleted. Defaults to None (unlimited).
+    #[serde(default)]
+    pub stream_max_bytes: Option<i64>,
+
+    /// Maximum messages per stream. Defaults to None (unlimited).
+    #[serde(default)]
+    pub stream_max_messages: Option<i64>,
 }
 
 impl NatsConfiguration {
@@ -89,6 +112,14 @@ impl NatsConfiguration {
 
     fn default_batch_size() -> usize {
         10
+    }
+
+    fn default_auto_create_streams() -> bool {
+        true
+    }
+
+    fn default_stream_replicas() -> usize {
+        1
     }
 
     pub fn connection_timeout(&self) -> Duration {
@@ -113,6 +144,10 @@ impl NatsConfiguration {
         self.batch_size.max(1)
     }
 
+    pub fn stream_max_age(&self) -> Option<Duration> {
+        self.stream_max_age_secs.map(Duration::from_secs)
+    }
+
     /// Creates configuration from environment variables.
     ///
     /// Uses defaults for any unset variables:
@@ -120,12 +155,25 @@ impl NatsConfiguration {
     /// - `NATS_USERNAME`: Optional username
     /// - `NATS_PASSWORD`: Optional password
     /// - `NATS_CONSUMER_NAME`: Optional consumer name for durable subscriptions
+    /// - `NATS_AUTO_CREATE_STREAMS`: Whether to auto-create streams (default: true)
+    /// - `NATS_STREAM_REPLICAS`: Number of stream replicas (default: 1)
+    /// - `NATS_STREAM_MAX_AGE_SECS`: Maximum age of messages in seconds
+    /// - `NATS_STREAM_MAX_BYTES`: Maximum bytes per stream
+    /// - `NATS_STREAM_MAX_MESSAGES`: Maximum messages per stream
     pub fn from_env() -> Self {
         Self {
             url: std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".into()),
             username: std::env::var("NATS_USERNAME").ok(),
             password: std::env::var("NATS_PASSWORD").ok(),
             consumer_name: std::env::var("NATS_CONSUMER_NAME").ok(),
+            auto_create_streams: env_var_or(
+                "NATS_AUTO_CREATE_STREAMS",
+                Self::default_auto_create_streams(),
+            ),
+            stream_replicas: env_var_or("NATS_STREAM_REPLICAS", Self::default_stream_replicas()),
+            stream_max_age_secs: env_var_opt("NATS_STREAM_MAX_AGE_SECS"),
+            stream_max_bytes: env_var_opt("NATS_STREAM_MAX_BYTES"),
+            stream_max_messages: env_var_opt("NATS_STREAM_MAX_MESSAGES"),
             ..Default::default()
         }
     }
@@ -144,6 +192,11 @@ impl Default for NatsConfiguration {
             subscription_buffer_size: Self::default_subscription_buffer_size(),
             consumer_name: None,
             batch_size: Self::default_batch_size(),
+            auto_create_streams: Self::default_auto_create_streams(),
+            stream_replicas: Self::default_stream_replicas(),
+            stream_max_age_secs: None,
+            stream_max_bytes: None,
+            stream_max_messages: None,
         }
     }
 }

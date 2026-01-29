@@ -174,6 +174,8 @@ impl Engine {
             return Ok(());
         }
 
+        self.broker.ensure_streams(&topics).await?;
+
         let worker_pool = Arc::new(WorkerPool::new(configuration));
         let tasks: Vec<_> = topics
             .into_iter()
