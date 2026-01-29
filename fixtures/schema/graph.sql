@@ -142,6 +142,22 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_files (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
+CREATE TABLE IF NOT EXISTS gl_milestones (
+    id Int64,
+    iid Nullable(Int64),
+    title String DEFAULT '',
+    description Nullable(String),
+    state Nullable(String),
+    due_date Nullable(Date32),
+    start_date Nullable(Date32),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
 CREATE TABLE IF NOT EXISTS gl_edges (
     source_id Int64,
     source_kind String,
