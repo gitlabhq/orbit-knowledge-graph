@@ -58,6 +58,10 @@ generation:
   parallel: true
   batch_size: 50000
 
+  # Random seed for reproducible data generation.
+  # Remove or set to null for non-deterministic generation.
+  seed: 42
+
   # Scale: 10 organizations (tenants)
   organizations: 3
 
