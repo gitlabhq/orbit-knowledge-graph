@@ -211,8 +211,8 @@ mod tests {
         assert!(result.sql.contains("gl_user AS u"));
         assert!(result.sql.contains("INNER JOIN gl_edges AS e0 ON"));
         assert!(
-            result.sql.contains("u.id = e0.source"),
-            "expected source column: {}",
+            result.sql.contains("u.id = e0.source_id"),
+            "expected source_id column: {}",
             result.sql
         );
         assert!(result.sql.contains("INNER JOIN gl_note AS n ON"));

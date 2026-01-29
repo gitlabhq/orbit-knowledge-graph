@@ -185,9 +185,9 @@ fn build_path_recursive(max_depth: u32) -> Query {
     let next_node = Expr::func(
         "if",
         vec![
-            Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source")),
-            Expr::col("e", "target"),
-            Expr::col("e", "source"),
+            Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id")),
+            Expr::col("e", "target_id"),
+            Expr::col("e", "source_id"),
         ],
     );
 
@@ -220,11 +220,11 @@ fn build_path_recursive(max_depth: u32) -> Query {
             Expr::or_all([
                 Some(Expr::eq(
                     Expr::col("p", "node_id"),
-                    Expr::col("e", "source"),
+                    Expr::col("e", "source_id"),
                 )),
                 Some(Expr::eq(
                     Expr::col("p", "node_id"),
-                    Expr::col("e", "target"),
+                    Expr::col("e", "target_id"),
                 )),
             ])
             .expect("or_all has elements"),
@@ -350,20 +350,22 @@ fn rel_type_filter(types: &[String]) -> Option<String> {
 
 fn edge_join_condition(from_node: &str, edge_alias: &str, dir: Direction) -> Expr {
     match dir {
-        Direction::Outgoing => {
-            Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "source"))
-        }
-        Direction::Incoming => {
-            Expr::eq(Expr::col(from_node, "id"), Expr::col(edge_alias, "target"))
-        }
+        Direction::Outgoing => Expr::eq(
+            Expr::col(from_node, "id"),
+            Expr::col(edge_alias, "source_id"),
+        ),
+        Direction::Incoming => Expr::eq(
+            Expr::col(from_node, "id"),
+            Expr::col(edge_alias, "target_id"),
+        ),
         Direction::Both => Expr::or_all([
             Some(Expr::eq(
                 Expr::col(from_node, "id"),
-                Expr::col(edge_alias, "source"),
+                Expr::col(edge_alias, "source_id"),
             )),
             Some(Expr::eq(
                 Expr::col(from_node, "id"),
-                Expr::col(edge_alias, "target"),
+                Expr::col(edge_alias, "target_id"),
             )),
         ])
         .expect("validated: or_all has elements"),
@@ -372,15 +374,19 @@ fn edge_join_condition(from_node: &str, edge_alias: &str, dir: Direction) -> Exp
 
 fn target_join_condition(edge_alias: &str, to_node: &str, dir: Direction) -> Expr {
     match dir {
-        Direction::Outgoing => Expr::eq(Expr::col(edge_alias, "target"), Expr::col(to_node, "id")),
-        Direction::Incoming => Expr::eq(Expr::col(edge_alias, "source"), Expr::col(to_node, "id")),
+        Direction::Outgoing => {
+            Expr::eq(Expr::col(edge_alias, "target_id"), Expr::col(to_node, "id"))
+        }
+        Direction::Incoming => {
+            Expr::eq(Expr::col(edge_alias, "source_id"), Expr::col(to_node, "id"))
+        }
         Direction::Both => Expr::or_all([
             Some(Expr::eq(
-                Expr::col(edge_alias, "target"),
+                Expr::col(edge_alias, "target_id"),
                 Expr::col(to_node, "id"),
             )),
             Some(Expr::eq(
-                Expr::col(edge_alias, "source"),
+                Expr::col(edge_alias, "source_id"),
                 Expr::col(to_node, "id"),
             )),
         ])

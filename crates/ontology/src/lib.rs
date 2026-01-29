@@ -46,9 +46,9 @@ pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];
 /// Reserved columns on the edge table (matches EdgeEntity schema).
 pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
     "relationship_kind",
-    "source",
+    "source_id",
     "source_kind",
-    "target",
+    "target_id",
     "target_kind",
 ];
 
