@@ -144,7 +144,7 @@ mod tests {
         MockDestination, MockMetricCollector, MockNatsServices, TestEnvelopeFactory,
     };
     use futures::stream;
-    use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity};
+    use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
     use std::collections::BTreeMap;
 
     struct MockWatermarkStore;
@@ -210,12 +210,13 @@ mod tests {
     #[tokio::test]
     async fn handle_processes_pipelines() {
         let datalake = Arc::new(MockDatalake);
+        let ontology = Ontology::new();
         let group_node = create_test_node("Group", "gl_groups", "groups");
         let issue_node = create_test_node("Issue", "gl_issues", "issues");
 
         let pipelines = vec![
-            OntologyEntityPipeline::from_node(&group_node, datalake.clone()).unwrap(),
-            OntologyEntityPipeline::from_node(&issue_node, datalake).unwrap(),
+            OntologyEntityPipeline::from_node(&group_node, &ontology, datalake.clone()).unwrap(),
+            OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake).unwrap(),
         ];
 
         let handler = NamespaceHandler::new(Arc::new(MockWatermarkStore), pipelines);

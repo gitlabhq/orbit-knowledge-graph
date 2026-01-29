@@ -26,14 +26,20 @@ pub enum EdgeDirection {
     Incoming,
 }
 
+/// How the edge target type is determined.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EdgeTarget {
+    /// A fixed node type (e.g., "User").
+    Literal(String),
+    /// Type read from a column at runtime (e.g., "noteable_type").
+    Column(String),
+}
+
 /// Mapping from a source column to an edge in the knowledge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeMapping {
-    /// The target node type (e.g., "User", "Project")
-    pub target_kind: String,
-    /// The relationship name for the edge (e.g., "AUTHORED_BY", "BELONGS_TO")
+    pub target: EdgeTarget,
     pub relationship_kind: String,
-    /// Direction of the edge relative to the node with the FK column.
     pub direction: EdgeDirection,
 }
 

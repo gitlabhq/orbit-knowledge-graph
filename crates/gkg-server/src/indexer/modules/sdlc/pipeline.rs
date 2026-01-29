@@ -1,8 +1,3 @@
-//! Ontology-driven ETL pipeline for entity processing.
-//!
-//! The pipeline handles extracting data from the datalake, transforming it
-//! according to the ontology definition, and writing to the destination.
-
 use std::sync::Arc;
 
 use arrow::compute::concat_batches;
@@ -12,13 +7,12 @@ use datafusion::prelude::*;
 use etl_engine::destination::{BatchWriter, Destination};
 use etl_engine::module::HandlerError;
 use futures::StreamExt;
-use ontology::{EDGE_TABLE, NodeEntity};
+use ontology::{EDGE_TABLE, NodeEntity, Ontology};
 use serde_json::Value;
 
 use super::datalake::DatalakeQuery;
-use super::transform::{
-    SOURCE_DATA_TABLE, build_all_edge_sql, build_source_query, build_transform_sql,
-};
+use super::prepare::PreparedEtlConfig;
+use super::transform::{SOURCE_DATA_TABLE, build_all_edge_sql, build_transform_sql};
 
 pub struct OntologyEntityPipeline {
     entity_name: String,
@@ -30,15 +24,19 @@ pub struct OntologyEntityPipeline {
 }
 
 impl OntologyEntityPipeline {
-    pub fn from_node(node: &NodeEntity, datalake: Arc<dyn DatalakeQuery>) -> Option<Self> {
-        let extract_query = build_source_query(node)?;
-        let transform_sql = build_transform_sql(node);
-        let edge_transforms = build_all_edge_sql(node);
+    pub fn from_node(
+        node: &NodeEntity,
+        ontology: &Ontology,
+        datalake: Arc<dyn DatalakeQuery>,
+    ) -> Option<Self> {
+        let config = PreparedEtlConfig::from_node(node, ontology)?;
+        let transform_sql = build_transform_sql(&config);
+        let edge_transforms = build_all_edge_sql(&config);
 
         Some(Self {
-            entity_name: node.name.clone(),
-            destination_table: node.destination_table.clone(),
-            extract_query,
+            entity_name: config.node_kind,
+            destination_table: config.destination_table,
+            extract_query: config.extract_query,
             transform_sql,
             edge_transforms,
             datalake,
@@ -126,7 +124,6 @@ impl OntologyEntityPipeline {
                 ))
             })?;
 
-        // Transform and write node data
         let transformed = self.execute_query(&session, &self.transform_sql).await?;
         entity_writer
             .write_batch(&[transformed])
@@ -135,7 +132,6 @@ impl OntologyEntityPipeline {
                 HandlerError::Processing(format!("failed to write {}: {e}", self.entity_name))
             })?;
 
-        // Transform and write edges
         for edge_sql in &self.edge_transforms {
             let edges = self.execute_query(&session, edge_sql).await?;
             if edges.num_rows() > 0 {
@@ -239,19 +235,19 @@ mod tests {
     }
 
     #[test]
-    fn from_node_creates_pipeline_with_etl_config() {
+    fn from_node_creates_pipeline() {
         let node = create_test_node();
+        let ontology = Ontology::new();
         let datalake = Arc::new(MockDatalake);
 
-        let pipeline = OntologyEntityPipeline::from_node(&node, datalake);
+        let pipeline = OntologyEntityPipeline::from_node(&node, &ontology, datalake);
 
         assert!(pipeline.is_some());
-        let pipeline = pipeline.unwrap();
-        assert_eq!(pipeline.entity_name(), "User");
+        assert_eq!(pipeline.unwrap().entity_name(), "User");
     }
 
     #[test]
-    fn from_node_returns_none_without_etl_config() {
+    fn from_node_returns_none_without_etl() {
         let node = NodeEntity {
             name: "NoEtl".to_string(),
             fields: vec![],
@@ -259,9 +255,10 @@ mod tests {
             destination_table: "test".to_string(),
             etl: None,
         };
+        let ontology = Ontology::new();
         let datalake = Arc::new(MockDatalake);
 
-        let pipeline = OntologyEntityPipeline::from_node(&node, datalake);
+        let pipeline = OntologyEntityPipeline::from_node(&node, &ontology, datalake);
 
         assert!(pipeline.is_none());
     }

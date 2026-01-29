@@ -68,6 +68,26 @@ CREATE TABLE IF NOT EXISTS gl_projects (
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
 
+CREATE TABLE IF NOT EXISTS gl_notes (
+    id Int64,
+    note Nullable(String),
+    noteable_type String DEFAULT '',
+    noteable_id Nullable(Int64),
+    system Bool DEFAULT false,
+    line_code Nullable(String),
+    commit_id Nullable(String),
+    discussion_id Nullable(String),
+    resolved_at Nullable(DateTime64(6, 'UTC')),
+    internal Bool DEFAULT false,
+    confidential Nullable(Bool),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
 CREATE TABLE IF NOT EXISTS kg_edges (
     source_id Int64,
     source_kind String,

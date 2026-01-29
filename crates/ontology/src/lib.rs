@@ -21,8 +21,8 @@ pub mod etl;
 
 pub use entities::{DataType, EdgeEntity, Field, NodeEntity};
 pub use etl::{
-    DELETED_COLUMN, EdgeDirection, EdgeMapping, EtlConfig, EtlScope, TRAVERSAL_PATH_COLUMN,
-    VERSION_COLUMN,
+    DELETED_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope,
+    TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 
 use rust_embed::Embed;
@@ -279,6 +279,35 @@ impl Ontology {
     #[must_use]
     pub fn get_edge(&self, name: &str) -> Option<&[EdgeEntity]> {
         self.edges.get(name).map(|v| v.as_slice())
+    }
+
+    /// Get allowed target types for a polymorphic edge.
+    ///
+    /// Given a relationship and the node kind that has the FK column,
+    /// returns the valid types on the other end based on edge schema variants.
+    #[must_use]
+    pub fn get_edge_target_types(
+        &self,
+        relationship_kind: &str,
+        node_kind: &str,
+        direction: EdgeDirection,
+    ) -> Vec<String> {
+        let Some(variants) = self.get_edge(relationship_kind) else {
+            return Vec::new();
+        };
+
+        variants
+            .iter()
+            .filter_map(|edge| match direction {
+                EdgeDirection::Outgoing if edge.source_kind == node_kind => {
+                    Some(edge.target_kind.clone())
+                }
+                EdgeDirection::Incoming if edge.target_kind == node_kind => {
+                    Some(edge.source_kind.clone())
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Check if a node exists.
@@ -616,7 +645,9 @@ struct EtlYaml {
 #[derive(Debug, Deserialize)]
 struct EdgeMappingYaml {
     #[serde(rename = "to")]
-    target_kind: String,
+    target_literal: Option<String>,
+    #[serde(rename = "to_column")]
+    target_column: Option<String>,
     #[serde(rename = "as")]
     relationship_kind: String,
     #[serde(default)]
@@ -725,20 +756,37 @@ impl EtlYaml {
             }
         };
 
-        let edges = self
+        let edges: Result<BTreeMap<String, EdgeMapping>, OntologyError> = self
             .edges
             .into_iter()
             .map(|(column, mapping)| {
-                (
+                let target = match (mapping.target_literal, mapping.target_column) {
+                    (Some(lit), None) => EdgeTarget::Literal(lit),
+                    (None, Some(col)) => EdgeTarget::Column(col),
+                    (Some(_), Some(_)) => {
+                        return Err(OntologyError::Validation(format!(
+                            "edge '{}': use 'to' or 'to_column', not both",
+                            column
+                        )));
+                    }
+                    (None, None) => {
+                        return Err(OntologyError::Validation(format!(
+                            "edge '{}': requires 'to' or 'to_column'",
+                            column
+                        )));
+                    }
+                };
+                Ok((
                     column,
                     EdgeMapping {
-                        target_kind: mapping.target_kind,
+                        target,
                         relationship_kind: mapping.relationship_kind,
                         direction: mapping.direction,
                     },
-                )
+                ))
             })
             .collect();
+        let edges = edges?;
 
         match self.etl_type.as_str() {
             "table" => {

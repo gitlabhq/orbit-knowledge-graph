@@ -2,6 +2,7 @@ mod datalake;
 mod global_handler;
 mod namespace_handler;
 mod pipeline;
+mod prepare;
 mod transform;
 mod watermark_store;
 
@@ -73,7 +74,8 @@ impl SdlcModule {
     }
 
     fn try_create_pipeline(&self, node: &NodeEntity) -> Option<OntologyEntityPipeline> {
-        let pipeline = OntologyEntityPipeline::from_node(node, Arc::clone(&self.datalake));
+        let pipeline =
+            OntologyEntityPipeline::from_node(node, &self.ontology, Arc::clone(&self.datalake));
         if pipeline.is_none() {
             warn!(
                 entity = node.name,

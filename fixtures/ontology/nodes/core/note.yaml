@@ -3,7 +3,7 @@
 node_type: Note
 domain: core
 description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
-destination_table: gl_note
+destination_table: gl_notes
 
 properties:
   id:
@@ -95,12 +95,19 @@ properties:
     nullable: true
     description: "SHA of the commit this note is on (for commit notes)."
 
-# edges:
-#   - type: AUTHOR
-#     source_id: author_id
-#     target_kind: User
-#
-#   - type: ON
-#     source_id: noteable_id
-#     target_kind: [Issue, MergeRequest, Commit]
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_notes
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    author_id:
+      to: User
+      as: authored
+      direction: incoming
+    noteable_id:
+      to_column: noteable_type
+      as: has_note
+      direction: incoming
 
