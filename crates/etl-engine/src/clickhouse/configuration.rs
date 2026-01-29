@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::arrow_client::ArrowClickHouseClient;
 use crate::destination::DestinationError;
+use crate::env::env_var_or;
 
 /// ClickHouse connection settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -62,12 +63,9 @@ impl ClickHouseConfiguration {
         };
 
         Self {
-            url: std::env::var(format!("{prefix}_URL"))
-                .unwrap_or_else(|_| "http://127.0.0.1:8123".into()),
-            database: std::env::var(format!("{prefix}_DATABASE"))
-                .unwrap_or_else(|_| "default".into()),
-            username: std::env::var(format!("{prefix}_USERNAME"))
-                .unwrap_or_else(|_| "default".into()),
+            url: env_var_or(&format!("{prefix}_URL"), "http://127.0.0.1:8123".into()),
+            database: env_var_or(&format!("{prefix}_DATABASE"), "default".into()),
+            username: env_var_or(&format!("{prefix}_USERNAME"), "default".into()),
             password: std::env::var(format!("{prefix}_PASSWORD")).ok(),
         }
     }

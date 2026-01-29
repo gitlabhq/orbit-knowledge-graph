@@ -273,3 +273,108 @@ async fn multiple_streams() {
     msg_a.ack().await.unwrap();
     msg_b.ack().await.unwrap();
 }
+
+#[tokio::test]
+#[serial]
+async fn auto_creates_stream_with_configured_settings() {
+    let (_container, url) = start_nats_container().await;
+
+    let config = NatsConfiguration {
+        url: url.clone(),
+        auto_create_streams: true,
+        stream_replicas: 1,
+        stream_max_age_secs: Some(3600),
+        ..Default::default()
+    };
+
+    let broker = NatsBroker::connect(&config)
+        .await
+        .expect("failed to connect");
+
+    let topic = Topic::new("auto_created_stream", "auto.events");
+    let topics = vec![topic.clone()];
+
+    broker
+        .ensure_streams(&topics)
+        .await
+        .expect("failed to ensure streams");
+
+    let client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("connect");
+    let jetstream = async_nats::jetstream::new(client);
+
+    let mut stream = jetstream
+        .get_stream("auto_created_stream")
+        .await
+        .expect("stream should exist");
+
+    let info = stream.info().await.expect("failed to get stream info");
+    assert_eq!(info.config.name, "auto_created_stream");
+    assert!(info.config.subjects.contains(&"auto.events".to_string()));
+    assert_eq!(info.config.max_age, std::time::Duration::from_secs(3600));
+}
+
+#[tokio::test]
+#[serial]
+async fn skips_creation_when_disabled() {
+    let (_container, url) = start_nats_container().await;
+
+    let config = NatsConfiguration {
+        url: url.clone(),
+        auto_create_streams: false,
+        ..Default::default()
+    };
+
+    let broker = NatsBroker::connect(&config)
+        .await
+        .expect("failed to connect");
+
+    let topic = Topic::new("should_not_exist", "skip.events");
+    let topics = vec![topic];
+
+    broker
+        .ensure_streams(&topics)
+        .await
+        .expect("ensure_streams should succeed even when disabled");
+
+    let client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("connect");
+    let jetstream = async_nats::jetstream::new(client);
+
+    let result = jetstream.get_stream("should_not_exist").await;
+    assert!(
+        result.is_err(),
+        "stream should not exist when auto-create is disabled"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn idempotent_when_stream_exists() {
+    let (_container, url) = start_nats_container().await;
+    create_test_stream(&url).await;
+
+    let config = NatsConfiguration {
+        url: url.clone(),
+        auto_create_streams: true,
+        ..Default::default()
+    };
+
+    let broker = NatsBroker::connect(&config)
+        .await
+        .expect("failed to connect");
+
+    let topic = Topic::new(TEST_STREAM, TEST_SUBJECT);
+    let topics = vec![topic];
+
+    let result = broker.ensure_streams(&topics).await;
+    assert!(result.is_ok(), "ensure_streams should be idempotent");
+
+    let result2 = broker.ensure_streams(&topics).await;
+    assert!(
+        result2.is_ok(),
+        "ensure_streams should succeed on second call"
+    );
+}

@@ -65,6 +65,7 @@ pub mod constants;
 pub mod destination;
 pub mod engine;
 pub mod entities;
+pub(crate) mod env;
 pub mod metrics;
 pub mod module;
 pub mod nats;

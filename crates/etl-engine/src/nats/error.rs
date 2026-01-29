@@ -38,6 +38,14 @@ pub enum NatsError {
         #[source]
         source: async_nats::error::Error<async_nats::jetstream::context::GetStreamErrorKind>,
     },
+
+    /// Failed to create a stream.
+    #[error("failed to create stream '{stream}': {source}")]
+    StreamCreationFailed {
+        stream: String,
+        #[source]
+        source: async_nats::error::Error<async_nats::jetstream::context::CreateStreamErrorKind>,
+    },
 }
 
 pub(crate) fn map_connect_error(error: async_nats::ConnectError) -> NatsError {
