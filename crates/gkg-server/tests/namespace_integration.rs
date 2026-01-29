@@ -416,15 +416,22 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
 
     context
         .execute(
+            "INSERT INTO siphon_milestones (id, title, project_id, state, traversal_path, _siphon_replicated_at)
+            VALUES (10, 'v1.0', 1000, 'active', '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
             "INSERT INTO hierarchy_merge_requests
                 (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
-                 draft, squash, target_project_id, author_id, assignee_id, merge_user_id,
+                 draft, squash, target_project_id, author_id, assignee_id, merge_user_id, milestone_id,
                  traversal_path, version)
             VALUES
                 (1, 101, 'Add feature X', 'Implements feature X', 'feature-x', 'main', 1, 'can_be_merged',
-                 false, true, 1000, 1, 2, NULL, '1/100/', '2024-01-20 12:00:00'),
+                 false, true, 1000, 1, 2, NULL, 10, '1/100/', '2024-01-20 12:00:00'),
                 (2, 102, 'Fix bug Y', 'Fixes critical bug', 'fix-y', 'main', 3, 'merged',
-                 false, false, 1000, 2, NULL, 1, '1/100/', '2024-01-20 12:00:00')",
+                 false, false, 1000, 2, NULL, 1, NULL, '1/100/', '2024-01-20 12:00:00')",
         )
         .await;
 
@@ -516,6 +523,18 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
         )
         .await;
     assert_eq!(merged_by_edges[0].num_rows(), 1, "only MR 2 was merged");
+
+    let in_milestone_edges = context
+        .query(
+            "SELECT source_id, target_id FROM gl_edges
+             WHERE relationship_kind = 'in_milestone' AND source_kind = 'MergeRequest' AND target_kind = 'Milestone'",
+        )
+        .await;
+    assert_eq!(
+        in_milestone_edges[0].num_rows(),
+        1,
+        "only MR 1 has a milestone"
+    );
 }
 
 #[tokio::test]
@@ -685,5 +704,124 @@ async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
         has_file_edges[0].num_rows(),
         3,
         "all diff files should have has_file edges to the diff"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_milestones_with_edges() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
+            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
+            VALUES (1000, '1/100/1000/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_milestones
+                (id, iid, title, description, state, due_date, start_date, project_id, group_id,
+                 traversal_path, _siphon_replicated_at)
+            VALUES
+                (1, 1, 'v1.0', 'First release', 'active', '2024-03-01', '2024-01-01', 1000, NULL, '1/100/', '2024-01-20 12:00:00'),
+                (2, 2, 'v2.0', 'Second release', 'closed', '2024-06-01', '2024-03-01', 1000, NULL, '1/100/', '2024-01-20 12:00:00'),
+                (3, 1, 'Q1 Goals', 'Group milestone', 'active', '2024-03-31', '2024-01-01', NULL, 100, '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let sdlc_module = SdlcModule::new(&context.config)
+        .await
+        .expect("failed to create SDLC module");
+
+    let handlers = sdlc_module.handlers();
+    let namespace_handler = handlers
+        .iter()
+        .find(|h| h.name() == "namespace-handler")
+        .expect("namespace-handler not found");
+
+    let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    let result = context
+        .query("SELECT id, title, state, due_date FROM gl_milestones ORDER BY id")
+        .await;
+    assert!(!result.is_empty(), "milestones should exist");
+
+    let batch = &result[0];
+    assert_eq!(batch.num_rows(), 3);
+
+    let titles = batch
+        .column_by_name("title")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(titles.value(0), "v1.0");
+    assert_eq!(titles.value(1), "v2.0");
+    assert_eq!(titles.value(2), "Q1 Goals");
+
+    let states = batch
+        .column_by_name("state")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(states.value(0), "active");
+    assert_eq!(states.value(1), "closed");
+
+    let in_project_edges = context
+        .query(
+            "SELECT source_id, target_id FROM gl_edges
+             WHERE relationship_kind = 'in_project' AND source_kind = 'Milestone' AND target_kind = 'Project'",
+        )
+        .await;
+    assert_eq!(
+        in_project_edges[0].num_rows(),
+        2,
+        "project milestones should have in_project edges"
+    );
+
+    let in_group_edges = context
+        .query(
+            "SELECT source_id, target_id FROM gl_edges
+             WHERE relationship_kind = 'in_group' AND source_kind = 'Milestone' AND target_kind = 'Group'",
+        )
+        .await;
+    assert_eq!(
+        in_group_edges[0].num_rows(),
+        1,
+        "group milestone should have in_group edge"
     );
 }

@@ -124,3 +124,7 @@ etl:
       to: User
       as: merged_by
       direction: incoming
+    milestone_id:
+      to: Milestone
+      as: in_milestone
+      direction: outgoing

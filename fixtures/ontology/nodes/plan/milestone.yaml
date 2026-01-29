@@ -3,7 +3,7 @@
 node_type: Milestone
 domain: plan
 description: A milestone for tracking progress toward a goal within a project or group
-destination_table: gl_milestone
+destination_table: gl_milestones
 
 properties:
   id:
@@ -31,13 +31,10 @@ properties:
     description: "Description of the milestone."
 
   state:
-    type: enum
+    type: string
     source: state
     nullable: true
-    description: "Current state of the milestone."
-    values:
-      0: active
-      1: closed
+    description: "Current state of the milestone (active, closed)."
 
   due_date:
     type: date
@@ -63,11 +60,18 @@ properties:
     nullable: true
     description: "Timestamp when the milestone was last updated."
 
-# edges:
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
-#
-#   - type: IN_GROUP
-#     source_id: group_id
-#     target_kind: Group
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_milestones
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: in_project
+      direction: outgoing
+    group_id:
+      to: Group
+      as: in_group
+      direction: outgoing

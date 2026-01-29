@@ -312,6 +312,32 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (merge_request_diff_id, relative_order)
 ORDER BY (merge_request_diff_id, relative_order);
 
+-- Siphon source tables for milestones
+CREATE TABLE IF NOT EXISTS siphon_milestones
+(
+    `id` Int64,
+    `title` String,
+    `project_id` Nullable(Int64),
+    `description` Nullable(String),
+    `due_date` Nullable(Date32),
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `state` Nullable(String),
+    `iid` Nullable(Int64),
+    `title_html` Nullable(String),
+    `description_html` Nullable(String),
+    `start_date` Nullable(Date32),
+    `cached_markdown_version` Nullable(Int64),
+    `group_id` Nullable(Int64),
+    `lock_version` Int64 DEFAULT 0,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
 -- Knowledge graph enabled namespaces
 CREATE TABLE IF NOT EXISTS test.siphon_knowledge_graph_enabled_namespaces
 (
