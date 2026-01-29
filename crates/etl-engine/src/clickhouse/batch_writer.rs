@@ -14,8 +14,8 @@
 
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use clickhouse_client::ArrowClickHouseClient;
 
-use super::arrow_client::ArrowClickHouseClient;
 use crate::destination::{BatchWriter, DestinationError};
 
 pub(crate) struct ClickHouseBatchWriter {

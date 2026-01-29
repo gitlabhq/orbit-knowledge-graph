@@ -1,10 +1,7 @@
-//! ClickHouse destination.
-
 use async_trait::async_trait;
+use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfiguration};
 
-use super::arrow_client::ArrowClickHouseClient;
 use super::batch_writer::ClickHouseBatchWriter;
-use super::configuration::ClickHouseConfiguration;
 use crate::destination::{BatchWriter, Destination, DestinationError};
 
 pub struct ClickHouseDestination {
@@ -13,7 +10,9 @@ pub struct ClickHouseDestination {
 
 impl ClickHouseDestination {
     pub fn new(configuration: ClickHouseConfiguration) -> Result<Self, DestinationError> {
-        configuration.validate()?;
+        configuration
+            .validate()
+            .map_err(|e| DestinationError::InvalidConfiguration(e.to_string()))?;
         Ok(Self { configuration })
     }
 
