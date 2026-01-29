@@ -48,6 +48,7 @@ tonic-prost-build = { workspace = true }
 prost-build = { workspace = true }
 
 [dev-dependencies]
+async-nats = { workspace = true }
 tokio = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }

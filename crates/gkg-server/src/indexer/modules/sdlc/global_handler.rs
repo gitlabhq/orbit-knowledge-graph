@@ -8,25 +8,12 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use etl_engine::module::{Handler, HandlerContext, HandlerError};
 use etl_engine::types::{Envelope, Event, SerializationError, Topic};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tracing::warn;
 
 use super::pipeline::OntologyEntityPipeline;
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
-use crate::indexer::modules::INDEXER_TOPIC;
-
-const SUBJECT: &str = "sdlc.global.indexing.requested";
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct GlobalHandlerPayload {
-    pub watermark: DateTime<Utc>,
-}
-
-impl Event for GlobalHandlerPayload {
-    fn topic() -> Topic {
-        Topic::new(INDEXER_TOPIC, SUBJECT)
-    }
-}
+use crate::indexer::topic::GlobalIndexingRequest;
 
 #[derive(Clone, Serialize)]
 pub struct GlobalQueryParams {
@@ -75,11 +62,11 @@ impl Handler for GlobalHandler {
     }
 
     fn topic(&self) -> Topic {
-        Topic::new(INDEXER_TOPIC, SUBJECT)
+        GlobalIndexingRequest::topic()
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
-        let payload: GlobalHandlerPayload = message.to_event().map_err(|error| match error {
+        let payload: GlobalIndexingRequest = message.to_event().map_err(|error| match error {
             SerializationError::Json(e) => HandlerError::Deserialization(e),
         })?;
 

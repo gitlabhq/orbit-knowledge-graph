@@ -2602,6 +2602,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "arrow-ipc",
+ "async-nats",
  "async-trait",
  "axum",
  "chrono",
