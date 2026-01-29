@@ -49,6 +49,12 @@ pub struct ClickHouseConfig {
     /// Database name.
     #[serde(default = "default_database")]
     pub database: String,
+    /// Username for authentication.
+    #[serde(default = "default_username")]
+    pub username: String,
+    /// Password for authentication (optional).
+    #[serde(default)]
+    pub password: Option<String>,
     /// Client connection settings.
     #[serde(default)]
     pub client: ClientConfig,
@@ -65,14 +71,32 @@ fn default_database() -> String {
     "default".to_string()
 }
 
+fn default_username() -> String {
+    "default".to_string()
+}
+
 impl Default for ClickHouseConfig {
     fn default() -> Self {
         Self {
             url: default_clickhouse_url(),
             database: default_database(),
+            username: default_username(),
+            password: None,
             client: ClientConfig::default(),
             schema: SchemaConfig::default(),
         }
+    }
+}
+
+impl ClickHouseConfig {
+    /// Build an ArrowClickHouseClient from this config.
+    pub fn build_client(&self) -> clickhouse_client::ArrowClickHouseClient {
+        clickhouse_client::ArrowClickHouseClient::new(
+            &self.url,
+            &self.database,
+            &self.username,
+            self.password.as_deref(),
+        )
     }
 }
 

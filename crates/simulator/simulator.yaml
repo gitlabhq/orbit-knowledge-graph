@@ -59,7 +59,7 @@ generation:
   batch_size: 50000
 
   # Scale: 10 organizations (tenants)
-  organizations: 10
+  organizations: 3
 
   # Root entities (absolute counts per organization)
   # These have no parent and are generated first.
@@ -153,6 +153,26 @@ generation:
       "User -> Project": 1            # Each project has a creator
     OWNER:
       "User -> Group": 1              # Each group has an owner
+
+    # MR merge action
+    MERGED_BY:
+      "User -> MergeRequest": 0.3     # 30% of MRs are merged (have a merger)
+
+    # MR closes work items
+    CLOSES:
+      "MergeRequest -> WorkItem": 0.2 # 20% of MRs close a work item
+
+    # MR fixes vulnerabilities
+    FIXES:
+      "MergeRequest -> Vulnerability": 0.1  # 10% of MRs fix a vulnerability
+
+    # Work items in milestones
+    IN_MILESTONE:
+      "WorkItem -> Milestone": 0.4    # 40% of work items are in a milestone
+
+    # Projects belong to groups
+    IN_GROUP:
+      "Project -> Group": 1           # Each project is in a group
 
 evaluation:
   queries_path: fixtures/queries/sdlc_queries.json

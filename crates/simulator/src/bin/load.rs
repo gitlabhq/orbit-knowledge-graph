@@ -2,7 +2,6 @@
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use clickhouse::Client;
 use ontology::Ontology;
 use simulator::Config;
 use simulator::clickhouse::ClickHouseWriter;
@@ -32,6 +31,10 @@ struct Args {
     /// Skip adding projections
     #[arg(long)]
     no_projections: bool,
+
+    /// Use clickhouse-client CLI for loading (faster, more reliable)
+    #[arg(long)]
+    use_cli: bool,
 }
 
 #[tokio::main]
@@ -55,7 +58,8 @@ async fn main() -> Result<()> {
         "Checking ClickHouse connection at {}...",
         config.clickhouse.url
     );
-    check_clickhouse_health(&config.clickhouse.url).await?;
+    let client = config.clickhouse.build_client();
+    check_clickhouse_health(&client).await?;
     println!("ClickHouse is healthy");
 
     let writer = ClickHouseWriter::with_config(&config.clickhouse);
@@ -87,50 +91,53 @@ async fn main() -> Result<()> {
 
         let overall_start = std::time::Instant::now();
 
+        if args.use_cli {
+            ClickHouseWriter::check_cli_available()?;
+            println!("Using clickhouse client for loading (faster)");
+        }
+
         for org_id in &orgs {
             println!("\nOrganization {}:", org_id);
 
             // Load node tables
             for node in ontology.nodes() {
-                let batches = reader.read_batches(*org_id, &node.name)?;
-                if batches.is_empty() {
+                let file_path = reader.file_path(*org_id, &node.name);
+                if !file_path.exists() {
                     continue;
                 }
 
-                let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
                 let tbl_name = ontology.table_name(&node.name)?;
-
-                print!("  {} ({} rows)... ", node.name, total_rows);
+                print!("  {}... ", node.name);
                 std::io::Write::flush(&mut std::io::stdout()).ok();
 
                 let start = std::time::Instant::now();
-                writer.write_batches(&tbl_name, &batches).await?;
-                let elapsed = start.elapsed().as_secs_f64();
 
-                println!(
-                    "{:.1}s ({:.0} rows/s)",
-                    elapsed,
-                    total_rows as f64 / elapsed.max(0.001)
-                );
+                if args.use_cli {
+                    writer.load_parquet_file(&tbl_name, &file_path)?;
+                } else {
+                    let batches = reader.read_batches(*org_id, &node.name)?;
+                    writer.write_batches(&tbl_name, &batches).await?;
+                }
+
+                println!("{:.1}s", start.elapsed().as_secs_f64());
             }
 
             // Load edges
-            let edge_batches = reader.read_edges(*org_id)?;
-            if !edge_batches.is_empty() {
-                let total_rows: usize = edge_batches.iter().map(|b| b.num_rows()).sum();
-
-                print!("  edges ({} rows)... ", total_rows);
+            let edges_path = reader.file_path(*org_id, "edges");
+            if edges_path.exists() {
+                print!("  edges... ");
                 std::io::Write::flush(&mut std::io::stdout()).ok();
 
                 let start = std::time::Instant::now();
-                writer.write_batches("kg_edges", &edge_batches).await?;
-                let elapsed = start.elapsed().as_secs_f64();
 
-                println!(
-                    "{:.1}s ({:.0} rows/s)",
-                    elapsed,
-                    total_rows as f64 / elapsed.max(0.001)
-                );
+                if args.use_cli {
+                    writer.load_parquet_file("kg_edges", &edges_path)?;
+                } else {
+                    let edge_batches = reader.read_edges(*org_id)?;
+                    writer.write_batches("kg_edges", &edge_batches).await?;
+                }
+
+                println!("{:.1}s", start.elapsed().as_secs_f64());
             }
         }
 
@@ -162,11 +169,9 @@ async fn main() -> Result<()> {
 }
 
 /// Check that ClickHouse is running and healthy.
-async fn check_clickhouse_health(url: &str) -> Result<()> {
-    let client = Client::default().with_url(url);
-
+async fn check_clickhouse_health(client: &clickhouse_client::ArrowClickHouseClient) -> Result<()> {
     // Try a simple query to verify connectivity
-    let result: Result<String, _> = client.query("SELECT version()").fetch_one().await;
+    let result: Result<String, _> = client.inner().query("SELECT version()").fetch_one().await;
 
     match result {
         Ok(version) => {
@@ -178,12 +183,11 @@ async fn check_clickhouse_health(url: &str) -> Result<()> {
 
             if error_msg.contains("Connect") || error_msg.contains("connection") {
                 bail!(
-                    "Cannot connect to ClickHouse at {}\n\n\
+                    "Cannot connect to ClickHouse.\n\n\
                      Make sure ClickHouse is running:\n\
                      - Docker: docker run -d -p 8123:8123 clickhouse/clickhouse-server\n\
                      - Local: clickhouse-server\n\n\
                      Error: {}",
-                    url,
                     error_msg
                 );
             } else {

@@ -25,6 +25,7 @@ parquet = "57"
 # Note: Use fake::rand re-export to avoid version conflicts
 
 # Internal crates
+clickhouse-client = { path = "../clickhouse-client" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 
@@ -35,3 +36,7 @@ path = "src/bin/generate.rs"
 [[bin]]
 name = "load"
 path = "src/bin/load.rs"
+
+[[bin]]
+name = "evaluate"
+path = "src/bin/evaluate.rs"

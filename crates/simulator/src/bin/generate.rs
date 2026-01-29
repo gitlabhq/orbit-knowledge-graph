@@ -66,6 +66,11 @@ async fn main() -> Result<()> {
 
     println!("Output directory: {:?}\n", config.generation.output_dir);
 
+    if std::path::Path::new(&config.generation.output_dir).exists() {
+        println!("Removing existing data directory...");
+        std::fs::remove_dir_all(&config.generation.output_dir)?;
+    }
+
     std::fs::create_dir_all(&config.generation.output_dir)?;
 
     let overall_start = std::time::Instant::now();

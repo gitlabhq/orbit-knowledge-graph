@@ -157,12 +157,16 @@ impl ParquetReader {
         Ok(orgs)
     }
 
+    /// Get the path to a Parquet file.
+    pub fn file_path(&self, org_id: u32, table_name: &str) -> PathBuf {
+        self.input_dir
+            .join(format!("org_{}", org_id))
+            .join(format!("{}.parquet", table_name.to_lowercase()))
+    }
+
     /// Read all batches from a Parquet file.
     pub fn read_batches(&self, org_id: u32, table_name: &str) -> Result<Vec<RecordBatch>> {
-        let file_path = self
-            .input_dir
-            .join(format!("org_{}", org_id))
-            .join(format!("{}.parquet", table_name.to_lowercase()));
+        let file_path = self.file_path(org_id, table_name);
 
         if !file_path.exists() {
             return Ok(vec![]);

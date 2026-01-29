@@ -238,7 +238,7 @@ mod tests {
 
         let batch = &batches[0];
         assert_eq!(batch.num_rows(), 10);
-        assert_eq!(batch.num_columns(), 5); // organization_id + traversal_id + 3 fields
+        assert_eq!(batch.num_columns(), 5); // organization_id + traversal_path + 3 fields
 
         // Check organization_id column
         let org_ids = batch
@@ -248,7 +248,7 @@ mod tests {
             .unwrap();
         assert!(org_ids.iter().all(|v| v == Some(1)));
 
-        // Check traversal_id column
+        // Check traversal_path column
         let traversal_ids = batch
             .column(1)
             .as_any()
