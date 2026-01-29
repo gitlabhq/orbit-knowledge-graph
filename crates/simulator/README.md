@@ -90,12 +90,12 @@ No hardcoded entity names - all node types, fields, and edge types come from the
 
 ### Generated Tables
 
-For each node type in the ontology, a table `kg_{node_name}` is created with:
+For each node type in the ontology, a table `gl_{node_name}` is created with:
 - `organization_id` - Organization identifier
-- `traversal_id` - Hierarchical authorization path (e.g., "1/2/3")
+- `traversal_path` - Hierarchical authorization path (e.g., "1/2/3")
 - All fields from the ontology definition
 
-A unified `kg_edges` table stores all relationships:
+A unified `gl_edges` table stores all relationships:
 - `relationship_kind` - Edge type (e.g., "AUTHORED", "CONTAINS")
 - `source` - Source node ID
 - `source_kind` - Source node type
@@ -106,8 +106,8 @@ A unified `kg_edges` table stores all relationships:
 
 Traversal IDs enable efficient row-level authorization using GitLab's namespace hierarchy:
 - Format: `org_id/group1/group2/...` (e.g., `1/42/100`)
-- Tables are ordered by `(organization_id, traversal_id, id)` for efficient range queries
-- Query pattern: `WHERE traversal_id LIKE '1/42/%'` to get all entities in a subtree
+- Tables are ordered by `(organization_id, traversal_path, id)` for efficient range queries
+- Query pattern: `WHERE traversal_path LIKE '1/42/%'` to get all entities in a subtree
 
 ## Query Evaluation
 
@@ -172,22 +172,22 @@ cargo run --bin evaluate -- \
 
 ```sql
 -- Count nodes by type
-SELECT 'users' as type, count() FROM kg_user
+SELECT 'users' as type, count() FROM gl_user
 UNION ALL
-SELECT 'groups', count() FROM kg_group
+SELECT 'groups', count() FROM gl_group
 UNION ALL
-SELECT 'projects', count() FROM kg_project;
+SELECT 'projects', count() FROM gl_project;
 
 -- Count edges by relationship type
 SELECT relationship_kind, count() 
-FROM kg_edges 
+FROM gl_edges 
 GROUP BY relationship_kind 
 ORDER BY count() DESC;
 
 -- Find all projects in a group
 SELECT p.* 
-FROM kg_project p
-JOIN kg_edges e ON e.target = p.id AND e.target_kind = 'Project'
+FROM gl_project p
+JOIN gl_edges e ON e.target = p.id AND e.target_kind = 'Project'
 WHERE e.source_kind = 'Group' 
   AND e.relationship_kind = 'CONTAINS'
   AND e.source = 123;

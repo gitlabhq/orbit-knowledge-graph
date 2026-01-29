@@ -454,8 +454,8 @@ mod tests {
             }],
             from: TableRef::join(
                 JoinType::Inner,
-                TableRef::scan("kg_user", "u"),
-                TableRef::scan_with_filter("kg_edges", "e", "AUTHORED"),
+                TableRef::scan("gl_user", "u"),
+                TableRef::scan_with_filter("gl_edges", "e", "AUTHORED"),
                 Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
             ),
             where_clause: None,

@@ -19,17 +19,17 @@ Some starting points:
 
 ```sql
 -- What columns exist?
-DESCRIBE TABLE kg_<entity>
+DESCRIBE TABLE gl_<entity>
 
 -- What values does a field actually contain?
-SELECT <field>, count(*) FROM kg_<entity> GROUP BY <field>
+SELECT <field>, count(*) FROM gl_<entity> GROUP BY <field>
 
 -- What edge types were generated?
-SELECT relationship_kind, count(*) FROM kg_edges 
+SELECT relationship_kind, count(*) FROM gl_edges 
 GROUP BY relationship_kind ORDER BY count(*) DESC
 
 -- Sample some traversal paths
-SELECT traversal_path FROM kg_<entity> LIMIT 10
+SELECT traversal_path FROM gl_<entity> LIMIT 10
 ```
 
 ## Inspect the generated SQL directly
@@ -39,7 +39,7 @@ The `gkg query` command lets you see what SQL the query engine produces without 
 First, sample some traversal paths from your data:
 
 ```sql
-SELECT DISTINCT traversal_path FROM kg_group LIMIT 5
+SELECT DISTINCT traversal_path FROM gl_group LIMIT 5
 ```
 
 Then pass them to the query command (org ID is parsed from the first segment):
@@ -80,11 +80,11 @@ To tell them apart, check if matching data exists globally:
 
 ```sql
 -- Does matching data exist anywhere?
-SELECT count(*) FROM kg_project 
+SELECT count(*) FROM gl_project 
 WHERE visibility_level = 'public' AND star_count >= 100
 
 -- How many entities are in the sampled path?
-SELECT count(*) FROM kg_project 
+SELECT count(*) FROM gl_project 
 WHERE startsWith(traversal_path, '3/514/522/523/524/')
 ```
 
@@ -111,9 +111,9 @@ If you see values like `val188ebe1e3a382996` instead of proper enums, the fake d
 Quick diagnostic:
 
 ```sql
-SELECT state, count(*) FROM kg_user GROUP BY state ORDER BY count(*) DESC
-SELECT visibility_level, count(*) FROM kg_project GROUP BY visibility_level
-SELECT user_type, count(*) FROM kg_user GROUP BY user_type
+SELECT state, count(*) FROM gl_user GROUP BY state ORDER BY count(*) DESC
+SELECT visibility_level, count(*) FROM gl_project GROUP BY visibility_level
+SELECT user_type, count(*) FROM gl_user GROUP BY user_type
 ```
 
 The ontology defines enum values in two ways:
@@ -137,7 +137,7 @@ If queries return empty, check if the sampled path is too deep for the entities 
 
 ```sql
 -- Projects have nested paths
-SELECT DISTINCT traversal_path FROM kg_project LIMIT 5  
+SELECT DISTINCT traversal_path FROM gl_project LIMIT 5  
 -- Returns: 1/2/3/, 1/2/4/, etc.
 ```
 
@@ -152,7 +152,7 @@ Check which edge variants are configured:
 ```sql
 -- What edges were actually generated?
 SELECT relationship_kind, source_kind, target_kind, count(*) 
-FROM kg_edges 
+FROM gl_edges 
 GROUP BY relationship_kind, source_kind, target_kind 
 ORDER BY count(*) DESC
 ```
@@ -208,7 +208,7 @@ If you still see mismatches, check that the sampled entity exists in the org:
 
 ```sql
 -- Check if sampled user is in the right org
-SELECT id, traversal_path FROM kg_user WHERE id = <sampled_user_id>
+SELECT id, traversal_path FROM gl_user WHERE id = <sampled_user_id>
 -- Path should start with the security context's org_id
 ```
 

@@ -38,32 +38,32 @@ pub struct EntityContext {
     /// The traversal ID (namespace path from org root).
     /// For Groups: extends parent's traversal ID with own ID.
     /// For other entities: inherits from parent container.
-    pub traversal_id: String,
+    pub traversal_path: String,
 }
 
 impl EntityContext {
-    pub fn new(id: i64, traversal_id: String) -> Self {
-        Self { id, traversal_id }
+    pub fn new(id: i64, traversal_path: String) -> Self {
+        Self { id, traversal_path }
     }
 
     pub fn root_group(org_id: u32, group_id: i64) -> Self {
         Self {
             id: group_id,
-            traversal_id: format!("{}/{}/", org_id, group_id),
+            traversal_path: format!("{}/{}/", org_id, group_id),
         }
     }
 
     pub fn subgroup(parent: &EntityContext, subgroup_id: i64) -> Self {
         Self {
             id: subgroup_id,
-            traversal_id: format!("{}{}/", parent.traversal_id, subgroup_id),
+            traversal_path: format!("{}{}/", parent.traversal_path, subgroup_id),
         }
     }
 
     pub fn child(parent: &EntityContext, entity_id: i64) -> Self {
         Self {
             id: entity_id,
-            traversal_id: parent.traversal_id.clone(),
+            traversal_path: parent.traversal_path.clone(),
         }
     }
 }
@@ -134,31 +134,31 @@ impl EntityRegistry {
     }
 }
 
-pub struct TraversalIdGenerator {
-    ids: Vec<String>,
+pub struct TraversalPathGenerator {
+    paths: Vec<String>,
 }
 
-impl TraversalIdGenerator {
+impl TraversalPathGenerator {
     pub fn new(org_id: u32, count: usize, max_depth: usize) -> Self {
-        let ids = generate_trie(org_id, count, max_depth);
-        Self { ids }
+        let paths = generate_trie(org_id, count, max_depth);
+        Self { paths }
     }
 
-    pub fn ids(&self) -> &[String] {
-        &self.ids
+    pub fn paths(&self) -> &[String] {
+        &self.paths
     }
 
     pub fn random(&self, rng: &mut impl Rng) -> &str {
-        let idx = rng.gen_range(0..self.ids.len());
-        &self.ids[idx]
+        let idx = rng.gen_range(0..self.paths.len());
+        &self.paths[idx]
     }
 
     pub fn len(&self) -> usize {
-        self.ids.len()
+        self.paths.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
+        self.paths.is_empty()
     }
 }
 
@@ -286,62 +286,62 @@ mod tests {
 
     #[test]
     #[ignore] // Run with: cargo test -p simulator -- --ignored --nocapture
-    fn test_print_example_traversal_ids() {
-        println!("\n=== Example traversal IDs (org_id=1, count=20, max_depth=4) ===");
-        let generator = TraversalIdGenerator::new(1, 20, 4);
-        for (i, id) in generator.ids().iter().enumerate() {
-            let depth = id.split('/').filter(|s| !s.is_empty()).count();
+    fn test_print_example_traversal_paths() {
+        println!("\n=== Example traversal paths (org_id=1, count=20, max_depth=4) ===");
+        let generator = TraversalPathGenerator::new(1, 20, 4);
+        for (i, path) in generator.paths().iter().enumerate() {
+            let depth = path.split('/').filter(|s| !s.is_empty()).count();
             let indent = "  ".repeat(depth - 1);
-            println!("{:3}. {}{}", i + 1, indent, id);
+            println!("{:3}. {}{}", i + 1, indent, path);
         }
 
         println!("\n=== Example traversal IDs (org_id=42, count=15, max_depth=5) ===");
-        let generator = TraversalIdGenerator::new(42, 15, 5);
-        for (i, id) in generator.ids().iter().enumerate() {
-            let depth = id.split('/').filter(|s| !s.is_empty()).count();
+        let generator = TraversalPathGenerator::new(42, 15, 5);
+        for (i, path) in generator.paths().iter().enumerate() {
+            let depth = path.split('/').filter(|s| !s.is_empty()).count();
             let indent = "  ".repeat(depth - 1);
-            println!("{:3}. {}{}", i + 1, indent, id);
+            println!("{:3}. {}{}", i + 1, indent, path);
         }
     }
 
     #[test]
     fn test_generate_trie_basic() {
-        let generator = TraversalIdGenerator::new(1, 10, 4);
+        let generator = TraversalPathGenerator::new(1, 10, 4);
 
         assert_eq!(generator.len(), 10);
 
         // All IDs should start with org_id
-        for id in generator.ids() {
-            assert!(id.starts_with("1"), "ID {} should start with 1", id);
+        for path in generator.paths() {
+            assert!(path.starts_with("1"), "Path {} should start with 1", path);
         }
 
         // First ID should be just the root
-        assert_eq!(generator.ids()[0], "1/");
+        assert_eq!(generator.paths()[0], "1/");
     }
 
     #[test]
     fn test_all_ids_unique() {
-        let generator = TraversalIdGenerator::new(42, 100, 5);
+        let generator = TraversalPathGenerator::new(42, 100, 5);
 
-        let unique: HashSet<_> = generator.ids().iter().collect();
+        let unique: HashSet<_> = generator.paths().iter().collect();
         assert_eq!(
             unique.len(),
             generator.len(),
-            "All traversal IDs should be unique"
+            "All traversal paths should be unique"
         );
     }
 
     #[test]
-    fn test_ids_are_valid_paths() {
-        let generator = TraversalIdGenerator::new(1, 50, 4);
+    fn test_paths_are_valid_paths() {
+        let generator = TraversalPathGenerator::new(1, 50, 4);
 
-        for id in generator.ids() {
+        for path in generator.paths() {
             // Should be slash-separated numbers (with trailing slash)
-            for part in id.split('/').filter(|s| !s.is_empty()) {
+            for part in path.split('/').filter(|s| !s.is_empty()) {
                 assert!(
                     part.parse::<u64>().is_ok(),
                     "Each path component should be a number: {}",
-                    id
+                    part
                 );
             }
         }
@@ -349,11 +349,11 @@ mod tests {
 
     #[test]
     fn test_monotonically_increasing_ids() {
-        let generator = TraversalIdGenerator::new(1, 20, 4);
+        let generator = TraversalPathGenerator::new(1, 20, 4);
 
         // Extract all individual IDs used in paths
         let mut all_ids: Vec<u64> = generator
-            .ids()
+            .paths()
             .iter()
             .flat_map(|path| {
                 path.split('/')
@@ -379,20 +379,20 @@ mod tests {
 
     #[test]
     fn test_parent_paths_exist() {
-        let generator = TraversalIdGenerator::new(1, 100, 5);
-        let id_set: HashSet<_> = generator.ids().iter().map(|s| s.as_str()).collect();
+        let generator = TraversalPathGenerator::new(1, 100, 5);
+        let path_set: HashSet<_> = generator.paths().iter().map(|s| s.as_str()).collect();
 
         // Every path's parent should also exist (except root)
-        for id in generator.ids() {
+        for path in generator.paths() {
             // Remove trailing slash to find parent
-            let id_without_trailing = id.trim_end_matches('/');
-            if let Some(last_slash) = id_without_trailing.rfind('/') {
-                let parent = format!("{}/", &id_without_trailing[..last_slash]);
+            let path_without_trailing = path.trim_end_matches('/');
+            if let Some(last_slash) = path_without_trailing.rfind('/') {
+                let parent = format!("{}/", &path_without_trailing[..last_slash]);
                 assert!(
-                    id_set.contains(parent.as_str()),
+                    path_set.contains(parent.as_str()),
                     "Parent path {} should exist for {}",
                     parent,
-                    id
+                    path
                 );
             }
         }
@@ -400,17 +400,17 @@ mod tests {
 
     #[test]
     fn test_no_cyclic_ids() {
-        let generator = TraversalIdGenerator::new(1, 100, 5);
+        let generator = TraversalPathGenerator::new(1, 100, 5);
 
-        for id in generator.ids() {
-            let parts: Vec<&str> = id.split('/').filter(|s| !s.is_empty()).collect();
+        for path in generator.paths() {
+            let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
             let unique_parts: HashSet<&str> = parts.iter().copied().collect();
 
             assert_eq!(
                 parts.len(),
                 unique_parts.len(),
-                "Path should not have repeated IDs: {}",
-                id
+                "Path should not have repeated sub-paths: {}",
+                path
             );
         }
     }
@@ -418,16 +418,16 @@ mod tests {
     #[test]
     fn test_depth_respected() {
         let max_depth = 3;
-        let generator = TraversalIdGenerator::new(1, 50, max_depth);
+        let generator = TraversalPathGenerator::new(1, 50, max_depth);
 
-        for id in generator.ids() {
-            let depth = id.split('/').filter(|s| !s.is_empty()).count();
+        for path in generator.paths() {
+            let depth = path.split('/').filter(|s| !s.is_empty()).count();
             assert!(
                 depth <= max_depth,
                 "Depth {} exceeds max_depth {} for {}",
                 depth,
                 max_depth,
-                id
+                path
             );
         }
     }
@@ -436,7 +436,7 @@ mod tests {
     fn test_entity_context_root_group() {
         let ctx = EntityContext::root_group(1, 100);
         assert_eq!(ctx.id, 100);
-        assert_eq!(ctx.traversal_id, "1/100/");
+        assert_eq!(ctx.traversal_path, "1/100/");
     }
 
     #[test]
@@ -444,12 +444,12 @@ mod tests {
         let parent = EntityContext::root_group(1, 100);
         let child = EntityContext::subgroup(&parent, 101);
         assert_eq!(child.id, 101);
-        assert_eq!(child.traversal_id, "1/100/101/");
+        assert_eq!(child.traversal_path, "1/100/101/");
 
         // Deeper nesting
         let grandchild = EntityContext::subgroup(&child, 102);
         assert_eq!(grandchild.id, 102);
-        assert_eq!(grandchild.traversal_id, "1/100/101/102/");
+        assert_eq!(grandchild.traversal_path, "1/100/101/102/");
     }
 
     #[test]
@@ -459,12 +459,12 @@ mod tests {
 
         // Project inherits group's traversal ID
         assert_eq!(project.id, 500);
-        assert_eq!(project.traversal_id, "1/100/");
+        assert_eq!(project.traversal_path, "1/100/");
 
         let mr = EntityContext::child(&project, 1000);
         // MR also inherits the same traversal ID
         assert_eq!(mr.id, 1000);
-        assert_eq!(mr.traversal_id, "1/100/");
+        assert_eq!(mr.traversal_path, "1/100/");
     }
 
     #[test]
@@ -504,8 +504,8 @@ mod tests {
 
         let groups = registry.get("Group").unwrap();
         assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0].traversal_id, "1/100/");
-        assert_eq!(groups[1].traversal_id, "1/101/");
+        assert_eq!(groups[0].traversal_path, "1/100/");
+        assert_eq!(groups[1].traversal_path, "1/101/");
 
         let group_ids = registry.get_ids("Group");
         assert_eq!(group_ids, vec![100, 101]);
