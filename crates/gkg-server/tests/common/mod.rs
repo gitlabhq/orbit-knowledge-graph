@@ -27,7 +27,8 @@ const TEST_PASSWORD: &str = "testpass";
 const MAX_CONNECTION_ATTEMPTS: u32 = 30;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(500);
 
-const SCHEMA_SQL: &str = include_str!("../fixtures/schema.sql");
+const SIPHON_SCHEMA_SQL: &str = include_str!("../fixtures/siphon.sql");
+const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../fixtures/schema/graph.sql");
 
 pub struct TestContext {
     _container: ContainerAsync<GenericImage>,
@@ -134,17 +135,20 @@ impl TestContext {
     }
 
     async fn run_schema(url: &str) {
-        let client = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+        let client =
+            ArrowClickHouseClient::new(url, TEST_DATABASE, TEST_USERNAME, Some(TEST_PASSWORD));
 
-        for statement in SCHEMA_SQL.split(';') {
-            let statement = statement.trim();
-            if statement.is_empty() {
-                continue;
+        for schema_sql in [SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL] {
+            for statement in schema_sql.split(';') {
+                let statement = statement.trim();
+                if statement.is_empty() {
+                    continue;
+                }
+                client
+                    .execute(statement)
+                    .await
+                    .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
             }
-            client
-                .execute(statement)
-                .await
-                .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
         }
     }
 }

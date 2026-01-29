@@ -1,4 +1,5 @@
-CREATE TABLE IF NOT EXISTS test.siphon_users
+-- Siphon source tables for user data
+CREATE TABLE IF NOT EXISTS siphon_users
 (
     `id` Int64,
     `email` String DEFAULT '',
@@ -66,35 +67,8 @@ PRIMARY KEY id
 ORDER BY id
 SETTINGS index_granularity = 8192;
 
-CREATE TABLE IF NOT EXISTS test.gl_users (
-    id Int64,
-    username String DEFAULT '',
-    email String DEFAULT '',
-    name String DEFAULT '',
-    first_name String DEFAULT '',
-    last_name String DEFAULT '',
-    state String DEFAULT '',
-    public_email Nullable(String),
-    preferred_language Nullable(String),
-    last_activity_on Nullable(Date32),
-    private_profile Bool DEFAULT false,
-    is_admin Bool DEFAULT false,
-    is_auditor Bool DEFAULT false,
-    is_external Bool DEFAULT false,
-    user_type String DEFAULT '',
-    created_at Nullable(DateTime64(6, 'UTC')),
-    updated_at Nullable(DateTime64(6, 'UTC')),
-    _version DateTime64(6, 'UTC') DEFAULT now(),
-    _deleted Bool DEFAULT false
-) ENGINE = MergeTree() ORDER BY id;
-
-CREATE TABLE IF NOT EXISTS test.global_indexing_watermark (
-    watermark DateTime64(6, 'UTC'),
-    _version DateTime64(6, 'UTC') DEFAULT now64()
-) ENGINE = ReplacingMergeTree(_version) ORDER BY tuple();
-
--- Namespace/Group source tables
-CREATE TABLE IF NOT EXISTS test.siphon_namespaces
+-- Siphon source tables for namespace/group data
+CREATE TABLE IF NOT EXISTS siphon_namespaces
 (
     `id` Int64,
     `name` String,
@@ -115,7 +89,7 @@ CREATE TABLE IF NOT EXISTS test.siphon_namespaces
 PRIMARY KEY id
 ORDER BY id;
 
-CREATE TABLE IF NOT EXISTS test.siphon_namespace_details
+CREATE TABLE IF NOT EXISTS siphon_namespace_details
 (
     `namespace_id` Int64,
     `created_at` Nullable(DateTime64(6, 'UTC')),
@@ -132,7 +106,7 @@ CREATE TABLE IF NOT EXISTS test.siphon_namespace_details
 PRIMARY KEY namespace_id
 ORDER BY namespace_id;
 
-CREATE TABLE IF NOT EXISTS test.namespace_traversal_paths
+CREATE TABLE IF NOT EXISTS namespace_traversal_paths
 (
     `id` Int64 DEFAULT 0,
     `traversal_path` String DEFAULT '0/',
@@ -143,33 +117,8 @@ PRIMARY KEY id
 ORDER BY id
 SETTINGS index_granularity = 512;
 
--- Group destination table
-CREATE TABLE IF NOT EXISTS test.gl_groups (
-    id Int64,
-    name Nullable(String),
-    description Nullable(String),
-    visibility_level Nullable(String),
-    full_path Nullable(String),
-    created_at Nullable(DateTime64(6, 'UTC')),
-    updated_at Nullable(DateTime64(6, 'UTC')),
-    traversal_path String default '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
-    _deleted Bool DEFAULT false
-) ENGINE = MergeTree() ORDER BY id;
-
--- Edges table for relationships
-CREATE TABLE IF NOT EXISTS test.kg_edges (
-    source_id Int64,
-    source_kind String,
-    relationship_kind String,
-    target_id Int64,
-    target_kind String,
-    _version DateTime64(6, 'UTC') DEFAULT now(),
-    _deleted Bool DEFAULT false
-) ENGINE = MergeTree() ORDER BY (source_id, target_id);
-
--- Project source tables
-CREATE TABLE IF NOT EXISTS test.siphon_projects
+-- Siphon source tables for project data
+CREATE TABLE IF NOT EXISTS siphon_projects
 (
     `id` Int64,
     `name` Nullable(String),
@@ -191,7 +140,7 @@ CREATE TABLE IF NOT EXISTS test.siphon_projects
 PRIMARY KEY id
 ORDER BY id;
 
-CREATE TABLE IF NOT EXISTS test.project_namespace_traversal_paths
+CREATE TABLE IF NOT EXISTS project_namespace_traversal_paths
 (
     `id` Int64 DEFAULT 0,
     `traversal_path` String DEFAULT '0/',
@@ -201,27 +150,3 @@ CREATE TABLE IF NOT EXISTS test.project_namespace_traversal_paths
 PRIMARY KEY id
 ORDER BY id
 SETTINGS index_granularity = 512;
-
--- Project destination table
-CREATE TABLE IF NOT EXISTS test.gl_projects (
-    id Int64,
-    name Nullable(String),
-    description Nullable(String),
-    visibility_level Nullable(String),
-    path Nullable(String),
-    created_at Nullable(DateTime64(6, 'UTC')),
-    updated_at Nullable(DateTime64(6, 'UTC')),
-    archived Nullable(Bool),
-    star_count Nullable(Int64),
-    last_activity_at Nullable(DateTime64(6, 'UTC')),
-    traversal_path String default '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
-    _deleted Bool DEFAULT false
-) ENGINE = MergeTree() ORDER BY id;
-
--- Namespace watermark table
-CREATE TABLE IF NOT EXISTS test.namespace_indexing_watermark (
-    namespace Int64,
-    watermark DateTime64(6, 'UTC'),
-    _version DateTime64(6, 'UTC') DEFAULT now64()
-) ENGINE = ReplacingMergeTree(_version) ORDER BY namespace
