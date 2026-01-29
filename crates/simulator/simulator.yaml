@@ -108,9 +108,12 @@ generation:
     HAS_JOB:
       "Stage -> Job": 5               # 5 jobs per stage
 
-    # MR-related files
+    # MR diffs and files
+    HAS_DIFF:
+      "MergeRequest -> MergeRequestDiff": 2  # 2 diffs per MR (initial + updates)
+
     HAS_FILE:
-      "MergeRequest -> MergeRequestFile": 4  # 4 files per MR
+      "MergeRequestDiff -> MergeRequestDiffFile": 4  # 4 files per diff
 
     # Notes (comments) on entities
     HAS_NOTE:

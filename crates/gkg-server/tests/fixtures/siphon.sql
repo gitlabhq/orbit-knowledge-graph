@@ -256,6 +256,62 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS index_granularity = 8192;
 
+-- Siphon source tables for merge request diffs
+CREATE TABLE IF NOT EXISTS siphon_merge_request_diffs
+(
+    `id` Int64,
+    `state` Nullable(String),
+    `merge_request_id` Int64,
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `base_commit_sha` Nullable(String),
+    `real_size` Nullable(String),
+    `head_commit_sha` Nullable(String),
+    `start_commit_sha` Nullable(String),
+    `commits_count` Nullable(Int64),
+    `external_diff` Nullable(String),
+    `external_diff_store` Nullable(Int64) DEFAULT 1,
+    `stored_externally` Nullable(Bool),
+    `files_count` Nullable(Int8),
+    `sorted` Bool DEFAULT false,
+    `diff_type` Int8 DEFAULT 1,
+    `patch_id_sha` Nullable(String),
+    `project_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+-- Siphon source tables for merge request diff files
+CREATE TABLE IF NOT EXISTS siphon_merge_request_diff_files
+(
+    `merge_request_diff_id` Int64,
+    `relative_order` Int64,
+    `new_file` Bool,
+    `renamed_file` Bool,
+    `deleted_file` Bool,
+    `too_large` Bool,
+    `a_mode` String,
+    `b_mode` String,
+    `new_path` Nullable(String),
+    `old_path` String,
+    `diff` Nullable(String),
+    `binary` Nullable(Bool),
+    `external_diff_offset` Nullable(Int64),
+    `external_diff_size` Nullable(Int64),
+    `generated` Nullable(Bool),
+    `encoded_file_path` Bool DEFAULT false,
+    `project_id` Nullable(Int64),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (merge_request_diff_id, relative_order)
+ORDER BY (merge_request_diff_id, relative_order);
+
 -- Knowledge graph enabled namespaces
 CREATE TABLE IF NOT EXISTS test.siphon_knowledge_graph_enabled_namespaces
 (
