@@ -1,0 +1,28 @@
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ClickHouseError {
+    #[error("query error: {0}")]
+    Query(#[source] clickhouse::error::Error),
+
+    #[error("insert error: {0}")]
+    Insert(#[source] clickhouse::error::Error),
+
+    #[error("arrow decode error: {0}")]
+    ArrowDecode(#[source] arrow::error::ArrowError),
+
+    #[error("arrow encode error: {0}")]
+    ArrowEncode(#[source] arrow::error::ArrowError),
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigurationError {
+    #[error("database cannot be empty")]
+    EmptyDatabase,
+
+    #[error("url cannot be empty")]
+    EmptyUrl,
+
+    #[error("username cannot be empty")]
+    EmptyUsername,
+}

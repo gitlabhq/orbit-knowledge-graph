@@ -1001,6 +1001,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickhouse-client"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-ipc",
+ "bytes",
+ "clickhouse",
+ "futures",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "clickhouse-macros"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2211,12 +2227,11 @@ name = "etl-engine"
 version = "0.1.0"
 dependencies = [
  "arrow",
- "arrow-ipc",
  "async-nats",
  "async-trait",
  "bytes",
  "chrono",
- "clickhouse",
+ "clickhouse-client",
  "futures",
  "parking_lot",
  "serde",

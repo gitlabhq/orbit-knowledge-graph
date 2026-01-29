@@ -1,0 +1,19 @@
+[package]
+name = "clickhouse-client"
+version = "0.1.0"
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+arrow = { workspace = true }
+arrow-ipc = { workspace = true }
+bytes = { workspace = true }
+clickhouse = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+serial_test = { workspace = true }

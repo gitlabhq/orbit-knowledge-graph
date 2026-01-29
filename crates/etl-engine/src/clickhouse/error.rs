@@ -1,23 +1,6 @@
-//! Error types for ClickHouse operations.
-
-use thiserror::Error;
+use clickhouse_client::ClickHouseError;
 
 use crate::destination::DestinationError;
-
-#[derive(Debug, Error)]
-pub enum ClickHouseError {
-    #[error("query error: {0}")]
-    Query(#[source] clickhouse::error::Error),
-
-    #[error("insert error: {0}")]
-    Insert(#[source] clickhouse::error::Error),
-
-    #[error("arrow decode error: {0}")]
-    ArrowDecode(#[source] arrow::error::ArrowError),
-
-    #[error("arrow encode error: {0}")]
-    ArrowEncode(#[source] arrow::error::ArrowError),
-}
 
 impl From<ClickHouseError> for DestinationError {
     fn from(error: ClickHouseError) -> Self {

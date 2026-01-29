@@ -1,24 +1,15 @@
-//! ClickHouse connection configuration.
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use super::arrow_client::ArrowClickHouseClient;
-use crate::destination::DestinationError;
-use crate::env::env_var_or;
+use crate::arrow_client::ArrowClickHouseClient;
+use crate::error::ConfigurationError;
 
-/// ClickHouse connection settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClickHouseConfiguration {
-    /// Database name.
     pub database: String,
-
-    /// Server URL, e.g. "http://127.0.0.1:8123" (HTTP protocol).
     pub url: String,
-
-    /// Username for authentication.
     pub username: String,
-
-    /// Optional password for authentication.
     #[serde(default)]
     pub password: Option<String>,
 }
@@ -35,26 +26,10 @@ impl Default for ClickHouseConfiguration {
 }
 
 impl ClickHouseConfiguration {
-    /// Creates configuration from environment variables.
-    ///
-    /// Uses defaults for any unset variables:
-    /// - `CLICKHOUSE_URL`: Server address (default: "http://127.0.0.1:8123")
-    /// - `CLICKHOUSE_DATABASE`: Database name (default: "default")
-    /// - `CLICKHOUSE_USERNAME`: Username (default: "default")
-    /// - `CLICKHOUSE_PASSWORD`: Optional password
     pub fn from_env() -> Self {
         Self::from_env_with_prefix("")
     }
 
-    /// Creates configuration from environment variables with a custom prefix.
-    ///
-    /// For example, with prefix "DATALAKE", reads:
-    /// - `DATALAKE_CLICKHOUSE_URL`: Server address (default: "http://127.0.0.1:8123")
-    /// - `DATALAKE_CLICKHOUSE_DATABASE`: Database name (default: "default")
-    /// - `DATALAKE_CLICKHOUSE_USERNAME`: Username (default: "default")
-    /// - `DATALAKE_CLICKHOUSE_PASSWORD`: Optional password
-    ///
-    /// With an empty prefix, reads the standard `CLICKHOUSE_*` variables.
     pub fn from_env_with_prefix(prefix: &str) -> Self {
         let prefix = if prefix.is_empty() {
             "CLICKHOUSE".to_string()
@@ -70,30 +45,22 @@ impl ClickHouseConfiguration {
         }
     }
 
-    /// Validates the configuration fields.
-    pub fn validate(&self) -> Result<(), DestinationError> {
+    pub fn validate(&self) -> Result<(), ConfigurationError> {
         if self.database.is_empty() {
-            return Err(DestinationError::InvalidConfiguration(
-                "database cannot be empty".to_string(),
-            ));
+            return Err(ConfigurationError::EmptyDatabase);
         }
 
         if self.url.is_empty() {
-            return Err(DestinationError::InvalidConfiguration(
-                "url cannot be empty".to_string(),
-            ));
+            return Err(ConfigurationError::EmptyUrl);
         }
 
         if self.username.is_empty() {
-            return Err(DestinationError::InvalidConfiguration(
-                "username cannot be empty".to_string(),
-            ));
+            return Err(ConfigurationError::EmptyUsername);
         }
 
         Ok(())
     }
 
-    /// Builds an Arrow ClickHouse client from this configuration.
     pub fn build_client(&self) -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
             &self.url,
@@ -102,6 +69,13 @@ impl ClickHouseConfiguration {
             self.password.as_deref(),
         )
     }
+}
+
+fn env_var_or<T: FromStr>(key: &str, default: T) -> T {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 #[cfg(test)]
@@ -157,8 +131,7 @@ mod tests {
         };
 
         let result = config.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("database"));
+        assert!(matches!(result, Err(ConfigurationError::EmptyDatabase)));
     }
 
     #[test]
@@ -171,8 +144,7 @@ mod tests {
         };
 
         let result = config.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("url"));
+        assert!(matches!(result, Err(ConfigurationError::EmptyUrl)));
     }
 
     #[test]
@@ -185,8 +157,7 @@ mod tests {
         };
 
         let result = config.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("username"));
+        assert!(matches!(result, Err(ConfigurationError::EmptyUsername)));
     }
 
     #[test]
@@ -199,7 +170,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_from_env_with_prefix_reads_prefixed_variables() {
-        // SAFETY: Test is serialized and cleans up env vars after use.
         unsafe {
             std::env::set_var("DATALAKE_CLICKHOUSE_URL", "http://datalake:8123");
             std::env::set_var("DATALAKE_CLICKHOUSE_DATABASE", "datalake_db");
@@ -214,7 +184,6 @@ mod tests {
         assert_eq!(config.username, "datalake_user");
         assert_eq!(config.password, Some("datalake_pass".to_string()));
 
-        // SAFETY: Cleaning up env vars set above.
         unsafe {
             std::env::remove_var("DATALAKE_CLICKHOUSE_URL");
             std::env::remove_var("DATALAKE_CLICKHOUSE_DATABASE");
@@ -226,7 +195,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_from_env_with_empty_prefix_reads_standard_variables() {
-        // SAFETY: Test is serialized and cleans up env vars after use.
         unsafe {
             std::env::set_var("CLICKHOUSE_URL", "http://standard:8123");
             std::env::set_var("CLICKHOUSE_DATABASE", "standard_db");
@@ -237,7 +205,6 @@ mod tests {
         assert_eq!(config.url, "http://standard:8123");
         assert_eq!(config.database, "standard_db");
 
-        // SAFETY: Cleaning up env vars set above.
         unsafe {
             std::env::remove_var("CLICKHOUSE_URL");
             std::env::remove_var("CLICKHOUSE_DATABASE");
