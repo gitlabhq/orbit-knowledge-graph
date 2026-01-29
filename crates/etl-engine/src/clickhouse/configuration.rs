@@ -42,11 +42,33 @@ impl ClickHouseConfiguration {
     /// - `CLICKHOUSE_USERNAME`: Username (default: "default")
     /// - `CLICKHOUSE_PASSWORD`: Optional password
     pub fn from_env() -> Self {
+        Self::from_env_with_prefix("")
+    }
+
+    /// Creates configuration from environment variables with a custom prefix.
+    ///
+    /// For example, with prefix "DATALAKE", reads:
+    /// - `DATALAKE_CLICKHOUSE_URL`: Server address (default: "http://127.0.0.1:8123")
+    /// - `DATALAKE_CLICKHOUSE_DATABASE`: Database name (default: "default")
+    /// - `DATALAKE_CLICKHOUSE_USERNAME`: Username (default: "default")
+    /// - `DATALAKE_CLICKHOUSE_PASSWORD`: Optional password
+    ///
+    /// With an empty prefix, reads the standard `CLICKHOUSE_*` variables.
+    pub fn from_env_with_prefix(prefix: &str) -> Self {
+        let prefix = if prefix.is_empty() {
+            "CLICKHOUSE".to_string()
+        } else {
+            format!("{prefix}_CLICKHOUSE")
+        };
+
         Self {
-            url: std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://127.0.0.1:8123".into()),
-            database: std::env::var("CLICKHOUSE_DATABASE").unwrap_or_else(|_| "default".into()),
-            username: std::env::var("CLICKHOUSE_USERNAME").unwrap_or_else(|_| "default".into()),
-            password: std::env::var("CLICKHOUSE_PASSWORD").ok(),
+            url: std::env::var(format!("{prefix}_URL"))
+                .unwrap_or_else(|_| "http://127.0.0.1:8123".into()),
+            database: std::env::var(format!("{prefix}_DATABASE"))
+                .unwrap_or_else(|_| "default".into()),
+            username: std::env::var(format!("{prefix}_USERNAME"))
+                .unwrap_or_else(|_| "default".into()),
+            password: std::env::var(format!("{prefix}_PASSWORD")).ok(),
         }
     }
 
@@ -86,6 +108,8 @@ impl ClickHouseConfiguration {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
     #[test]
@@ -172,5 +196,53 @@ mod tests {
         let config = ClickHouseConfiguration::default();
         assert!(config.url.starts_with("http://"));
         assert!(config.url.contains("8123"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_from_env_with_prefix_reads_prefixed_variables() {
+        // SAFETY: Test is serialized and cleans up env vars after use.
+        unsafe {
+            std::env::set_var("DATALAKE_CLICKHOUSE_URL", "http://datalake:8123");
+            std::env::set_var("DATALAKE_CLICKHOUSE_DATABASE", "datalake_db");
+            std::env::set_var("DATALAKE_CLICKHOUSE_USERNAME", "datalake_user");
+            std::env::set_var("DATALAKE_CLICKHOUSE_PASSWORD", "datalake_pass");
+        }
+
+        let config = ClickHouseConfiguration::from_env_with_prefix("DATALAKE");
+
+        assert_eq!(config.url, "http://datalake:8123");
+        assert_eq!(config.database, "datalake_db");
+        assert_eq!(config.username, "datalake_user");
+        assert_eq!(config.password, Some("datalake_pass".to_string()));
+
+        // SAFETY: Cleaning up env vars set above.
+        unsafe {
+            std::env::remove_var("DATALAKE_CLICKHOUSE_URL");
+            std::env::remove_var("DATALAKE_CLICKHOUSE_DATABASE");
+            std::env::remove_var("DATALAKE_CLICKHOUSE_USERNAME");
+            std::env::remove_var("DATALAKE_CLICKHOUSE_PASSWORD");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_from_env_with_empty_prefix_reads_standard_variables() {
+        // SAFETY: Test is serialized and cleans up env vars after use.
+        unsafe {
+            std::env::set_var("CLICKHOUSE_URL", "http://standard:8123");
+            std::env::set_var("CLICKHOUSE_DATABASE", "standard_db");
+        }
+
+        let config = ClickHouseConfiguration::from_env_with_prefix("");
+
+        assert_eq!(config.url, "http://standard:8123");
+        assert_eq!(config.database, "standard_db");
+
+        // SAFETY: Cleaning up env vars set above.
+        unsafe {
+            std::env::remove_var("CLICKHOUSE_URL");
+            std::env::remove_var("CLICKHOUSE_DATABASE");
+        }
     }
 }

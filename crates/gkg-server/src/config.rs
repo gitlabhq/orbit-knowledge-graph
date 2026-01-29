@@ -15,7 +15,9 @@ pub struct AppConfig {
     #[serde(default)]
     pub nats: NatsConfiguration,
     #[serde(default)]
-    pub clickhouse: ClickHouseConfiguration,
+    pub datalake: ClickHouseConfiguration,
+    #[serde(default)]
+    pub graph: ClickHouseConfiguration,
     #[serde(default)]
     pub engine: EngineConfiguration,
 }
@@ -49,7 +51,8 @@ impl AppConfig {
             jwt_clock_skew_secs,
             ontology_path,
             nats: NatsConfiguration::from_env(),
-            clickhouse: ClickHouseConfiguration::from_env(),
+            datalake: ClickHouseConfiguration::from_env_with_prefix("DATALAKE"),
+            graph: ClickHouseConfiguration::from_env_with_prefix("GRAPH"),
             engine: EngineConfiguration::default(),
         })
     }
