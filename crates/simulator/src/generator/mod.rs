@@ -120,7 +120,12 @@ impl Generator {
         _rng: &mut impl Rng,
     ) -> Result<(Vec<RecordBatch>, Vec<EdgeRecord>)> {
         let schema = Arc::new(node.to_arrow_schema());
-        let mut builder = BatchBuilder::new(node, schema, self.config.generation.batch_size);
+        let mut builder = BatchBuilder::with_seed(
+            node,
+            schema,
+            self.config.generation.batch_size,
+            self.config.generation.seed,
+        );
         let mut edges = Vec::new();
         let is_group = node.name == "Group";
 
@@ -130,8 +135,12 @@ impl Generator {
                 let trav = format!("{}/{}/", org_id, ns_id);
                 (ns_id, trav)
             } else {
+                // Non-group root entities (like Users) get org-level paths.
+                // Note: The query engine skips traversal path security filters
+                // for Users since their visibility is determined through
+                // MEMBER_OF relationships to Groups, not path hierarchy.
                 let eid = registry.next_entity_id();
-                (eid, org_id.to_string())
+                (eid, format!("{}/", org_id))
             };
 
             builder.add_row(org_id, traversal_id.clone(), entity_id);
@@ -199,7 +208,12 @@ impl Generator {
         rng: &mut impl Rng,
     ) -> Result<(Vec<RecordBatch>, Vec<EdgeRecord>)> {
         let schema = Arc::new(node.to_arrow_schema());
-        let mut builder = BatchBuilder::new(node, schema, self.config.generation.batch_size);
+        let mut builder = BatchBuilder::with_seed(
+            node,
+            schema,
+            self.config.generation.batch_size,
+            self.config.generation.seed,
+        );
         let mut edges = Vec::new();
         let is_group = node.name == "Group";
 

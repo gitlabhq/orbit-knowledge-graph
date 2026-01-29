@@ -318,6 +318,11 @@ pub struct GenerationConfig {
     /// Run generation in parallel across organizations.
     #[serde(default)]
     pub parallel: bool,
+
+    /// Random seed for reproducible data generation.
+    /// If not set, uses thread-local random source.
+    #[serde(default)]
+    pub seed: Option<u64>,
 }
 
 fn default_output_dir() -> String {
@@ -349,6 +354,7 @@ impl Default for GenerationConfig {
             associations: AssociationConfig::default(),
             batch_size: default_batch_size(),
             parallel: false,
+            seed: None,
         }
     }
 }

@@ -42,6 +42,15 @@ enum ColumnValues {
 
 impl BatchBuilder {
     pub fn new(node: &NodeEntity, schema: Arc<Schema>, batch_size: usize) -> Self {
+        Self::with_seed(node, schema, batch_size, None)
+    }
+
+    pub fn with_seed(
+        node: &NodeEntity,
+        schema: Arc<Schema>,
+        batch_size: usize,
+        seed: Option<u64>,
+    ) -> Self {
         let columns: Vec<ColumnData> = node
             .fields
             .iter()
@@ -53,11 +62,16 @@ impl BatchBuilder {
 
         let primary_keys: HashSet<String> = node.primary_keys.iter().cloned().collect();
 
+        let fake_gen = match seed {
+            Some(s) => FakeValueGenerator::fast_with_seed(s),
+            None => FakeValueGenerator::new_fast(),
+        };
+
         Self {
             primary_keys,
             batch_size,
             schema,
-            fake_gen: FakeValueGenerator::new_fast(), // Fast mode with non-predictable patterns
+            fake_gen,
             organization_ids: Vec::with_capacity(batch_size),
             traversal_ids: Vec::with_capacity(batch_size),
             columns,

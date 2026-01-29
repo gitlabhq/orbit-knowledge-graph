@@ -6,12 +6,13 @@ use fake::faker::company::en::*;
 use fake::faker::internet::en::*;
 use fake::faker::lorem::en::*;
 use fake::faker::name::en::*;
-use fake::rand::Rng;
+use fake::rand::rngs::StdRng;
+use fake::rand::{Rng, SeedableRng};
 use ontology::{DataType, Field};
 
 /// Generates fake values for ontology fields.
 pub struct FakeValueGenerator {
-    rng: fake::rand::rngs::ThreadRng,
+    rng: StdRng,
     fast_mode: bool,
     counter: u64,
 }
@@ -25,7 +26,7 @@ impl Default for FakeValueGenerator {
 impl FakeValueGenerator {
     pub fn new() -> Self {
         Self {
-            rng: fake::rand::thread_rng(),
+            rng: StdRng::from_entropy(),
             fast_mode: false,
             counter: 0,
         }
@@ -33,7 +34,23 @@ impl FakeValueGenerator {
 
     pub fn new_fast() -> Self {
         Self {
-            rng: fake::rand::thread_rng(),
+            rng: StdRng::from_entropy(),
+            fast_mode: true,
+            counter: 0,
+        }
+    }
+
+    pub fn with_seed(seed: u64) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed),
+            fast_mode: false,
+            counter: 0,
+        }
+    }
+
+    pub fn fast_with_seed(seed: u64) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed),
             fast_mode: true,
             counter: 0,
         }
@@ -50,6 +67,11 @@ impl FakeValueGenerator {
             return self.generate_fast(field);
         }
 
+        // Use ontology enum values if defined (for both Enum and String types)
+        if field.enum_values.is_some() {
+            return self.generate_enum(field);
+        }
+
         match field.data_type {
             DataType::String => self.generate_string(&field.name),
             DataType::Int => self.generate_int(&field.name),
@@ -62,6 +84,11 @@ impl FakeValueGenerator {
     }
 
     fn generate_fast(&mut self, field: &Field) -> FakeValue {
+        // Use ontology enum values if defined (for both Enum and String types)
+        if field.enum_values.is_some() {
+            return self.generate_enum(field);
+        }
+
         match field.data_type {
             DataType::Enum => self.generate_enum(field),
             DataType::String => {
