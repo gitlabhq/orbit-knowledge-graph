@@ -2,7 +2,6 @@
 
 #![allow(dead_code)]
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -82,15 +81,6 @@ impl TestContext {
             .execute(sql)
             .await
             .expect("execute failed");
-    }
-
-    pub fn ontology_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates directory should exist")
-            .parent()
-            .expect("workspace root should exist")
-            .join("fixtures/ontology")
     }
 
     fn create_client(&self) -> ArrowClickHouseClient {

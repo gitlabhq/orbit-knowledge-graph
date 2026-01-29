@@ -5,7 +5,6 @@ mod pipeline;
 mod transform;
 mod watermark_store;
 
-use std::path::Path;
 use std::sync::Arc;
 
 use datalake::{Datalake, DatalakeQuery};
@@ -25,20 +24,28 @@ pub struct SdlcModule {
 }
 
 impl SdlcModule {
-    pub async fn new(
-        configuration: &ClickHouseConfiguration,
-        ontology_path: impl AsRef<Path>,
-    ) -> Result<Self, ModuleInitError> {
+    pub async fn new(configuration: &ClickHouseConfiguration) -> Result<Self, ModuleInitError> {
         let client = Arc::new(configuration.build_client());
-
-        // TODO: This is placeholder for now, it will eventually be received from Rails.
-        let ontology = Ontology::load_from_dir(ontology_path).map_err(ModuleInitError::new)?;
+        let ontology = Ontology::load_embedded().map_err(ModuleInitError::new)?;
 
         Ok(Self {
             datalake: Arc::new(Datalake::new(Arc::clone(&client))),
             watermark_store: Arc::new(ClickHouseWatermarkStore::new(client)),
             ontology: Arc::new(ontology),
         })
+    }
+
+    #[cfg(test)]
+    fn with_ontology(
+        datalake: Arc<dyn DatalakeQuery>,
+        watermark_store: Arc<dyn WatermarkStore>,
+        ontology: Ontology,
+    ) -> Self {
+        Self {
+            datalake,
+            watermark_store,
+            ontology: Arc::new(ontology),
+        }
     }
 
     fn create_global_pipelines(&self) -> Vec<OntologyEntityPipeline> {
@@ -113,47 +120,33 @@ impl Module for SdlcModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-
-    fn fixtures_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates directory should exist")
-            .parent()
-            .expect("workspace root should exist")
-            .join("fixtures/ontology")
-    }
 
     #[test]
     fn create_global_pipelines_returns_global_entities() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        let module = SdlcModule {
-            datalake: Arc::new(MockDatalake),
-            watermark_store: Arc::new(MockWatermarkStore),
-            ontology: Arc::new(ontology),
-        };
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let module = SdlcModule::with_ontology(
+            Arc::new(MockDatalake),
+            Arc::new(MockWatermarkStore),
+            ontology,
+        );
 
         let pipelines = module.create_global_pipelines();
 
-        // User entity has global scope
         let entity_names: Vec<_> = pipelines.iter().map(|p| p.entity_name()).collect();
         assert!(entity_names.contains(&"User"), "should include User entity");
     }
 
     #[test]
     fn create_namespace_pipelines_returns_namespaced_entities() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        let module = SdlcModule {
-            datalake: Arc::new(MockDatalake),
-            watermark_store: Arc::new(MockWatermarkStore),
-            ontology: Arc::new(ontology),
-        };
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let module = SdlcModule::with_ontology(
+            Arc::new(MockDatalake),
+            Arc::new(MockWatermarkStore),
+            ontology,
+        );
 
         let pipelines = module.create_namespace_pipelines();
 
-        // Group and Project entities have namespaced scope
         let entity_names: Vec<_> = pipelines.iter().map(|p| p.entity_name()).collect();
         assert!(
             entity_names.contains(&"Group"),
