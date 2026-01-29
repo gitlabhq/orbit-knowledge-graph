@@ -12,6 +12,7 @@ use tracing::info;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     labkit_rs::logging::init();
+    let _metrics = labkit_rs::metrics::try_init().ok();
 
     let args = Args::parse();
     let config = AppConfig::from_env()?;

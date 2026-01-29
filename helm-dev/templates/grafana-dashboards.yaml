@@ -1,0 +1,12 @@
+{{- if .Values.observability.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gkg-overview-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+data:
+  gkg-overview.json: |-
+{{ .Files.Get "dashboards/gkg-overview.json" | indent 4 }}
+{{- end }}

@@ -22,3 +22,7 @@ dependencies:
     version: "6.51.0"
     repository: "https://grafana.github.io/helm-charts"
     condition: observability.loki.enabled
+  - name: alloy
+    version: "1.0.3"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: observability.alloy.enabled
