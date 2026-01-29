@@ -20,7 +20,7 @@ pub struct BatchBuilder {
     schema: Arc<Schema>,
     fake_gen: FakeValueGenerator,
     organization_ids: Vec<u32>,
-    traversal_ids: Vec<String>,
+    traversal_paths: Vec<String>,
     columns: Vec<ColumnData>,
     batches: Vec<RecordBatch>,
 }
@@ -73,15 +73,15 @@ impl BatchBuilder {
             schema,
             fake_gen,
             organization_ids: Vec::with_capacity(batch_size),
-            traversal_ids: Vec::with_capacity(batch_size),
+            traversal_paths: Vec::with_capacity(batch_size),
             columns,
             batches: Vec::new(),
         }
     }
 
-    pub fn add_row(&mut self, organization_id: u32, traversal_id: String, id: i64) {
+    pub fn add_row(&mut self, organization_id: u32, traversal_path: String, id: i64) {
         self.organization_ids.push(organization_id);
-        self.traversal_ids.push(traversal_id);
+        self.traversal_paths.push(traversal_path);
 
         for col_data in &mut self.columns {
             if self.primary_keys.contains(&col_data.field.name) {
@@ -111,7 +111,7 @@ impl BatchBuilder {
         ))));
 
         arrays.push(Arc::new(StringArray::from(std::mem::take(
-            &mut self.traversal_ids,
+            &mut self.traversal_paths,
         ))));
 
         for col_data in &mut self.columns {
@@ -124,7 +124,7 @@ impl BatchBuilder {
         }
 
         self.organization_ids = Vec::with_capacity(self.batch_size);
-        self.traversal_ids = Vec::with_capacity(self.batch_size);
+        self.traversal_paths = Vec::with_capacity(self.batch_size);
     }
 
     pub fn finish(mut self) -> Vec<RecordBatch> {
@@ -263,12 +263,12 @@ mod tests {
         assert!(org_ids.iter().all(|v| v == Some(1)));
 
         // Check traversal_path column
-        let traversal_ids = batch
+        let traversal_paths = batch
             .column(1)
             .as_any()
             .downcast_ref::<StringArray>()
             .unwrap();
-        assert!(traversal_ids.iter().all(|v| v.is_some()));
+        assert!(traversal_paths.iter().all(|v| v.is_some()));
 
         // Check id column
         let ids = batch

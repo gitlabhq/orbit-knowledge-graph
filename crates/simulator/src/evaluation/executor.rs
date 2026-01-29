@@ -199,7 +199,7 @@ impl QueryExecutor {
     /// Warm the parameter cache and sample security contexts.
     pub async fn warm_cache(&mut self) -> Result<()> {
         self.sampler.warm_cache(&self.ontology).await?;
-        self.security_contexts = self.sampler.sample_traversal_ids().await?;
+        self.security_contexts = self.sampler.sample_traversal_paths().await?;
         Ok(())
     }
 

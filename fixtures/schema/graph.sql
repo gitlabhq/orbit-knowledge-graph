@@ -67,7 +67,6 @@ CREATE TABLE IF NOT EXISTS gl_projects (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-
 CREATE TABLE IF NOT EXISTS gl_notes (
     id Int64,
     note Nullable(String),
@@ -88,7 +87,7 @@ CREATE TABLE IF NOT EXISTS gl_notes (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS kg_edges (
+CREATE TABLE IF NOT EXISTS gl_edges (
     source_id Int64,
     source_kind String,
     relationship_kind String,

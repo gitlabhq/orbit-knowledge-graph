@@ -131,10 +131,10 @@ async fn main() -> Result<()> {
                 let start = std::time::Instant::now();
 
                 if args.use_cli {
-                    writer.load_parquet_file("kg_edges", &edges_path)?;
+                    writer.load_parquet_file("gl_edges", &edges_path)?;
                 } else {
                     let edge_batches = reader.read_edges(*org_id)?;
-                    writer.write_batches("kg_edges", &edge_batches).await?;
+                    writer.write_batches("gl_edges", &edge_batches).await?;
                 }
 
                 println!("{:.1}s", start.elapsed().as_secs_f64());

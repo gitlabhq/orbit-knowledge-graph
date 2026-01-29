@@ -197,12 +197,12 @@ mod tests {
     fn test_to_clickhouse_ddl() {
         let schema = edge_schema();
         let ddl = to_clickhouse_ddl(
-            "kg_edges",
+            "gl_edges",
             &schema,
             &["relationship_kind", "source_kind", "source"],
         );
 
-        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS kg_edges"));
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS gl_edges"));
         assert!(ddl.contains("relationship_kind String"));
         assert!(ddl.contains("ORDER BY (relationship_kind, source_kind, source)"));
     }

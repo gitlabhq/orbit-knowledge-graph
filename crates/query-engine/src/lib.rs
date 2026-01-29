@@ -208,14 +208,14 @@ mod tests {
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
 
         assert!(result.sql.contains("SELECT"));
-        assert!(result.sql.contains("kg_user AS u"));
-        assert!(result.sql.contains("INNER JOIN kg_edges AS e0 ON"));
+        assert!(result.sql.contains("gl_user AS u"));
+        assert!(result.sql.contains("INNER JOIN gl_edges AS e0 ON"));
         assert!(
             result.sql.contains("u.id = e0.source"),
             "expected source column: {}",
             result.sql
         );
-        assert!(result.sql.contains("INNER JOIN kg_note AS n ON"));
+        assert!(result.sql.contains("INNER JOIN gl_note AS n ON"));
         assert!(
             result
                 .sql

@@ -140,7 +140,7 @@ async fn namespace_handler_creates_group_edges() {
 
     // Verify owner edges
     let owner_edges = context
-        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'owner' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'owner' ORDER BY target_id")
         .await;
 
     assert!(!owner_edges.is_empty(), "owner edges should exist");
@@ -149,7 +149,7 @@ async fn namespace_handler_creates_group_edges() {
 
     // Verify parent-child edges
     let parent_edges = context
-        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'contains' AND source_kind = 'Group' AND target_kind = 'Group'")
+        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'contains' AND source_kind = 'Group' AND target_kind = 'Group'")
         .await;
 
     assert!(!parent_edges.is_empty(), "parent edges should exist");
@@ -243,14 +243,14 @@ async fn namespace_handler_processes_projects() {
 
     // Verify project edges (User/Group is source, Project is target - incoming direction)
     let creator_edges = context
-        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'creator' AND source_kind = 'User' AND target_kind = 'Project' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'creator' AND source_kind = 'User' AND target_kind = 'Project' ORDER BY target_id")
         .await;
 
     assert!(!creator_edges.is_empty(), "creator edges should exist");
     assert_eq!(creator_edges[0].num_rows(), 2);
 
     let contains_edges = context
-        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'contains' AND source_kind = 'Group' AND target_kind = 'Project'")
+        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'contains' AND source_kind = 'Group' AND target_kind = 'Project'")
         .await;
 
     assert!(!contains_edges.is_empty(), "contains edges should exist");
@@ -382,7 +382,7 @@ async fn namespace_handler_processes_notes_with_edges() {
 
     // Verify author edges (User -> Note via authored)
     let author_edges = context
-        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'authored' AND source_kind = 'User' AND target_kind = 'Note' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'authored' AND source_kind = 'User' AND target_kind = 'Note' ORDER BY target_id")
         .await;
 
     assert!(!author_edges.is_empty(), "author edges should exist");
@@ -390,7 +390,7 @@ async fn namespace_handler_processes_notes_with_edges() {
 
     // Verify has_note edges (MergeRequest/WorkItem -> Note)
     let has_note_edges = context
-        .query("SELECT source_id, source_kind, target_id FROM kg_edges WHERE relationship_kind = 'has_note' ORDER BY target_id")
+        .query("SELECT source_id, source_kind, target_id FROM gl_edges WHERE relationship_kind = 'has_note' ORDER BY target_id")
         .await;
 
     assert!(!has_note_edges.is_empty(), "has_note edges should exist");

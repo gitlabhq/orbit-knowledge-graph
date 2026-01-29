@@ -12,7 +12,7 @@ mod traversal;
 pub use batch::BatchBuilder;
 pub use dependency::{DependencyGraph, ParentEdge};
 pub use fake_data::FakeValueGenerator;
-pub use traversal::{EntityContext, EntityRegistry, TraversalIdGenerator};
+pub use traversal::{EntityContext, EntityRegistry, TraversalPathGenerator};
 
 use crate::arrow_schema::ToArrowSchema;
 use crate::config::{Config, EdgeRatio};
@@ -178,7 +178,7 @@ impl Generator {
         let is_group = node.name == "Group";
 
         for _ in 0..count {
-            let (entity_id, traversal_id) = if is_group {
+            let (entity_id, traversal_path) = if is_group {
                 let ns_id = registry.next_namespace_id();
                 let trav = format!("{}/{}/", org_id, ns_id);
                 (ns_id, trav)
@@ -191,8 +191,8 @@ impl Generator {
                 (eid, format!("{}/", org_id))
             };
 
-            builder.add_row(org_id, traversal_id.clone(), entity_id);
-            let ctx = EntityContext::new(entity_id, traversal_id);
+            builder.add_row(org_id, traversal_path.clone(), entity_id);
+            let ctx = EntityContext::new(entity_id, traversal_path);
             registry.add(&node.name, ctx.clone());
 
             if is_group && self.config.generation.subgroups.max_depth > 0 {
@@ -227,10 +227,10 @@ impl Generator {
 
         for _ in 0..subgroup_config.per_group {
             let ns_id = registry.next_namespace_id();
-            let traversal_id = format!("{}{}/", parent.traversal_id, ns_id);
+            let traversal_path = format!("{}{}/", parent.traversal_path, ns_id);
 
-            builder.add_row(org_id, traversal_id.clone(), ns_id);
-            let ctx = EntityContext::new(ns_id, traversal_id);
+            builder.add_row(org_id, traversal_path.clone(), ns_id);
+            let ctx = EntityContext::new(ns_id, traversal_path);
             registry.add("Group", ctx.clone());
 
             edges.push(EdgeRecord {
@@ -275,17 +275,17 @@ impl Generator {
                 let child_count = parent_edge.ratio.sample_with_variance(rng);
 
                 for _ in 0..child_count {
-                    let (entity_id, traversal_id) = if is_group {
+                    let (entity_id, traversal_path) = if is_group {
                         let ns_id = registry.next_namespace_id();
-                        let trav = format!("{}{}/", parent.traversal_id, ns_id);
+                        let trav = format!("{}{}/", parent.traversal_path, ns_id);
                         (ns_id, trav)
                     } else {
                         let eid = self.next_entity_id();
-                        (eid, parent.traversal_id.clone())
+                        (eid, parent.traversal_path.clone())
                     };
 
-                    builder.add_row(org_id, traversal_id.clone(), entity_id);
-                    registry.add(&node.name, EntityContext::new(entity_id, traversal_id));
+                    builder.add_row(org_id, traversal_path.clone(), entity_id);
+                    registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
                     {
@@ -380,10 +380,10 @@ impl Generator {
                     .filter(|candidate| {
                         let (source_path, target_path) = if is_source_iteration {
                             // primary is source, candidate is target
-                            (&primary.traversal_id, &candidate.traversal_id)
+                            (&primary.traversal_path, &candidate.traversal_path)
                         } else {
                             // candidate is source, primary is target
-                            (&candidate.traversal_id, &primary.traversal_id)
+                            (&candidate.traversal_path, &primary.traversal_path)
                         };
                         edge_is_queryable(source_path, target_path, &target_kind)
                     })

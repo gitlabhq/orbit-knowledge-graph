@@ -53,7 +53,7 @@ pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
 ];
 
 /// Edge table name in ClickHouse.
-pub const EDGE_TABLE: &str = "kg_edges";
+pub const EDGE_TABLE: &str = "gl_edges";
 
 /// Errors that can occur when loading or validating an ontology.
 #[derive(Debug)]
@@ -428,8 +428,8 @@ impl Ontology {
 
     /// Get the ClickHouse table name for a node label.
     ///
-    /// Node tables follow the pattern `kg_{lowercase_label}`.
-    /// Example: `User` → `kg_user`, `Project` → `kg_project`
+    /// Node tables follow the pattern `gl_{lowercase_label}`.
+    /// Example: `User` → `gl_user`, `Project` → `gl_project`
     ///
     /// # Errors
     ///
@@ -440,7 +440,7 @@ impl Ontology {
                 "unknown node label \"{node_label}\""
             )));
         }
-        Ok(format!("kg_{}", node_label.to_lowercase()))
+        Ok(format!("gl_{}", node_label.to_lowercase()))
     }
 
     /// Generate a JSON Schema with ontology values populated.
@@ -1084,8 +1084,8 @@ mod tests {
         let ontology = Ontology::new().with_nodes(["User", "Project"]);
 
         // Valid nodes
-        assert_eq!(ontology.table_name("User").unwrap(), "kg_user");
-        assert_eq!(ontology.table_name("Project").unwrap(), "kg_project");
+        assert_eq!(ontology.table_name("User").unwrap(), "gl_user");
+        assert_eq!(ontology.table_name("Project").unwrap(), "gl_project");
 
         // Unknown node
         let err = ontology.table_name("Unknown").unwrap_err();
@@ -1167,7 +1167,7 @@ mod tests {
                 enum_values: Some(enum_values),
             }],
             primary_keys: vec!["id".to_string()],
-            destination_table: "kg_user".to_string(),
+            destination_table: "gl_user".to_string(),
             etl: None,
         };
 
