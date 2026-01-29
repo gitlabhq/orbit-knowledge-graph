@@ -3,8 +3,7 @@ use labkit_rs::correlation::http::{CorrelationIdLayer, PropagateCorrelationIdLay
 use serde::Serialize;
 use tower_http::trace::TraceLayer;
 
-use crate::auth::JwtValidator;
-use crate::cli::Mode;
+use crate::webserver::JwtValidator;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -19,15 +18,9 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
-pub fn create_router(mode: Mode, _validator: JwtValidator) -> Router {
-    let router = Router::new().route("/health", get(health));
-
-    let router = match mode {
-        Mode::Webserver => router,
-        Mode::Indexer => router,
-    };
-
-    router
+pub fn create_router(_validator: JwtValidator) -> Router {
+    Router::new()
+        .route("/health", get(health))
         .layer(CorrelationIdLayer::new())
         .layer(TraceLayer::new_for_http())
         .layer(PropagateCorrelationIdLayer::new())

@@ -1,4 +1,5 @@
 pub mod modules;
+pub mod topic;
 
 use std::sync::Arc;
 

@@ -8,27 +8,12 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use etl_engine::module::{Handler, HandlerContext, HandlerError};
 use etl_engine::types::{Envelope, Event, SerializationError, Topic};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tracing::warn;
 
 use super::pipeline::OntologyEntityPipeline;
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
-use crate::indexer::modules::INDEXER_TOPIC;
-
-const SUBJECT: &str = "sdlc.namespace.indexing.requested";
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NamespaceHandlerPayload {
-    pub organization: i64,
-    pub namespace: i64,
-    pub watermark: DateTime<Utc>,
-}
-
-impl Event for NamespaceHandlerPayload {
-    fn topic() -> Topic {
-        Topic::new(INDEXER_TOPIC, SUBJECT)
-    }
-}
+use crate::indexer::topic::NamespaceIndexingRequest;
 
 #[derive(Clone, Serialize)]
 pub struct NamespaceQueryParams {
@@ -84,13 +69,14 @@ impl Handler for NamespaceHandler {
     }
 
     fn topic(&self) -> Topic {
-        Topic::new(INDEXER_TOPIC, SUBJECT)
+        NamespaceIndexingRequest::topic()
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
-        let payload: NamespaceHandlerPayload = message.to_event().map_err(|error| match error {
-            SerializationError::Json(e) => HandlerError::Deserialization(e),
-        })?;
+        let payload: NamespaceIndexingRequest =
+            message.to_event().map_err(|error| match error {
+                SerializationError::Json(e) => HandlerError::Deserialization(e),
+            })?;
 
         let last_watermark = match self
             .watermark_store

@@ -6,7 +6,6 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::auth::JwtValidator;
-use crate::cli::Mode;
 
 pub use router::create_router;
 
@@ -16,13 +15,9 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn bind(
-        addr: SocketAddr,
-        mode: Mode,
-        validator: JwtValidator,
-    ) -> std::io::Result<Self> {
+    pub async fn bind(addr: SocketAddr, validator: JwtValidator) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr).await?;
-        let router = create_router(mode, validator);
+        let router = create_router(validator);
         Ok(Self { listener, router })
     }
 
