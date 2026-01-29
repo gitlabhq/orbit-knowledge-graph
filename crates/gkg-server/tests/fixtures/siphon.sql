@@ -151,6 +151,31 @@ PRIMARY KEY id
 ORDER BY id
 SETTINGS index_granularity = 512;
 
+-- Siphon source tables for notes
+CREATE TABLE IF NOT EXISTS siphon_notes
+(
+    `id` Int64,
+    `note` Nullable(String),
+    `noteable_type` Nullable(String),
+    `noteable_id` Nullable(Int64),
+    `author_id` Nullable(Int64),
+    `system` Bool DEFAULT false,
+    `line_code` Nullable(String),
+    `commit_id` Nullable(String),
+    `discussion_id` Nullable(String),
+    `resolved_at` Nullable(DateTime64(6, 'UTC')),
+    `resolved_by_id` Nullable(Int64),
+    `internal` Bool DEFAULT false,
+    `confidential` Nullable(Bool),
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
 -- Knowledge graph enabled namespaces
 CREATE TABLE IF NOT EXISTS test.siphon_knowledge_graph_enabled_namespaces
 (

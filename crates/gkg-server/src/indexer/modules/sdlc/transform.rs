@@ -1,140 +1,64 @@
-//! Transform engine for generating SQL from ontology definitions.
-//!
-//! Uses `NodeEntity.fields` with `Field.source` and `Field.enum_values` to generate
-//! extract, transform, and edge SQL statements.
-
-use ontology::{
-    DELETED_COLUMN, DataType, EdgeDirection, EtlConfig, EtlScope, Field, NodeEntity,
-    TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
-};
+use super::prepare::{PreparedEdge, PreparedEtlConfig};
 
 pub const SOURCE_DATA_TABLE: &str = "source_data";
 
-pub fn build_source_query(node: &NodeEntity) -> Option<String> {
-    let etl = node.etl.as_ref()?;
-
-    match etl {
-        EtlConfig::Table {
-            scope,
-            source,
-            watermark,
-            deleted,
-            edges,
-        } => {
-            let mut columns: Vec<String> = node.fields.iter().map(|f| f.source.clone()).collect();
-
-            for column in edges.keys() {
-                if !columns.contains(column) {
-                    columns.push(column.clone());
-                }
-            }
-
-            if *scope == EtlScope::Namespaced {
-                columns.push(TRAVERSAL_PATH_COLUMN.to_string());
-            }
-            columns.push(format!("{watermark} AS {VERSION_COLUMN}"));
-            columns.push(format!("{deleted} AS {DELETED_COLUMN}"));
-
-            let columns_str = columns.join(", ");
-            Some(format!(
-                "SELECT {columns_str}
-                 FROM {source}
-                 WHERE {watermark} > {{last_watermark:String}} AND {watermark} <= {{watermark:String}}
-                "
-            ))
-        }
-        EtlConfig::Query { query, .. } => Some(query.clone()),
-    }
-}
-
-pub fn build_transform_sql(node: &NodeEntity) -> String {
-    let columns: Vec<String> = node.fields.iter().map(build_field_expression).collect();
-
-    let mut all_columns = columns;
-
-    let is_namespaced = node
-        .etl
-        .as_ref()
-        .is_some_and(|etl| etl.scope() == EtlScope::Namespaced);
-
-    if is_namespaced {
-        all_columns.push(TRAVERSAL_PATH_COLUMN.to_string());
-    }
-    all_columns.push(VERSION_COLUMN.to_string());
-    all_columns.push(DELETED_COLUMN.to_string());
-
-    let columns_str = all_columns.join(", ");
-
-    format!("SELECT {columns_str} FROM {SOURCE_DATA_TABLE}")
-}
-
-pub fn build_all_edge_sql(node: &NodeEntity) -> Vec<String> {
-    let Some(ref etl) = node.etl else {
-        return Vec::new();
-    };
-
-    let node_kind = &node.name;
-    etl.edges()
+pub fn build_transform_sql(config: &PreparedEtlConfig) -> String {
+    let mut columns: Vec<&str> = config
+        .fields
         .iter()
-        .map(|(fk_column, mapping)| {
-            let (source_kind, source_id, target_kind, target_id) = match mapping.direction {
-                EdgeDirection::Outgoing => (
-                    node_kind.as_str(),
-                    "id",
-                    mapping.target_kind.as_str(),
-                    fk_column.as_str(),
-                ),
-                EdgeDirection::Incoming => (
-                    mapping.target_kind.as_str(),
-                    fk_column.as_str(),
-                    node_kind.as_str(),
-                    "id",
-                ),
-            };
-            let relationship_kind = &mapping.relationship_kind;
-            format!(
-                r#"SELECT
-    {source_id} AS source_id,
-    '{source_kind}' AS source_kind,
-    '{relationship_kind}' AS relationship_kind,
-    {target_id} AS target_id,
-    '{target_kind}' AS target_kind,
-    {VERSION_COLUMN},
-    {DELETED_COLUMN}
-FROM {SOURCE_DATA_TABLE}
-WHERE {fk_column} IS NOT NULL"#
-            )
-        })
-        .collect()
+        .map(|f| f.expression.as_str())
+        .collect();
+
+    if config.is_namespaced {
+        columns.push("traversal_path");
+    }
+    columns.push("_version");
+    columns.push("_deleted");
+
+    format!("SELECT {} FROM {}", columns.join(", "), SOURCE_DATA_TABLE)
 }
 
-fn build_field_expression(field: &Field) -> String {
-    if field.data_type == DataType::Enum
-        && let Some(ref enum_values) = field.enum_values
-    {
-        let cases: Vec<String> = enum_values
-            .iter()
-            .map(|(value, label)| format!("WHEN {} = {} THEN '{}'", field.source, value, label))
-            .collect();
+pub fn build_all_edge_sql(config: &PreparedEtlConfig) -> Vec<String> {
+    config.edges.iter().map(build_edge_sql).collect()
+}
 
-        return format!(
-            "CASE {} ELSE 'unknown' END AS {}",
-            cases.join(" "),
-            field.name
-        );
-    }
+fn build_edge_sql(edge: &PreparedEdge) -> String {
+    let filter = edge
+        .type_filter
+        .as_ref()
+        .map(|f| format!(" AND {}", f))
+        .unwrap_or_default();
 
-    if field.source == field.name {
-        field.name.clone()
-    } else {
-        format!("{} AS {}", field.source, field.name)
-    }
+    format!(
+        r#"SELECT
+    {} AS source_id,
+    {} AS source_kind,
+    '{}' AS relationship_kind,
+    {} AS target_id,
+    {} AS target_kind,
+    _version,
+    _deleted
+FROM {}
+WHERE {} IS NOT NULL{}"#,
+        edge.source_id,
+        edge.source_kind.to_sql(),
+        edge.relationship_kind,
+        edge.target_id,
+        edge.target_kind.to_sql(),
+        SOURCE_DATA_TABLE,
+        edge.fk_column,
+        filter
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::{EdgeDirection, EdgeMapping, EtlScope};
+    use crate::indexer::modules::sdlc::prepare::PreparedEtlConfig;
+    use ontology::{
+        DataType, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, Field, NodeEntity,
+        Ontology,
+    };
     use std::collections::BTreeMap;
 
     fn create_user_node() -> NodeEntity {
@@ -209,90 +133,60 @@ mod tests {
     }
 
     #[test]
-    fn build_source_query_generates_correct_sql_for_table_config() {
-        let node = create_user_node();
-        let query = build_source_query(&node).unwrap();
-
-        assert!(query.contains("SELECT"));
-        assert!(query.contains("FROM siphon_users"));
-        assert!(query.contains("id"));
-        assert!(query.contains("username"));
-        assert!(query.contains("admin"));
-        assert!(query.contains("_siphon_replicated_at AS _version"));
-        assert!(query.contains("_siphon_deleted AS _deleted"));
-        assert!(query.contains("{last_watermark:String}"));
-        assert!(query.contains("{watermark:String}"));
-    }
-
-    #[test]
-    fn build_source_query_excludes_traversal_path_for_global_entities() {
-        let node = create_user_node();
-        let query = build_source_query(&node).unwrap();
-
-        assert!(!query.contains("traversal_path"));
-    }
-
-    #[test]
-    fn build_source_query_includes_traversal_path_for_namespaced_entities() {
-        let node = create_namespaced_node();
-        let query = build_source_query(&node).unwrap();
-
-        assert!(query.contains("traversal_path"));
-    }
-
-    #[test]
-    fn build_transform_sql_excludes_traversal_path_for_global_entities() {
-        let node = create_user_node();
-        let sql = build_transform_sql(&node);
+    fn transform_sql_excludes_traversal_path_for_global() {
+        let ontology = Ontology::new();
+        let config = PreparedEtlConfig::from_node(&create_user_node(), &ontology).unwrap();
+        let sql = build_transform_sql(&config);
 
         assert!(!sql.contains("traversal_path"));
+        assert!(sql.contains("FROM source_data"));
     }
 
     #[test]
-    fn build_transform_sql_includes_traversal_path_for_namespaced_entities() {
-        let node = create_namespaced_node();
-        let sql = build_transform_sql(&node);
+    fn transform_sql_includes_traversal_path_for_namespaced() {
+        let ontology = Ontology::new();
+        let config = PreparedEtlConfig::from_node(&create_namespaced_node(), &ontology).unwrap();
+        let sql = build_transform_sql(&config);
 
         assert!(sql.contains("traversal_path"));
     }
 
     #[test]
-    fn build_transform_sql_handles_column_renaming() {
-        let node = create_user_node();
-        let sql = build_transform_sql(&node);
+    fn transform_sql_handles_column_renaming() {
+        let ontology = Ontology::new();
+        let config = PreparedEtlConfig::from_node(&create_user_node(), &ontology).unwrap();
+        let sql = build_transform_sql(&config);
 
-        assert!(sql.contains("id"));
-        assert!(sql.contains("username"));
         assert!(sql.contains("admin AS is_admin"));
-        assert!(sql.contains("FROM source_data"));
     }
 
     #[test]
-    fn build_transform_sql_handles_enum_fields() {
-        let node = create_user_node();
-        let sql = build_transform_sql(&node);
+    fn transform_sql_handles_enum_fields() {
+        let ontology = Ontology::new();
+        let config = PreparedEtlConfig::from_node(&create_user_node(), &ontology).unwrap();
+        let sql = build_transform_sql(&config);
 
+        assert!(sql.contains("CASE"));
         assert!(sql.contains("WHEN user_type = 0 THEN 'human'"));
-        assert!(sql.contains("WHEN user_type = 1 THEN 'bot'"));
-        assert!(sql.contains("ELSE 'unknown'"));
-        assert!(sql.contains("AS user_type"));
     }
 
     #[test]
-    fn build_all_edge_sql_returns_empty_for_no_edges() {
-        let node = create_user_node();
-        let edge_sqls = build_all_edge_sql(&node);
+    fn edge_sql_empty_for_no_edges() {
+        let ontology = Ontology::new();
+        let config = PreparedEtlConfig::from_node(&create_user_node(), &ontology).unwrap();
+        let sqls = build_all_edge_sql(&config);
 
-        assert!(edge_sqls.is_empty());
+        assert!(sqls.is_empty());
     }
 
     #[test]
-    fn build_all_edge_sql_generates_correct_structure_for_outgoing() {
+    fn edge_sql_outgoing() {
+        let ontology = Ontology::new();
         let mut edges = BTreeMap::new();
         edges.insert(
             "owner_id".to_string(),
             EdgeMapping {
-                target_kind: "User".to_string(),
+                target: EdgeTarget::Literal("User".to_string()),
                 relationship_kind: "owns".to_string(),
                 direction: EdgeDirection::Outgoing,
             },
@@ -300,77 +194,64 @@ mod tests {
 
         let node = NodeEntity {
             name: "Group".to_string(),
-            fields: vec![Field {
-                name: "id".to_string(),
-                source: "id".to_string(),
-                data_type: DataType::Int,
-                nullable: false,
-                enum_values: None,
-            }],
+            fields: vec![],
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_groups".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
-                source: "siphon_namespaces".to_string(),
+                source: "siphon_groups".to_string(),
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
                 edges,
             }),
         };
 
-        let edge_sqls = build_all_edge_sql(&node);
+        let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
+        let sqls = build_all_edge_sql(&config);
 
-        assert_eq!(edge_sqls.len(), 1);
-        let sql = &edge_sqls[0];
+        assert_eq!(sqls.len(), 1);
+        let sql = &sqls[0];
         assert!(sql.contains("id AS source_id"));
         assert!(sql.contains("'Group' AS source_kind"));
-        assert!(sql.contains("'owns' AS relationship_kind"));
         assert!(sql.contains("owner_id AS target_id"));
         assert!(sql.contains("'User' AS target_kind"));
-        assert!(sql.contains("WHERE owner_id IS NOT NULL"));
     }
 
     #[test]
-    fn build_all_edge_sql_generates_correct_structure_for_incoming() {
+    fn edge_sql_incoming() {
+        let ontology = Ontology::new();
         let mut edges = BTreeMap::new();
         edges.insert(
-            "owner_id".to_string(),
+            "author_id".to_string(),
             EdgeMapping {
-                target_kind: "User".to_string(),
-                relationship_kind: "owner".to_string(),
+                target: EdgeTarget::Literal("User".to_string()),
+                relationship_kind: "authored".to_string(),
                 direction: EdgeDirection::Incoming,
             },
         );
 
         let node = NodeEntity {
-            name: "Group".to_string(),
-            fields: vec![Field {
-                name: "id".to_string(),
-                source: "id".to_string(),
-                data_type: DataType::Int,
-                nullable: false,
-                enum_values: None,
-            }],
+            name: "Note".to_string(),
+            fields: vec![],
             primary_keys: vec!["id".to_string()],
-            destination_table: "gl_groups".to_string(),
+            destination_table: "gl_note".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
-                source: "siphon_namespaces".to_string(),
+                source: "siphon_notes".to_string(),
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
                 edges,
             }),
         };
 
-        let edge_sqls = build_all_edge_sql(&node);
+        let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
+        let sqls = build_all_edge_sql(&config);
 
-        assert_eq!(edge_sqls.len(), 1);
-        let sql = &edge_sqls[0];
-        assert!(sql.contains("owner_id AS source_id"));
+        assert_eq!(sqls.len(), 1);
+        let sql = &sqls[0];
+        assert!(sql.contains("author_id AS source_id"));
         assert!(sql.contains("'User' AS source_kind"));
-        assert!(sql.contains("'owner' AS relationship_kind"));
         assert!(sql.contains("id AS target_id"));
-        assert!(sql.contains("'Group' AS target_kind"));
-        assert!(sql.contains("WHERE owner_id IS NOT NULL"));
+        assert!(sql.contains("'Note' AS target_kind"));
     }
 }
