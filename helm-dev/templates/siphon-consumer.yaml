@@ -18,12 +18,12 @@ data:
       oversize_bucket_name: repl_events_bucket
 
     clickhouse:
-      host: {{ .Values.clickhouse.host | quote }}
-      port: {{ .Values.clickhouse.port }}
-      database: {{ .Values.clickhouse.database | quote }}
-      username: {{ .Values.clickhouse.user | quote }}
+      host: {{ .Values.clickhouse.datalake.host | quote }}
+      port: {{ .Values.clickhouse.datalake.port }}
+      database: {{ .Values.clickhouse.datalake.database | quote }}
+      username: {{ .Values.clickhouse.datalake.user | quote }}
       password: ${CH_DB_PASSWORD}
-      ssl: {{ .Values.clickhouse.ssl }}
+      ssl: {{ .Values.clickhouse.datalake.ssl }}
       {{- if .Values.consumer.insertBatchSize }}
       insert_batch_size: {{ .Values.consumer.insertBatchSize }}
       {{- end }}
@@ -55,7 +55,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "siphon-consumer") | nindent 8 }}
       annotations:
-        checksum/config: {{ toJson .Values.consumer | sha256sum }}-{{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.tableMappings | sha256sum }}
+        checksum/config: {{ toJson .Values.consumer | sha256sum }}-{{ toJson .Values.clickhouse.datalake | sha256sum }}-{{ toJson .Values.tableMappings | sha256sum }}
     spec:
       {{- if .Values.secrets.enabled }}
       serviceAccountName: gcp-secrets-sa

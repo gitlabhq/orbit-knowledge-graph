@@ -67,7 +67,26 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 NATS URL
 */}}
 {{- define "gkg.natsUrl" -}}
-nats://nats.{{ .Release.Namespace }}.svc.cluster.local:4222
+nats://{{ .Release.Name }}-nats.{{ .Release.Namespace }}.svc.cluster.local:4222
+{{- end }}
+
+{{/*
+ClickHouse environment variables with prefix
+Usage: {{ include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") }}
+*/}}
+{{- define "gkg.clickhouseEnv" -}}
+- name: {{ .prefix }}_CLICKHOUSE_URL
+  value: "http://{{ .config.host }}:8123"
+- name: {{ .prefix }}_CLICKHOUSE_DATABASE
+  value: {{ .config.database }}
+- name: {{ .prefix }}_CLICKHOUSE_USERNAME
+  value: {{ .config.user }}
+- name: {{ .prefix }}_CLICKHOUSE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secretName }}
+      key: password
+      optional: true
 {{- end }}
 
 {{/*

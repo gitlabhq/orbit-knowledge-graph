@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     let result = match args.mode {
         Mode::Indexer => indexer::run(&config, shutdown).await.map_err(Into::into),
         Mode::Webserver => {
-            let validator = JwtValidator::new(&config.jwt_secret, config.jwt_clock_skew_secs)?;
+            let validator = JwtValidator::new(config.jwt_secret()?, config.jwt_clock_skew_secs)?;
             let server = Server::bind(config.bind_address, args.mode, validator).await?;
             server.run().await.map_err(Into::into)
         }

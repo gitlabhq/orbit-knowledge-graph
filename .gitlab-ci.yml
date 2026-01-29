@@ -199,7 +199,7 @@ tilt-ci:
     - .mr-only-rules
   image: docker:29
   tags:
-    - saas-linux-medium-amd64
+    - saas-linux-large-amd64
   services:
     - docker:29-dind
   variables:
@@ -208,6 +208,7 @@ tilt-ci:
     KIND_VERSION: "v0.25.0"
     TILT_VERSION: "0.36.0"
     KUBECTL_VERSION: "v1.32.0"
+    SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
   needs: []
   before_script:
     - apk add --no-cache curl bash sed
@@ -219,7 +220,7 @@ tilt-ci:
     - curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux-alpine.x86_64.tar.gz" | tar -xz -C /usr/local/bin tilt
   script:
     - |
-      cat <<EOF | kind create cluster --wait 1m --config=-
+      cat <<EOF | kind create cluster --wait 5m --config=-
       kind: Cluster
       apiVersion: kind.x-k8s.io/v1alpha4
       networking:
@@ -235,12 +236,14 @@ tilt-ci:
     - helm repo add gitlab https://charts.gitlab.io
     - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     - helm repo add grafana https://grafana.github.io/helm-charts
+    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
     - helm dependency build helm-dev
     # Create dummy secrets for CI (not real credentials)
     - |
       cat <<EOF > .tilt-secrets
       POSTGRES_PASSWORD=ci_test_password
       CLICKHOUSE_PASSWORD=ci_test_password
+      GKG_JWT_SECRET=ci_test_jwt_secret_at_least_32_bytes_long
       EOF
     - tilt ci
 
@@ -266,6 +269,7 @@ variables:
     - helm repo add gitlab https://charts.gitlab.io
     - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     - helm repo add grafana https://grafana.github.io/helm-charts
+    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
     - helm dependency update ${HELM_CHART_PATH}
 
 .helm-with-gke-auth:

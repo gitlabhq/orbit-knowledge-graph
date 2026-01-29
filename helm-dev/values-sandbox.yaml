@@ -38,28 +38,44 @@ postgres:
 
 # ClickHouse Configuration (ClickHouse VM)
 clickhouse:
-  host: 10.128.0.13
-  port: 9000
-  database: gitlab_clickhouse_main_production
-  user: default
-  ssl: false
+  datalake:
+    host: 10.128.0.13
+    port: 9000
+    database: gitlab_clickhouse_main_production
+    user: default
+    ssl: false
+  graph:
+    host: 10.128.0.13
+    port: 9000
+    database: gkg-sandbox
+    user: default
+    ssl: false
 
-# NATS Configuration
+# NATS Configuration (using official nats-io helm chart)
 nats:
   enabled: true
   streamName: gkg_replication
-  image:
-    repository: nats
-    tag: "2.10-alpine"
-    pullPolicy: IfNotPresent
-  storage: 10Gi
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 10Gi
+  container:
+    image:
+      repository: nats
+      tag: "2.10-alpine"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  natsBox:
+    enabled: false
 
 # Siphon Image Configuration
 siphon:
