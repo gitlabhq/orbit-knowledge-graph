@@ -7,12 +7,14 @@ use datafusion::prelude::*;
 use etl_engine::destination::{BatchWriter, Destination};
 use etl_engine::module::HandlerError;
 use futures::StreamExt;
-use ontology::{EDGE_TABLE, NodeEntity, Ontology};
+use ontology::{EDGE_TABLE, EdgeSourceEtlConfig, NodeEntity, Ontology};
 use serde_json::Value;
 
 use super::datalake::DatalakeQuery;
-use super::prepare::PreparedEtlConfig;
-use super::transform::{SOURCE_DATA_TABLE, build_all_edge_sql, build_transform_sql};
+use super::prepare::{PreparedEdgeEtl, PreparedEtlConfig};
+use super::transform::{
+    SOURCE_DATA_TABLE, build_all_edge_sql, build_edge_etl_transform_sql, build_transform_sql,
+};
 
 pub struct OntologyEntityPipeline {
     entity_name: String,
@@ -176,6 +178,153 @@ impl OntologyEntityPipeline {
             HandlerError::Processing(format!(
                 "failed to concat batches for {}: {e}",
                 self.entity_name
+            ))
+        })
+    }
+}
+
+/// Pipeline for processing edge ETL from join tables.
+///
+/// Unlike `OntologyEntityPipeline`, this only produces edges (no nodes).
+pub struct OntologyEdgePipeline {
+    relationship_kind: String,
+    extract_query: String,
+    transform_sql: String,
+    datalake: Arc<dyn DatalakeQuery>,
+}
+
+impl OntologyEdgePipeline {
+    pub fn from_config(
+        relationship_kind: &str,
+        config: &EdgeSourceEtlConfig,
+        ontology: &Ontology,
+        datalake: Arc<dyn DatalakeQuery>,
+    ) -> Self {
+        let prepared = PreparedEdgeEtl::from_config(relationship_kind, config, ontology);
+        let transform_sql = build_edge_etl_transform_sql(&prepared);
+
+        Self {
+            relationship_kind: relationship_kind.to_string(),
+            extract_query: prepared.extract_query,
+            transform_sql,
+            datalake,
+        }
+    }
+
+    pub fn relationship_kind(&self) -> &str {
+        &self.relationship_kind
+    }
+
+    pub async fn process(
+        &self,
+        params: Value,
+        destination: &dyn Destination,
+    ) -> Result<(), HandlerError> {
+        let edge_writer = destination
+            .new_batch_writer(EDGE_TABLE)
+            .await
+            .map_err(|e| {
+                HandlerError::Processing(format!(
+                    "failed to create edge writer for {}: {e}",
+                    self.relationship_kind
+                ))
+            })?;
+
+        let mut stream = self
+            .datalake
+            .query_arrow(&self.extract_query, params)
+            .await
+            .map_err(|e| {
+                HandlerError::Processing(format!(
+                    "failed to query {} edge data: {e}",
+                    self.relationship_kind
+                ))
+            })?;
+
+        while let Some(result) = stream.next().await {
+            let source_batch = result.map_err(|e| {
+                HandlerError::Processing(format!(
+                    "failed to read {} edge batch: {e}",
+                    self.relationship_kind
+                ))
+            })?;
+
+            if source_batch.num_rows() == 0 {
+                continue;
+            }
+
+            self.transform_and_write_batch(source_batch, edge_writer.as_ref())
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn transform_and_write_batch(
+        &self,
+        batch: RecordBatch,
+        edge_writer: &dyn BatchWriter,
+    ) -> Result<(), HandlerError> {
+        let session = SessionContext::new();
+
+        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
+            HandlerError::Processing(format!(
+                "failed to create mem table for {} edges: {e}",
+                self.relationship_kind
+            ))
+        })?;
+
+        session
+            .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
+            .map_err(|e| {
+                HandlerError::Processing(format!(
+                    "failed to register table for {} edges: {e}",
+                    self.relationship_kind
+                ))
+            })?;
+
+        let edges = self.execute_query(&session, &self.transform_sql).await?;
+        if edges.num_rows() > 0 {
+            edge_writer.write_batch(&[edges]).await.map_err(|e| {
+                HandlerError::Processing(format!(
+                    "failed to write {} edges: {e}",
+                    self.relationship_kind
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    async fn execute_query(
+        &self,
+        session: &SessionContext,
+        sql: &str,
+    ) -> Result<RecordBatch, HandlerError> {
+        let dataframe = session.sql(sql).await.map_err(|e| {
+            HandlerError::Processing(format!(
+                "failed to execute sql for {} edges: {e}",
+                self.relationship_kind
+            ))
+        })?;
+
+        let schema = Arc::new(dataframe.schema().as_arrow().clone());
+
+        let batches = dataframe.collect().await.map_err(|e| {
+            HandlerError::Processing(format!(
+                "failed to collect results for {} edges: {e}",
+                self.relationship_kind
+            ))
+        })?;
+
+        if batches.is_empty() {
+            return Ok(RecordBatch::new_empty(schema));
+        }
+
+        concat_batches(&schema, &batches).map_err(|e| {
+            HandlerError::Processing(format!(
+                "failed to concat batches for {} edges: {e}",
+                self.relationship_kind
             ))
         })
     }

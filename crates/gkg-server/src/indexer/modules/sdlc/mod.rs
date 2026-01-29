@@ -14,7 +14,7 @@ use etl_engine::module::{Handler, Module, ModuleInitError};
 use global_handler::GlobalHandler;
 use namespace_handler::NamespaceHandler;
 use ontology::{EtlScope, NodeEntity, Ontology};
-use pipeline::OntologyEntityPipeline;
+use pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
 use tracing::warn;
 use watermark_store::{ClickHouseWatermarkStore, WatermarkStore};
 
@@ -84,6 +84,21 @@ impl SdlcModule {
         }
         pipeline
     }
+
+    fn create_namespace_edge_pipelines(&self) -> Vec<OntologyEdgePipeline> {
+        self.ontology
+            .edge_etl_configs()
+            .filter(|(_, config)| config.scope == EtlScope::Namespaced)
+            .map(|(relationship_kind, config)| {
+                OntologyEdgePipeline::from_config(
+                    relationship_kind,
+                    config,
+                    &self.ontology,
+                    Arc::clone(&self.datalake),
+                )
+            })
+            .collect()
+    }
 }
 
 impl Module for SdlcModule {
@@ -94,6 +109,7 @@ impl Module for SdlcModule {
     fn handlers(&self) -> Vec<Box<dyn Handler>> {
         let global_pipelines = self.create_global_pipelines();
         let namespace_pipelines = self.create_namespace_pipelines();
+        let namespace_edge_pipelines = self.create_namespace_edge_pipelines();
 
         let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
 
@@ -104,10 +120,11 @@ impl Module for SdlcModule {
             )));
         }
 
-        if !namespace_pipelines.is_empty() {
+        if !namespace_pipelines.is_empty() || !namespace_edge_pipelines.is_empty() {
             handlers.push(Box::new(NamespaceHandler::new(
                 Arc::clone(&self.watermark_store),
                 namespace_pipelines,
+                namespace_edge_pipelines,
             )));
         }
 

@@ -158,6 +158,19 @@ CREATE TABLE IF NOT EXISTS gl_milestones (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
+CREATE TABLE IF NOT EXISTS gl_labels (
+    id Int64,
+    title Nullable(String),
+    description Nullable(String),
+    color Nullable(String),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
 CREATE TABLE IF NOT EXISTS gl_edges (
     source_id Int64,
     source_kind String,

@@ -19,7 +19,9 @@
 mod entities;
 pub mod etl;
 
-pub use entities::{DataType, EdgeEntity, Field, NodeEntity};
+pub use entities::{
+    DataType, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, Field, NodeEntity,
+};
 pub use etl::{
     DELETED_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope,
     TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
@@ -101,6 +103,8 @@ impl fmt::Display for OntologyError {
 pub struct Ontology {
     nodes: BTreeMap<String, NodeEntity>,
     edges: BTreeMap<String, Vec<EdgeEntity>>,
+    /// ETL configs for edges sourced from join tables (keyed by relationship kind).
+    edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
 }
 
 impl Default for Ontology {
@@ -116,6 +120,7 @@ impl Ontology {
         Self {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
+            edge_etl_configs: BTreeMap::new(),
         }
     }
 
@@ -246,7 +251,7 @@ impl Ontology {
             let content = reader.read(edge_path)?;
             let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
-            let entities = edge_def.into_entities(edge_name.clone());
+            let entities = edge_def.to_entities(edge_name.clone());
 
             for entity in &entities {
                 if !ontology.nodes.contains_key(&entity.source_kind) {
@@ -264,6 +269,12 @@ impl Ontology {
             }
 
             ontology.edges.insert(edge_name.clone(), entities);
+
+            if let Some(etl_config) = edge_def.into_etl_config()? {
+                ontology
+                    .edge_etl_configs
+                    .insert(edge_name.clone(), etl_config);
+            }
         }
 
         Ok(ontology)
@@ -310,6 +321,38 @@ impl Ontology {
             .collect()
     }
 
+    /// Get all source node types for an edge relationship.
+    ///
+    /// Returns unique node types that can be the source of this relationship.
+    pub fn get_edge_source_types(&self, relationship_kind: &str) -> Vec<String> {
+        let Some(variants) = self.get_edge(relationship_kind) else {
+            return Vec::new();
+        };
+
+        variants
+            .iter()
+            .map(|edge| edge.source_kind.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// Get all target node types for an edge relationship.
+    ///
+    /// Returns unique node types that can be the target of this relationship.
+    pub fn get_edge_all_target_types(&self, relationship_kind: &str) -> Vec<String> {
+        let Some(variants) = self.get_edge(relationship_kind) else {
+            return Vec::new();
+        };
+
+        variants
+            .iter()
+            .map(|edge| edge.target_kind.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// Check if a node exists.
     #[must_use]
     pub fn has_node(&self, name: &str) -> bool {
@@ -352,6 +395,23 @@ impl Ontology {
     #[must_use]
     pub fn edge_count(&self) -> usize {
         self.edges.len()
+    }
+
+    /// Get ETL config for an edge by relationship kind.
+    ///
+    /// Returns `Some` only for edges sourced from join tables.
+    pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&EdgeSourceEtlConfig> {
+        self.edge_etl_configs.get(relationship_kind)
+    }
+
+    /// Check if an edge has ETL config (i.e., is sourced from a join table).
+    pub fn has_edge_etl(&self, relationship_kind: &str) -> bool {
+        self.edge_etl_configs.contains_key(relationship_kind)
+    }
+
+    /// Iterator over all edge ETL configs (relationship_kind, config).
+    pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &EdgeSourceEtlConfig)> {
+        self.edge_etl_configs.iter().map(|(k, v)| (k.as_str(), v))
     }
 
     // --- Query validation helpers ---
@@ -672,6 +732,8 @@ struct PropertyYaml {
 struct EdgeYaml {
     #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
+    #[serde(default)]
+    etl: Option<EdgeEtlYaml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -685,6 +747,25 @@ struct EdgeNodeRef {
     #[serde(rename = "type")]
     node_type: String,
     id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeEtlYaml {
+    scope: String,
+    source: String,
+    watermark: String,
+    deleted: String,
+    from: EdgeEndpointYaml,
+    to: EdgeEndpointYaml,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeEndpointYaml {
+    id: String,
+    #[serde(rename = "type")]
+    type_literal: Option<String>,
+    #[serde(rename = "type_column")]
+    type_column: Option<String>,
 }
 
 // --- Conversion implementations ---
@@ -834,17 +915,72 @@ impl EtlYaml {
 }
 
 impl EdgeYaml {
-    fn into_entities(self, relationship_kind: String) -> Vec<EdgeEntity> {
+    fn to_entities(&self, relationship_kind: String) -> Vec<EdgeEntity> {
         self.variants
-            .into_iter()
+            .iter()
             .map(|v| EdgeEntity {
                 relationship_kind: relationship_kind.clone(),
-                source: v.from_node.id,
-                source_kind: v.from_node.node_type,
-                target: v.to_node.id,
-                target_kind: v.to_node.node_type,
+                source: v.from_node.id.clone(),
+                source_kind: v.from_node.node_type.clone(),
+                target: v.to_node.id.clone(),
+                target_kind: v.to_node.node_type.clone(),
             })
             .collect()
+    }
+
+    fn into_etl_config(self) -> Result<Option<EdgeSourceEtlConfig>, OntologyError> {
+        let Some(etl) = self.etl else {
+            return Ok(None);
+        };
+
+        let scope = match etl.scope.as_str() {
+            "global" => EtlScope::Global,
+            "namespaced" => EtlScope::Namespaced,
+            other => {
+                return Err(OntologyError::Validation(format!(
+                    "invalid edge ETL scope: '{}', expected 'global' or 'namespaced'",
+                    other
+                )));
+            }
+        };
+
+        let from = etl.from.into_endpoint("from")?;
+        let to = etl.to.into_endpoint("to")?;
+
+        Ok(Some(EdgeSourceEtlConfig {
+            scope,
+            source: etl.source,
+            watermark: etl.watermark,
+            deleted: etl.deleted,
+            from,
+            to,
+        }))
+    }
+}
+
+impl EdgeEndpointYaml {
+    fn into_endpoint(self, endpoint_name: &str) -> Result<EdgeEndpoint, OntologyError> {
+        let node_type = match (self.type_literal, self.type_column) {
+            (Some(lit), None) => EdgeEndpointType::Literal(lit),
+            (None, Some(col)) => EdgeEndpointType::Column(col),
+            (Some(_), Some(_)) => {
+                return Err(OntologyError::Validation(format!(
+                    "edge source endpoint '{}': use 'type' or 'type_column', not both",
+                    endpoint_name
+                )));
+            }
+            (None, None) => {
+                return Err(OntologyError::Validation(format!(
+                    "edge source endpoint '{}': requires 'type' or 'type_column'",
+                    endpoint_name
+                )));
+            }
+        };
+
+        Ok(EdgeEndpoint {
+            id_column: self.id,
+            node_type,
+        })
     }
 }
 

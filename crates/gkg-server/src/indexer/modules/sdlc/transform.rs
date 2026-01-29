@@ -1,4 +1,4 @@
-use super::prepare::{PreparedEdge, PreparedEtlConfig};
+use super::prepare::{PreparedEdge, PreparedEdgeEtl, PreparedEtlConfig};
 
 pub const SOURCE_DATA_TABLE: &str = "source_data";
 
@@ -20,6 +20,39 @@ pub fn build_transform_sql(config: &PreparedEtlConfig) -> String {
 
 pub fn build_all_edge_sql(config: &PreparedEtlConfig) -> Vec<String> {
     config.edges.iter().map(build_edge_sql).collect()
+}
+
+/// Build SQL to transform edge ETL data into edge format.
+///
+/// This is for edges sourced from join tables (no node output).
+pub fn build_edge_etl_transform_sql(config: &PreparedEdgeEtl) -> String {
+    let filter = config
+        .source_type_filter
+        .as_ref()
+        .map(|f| format!(" AND {}", f))
+        .unwrap_or_default();
+
+    format!(
+        r#"SELECT
+    {} AS source_id,
+    {} AS source_kind,
+    '{}' AS relationship_kind,
+    {} AS target_id,
+    {} AS target_kind,
+    _version,
+    _deleted
+FROM {}
+WHERE {} IS NOT NULL AND {} IS NOT NULL{}"#,
+        config.source_id,
+        config.source_kind.to_sql(),
+        config.relationship_kind,
+        config.target_id,
+        config.target_kind.to_sql(),
+        SOURCE_DATA_TABLE,
+        config.source_id,
+        config.target_id,
+        filter
+    )
 }
 
 fn build_edge_sql(edge: &PreparedEdge) -> String {

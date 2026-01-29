@@ -10,3 +10,16 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Label, id: id }
     description: "Merge request has label."
+
+etl:
+  scope: namespaced
+  source: siphon_label_links
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  from:
+    id: target_id
+    # TODO: The values are Issue, MergeRequest and Epic. This will need remapping to WorkItem.
+    type_column: target_type
+  to:
+    id: label_id
+    type: Label
