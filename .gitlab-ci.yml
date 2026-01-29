@@ -5,6 +5,7 @@ stages:
   - lint
   - security
   - test
+  - build
   - deploy
 
 # Job Templates
@@ -246,6 +247,25 @@ tilt-ci:
       GKG_JWT_SECRET=ci_test_jwt_secret_at_least_32_bytes_long
       EOF
     - tilt ci
+
+# Build Stage
+
+docker-build-push:
+  stage: build
+  image: docker:29
+  needs: []
+  services:
+    - docker:29-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    IMAGE_NAME: gkg
+  tags:
+    - saas-linux-large-amd64
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
 
 # Deploy Stage - Helm Charts
 
