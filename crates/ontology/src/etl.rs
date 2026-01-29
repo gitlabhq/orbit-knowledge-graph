@@ -15,6 +15,17 @@ pub enum EtlScope {
     Namespaced,
 }
 
+/// Direction of an edge relative to the node defining the FK column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeDirection {
+    /// Node with FK is edge source: (this_node) -[edge]-> (fk_target)
+    #[default]
+    Outgoing,
+    /// Node with FK is edge target: (fk_target) -[edge]-> (this_node)
+    Incoming,
+}
+
 /// Mapping from a source column to an edge in the knowledge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeMapping {
@@ -22,6 +33,8 @@ pub struct EdgeMapping {
     pub target_kind: String,
     /// The relationship name for the edge (e.g., "AUTHORED_BY", "BELONGS_TO")
     pub relationship_kind: String,
+    /// Direction of the edge relative to the node with the FK column.
+    pub direction: EdgeDirection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

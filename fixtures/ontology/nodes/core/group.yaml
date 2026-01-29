@@ -79,6 +79,8 @@ etl:
     owner_id:
       to: User
       as: owner
+      direction: incoming
     parent_id:
       to: Group
       as: contains
+      direction: incoming

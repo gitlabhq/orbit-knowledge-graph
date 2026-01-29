@@ -241,16 +241,16 @@ async fn namespace_handler_processes_projects() {
     assert_eq!(visibility_column.value(0), "private");
     assert_eq!(visibility_column.value(1), "public");
 
-    // Verify project edges (Project is the source, pointing to User/Group as target)
+    // Verify project edges (User/Group is source, Project is target - incoming direction)
     let creator_edges = context
-        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'creator' AND source_kind = 'Project' AND target_kind = 'User' ORDER BY source_id")
+        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'creator' AND source_kind = 'User' AND target_kind = 'Project' ORDER BY target_id")
         .await;
 
     assert!(!creator_edges.is_empty(), "creator edges should exist");
     assert_eq!(creator_edges[0].num_rows(), 2);
 
     let contains_edges = context
-        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'contains' AND source_kind = 'Project' AND target_kind = 'Group'")
+        .query("SELECT source_id, target_id FROM kg_edges WHERE relationship_kind = 'contains' AND source_kind = 'Group' AND target_kind = 'Project'")
         .await;
 
     assert!(!contains_edges.is_empty(), "contains edges should exist");
