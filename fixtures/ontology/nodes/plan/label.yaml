@@ -3,7 +3,7 @@
 node_type: Label
 domain: plan
 description: A label for categorizing and filtering work items
-destination_table: gl_label
+destination_table: gl_labels
 
 properties:
   id:
@@ -42,11 +42,18 @@ properties:
     nullable: true
     description: "Timestamp when the label was last updated."
 
-# edges:
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
-#
-#   - type: IN_GROUP
-#     source_id: group_id
-#     target_kind: Group
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_labels
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: in_project
+      direction: outgoing
+    group_id:
+      to: Group
+      as: in_group
+      direction: outgoing

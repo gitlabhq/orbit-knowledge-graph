@@ -338,6 +338,50 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
 
+-- Siphon source tables for labels
+CREATE TABLE IF NOT EXISTS siphon_labels
+(
+    `id` Int64,
+    `title` Nullable(String),
+    `color` Nullable(String),
+    `project_id` Nullable(Int64),
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `template` Nullable(Bool) DEFAULT false,
+    `description` Nullable(String),
+    `description_html` Nullable(String),
+    `type` Nullable(String),
+    `group_id` Nullable(Int64),
+    `cached_markdown_version` Nullable(Int64),
+    `lock_on_merge` Bool DEFAULT false,
+    `archived` Bool DEFAULT false,
+    `organization_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+-- Siphon source tables for label links (join table)
+CREATE TABLE IF NOT EXISTS siphon_label_links
+(
+    `id` Int64,
+    `label_id` Nullable(Int64),
+    `target_id` Nullable(Int64),
+    `target_type` Nullable(String),
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `namespace_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
 -- Knowledge graph enabled namespaces
 CREATE TABLE IF NOT EXISTS test.siphon_knowledge_graph_enabled_namespaces
 (

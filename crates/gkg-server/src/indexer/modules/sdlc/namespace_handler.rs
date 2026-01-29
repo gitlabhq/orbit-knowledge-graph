@@ -11,7 +11,7 @@ use etl_engine::types::{Envelope, Event, SerializationError, Topic};
 use serde::Serialize;
 use tracing::warn;
 
-use super::pipeline::OntologyEntityPipeline;
+use super::pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
 use crate::indexer::topic::NamespaceIndexingRequest;
 
@@ -48,16 +48,19 @@ impl NamespaceQueryParams {
 pub struct NamespaceHandler {
     watermark_store: Arc<dyn WatermarkStore>,
     pipelines: Vec<OntologyEntityPipeline>,
+    edge_pipelines: Vec<OntologyEdgePipeline>,
 }
 
 impl NamespaceHandler {
     pub fn new(
         watermark_store: Arc<dyn WatermarkStore>,
         pipelines: Vec<OntologyEntityPipeline>,
+        edge_pipelines: Vec<OntologyEdgePipeline>,
     ) -> Self {
         Self {
             watermark_store,
             pipelines,
+            edge_pipelines,
         }
     }
 }
@@ -106,6 +109,16 @@ impl Handler for NamespaceHandler {
             {
                 warn!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
                 errors.push((pipeline.entity_name().to_string(), error));
+            }
+        }
+
+        for edge_pipeline in &self.edge_pipelines {
+            if let Err(error) = edge_pipeline
+                .process(params.to_json(), context.destination.as_ref())
+                .await
+            {
+                warn!(edge = edge_pipeline.relationship_kind(), %error, "edge pipeline processing failed");
+                errors.push((edge_pipeline.relationship_kind().to_string(), error));
             }
         }
 
@@ -219,7 +232,7 @@ mod tests {
             OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake).unwrap(),
         ];
 
-        let handler = NamespaceHandler::new(Arc::new(MockWatermarkStore), pipelines);
+        let handler = NamespaceHandler::new(Arc::new(MockWatermarkStore), pipelines, vec![]);
 
         let payload = serde_json::json!({
             "organization": 1,

@@ -1,5 +1,6 @@
 use ontology::{
-    DataType, EdgeDirection, EdgeTarget, EtlConfig, EtlScope, Field, NodeEntity, Ontology,
+    DataType, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget, EtlConfig,
+    EtlScope, Field, NodeEntity, Ontology,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +86,104 @@ impl PreparedEtlConfig {
             edges: prepare_edges(node, etl, ontology),
             is_namespaced: etl.scope() == EtlScope::Namespaced,
         })
+    }
+}
+
+/// Prepared ETL config for edges sourced from join tables.
+///
+/// Unlike `PreparedEtlConfig`, this only produces edges (no nodes).
+/// Both endpoints are determined by columns in the join table.
+#[derive(Debug, Clone)]
+pub struct PreparedEdgeEtl {
+    pub relationship_kind: String,
+    pub extract_query: String,
+    pub source_id: String,
+    pub source_kind: SqlExpr,
+    pub target_id: String,
+    pub target_kind: SqlExpr,
+    pub source_type_filter: Option<String>,
+}
+
+impl PreparedEdgeEtl {
+    pub fn from_config(
+        relationship_kind: &str,
+        config: &EdgeSourceEtlConfig,
+        ontology: &Ontology,
+    ) -> Self {
+        let extract_query = build_edge_extract_query(config);
+        let (source_id, source_kind, source_type_filter) =
+            prepare_endpoint(&config.from, relationship_kind, true, ontology);
+        let (target_id, target_kind, _) =
+            prepare_endpoint(&config.to, relationship_kind, false, ontology);
+
+        Self {
+            relationship_kind: relationship_kind.to_string(),
+            extract_query,
+            source_id,
+            source_kind,
+            target_id,
+            target_kind,
+            source_type_filter,
+        }
+    }
+}
+
+fn build_edge_extract_query(config: &EdgeSourceEtlConfig) -> String {
+    let mut columns = vec![
+        config.from.id_column.clone(),
+        config.to.id_column.clone(),
+        format!("{} AS _version", config.watermark),
+        format!("{} AS _deleted", config.deleted),
+    ];
+
+    if let EdgeEndpointType::Column(ref col) = config.from.node_type
+        && !columns.contains(col)
+    {
+        columns.push(col.clone());
+    }
+    if let EdgeEndpointType::Column(ref col) = config.to.node_type
+        && !columns.contains(col)
+    {
+        columns.push(col.clone());
+    }
+
+    let namespace_filter = if config.scope == EtlScope::Namespaced {
+        " AND startsWith(traversal_path, {traversal_path:String})"
+    } else {
+        ""
+    };
+
+    format!(
+        "SELECT {} FROM {} WHERE {} > {{last_watermark:String}} AND {} <= {{watermark:String}}{}",
+        columns.join(", "),
+        config.source,
+        config.watermark,
+        config.watermark,
+        namespace_filter
+    )
+}
+
+fn prepare_endpoint(
+    endpoint: &ontology::EdgeEndpoint,
+    relationship_kind: &str,
+    is_source: bool,
+    ontology: &Ontology,
+) -> (String, SqlExpr, Option<String>) {
+    let id_column = endpoint.id_column.clone();
+
+    match &endpoint.node_type {
+        EdgeEndpointType::Literal(node_type) => {
+            (id_column, SqlExpr::Literal(node_type.clone()), None)
+        }
+        EdgeEndpointType::Column(type_column) => {
+            let allowed_types = if is_source {
+                ontology.get_edge_source_types(relationship_kind)
+            } else {
+                ontology.get_edge_all_target_types(relationship_kind)
+            };
+            let type_filter = build_type_filter(type_column, &allowed_types);
+            (id_column, SqlExpr::Column(type_column.clone()), type_filter)
+        }
     }
 }
 

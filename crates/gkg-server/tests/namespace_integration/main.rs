@@ -7,6 +7,7 @@
 mod common;
 
 mod groups;
+mod labels;
 mod merge_request_diffs;
 mod merge_requests;
 mod milestones;

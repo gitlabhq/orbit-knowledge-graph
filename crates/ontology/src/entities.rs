@@ -40,6 +40,41 @@ pub struct EdgeEntity {
     pub target_kind: String,
 }
 
+/// ETL configuration for edges sourced from join tables.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeSourceEtlConfig {
+    /// Whether this is global or namespaced.
+    pub scope: crate::etl::EtlScope,
+    /// Source table name.
+    pub source: String,
+    /// Column name for watermark (version tracking).
+    pub watermark: String,
+    /// Column name for soft delete flag.
+    pub deleted: String,
+    /// Source endpoint configuration.
+    pub from: EdgeEndpoint,
+    /// Target endpoint configuration.
+    pub to: EdgeEndpoint,
+}
+
+/// Configuration for an edge endpoint (source or target).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeEndpoint {
+    /// Column containing the ID of the node.
+    pub id_column: String,
+    /// How the node type is determined.
+    pub node_type: EdgeEndpointType,
+}
+
+/// How an edge endpoint's node type is determined.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EdgeEndpointType {
+    /// A fixed node type (e.g., "Label").
+    Literal(String),
+    /// Type read from a column at runtime (e.g., "target_type").
+    Column(String),
+}
+
 impl fmt::Display for EdgeEntity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
