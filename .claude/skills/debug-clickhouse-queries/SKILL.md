@@ -68,6 +68,14 @@ Empty results can come from three sources:
 2. **Sampling issues** - Sampler picks narrow paths that don't contain matching data
 3. **Query engine bugs** - TYPE_MISMATCH, UNKNOWN_COLUMN errors
 
+The evaluation report shows sampling metadata for each empty result:
+
+- `path-scoped (N entities in 'path/')` - IDs sampled from within the security context
+- `global (N entities)` - Fell back to global sampling (path had no matching entities)
+- `no sampling needed` - Query has no node_ids parameters
+
+If you see `global` sampling with empty results, the sampled IDs likely don't exist in the security context path. If you see `path-scoped` with empty results, the data exists but query predicates filter it out.
+
 To tell them apart, check if matching data exists globally:
 
 ```sql
@@ -114,16 +122,94 @@ The ontology defines enum values in two ways:
 
 Both should use the ontology's `values:` mapping. If not, check `fake_data.rs` to ensure it checks `field.enum_values` before falling back to pattern-based generation.
 
-### Traversal path mismatches
+### Traversal path semantics
 
-Root entities (User, Group) dont have traversal paths. Nested entities (Project, MergeRequest, etc.) have paths like `"1/2/3/4/"`.
+Traversal paths form a trie structure for access control:
+- `1/2/` can access itself and descendants (`1/2/3/`, `1/2/3/4/`, etc.)
+- `1/2/3/4/` can only access itself and descendants, NOT ancestors like `1/2/`
+- More specific paths = more restricted access
 
-If User queries return empty but Users exist, check if the sampled traversal path is too specific:
+The `startsWith(entity.traversal_path, security_context_path)` filter enforces this: entities must be at or below the security context level.
+
+Root entities (User, Group) have shallow paths. Nested entities (Project, MergeRequest, etc.) have deeper paths like `"1/2/3/4/"`.
+
+If queries return empty, check if the sampled path is too deep for the entities being queried:
 
 ```sql
 -- Projects have nested paths
 SELECT DISTINCT traversal_path FROM kg_project LIMIT 5  
 -- Returns: 1/2/3/, 1/2/4/, etc.
+```
+
+## Simulator configuration impact
+
+The simulator config (`simulator.yaml`) directly affects what data exists for queries to find.
+
+### Edge types and directions
+
+Check which edge variants are configured:
+
+```sql
+-- What edges were actually generated?
+SELECT relationship_kind, source_kind, target_kind, count(*) 
+FROM kg_edges 
+GROUP BY relationship_kind, source_kind, target_kind 
+ORDER BY count(*) DESC
+```
+
+If a query expects `MergeRequest -> Pipeline` edges but only `User -> Pipeline` exists, the query will return empty. Compare against `simulator.yaml` associations section.
+
+### Association iteration direction
+
+Associations can iterate per-source or per-target:
+
+```yaml
+# Per-target (default): For each User, link 1 MR
+AUTHORED:
+  "User -> MergeRequest": 1
+
+# Per-source: For each MR, maybe link a User  
+MERGED_BY:
+  "MergeRequest -> User":
+    ratio: 0.3
+    per: source
+```
+
+**Why this matters**: With 1000 Users and 100k MRs:
+- `per: target` with ratio 1 → 1000 edges (1 per User)
+- `per: source` with ratio 0.3 → 30k edges (30% of MRs)
+
+If queries return empty for User-related edges, check:
+1. Is the edge configured at all?
+2. Is the iteration direction correct for the cardinality?
+3. Are there enough edges generated?
+
+### Edge direction in ontology vs queries
+
+Queries specify edge direction: `{"type": "MERGED_BY", "from": "mr", "to": "user"}`
+
+This translates to: `mr.id = edge.source AND edge.target = user.id`
+
+The ontology must match. If ontology says `User -> MergeRequest` but query expects `MergeRequest -> User`, they're incompatible.
+
+### Path compatibility for edges
+
+Association edges must be queryable given the security filter rules. The generator uses `edge_is_queryable()`:
+
+This matches the query engine's behavior (`crates/query-engine/src/security.rs`):
+- **User** (exempt): Only filtered by relationships, not path. Edges just need same org.
+- **Other entities**: Must be at or below the source's path level.
+
+### Sampling fallback behavior
+
+When path-scoped sampling returns no results, the sampler falls back to org-scoped sampling using `random_ids_in_org()`. This ensures sampled entities are at least in the correct organization.
+
+If you still see mismatches, check that the sampled entity exists in the org:
+
+```sql
+-- Check if sampled user is in the right org
+SELECT id, traversal_path FROM kg_user WHERE id = <sampled_user_id>
+-- Path should start with the security context's org_id
 ```
 
 ## Places to investigate
@@ -138,10 +224,25 @@ Enum value sources:
 
 Edge configuration:
 - `crates/simulator/simulator.yaml` - relationships and associations
+- `fixtures/ontology/edges/*.yaml` - edge type definitions (source/target kinds)
 
 Traversal path construction:
 - `crates/simulator/src/generator/traversal.rs`
 - `crates/simulator/src/generator/mod.rs`
+
+Association generation:
+- `crates/simulator/src/config.rs` - `AssociationConfig`, `IterationDirection`
+- `crates/simulator/src/generator/mod.rs` - `generate_association_edges()`
+
+## Debugging checklist for empty results
+
+1. **Check sampling metadata** - Is it path-scoped or global fallback?
+2. **Verify edge exists in ontology** - Does `fixtures/ontology/edges/<type>.yaml` define the right direction?
+3. **Verify edge configured in simulator** - Is it in `simulator.yaml` associations?
+4. **Check iteration direction** - Does `per: source` vs `per: target` match the cardinality?
+5. **Check edge counts** - Do enough edges of this type exist?
+6. **Check path compatibility** - Are source/target entities in the same traversal hierarchy?
+7. **Check query predicates** - Are filters too restrictive for the generated data?
 
 ## After changes, regenerate
 

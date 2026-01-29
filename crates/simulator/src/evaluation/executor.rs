@@ -25,6 +25,50 @@ const SAFE_QUERY_SETTINGS: &str = "\
 /// Sample row from query results for peeking.
 pub type SampleRow = Vec<String>;
 
+/// Information about how query parameters were sampled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SamplingInfo {
+    /// The traversal path used for scoped sampling, if any.
+    pub traversal_path: Option<String>,
+    /// Number of entities that had IDs sampled within the path.
+    pub path_scoped_count: usize,
+    /// Number of entities that fell back to global sampling.
+    pub global_fallback_count: usize,
+}
+
+impl SamplingInfo {
+    pub fn empty() -> Self {
+        Self {
+            traversal_path: None,
+            path_scoped_count: 0,
+            global_fallback_count: 0,
+        }
+    }
+
+    /// Returns a short description of sampling behavior.
+    pub fn description(&self) -> String {
+        match (
+            &self.traversal_path,
+            self.path_scoped_count,
+            self.global_fallback_count,
+        ) {
+            (Some(path), scoped, 0) if scoped > 0 => {
+                format!("path-scoped ({} entities in '{}')", scoped, path)
+            }
+            (Some(path), scoped, global) if scoped > 0 && global > 0 => {
+                format!(
+                    "mixed ({} path-scoped in '{}', {} global)",
+                    scoped, path, global
+                )
+            }
+            (_, 0, global) if global > 0 => {
+                format!("global ({} entities)", global)
+            }
+            _ => "no sampling needed".to_string(),
+        }
+    }
+}
+
 /// Result of executing a single query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
@@ -48,8 +92,12 @@ pub struct ExecutionResult {
     pub sql: Option<String>,
     /// Parameters used.
     pub params: Option<serde_json::Value>,
+    /// Information about how parameters were sampled.
+    #[serde(default)]
+    pub sampling_info: Option<SamplingInfo>,
 }
 
+#[allow(clippy::too_many_arguments)]
 impl ExecutionResult {
     pub fn success(
         query_name: String,
@@ -59,6 +107,7 @@ impl ExecutionResult {
         execution_time: Duration,
         sql: String,
         params: serde_json::Value,
+        sampling_info: Option<SamplingInfo>,
     ) -> Self {
         Self {
             query_name,
@@ -79,6 +128,7 @@ impl ExecutionResult {
             execution_time,
             sql: Some(sql),
             params: Some(params),
+            sampling_info,
         }
     }
 
@@ -104,6 +154,7 @@ impl ExecutionResult {
             execution_time,
             sql,
             params: None,
+            sampling_info: None,
         }
     }
 
@@ -172,17 +223,30 @@ impl QueryExecutor {
     pub async fn execute_query(&mut self, name: &str, query: &QueryDefinition) -> ExecutionResult {
         let start = Instant::now();
 
-        // Substitute parameters with sampled values
-        let substituted = match self.substitute_parameters(query).await {
-            Ok(q) => q,
+        // Pick security context FIRST so we can sample IDs within its scope
+        let security_ctx = match self.random_security_context() {
+            Ok(ctx) => ctx,
             Err(e) => {
                 return ExecutionResult::failure(
                     name.to_string(),
-                    format!("Parameter substitution failed: {}", e),
+                    format!("Security context error: {}", e),
                     start.elapsed(),
                 );
             }
         };
+
+        // Substitute parameters with sampled values within the security context path
+        let (substituted, sampling_info) =
+            match self.substitute_parameters(query, &security_ctx).await {
+                Ok(result) => result,
+                Err(e) => {
+                    return ExecutionResult::failure(
+                        name.to_string(),
+                        format!("Parameter substitution failed: {}", e),
+                        start.elapsed(),
+                    );
+                }
+            };
 
         // Compile JSON to SQL
         let json_str = match serde_json::to_string(&substituted) {
@@ -191,17 +255,6 @@ impl QueryExecutor {
                 return ExecutionResult::failure(
                     name.to_string(),
                     format!("JSON serialization failed: {}", e),
-                    start.elapsed(),
-                );
-            }
-        };
-
-        let security_ctx = match self.random_security_context() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                return ExecutionResult::failure(
-                    name.to_string(),
-                    format!("Security context error: {}", e),
                     start.elapsed(),
                 );
             }
@@ -231,6 +284,7 @@ impl QueryExecutor {
                 start.elapsed(),
                 compiled.sql,
                 serde_json::to_value(&compiled.params).unwrap_or_default(),
+                Some(sampling_info),
             ),
             Err(e) => ExecutionResult::failure_with_sql(
                 name.to_string(),
@@ -268,12 +322,24 @@ impl QueryExecutor {
         results
     }
 
-    /// Substitute placeholder node_ids with sampled values.
+    /// Substitute placeholder node_ids with sampled values within the security context.
+    ///
+    /// Returns the substituted query and sampling info for diagnostics.
     async fn substitute_parameters(
         &mut self,
         query: &QueryDefinition,
-    ) -> Result<serde_json::Value> {
+        security_ctx: &SecurityContext,
+    ) -> Result<(serde_json::Value, SamplingInfo)> {
         let mut query_value = serde_json::to_value(query)?;
+
+        // Get the first traversal path from the security context
+        let traversal_path = security_ctx.traversal_paths.first().cloned();
+
+        let mut sampling_info = SamplingInfo {
+            traversal_path: traversal_path.clone(),
+            path_scoped_count: 0,
+            global_fallback_count: 0,
+        };
 
         if let Some(nodes) = query_value.get_mut("nodes").and_then(|n| n.as_array_mut()) {
             for node in nodes.iter_mut() {
@@ -289,11 +355,39 @@ impl QueryExecutor {
                             .map(|arr| arr.len())
                             .unwrap_or(1);
 
-                        // Sample new IDs
-                        let sampled_ids = self
-                            .sampler
-                            .random_ids(entity, count, &self.ontology)
-                            .await?;
+                        // Sample IDs within the security context path if available
+                        let sampled_ids = if let Some(ref path) = traversal_path {
+                            let ids = self
+                                .sampler
+                                .random_ids_in_path(entity, count, path, &self.ontology)
+                                .await?;
+                            if ids.is_empty() {
+                                // No entities in path, fall back to org-scoped sampling
+                                sampling_info.global_fallback_count += 1;
+                                self.sampler
+                                    .random_ids_in_org(
+                                        entity,
+                                        count,
+                                        security_ctx.org_id,
+                                        &self.ontology,
+                                    )
+                                    .await?
+                            } else {
+                                sampling_info.path_scoped_count += 1;
+                                ids
+                            }
+                        } else {
+                            // No path available, use org-scoped sampling
+                            sampling_info.global_fallback_count += 1;
+                            self.sampler
+                                .random_ids_in_org(
+                                    entity,
+                                    count,
+                                    security_ctx.org_id,
+                                    &self.ontology,
+                                )
+                                .await?
+                        };
 
                         if !sampled_ids.is_empty() {
                             obj.insert("node_ids".to_string(), serde_json::to_value(&sampled_ids)?);
@@ -303,7 +397,7 @@ impl QueryExecutor {
             }
         }
 
-        Ok(query_value)
+        Ok((query_value, sampling_info))
     }
 
     /// Execute raw SQL and return row count plus sample rows.
@@ -352,7 +446,6 @@ impl QueryExecutor {
         }
 
         // Parse the JSONCompactColumns format: [[col1_values...], [col2_values...], ...]
-        // Actually, let's use a simpler approach - fetch column names separately
         let columns = self.get_column_names(sql).await.unwrap_or_default();
 
         // Fetch data as tab-separated values which is easier to parse
@@ -472,6 +565,7 @@ mod tests {
             Duration::from_millis(100),
             "SELECT 1".to_string(),
             serde_json::json!({}),
+            None,
         );
         assert!(result.success);
         assert_eq!(result.row_count, Some(10));

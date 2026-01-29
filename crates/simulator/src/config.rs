@@ -473,42 +473,104 @@ impl RelationshipConfig {
     }
 }
 
+/// Iteration direction for association edge generation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IterationDirection {
+    /// Iterate over target entities (default).
+    /// For each target, sample source entities to link.
+    #[default]
+    Target,
+    /// Iterate over source entities.
+    /// For each source, sample target entities to link.
+    Source,
+}
+
+/// Extended association edge configuration with iteration direction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssociationEdgeExtended {
+    /// Ratio or probability for this relationship.
+    pub ratio: EdgeRatio,
+    /// Which side to iterate over when generating edges.
+    #[serde(default)]
+    pub per: IterationDirection,
+}
+
+/// Association edge value - can be simple ratio or extended config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AssociationEdgeValue {
+    /// Simple ratio (defaults to iterating over targets).
+    Simple(EdgeRatio),
+    /// Extended config with iteration direction.
+    Extended(AssociationEdgeExtended),
+}
+
+impl AssociationEdgeValue {
+    /// Get the ratio from this config.
+    pub fn ratio(&self) -> &EdgeRatio {
+        match self {
+            AssociationEdgeValue::Simple(r) => r,
+            AssociationEdgeValue::Extended(e) => &e.ratio,
+        }
+    }
+
+    /// Get the iteration direction.
+    pub fn iteration_direction(&self) -> IterationDirection {
+        match self {
+            AssociationEdgeValue::Simple(_) => IterationDirection::Target,
+            AssociationEdgeValue::Extended(e) => e.per,
+        }
+    }
+}
+
 /// Association edge configuration.
 ///
 /// Creates edges between existing entities (does not generate new entities).
 /// Used for relationships like AUTHORED, MEMBER_OF, ASSIGNED, etc.
 ///
-/// Format: `"Source -> Target": ratio`
-/// Semantics: For each TARGET entity, sample RATIO source entities to link.
+/// # Simple Format
+/// `"Source -> Target": ratio`
+/// Iterates over targets, sampling sources to link.
+///
+/// # Extended Format
+/// `"Source -> Target": { ratio: 0.3, per: "source" }`
+/// Iterates over the specified side (source or target).
 ///
 /// # Example YAML
 /// ```yaml
 /// associations:
 ///   AUTHORED:
-///     "User -> MergeRequest": 1    # Each MR has 1 author (sampled from Users)
-///   MEMBER_OF:
-///     "User -> Group": 3           # Each group has 3 members
+///     "User -> MergeRequest": 1           # Each MR has 1 author
+///   MERGED_BY:
+///     "MergeRequest -> User":             # 30% of MRs have a merger
+///       ratio: 0.3
+///       per: source                       # Iterate over MRs, not Users
 ///   ASSIGNED:
-///     "User -> WorkItem": 0.7      # 70% of work items have an assignee
+///     "User -> WorkItem": 0.7             # 70% of work items have an assignee
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssociationConfig {
     /// Map of edge type to variant configurations.
-    /// Key: edge relationship kind (e.g., "AUTHORED")
-    /// Value: map of "Source -> Target" to ratio (iterates over targets)
     #[serde(flatten)]
-    pub edges: HashMap<String, HashMap<String, EdgeRatio>>,
+    pub edges: HashMap<String, HashMap<String, AssociationEdgeValue>>,
 }
 
 impl AssociationConfig {
     /// Get all configured associations as a flat list.
-    /// Returns (edge_type, source_kind, target_kind, ratio).
-    pub fn all_associations(&self) -> Vec<(String, String, String, EdgeRatio)> {
+    /// Returns (edge_type, source_kind, target_kind, ratio, iteration_direction).
+    pub fn all_associations(&self) -> Vec<(String, String, String, EdgeRatio, IterationDirection)> {
         let mut result = Vec::new();
         for (edge_type, variants) in &self.edges {
-            for (variant_key, ratio) in variants {
+            for (variant_key, value) in variants {
                 if let Some((source, target)) = RelationshipConfig::parse_variant_key(variant_key) {
-                    result.push((edge_type.clone(), source, target, ratio.clone()));
+                    result.push((
+                        edge_type.clone(),
+                        source,
+                        target,
+                        value.ratio().clone(),
+                        value.iteration_direction(),
+                    ));
                 }
             }
         }

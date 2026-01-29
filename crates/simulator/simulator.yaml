@@ -68,8 +68,8 @@ generation:
   # Root entities (absolute counts per organization)
   # These have no parent and are generated first.
   roots:
-    User: 100
-    Group: 50
+    User: 1000                        # Many users per org
+    Group: 5                         # Few top-level groups (subgroups expand this)
 
   # Subgroup hierarchy (Group -> Group)
   # Generates nested groups under each root group
@@ -146,11 +146,14 @@ generation:
 
     # Review - who reviews what
     REVIEWER:
-      "User -> MergeRequest": 0.5     # 50% of MRs have a reviewer
+      "MergeRequest -> User":
+        ratio: 0.5                    # 50% of MRs have a reviewer
+        per: source                   # Iterate over MRs, not Users
 
     # Pipeline triggers
     TRIGGERED:
       "User -> Pipeline": 1           # Each pipeline was triggered by someone
+      "MergeRequest -> Pipeline": 0.8 # 80% of MRs trigger a pipeline
 
     # Project/Group ownership
     CREATOR:
@@ -160,7 +163,9 @@ generation:
 
     # MR merge action
     MERGED_BY:
-      "User -> MergeRequest": 0.3     # 30% of MRs are merged (have a merger)
+      "MergeRequest -> User":
+        ratio: 0.3                    # 30% of MRs are merged (have a merger)
+        per: source                   # Iterate over MRs, not Users
 
     # MR closes work items
     CLOSES:
@@ -173,6 +178,10 @@ generation:
     # Work items in milestones
     IN_MILESTONE:
       "WorkItem -> Milestone": 0.4    # 40% of work items are in a milestone
+
+    # Labels on entities
+    HAS_LABEL:
+      "WorkItem -> Label": 0.3        # 30% of work items have a label
 
     # Projects belong to groups
     IN_GROUP:

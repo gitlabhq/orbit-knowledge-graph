@@ -23,6 +23,46 @@ use fake::rand::seq::SliceRandom;
 use ontology::{NodeEntity, Ontology};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
+
+/// Entity types that don't have traversal path security filters applied.
+/// These are "root" entities whose visibility is relationship-based.
+/// Must match query-engine/src/security.rs SKIP_SECURITY_FILTER_TABLES.
+/// TODO: Make this compliant and derive from the ontology.
+const PATH_FILTER_EXEMPT_ENTITIES: &[&str] = &["User"];
+
+/// Check if source and target are in the same organization.
+fn same_org(source_path: &str, target_path: &str) -> bool {
+    let source_org = source_path.split('/').next();
+    let target_org = target_path.split('/').next();
+    source_org == target_org && source_org.is_some()
+}
+
+/// Check if target is reachable from source via traversal path.
+///
+/// For edges to be queryable, the target's path must start with (or equal)
+/// the source's path. This matches the query engine's security filter which
+/// uses `startsWith(target.traversal_path, source_context_path)`.
+///
+/// Examples:
+/// - source `1/2/`, target `1/2/3/` → true (target is descendant)
+/// - source `1/2/`, target `1/2/` → true (same level)
+/// - source `1/2/3/`, target `1/2/` → false (target is ancestor, not reachable)
+fn target_reachable_from_source(source_path: &str, target_path: &str) -> bool {
+    target_path.starts_with(source_path)
+}
+
+/// Check if an edge between source and target is valid for querying.
+///
+/// - If target entity is exempt from path filtering (e.g., User), just check same org
+/// - Otherwise, target must be at or below source's path level
+fn edge_is_queryable(source_path: &str, target_path: &str, target_kind: &str) -> bool {
+    if PATH_FILTER_EXEMPT_ENTITIES.contains(&target_kind) {
+        same_org(source_path, target_path)
+    } else {
+        target_reachable_from_source(source_path, target_path)
+    }
+}
 
 /// Edge record for storage.
 #[derive(Debug, Clone)]
@@ -48,6 +88,8 @@ pub struct Generator {
     config: Config,
     /// Dependency graph determining generation order.
     dependency_graph: DependencyGraph,
+    /// Global entity ID counter (shared across all orgs for unique IDs).
+    global_entity_counter: AtomicI64,
 }
 
 impl Generator {
@@ -58,7 +100,13 @@ impl Generator {
             ontology,
             config,
             dependency_graph,
+            global_entity_counter: AtomicI64::new(1),
         })
+    }
+
+    /// Get the next globally unique entity ID.
+    pub fn next_entity_id(&self) -> i64 {
+        self.global_entity_counter.fetch_add(1, Ordering::SeqCst)
     }
 
     pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
@@ -139,7 +187,7 @@ impl Generator {
                 // Note: The query engine skips traversal path security filters
                 // for Users since their visibility is determined through
                 // MEMBER_OF relationships to Groups, not path hierarchy.
-                let eid = registry.next_entity_id();
+                let eid = self.next_entity_id();
                 (eid, format!("{}/", org_id))
             };
 
@@ -232,7 +280,7 @@ impl Generator {
                         let trav = format!("{}{}/", parent.traversal_id, ns_id);
                         (ns_id, trav)
                     } else {
-                        let eid = registry.next_entity_id();
+                        let eid = self.next_entity_id();
                         (eid, parent.traversal_id.clone())
                     };
 
@@ -277,17 +325,19 @@ impl Generator {
     /// Unlike relationship edges (which are created when generating child entities),
     /// association edges connect entities that already exist without generating new ones.
     ///
-    /// Config format: `"Source -> Target": ratio`
-    /// Semantics: For each TARGET entity, sample RATIO source entities to link.
-    /// Example: `"User -> MergeRequest": 1` means each MR gets 1 author (User).
+    /// The iteration direction determines which side we iterate over:
+    /// - `per: target` (default): For each target, sample sources to link
+    /// - `per: source`: For each source, sample targets to link
     fn generate_association_edges(
         &self,
         registry: &EntityRegistry,
         rng: &mut impl Rng,
     ) -> Vec<EdgeRecord> {
+        use crate::config::IterationDirection;
+
         let mut edges = Vec::new();
 
-        for (edge_type, source_kind, target_kind, ratio) in
+        for (edge_type, source_kind, target_kind, ratio, direction) in
             self.config.generation.associations.all_associations()
         {
             let sources = match registry.get(&source_kind) {
@@ -300,8 +350,13 @@ impl Generator {
                 _ => continue,
             };
 
-            // For each target entity, sample source entities to create edges
-            for target in targets {
+            // Determine which side to iterate over based on direction
+            let (iterate_over, sample_from, is_source_iteration) = match direction {
+                IterationDirection::Target => (targets, sources, false),
+                IterationDirection::Source => (sources, targets, true),
+            };
+
+            for primary in iterate_over {
                 let edge_count = match &ratio {
                     EdgeRatio::Count(n) => *n,
                     EdgeRatio::Probability(p) => {
@@ -317,13 +372,44 @@ impl Generator {
                     continue;
                 }
 
-                let selected_sources: Vec<_> = if edge_count >= sources.len() {
-                    sources.iter().collect()
+                // Filter candidates where edge is queryable.
+                // For path-filtered targets: target must be at or below source level.
+                // For exempt targets (User): just need same org.
+                let compatible: Vec<_> = sample_from
+                    .iter()
+                    .filter(|candidate| {
+                        let (source_path, target_path) = if is_source_iteration {
+                            // primary is source, candidate is target
+                            (&primary.traversal_id, &candidate.traversal_id)
+                        } else {
+                            // candidate is source, primary is target
+                            (&candidate.traversal_id, &primary.traversal_id)
+                        };
+                        edge_is_queryable(source_path, target_path, &target_kind)
+                    })
+                    .collect();
+
+                if compatible.is_empty() {
+                    continue;
+                }
+
+                let selected: Vec<_> = if edge_count >= compatible.len() {
+                    compatible
                 } else {
-                    sources.choose_multiple(rng, edge_count).collect()
+                    compatible
+                        .choose_multiple(rng, edge_count)
+                        .copied()
+                        .collect()
                 };
 
-                for source in selected_sources {
+                for secondary in selected {
+                    // Create edge with correct source/target based on iteration direction
+                    let (source, target) = if is_source_iteration {
+                        (primary, secondary)
+                    } else {
+                        (secondary, primary)
+                    };
+
                     edges.push(EdgeRecord {
                         relationship_kind: edge_type.clone(),
                         source: source.id,
@@ -390,12 +476,20 @@ impl Generator {
         println!();
 
         if !cfg.associations.edges.is_empty() {
-            println!("  Associations (per target entity):");
+            println!("  Associations:");
             for (edge_type, variants) in &cfg.associations.edges {
-                for (variant, ratio) in variants {
+                for (variant, value) in variants {
+                    let ratio = value.ratio();
+                    let direction = value.iteration_direction();
+                    let per_str = match direction {
+                        crate::config::IterationDirection::Target => "per target",
+                        crate::config::IterationDirection::Source => "per source",
+                    };
                     let ratio_str = match ratio {
-                        EdgeRatio::Count(n) => format!("{} per target", n),
-                        EdgeRatio::Probability(p) => format!("{:.0}% chance", p * 100.0),
+                        EdgeRatio::Count(n) => format!("{} {}", n, per_str),
+                        EdgeRatio::Probability(p) => {
+                            format!("{:.0}% chance {}", p * 100.0, per_str)
+                        }
                     };
                     println!("    {}: {} ({})", edge_type, variant, ratio_str);
                 }

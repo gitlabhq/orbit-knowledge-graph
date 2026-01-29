@@ -217,6 +217,9 @@ impl Report {
                     result.query_name,
                     result.execution_time.as_secs_f64() * 1000.0
                 ));
+                if let Some(ref sampling) = result.sampling_info {
+                    output.push_str(&format!("    Sampling: {}\n", sampling.description()));
+                }
                 if let Some(sql) = &result.sql {
                     output.push_str("    SQL:\n");
                     output.push_str(&format_sql(sql, 6));
@@ -566,6 +569,7 @@ mod tests {
                 Duration::from_millis(100),
                 "SELECT 1".to_string(),
                 serde_json::json!({}),
+                None,
             ),
             ExecutionResult::success(
                 "q2".to_string(),
@@ -575,6 +579,7 @@ mod tests {
                 Duration::from_millis(200),
                 "SELECT 2".to_string(),
                 serde_json::json!({}),
+                None,
             ),
             ExecutionResult::failure(
                 "q3".to_string(),
@@ -600,6 +605,7 @@ mod tests {
             Duration::from_millis(100),
             "SELECT 1".to_string(),
             serde_json::json!({}),
+            None,
         )];
 
         let report = Report::new(results);

@@ -9,7 +9,7 @@ mod report;
 mod sampler;
 
 pub use error::{ErrorCategory, ParsedError};
-pub use executor::{ExecutionResult, QueryExecutor, SampleRow};
+pub use executor::{ExecutionResult, QueryExecutor, SampleRow, SamplingInfo};
 pub use report::{Report, ReportFormat};
 pub use sampler::ParameterSampler;
 
