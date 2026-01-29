@@ -24,31 +24,73 @@ postgres:
 
 # ClickHouse on host machine (GDK)
 clickhouse:
-  host: host.docker.internal
-  port: 9000
-  database: gitlab_clickhouse_main_development
-  user: default
-  ssl: false
+  datalake:
+    host: host.docker.internal
+    port: 9000
+    database: gitlab_clickhouse_main_development
+    user: default
+    ssl: false
+  graph:
+    host: host.docker.internal
+    port: 9000
+    database: gkg-development
+    user: default
+    ssl: false
 
 # NOTE: Secrets are managed by Tilt from .tilt-secrets file.
 # See .tilt-secrets.example in the repo root.
 
-# NATS for knowledge graph indexer queue
+# GKG Server components
+gkgServer:
+  image:
+    repository: gkg-server
+    tag: dev
+    pullPolicy: Never
+  indexer:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  webserver:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# NATS JetStream (using official chart)
 nats:
   enabled: true
-  streamName: gkg_indexer
-  image:
-    repository: nats
-    tag: "2.10-alpine"
-    pullPolicy: IfNotPresent
-  storage: 1Gi
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 200m
-      memory: 256Mi
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 1Gi
+  container:
+    image:
+      repository: nats
+      tag: "2.10-alpine"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  natsBox:
+    enabled: false
 
 # Siphon image (not used when producer/consumer disabled)
 siphon:
@@ -121,6 +163,12 @@ kube-prometheus-stack:
     enabled: false
   grafana:
     adminPassword: admin
+    additionalDataSources:
+      - name: Loki
+        type: loki
+        url: http://gkg-loki:3100
+        access: proxy
+        isDefault: false
     service:
       type: NodePort
       nodePort: 30300
@@ -140,6 +188,8 @@ loki:
     auth_enabled: false
     commonConfig:
       replication_factor: 1
+    memberlist:
+      join_members: []
     storage:
       type: filesystem
     schemaConfig:
@@ -168,6 +218,9 @@ loki:
     replicas: 0
   gateway:
     enabled: false
+  memberlist:
+    service:
+      enabled: false
   chunksCache:
     enabled: false
   resultsCache:

@@ -1,6 +1,8 @@
 # Tiltfile for local Knowledge Graph development
 # Requires: colima with kubernetes enabled
 
+update_settings(k8s_upsert_timeout_secs=600)
+
 # Only allow local contexts to prevent accidental GCP deployments
 # Change context with: kubectl config use-context <context>
 allow_k8s_contexts(['colima', 'docker-desktop', 'minikube', 'kind-kind', 'rancher-desktop'])
@@ -47,15 +49,32 @@ metadata:
 type: Opaque
 stringData:
   password: "{clickhouse_password}"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gkg-server-credentials
+type: Opaque
+stringData:
+  jwt-secret: "{jwt_secret}"
 '''.format(
     postgres_password=secrets.get('POSTGRES_PASSWORD', ''),
     clickhouse_password=secrets.get('CLICKHOUSE_PASSWORD', ''),
+    jwt_secret=secrets.get('GKG_JWT_SECRET', ''),
 )
 
 k8s_yaml(blob(secrets_yaml))
 
-# Build helm dependencies (gitlab-runner chart is gitignored)
+# Build gkg-server: use Docker with cached volumes for fast incremental builds
+custom_build(
+    'gkg-server',
+    './scripts/build-dev.sh $EXPECTED_REF',
+    deps=['crates/', 'Cargo.toml', 'Cargo.lock'],
+)
+
+# Build helm dependencies (gitlab-runner and nats charts are gitignored)
 local('helm repo add gitlab https://charts.gitlab.io 2>/dev/null || true', quiet=True)
+local('helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true', quiet=True)
 local('helm dependency build ./helm-dev', quiet=True)
 
 # Install Prometheus Operator CRDs (required for kube-prometheus-stack)
@@ -78,3 +97,7 @@ k8s_yaml(helm(
     namespace='default',
     values=['./helm-dev/values-local.yaml'],
 ))
+
+# Skip readiness checks for components that may take time to connect
+k8s_resource('gkg-indexer', pod_readiness='ignore')
+k8s_resource('gkg-webserver', pod_readiness='ignore')

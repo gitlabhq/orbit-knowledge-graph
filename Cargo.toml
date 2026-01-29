@@ -95,7 +95,7 @@ tower = "0.5.3"
 axum = { version = "0.8.8", features = ["macros"] }
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 tower-http = { version = "0.6.8", features = ["trace"] }
-rust-embed = { version = "8.11.0", features = ["interpolate-folder-path"] }
+rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

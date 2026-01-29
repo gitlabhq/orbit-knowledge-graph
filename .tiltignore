@@ -1,0 +1,4 @@
+# Ignore helm chart dependencies to prevent reload loops
+helm-dev/charts/
+helm-dev/tmpcharts*
+helm-dev/Chart.lock

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     pub bind_address: SocketAddr,
-    pub jwt_secret: String,
+    pub jwt_secret: Option<String>,
     pub jwt_clock_skew_secs: u64,
     #[serde(default)]
     pub nats: NatsConfiguration,
@@ -27,12 +27,7 @@ impl AppConfig {
             .parse()
             .map_err(|_| ConfigError::InvalidBindAddress)?;
 
-        let jwt_secret =
-            std::env::var("GKG_JWT_SECRET").map_err(|_| ConfigError::MissingJwtSecret)?;
-
-        if jwt_secret.len() < 32 {
-            return Err(ConfigError::JwtSecretTooShort);
-        }
+        let jwt_secret = std::env::var("GKG_JWT_SECRET").ok();
 
         let jwt_clock_skew_secs = std::env::var("GKG_JWT_CLOCK_SKEW_SECS")
             .unwrap_or_else(|_| "60".into())
@@ -49,6 +44,12 @@ impl AppConfig {
             engine: EngineConfiguration::default(),
         })
     }
+
+    pub fn jwt_secret(&self) -> Result<&str, ConfigError> {
+        self.jwt_secret
+            .as_deref()
+            .ok_or(ConfigError::MissingJwtSecret)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,6 +58,4 @@ pub enum ConfigError {
     InvalidBindAddress,
     #[error("GKG_JWT_SECRET environment variable is required")]
     MissingJwtSecret,
-    #[error("JWT secret must be at least 32 bytes")]
-    JwtSecretTooShort,
 }
