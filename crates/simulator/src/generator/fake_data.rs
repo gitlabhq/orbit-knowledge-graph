@@ -63,6 +63,7 @@ impl FakeValueGenerator {
 
     fn generate_fast(&mut self, field: &Field) -> FakeValue {
         match field.data_type {
+            DataType::Enum => self.generate_enum(field),
             DataType::String => {
                 let rand1 = self.rng.r#gen::<u32>();
                 let rand2 = self.rng.r#gen::<u16>();
@@ -146,7 +147,6 @@ impl FakeValueGenerator {
                 let millis = (days_ago * 86400 + hour_offset * 3600) * 1000;
                 FakeValue::DateTime(Utc::now().timestamp_millis() - millis)
             }
-            DataType::Enum => self.generate_enum(field),
         }
     }
 

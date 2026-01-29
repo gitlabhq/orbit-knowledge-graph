@@ -1,0 +1,181 @@
+//! CLI for query evaluation.
+
+use anyhow::{Result, bail};
+use clap::Parser;
+use ontology::Ontology;
+use simulator::Config;
+use simulator::evaluation::{QueryExecutor, Report, ReportFormat, load_queries};
+use std::path::PathBuf;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+#[derive(Parser)]
+#[command(name = "evaluate")]
+#[command(about = "Execute SDLC queries and collect statistics")]
+struct Args {
+    /// Path to YAML configuration file
+    #[arg(short, long, default_value = "simulator.yaml")]
+    config: PathBuf,
+
+    /// Verbose output
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    let filter = if args.verbose {
+        "simulator=debug,info"
+    } else {
+        "simulator=info,warn"
+    };
+
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter)))
+        .init();
+
+    tracing::info!("Loading config from {:?}", args.config);
+    let config = Config::load(&args.config)?;
+
+    tracing::info!(
+        "Loading ontology from {:?}",
+        config.generation.ontology_path
+    );
+    let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
+
+    tracing::info!("Loading queries from {:?}", config.evaluation.queries_path);
+    let mut queries = load_queries(config.evaluation.queries_path.as_ref())?;
+
+    if let Some(pattern) = &config.evaluation.filter {
+        let pattern_lower = pattern.to_lowercase();
+        queries.retain(|name, _| name.to_lowercase().contains(&pattern_lower));
+        tracing::info!(
+            "Filtered to {} queries matching '{}'",
+            queries.len(),
+            pattern
+        );
+    }
+
+    if queries.is_empty() {
+        tracing::warn!("No queries to execute");
+        return Ok(());
+    }
+
+    tracing::info!("Loaded {} queries", queries.len());
+
+    // Check ClickHouse connectivity before proceeding
+    tracing::info!(
+        "Checking ClickHouse connection at {}...",
+        config.clickhouse.url
+    );
+    let client = config.clickhouse.build_client();
+    check_clickhouse_health(&client).await?;
+    tracing::info!("ClickHouse is healthy");
+
+    let mut executor = QueryExecutor::new(client, ontology, config.evaluation.sample_size);
+
+    if !config.evaluation.skip_cache_warm {
+        tracing::info!("Warming parameter cache...");
+        executor.warm_cache().await?;
+
+        let stats = executor.cache_stats();
+        for (entity, count) in &stats {
+            tracing::debug!("  {}: {} IDs sampled", entity, count);
+        }
+        tracing::info!("Cache warmed: {} entity types", stats.len());
+    }
+
+    tracing::info!(
+        "Executing {} queries ({} iteration(s))...",
+        queries.len(),
+        config.evaluation.iterations
+    );
+
+    let mut all_results = Vec::new();
+
+    for iteration in 0..config.evaluation.iterations {
+        if config.evaluation.iterations > 1 {
+            tracing::info!(
+                "Iteration {}/{}",
+                iteration + 1,
+                config.evaluation.iterations
+            );
+        }
+
+        let results = executor.execute_all(&queries).await;
+
+        for result in &results {
+            if result.success {
+                tracing::debug!(
+                    "✓ {} - {} rows in {:.2}ms",
+                    result.query_name,
+                    result.row_count.unwrap_or(0),
+                    result.execution_time.as_secs_f64() * 1000.0
+                );
+            } else {
+                tracing::warn!(
+                    "✗ {} - {}",
+                    result.query_name,
+                    result.error.as_deref().unwrap_or("unknown error")
+                );
+            }
+        }
+
+        all_results.extend(results);
+    }
+
+    let report = Report::new(all_results);
+    let format: ReportFormat = config.evaluation.output.format.parse().unwrap_or_default();
+    let output = report.format(format);
+
+    let wrote_to_file = if let Some(ref path) = config.evaluation.output.path {
+        std::fs::write(path, &output)?;
+        tracing::info!("Report written to {:?}", path);
+        true
+    } else {
+        println!("{}", output);
+        false
+    };
+
+    if wrote_to_file {
+        eprintln!(
+            "Completed: {}/{} successful ({:.1}%)",
+            report.summary.successful,
+            report.summary.total_queries,
+            report.summary.success_rate()
+        );
+    }
+
+    Ok(())
+}
+
+/// Check that ClickHouse is running and healthy.
+async fn check_clickhouse_health(client: &clickhouse_client::ArrowClickHouseClient) -> Result<()> {
+    // Try a simple query to verify connectivity
+    let result: Result<String, _> = client.inner().query("SELECT version()").fetch_one().await;
+
+    match result {
+        Ok(version) => {
+            tracing::debug!("ClickHouse version: {}", version);
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+
+            if error_msg.contains("Connect") || error_msg.contains("connection") {
+                bail!(
+                    "Cannot connect to ClickHouse.\n\n\
+                     Make sure ClickHouse is running:\n\
+                     - Docker: docker run -d -p 8123:8123 clickhouse/clickhouse-server\n\
+                     - Local: clickhouse-server\n\n\
+                     Error: {}",
+                    error_msg
+                );
+            } else {
+                bail!("ClickHouse health check failed: {}", error_msg)
+            }
+        }
+    }
+}

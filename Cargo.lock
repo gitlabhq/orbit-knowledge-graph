@@ -5571,6 +5571,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse",
+ "clickhouse-client",
  "fake",
  "indicatif",
  "ontology",

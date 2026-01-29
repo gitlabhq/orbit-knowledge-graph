@@ -3,11 +3,13 @@
 use super::schema::SchemaGenerator;
 use crate::config::ClickHouseConfig;
 use crate::generator::{EdgeRecord, OrganizationData};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 use clickhouse::{Client, Row};
 use ontology::{EDGE_TABLE, Ontology};
 use serde::Serialize;
+use std::path::Path;
+use std::process::Command;
 
 /// ClickHouse row for edges (matches EdgeEntity).
 #[derive(Debug, Clone, Serialize, Row)]
@@ -34,12 +36,16 @@ impl From<&EdgeRecord> for EdgeRow {
 /// Writes data to ClickHouse with batched inserts.
 pub struct ClickHouseWriter {
     client: Client,
+    url: String,
 }
 
 impl ClickHouseWriter {
     pub fn new(url: &str) -> Self {
         let client = Client::default().with_url(url);
-        Self { client }
+        Self {
+            client,
+            url: url.to_string(),
+        }
     }
 
     pub fn with_config(config: &ClickHouseConfig) -> Self {
@@ -51,7 +57,69 @@ impl ClickHouseWriter {
                 "max_insert_block_size",
                 config.client.max_insert_block_size.to_string(),
             );
-        Self { client }
+        Self {
+            client,
+            url: config.url.clone(),
+        }
+    }
+
+    /// Check that clickhouse CLI is available in PATH.
+    pub fn check_cli_available() -> Result<()> {
+        let output = Command::new("clickhouse").arg("--version").output();
+
+        match output {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                anyhow::bail!("clickhouse CLI error: {}", stderr)
+            }
+            Err(_) => anyhow::bail!(
+                "clickhouse CLI not found in PATH.\n\
+                 Install via: mise install\n\
+                 Or: brew install clickhouse"
+            ),
+        }
+    }
+
+    /// Load a Parquet file directly into a table using clickhouse client.
+    /// Much faster and more reliable than HTTP streaming for large files.
+    pub fn load_parquet_file(&self, table_name: &str, parquet_path: &Path) -> Result<()> {
+        let path_str = parquet_path.to_str().context("Invalid path encoding")?;
+
+        let output = Command::new("clickhouse")
+            .arg("client")
+            .arg("--query")
+            .arg(format!("INSERT INTO {} FORMAT Parquet", table_name))
+            .arg("--host")
+            .arg(self.parse_host())
+            .arg("--port")
+            .arg(self.parse_port())
+            .stdin(std::fs::File::open(parquet_path)?)
+            .output()
+            .context("Failed to run clickhouse client")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("clickhouse client failed for {}: {}", path_str, stderr);
+        }
+
+        Ok(())
+    }
+
+    fn parse_host(&self) -> String {
+        // Extract host from URL like "http://localhost:8123"
+        self.url
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .split(':')
+            .next()
+            .unwrap_or("localhost")
+            .to_string()
+    }
+
+    fn parse_port(&self) -> String {
+        // Default to native port 9000 for clickhouse-client
+        "9000".to_string()
     }
 
     pub async fn create_schemas(

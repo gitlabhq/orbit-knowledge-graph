@@ -170,7 +170,7 @@ impl Generator {
 
         for _ in 0..subgroup_config.per_group {
             let ns_id = registry.next_namespace_id();
-            let traversal_id = format!("{}/{}/", parent.traversal_id, ns_id);
+            let traversal_id = format!("{}{}/", parent.traversal_id, ns_id);
 
             builder.add_row(org_id, traversal_id.clone(), ns_id);
             let ctx = EntityContext::new(ns_id, traversal_id);
@@ -215,7 +215,7 @@ impl Generator {
                 for _ in 0..child_count {
                     let (entity_id, traversal_id) = if is_group {
                         let ns_id = registry.next_namespace_id();
-                        let trav = format!("{}/{}/", parent.traversal_id, ns_id);
+                        let trav = format!("{}{}/", parent.traversal_id, ns_id);
                         (ns_id, trav)
                     } else {
                         let eid = registry.next_entity_id();
