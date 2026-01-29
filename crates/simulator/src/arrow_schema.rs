@@ -60,16 +60,16 @@ impl ToArrowType for DataType {
 ///
 /// Matches `EdgeEntity` from ontology:
 /// - relationship_kind: Utf8 (e.g., "AUTHORED", "CONTAINS")
-/// - source: Int64 (source node ID)
+/// - source_id: Int64 (source node ID)
 /// - source_kind: Utf8 (e.g., "User", "Group")
-/// - target: Int64 (target node ID)
+/// - target_id: Int64 (target node ID)
 /// - target_kind: Utf8 (e.g., "MergeRequest", "Project")
 pub fn edge_schema() -> Schema {
     Schema::new(vec![
         ArrowField::new("relationship_kind", ArrowDataType::Utf8, false),
-        ArrowField::new("source", ArrowDataType::Int64, false),
+        ArrowField::new("source_id", ArrowDataType::Int64, false),
         ArrowField::new("source_kind", ArrowDataType::Utf8, false),
-        ArrowField::new("target", ArrowDataType::Int64, false),
+        ArrowField::new("target_id", ArrowDataType::Int64, false),
         ArrowField::new("target_kind", ArrowDataType::Utf8, false),
     ])
 }
@@ -185,9 +185,9 @@ mod tests {
             field_names,
             vec![
                 "relationship_kind",
-                "source",
+                "source_id",
                 "source_kind",
-                "target",
+                "target_id",
                 "target_kind"
             ]
         );
@@ -199,11 +199,11 @@ mod tests {
         let ddl = to_clickhouse_ddl(
             "gl_edges",
             &schema,
-            &["relationship_kind", "source_kind", "source"],
+            &["relationship_kind", "source_kind", "source_id"],
         );
 
         assert!(ddl.contains("CREATE TABLE IF NOT EXISTS gl_edges"));
         assert!(ddl.contains("relationship_kind String"));
-        assert!(ddl.contains("ORDER BY (relationship_kind, source_kind, source)"));
+        assert!(ddl.contains("ORDER BY (relationship_kind, source_kind, source_id)"));
     }
 }

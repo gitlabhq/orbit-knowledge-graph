@@ -24,15 +24,15 @@ clickhouse:
     node_order_by: [organization_id, id]
 
     # Edge table: ordered for forward traversal (source -> target)
-    edge_primary_key: [source_kind, source]
-    edge_order_by: [source_kind, source, relationship_kind]
+    edge_primary_key: [source_kind, source_id]
+    edge_order_by: [source_kind, source_id, relationship_kind]
 
     # Data skipping indexes for FK lookups not in primary key
     indexes:
       # Bloom filter for target lookups (reverse traversal)
       - name: idx_target
         table: edges
-        expression: target
+        expression: target_id
         type: bloom_filter
         granularity: 4
 
@@ -48,8 +48,8 @@ clickhouse:
       # Find edges by target (reverse of source -> target)
       - name: by_target
         table: edges
-        columns: [source_kind, source, relationship_kind, target_kind, target]
-        order_by: [target_kind, target, relationship_kind]
+        columns: [source_kind, source_id, relationship_kind, target_kind, target_id]
+        order_by: [target_kind, target_id, relationship_kind]
 
 generation:
   ontology_path: fixtures/ontology
