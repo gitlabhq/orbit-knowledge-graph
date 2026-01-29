@@ -87,6 +87,28 @@ CREATE TABLE IF NOT EXISTS gl_notes (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
+CREATE TABLE IF NOT EXISTS gl_merge_requests (
+    id Int64,
+    iid Nullable(Int64),
+    title String DEFAULT '',
+    description String DEFAULT '',
+    source_branch String DEFAULT '',
+    target_branch String DEFAULT '',
+    state String DEFAULT '',
+    merge_status String DEFAULT 'unchecked',
+    draft Bool DEFAULT false,
+    squash Bool DEFAULT false,
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    merge_commit_sha Nullable(String),
+    discussion_locked Nullable(Bool),
+    prepared_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
 CREATE TABLE IF NOT EXISTS gl_edges (
     source_id Int64,
     source_kind String,

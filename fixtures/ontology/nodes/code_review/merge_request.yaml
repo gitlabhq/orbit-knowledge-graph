@@ -3,7 +3,7 @@
 node_type: MergeRequest
 domain: code_review
 description: A merge request for code review and merging changes into a target branch
-destination_table: gl_merge_request
+destination_table: gl_merge_requests
 
 properties:
   id:
@@ -17,12 +17,6 @@ properties:
     source: iid
     nullable: true
     description: "Project-scoped merge request number."
-
-  full_path:
-    type: string
-    source: path
-    nullable: true
-    description: "Full path to the merge request (e.g., gitlab-org/gitlab/-/merge_requests/123)."
 
   title:
     type: string
@@ -60,18 +54,10 @@ properties:
       4: locked
 
   merge_status:
-    type: enum
+    type: string
     source: merge_status
     nullable: false
-    description: "Mergeability check status."
-    values:
-      0: unchecked
-      1: preparing
-      2: checking
-      3: can_be_merged
-      4: cannot_be_merged
-      5: cannot_be_merged_recheck
-      6: cannot_be_merged_rechecking
+    description: "Mergeability check status (unchecked, preparing, checking, can_be_merged, cannot_be_merged, etc.)."
 
   draft:
     type: boolean
@@ -115,19 +101,26 @@ properties:
     nullable: true
     description: "Timestamp when the merge request was prepared."
 
-# edges:
-#   - type: IN_PROJECT
-#     source_id: target_project_id
-#     target_kind: Project
-#
-#   - type: AUTHOR
-#     source_id: author_id
-#     target_kind: User
-#
-#   - type: FROM_BRANCH
-#     source: source_branch
-#     target_kind: Branch
-#
-#   - type: TO_BRANCH
-#     source: target_branch
-#     target_kind: Branch
+etl:
+  type: table
+  scope: namespaced
+  source: hierarchy_merge_requests
+  watermark: version
+  deleted: deleted
+  edges:
+    target_project_id:
+      to: Project
+      as: in_project
+      direction: outgoing
+    author_id:
+      to: User
+      as: authored
+      direction: incoming
+    assignee_id:
+      to: User
+      as: assigned
+      direction: incoming
+    merge_user_id:
+      to: User
+      as: merged_by
+      direction: incoming

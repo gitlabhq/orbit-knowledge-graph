@@ -1,4 +1,4 @@
-//! Integration tests for the namespace handler (groups, projects, and notes).
+//! Integration tests for the namespace handler (groups, projects, notes, and merge requests).
 //!
 //! These tests require a Docker-compatible runtime (Docker, Colima, etc).
 
@@ -407,4 +407,113 @@ async fn namespace_handler_processes_notes_with_edges() {
     assert_eq!(source_kind.value(0), "MergeRequest");
     assert_eq!(source_kind.value(1), "WorkItem");
     assert_eq!(source_kind.value(2), "Vulnerability");
+}
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_merge_requests_with_edges() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO hierarchy_merge_requests
+                (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+                 draft, squash, target_project_id, author_id, assignee_id, merge_user_id,
+                 traversal_path, version)
+            VALUES
+                (1, 101, 'Add feature X', 'Implements feature X', 'feature-x', 'main', 1, 'can_be_merged',
+                 false, true, 1000, 1, 2, NULL, '1/100/', '2024-01-20 12:00:00'),
+                (2, 102, 'Fix bug Y', 'Fixes critical bug', 'fix-y', 'main', 3, 'merged',
+                 false, false, 1000, 2, NULL, 1, '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let sdlc_module = SdlcModule::new(&context.config)
+        .await
+        .expect("failed to create SDLC module");
+
+    let handlers = sdlc_module.handlers();
+    let namespace_handler = handlers
+        .iter()
+        .find(|h| h.name() == "namespace-handler")
+        .expect("namespace-handler not found");
+
+    let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    let result = context
+        .query("SELECT id, title, state, merge_status, draft, squash FROM gl_merge_requests ORDER BY id")
+        .await;
+    assert!(!result.is_empty(), "merge requests should exist");
+
+    let batch = &result[0];
+    assert_eq!(batch.num_rows(), 2);
+
+    let titles = batch
+        .column_by_name("title")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(titles.value(0), "Add feature X");
+    assert_eq!(titles.value(1), "Fix bug Y");
+
+    let states = batch
+        .column_by_name("state")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(states.value(0), "opened");
+    assert_eq!(states.value(1), "merged");
+
+    let in_project_edges = context
+        .query(
+            "SELECT source_id, target_id FROM gl_edges
+             WHERE relationship_kind = 'in_project' AND source_kind = 'MergeRequest'",
+        )
+        .await;
+    assert_eq!(
+        in_project_edges[0].num_rows(),
+        2,
+        "both MRs should have in_project edges"
+    );
+
+    let authored_edges = context
+        .query(
+            "SELECT source_id, target_id FROM gl_edges
+             WHERE relationship_kind = 'authored' AND target_kind = 'MergeRequest'
+             ORDER BY target_id",
+        )
+        .await;
+    assert_eq!(
+        authored_edges[0].num_rows(),
+        2,
+        "both MRs should have author edges"
+    );
+
+    let assigned_edges = context
+        .query(
+            "SELECT target_id FROM gl_edges
+             WHERE relationship_kind = 'assigned' AND target_kind = 'MergeRequest'",
+        )
+        .await;
+    assert_eq!(assigned_edges[0].num_rows(), 1, "only MR 1 has an assignee");
+
+    let merged_by_edges = context
+        .query(
+            "SELECT target_id FROM gl_edges
+             WHERE relationship_kind = 'merged_by' AND target_kind = 'MergeRequest'",
+        )
+        .await;
+    assert_eq!(merged_by_edges[0].num_rows(), 1, "only MR 2 was merged");
 }
