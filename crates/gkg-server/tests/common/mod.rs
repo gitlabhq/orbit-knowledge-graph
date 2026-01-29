@@ -5,13 +5,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use arrow::array::{BooleanArray, StringArray, UInt64Array};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use etl_engine::clickhouse::{
     ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination,
 };
-use etl_engine::module::HandlerContext;
+use etl_engine::module::{Handler, HandlerContext, Module};
 use etl_engine::testkit::{MockMetricCollector, MockNatsServices};
+use gkg_server::indexer::modules::SdlcModule;
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
@@ -171,4 +173,77 @@ pub fn create_namespace_payload(
         "watermark": watermark.to_rfc3339()
     })
     .to_string()
+}
+
+/// Default watermark used across namespace tests.
+pub fn default_test_watermark() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
+/// Get the namespace handler from an SdlcModule.
+pub async fn get_namespace_handler(context: &TestContext) -> Box<dyn Handler> {
+    let sdlc_module = SdlcModule::new(&context.config)
+        .await
+        .expect("failed to create SDLC module");
+    let handlers = sdlc_module.handlers();
+    handlers
+        .into_iter()
+        .find(|h| h.name() == "namespace-handler")
+        .expect("namespace-handler not found")
+}
+
+/// Extract a string column from a RecordBatch.
+pub fn get_string_column<'a>(batch: &'a RecordBatch, name: &str) -> &'a StringArray {
+    batch
+        .column_by_name(name)
+        .unwrap_or_else(|| panic!("{name} column should exist"))
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap_or_else(|| panic!("{name} should be StringArray"))
+}
+
+/// Extract a uint64 column from a RecordBatch.
+pub fn get_uint64_column<'a>(batch: &'a RecordBatch, name: &str) -> &'a UInt64Array {
+    batch
+        .column_by_name(name)
+        .unwrap_or_else(|| panic!("{name} column should exist"))
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .unwrap_or_else(|| panic!("{name} should be UInt64Array"))
+}
+
+/// Extract a boolean column from a RecordBatch.
+pub fn get_boolean_column<'a>(batch: &'a RecordBatch, name: &str) -> &'a BooleanArray {
+    batch
+        .column_by_name(name)
+        .unwrap_or_else(|| panic!("{name} column should exist"))
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap_or_else(|| panic!("{name} should be BooleanArray"))
+}
+
+/// Query edges and assert a specific count.
+pub async fn assert_edge_count(
+    context: &TestContext,
+    relationship_kind: &str,
+    source_kind: &str,
+    target_kind: &str,
+    expected_count: usize,
+) {
+    let query = format!(
+        "SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = '{relationship_kind}' \
+         AND source_kind = '{source_kind}' AND target_kind = '{target_kind}'"
+    );
+    let result = context.query(&query).await;
+    assert!(
+        !result.is_empty(),
+        "{relationship_kind} edges from {source_kind} to {target_kind} should exist"
+    );
+    assert_eq!(
+        result[0].num_rows(),
+        expected_count,
+        "expected {expected_count} {relationship_kind} edges from {source_kind} to {target_kind}"
+    );
 }
