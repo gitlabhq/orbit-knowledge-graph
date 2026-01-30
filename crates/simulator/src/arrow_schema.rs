@@ -157,6 +157,7 @@ mod tests {
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_users".to_string(),
             etl: None,
+            redaction: None,
         };
 
         let schema = node.to_arrow_schema();

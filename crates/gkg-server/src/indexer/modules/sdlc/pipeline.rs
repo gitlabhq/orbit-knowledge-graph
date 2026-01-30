@@ -380,6 +380,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges: BTreeMap::new(),
             }),
+            redaction: None,
         }
     }
 
@@ -403,6 +404,7 @@ mod tests {
             primary_keys: vec!["id".to_string()],
             destination_table: "test".to_string(),
             etl: None,
+            redaction: None,
         };
         let ontology = Ontology::new();
         let datalake = Arc::new(MockDatalake);

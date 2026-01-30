@@ -217,6 +217,7 @@ mod tests {
                 ),
                 edges: BTreeMap::new(),
             }),
+            redaction: None,
         }
     }
 

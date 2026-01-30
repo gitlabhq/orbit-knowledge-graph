@@ -427,6 +427,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges,
             }),
+            redaction: None,
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
@@ -463,6 +464,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges,
             }),
+            redaction: None,
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();

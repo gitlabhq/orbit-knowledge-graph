@@ -1,6 +1,6 @@
-use serde_json::{Value, json};
+use std::collections::HashMap;
 
-use crate::redaction::{RedactionFilter, ResourceAuthorization};
+use crate::redaction::{QueryResult, ResourceAuthorization};
 
 #[derive(Debug, Clone, Default)]
 pub struct ContextEngine;
@@ -10,94 +10,86 @@ impl ContextEngine {
         Self
     }
 
-    pub fn prepare_response(&self, raw_result: Value) -> Value {
-        self.optimize_for_llm(raw_result)
-    }
-
-    pub fn apply_redaction_and_prepare(
+    pub fn apply_redaction(
         &self,
-        raw_result: Value,
+        result: &mut QueryResult,
         authorizations: &[ResourceAuthorization],
-    ) -> Value {
-        let (redacted, redacted_count) = RedactionFilter::apply(raw_result, authorizations);
-
-        if redacted_count == 0 {
-            return self.optimize_for_llm(redacted);
-        }
-
-        self.add_redaction_metadata(redacted, redacted_count)
-    }
-
-    fn add_redaction_metadata(&self, mut result: Value, redacted_count: usize) -> Value {
-        if let Value::Object(ref mut map) = result {
-            map.insert(
-                "_context".to_string(),
-                json!({
-                    "redacted_count": redacted_count,
-                    "note": "Some results were filtered due to access permissions"
-                }),
-            );
-        }
-        self.optimize_for_llm(result)
-    }
-
-    fn optimize_for_llm(&self, value: Value) -> Value {
-        value
+        entity_to_resource: &HashMap<&str, &str>,
+    ) -> usize {
+        result.apply_authorizations(authorizations, entity_to_resource)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use arrow::array::{Int64Array, StringArray};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::record_batch::RecordBatch;
+    use query_engine::ResultContext;
+    use std::sync::Arc;
 
-    #[test]
-    fn test_prepare_response() {
-        let engine = ContextEngine::new();
-        let input = json!({"nodes": [{"id": 1}]});
-        let result = engine.prepare_response(input.clone());
-        assert_eq!(result, input);
+    fn make_test_result() -> QueryResult {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("_gkg_p_id", DataType::Int64, false),
+            Field::new("_gkg_p_type", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(vec![101, 102])),
+                Arc::new(StringArray::from(vec!["Project", "Project"])),
+            ],
+        )
+        .unwrap();
+
+        let mut ctx = ResultContext::new();
+        ctx.add_node("p", "Project");
+
+        QueryResult::from_batches(&[batch], &ctx)
     }
 
     #[test]
-    fn test_apply_redaction_adds_metadata() {
+    fn apply_redaction_marks_unauthorized() {
         let engine = ContextEngine::new();
-        let input = json!({
-            "nodes": [
-                {"id": 101, "type": "gl_issue"},
-                {"id": 102, "type": "gl_issue"}
-            ]
-        });
+        let mut result = make_test_result();
 
         let mut auth = HashMap::new();
         auth.insert(101, true);
         auth.insert(102, false);
 
         let authorizations = vec![ResourceAuthorization {
-            resource_type: "issues".to_string(),
+            resource_type: "projects".to_string(),
             authorized: auth,
         }];
 
-        let result = engine.apply_redaction_and_prepare(input, &authorizations);
+        let entity_map: HashMap<&str, &str> = [("Project", "projects")].into_iter().collect();
 
-        let context = result.get("_context").unwrap();
-        assert_eq!(context.get("redacted_count").unwrap().as_u64().unwrap(), 1);
+        let count = engine.apply_redaction(&mut result, &authorizations, &entity_map);
+
+        assert_eq!(count, 1);
+        assert_eq!(result.authorized_count(), 1);
     }
 
     #[test]
-    fn test_no_metadata_when_all_authorized() {
+    fn apply_redaction_no_changes_when_all_authorized() {
         let engine = ContextEngine::new();
-        let input = json!({"nodes": [{"id": 101, "type": "gl_issue"}]});
+        let mut result = make_test_result();
 
         let mut auth = HashMap::new();
         auth.insert(101, true);
+        auth.insert(102, true);
 
         let authorizations = vec![ResourceAuthorization {
-            resource_type: "issues".to_string(),
+            resource_type: "projects".to_string(),
             authorized: auth,
         }];
 
-        let result = engine.apply_redaction_and_prepare(input, &authorizations);
-        assert!(result.get("_context").is_none());
+        let entity_map: HashMap<&str, &str> = [("Project", "projects")].into_iter().collect();
+
+        let count = engine.apply_redaction(&mut result, &authorizations, &entity_map);
+
+        assert_eq!(count, 0);
+        assert_eq!(result.authorized_count(), 2);
     }
 }

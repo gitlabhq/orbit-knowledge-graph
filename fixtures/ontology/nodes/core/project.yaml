@@ -5,6 +5,10 @@ domain: core
 description: A GitLab project/repository
 destination_table: gl_projects
 
+redaction:
+  resource_type: projects
+  id_column: id
+
 properties:
   id:
     type: int64

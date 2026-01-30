@@ -1,5 +1,9 @@
-mod filter;
+mod extractor;
+mod query_result;
 mod types;
+mod validator;
 
-pub use filter::{RedactionFilter, map_node_type_to_resource};
+pub use extractor::RedactionExtractor;
+pub use query_result::{ColumnValue, NodeRef, QueryResult, QueryResultRow, RedactableNodes};
 pub use types::{ResourceAuthorization, ResourceCheck};
+pub use validator::{SchemaValidationError, SchemaValidator};

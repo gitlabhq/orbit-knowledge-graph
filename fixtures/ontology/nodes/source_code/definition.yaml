@@ -5,6 +5,11 @@ domain: source_code
 description: A code definition such as a class, function, method, or module
 destination_table: gl_definition
 
+redaction:
+  resource_type: projects
+  id_column: id
+  ability: read_project
+
 properties:
   id:
     type: int64
