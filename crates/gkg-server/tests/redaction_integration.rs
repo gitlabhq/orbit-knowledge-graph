@@ -159,8 +159,8 @@ async fn fail_closed_no_authorization_returns_nothing() {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User"}],
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
         "limit": 10
     }"#;
 
@@ -192,8 +192,8 @@ async fn fail_closed_partial_authorization_denies_unknown_ids() {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User"}],
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
         "limit": 10
     }"#;
 
@@ -235,8 +235,8 @@ async fn fail_closed_explicit_deny_filters_row() {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User"}],
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
         "limit": 10
     }"#;
 
@@ -585,8 +585,8 @@ async fn single_node_project_query_verifies_all_projects() {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project"}],
+        "query_type": "search",
+        "node": {"id": "p", "entity": "Project"},
         "limit": 10
     }"#;
 
@@ -678,8 +678,8 @@ async fn empty_query_result_stays_empty() {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "filters": {"username": "nonexistent"}}],
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "filters": {"username": "nonexistent"}},
         "limit": 10
     }"#;
 
@@ -897,8 +897,8 @@ async fn redacted_rows_filtered_from_authorized_iterator() {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User"}],
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
         "limit": 10
     }"#;
 
@@ -1263,6 +1263,390 @@ async fn path_finding_denying_end_node_filters_those_paths() {
 
     assert!(authorized_ends.contains(&1000));
     assert!(!authorized_ends.contains(&1002));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Search Query Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[serial]
+async fn search_with_complex_filters_and_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Search for active users whose names start with a letter in the first half of
+    // the alphabet, using multiple filter operators simultaneously
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "u",
+            "entity": "User",
+            "filters": {
+                "state": {"op": "eq", "value": "active"},
+                "username": {"op": "in", "value": ["alice", "bob", "charlie", "diana"]}
+            }
+        },
+        "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Verify search queries don't generate JOINs
+    assert!(
+        !query.sql.contains("JOIN"),
+        "search queries should not produce JOINs, got: {}",
+        query.sql
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Should find alice, bob, charlie, diana (all active and in the username list)
+    // eve is blocked so filtered out by the state filter
+    let raw_usernames: Vec<i64> = result.iter().filter_map(|r| r.get_id("u")).collect();
+    assert_eq!(
+        raw_usernames.len(),
+        4,
+        "should find 4 active users matching filters"
+    );
+
+    // Now apply redaction: only allow users 1 (alice) and 2 (bob)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1, 2]);
+    mock_service.deny("users", &[3, 4]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 2, "charlie and diana should be redacted");
+    assert_eq!(result.authorized_count(), 2);
+
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("u"))
+        .collect();
+
+    assert_eq!(authorized_ids, HashSet::from([1, 2]));
+}
+
+#[tokio::test]
+#[serial]
+async fn search_projects_with_visibility_and_path_filters() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Search for projects that are either public or internal
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "p",
+            "entity": "Project",
+            "filters": {
+                "visibility_level": {"op": "in", "value": ["public", "internal"]}
+            }
+        },
+        "order_by": {"node": "p", "property": "id", "direction": "ASC"},
+        "limit": 50
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Should find: 1000 (public), 1002 (internal), 1004 (public)
+    // Not: 1001, 1003 (private)
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("p")).collect();
+    assert_eq!(
+        raw_ids,
+        HashSet::from([1000, 1002, 1004]),
+        "should find only public and internal projects"
+    );
+
+    // Redaction: allow only project 1000
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1002, 1004]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("p"))
+        .collect();
+
+    assert_eq!(authorized_ids, HashSet::from([1000]));
+}
+
+#[tokio::test]
+#[serial]
+async fn search_groups_with_traversal_path_starts_with() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Search for groups under the root namespace using traversal_path prefix
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "g",
+            "entity": "Group",
+            "filters": {
+                "traversal_path": {"op": "starts_with", "value": "1/"}
+            }
+        },
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // All our test groups have paths starting with "1/"
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("g")).collect();
+    assert_eq!(
+        raw_ids,
+        HashSet::from([100, 101, 102]),
+        "should find all groups under root"
+    );
+
+    // Partial authorization
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("groups", &[100, 102]);
+    mock_service.deny("groups", &[101]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("g"))
+        .collect();
+
+    assert_eq!(authorized_ids, HashSet::from([100, 102]));
+}
+
+#[tokio::test]
+#[serial]
+async fn search_with_id_range_filter() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Search for users with IDs in a specific range
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "u",
+            "entity": "User",
+            "id_range": {"start": 2, "end": 4}
+        },
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("u")).collect();
+    assert_eq!(
+        raw_ids,
+        HashSet::from([2, 3, 4]),
+        "should find users 2, 3, 4 within ID range"
+    );
+
+    // Full authorization for this range
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[2, 3, 4]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    assert_eq!(redacted, 0);
+    assert_eq!(result.authorized_count(), 3);
+}
+
+#[tokio::test]
+#[serial]
+async fn search_with_specific_node_ids() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Search for specific projects by ID
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "p",
+            "entity": "Project",
+            "node_ids": [1000, 1003]
+        },
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("p")).collect();
+    assert_eq!(
+        raw_ids,
+        HashSet::from([1000, 1003]),
+        "should find only the specified projects"
+    );
+
+    // Allow one, deny the other
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1003]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("p"))
+        .collect();
+
+    assert_eq!(authorized_ids, HashSet::from([1000]));
+}
+
+#[tokio::test]
+#[serial]
+async fn search_no_results_with_impossible_filter() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Search for a user that doesn't exist
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "u",
+            "entity": "User",
+            "filters": {
+                "username": {"op": "eq", "value": "definitely_does_not_exist_12345"}
+            }
+        },
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 0, "should find no users");
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", ALL_USER_IDS);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    assert_eq!(redacted, 0);
+    assert_eq!(result.authorized_count(), 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn search_fail_closed_no_authorization() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "g",
+            "entity": "Group"
+        },
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert_eq!(raw_count, 3, "should find all 3 groups");
+
+    // No authorizations at all - fail closed
+    let mock_service = MockRedactionService::new();
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 3, "all groups should be redacted");
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "fail-closed: nothing authorized"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn search_preserves_metadata_columns_after_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "u",
+            "entity": "User",
+            "filters": {
+                "state": "active"
+            }
+        },
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Verify the SQL includes the required metadata columns
+    assert!(
+        query.sql.contains("_gkg_u_id"),
+        "SQL should include _gkg_u_id"
+    );
+    assert!(
+        query.sql.contains("_gkg_u_type"),
+        "SQL should include _gkg_u_type"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Check columns exist before redaction
+    for row in result.iter() {
+        assert!(
+            row.get_id("u").is_some(),
+            "ID should exist before redaction"
+        );
+        assert_eq!(row.get_type("u"), Some("User"), "type should be User");
+    }
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Check columns still exist after redaction
+    for row in result.authorized_rows() {
+        assert_eq!(row.get_id("u"), Some(1));
+        assert_eq!(row.get_type("u"), Some("User"));
+    }
 }
 
 /// Verifies fail-closed behavior: rows with NULL entity type must be denied.

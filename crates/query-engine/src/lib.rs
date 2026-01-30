@@ -185,8 +185,8 @@ mod tests {
     #[test]
     fn compile_to_ast_works() {
         let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
             "limit": 10
         }"#;
 
@@ -275,8 +275,8 @@ mod tests {
     #[test]
     fn filter_operators() {
         let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{
+            "query_type": "search",
+            "node": {
                 "id": "u",
                 "entity": "User",
                 "filters": {
@@ -284,7 +284,7 @@ mod tests {
                     "state": {"op": "in", "value": ["active", "blocked"]},
                     "username": {"op": "contains", "value": "admin"}
                 }
-            }],
+            },
             "limit": 30
         }"#;
 
@@ -383,8 +383,8 @@ mod ontology_integration_tests {
     #[test]
     fn valid_column_in_order_by() {
         let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
             "limit": 10,
             "order_by": {"node": "u", "property": "username", "direction": "ASC"}
         }"#;
@@ -394,8 +394,8 @@ mod ontology_integration_tests {
     #[test]
     fn invalid_column_in_order_by() {
         let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
             "limit": 10,
             "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
         }"#;
@@ -406,8 +406,8 @@ mod ontology_integration_tests {
     #[test]
     fn valid_column_in_filter() {
         let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "filters": {"username": "admin"}}],
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "filters": {"username": "admin"}},
             "limit": 10
         }"#;
         assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
@@ -416,8 +416,8 @@ mod ontology_integration_tests {
     #[test]
     fn invalid_column_in_filter() {
         let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "filters": {"nonexistent_column": "value"}}],
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "filters": {"nonexistent_column": "value"}},
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
@@ -450,8 +450,8 @@ mod ontology_integration_tests {
     #[test]
     fn invalid_entity_type_rejected() {
         let json = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "NonexistentType"}],
+            "query_type": "search",
+            "node": {"id": "n", "entity": "NonexistentType"},
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
@@ -486,6 +486,75 @@ mod ontology_integration_tests {
         assert!(result.sql.contains("LIMIT 25"));
         assert!(result.sql.contains("ORDER BY"));
         assert!(result.sql.contains("DESC"));
+    }
+
+    #[test]
+    fn basic_search_query() {
+        let json = r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "filters": {
+                    "username": {"op": "eq", "value": "admin"}
+                }
+            },
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Search SQL: {}", result.sql);
+        println!("Params: {:?}", result.params);
+        println!("Inlined: {result}");
+
+        assert!(result.sql.contains("SELECT"));
+        assert!(result.sql.contains("FROM"));
+        assert!(result.sql.contains("WHERE"));
+        assert!(result.sql.contains("username"));
+        assert!(result.sql.contains("LIMIT 10"));
+        assert!(
+            !result.sql.contains("JOIN"),
+            "search queries should not have joins"
+        );
+    }
+
+    #[test]
+    fn complex_search_query() {
+        let json = r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "filters": {
+                    "username": {"op": "starts_with", "value": "admin"},
+                    "state": {"op": "in", "value": ["active", "blocked"]},
+                    "created_at": {"op": "gte", "value": "2024-01-01"}
+                }
+            },
+            "limit": 50,
+            "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Complex search SQL: {}", result.sql);
+        println!("Params: {:?}", result.params);
+        println!("Inlined: {result}");
+
+        assert!(result.sql.contains("SELECT"));
+        assert!(result.sql.contains("WHERE"));
+        assert!(result.sql.contains("username"));
+        assert!(result.sql.contains("state"));
+        assert!(result.sql.contains("created_at"));
+        assert!(result.sql.contains("ORDER BY"));
+        assert!(result.sql.contains("DESC"));
+        assert!(result.sql.contains("LIMIT 50"));
+        assert!(
+            !result.sql.contains("JOIN"),
+            "search queries should not have joins"
+        );
+
+        // Verify multiple filters are combined with AND
+        assert!(result.sql.contains("AND"));
     }
 
     #[test]

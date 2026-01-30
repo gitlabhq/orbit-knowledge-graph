@@ -44,7 +44,7 @@ fn selectable_node_ids(input: &Input) -> HashSet<String> {
             .iter()
             .filter_map(|agg| agg.group_by.clone())
             .collect(),
-        QueryType::Traversal | QueryType::Pattern => {
+        QueryType::Traversal | QueryType::Search => {
             input.nodes.iter().map(|n| n.id.clone()).collect()
         }
         QueryType::PathFinding => HashSet::new(),

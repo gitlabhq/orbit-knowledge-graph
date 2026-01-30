@@ -4,14 +4,18 @@
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
-  "required": ["query_type", "nodes"],
+  "required": ["query_type"],
   "properties": {
     "query_type": {
       "$ref": "#/$defs/QueryType"
     },
+    "node": {
+      "$ref": "#/$defs/NodeSelector",
+      "description": "Single node for search queries"
+    },
     "nodes": {
       "type": "array",
-      "description": "Nodes to match in the query. At least one node is required.",
+      "description": "Array of nodes for traversal, aggregation, path_finding queries",
       "minItems": 1,
       "items": {
         "$ref": "#/$defs/NodeSelector"
@@ -41,7 +45,7 @@
       "type": "integer",
       "description": "Maximum number of results to return",
       "minimum": 1,
-      "maximum": 30,
+      "maximum": 1000,
       "default": 30
     },
     "order_by": {
@@ -57,6 +61,25 @@
     {
       "if": {
         "properties": {
+          "query_type": { "const": "search" }
+        }
+      },
+      "then": {
+        "required": ["node"],
+        "not": {
+          "required": ["nodes"]
+        }
+      },
+      "else": {
+        "required": ["nodes"],
+        "not": {
+          "required": ["node"]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "query_type": { "const": "aggregation" }
         }
       },
@@ -65,6 +88,25 @@
         "properties": {
           "aggregations": {
             "minItems": 1
+          },
+          "nodes": {
+            "minItems": 1,
+            "description": "Aggregation requires at least 1 node"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "query_type": { "const": "traversal" }
+        }
+      },
+      "then": {
+        "properties": {
+          "nodes": {
+            "minItems": 2,
+            "description": "Traversal and pathfinding queries require at least 2 nodes"
           }
         }
       }
@@ -76,7 +118,13 @@
         }
       },
       "then": {
-        "required": ["path"]
+        "required": ["path"],
+        "properties": {
+          "nodes": {
+            "minItems": 2,
+            "description": "Path finding requires at least 2 nodes (start and end)"
+          }
+        }
       }
     }
   ],
@@ -91,7 +139,7 @@
     "QueryType": {
       "type": "string",
       "description": "Type of graph query to execute",
-      "enum": ["traversal", "aggregation", "path_finding", "pattern"]
+      "enum": ["traversal", "aggregation", "path_finding", "search"]
     },
     "EntityType": {
       "type": "string",
