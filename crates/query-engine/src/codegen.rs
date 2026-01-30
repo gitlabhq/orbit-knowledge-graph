@@ -122,9 +122,6 @@ impl Context {
             parts.push(format!("LIMIT {limit}"));
         }
 
-        // TODO: Do we want to support keywords like "FINAL"?
-        // TODO: Do we want to support regular CTEs?
-
         Ok(parts.join(" "))
     }
 
@@ -241,6 +238,21 @@ impl Context {
                         on_clause
                     ),
                     type_conditions: left_res.type_conditions,
+                }
+            }
+            TableRef::Union { queries, alias } => {
+                // Emit each query in the union and join with UNION ALL
+                let union_parts: Vec<_> = queries
+                    .iter()
+                    .map(|q| {
+                        // Emit each subquery
+                        self.emit_query(q).unwrap_or_default()
+                    })
+                    .collect();
+
+                TableRefResult {
+                    sql: format!("({}) AS {alias}", union_parts.join(" UNION ALL ")),
+                    type_conditions: vec![],
                 }
             }
         }

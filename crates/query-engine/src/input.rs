@@ -169,6 +169,24 @@ pub enum Direction {
     Both,
 }
 
+impl Direction {
+    /// Returns (start_col, end_col) for edge traversal.
+    pub fn edge_columns(self) -> (&'static str, &'static str) {
+        match self {
+            Direction::Outgoing | Direction::Both => ("source_id", "target_id"),
+            Direction::Incoming => ("target_id", "source_id"),
+        }
+    }
+
+    /// Returns (from_col, to_col) for union subquery joins.
+    pub fn union_columns(self) -> (&'static str, &'static str) {
+        match self {
+            Direction::Outgoing | Direction::Both => ("start_id", "end_id"),
+            Direction::Incoming => ("end_id", "start_id"),
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Aggregations
 // ─────────────────────────────────────────────────────────────────────────────
