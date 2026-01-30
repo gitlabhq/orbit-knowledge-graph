@@ -10,3 +10,7 @@ variants:
   - from_node: { type: Label, id: id }
     to_node: { type: Group, id: id }
     description: "Label belongs to group."
+
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: Group, id: id }
+    description: "Work item belongs to group."

@@ -364,23 +364,109 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
 
--- Siphon source tables for label links (join table)
-CREATE TABLE IF NOT EXISTS siphon_label_links
+
+-- Hierarchy work items table
+CREATE TABLE IF NOT EXISTS hierarchy_work_items
+(
+    `traversal_path` String,
+    `id` Int64,
+    `title` String DEFAULT '',
+    `author_id` Nullable(Int64),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `milestone_id` Nullable(Int64),
+    `iid` Nullable(Int64),
+    `updated_by_id` Nullable(Int64),
+    `weight` Nullable(Int64),
+    `confidential` Bool DEFAULT false,
+    `due_date` Nullable(Date32),
+    `moved_to_id` Nullable(Int64),
+    `time_estimate` Nullable(Int64) DEFAULT 0,
+    `relative_position` Nullable(Int64),
+    `last_edited_at` Nullable(DateTime64(6, 'UTC')),
+    `last_edited_by_id` Nullable(Int64),
+    `closed_at` Nullable(DateTime64(6, 'UTC')),
+    `closed_by_id` Nullable(Int64),
+    `state_id` Int8 DEFAULT 1,
+    `duplicated_to_id` Nullable(Int64),
+    `promoted_to_epic_id` Nullable(Int64),
+    `health_status` Nullable(Int8),
+    `sprint_id` Nullable(Int64),
+    `blocking_issues_count` Int64 DEFAULT 0,
+    `upvotes_count` Int64 DEFAULT 0,
+    `work_item_type_id` Int64,
+    `namespace_id` Int64,
+    `start_date` Nullable(Date32),
+    `custom_status_id` Int64,
+    `system_defined_status_id` Int64,
+    `version` DateTime64(6, 'UTC') DEFAULT now(),
+    `deleted` Bool DEFAULT false,
+    `label_ids` String DEFAULT '',
+    `assignee_ids` String DEFAULT ''
+)
+ENGINE = ReplacingMergeTree(version, deleted)
+PRIMARY KEY (traversal_path, work_item_type_id, id)
+ORDER BY (traversal_path, work_item_type_id, id)
+SETTINGS index_granularity = 8192;
+
+-- Siphon source tables for issues (work items)
+CREATE TABLE IF NOT EXISTS siphon_issues
 (
     `id` Int64,
-    `label_id` Nullable(Int64),
-    `target_id` Nullable(Int64),
-    `target_type` Nullable(String),
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
-    `namespace_id` Nullable(Int64),
-    `traversal_path` String DEFAULT '0/',
+    `title` String DEFAULT '',
+    `author_id` Nullable(Int64),
+    `project_id` Nullable(Int64),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `description` String DEFAULT '',
+    `milestone_id` Nullable(Int64),
+    `iid` Nullable(Int64),
+    `updated_by_id` Nullable(Int64),
+    `weight` Nullable(Int64),
+    `confidential` Bool DEFAULT false,
+    `due_date` Nullable(Date32),
+    `moved_to_id` Nullable(Int64),
+    `lock_version` Int64 DEFAULT 0,
+    `time_estimate` Nullable(Int64) DEFAULT 0,
+    `relative_position` Nullable(Int64),
+    `service_desk_reply_to` Nullable(String),
+    `cached_markdown_version` Nullable(Int64),
+    `last_edited_at` Nullable(DateTime64(6, 'UTC')),
+    `last_edited_by_id` Nullable(Int64),
+    `discussion_locked` Nullable(Bool),
+    `closed_at` Nullable(DateTime64(6, 'UTC')),
+    `closed_by_id` Nullable(Int64),
+    `state_id` Int8 DEFAULT 1,
+    `duplicated_to_id` Nullable(Int64),
+    `promoted_to_epic_id` Nullable(Int64),
+    `health_status` Nullable(Int8),
+    `external_key` Nullable(String),
+    `sprint_id` Nullable(Int64),
+    `blocking_issues_count` Int64 DEFAULT 0,
+    `upvotes_count` Int64 DEFAULT 0,
+    `work_item_type_id` Int64 DEFAULT 0,
+    `namespace_id` Int64 DEFAULT 0,
+    `start_date` Nullable(Date32),
+    `tmp_epic_id` Nullable(Int64),
+    `imported_from` Int8 DEFAULT 0,
+    `author_id_convert_to_bigint` Nullable(Int64),
+    `closed_by_id_convert_to_bigint` Nullable(Int64),
+    `duplicated_to_id_convert_to_bigint` Nullable(Int64),
+    `id_convert_to_bigint` Int64 DEFAULT 0,
+    `last_edited_by_id_convert_to_bigint` Nullable(Int64),
+    `milestone_id_convert_to_bigint` Nullable(Int64),
+    `moved_to_id_convert_to_bigint` Nullable(Int64),
+    `project_id_convert_to_bigint` Nullable(Int64),
+    `promoted_to_epic_id_convert_to_bigint` Nullable(Int64),
+    `updated_by_id_convert_to_bigint` Nullable(Int64),
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
-    `_siphon_deleted` Bool DEFAULT false
+    `_siphon_deleted` Bool DEFAULT false,
+    `namespace_traversal_ids` Array(Int64) DEFAULT []
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY (traversal_path, id)
-ORDER BY (traversal_path, id);
+PRIMARY KEY id
+ORDER BY id
+SETTINGS index_granularity = 8192;
 
 -- Knowledge graph enabled namespaces
 CREATE TABLE IF NOT EXISTS test.siphon_knowledge_graph_enabled_namespaces

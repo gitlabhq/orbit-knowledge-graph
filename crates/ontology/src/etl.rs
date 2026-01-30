@@ -35,12 +35,12 @@ pub enum EdgeTarget {
     Column(String),
 }
 
-/// Mapping from a source column to an edge in the knowledge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeMapping {
     pub target: EdgeTarget,
     pub relationship_kind: String,
     pub direction: EdgeDirection,
+    pub delimiter: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

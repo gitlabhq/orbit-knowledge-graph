@@ -3,7 +3,7 @@
 node_type: WorkItem
 domain: plan
 description: A work item representing an issue, epic, task, incident, or other trackable unit of work
-destination_table: gl_work_item
+destination_table: gl_work_items
 
 properties:
   id:
@@ -99,15 +99,57 @@ properties:
     nullable: true
     description: "Timestamp when the work item was closed."
 
-# edges:
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
-#
-#   - type: ASSIGNED_TO
-#     source_id: assignee_id
-#     target_kind: User
-#
-#   - type: AUTHOR
-#     source_id: author_id
-#     target_kind: User
+etl:
+  type: query
+  scope: namespaced
+  query: |
+    SELECT
+      wi.traversal_path,
+      wi.id,
+      wi.title,
+      si.description,
+      wi.author_id,
+      wi.iid,
+      wi.state_id,
+      wi.work_item_type_id,
+      wi.confidential,
+      wi.due_date,
+      wi.start_date,
+      wi.weight,
+      wi.milestone_id,
+      wi.namespace_id,
+      wi.created_at,
+      wi.updated_at,
+      wi.closed_at,
+      wi.assignee_ids,
+      wi.label_ids,
+      wi.version AS _version,
+      wi.deleted AS _deleted
+    FROM hierarchy_work_items wi
+    LEFT JOIN siphon_issues si ON wi.id = si.id
+    WHERE startsWith(wi.traversal_path, {traversal_path:String})
+      AND wi.version > {last_watermark:String}
+      AND wi.version <= {watermark:String}
+  edges:
+    author_id:
+      to: User
+      as: authored
+      direction: incoming
+    milestone_id:
+      to: Milestone
+      as: in_milestone
+      direction: outgoing
+    namespace_id:
+      to: Group
+      as: in_group
+      direction: outgoing
+    assignee_ids:
+      to: User
+      as: assigned
+      direction: incoming
+      delimiter: "/"
+    label_ids:
+      to: Label
+      as: has_label
+      direction: outgoing
+      delimiter: "/"

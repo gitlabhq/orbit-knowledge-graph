@@ -736,6 +736,8 @@ struct EdgeMappingYaml {
     relationship_kind: String,
     #[serde(default)]
     direction: EdgeDirection,
+    #[serde(default)]
+    delimiter: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -894,6 +896,7 @@ impl EtlYaml {
                         target,
                         relationship_kind: mapping.relationship_kind,
                         direction: mapping.direction,
+                        delimiter: mapping.delimiter,
                     },
                 ))
             })
