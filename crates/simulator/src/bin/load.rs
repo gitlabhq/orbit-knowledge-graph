@@ -1,10 +1,10 @@
 //! CLI for loading Parquet data into ClickHouse.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::Parser;
 use ontology::Ontology;
 use simulator::Config;
-use simulator::clickhouse::ClickHouseWriter;
+use simulator::clickhouse::{ClickHouseWriter, check_clickhouse_health};
 use simulator::parquet::ParquetReader;
 use std::path::PathBuf;
 
@@ -58,11 +58,9 @@ async fn main() -> Result<()> {
         "Checking ClickHouse connection at {}...",
         config.clickhouse.url
     );
-    let client = config.clickhouse.build_client();
-    check_clickhouse_health(&client).await?;
-    println!("ClickHouse is healthy");
-
     let writer = ClickHouseWriter::with_config(&config.clickhouse);
+    check_clickhouse_health(&writer.client).await?;
+    println!("ClickHouse is healthy");
 
     // Create schemas
     if !args.no_schema {
@@ -166,33 +164,4 @@ async fn main() -> Result<()> {
     writer.print_statistics(&ontology).await?;
 
     Ok(())
-}
-
-/// Check that ClickHouse is running and healthy.
-async fn check_clickhouse_health(client: &clickhouse_client::ArrowClickHouseClient) -> Result<()> {
-    // Try a simple query to verify connectivity
-    let result: Result<String, _> = client.inner().query("SELECT version()").fetch_one().await;
-
-    match result {
-        Ok(version) => {
-            println!("ClickHouse version: {}", version);
-            Ok(())
-        }
-        Err(e) => {
-            let error_msg = e.to_string();
-
-            if error_msg.contains("Connect") || error_msg.contains("connection") {
-                bail!(
-                    "Cannot connect to ClickHouse.\n\n\
-                     Make sure ClickHouse is running:\n\
-                     - Docker: docker run -d -p 8123:8123 clickhouse/clickhouse-server\n\
-                     - Local: clickhouse-server\n\n\
-                     Error: {}",
-                    error_msg
-                );
-            } else {
-                bail!("ClickHouse health check failed: {}", error_msg)
-            }
-        }
-    }
 }

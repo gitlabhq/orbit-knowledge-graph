@@ -97,7 +97,7 @@ generation:
       "Pipeline -> Project": 60       # 60 pipelines per project
       "Vulnerability -> Project": 4   # 4 vulnerabilities per project
       "Finding -> Project": 12        # 12 findings per project
-      "Scanner -> Project": 1         # 1 scanner config per project
+      # "Scanner -> Project": 1         # 1 scanner config per project
       "Milestone -> Project": 2       # 2 milestones per project
       "Label -> Project": 5           # 5 labels per project
 

@@ -199,7 +199,7 @@ impl ParameterSampler {
     /// The first segment of traversal_path is the org_id.
     pub async fn sample_traversal_paths(&self) -> Result<Vec<(i64, String)>> {
         let query = format!(
-            "SELECT traversal_path FROM gl_group \
+            "SELECT traversal_path FROM gl_groups \
              WHERE traversal_path != '' \
              ORDER BY cityHash64(rand()) LIMIT {}",
             self.sample_size
