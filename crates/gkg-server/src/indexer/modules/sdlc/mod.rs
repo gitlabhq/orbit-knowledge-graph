@@ -25,13 +25,17 @@ pub struct SdlcModule {
 }
 
 impl SdlcModule {
-    pub async fn new(configuration: &ClickHouseConfiguration) -> Result<Self, ModuleInitError> {
-        let client = Arc::new(configuration.build_client());
+    pub async fn new(
+        datalake_config: &ClickHouseConfiguration,
+        graph_config: &ClickHouseConfiguration,
+    ) -> Result<Self, ModuleInitError> {
+        let datalake_client = Arc::new(datalake_config.build_client());
+        let graph_client = Arc::new(graph_config.build_client());
         let ontology = Ontology::load_embedded().map_err(ModuleInitError::new)?;
 
         Ok(Self {
-            datalake: Arc::new(Datalake::new(Arc::clone(&client))),
-            watermark_store: Arc::new(ClickHouseWatermarkStore::new(client)),
+            datalake: Arc::new(Datalake::new(datalake_client)),
+            watermark_store: Arc::new(ClickHouseWatermarkStore::new(graph_client)),
             ontology: Arc::new(ontology),
         })
     }

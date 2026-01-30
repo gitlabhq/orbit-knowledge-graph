@@ -61,7 +61,7 @@ fn build_edge_sql(edge: &PreparedEdge) -> String {
 
 fn build_multi_target_edge_sql(edge: &PreparedEdge, delimiter: &str) -> String {
     let exploded_value = format!(
-        "CAST(unnest(string_to_array({}, '{}')) AS BIGINT)",
+        "CAST(NULLIF(unnest(string_to_array({}, '{}')), '') AS BIGINT)",
         edge.fk_column, delimiter
     );
 
@@ -323,7 +323,9 @@ mod tests {
 
         assert_eq!(sqls.len(), 1);
         let sql = &sqls[0];
-        assert!(sql.contains("CAST(unnest(string_to_array(assignee_ids, '/')) AS BIGINT)"));
+        assert!(
+            sql.contains("CAST(NULLIF(unnest(string_to_array(assignee_ids, '/')), '') AS BIGINT)")
+        );
         assert!(sql.contains("'User' AS source_kind"));
         assert!(sql.contains("id AS target_id"));
         assert!(sql.contains("'WorkItem' AS target_kind"));
@@ -365,7 +367,9 @@ mod tests {
         let sql = &sqls[0];
         assert!(sql.contains("id AS source_id"));
         assert!(sql.contains("'WorkItem' AS source_kind"));
-        assert!(sql.contains("CAST(unnest(string_to_array(label_ids, '/')) AS BIGINT)"));
+        assert!(
+            sql.contains("CAST(NULLIF(unnest(string_to_array(label_ids, '/')), '') AS BIGINT)")
+        );
         assert!(sql.contains("'Label' AS target_kind"));
     }
 }

@@ -214,7 +214,7 @@ pub fn default_test_watermark() -> DateTime<Utc> {
 
 /// Get the namespace handler from an SdlcModule.
 pub async fn get_namespace_handler(context: &TestContext) -> Box<dyn Handler> {
-    let sdlc_module = SdlcModule::new(&context.config)
+    let sdlc_module = SdlcModule::new(&context.config, &context.config)
         .await
         .expect("failed to create SDLC module");
     let handlers = sdlc_module.handlers();

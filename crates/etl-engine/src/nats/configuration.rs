@@ -35,8 +35,8 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_ack_wait_secs")]
     pub ack_wait_secs: u64,
 
-    /// Maximum redelivery attempts. None means unlimited. Defaults to None.
-    #[serde(default)]
+    /// Maximum redelivery attempts. None means unlimited. Defaults to 5.
+    #[serde(default = "NatsConfiguration::default_max_deliver")]
     pub max_deliver: Option<u32>,
 
     /// How many messages to buffer per subscription. Defaults to 100.
@@ -104,6 +104,10 @@ impl NatsConfiguration {
 
     fn default_ack_wait_secs() -> u64 {
         30
+    }
+
+    fn default_max_deliver() -> Option<u32> {
+        Some(5)
     }
 
     fn default_subscription_buffer_size() -> usize {
@@ -188,7 +192,7 @@ impl Default for NatsConfiguration {
             connection_timeout_secs: Self::default_connection_timeout_secs(),
             request_timeout_secs: Self::default_request_timeout_secs(),
             ack_wait_secs: Self::default_ack_wait_secs(),
-            max_deliver: None,
+            max_deliver: Self::default_max_deliver(),
             subscription_buffer_size: Self::default_subscription_buffer_size(),
             consumer_name: None,
             batch_size: Self::default_batch_size(),

@@ -39,7 +39,7 @@ pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), 
     let destination = Arc::new(ClickHouseDestination::new(config.graph.clone())?);
 
     info!("initializing SDLC module");
-    let sdlc_module = SdlcModule::new(&config.datalake).await?;
+    let sdlc_module = SdlcModule::new(&config.datalake, &config.graph).await?;
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);
