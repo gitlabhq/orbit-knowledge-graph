@@ -11,6 +11,8 @@ For Kubernetes deployments, see `helm-dev/` charts (source of truth for componen
 | vm-clickhouse | n4-standard-4 | us-central1-b | 10.128.0.13 | 34.61.31.19 |
 | vm-gitlab-omnibus | n4-standard-8 | us-central1-b | 10.128.0.4 | 34.9.130.112 |
 
+See [GITLAB_INSTANCE.md](GITLAB_INSTANCE.md) for GitLab-specific configuration.
+
 ## GKE Cluster
 
 | Name | Location | Pod CIDR |
@@ -22,6 +24,8 @@ For Kubernetes deployments, see `helm-dev/` charts (source of truth for componen
 | Name | Purpose |
 |------|---------|
 | clickhouse-password | ClickHouse default user |
+| gitaly-token | Gitaly gRPC authentication |
+| gkg-jwt-secret | GitLab internal API JWT signing |
 | postgres-password | PostgreSQL gitlab user |
 | runner_authentication_token | GitLab Runner registration token (glrt-) |
 | grafana-oauth-client-id | Google OAuth client ID for Grafana |
