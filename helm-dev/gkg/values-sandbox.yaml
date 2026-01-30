@@ -93,6 +93,10 @@ tableMappings:
     schema: public
     subject: users
     target: siphon_users
+  - table: knowledge_graph_enabled_namespaces
+    schema: public
+    subject: knowledge_graph_enabled_namespaces
+    target: siphon_knowledge_graph_enabled_namespaces
 
 producer:
   enabled: true
@@ -130,6 +134,16 @@ gkgServer:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
     tag: develop
     pullPolicy: Always
+  dispatcher:
+    enabled: false
+    schedule: "* * * * *"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
   indexer:
     enabled: true
     replicas: 1
