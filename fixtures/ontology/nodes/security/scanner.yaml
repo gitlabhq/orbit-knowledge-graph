@@ -42,7 +42,14 @@ properties:
     nullable: false
     description: "Timestamp when the scanner was last updated."
 
-# edges:
-#   - type: SCANS
-#     source_id: project_id
-#     target_kind: Project
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_vulnerability_scanners
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: scans
+      direction: outgoing

@@ -21,7 +21,7 @@ properties:
   name:
     type: string
     source: name
-    nullable: false
+    nullable: true
     description: "Name of the finding."
 
   description:
@@ -29,6 +29,12 @@ properties:
     source: description
     nullable: true
     description: "Detailed description of the finding."
+
+  solution:
+    type: string
+    source: solution
+    nullable: true
+    description: "Recommended solution or remediation for the finding."
 
   severity:
     type: enum
@@ -43,74 +49,46 @@ properties:
       4: high
       5: critical
 
-  report_type:
-    type: enum
-    source: report_type
+  deduplicated:
+    type: boolean
+    source: deduplicated
     nullable: false
-    description: "Type of security scan that detected the finding."
-    values:
-      0: sast
-      1: dependency_scanning
-      2: container_scanning
-      3: dast
-      4: secret_detection
-      5: coverage_fuzzing
-      6: api_fuzzing
-      7: cluster_image_scanning
-      8: container_scanning_for_registry
-      9: generic
+    description: "Whether this finding has been deduplicated."
 
-  detection_method:
-    type: enum
-    source: detection_method
-    nullable: false
-    description: "Method by which the finding was detected."
-    values:
-      0: gitlab_security_report
-      1: external_security_report
-      2: bug_bounty
-      3: code_review
-      4: security_audit
-
-  solution:
+  overridden_uuid:
     type: string
-    source: solution
+    source: overridden_uuid
     nullable: true
-    description: "Suggested solution or remediation for the finding."
+    description: "UUID of the finding this one overrides."
 
-  cve:
-    type: string
-    source: cve
-    nullable: true
-    description: "CVE identifier if applicable."
-
-  created_at:
-    type: timestamp
-    source: created_at
-    nullable: false
-    description: "Timestamp when the finding was created."
-
-  updated_at:
-    type: timestamp
-    source: updated_at
-    nullable: false
-    description: "Timestamp when the finding was last updated."
-
-  detected_at:
-    type: timestamp
-    source: detected_at
-    nullable: true
-    description: "Timestamp when the finding was first detected."
-
-# edges:
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
-#
-#   - type: DETECTED_BY
-#     source_id: scanner_id
-#     target_kind: Scanner
-#
-#   - type: HAS_IDENTIFIER
-#     source_id: identifier_id
-#     target_kind: Identifier
+etl:
+  type: query
+  scope: namespaced
+  query: |
+    SELECT
+        traversal_path,
+        id,
+        uuid,
+        nullIf(JSONExtractString(finding_data, 'name'), '') AS name,
+        nullIf(JSONExtractString(finding_data, 'description'), '') AS description,
+        nullIf(JSONExtractString(finding_data, 'solution'), '') AS solution,
+        severity,
+        deduplicated,
+        overridden_uuid,
+        project_id,
+        scanner_id,
+        _siphon_replicated_at AS _version,
+        _siphon_deleted AS _deleted
+    FROM siphon_security_findings
+    WHERE startsWith(traversal_path, {traversal_path:String})
+        AND _siphon_replicated_at > {last_watermark:String}
+        AND _siphon_replicated_at <= {watermark:String}
+  edges:
+    project_id:
+      to: Project
+      as: in_project
+      direction: outgoing
+    scanner_id:
+      to: Scanner
+      as: detected_by
+      direction: outgoing

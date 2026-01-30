@@ -482,3 +482,139 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (root_namespace_id, id)
 ORDER BY (root_namespace_id, id)
 SETTINGS index_granularity = 8192;
+
+-- Siphon source tables for security vulnerabilities
+CREATE TABLE IF NOT EXISTS siphon_vulnerabilities
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `project_id` Int64,
+    `author_id` Int64,
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `title` String,
+    `title_html` Nullable(String),
+    `description` Nullable(String),
+    `description_html` Nullable(String),
+    `state` Int8 DEFAULT 1,
+    `severity` Int8,
+    `severity_overridden` Nullable(Bool) DEFAULT false CODEC(ZSTD(1)),
+    `resolved_by_id` Nullable(Int64),
+    `resolved_at` Nullable(DateTime64(6, 'UTC')),
+    `report_type` Int8,
+    `cached_markdown_version` Nullable(Int64),
+    `confirmed_by_id` Nullable(Int64),
+    `confirmed_at` Nullable(DateTime64(6, 'UTC')),
+    `dismissed_at` Nullable(DateTime64(6, 'UTC')),
+    `dismissed_by_id` Nullable(Int64),
+    `resolved_on_default_branch` Bool DEFAULT false CODEC(ZSTD(1)),
+    `present_on_default_branch` Bool DEFAULT true CODEC(ZSTD(1)),
+    `detected_at` Nullable(DateTime64(6, 'UTC')) DEFAULT now(),
+    `finding_id` Nullable(Int64),
+    `cvss` Nullable(String) DEFAULT '[]',
+    `auto_resolved` Bool DEFAULT false CODEC(ZSTD(1)),
+    `uuid` String,
+    `solution` Nullable(String),
+    `partition_id` Nullable(Int64) DEFAULT 1,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+-- Siphon source tables for vulnerability scanners
+CREATE TABLE IF NOT EXISTS siphon_vulnerability_scanners
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `project_id` Int64,
+    `external_id` String,
+    `name` String,
+    `vendor` String DEFAULT 'GitLab',
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+-- Siphon source tables for vulnerability identifiers
+CREATE TABLE IF NOT EXISTS siphon_vulnerability_identifiers
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `project_id` Int64,
+    `fingerprint` String,
+    `external_type` String,
+    `external_id` String,
+    `name` String,
+    `url` Nullable(String),
+    `partition_id` Nullable(Int64) DEFAULT 1,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+-- Siphon source tables for security findings
+CREATE TABLE IF NOT EXISTS siphon_security_findings
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `scan_id` Int64,
+    `scanner_id` Int64,
+    `severity` Int8,
+    `deduplicated` Bool DEFAULT false CODEC(ZSTD(1)),
+    `uuid` String,
+    `overridden_uuid` Nullable(String),
+    `partition_number` Int64 DEFAULT 1 CODEC(DoubleDelta, ZSTD),
+    `finding_data` String DEFAULT '{}',
+    `project_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id, partition_number)
+ORDER BY (traversal_path, id, partition_number);
+
+CREATE TABLE IF NOT EXISTS siphon_vulnerability_occurrences
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `severity` Int8,
+    `report_type` Int8,
+    `project_id` Int64,
+    `scanner_id` Int64,
+    `primary_identifier_id` Int64,
+    `location_fingerprint` String,
+    `name` String,
+    `metadata_version` String,
+    `raw_metadata` Nullable(String),
+    `vulnerability_id` Nullable(Int64),
+    `details` String DEFAULT '{}',
+    `description` Nullable(String),
+    `solution` Nullable(String),
+    `cve` Nullable(String),
+    `location` Nullable(String),
+    `detection_method` Int8 DEFAULT 0,
+    `uuid` String,
+    `initial_pipeline_id` Nullable(Int64),
+    `latest_pipeline_id` Nullable(Int64),
+    `security_project_tracked_context_id` Nullable(Int64),
+    `detected_at` Nullable(DateTime64(6, 'UTC')) DEFAULT now(),
+    `new_uuid` Nullable(String),
+    `partition_id` Nullable(Int64) DEFAULT 1,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);

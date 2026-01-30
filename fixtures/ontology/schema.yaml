@@ -33,6 +33,7 @@ domains:
     description: "Entities related to security vulnerabilities and findings."
     nodes:
       Vulnerability: nodes/security/vulnerability.yaml
+      VulnerabilityOccurrence: nodes/security/occurrence.yaml
       Finding: nodes/security/finding.yaml
       Scanner: nodes/security/scanner.yaml
       VulnerabilityIdentifier: nodes/security/identifier.yaml
@@ -84,3 +85,4 @@ edges:
   TARGETS: edges/targets.yaml
   FROM_BRANCH: edges/from_branch.yaml
   ON_BRANCH: edges/on_branch.yaml
+  OCCURRENCE_OF: edges/occurrence.yaml

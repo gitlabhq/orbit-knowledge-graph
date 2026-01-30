@@ -1,0 +1,139 @@
+# fixtures/ontology/nodes/security/occurrence.yaml
+
+node_type: VulnerabilityOccurrence
+domain: security
+description: A specific occurrence of a vulnerability detected in a project
+destination_table: gl_vulnerability_occurrence
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the occurrence."
+
+  uuid:
+    type: string
+    source: uuid
+    nullable: false
+    description: "UUID uniquely identifying the occurrence."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Name of the vulnerability occurrence."
+
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Detailed description of the occurrence."
+
+  solution:
+    type: string
+    source: solution
+    nullable: true
+    description: "Recommended solution or remediation."
+
+  cve:
+    type: string
+    source: cve
+    nullable: true
+    description: "CVE identifier if applicable."
+
+  location:
+    type: string
+    source: location
+    nullable: true
+    description: "Location where the vulnerability was found."
+
+  location_fingerprint:
+    type: string
+    source: location_fingerprint
+    nullable: false
+    description: "Fingerprint identifying the location."
+
+  severity:
+    type: enum
+    source: severity
+    nullable: false
+    description: "Severity level of the occurrence."
+    values:
+      1: info
+      2: unknown
+      4: low
+      5: medium
+      6: high
+      7: critical
+
+  report_type:
+    type: enum
+    source: report_type
+    nullable: false
+    description: "Type of security report."
+    values:
+      0: sast
+      1: dependency_scanning
+      2: container_scanning
+      3: dast
+      4: secret_detection
+      5: coverage_fuzzing
+      6: api_fuzzing
+      7: cluster_image_scanning
+      8: container_scanning_for_registry
+      99: generic
+
+  detection_method:
+    type: enum
+    source: detection_method
+    nullable: false
+    description: "Method used to detect the vulnerability."
+    values:
+      0: gitlab_security_report
+      1: external_security_report
+      2: bug_bounty
+      3: code_review
+      4: security_audit
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    description: "Timestamp when the occurrence was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Timestamp when the occurrence was last updated."
+
+  detected_at:
+    type: timestamp
+    source: detected_at
+    nullable: true
+    description: "Timestamp when the vulnerability was detected."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_vulnerability_occurrences
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: in_project
+      direction: outgoing
+    scanner_id:
+      to: Scanner
+      as: detected_by
+      direction: outgoing
+    primary_identifier_id:
+      to: VulnerabilityIdentifier
+      as: has_identifier
+      direction: outgoing
+    vulnerability_id:
+      to: Vulnerability
+      as: occurrence_of
+      direction: outgoing

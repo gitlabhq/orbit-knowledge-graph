@@ -31,10 +31,6 @@ variants:
     to_node: { type: Project, id: id }
     description: "Finding detected in project."
 
-  - from_node: { type: Scanner, id: id }
-    to_node: { type: Project, id: id }
-    description: "Scanner configured for project."
-
   - from_node: { type: VulnerabilityIdentifier, id: id }
     to_node: { type: Project, id: id }
     description: "Vulnerability identifier found in project."
