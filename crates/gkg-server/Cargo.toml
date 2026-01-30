@@ -18,6 +18,7 @@ arrow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
+clickhouse-client = { path = "../clickhouse-client" }
 etl-engine = { path = "../etl-engine" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }

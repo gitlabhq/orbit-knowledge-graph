@@ -2608,6 +2608,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse",
+ "clickhouse-client",
  "datafusion",
  "etl-engine",
  "futures",

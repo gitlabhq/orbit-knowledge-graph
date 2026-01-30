@@ -1,11 +1,13 @@
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
 
+use clickhouse_client::ClickHouseConfiguration;
 use futures::StreamExt;
 use labkit_rs::correlation::grpc::{
     context_from_request, with_correlation, with_correlation_stream,
 };
 use labkit_rs::metrics::grpc::GrpcMetrics;
+use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
@@ -19,7 +21,7 @@ use crate::proto::{
     execute_query_message, execute_tool_message,
 };
 use crate::query::QueryExecutor;
-use crate::redaction::{RedactionService, ResourceExtractor};
+use crate::redaction::RedactionService;
 use crate::tools::{ToolRegistry, ToolService};
 
 use super::auth::extract_claims;
@@ -36,12 +38,15 @@ pub struct KnowledgeGraphServiceImpl {
 }
 
 impl KnowledgeGraphServiceImpl {
-    pub fn new(validator: Arc<JwtValidator>) -> Self {
+    pub fn new(validator: Arc<JwtValidator>, clickhouse_config: &ClickHouseConfiguration) -> Self {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let query_executor = QueryExecutor::new(clickhouse_config, ontology);
+        let tool_service = ToolService::new(query_executor.clone());
         let context_engine = ContextEngine::new();
         Self {
             validator,
-            tool_service: ToolService::new(),
-            query_executor: QueryExecutor::new(),
+            tool_service,
+            query_executor,
             context_engine,
         }
     }
@@ -132,22 +137,24 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
             info!(tool_name = %req.tool_name, "Executing tool");
 
-            let execution_result =
-                match executor.execute_tool(&req.tool_name, &req.arguments_json, &claims) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!(error = %e, "Tool execution failed");
-                        let _ = tx
-                            .send(Ok(ExecuteToolMessage {
-                                message: Some(execute_tool_message::Message::Error(ProtoError {
-                                    code: e.code(),
-                                    message: e.to_string(),
-                                })),
-                            }))
-                            .await;
-                        return;
-                    }
-                };
+            let execution_result = match executor
+                .execute_tool(&req.tool_name, &req.arguments_json, &claims)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    error!(error = %e, "Tool execution failed");
+                    let _ = tx
+                        .send(Ok(ExecuteToolMessage {
+                            message: Some(execute_tool_message::Message::Error(ProtoError {
+                                code: e.code(),
+                                message: e.to_string(),
+                            })),
+                        }))
+                        .await;
+                    return;
+                }
+            };
 
             if execution_result.resources_to_check.is_empty() {
                 info!("No redaction required, returning result directly");
@@ -248,7 +255,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
             info!(query_len = req.query_json.len(), "Executing query");
 
-            let query_result = match query_executor.execute(&req.query_json, &claims) {
+            let query_result = match query_executor.execute(&req.query_json, &claims).await {
                 Ok(r) => r,
                 Err(e) => {
                     error!(error = %e, "Query execution failed");
@@ -264,9 +271,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                 }
             };
 
-            let resources_to_check = ResourceExtractor::extract(&query_result.result);
-
-            if resources_to_check.is_empty() {
+            if query_result.resources_to_check.is_empty() {
                 info!("No redaction required, returning result directly");
                 let final_result = context_engine.prepare_response(query_result.result);
                 let _ = tx
@@ -281,7 +286,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             }
 
             let exchange_result = match RedactionService::request_authorization(
-                &resources_to_check,
+                &query_result.resources_to_check,
                 &tx,
                 &mut stream,
             )
@@ -327,14 +332,19 @@ mod tests {
         JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap()
     }
 
-    #[test]
-    fn test_service_can_be_created() {
+    fn test_config() -> ClickHouseConfiguration {
+        ClickHouseConfiguration::default()
+    }
+
+    #[tokio::test]
+    async fn test_service_can_be_created() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator);
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config());
         assert!(
             service
                 .tool_service
                 .execute_tool("get_graph_entities", "{}", &test_claims())
+                .await
                 .is_ok()
         );
     }

@@ -45,7 +45,7 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
     let http_server = HttpServer::bind(config.bind_address, (*validator).clone()).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
-    let grpc_server = GrpcServer::new(config.grpc_bind_address, validator);
+    let grpc_server = GrpcServer::new(config.grpc_bind_address, validator, &config.graph);
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
     tokio::select! {
