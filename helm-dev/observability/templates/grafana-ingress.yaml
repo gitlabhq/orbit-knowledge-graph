@@ -1,14 +1,14 @@
-{{- if and .Values.observability.enabled .Values.observability.grafana.ingress.enabled .Values.observability.grafana.ingress.host }}
+{{- if and .Values.grafana.ingress.enabled .Values.grafana.ingress.host }}
 apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:
   name: grafana-cert
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "gkg.labels" . | nindent 4 }}
+    {{- include "obs.labels" . | nindent 4 }}
 spec:
   domains:
-    - {{ .Values.observability.grafana.ingress.host }}
+    - {{ .Values.grafana.ingress.host }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -16,7 +16,7 @@ metadata:
   name: grafana
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "gkg.labels" . | nindent 4 }}
+    {{- include "obs.labels" . | nindent 4 }}
   annotations:
     kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.allow-http: "true"
@@ -24,7 +24,7 @@ metadata:
     networking.gke.io/managed-certificates: "grafana-cert"
 spec:
   rules:
-    - host: {{ .Values.observability.grafana.ingress.host }}
+    - host: {{ .Values.grafana.ingress.host }}
       http:
         paths:
           - path: /*

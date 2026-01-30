@@ -64,15 +64,14 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end }}
 
 {{/*
-NATS URL
+NATS URL - host:port only, code adds nats:// prefix
 */}}
 {{- define "gkg.natsUrl" -}}
-nats://{{ .Release.Name }}-nats.{{ .Release.Namespace }}.svc.cluster.local:4222
+{{ .Release.Name }}-nats:4222
 {{- end }}
 
 {{/*
 ClickHouse environment variables with prefix
-Usage: {{ include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") }}
 */}}
 {{- define "gkg.clickhouseEnv" -}}
 - name: {{ .prefix }}_CLICKHOUSE_URL

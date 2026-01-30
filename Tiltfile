@@ -73,10 +73,13 @@ custom_build(
     deps=['crates/', 'Cargo.toml', 'Cargo.lock'],
 )
 
-# Build helm dependencies (gitlab-runner and nats charts are gitignored)
+# Build helm dependencies
 local('helm repo add gitlab https://charts.gitlab.io 2>/dev/null || true', quiet=True)
 local('helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true', quiet=True)
-local('helm dependency build ./helm-dev', quiet=True)
+local('helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true', quiet=True)
+local('helm repo add grafana https://grafana.github.io/helm-charts 2>/dev/null || true', quiet=True)
+local('helm dependency build ./helm-dev/gkg', quiet=True)
+local('helm dependency build ./helm-dev/observability', quiet=True)
 
 # Install Prometheus Operator CRDs (required for kube-prometheus-stack)
 PROMETHEUS_OPERATOR_VERSION = 'v0.88.1'
@@ -91,12 +94,20 @@ for crd in PROMETHEUS_CRDS:
         quiet=True
     )
 
-# Deploy helm chart with local values
+# Deploy observability chart first (so OTEL endpoint is available)
 k8s_yaml(helm(
-    './helm-dev',
+    './helm-dev/observability',
+    name='gkg-obs',
+    namespace='default',
+    values=['./helm-dev/observability/values-local.yaml'],
+))
+
+# Deploy gkg chart
+k8s_yaml(helm(
+    './helm-dev/gkg',
     name='gkg',
     namespace='default',
-    values=['./helm-dev/values-local.yaml'],
+    values=['./helm-dev/gkg/values-local.yaml'],
 ))
 
 # Skip readiness checks for components that may take time to connect

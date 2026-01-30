@@ -240,7 +240,8 @@ tilt-ci:
     - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     - helm repo add grafana https://grafana.github.io/helm-charts
     - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency build helm-dev
+    - helm dependency build helm-dev/gkg
+    - helm dependency build helm-dev/observability
     # Create dummy secrets for CI (not real credentials)
     - |
       cat <<EOF > .tilt-secrets
@@ -276,9 +277,7 @@ variables:
   GKE_PROJECT: gl-knowledgegraph-prj-f2eec59d
   GKE_CLUSTER: knowledge-graph-test
   GKE_ZONE: us-central1
-  HELM_CHART_PATH: helm-dev
-  HELM_RELEASE_NAME: gkg-sandbox
-  HELM_NAMESPACE: gkg-sandbox
+  HELM_NAMESPACE: gkg
 
 .helm-base:
   image: google/cloud-sdk:slim
@@ -292,15 +291,14 @@ variables:
     - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     - helm repo add grafana https://grafana.github.io/helm-charts
     - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency update ${HELM_CHART_PATH}
+    - helm dependency update helm-dev/gkg
+    - helm dependency update helm-dev/observability
 
 .helm-with-gke-auth:
   extends: .helm-base
   before_script:
     - !reference [.helm-base, before_script]
-    # Install GKE auth plugin and kubectl
     - apt-get install -y google-cloud-cli-gke-gcloud-auth-plugin kubectl
-    # Write access for deployment (GKE_SA_KEY is protected, main branch only)
     - gcloud auth activate-service-account --key-file="${GKE_SA_KEY}"
     - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
 
@@ -311,8 +309,10 @@ helm-lint:
   stage: lint
   needs: []
   script:
-    - helm lint ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
-    - helm template ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} -f ${HELM_CHART_PATH}/values-sandbox.yaml
+    - helm lint helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
+    - helm lint helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
+    - helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
+    - helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
 
 helm-dry-run:
   extends: .helm-with-gke-auth
@@ -322,10 +322,18 @@ helm-dry-run:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - |
-      helm upgrade ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} \
-        -f ${HELM_CHART_PATH}/values-sandbox.yaml \
+      helm upgrade gkg-obs helm-dev/observability \
+        -f helm-dev/observability/values-sandbox.yaml \
         --namespace ${HELM_NAMESPACE} \
         --install \
+        --history-max 1 \
+        --dry-run
+    - |
+      helm upgrade gkg helm-dev/gkg \
+        -f helm-dev/gkg/values-sandbox.yaml \
+        --namespace ${HELM_NAMESPACE} \
+        --install \
+        --history-max 1 \
         --dry-run
   environment:
     name: sandbox
@@ -342,11 +350,20 @@ deploy-sandbox:
       when: manual
   script:
     - |
-      helm upgrade ${HELM_RELEASE_NAME} ${HELM_CHART_PATH} \
-        -f ${HELM_CHART_PATH}/values-sandbox.yaml \
+      helm upgrade gkg-obs helm-dev/observability \
+        -f helm-dev/observability/values-sandbox.yaml \
         --namespace ${HELM_NAMESPACE} \
         --create-namespace \
         --install \
+        --history-max 1 \
+        --wait \
+        --timeout 10m
+    - |
+      helm upgrade gkg helm-dev/gkg \
+        -f helm-dev/gkg/values-sandbox.yaml \
+        --namespace ${HELM_NAMESPACE} \
+        --install \
+        --history-max 1 \
         --wait \
         --timeout 5m
     - kubectl get pods -n ${HELM_NAMESPACE}

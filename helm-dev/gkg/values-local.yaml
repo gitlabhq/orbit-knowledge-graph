@@ -1,0 +1,101 @@
+# Local development values for gkg chart (use with Tilt)
+
+gcp:
+  project: ""
+  region: ""
+  cluster: ""
+
+secrets:
+  enabled: false
+
+gitlab-runner:
+  enabled: false
+
+postgres:
+  host: host.docker.internal
+  port: 5432
+  database: gitlabhq_development
+  user: gitlab
+
+clickhouse:
+  datalake:
+    host: host.docker.internal
+    port: 9000
+    database: gitlab_clickhouse_main_development
+    user: default
+    ssl: false
+  graph:
+    host: host.docker.internal
+    port: 9000
+    database: gkg-development
+    user: default
+    ssl: false
+
+gkgServer:
+  image:
+    repository: gkg-server
+    tag: dev
+    pullPolicy: Never
+  indexer:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  webserver:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+nats:
+  enabled: true
+  streamName: gkg_replication
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 1Gi
+  container:
+    image:
+      repository: nats
+      tag: "2.10-alpine"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  natsBox:
+    enabled: false
+
+siphon:
+  image:
+    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+    tag: "0.0.25-beta"
+    pullPolicy: Always
+
+tableMappings: []
+
+producer:
+  enabled: false
+
+consumer:
+  enabled: false
+
+otel:
+  enabled: true
+  endpoint: "http://gkg-obs-alloy:4317"

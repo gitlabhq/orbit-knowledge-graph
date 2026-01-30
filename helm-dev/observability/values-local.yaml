@@ -1,152 +1,17 @@
-# Local development values for use with Tilt
-# PostgreSQL and ClickHouse run on host machine (GDK), siphon services disabled
+# Local development values for observability chart (use with Tilt)
 
-# Disable GCP integration
 gcp:
   project: ""
   region: ""
   cluster: ""
 
-# Use local secrets from values instead of GCP Secrets Manager
 secrets:
   enabled: false
 
-# Disable GitLab Runner for local dev
-gitlab-runner:
-  enabled: false
-
-# PostgreSQL on host machine (GDK)
-postgres:
-  host: host.docker.internal
-  port: 5432
-  database: gitlabhq_development
-  user: gitlab
-
-# ClickHouse on host machine (GDK)
-clickhouse:
-  datalake:
-    host: host.docker.internal
-    port: 9000
-    database: gitlab_clickhouse_main_development
-    user: default
-    ssl: false
-  graph:
-    host: host.docker.internal
-    port: 9000
-    database: gkg-development
-    user: default
-    ssl: false
-
-# NOTE: Secrets are managed by Tilt from .tilt-secrets file.
-# See .tilt-secrets.example in the repo root.
-
-# GKG Server components
-gkgServer:
-  image:
-    repository: gkg-server
-    tag: dev
-    pullPolicy: Never
-  indexer:
-    enabled: true
-    replicas: 1
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-  webserver:
-    enabled: true
-    replicas: 1
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-
-# NATS JetStream (using official chart)
-nats:
-  enabled: true
-  config:
-    jetstream:
-      enabled: true
-      fileStore:
-        enabled: true
-        pvc:
-          enabled: true
-          size: 1Gi
-  container:
-    image:
-      repository: nats
-      tag: "2.10-alpine"
-    resources:
-      requests:
-        cpu: 50m
-        memory: 128Mi
-      limits:
-        cpu: 200m
-        memory: 256Mi
-  natsBox:
+grafana:
+  ingress:
     enabled: false
 
-# Siphon image (not used when producer/consumer disabled)
-siphon:
-  image:
-    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.25-beta"
-    pullPolicy: Always
-
-# No table mappings needed when siphon is disabled
-tableMappings: []
-
-# Disable siphon producer (managed by GDK)
-producer:
-  enabled: false
-  applicationIdentifier: ""
-  publicationName: ""
-  slotName: ""
-  advisoryLockId: 144324
-  maxColumnSizeBytes: 8000000
-  memoryBufferSize: 104857600
-  logLevel: info
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1
-      memory: 1Gi
-
-# Disable siphon consumer (managed by GDK)
-consumer:
-  enabled: false
-  applicationIdentifier: ""
-  replicas: 1
-  logLevel: info
-  insertBatchSize: 10000
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1
-      memory: 1Gi
-
-# Observability stack for local development
-observability:
-  enabled: true
-  grafana:
-    ingress:
-      enabled: false
-  loki:
-    enabled: true
-  alloy:
-    enabled: true
-
-# Prometheus + Grafana (local config with simple auth)
 kube-prometheus-stack:
   enabled: true
   crds:
@@ -177,7 +42,7 @@ kube-prometheus-stack:
     additionalDataSources:
       - name: Loki
         type: loki
-        url: http://gkg-loki:3100
+        url: http://gkg-obs-loki:3100
         access: proxy
         isDefault: false
     service:
@@ -191,7 +56,6 @@ kube-prometheus-stack:
         cpu: 200m
         memory: 256Mi
 
-# Loki for local log aggregation
 loki:
   enabled: true
   deploymentMode: SingleBinary
@@ -241,20 +105,18 @@ loki:
   test:
     enabled: false
 
-# Alloy for log collection and OTEL metrics
 alloy:
+  enabled: true
   alloy:
     clustering:
       enabled: false
     configMap:
       create: true
       content: |
-        // Kubernetes pod discovery
         discovery.kubernetes "pods" {
           role = "pod"
         }
 
-        // Relabel to filter only gkg pods
         discovery.relabel "gkg_pods" {
           targets = discovery.kubernetes.pods.targets
 
@@ -291,7 +153,6 @@ alloy:
           }
         }
 
-        // Process JSON logs
         loki.process "json" {
           forward_to = [loki.write.default.receiver]
 
@@ -309,20 +170,17 @@ alloy:
           }
         }
 
-        // Collect logs from pods
         loki.source.kubernetes "pods" {
           targets    = discovery.relabel.gkg_pods.output
           forward_to = [loki.process.json.receiver]
         }
 
-        // Write logs to Loki
         loki.write "default" {
           endpoint {
-            url = "http://gkg-loki:3100/loki/api/v1/push"
+            url = "http://gkg-obs-loki:3100/loki/api/v1/push"
           }
         }
 
-        // OTEL receiver for metrics
         otelcol.receiver.otlp "default" {
           grpc {
             endpoint = "0.0.0.0:4317"
@@ -336,22 +194,19 @@ alloy:
           }
         }
 
-        // Batch processor for efficiency
         otelcol.processor.batch "default" {
           output {
             metrics = [otelcol.exporter.prometheus.default.input]
           }
         }
 
-        // Export metrics to Prometheus
         otelcol.exporter.prometheus "default" {
           forward_to = [prometheus.remote_write.default.receiver]
         }
 
-        // Remote write to Prometheus
         prometheus.remote_write "default" {
           endpoint {
-            url = "http://gkg-kube-prometheus-stack-prometheus:9090/api/v1/write"
+            url = "http://gkg-obs-kube-prometheus-st-prometheus:9090/api/v1/write"
           }
         }
     extraPorts:

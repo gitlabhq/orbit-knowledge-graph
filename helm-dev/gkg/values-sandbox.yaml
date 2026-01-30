@@ -1,0 +1,156 @@
+# Sandbox environment values for gkg chart
+
+gcp:
+  project: gl-knowledgegraph-prj-f2eec59d
+  region: us-central1
+  cluster: knowledge-graph-test
+
+secrets:
+  enabled: true
+  gcpServiceAccount: gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com
+  postgresSecretName: postgres-password
+  clickhouseSecretName: clickhouse-password
+  runnerTokenSecretName: runner_authentication_token
+  jwtSecretName: gkg-jwt-secret
+
+gitlab-runner:
+  enabled: true
+  gitlabUrl: https://gitlab.gkg.dev
+  unregisterRunners: true
+  concurrent: 10
+  rbac:
+    create: true
+  runners:
+    secret: gitlab-runner-token
+    config: |
+      [[runners]]
+        [runners.kubernetes]
+          namespace = "{{.Release.Namespace}}"
+          image = "alpine:latest"
+          helper_image = "registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-v18.8.0"
+
+postgres:
+  host: 10.128.0.4
+  port: 5432
+  database: gitlabhq_production
+  user: gitlab
+
+clickhouse:
+  datalake:
+    host: 10.128.0.13
+    port: 9000
+    database: gitlab_clickhouse_main_production
+    user: default
+    ssl: false
+  graph:
+    host: 10.128.0.13
+    port: 9000
+    database: gkg-sandbox
+    user: default
+    ssl: false
+
+nats:
+  enabled: true
+  streamName: gkg_replication
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 10Gi
+  container:
+    image:
+      repository: nats
+      tag: "2.10-alpine"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  natsBox:
+    enabled: false
+
+siphon:
+  image:
+    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+    tag: "0.0.25-beta"
+    pullPolicy: Always
+
+tableMappings:
+  - table: projects
+    schema: public
+    subject: projects
+    target: siphon_projects
+  - table: namespaces
+    schema: public
+    subject: namespaces
+    target: siphon_namespaces
+  - table: users
+    schema: public
+    subject: users
+    target: siphon_users
+
+producer:
+  enabled: true
+  applicationIdentifier: gkg-producer
+  publicationName: gkg_publication
+  slotName: gkg_slot
+  advisoryLockId: 144324
+  maxColumnSizeBytes: 8000000
+  memoryBufferSize: 104857600
+  logLevel: info
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+consumer:
+  enabled: true
+  applicationIdentifier: gkg-consumer
+  replicas: 1
+  logLevel: info
+  insertBatchSize: 10000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+gkgServer:
+  image:
+    repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
+    tag: develop
+    pullPolicy: Always
+  indexer:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  webserver:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+otel:
+  enabled: true
+  endpoint: "http://gkg-obs-alloy:4317"

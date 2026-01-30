@@ -57,4 +57,4 @@ DNS for `gkg.dev` is managed externally.
 
 ## Workload Identity
 
-GCP service account `gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com` is bound to K8s ServiceAccount `gcp-secrets-sa` in `gkg-sandbox` namespace.
+GCP service account `gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com` is bound to K8s ServiceAccount `gcp-secrets-sa` in `gkg` namespace.

@@ -54,9 +54,9 @@ spec:
                   key: jwt-secret
             - name: GKG_BIND_ADDRESS
               value: "0.0.0.0:8080"
-            {{- if .Values.observability.alloy.enabled }}
+            {{- if .Values.otel.enabled }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://{{ .Release.Name }}-alloy:4317"
+              value: {{ .Values.otel.endpoint | quote }}
             - name: OTEL_SERVICE_NAME
               value: "gkg-webserver"
             {{- end }}

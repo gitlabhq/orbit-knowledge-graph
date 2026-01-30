@@ -1,0 +1,29 @@
+# Default values for gkg-observability chart
+
+gcp:
+  project: ""
+  region: ""
+  cluster: ""
+
+secrets:
+  enabled: false
+  gcpServiceAccount: ""
+
+grafana:
+  ingress:
+    enabled: false
+    host: ""
+
+# Prometheus + Grafana subchart
+kube-prometheus-stack:
+  enabled: false
+  crds:
+    enabled: false
+
+# Loki subchart
+loki:
+  enabled: false
+
+# Alloy subchart
+alloy:
+  enabled: false

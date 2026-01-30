@@ -1,155 +1,24 @@
-# GCP Configuration
+# Sandbox environment values for observability chart
+
 gcp:
   project: gl-knowledgegraph-prj-f2eec59d
   region: us-central1
   cluster: knowledge-graph-test
 
-# Secrets Configuration (External Secrets Operator)
 secrets:
   enabled: true
+  createSecretStore: false
   gcpServiceAccount: gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com
-  postgresSecretName: postgres-password
-  clickhouseSecretName: clickhouse-password
-  runnerTokenSecretName: runner_authentication_token
 
-# GitLab Runner Configuration (subchart)
-gitlab-runner:
-  enabled: true
-  gitlabUrl: https://gitlab.gkg.dev
-  unregisterRunners: true
-  concurrent: 10
-  rbac:
-    create: true
-  runners:
-    secret: gitlab-runner-token
-    config: |
-      [[runners]]
-        [runners.kubernetes]
-          namespace = "{{.Release.Namespace}}"
-          image = "alpine:latest"
-          helper_image = "registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-v18.8.0"
-
-# PostgreSQL Configuration (GitLab Omnibus VM)
-postgres:
-  host: 10.128.0.4
-  port: 5432
-  database: gitlabhq_production
-  user: gitlab
-
-# ClickHouse Configuration (ClickHouse VM)
-clickhouse:
-  datalake:
-    host: 10.128.0.13
-    port: 9000
-    database: gitlab_clickhouse_main_production
-    user: default
-    ssl: false
-  graph:
-    host: 10.128.0.13
-    port: 9000
-    database: gkg-sandbox
-    user: default
-    ssl: false
-
-# NATS Configuration (using official nats-io helm chart)
-nats:
-  enabled: true
-  streamName: gkg_replication
-  config:
-    jetstream:
-      enabled: true
-      fileStore:
-        enabled: true
-        pvc:
-          enabled: true
-          size: 10Gi
-  container:
-    image:
-      repository: nats
-      tag: "2.10-alpine"
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-  natsBox:
-    enabled: false
-
-# Siphon Image Configuration
-siphon:
-  image:
-    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.25-beta"
-    pullPolicy: Always
-
-# Table Mappings (shared between producer and consumer)
-tableMappings:
-  - table: projects
-    schema: public
-    subject: projects
-    target: siphon_projects
-  - table: namespaces
-    schema: public
-    subject: namespaces
-    target: siphon_namespaces
-  - table: users
-    schema: public
-    subject: users
-    target: siphon_users
-
-# Producer Configuration
-producer:
-  enabled: true
-  applicationIdentifier: gkg-producer
-  publicationName: gkg_publication
-  slotName: gkg_slot
-  advisoryLockId: 144324
-  maxColumnSizeBytes: 8000000
-  memoryBufferSize: 104857600
-  logLevel: info
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1
-      memory: 1Gi
-
-# Consumer Configuration
-consumer:
-  enabled: true
-  applicationIdentifier: gkg-consumer
-  replicas: 1
-  logLevel: info
-  insertBatchSize: 10000
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1
-      memory: 1Gi
-
-# Observability stack for sandbox
-observability:
-  enabled: true
-  grafana:
-    ingress:
-      enabled: true
-      host: grafana.gkg.dev
-  loki:
+grafana:
+  ingress:
     enabled: true
-  alloy:
-    enabled: true
+    host: grafana.gkg.dev
 
-# Prometheus + Grafana with Google OAuth
 kube-prometheus-stack:
   enabled: true
   crds:
     enabled: false
-  # Disable components incompatible with GKE Autopilot
   nodeExporter:
     enabled: false
   kubeApiServer:
@@ -166,7 +35,6 @@ kube-prometheus-stack:
     enabled: false
   coreDns:
     enabled: false
-  # Reduce chart size for helm secrets limit
   defaultRules:
     create: true
     rules:
@@ -215,7 +83,7 @@ kube-prometheus-stack:
     additionalDataSources:
       - name: Loki
         type: loki
-        url: http://gkg-sandbox-loki:3100
+        url: http://gkg-obs-loki:3100
         access: proxy
         isDefault: false
     grafana.ini:
@@ -254,20 +122,18 @@ kube-prometheus-stack:
         cpu: 500m
         memory: 512Mi
 
-# Alloy for log collection and OTEL metrics
 alloy:
+  enabled: true
   alloy:
     clustering:
       enabled: false
     configMap:
       create: true
       content: |
-        // Kubernetes pod discovery
         discovery.kubernetes "pods" {
           role = "pod"
         }
 
-        // Relabel to filter only gkg and siphon pods
         discovery.relabel "gkg_pods" {
           targets = discovery.kubernetes.pods.targets
 
@@ -304,7 +170,6 @@ alloy:
           }
         }
 
-        // Process JSON logs
         loki.process "json" {
           forward_to = [loki.write.default.receiver]
 
@@ -322,20 +187,17 @@ alloy:
           }
         }
 
-        // Collect logs from pods
         loki.source.kubernetes "pods" {
           targets    = discovery.relabel.gkg_pods.output
           forward_to = [loki.process.json.receiver]
         }
 
-        // Write logs to Loki
         loki.write "default" {
           endpoint {
-            url = "http://gkg-sandbox-loki:3100/loki/api/v1/push"
+            url = "http://gkg-obs-loki:3100/loki/api/v1/push"
           }
         }
 
-        // OTEL receiver for metrics
         otelcol.receiver.otlp "default" {
           grpc {
             endpoint = "0.0.0.0:4317"
@@ -349,22 +211,19 @@ alloy:
           }
         }
 
-        // Batch processor for efficiency
         otelcol.processor.batch "default" {
           output {
             metrics = [otelcol.exporter.prometheus.default.input]
           }
         }
 
-        // Export metrics to Prometheus
         otelcol.exporter.prometheus "default" {
           forward_to = [prometheus.remote_write.default.receiver]
         }
 
-        // Remote write to Prometheus
         prometheus.remote_write "default" {
           endpoint {
-            url = "http://gkg-sandbox-kube-prometheus-prometheus:9090/api/v1/write"
+            url = "http://gkg-obs-kube-prometheus-st-prometheus:9090/api/v1/write"
           }
         }
     extraPorts:
@@ -390,7 +249,6 @@ alloy:
       cpu: 500m
       memory: 512Mi
 
-# Loki for log aggregation
 loki:
   enabled: true
   deploymentMode: SingleBinary
