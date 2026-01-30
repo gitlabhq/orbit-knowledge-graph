@@ -121,24 +121,36 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
     let start_table = resolve_table(ontology, start)?;
     let end_table = resolve_table(ontology, end)?;
 
+    let start_entity = start
+        .entity
+        .as_deref()
+        .ok_or_else(|| QueryError::Lowering("start node has no entity".into()))?;
+
     Ok(Node::RecursiveCte(Box::new(RecursiveCte {
         name: "path_cte".into(),
-        base: path_base_query(&start.node_ids, &start_table),
+        base: path_base_query(&start.node_ids, &start_table, &start.id, start_entity),
         recursive: path_recursive_query(path.max_depth),
         max_depth: path.max_depth,
-        final_query: path_final_query(&end.node_ids, &end_table, input.limit),
+        final_query: path_final_query(&end.node_ids, &end_table, &end.id, input.limit),
     })))
 }
 
-fn path_base_query(start_ids: &[i64], table: &str) -> Query {
+/// Base query: start the path with the first node as a typed tuple (id, entity_type).
+/// Also tracks path_ids separately for cycle detection (since path is now Array(Tuple)).
+fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_entity: &str) -> Query {
+    // path = [tuple(start.id, 'EntityType')]
+    let start_id = Expr::col(start_alias, "id");
+    let start_tuple = Expr::func("tuple", vec![start_id.clone(), Expr::lit(start_entity)]);
+
     Query {
         select: vec![
-            SelectExpr::new(Expr::col("n", "id"), "node_id"),
-            SelectExpr::new(Expr::func("array", vec![Expr::col("n", "id")]), "path"),
+            SelectExpr::new(start_id.clone(), "node_id"),
+            SelectExpr::new(Expr::func("array", vec![start_id]), "path_ids"),
+            SelectExpr::new(Expr::func("array", vec![start_tuple]), "path"),
             SelectExpr::new(Expr::lit(0), "depth"),
         ],
-        from: TableRef::scan(table, "n"),
-        where_clause: id_filter("n", "id", start_ids),
+        from: TableRef::scan(table, start_alias),
+        where_clause: id_filter(start_alias, "id", start_ids),
         group_by: vec![],
         order_by: vec![],
         limit: None,
@@ -146,9 +158,11 @@ fn path_base_query(start_ids: &[i64], table: &str) -> Query {
 }
 
 /// Recursive step: traverse edges bidirectionally, avoiding cycles.
+/// Path contains tuples of (node_id, entity_type) for each step.
+/// path_ids is a separate Array(Int64) for efficient cycle detection.
 fn path_recursive_query(max_depth: u32) -> Query {
-    // next_node = if(p.node_id = e.source_id, e.target_id, e.source_id)
-    let next_node = Expr::func(
+    // next_node_id = if(p.node_id = e.source_id, e.target_id, e.source_id)
+    let next_node_id = Expr::func(
         "if",
         vec![
             Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id")),
@@ -157,15 +171,38 @@ fn path_recursive_query(max_depth: u32) -> Query {
         ],
     );
 
+    // next_node_type = if(p.node_id = e.source_id, e.target_kind, e.source_kind)
+    let next_node_type = Expr::func(
+        "if",
+        vec![
+            Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id")),
+            Expr::col("e", "target_kind"),
+            Expr::col("e", "source_kind"),
+        ],
+    );
+
+    // next_tuple = tuple(next_node_id, next_node_type)
+    let next_tuple = Expr::func("tuple", vec![next_node_id.clone(), next_node_type]);
+
     Query {
         select: vec![
-            SelectExpr::new(next_node.clone(), "node_id"),
+            SelectExpr::new(next_node_id.clone(), "node_id"),
+            SelectExpr::new(
+                Expr::func(
+                    "arrayConcat",
+                    vec![
+                        Expr::col("p", "path_ids"),
+                        Expr::func("array", vec![next_node_id.clone()]),
+                    ],
+                ),
+                "path_ids",
+            ),
             SelectExpr::new(
                 Expr::func(
                     "arrayConcat",
                     vec![
                         Expr::col("p", "path"),
-                        Expr::func("array", vec![next_node.clone()]),
+                        Expr::func("array", vec![next_tuple]),
                     ],
                 ),
                 "path",
@@ -191,9 +228,10 @@ fn path_recursive_query(max_depth: u32) -> Query {
                 Expr::col("p", "depth"),
                 Expr::lit(max_depth as i64),
             )),
+            // Cycle detection: check if next node ID already in path_ids
             Some(Expr::unary(
                 Op::Not,
-                Expr::func("has", vec![Expr::col("p", "path"), next_node]),
+                Expr::func("has", vec![Expr::col("p", "path_ids"), next_node_id]),
             )),
         ]),
         group_by: vec![],
@@ -202,22 +240,19 @@ fn path_recursive_query(max_depth: u32) -> Query {
     }
 }
 
-fn path_final_query(end_ids: &[i64], end_table: &str, limit: u32) -> Query {
+fn path_final_query(end_ids: &[i64], end_table: &str, end_alias: &str, limit: u32) -> Query {
     Query {
         select: vec![
-            SelectExpr::new(Expr::col("path_cte", "path"), "path"),
+            SelectExpr::new(Expr::col("path_cte", "path"), "_gkg_path"),
             SelectExpr::new(Expr::col("path_cte", "depth"), "depth"),
         ],
         from: TableRef::join(
             JoinType::Inner,
             TableRef::scan("path_cte", "path_cte"),
-            TableRef::scan(end_table, "end_node"),
-            Expr::eq(
-                Expr::col("path_cte", "node_id"),
-                Expr::col("end_node", "id"),
-            ),
+            TableRef::scan(end_table, end_alias),
+            Expr::eq(Expr::col("path_cte", "node_id"), Expr::col(end_alias, "id")),
         ),
-        where_clause: id_filter("end_node", "id", end_ids),
+        where_clause: id_filter(end_alias, "id", end_ids),
         group_by: vec![],
         order_by: vec![OrderExpr {
             expr: Expr::col("path_cte", "depth"),

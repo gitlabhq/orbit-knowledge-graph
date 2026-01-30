@@ -48,7 +48,7 @@ pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
 pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
 pub use r#return::enforce_return;
-pub use result_context::{id_column, type_column, RedactionNode, ResultContext};
+pub use result_context::{id_column, type_column, RedactionNode, ResultContext, PATH_COLUMN};
 pub use security::{apply_security_context, SecurityContext};
 
 // ─────────────────────────────────────────────────────────────────────────────
