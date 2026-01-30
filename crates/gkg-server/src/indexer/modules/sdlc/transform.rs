@@ -9,9 +9,6 @@ pub fn build_transform_sql(config: &PreparedEtlConfig) -> String {
         .map(|f| f.expression.as_str())
         .collect();
 
-    if config.is_namespaced {
-        columns.push("traversal_path");
-    }
     columns.push("_version");
     columns.push("_deleted");
 
@@ -182,48 +179,6 @@ mod tests {
             }),
             redaction: None,
         }
-    }
-
-    fn create_namespaced_node() -> NodeEntity {
-        NodeEntity {
-            name: "Group".to_string(),
-            fields: vec![Field {
-                name: "id".to_string(),
-                source: "id".to_string(),
-                data_type: DataType::Int,
-                nullable: false,
-                enum_values: None,
-            }],
-            primary_keys: vec!["id".to_string()],
-            destination_table: "gl_groups".to_string(),
-            etl: Some(EtlConfig::Table {
-                scope: EtlScope::Namespaced,
-                source: "siphon_namespaces".to_string(),
-                watermark: "_siphon_replicated_at".to_string(),
-                deleted: "_siphon_deleted".to_string(),
-                edges: BTreeMap::new(),
-            }),
-            redaction: None,
-        }
-    }
-
-    #[test]
-    fn transform_sql_excludes_traversal_path_for_global() {
-        let ontology = Ontology::new();
-        let config = PreparedEtlConfig::from_node(&create_user_node(), &ontology).unwrap();
-        let sql = build_transform_sql(&config);
-
-        assert!(!sql.contains("traversal_path"));
-        assert!(sql.contains("FROM source_data"));
-    }
-
-    #[test]
-    fn transform_sql_includes_traversal_path_for_namespaced() {
-        let ontology = Ontology::new();
-        let config = PreparedEtlConfig::from_node(&create_namespaced_node(), &ontology).unwrap();
-        let sql = build_transform_sql(&config);
-
-        assert!(sql.contains("traversal_path"));
     }
 
     #[test]
