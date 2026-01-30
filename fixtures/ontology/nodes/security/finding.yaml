@@ -4,6 +4,7 @@ node_type: Finding
 domain: security
 description: A security scan finding (occurrence) that may be linked to a vulnerability
 destination_table: gl_finding
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

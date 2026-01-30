@@ -2,258 +2,170 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://gitlab.com/knowledge-graph/ontology.schema.json",
   "title": "GitLab Knowledge Graph Ontology Schema",
+  "description": "Schema for validating ontology YAML files used by the Knowledge Graph ETL pipeline.",
 
-  "type": "object",
-  "required": ["type"],
-  "properties": {
-    "type": {
-      "type": "string",
-      "enum": ["main", "node", "edge"],
-      "description": "Discriminator for schema type."
-    }
-  },
   "oneOf": [
     { "$ref": "#/definitions/mainSchema" },
-    { "$ref": "#/definitions/nodeDefinition" },
-    { "$ref": "#/definitions/edgeDefinition" }
+    { "$ref": "#/definitions/nodeSchema" },
+    { "$ref": "#/definitions/edgeSchema" }
   ],
 
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "source_code", "code_review", "ci", "security", "plan"]
+      "enum": ["core", "source_code", "code_review", "ci", "security", "plan"],
+      "description": "Domain classification for organizing entities."
     },
 
     "propertyType": {
       "type": "string",
-      "enum": ["string", "int64", "boolean", "timestamp", "date", "enum"]
-    },
-
-    "sourceDefinition": {
-      "type": "object",
-      "properties": {
-        "system": {
-          "type": "string",
-          "enum": ["postgres", "clickhouse", "rails", "code_indexer"],
-          "description": "The source system where this data originates."
-        },
-        "database": {
-          "type": "string",
-          "description": "Database name (for postgres sources)."
-        },
-        "table": {
-          "type": ["string", "null"],
-          "description": "Table name in the database."
-        },
-        "column": {
-          "type": "string",
-          "description": "Column name in the table."
-        },
-        "column_type": {
-          "type": "string",
-          "description": "The database column type (e.g., varchar, smallint)."
-        },
-        "from_column": {
-          "type": "string",
-          "description": "Column representing the source node in an edge relationship."
-        },
-        "to_column": {
-          "type": "string",
-          "description": "Column representing the target node in an edge relationship."
-        },
-        "filter": {
-          "type": "string",
-          "description": "SQL filter condition for this source (e.g., type = 'GroupMember')."
-        },
-        "file": {
-          "type": "string",
-          "description": "Source file path (for rails sources)."
-        },
-        "class": {
-          "type": "string",
-          "description": "Ruby class name (for rails sources)."
-        },
-        "type": {
-          "type": "string",
-          "description": "Source type modifier (e.g., derived)."
-        },
-        "relationship": {
-          "type": "string",
-          "description": "Relationship name in code indexer graph."
-        },
-        "from_table": {
-          "type": "string",
-          "description": "Source node table in code indexer graph."
-        },
-        "to_table": {
-          "type": "string",
-          "description": "Target node table in code indexer graph."
-        }
-      },
-      "required": ["system"],
-      "additionalProperties": false
-    },
-
-    "internalDefinition": {
-      "type": "object",
-      "properties": {
-        "sources": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/sourceDefinition" },
-          "minItems": 1,
-          "description": "List of internal data sources for this property."
-        }
-      },
-      "required": ["sources"],
-      "additionalProperties": false
-    },
-
-    "propertyStatus": {
-      "type": "string",
-      "enum": ["pending", "indexed"],
-      "description": "Indicates whether this property is being indexed."
+      "enum": ["string", "int64", "boolean", "timestamp", "date", "enum"],
+      "description": "Data type for a property field."
     },
 
     "etlScope": {
       "type": "string",
       "enum": ["global", "namespaced"],
-      "description": "Scope of ETL processing - global (all records) or namespaced (per-namespace)."
+      "description": "ETL processing scope - global processes all records, namespaced processes per-namespace."
     },
 
-    "etlTableConfig": {
+    "edgeDirection": {
+      "type": "string",
+      "enum": ["incoming", "outgoing"],
+      "description": "Direction of the edge relationship from the current node's perspective."
+    },
+
+    "enumValues": {
       "type": "object",
-      "description": "ETL configuration for simple table-based extraction.",
-      "properties": {
-        "type": { "const": "table" },
-        "scope": { "$ref": "#/definitions/etlScope" },
-        "source": {
-          "type": "string",
-          "description": "Source table name in ClickHouse."
-        },
-        "watermark": {
-          "type": "string",
-          "description": "Column name for watermark-based incremental processing."
-        },
-        "deleted": {
-          "type": "string",
-          "description": "Optional column name indicating soft-deleted records."
-        }
-      },
-      "required": ["type", "scope", "source", "watermark"],
-      "additionalProperties": false
-    },
-
-    "etlQueryConfig": {
-      "type": "object",
-      "description": "ETL configuration for complex query-based extraction (JOINs, etc.).",
-      "properties": {
-        "type": { "const": "query" },
-        "scope": { "$ref": "#/definitions/etlScope" },
-        "source": {
-          "type": "string",
-          "description": "Primary source table for watermark tracking."
-        },
-        "watermark": {
-          "type": "string",
-          "description": "Column name for watermark-based incremental processing."
-        },
-        "deleted": {
-          "type": "string",
-          "description": "Optional column name indicating soft-deleted records."
-        },
-        "query": {
-          "type": "string",
-          "description": "SQL query template with {last_watermark:String}, {watermark:String}, and optional {traversal_path:String} placeholders."
-        }
-      },
-      "required": ["type", "scope", "source", "watermark", "query"],
-      "additionalProperties": false
-    },
-
-    "etlConfig": {
-      "oneOf": [
-        { "$ref": "#/definitions/etlTableConfig" },
-        { "$ref": "#/definitions/etlQueryConfig" }
-      ]
-    },
-
-    "edgeGenerationConfig": {
-      "type": "object",
-      "description": "Configuration for generating edges from source data.",
-      "properties": {
-        "relationship_kind": {
-          "type": "string",
-          "description": "Type of relationship (e.g., 'owner', 'contains', 'creator')."
-        },
-        "source_column": {
-          "type": "string",
-          "description": "Column in source data containing the related entity ID."
-        },
-        "target_kind": {
-          "type": "string",
-          "description": "Node type of the target entity (e.g., 'User', 'Group')."
-        }
-      },
-      "required": ["relationship_kind", "source_column", "target_kind"],
-      "additionalProperties": false
+      "description": "Mapping of integer values to string labels for enum types.",
+      "additionalProperties": { "type": "string" }
     },
 
     "propertyDefinition": {
       "type": "object",
+      "description": "Definition of a node property/field.",
       "properties": {
         "type": { "$ref": "#/definitions/propertyType" },
-        "description": { "type": "string" },
-        "nullable": { "type": "boolean" },
-        "status": { "$ref": "#/definitions/propertyStatus" },
-        "values": {
-          "type": "array",
-          "items": { "type": "string" },
-          "minItems": 1
-        },
-        "internal": { "$ref": "#/definitions/internalDefinition" }
-      },
-      "required": ["type", "status"],
-      "additionalProperties": false
-    },
-
-    "propertiesMap": {
-      "type": "object",
-      "additionalProperties": { "$ref": "#/definitions/propertyDefinition" }
-    },
-
-    "nodeReference": {
-      "type": "object",
-      "properties": {
-        "type": { "type": "string" },
-        "id": { "type": "string" }
-      },
-      "required": ["type", "id"],
-      "additionalProperties": false
-    },
-
-    "edgeVariant": {
-      "type": "object",
-      "properties": {
-        "from_node": { "$ref": "#/definitions/nodeReference" },
-        "to_node": { "$ref": "#/definitions/nodeReference" },
-        "meaning": { "type": "string" },
-        "status": { "$ref": "#/definitions/propertyStatus" },
-        "cypher_example": {
+        "source": {
           "type": "string",
-          "description": "Example Cypher query demonstrating this edge variant."
+          "description": "Source column name in the database table."
         },
-        "internal": { "$ref": "#/definitions/internalDefinition" }
+        "nullable": {
+          "type": "boolean",
+          "description": "Whether this field can be null.",
+          "default": false
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the property."
+        },
+        "values": {
+          "$ref": "#/definitions/enumValues",
+          "description": "For enum types, maps integer values to string labels."
+        }
       },
-      "required": ["from_node", "to_node", "meaning", "status"],
+      "required": ["type", "source"],
+      "additionalProperties": false
+    },
+
+    "edgeMappingDefinition": {
+      "type": "object",
+      "description": "Configuration for generating edges during ETL.",
+      "properties": {
+        "to": {
+          "type": "string",
+          "description": "Target node type (literal value)."
+        },
+        "to_column": {
+          "type": "string",
+          "description": "Column containing the target node type (for polymorphic edges)."
+        },
+        "as": {
+          "type": "string",
+          "description": "Relationship kind name for the generated edge."
+        },
+        "direction": {
+          "$ref": "#/definitions/edgeDirection",
+          "description": "Edge direction from this node's perspective."
+        },
+        "delimiter": {
+          "type": "string",
+          "description": "Delimiter for splitting multi-value columns."
+        }
+      },
+      "required": ["as"],
+      "additionalProperties": false
+    },
+
+    "etlConfig": {
+      "type": "object",
+      "description": "ETL configuration for indexing this entity from source tables.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["table", "query"],
+          "description": "ETL type - 'table' for simple extraction, 'query' for complex JOINs."
+        },
+        "scope": { "$ref": "#/definitions/etlScope" },
+        "source": {
+          "type": "string",
+          "description": "Source table name for watermark tracking."
+        },
+        "watermark": {
+          "type": "string",
+          "description": "Column name for incremental processing watermark."
+        },
+        "deleted": {
+          "type": "string",
+          "description": "Column name indicating soft-deleted records."
+        },
+        "query": {
+          "type": "string",
+          "description": "SQL query template with {last_watermark:String}, {watermark:String}, and {traversal_path:String} placeholders."
+        },
+        "edges": {
+          "type": "object",
+          "description": "Edge generation config keyed by source column name.",
+          "additionalProperties": { "$ref": "#/definitions/edgeMappingDefinition" }
+        }
+      },
+      "required": ["type", "scope"],
+      "additionalProperties": false
+    },
+
+    "redactionConfig": {
+      "type": "object",
+      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. When a node has redaction config, the query engine includes id/type columns in results, and gkg-server validates these against the user's permissions before returning data.",
+      "properties": {
+        "resource_type": {
+          "type": "string",
+          "description": "Rails resource type identifier used by RedactionService (e.g., 'projects', 'merge_requests', 'groups', 'users'). Maps to keys in Authz::RedactionService::RESOURCE_CLASSES."
+        },
+        "id_column": {
+          "type": "string",
+          "default": "id",
+          "description": "Column containing the entity ID for redaction lookups. Defaults to 'id'."
+        },
+        "ability": {
+          "type": "string",
+          "description": "Rails ability to check (e.g., 'read_project'). If not specified, uses the default ability for the resource type."
+        }
+      },
+      "required": ["resource_type"],
       "additionalProperties": false
     },
 
     "domainDefinition": {
       "type": "object",
+      "description": "A domain grouping related entities.",
       "properties": {
-        "description": { "type": "string" },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the domain."
+        },
         "nodes": {
           "type": "object",
+          "description": "Map of node names to their YAML file paths.",
           "additionalProperties": { "type": "string" }
         }
       },
@@ -263,19 +175,29 @@
 
     "mainSchema": {
       "type": "object",
+      "description": "Main schema.yaml file that references all nodes and edges.",
       "properties": {
-        "type": { "const": "main" },
-        "schema_version": {
-          "type": ["string", "number"]
+        "type": {
+          "const": "main",
+          "description": "Discriminator identifying this as the main schema file."
         },
-        "description": { "type": "string" },
+        "schema_version": {
+          "type": ["string", "number"],
+          "description": "Schema version identifier."
+        },
+        "description": {
+          "type": "string",
+          "description": "Overall description of the ontology."
+        },
         "domains": {
           "type": "object",
+          "description": "Domain definitions containing node references.",
           "propertyNames": { "$ref": "#/definitions/domainName" },
           "additionalProperties": { "$ref": "#/definitions/domainDefinition" }
         },
         "edges": {
           "type": "object",
+          "description": "Map of edge names to their YAML file paths.",
           "additionalProperties": { "type": "string" }
         }
       },
@@ -283,39 +205,140 @@
       "additionalProperties": false
     },
 
-    "nodeDefinition": {
+    "nodeSchema": {
       "type": "object",
+      "description": "Node entity definition file.",
       "properties": {
-        "type": { "const": "node" },
+        "node_type": {
+          "type": "string",
+          "description": "Name of the node type (e.g., 'Project', 'User')."
+        },
         "domain": { "$ref": "#/definitions/domainName" },
-        "description": { "type": "string" },
-        "example_output": { "type": "string" },
-        "properties": { "$ref": "#/definitions/propertiesMap" },
-        "additional_properties": { "$ref": "#/definitions/propertiesMap" },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the node."
+        },
+        "destination_table": {
+          "type": "string",
+          "description": "ClickHouse table name for storing this entity."
+        },
+        "properties": {
+          "type": "object",
+          "description": "Property definitions for this node.",
+          "additionalProperties": { "$ref": "#/definitions/propertyDefinition" }
+        },
         "etl": { "$ref": "#/definitions/etlConfig" },
-        "edges": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/edgeGenerationConfig" },
-          "description": "List of edges to generate from source data during ETL."
+        "redaction": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/definitions/redactionConfig" }
+          ],
+          "description": "Redaction configuration for access control. Set to null if not yet configured."
         }
       },
-      "required": ["type", "domain", "description", "properties"],
+      "required": ["node_type", "domain", "description", "destination_table", "properties", "redaction"],
       "additionalProperties": false
     },
 
-    "edgeDefinition": {
+    "edgeNodeReference": {
       "type": "object",
+      "description": "Reference to a node in an edge variant.",
       "properties": {
-        "type": { "const": "edge" },
-        "description": { "type": "string" },
-        "properties": { "$ref": "#/definitions/propertiesMap" },
-        "variants": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/edgeVariant" },
-          "minItems": 1
+        "type": {
+          "type": "string",
+          "description": "Node type name."
+        },
+        "id": {
+          "type": "string",
+          "description": "ID field name on the node."
         }
       },
-      "required": ["type", "description", "variants"],
+      "required": ["type", "id"],
+      "additionalProperties": false
+    },
+
+    "edgeVariant": {
+      "type": "object",
+      "description": "A specific source-target pair for an edge relationship.",
+      "properties": {
+        "from_node": { "$ref": "#/definitions/edgeNodeReference" },
+        "to_node": { "$ref": "#/definitions/edgeNodeReference" },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this edge variant."
+        }
+      },
+      "required": ["from_node", "to_node"],
+      "additionalProperties": false
+    },
+
+    "edgeEtlEndpoint": {
+      "type": "object",
+      "description": "Configuration for an edge endpoint in ETL.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Column containing the node ID."
+        },
+        "type": {
+          "type": "string",
+          "description": "Literal node type name."
+        },
+        "type_column": {
+          "type": "string",
+          "description": "Column containing the node type (for polymorphic edges)."
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+
+    "edgeEtlConfig": {
+      "type": "object",
+      "description": "ETL configuration for edges sourced from join tables.",
+      "properties": {
+        "scope": { "$ref": "#/definitions/etlScope" },
+        "source": {
+          "type": "string",
+          "description": "Source table name."
+        },
+        "watermark": {
+          "type": "string",
+          "description": "Column for incremental processing."
+        },
+        "deleted": {
+          "type": "string",
+          "description": "Column indicating deleted records."
+        },
+        "from": { "$ref": "#/definitions/edgeEtlEndpoint" },
+        "to": { "$ref": "#/definitions/edgeEtlEndpoint" }
+      },
+      "required": ["scope", "source", "watermark", "deleted", "from", "to"],
+      "additionalProperties": false
+    },
+
+    "edgeSchema": {
+      "type": "object",
+      "description": "Edge relationship definition file.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the relationship."
+        },
+        "properties": {
+          "type": "object",
+          "description": "Property definitions for this edge (for edges with additional data).",
+          "additionalProperties": { "$ref": "#/definitions/propertyDefinition" }
+        },
+        "variants": {
+          "type": "array",
+          "description": "List of valid source-target node type pairs.",
+          "items": { "$ref": "#/definitions/edgeVariant" },
+          "minItems": 1
+        },
+        "etl": { "$ref": "#/definitions/edgeEtlConfig" }
+      },
+      "required": ["description", "variants"],
       "additionalProperties": false
     }
   }

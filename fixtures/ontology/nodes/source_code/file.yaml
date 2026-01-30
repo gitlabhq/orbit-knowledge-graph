@@ -4,6 +4,7 @@ node_type: File
 domain: source_code
 description: A source code file within a repository
 destination_table: gl_file
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

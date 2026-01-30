@@ -14,6 +14,7 @@ GITALY_PROTO_ROOT = "~/gitlab/gdk/gitaly"
 "sccache" = "0.13.0"
 "tilt" = "0.36.1"
 clickhouse = "latest"
+uv = "latest"
 
 [tasks.build]
 run = "cargo build --release"
@@ -62,4 +63,8 @@ usage = '''
 arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
+
+[tasks."ontology:validate"]
+run = "find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile fixtures/ontology/ontology.schema.json"
+description = "Validate ontology YAML files against JSON schema"
 

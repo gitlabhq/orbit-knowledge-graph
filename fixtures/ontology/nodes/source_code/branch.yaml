@@ -4,6 +4,7 @@ node_type: Branch
 domain: source_code
 description: A Git branch in a repository
 destination_table: gl_branch
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

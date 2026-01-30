@@ -4,6 +4,7 @@ node_type: Stage
 domain: ci
 description: A stage within a CI/CD pipeline that groups related jobs (e.g., build, test, deploy)
 destination_table: gl_stage
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

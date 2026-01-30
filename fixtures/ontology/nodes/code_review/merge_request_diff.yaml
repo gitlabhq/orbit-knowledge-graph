@@ -4,6 +4,7 @@ node_type: MergeRequestDiff
 domain: code_review
 description: A snapshot of changes (commits and file diffs) associated with a merge request at a point in time
 destination_table: gl_merge_request_diffs
+redaction: null  # TODO: configure redaction
 
 properties:
   id:
