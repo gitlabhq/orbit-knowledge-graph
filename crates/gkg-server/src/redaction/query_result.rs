@@ -213,7 +213,10 @@ impl QueryResult {
 
             for alias in &aliases {
                 let Some(node_ref) = row.node_ref(alias) else {
-                    continue;
+                    // Fail closed: NULL IDs cannot be verified, so deny the row
+                    row.set_unauthorized();
+                    redacted_count += 1;
+                    break;
                 };
 
                 if !is_node_authorized(&node_ref, authorizations, entity_to_resource) {
