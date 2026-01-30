@@ -4,14 +4,15 @@
 
 use crate::ast::{Expr, Node, Op, Query, RecursiveCte, TableRef};
 use crate::error::Result;
+use crate::result_context::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Parameterized SQL query with bound parameters.
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, Value>,
+    pub result_context: ResultContext,
 }
 
 /// Display inlines parameters into SQL for debugging/testing.
@@ -39,8 +40,7 @@ impl std::fmt::Display for ParameterizedQuery {
     }
 }
 
-/// Convert an AST node to parameterized SQL.
-pub fn codegen(ast: &Node) -> Result<ParameterizedQuery> {
+pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
     let sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
@@ -49,6 +49,7 @@ pub fn codegen(ast: &Node) -> Result<ParameterizedQuery> {
     Ok(ParameterizedQuery {
         sql,
         params: ctx.params,
+        result_context,
     })
 }
 
@@ -270,6 +271,10 @@ mod tests {
     use super::*;
     use crate::ast::{JoinType, OrderExpr, SelectExpr};
 
+    fn empty_ctx() -> ResultContext {
+        ResultContext::new()
+    }
+
     #[test]
     fn simple_select() {
         let q = Query {
@@ -290,7 +295,7 @@ mod tests {
             limit: Some(10),
         };
 
-        let result = codegen(&Node::Query(Box::new(q))).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
@@ -323,7 +328,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q))).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, e.label AS rel_type FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id)"
@@ -353,7 +358,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q))).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label ORDER BY COUNT(n.id) DESC"
@@ -382,7 +387,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q))).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE n.label IN ({p0:String}, {p1:String}, {p2:String})"
@@ -413,7 +418,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q))).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE ((n.label = {p0:String}) AND ((n.created_at > {p1:String}) OR (n.deleted_at IS NULL)))"
@@ -467,7 +472,7 @@ mod tests {
             limit: None,
         };
 
-        let result = codegen(&Node::Query(Box::new(q))).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert!(
             result
                 .sql
@@ -484,5 +489,24 @@ mod tests {
             result.params.get("type_e"),
             Some(&Value::String("AUTHORED".into()))
         );
+    }
+
+    #[test]
+    fn result_context_preserved() {
+        let mut ctx = ResultContext::new();
+        ctx.add_node("u", "User");
+
+        let q = Query {
+            select: vec![],
+            from: TableRef::scan("nodes", "n"),
+            where_clause: None,
+            group_by: vec![],
+            order_by: vec![],
+            limit: None,
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), ctx).unwrap();
+        assert_eq!(result.result_context.len(), 1);
+        assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
     }
 }

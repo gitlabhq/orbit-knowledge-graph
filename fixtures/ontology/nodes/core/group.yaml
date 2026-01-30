@@ -5,6 +5,10 @@ domain: core
 description: A GitLab group (top-level group or subgroup)
 destination_table: gl_groups
 
+redaction:
+  resource_type: groups
+  id_column: id
+
 properties:
   id:
     type: int64

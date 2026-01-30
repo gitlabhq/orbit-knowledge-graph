@@ -5,6 +5,10 @@ domain: core
 description: A GitLab user account
 destination_table: gl_users
 
+redaction:
+  resource_type: users
+  id_column: id
+
 properties:
   id:
     type: int64

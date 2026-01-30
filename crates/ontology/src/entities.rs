@@ -4,6 +4,19 @@ use std::{collections::BTreeMap, fmt};
 
 use crate::etl::EtlConfig;
 
+/// Redaction configuration for an entity.
+///
+/// Defines how this entity should be validated against Rails' RedactionService
+/// to ensure users have permission to view the entity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedactionConfig {
+    /// Rails resource type (e.g., "projects", "merge_requests", "groups", "users").
+    /// This maps to the key used in `Authz::RedactionService::RESOURCE_CLASSES`.
+    pub resource_type: String,
+    /// Column containing the ID for redaction (defaults to "id").
+    pub id_column: String,
+}
+
 /// A node entity representing a record or row in the knowledge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeEntity {
@@ -17,6 +30,9 @@ pub struct NodeEntity {
     pub destination_table: String,
     /// ETL configuration for indexing this entity.
     pub etl: Option<EtlConfig>,
+    /// Redaction configuration for permission checks.
+    /// If `None`, this entity does not require redaction validation.
+    pub redaction: Option<RedactionConfig>,
 }
 
 impl fmt::Display for NodeEntity {

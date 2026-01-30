@@ -21,6 +21,7 @@ pub mod etl;
 
 pub use entities::{
     DataType, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, Field, NodeEntity,
+    RedactionConfig,
 };
 pub use etl::{
     DELETED_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope,
@@ -137,6 +138,7 @@ impl Ontology {
                     primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
                     destination_table: format!("gl_{}", name.to_lowercase()),
                     etl: None,
+                    redaction: None,
                 },
             );
         }
@@ -365,6 +367,18 @@ impl Ontology {
         self.edges.contains_key(name)
     }
 
+    /// Get the redaction config for an entity, if it requires redaction.
+    #[must_use]
+    pub fn get_redaction_config(&self, entity_name: &str) -> Option<&RedactionConfig> {
+        self.get_node(entity_name)?.redaction.as_ref()
+    }
+
+    /// Check if an entity requires redaction validation.
+    #[must_use]
+    pub fn requires_redaction(&self, entity_name: &str) -> bool {
+        self.get_redaction_config(entity_name).is_some()
+    }
+
     /// Iterator over all nodes.
     pub fn nodes(&self) -> impl Iterator<Item = &NodeEntity> {
         self.nodes.values()
@@ -488,19 +502,16 @@ impl Ontology {
 
     /// Get the ClickHouse table name for a node label.
     ///
-    /// Node tables follow the pattern `gl_{lowercase_label}`.
-    /// Example: `User` → `gl_user`, `Project` → `gl_project`
+    /// Returns the `destination_table` from the node's ontology definition.
     ///
     /// # Errors
     ///
     /// Returns an error if the node label is unknown.
     pub fn table_name(&self, node_label: &str) -> Result<String, OntologyError> {
-        if !self.has_node(node_label) {
-            return Err(OntologyError::Validation(format!(
-                "unknown node label \"{node_label}\""
-            )));
-        }
-        Ok(format!("gl_{}", node_label.to_lowercase()))
+        let node = self.nodes.get(node_label).ok_or_else(|| {
+            OntologyError::Validation(format!("unknown node label \"{node_label}\""))
+        })?;
+        Ok(node.destination_table.clone())
     }
 
     /// Generate a JSON Schema with ontology values populated.
@@ -683,6 +694,19 @@ struct NodeYaml {
     properties: BTreeMap<String, PropertyYaml>,
     #[serde(default)]
     etl: Option<EtlYaml>,
+    #[serde(default)]
+    redaction: Option<RedactionYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RedactionYaml {
+    resource_type: String,
+    #[serde(default = "default_id_column")]
+    id_column: String,
+}
+
+fn default_id_column() -> String {
+    "id".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -814,12 +838,19 @@ impl NodeYaml {
         // Convert ETL config
         let etl = self.etl.map(|e| e.into_config()).transpose()?;
 
+        // Convert redaction config
+        let redaction = self.redaction.map(|r| RedactionConfig {
+            resource_type: r.resource_type,
+            id_column: r.id_column,
+        });
+
         Ok(NodeEntity {
             name,
             fields,
             primary_keys,
             destination_table: self.destination_table,
             etl,
+            redaction,
         })
     }
 }
@@ -1305,6 +1336,7 @@ mod tests {
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_user".to_string(),
             etl: None,
+            redaction: None,
         };
 
         let mut ontology = Ontology::new();
@@ -1318,5 +1350,44 @@ mod tests {
         let enum_array = status_schema["enum"].as_array().unwrap();
         let enum_values: Vec<_> = enum_array.iter().filter_map(|v| v.as_str()).collect();
         assert_eq!(enum_values, vec!["active", "inactive", "pending"]);
+    }
+
+    #[test]
+    fn test_redaction_config_parsing() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        let project_config = ontology
+            .get_redaction_config("Project")
+            .expect("Project should have redaction config");
+        assert_eq!(project_config.resource_type, "projects");
+        assert_eq!(project_config.id_column, "id");
+
+        let user_config = ontology
+            .get_redaction_config("User")
+            .expect("User should have redaction config");
+        assert_eq!(user_config.resource_type, "users");
+        assert_eq!(user_config.id_column, "id");
+
+        let group_config = ontology
+            .get_redaction_config("Group")
+            .expect("Group should have redaction config");
+        assert_eq!(group_config.resource_type, "groups");
+        assert_eq!(group_config.id_column, "id");
+
+        let mr_config = ontology
+            .get_redaction_config("MergeRequest")
+            .expect("MergeRequest should have redaction config");
+        assert_eq!(mr_config.resource_type, "merge_requests");
+        assert_eq!(mr_config.id_column, "id");
+    }
+
+    #[test]
+    fn test_requires_redaction() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert!(ontology.requires_redaction("Project"));
+        assert!(ontology.requires_redaction("User"));
+        assert!(ontology.requires_redaction("Group"));
+        assert!(ontology.requires_redaction("MergeRequest"));
     }
 }

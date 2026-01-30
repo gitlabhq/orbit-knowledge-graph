@@ -231,6 +231,7 @@ mod tests {
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_test_nodes".to_string(),
             etl: None,
+            redaction: None,
         }
     }
 

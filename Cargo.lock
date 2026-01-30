@@ -2617,6 +2617,8 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
+ "query-engine",
+ "regex",
  "serde",
  "serde_json",
  "serial_test",

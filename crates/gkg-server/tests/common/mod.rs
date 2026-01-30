@@ -14,6 +14,8 @@ use etl_engine::clickhouse::{
 use etl_engine::module::{Handler, HandlerContext, Module};
 use etl_engine::testkit::{MockMetricCollector, MockNatsServices};
 use gkg_server::indexer::modules::SdlcModule;
+use query_engine::ParameterizedQuery;
+use serde_json::Value;
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
@@ -77,6 +79,34 @@ impl TestContext {
             .query_arrow(sql)
             .await
             .expect("query failed")
+    }
+
+    pub async fn query_parameterized(&self, pq: &ParameterizedQuery) -> Vec<RecordBatch> {
+        let client = self.create_client();
+        let mut query = client.query(&pq.sql);
+
+        for (name, value) in &pq.params {
+            query = match value {
+                Value::String(s) => query.param(name, s.as_str()),
+                Value::Number(n) => {
+                    if let Some(i) = n.as_i64() {
+                        query.param(name, i)
+                    } else if let Some(f) = n.as_f64() {
+                        query.param(name, f)
+                    } else {
+                        query.param(name, n.to_string())
+                    }
+                }
+                Value::Bool(b) => query.param(name, *b),
+                Value::Null => query.param(name, Option::<String>::None),
+                _ => query.param(name, value.to_string()),
+            };
+        }
+
+        query
+            .fetch_arrow()
+            .await
+            .expect("parameterized query failed")
     }
 
     pub async fn execute(&self, sql: &str) {

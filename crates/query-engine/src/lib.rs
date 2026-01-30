@@ -35,6 +35,8 @@ pub mod codegen;
 pub mod error;
 pub mod input;
 pub mod lower;
+pub mod result_context;
+pub mod r#return;
 pub mod security;
 pub mod validate;
 
@@ -45,6 +47,8 @@ pub use codegen::{codegen, ParameterizedQuery};
 pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
 pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
+pub use r#return::enforce_return;
+pub use result_context::{id_column, type_column, RedactionNode, ResultContext};
 pub use security::{apply_security_context, SecurityContext};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,8 +118,9 @@ pub fn compile(
     let input: Input = serde_json::from_value(value)?;
     validate::validate(&input, ontology)?;
     let mut node = lower::lower(&input, ontology)?;
+    let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx)?;
-    codegen(&node)
+    codegen(&node, result_context)
 }
 
 /// Get the base JSON schema template (without ontology values).
@@ -487,5 +492,37 @@ mod ontology_integration_tests {
         assert!(result.sql.contains("LIMIT 25"));
         assert!(result.sql.contains("ORDER BY"));
         assert!(result.sql.contains("DESC"));
+    }
+
+    #[test]
+    fn result_context_populated() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+
+        assert_eq!(result.result_context.len(), 2);
+
+        let user = result.result_context.get("u").unwrap();
+        assert_eq!(user.entity_type, "User");
+        assert_eq!(user.id_column, "_gkg_u_id");
+        assert_eq!(user.type_column, "_gkg_u_type");
+
+        let project = result.result_context.get("p").unwrap();
+        assert_eq!(project.entity_type, "Project");
+        assert_eq!(project.id_column, "_gkg_p_id");
+        assert_eq!(project.type_column, "_gkg_p_type");
+
+        assert!(result.sql.contains("_gkg_u_id"));
+        assert!(result.sql.contains("_gkg_u_type"));
+        assert!(result.sql.contains("_gkg_p_id"));
+        assert!(result.sql.contains("_gkg_p_type"));
     }
 }

@@ -187,6 +187,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges: BTreeMap::new(),
             }),
+            redaction: None,
         }
     }
 

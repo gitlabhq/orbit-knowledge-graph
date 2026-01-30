@@ -20,6 +20,7 @@ axum = { workspace = true }
 clap = { workspace = true }
 etl-engine = { path = "../etl-engine" }
 ontology = { path = "../ontology" }
+query-engine = { path = "../query-engine" }
 jsonwebtoken = { workspace = true }
 labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum"] }
 serde = { workspace = true }
@@ -54,6 +55,8 @@ testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
 serial_test = { workspace = true }
 etl-engine = { path = "../etl-engine", features = ["testkit"] }
+query-engine = { path = "../query-engine" }
+regex = { workspace = true }
 
 [lints]
 workspace = true
