@@ -16,3 +16,15 @@ variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }
     description: "Work item is related to another work item."
+
+etl:
+  scope: namespaced
+  source: siphon_issue_links
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  from:
+    id: source_id
+    type: WorkItem
+  to:
+    id: target_id
+    type: WorkItem
