@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use arrow::array::{Array, Int64Array, StringArray};
+use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
 use arrow::record_batch::RecordBatch;
-use query_engine::{ResultContext, id_column, type_column};
+use query_engine::{PATH_COLUMN, QueryType, ResultContext, id_column, type_column};
 
 use super::ResourceAuthorization;
 
@@ -87,13 +87,15 @@ impl ColumnValue {
 #[derive(Debug, Clone)]
 pub struct QueryResultRow {
     columns: HashMap<String, ColumnValue>,
+    path_nodes: Vec<NodeRef>,
     authorized: bool,
 }
 
 impl QueryResultRow {
-    fn new(columns: HashMap<String, ColumnValue>) -> Self {
+    fn new(columns: HashMap<String, ColumnValue>, path_nodes: Vec<NodeRef>) -> Self {
         Self {
             columns,
+            path_nodes,
             authorized: true,
         }
     }
@@ -117,6 +119,10 @@ impl QueryResultRow {
         ))
     }
 
+    pub fn path_nodes(&self) -> &[NodeRef] {
+        &self.path_nodes
+    }
+
     pub fn is_authorized(&self) -> bool {
         self.authorized
     }
@@ -136,6 +142,7 @@ pub struct QueryResult {
 impl QueryResult {
     pub fn from_batches(batches: &[RecordBatch], ctx: &ResultContext) -> Self {
         let node_aliases: Vec<String> = ctx.nodes().map(|n| n.alias.clone()).collect();
+        let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
 
         let mut rows = Vec::new();
         for batch in batches {
@@ -148,7 +155,15 @@ impl QueryResult {
                         extract_value(batch.column(col_idx).as_ref(), row_idx),
                     );
                 }
-                rows.push(QueryResultRow::new(columns));
+
+                // For path finding, also extract nodes from the path column
+                let path_nodes = if is_path_finding {
+                    extract_path_nodes(batch, row_idx)
+                } else {
+                    Vec::new()
+                };
+
+                rows.push(QueryResultRow::new(columns, path_nodes));
             }
         }
 
@@ -182,10 +197,15 @@ impl QueryResult {
     pub fn extract_redactable_nodes(&self) -> RedactableNodes {
         let mut nodes = RedactableNodes::new();
         for row in &self.rows {
+            // Extract nodes from _gkg_* columns
             for alias in &self.node_aliases {
                 if let Some(node_ref) = row.node_ref(alias) {
                     nodes.add(node_ref.id, node_ref.entity_type);
                 }
+            }
+            // For path finding, also extract intermediate nodes from path
+            for node_ref in &row.path_nodes {
+                nodes.add(node_ref.id, &node_ref.entity_type);
             }
         }
         nodes
@@ -198,6 +218,8 @@ impl QueryResult {
     /// - Has an entity type not configured for redaction (not in entity_to_resource)
     /// - Has no authorization result from the redaction service
     /// - Is explicitly marked as unauthorized
+    ///
+    /// For path finding queries, all nodes in the path are also checked.
     pub fn apply_authorizations(
         &mut self,
         authorizations: &[ResourceAuthorization],
@@ -211,6 +233,7 @@ impl QueryResult {
                 continue;
             }
 
+            // Check nodes from _gkg_* columns
             for alias in &aliases {
                 let Some(node_ref) = row.node_ref(alias) else {
                     // Fail closed: NULL IDs cannot be verified, so deny the row
@@ -223,6 +246,17 @@ impl QueryResult {
                     row.set_unauthorized();
                     redacted_count += 1;
                     break;
+                }
+            }
+
+            // Check path nodes (for path finding queries)
+            if row.authorized {
+                for node_ref in &row.path_nodes {
+                    if !is_node_authorized(node_ref, authorizations, entity_to_resource) {
+                        row.set_unauthorized();
+                        redacted_count += 1;
+                        break;
+                    }
                 }
             }
         }
@@ -272,6 +306,37 @@ fn extract_value(array: &dyn Array, idx: usize) -> ColumnValue {
     }
 
     ColumnValue::Null
+}
+
+/// Extract nodes from the _gkg_path column in path finding queries.
+/// The column is Array(Tuple(Int64, String)) where each tuple is (node_id, entity_type).
+fn extract_path_nodes(batch: &RecordBatch, row_idx: usize) -> Vec<NodeRef> {
+    let col_idx = match batch.schema().index_of(PATH_COLUMN) {
+        Ok(i) => i,
+        Err(_) => return Vec::new(),
+    };
+
+    let list = match batch.column(col_idx).as_any().downcast_ref::<ListArray>() {
+        Some(l) if !l.is_null(row_idx) => l,
+        _ => return Vec::new(),
+    };
+
+    let values = list.value(row_idx);
+    let structs = match values.as_any().downcast_ref::<StructArray>() {
+        Some(s) if s.num_columns() >= 2 => s,
+        _ => return Vec::new(),
+    };
+
+    let ids = structs.column(0).as_any().downcast_ref::<Int64Array>();
+    let types = structs.column(1).as_any().downcast_ref::<StringArray>();
+
+    match (ids, types) {
+        (Some(ids), Some(types)) => (0..ids.len())
+            .filter(|&i| !ids.is_null(i) && !types.is_null(i))
+            .map(|i| NodeRef::new(ids.value(i), types.value(i)))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]

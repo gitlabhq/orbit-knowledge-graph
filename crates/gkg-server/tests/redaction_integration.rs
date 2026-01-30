@@ -1007,6 +1007,264 @@ fn fail_closed_null_id_denies_row() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Path Finding Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[serial]
+async fn path_finding_extracts_all_nodes_from_path() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Find paths from user 1 to project 1000 (path: User 1 -> Group 100 -> Project 1000)
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert!(!result.is_empty(), "should find at least one path");
+
+    // Each row should have path_nodes containing (User 1, Group 100, Project 1000)
+    for row in result.iter() {
+        let path_nodes = row.path_nodes();
+        assert!(
+            path_nodes.len() >= 2,
+            "path should have at least start and end nodes"
+        );
+
+        // First node should be User 1
+        assert_eq!(path_nodes[0].id, 1);
+        assert_eq!(path_nodes[0].entity_type, "User");
+
+        // Last node should be Project 1000
+        let last = path_nodes.last().unwrap();
+        assert_eq!(last.id, 1000);
+        assert_eq!(last.entity_type, "Project");
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn path_finding_no_authorization_returns_nothing() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count > 0, "should find paths before redaction");
+
+    let mock_service = MockRedactionService::new();
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, raw_count, "all paths should be redacted");
+    assert_eq!(result.authorized_count(), 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn path_finding_denying_intermediate_node_filters_path() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Find paths from user 1 to any project in group 100 or 102
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count > 0, "should find paths");
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]); // Only allow group 100, deny 102
+    mock_service.deny("groups", &[102]);
+    mock_service.allow("projects", &[1000, 1002, 1004]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Only paths through group 100 should remain
+    for row in result.authorized_rows() {
+        let path_nodes = row.path_nodes();
+        for node in path_nodes {
+            assert_ne!(
+                node.id, 102,
+                "denied group 102 should not appear in authorized paths"
+            );
+        }
+    }
+
+    // Paths to 1000 and 1002 (via group 100) should be authorized
+    // Path to 1004 (via group 102) should be denied
+    let authorized_ends: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .collect();
+
+    assert!(
+        authorized_ends.contains(&1000) || authorized_ends.contains(&1002),
+        "paths through group 100 should be authorized"
+    );
+    assert!(
+        !authorized_ends.contains(&1004),
+        "path through denied group 102 should be filtered"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn path_finding_all_nodes_authorized_preserves_paths() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1002]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", ALL_USER_IDS);
+    mock_service.allow("groups", ALL_GROUP_IDS);
+    mock_service.allow("projects", ALL_PROJECT_IDS);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        redacted, 0,
+        "nothing should be redacted when all authorized"
+    );
+    assert_eq!(result.authorized_count(), raw_count);
+}
+
+#[tokio::test]
+#[serial]
+async fn path_finding_denying_start_node_filters_all_paths() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert!(!result.is_empty());
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.deny("users", &[1]); // Deny the start node
+    mock_service.allow("groups", ALL_GROUP_IDS);
+    mock_service.allow("projects", ALL_PROJECT_IDS);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, result.len(), "all paths should be redacted");
+    assert_eq!(result.authorized_count(), 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn path_finding_denying_end_node_filters_those_paths() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1002]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count > 0);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", ALL_GROUP_IDS);
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1002]); // Deny one end node
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Only paths to project 1000 should remain
+    let authorized_ends: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .collect();
+
+    assert!(authorized_ends.contains(&1000));
+    assert!(!authorized_ends.contains(&1002));
+}
+
 /// Verifies fail-closed behavior: rows with NULL entity type must be denied.
 #[test]
 fn fail_closed_null_type_denies_row() {
