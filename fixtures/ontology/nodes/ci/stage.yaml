@@ -56,8 +56,19 @@ properties:
     nullable: true
     description: "Timestamp when the stage was last updated."
 
-# edges:
-#   - type: IN_PIPELINE
-#     source_id: pipeline_id
-#     target_kind: Pipeline
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_p_ci_stages
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: in_project
+      direction: outgoing
+    pipeline_id:
+      to: Pipeline
+      as: has_stage
+      direction: incoming
 

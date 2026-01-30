@@ -19,7 +19,7 @@ properties:
     description: "Name of the job as defined in .gitlab-ci.yml."
 
   status:
-    type: enum
+    type: string
     source: status
     nullable: false
     description: "Current execution status of the job."
@@ -69,7 +69,7 @@ properties:
     description: "Deployment environment name (e.g., production, staging)."
 
   when:
-    type: enum
+    type: string
     source: when
     nullable: true
     description: "Condition that determines when the job runs."
@@ -147,11 +147,22 @@ properties:
     nullable: true
     description: "Timestamp when the job was queued for execution."
 
-# edges:
-#   - type: IN_PIPELINE
-#     source_id: commit_id
-#     target_kind: Pipeline
-#
-#   - type: IN_STAGE
-#     source_id: stage_id
-#     target_kind: Stage
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_p_ci_builds
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: in_project
+      direction: outgoing
+    stage_id:
+      to: Stage
+      as: has_job
+      direction: incoming
+    user_id:
+      to: User
+      as: triggered
+      direction: incoming

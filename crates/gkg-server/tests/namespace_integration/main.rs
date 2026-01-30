@@ -6,6 +6,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod ci;
 mod groups;
 mod labels;
 mod merge_request_diffs;

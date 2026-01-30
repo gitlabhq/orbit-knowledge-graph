@@ -31,7 +31,7 @@ properties:
     description: "Branch or tag name the pipeline runs for."
 
   status:
-    type: enum
+    type: string
     source: status
     nullable: false
     description: "Current execution status of the pipeline."
@@ -125,15 +125,22 @@ properties:
     nullable: true
     description: "Timestamp when the pipeline finished executing."
 
-# edges:
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
-#
-#   - type: TRIGGERED_BY
-#     source_id: user_id
-#     target_kind: User
-#
-#   - type: FOR_MERGE_REQUEST
-#     source_id: merge_request_id
-#     target_kind: MergeRequest
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_p_ci_pipelines
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: in_project
+      direction: outgoing
+    user_id:
+      to: User
+      as: triggered
+      direction: incoming
+    merge_request_id:
+      to: MergeRequest
+      as: triggered
+      direction: incoming
