@@ -91,7 +91,10 @@ pub enum EdgeEndpointType {
     /// A fixed node type (e.g., "Label").
     Literal(String),
     /// Type read from a column at runtime (e.g., "target_type").
-    Column(String),
+    Column {
+        column: String,
+        type_mapping: std::collections::BTreeMap<String, String>,
+    },
 }
 
 impl fmt::Display for EdgeEntity {

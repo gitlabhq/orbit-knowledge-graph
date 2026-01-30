@@ -287,6 +287,11 @@
         "type_column": {
           "type": "string",
           "description": "Column containing the node type (for polymorphic edges)."
+        },
+        "type_mapping": {
+          "type": "object",
+          "description": "Maps raw column values to entity types (e.g., Namespace -> Group).",
+          "additionalProperties": { "type": "string" }
         }
       },
       "required": ["id"],

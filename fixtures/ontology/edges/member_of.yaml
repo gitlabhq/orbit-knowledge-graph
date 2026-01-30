@@ -41,3 +41,18 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: Project, id: id }
     description: "User has access to project (via direct membership or group inheritance)."
+
+etl:
+  scope: namespaced
+  source: siphon_members
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  from:
+    id: user_id
+    type: User
+  to:
+    id: source_id
+    type_column: source_type
+    type_mapping:
+      Namespace: Group
+      Project: Project

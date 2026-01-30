@@ -798,6 +798,8 @@ struct EdgeEndpointYaml {
     type_literal: Option<String>,
     #[serde(rename = "type_column")]
     type_column: Option<String>,
+    #[serde(default)]
+    type_mapping: BTreeMap<String, String>,
 }
 
 // --- Conversion implementations ---
@@ -1003,7 +1005,10 @@ impl EdgeEndpointYaml {
     fn into_endpoint(self, endpoint_name: &str) -> Result<EdgeEndpoint, OntologyError> {
         let node_type = match (self.type_literal, self.type_column) {
             (Some(lit), None) => EdgeEndpointType::Literal(lit),
-            (None, Some(col)) => EdgeEndpointType::Column(col),
+            (None, Some(col)) => EdgeEndpointType::Column {
+                column: col,
+                type_mapping: self.type_mapping,
+            },
             (Some(_), Some(_)) => {
                 return Err(OntologyError::Validation(format!(
                     "edge source endpoint '{}': use 'type' or 'type_column', not both",
