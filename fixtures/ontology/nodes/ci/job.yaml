@@ -4,6 +4,7 @@ node_type: Job
 domain: ci
 description: A CI/CD job that executes scripts within a pipeline stage
 destination_table: gl_job
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

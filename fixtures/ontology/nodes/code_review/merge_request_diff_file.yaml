@@ -4,6 +4,7 @@ node_type: MergeRequestDiffFile
 domain: code_review
 description: A file changed in a merge request diff
 destination_table: gl_merge_request_diff_files
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

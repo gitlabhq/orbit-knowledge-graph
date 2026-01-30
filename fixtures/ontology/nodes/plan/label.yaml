@@ -4,6 +4,7 @@ node_type: Label
 domain: plan
 description: A label for categorizing and filtering work items
 destination_table: gl_labels
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

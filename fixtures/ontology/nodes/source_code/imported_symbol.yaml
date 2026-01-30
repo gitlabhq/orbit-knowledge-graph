@@ -4,6 +4,7 @@ node_type: ImportedSymbol
 domain: source_code
 description: An imported symbol or module reference within a source file
 destination_table: gl_imported_symbol
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

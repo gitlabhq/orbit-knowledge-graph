@@ -4,6 +4,7 @@ node_type: Milestone
 domain: plan
 description: A milestone for tracking progress toward a goal within a project or group
 destination_table: gl_milestones
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

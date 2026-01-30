@@ -4,6 +4,7 @@ node_type: Directory
 domain: source_code
 description: A directory within a repository's file structure
 destination_table: gl_directory
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

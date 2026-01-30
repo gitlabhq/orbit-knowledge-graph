@@ -4,6 +4,7 @@ node_type: WorkItem
 domain: plan
 description: A work item representing an issue, epic, task, incident, or other trackable unit of work
 destination_table: gl_work_items
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

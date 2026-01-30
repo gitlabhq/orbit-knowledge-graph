@@ -4,6 +4,7 @@ node_type: Scanner
 domain: security
 description: A security scanner that detects vulnerabilities in projects
 destination_table: gl_scanner
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

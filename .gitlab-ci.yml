@@ -66,6 +66,17 @@ mr-title-check:
   script:
     - ./scripts/check-mr-title.sh
 
+ontology-schema-validate:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-small-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile fixtures/ontology/ontology.schema.json
+
 fmt-check:
   stage: lint
   extends:

@@ -4,6 +4,7 @@ node_type: VulnerabilityOccurrence
 domain: security
 description: A specific occurrence of a vulnerability detected in a project
 destination_table: gl_vulnerability_occurrence
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

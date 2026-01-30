@@ -4,6 +4,7 @@ node_type: Note
 domain: core
 description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
 destination_table: gl_notes
+redaction: null  # TODO: configure redaction
 
 properties:
   id:

@@ -4,6 +4,7 @@ node_type: Pipeline
 domain: ci
 description: A CI/CD pipeline that runs a series of stages and jobs to build, test, and deploy code
 destination_table: gl_pipeline
+redaction: null  # TODO: configure redaction
 
 properties:
   id:
