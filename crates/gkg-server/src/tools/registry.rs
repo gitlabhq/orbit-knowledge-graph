@@ -12,79 +12,26 @@ pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools() -> Vec<ToolDefinition> {
-        vec![
-            Self::get_graph_schema(),
-            Self::find_nodes(),
-            Self::traverse_relationships(),
-            Self::explore_neighborhood(),
-            Self::find_paths(),
-            Self::aggregate_nodes(),
-        ]
+        vec![Self::query_graph(), Self::get_graph_entities()]
     }
 
-    fn get_graph_schema() -> ToolDefinition {
+    fn query_graph() -> ToolDefinition {
         ToolDefinition {
-            name: "get_graph_schema".to_string(),
-            description: "placeholder".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {}
-            }),
+            name: "query_graph".to_string(),
+            description: "Execute graph queries to find nodes, traverse relationships, \
+                          explore neighborhoods, find paths, or aggregate data."
+                .to_string(),
+            parameters: json!({}),
         }
     }
 
-    fn find_nodes() -> ToolDefinition {
+    fn get_graph_entities() -> ToolDefinition {
         ToolDefinition {
-            name: "find_nodes".to_string(),
-            description: "placeholder".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {}
-            }),
-        }
-    }
-
-    fn traverse_relationships() -> ToolDefinition {
-        ToolDefinition {
-            name: "traverse_relationships".to_string(),
-            description: "placeholder".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {}
-            }),
-        }
-    }
-
-    fn explore_neighborhood() -> ToolDefinition {
-        ToolDefinition {
-            name: "explore_neighborhood".to_string(),
-            description: "placeholder".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {}
-            }),
-        }
-    }
-
-    fn find_paths() -> ToolDefinition {
-        ToolDefinition {
-            name: "find_paths".to_string(),
-            description: "placeholder".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {}
-            }),
-        }
-    }
-
-    fn aggregate_nodes() -> ToolDefinition {
-        ToolDefinition {
-            name: "aggregate_nodes".to_string(),
-            description: "placeholder".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {}
-            }),
+            name: "get_graph_entities".to_string(),
+            description: "Get graph schema including node types, relationship types, \
+                          and their properties."
+                .to_string(),
+            parameters: json!({}),
         }
     }
 }
@@ -96,7 +43,7 @@ mod tests {
     #[test]
     fn test_all_tools_have_valid_schemas() {
         let tools = ToolRegistry::get_all_tools();
-        assert_eq!(tools.len(), 6, "Should have exactly 6 tools");
+        assert_eq!(tools.len(), 2, "Should have exactly 2 tools");
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -124,11 +71,7 @@ mod tests {
         let tools = ToolRegistry::get_all_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
 
-        assert!(names.contains(&"get_graph_schema"));
-        assert!(names.contains(&"find_nodes"));
-        assert!(names.contains(&"traverse_relationships"));
-        assert!(names.contains(&"explore_neighborhood"));
-        assert!(names.contains(&"find_paths"));
-        assert!(names.contains(&"aggregate_nodes"));
+        assert!(names.contains(&"query_graph"));
+        assert!(names.contains(&"get_graph_entities"));
     }
 }
