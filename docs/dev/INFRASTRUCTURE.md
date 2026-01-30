@@ -52,8 +52,26 @@ DNS for `gkg.dev` is managed externally.
 
 ## ClickHouse
 
-- Database: `gitlab_clickhouse_main_production` (created by GitLab Omnibus migrations)
-- Siphon tables: `siphon_projects`, `siphon_namespaces`, `siphon_users`, etc.
+**Databases:**
+
+| Database | Purpose |
+|----------|---------|
+| gitlab_clickhouse_main_production | Datalake - siphon replicated tables, config tables |
+| gkg-sandbox | Graph database - indexed graph nodes and edges |
+
+**Users:**
+
+| User | Password | Access |
+|------|----------|--------|
+| default | (from GCP Secret Manager) | Full access |
+| grafana_reader | (none) | Read-only (readonly=2), used by Grafana |
+
+**Grafana user setup (sandbox):**
+```sql
+CREATE USER grafana_reader IDENTIFIED WITH no_password SETTINGS readonly = 2;
+GRANT SELECT ON gitlab_clickhouse_main_production.* TO grafana_reader;
+GRANT SELECT ON `gkg-sandbox`.* TO grafana_reader;
+```
 
 ## Workload Identity
 

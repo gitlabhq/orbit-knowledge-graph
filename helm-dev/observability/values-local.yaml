@@ -32,6 +32,8 @@ kube-prometheus-stack:
   grafana:
     adminPassword: admin
     defaultDashboardsEnabled: true
+    plugins:
+      - grafana-clickhouse-datasource
     grafana.ini:
       auth:
         disable_login_form: false
@@ -45,6 +47,30 @@ kube-prometheus-stack:
         url: http://gkg-obs-loki:3100
         access: proxy
         isDefault: false
+      - name: ClickHouse-Datalake
+        type: grafana-clickhouse-datasource
+        access: proxy
+        isDefault: false
+        jsonData:
+          host: host.docker.internal
+          port: 8123
+          protocol: http
+          username: default
+          defaultDatabase: gitlab_clickhouse_main_development
+        secureJsonData:
+          password: ""
+      - name: ClickHouse-Graph
+        type: grafana-clickhouse-datasource
+        access: proxy
+        isDefault: false
+        jsonData:
+          host: host.docker.internal
+          port: 8123
+          protocol: http
+          username: default
+          defaultDatabase: gkg-development
+        secureJsonData:
+          password: ""
     service:
       type: NodePort
       nodePort: 30300

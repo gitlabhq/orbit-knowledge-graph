@@ -80,12 +80,38 @@ kube-prometheus-stack:
   grafana:
     defaultDashboardsEnabled: true
     envFromSecret: grafana-oauth-credentials
+    plugins:
+      - grafana-clickhouse-datasource
     additionalDataSources:
       - name: Loki
         type: loki
         url: http://gkg-obs-loki:3100
         access: proxy
         isDefault: false
+      - name: ClickHouse-Datalake
+        type: grafana-clickhouse-datasource
+        access: proxy
+        isDefault: false
+        jsonData:
+          host: 10.128.0.13
+          port: 8123
+          protocol: http
+          username: grafana_reader
+          defaultDatabase: gitlab_clickhouse_main_production
+        secureJsonData:
+          password: ""
+      - name: ClickHouse-Graph
+        type: grafana-clickhouse-datasource
+        access: proxy
+        isDefault: false
+        jsonData:
+          host: 10.128.0.13
+          port: 8123
+          protocol: http
+          username: grafana_reader
+          defaultDatabase: gkg-sandbox
+        secureJsonData:
+          password: ""
     grafana.ini:
       server:
         root_url: https://grafana.gkg.dev

@@ -102,6 +102,16 @@ gkgServer:
     repository: ""
     tag: ""
     pullPolicy: Always
+  dispatcher:
+    enabled: false
+    schedule: "* * * * *"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
   indexer:
     enabled: false
     replicas: 1
