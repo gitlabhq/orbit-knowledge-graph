@@ -3,6 +3,7 @@ pub mod cli;
 pub mod config;
 pub mod context_engine;
 pub mod dispatcher;
+pub mod grpc;
 pub mod indexer;
 pub mod proto;
 pub mod redaction;

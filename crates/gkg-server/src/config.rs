@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     pub bind_address: SocketAddr,
+    pub grpc_bind_address: SocketAddr,
     pub jwt_secret: Option<String>,
     pub jwt_clock_skew_secs: u64,
     #[serde(default)]
@@ -23,9 +24,14 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let bind_address = std::env::var("GKG_BIND_ADDRESS")
-            .unwrap_or_else(|_| "127.0.0.1:8080".into())
+            .unwrap_or_else(|_| "127.0.0.1:4200".into())
             .parse()
             .map_err(|_| ConfigError::InvalidBindAddress)?;
+
+        let grpc_bind_address = std::env::var("GKG_GRPC_BIND_ADDRESS")
+            .unwrap_or_else(|_| "127.0.0.1:50051".into())
+            .parse()
+            .map_err(|_| ConfigError::InvalidGrpcBindAddress)?;
 
         let jwt_secret = std::env::var("GKG_JWT_SECRET").ok();
 
@@ -36,6 +42,7 @@ impl AppConfig {
 
         Ok(Self {
             bind_address,
+            grpc_bind_address,
             jwt_secret,
             jwt_clock_skew_secs,
             nats: NatsConfiguration::from_env(),
@@ -54,8 +61,10 @@ impl AppConfig {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("invalid bind address")]
+    #[error("invalid HTTP bind address")]
     InvalidBindAddress,
+    #[error("invalid gRPC bind address")]
+    InvalidGrpcBindAddress,
     #[error("GKG_JWT_SECRET environment variable is required")]
     MissingJwtSecret,
 }
