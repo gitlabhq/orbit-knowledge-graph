@@ -171,6 +171,26 @@ CREATE TABLE IF NOT EXISTS gl_labels (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
+CREATE TABLE IF NOT EXISTS gl_work_items (
+    id Int64,
+    iid Nullable(Int64),
+    title String DEFAULT '',
+    description Nullable(String),
+    state String DEFAULT '',
+    work_item_type String DEFAULT '',
+    confidential Bool DEFAULT false,
+    due_date Nullable(Date32),
+    start_date Nullable(Date32),
+    weight Nullable(Int64),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    closed_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
 CREATE TABLE IF NOT EXISTS gl_edges (
     source_id Int64,
     source_kind String,

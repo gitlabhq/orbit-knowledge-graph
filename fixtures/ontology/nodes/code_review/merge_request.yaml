@@ -120,10 +120,6 @@ etl:
       to: User
       as: authored
       direction: incoming
-    assignee_id:
-      to: User
-      as: assigned
-      direction: incoming
     merge_user_id:
       to: User
       as: merged_by
@@ -132,3 +128,18 @@ etl:
       to: Milestone
       as: in_milestone
       direction: outgoing
+    assignee_ids:
+      to: User
+      as: assigned
+      direction: incoming
+      delimiter: "/"
+    label_ids:
+      to: Label
+      as: has_label
+      direction: outgoing
+      delimiter: "/"
+    approver_ids:
+      to: User
+      as: reviewer
+      direction: outgoing
+      delimiter: "/"

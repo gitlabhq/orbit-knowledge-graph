@@ -24,13 +24,13 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
         .execute(
             "INSERT INTO hierarchy_merge_requests
                 (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
-                 draft, squash, target_project_id, author_id, assignee_id, merge_user_id, milestone_id,
+                 draft, squash, target_project_id, author_id, assignee_ids, merge_user_id, milestone_id,
                  traversal_path, version)
             VALUES
                 (1, 101, 'Add feature X', 'Implements feature X', 'feature-x', 'main', 1, 'can_be_merged',
-                 false, true, 1000, 1, 2, NULL, 10, '1/100/', '2024-01-20 12:00:00'),
+                 false, true, 1000, 1, '2/3', NULL, 10, '1/100/', '2024-01-20 12:00:00'),
                 (2, 102, 'Fix bug Y', 'Fixes critical bug', 'fix-y', 'main', 3, 'merged',
-                 false, false, 1000, 2, NULL, 1, NULL, '1/100/', '2024-01-20 12:00:00')",
+                 false, false, 1000, 2, '', 1, NULL, '1/100/', '2024-01-20 12:00:00')",
         )
         .await;
 
@@ -92,7 +92,11 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
              WHERE relationship_kind = 'assigned' AND target_kind = 'MergeRequest'",
         )
         .await;
-    assert_eq!(assigned_edges[0].num_rows(), 1, "only MR 1 has an assignee");
+    assert_eq!(
+        assigned_edges[0].num_rows(),
+        2,
+        "MR 1 has two assignees (multi-value)"
+    );
 
     let merged_by_edges = context
         .query(

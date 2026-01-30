@@ -14,3 +14,4 @@ mod milestones;
 mod notes;
 mod projects;
 mod watermarking;
+mod work_items;

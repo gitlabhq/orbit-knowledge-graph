@@ -62,6 +62,7 @@ pub struct PreparedEdge {
     pub target_id: String,
     pub target_kind: SqlExpr,
     pub type_filter: Option<String>,
+    pub delimiter: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -233,6 +234,7 @@ fn prepare_edges(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Vec
                 &mapping.target,
                 &mapping.relationship_kind,
                 mapping.direction,
+                mapping.delimiter.as_deref(),
                 ontology,
             )
         })
@@ -245,6 +247,7 @@ fn prepare_edge(
     target: &EdgeTarget,
     relationship_kind: &str,
     direction: EdgeDirection,
+    delimiter: Option<&str>,
     ontology: &Ontology,
 ) -> PreparedEdge {
     match target {
@@ -254,6 +257,7 @@ fn prepare_edge(
             target_type,
             relationship_kind,
             direction,
+            delimiter,
         ),
         EdgeTarget::Column(type_column) => resolve_polymorphic_edge(
             node_kind,
@@ -261,6 +265,7 @@ fn prepare_edge(
             type_column,
             relationship_kind,
             direction,
+            delimiter,
             ontology,
         ),
     }
@@ -272,6 +277,7 @@ fn resolve_literal_edge(
     target_type: &str,
     relationship_kind: &str,
     direction: EdgeDirection,
+    delimiter: Option<&str>,
 ) -> PreparedEdge {
     let (source_id, source_kind, target_id, target_kind) = match direction {
         EdgeDirection::Outgoing => (
@@ -296,6 +302,7 @@ fn resolve_literal_edge(
         target_id,
         target_kind,
         type_filter: None,
+        delimiter: delimiter.map(String::from),
     }
 }
 
@@ -305,6 +312,7 @@ fn resolve_polymorphic_edge(
     type_column: &str,
     relationship_kind: &str,
     direction: EdgeDirection,
+    delimiter: Option<&str>,
     ontology: &Ontology,
 ) -> PreparedEdge {
     let allowed_types = ontology.get_edge_target_types(relationship_kind, node_kind, direction);
@@ -333,6 +341,7 @@ fn resolve_polymorphic_edge(
         target_id,
         target_kind,
         type_filter,
+        delimiter: delimiter.map(String::from),
     }
 }
 
@@ -412,6 +421,7 @@ mod tests {
                 target: EdgeTarget::Literal("User".to_string()),
                 relationship_kind: "owns".to_string(),
                 direction: EdgeDirection::Outgoing,
+                delimiter: None,
             },
         );
 
@@ -449,6 +459,7 @@ mod tests {
                 target: EdgeTarget::Literal("User".to_string()),
                 relationship_kind: "authored".to_string(),
                 direction: EdgeDirection::Incoming,
+                delimiter: None,
             },
         );
 

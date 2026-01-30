@@ -56,7 +56,47 @@ WHERE {} IS NOT NULL AND {} IS NOT NULL{}"#,
 }
 
 fn build_edge_sql(edge: &PreparedEdge) -> String {
-    let filter = edge
+    match &edge.delimiter {
+        Some(delimiter) => build_multi_target_edge_sql(edge, delimiter),
+        None => build_single_value_edge_sql(edge),
+    }
+}
+
+fn build_multi_target_edge_sql(edge: &PreparedEdge, delimiter: &str) -> String {
+    let exploded_value = format!(
+        "CAST(unnest(string_to_array({}, '{}')) AS BIGINT)",
+        edge.fk_column, delimiter
+    );
+
+    let fk_is_source = edge.source_id == edge.fk_column;
+    let (source_id, target_id) = if fk_is_source {
+        (exploded_value.as_str(), edge.target_id.as_str())
+    } else {
+        (edge.source_id.as_str(), exploded_value.as_str())
+    };
+
+    format!(
+        r#"SELECT
+    {source_id} AS source_id,
+    {} AS source_kind,
+    '{}' AS relationship_kind,
+    {target_id} AS target_id,
+    {} AS target_kind,
+    _version,
+    _deleted
+FROM {}
+WHERE {} IS NOT NULL AND {} != ''"#,
+        edge.source_kind.to_sql(),
+        edge.relationship_kind,
+        edge.target_kind.to_sql(),
+        SOURCE_DATA_TABLE,
+        edge.fk_column,
+        edge.fk_column,
+    )
+}
+
+fn build_single_value_edge_sql(edge: &PreparedEdge) -> String {
+    let type_filter = edge
         .type_filter
         .as_ref()
         .map(|f| format!(" AND {}", f))
@@ -80,7 +120,7 @@ WHERE {} IS NOT NULL{}"#,
         edge.target_kind.to_sql(),
         SOURCE_DATA_TABLE,
         edge.fk_column,
-        filter
+        type_filter
     )
 }
 
@@ -224,6 +264,7 @@ mod tests {
                 target: EdgeTarget::Literal("User".to_string()),
                 relationship_kind: "owns".to_string(),
                 direction: EdgeDirection::Outgoing,
+                delimiter: None,
             },
         );
 
@@ -263,6 +304,7 @@ mod tests {
                 target: EdgeTarget::Literal("User".to_string()),
                 relationship_kind: "authored".to_string(),
                 direction: EdgeDirection::Incoming,
+                delimiter: None,
             },
         );
 
@@ -290,5 +332,83 @@ mod tests {
         assert!(sql.contains("'User' AS source_kind"));
         assert!(sql.contains("id AS target_id"));
         assert!(sql.contains("'Note' AS target_kind"));
+    }
+
+    #[test]
+    fn edge_sql_multi_target_incoming() {
+        let ontology = Ontology::new();
+        let mut edges = BTreeMap::new();
+        edges.insert(
+            "assignee_ids".to_string(),
+            EdgeMapping {
+                target: EdgeTarget::Literal("User".to_string()),
+                relationship_kind: "assigned".to_string(),
+                direction: EdgeDirection::Incoming,
+                delimiter: Some("/".to_string()),
+            },
+        );
+
+        let node = NodeEntity {
+            name: "WorkItem".to_string(),
+            fields: vec![],
+            primary_keys: vec!["id".to_string()],
+            destination_table: "gl_work_item".to_string(),
+            etl: Some(EtlConfig::Table {
+                scope: EtlScope::Namespaced,
+                source: "hierarchy_work_items".to_string(),
+                watermark: "version".to_string(),
+                deleted: "deleted".to_string(),
+                edges,
+            }),
+        };
+
+        let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
+        let sqls = build_all_edge_sql(&config);
+
+        assert_eq!(sqls.len(), 1);
+        let sql = &sqls[0];
+        assert!(sql.contains("CAST(unnest(string_to_array(assignee_ids, '/')) AS BIGINT)"));
+        assert!(sql.contains("'User' AS source_kind"));
+        assert!(sql.contains("id AS target_id"));
+        assert!(sql.contains("'WorkItem' AS target_kind"));
+    }
+
+    #[test]
+    fn edge_sql_multi_target_outgoing() {
+        let ontology = Ontology::new();
+        let mut edges = BTreeMap::new();
+        edges.insert(
+            "label_ids".to_string(),
+            EdgeMapping {
+                target: EdgeTarget::Literal("Label".to_string()),
+                relationship_kind: "has_label".to_string(),
+                direction: EdgeDirection::Outgoing,
+                delimiter: Some("/".to_string()),
+            },
+        );
+
+        let node = NodeEntity {
+            name: "WorkItem".to_string(),
+            fields: vec![],
+            primary_keys: vec!["id".to_string()],
+            destination_table: "gl_work_item".to_string(),
+            etl: Some(EtlConfig::Table {
+                scope: EtlScope::Namespaced,
+                source: "hierarchy_work_items".to_string(),
+                watermark: "version".to_string(),
+                deleted: "deleted".to_string(),
+                edges,
+            }),
+        };
+
+        let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
+        let sqls = build_all_edge_sql(&config);
+
+        assert_eq!(sqls.len(), 1);
+        let sql = &sqls[0];
+        assert!(sql.contains("id AS source_id"));
+        assert!(sql.contains("'WorkItem' AS source_kind"));
+        assert!(sql.contains("CAST(unnest(string_to_array(label_ids, '/')) AS BIGINT)"));
+        assert!(sql.contains("'Label' AS target_kind"));
     }
 }
