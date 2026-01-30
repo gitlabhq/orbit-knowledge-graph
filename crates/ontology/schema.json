@@ -41,6 +41,10 @@
       "$ref": "#/$defs/PathConfig",
       "description": "Path finding configuration. Required when query_type is 'path_finding'."
     },
+    "neighbors": {
+      "$ref": "#/$defs/NeighborsConfig",
+      "description": "Neighbors configuration. Required when query_type is 'neighbors'."
+    },
     "limit": {
       "type": "integer",
       "description": "Maximum number of results to return",
@@ -61,7 +65,7 @@
     {
       "if": {
         "properties": {
-          "query_type": { "const": "search" }
+          "query_type": { "enum": ["search", "neighbors"] }
         }
       },
       "then": {
@@ -126,6 +130,19 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "query_type": { "const": "neighbors" }
+        }
+      },
+      "then": {
+        "required": ["node", "neighbors"],
+        "not": {
+          "required": ["nodes"]
+        }
+      }
     }
   ],
   "$defs": {
@@ -139,7 +156,7 @@
     "QueryType": {
       "type": "string",
       "description": "Type of graph query to execute",
-      "enum": ["traversal", "aggregation", "path_finding", "search"]
+      "enum": ["traversal", "aggregation", "path_finding", "search", "neighbors"]
     },
     "EntityType": {
       "type": "string",
@@ -538,6 +555,30 @@
       "type": "string",
       "description": "Path finding algorithm type",
       "enum": ["shortest", "all_shortest", "any"]
+    },
+    "NeighborsConfig": {
+      "type": "object",
+      "description": "Configuration for neighbors queries",
+      "required": ["node"],
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/Identifier",
+          "description": "Node variable ID to find neighbors for"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction",
+          "description": "Direction to traverse relationships (outgoing, incoming, or both)",
+          "default": "both"
+        },
+        "rel_types": {
+          "type": "array",
+          "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
+          "items": {
+            "$ref": "#/$defs/RelationshipTypeName"
+          },
+          "default": []
+        }
+      }
     },
     "OrderBy": {
       "type": "object",

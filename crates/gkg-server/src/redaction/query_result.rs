@@ -4,7 +4,10 @@ use std::collections::HashMap;
 
 use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
 use arrow::record_batch::RecordBatch;
-use query_engine::{PATH_COLUMN, QueryType, ResultContext, id_column, type_column};
+use query_engine::{
+    NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, QueryType, ResultContext, id_column,
+    type_column,
+};
 
 use super::ResourceAuthorization;
 
@@ -87,15 +90,16 @@ impl ColumnValue {
 #[derive(Debug, Clone)]
 pub struct QueryResultRow {
     columns: HashMap<String, ColumnValue>,
-    path_nodes: Vec<NodeRef>,
+    /// Nodes discovered dynamically at query time that need redaction checks (e.g nodes where their entity type is not known ahead of time).
+    dynamic_nodes: Vec<NodeRef>,
     authorized: bool,
 }
 
 impl QueryResultRow {
-    fn new(columns: HashMap<String, ColumnValue>, path_nodes: Vec<NodeRef>) -> Self {
+    fn new(columns: HashMap<String, ColumnValue>, dynamic_nodes: Vec<NodeRef>) -> Self {
         Self {
             columns,
-            path_nodes,
+            dynamic_nodes,
             authorized: true,
         }
     }
@@ -119,8 +123,15 @@ impl QueryResultRow {
         ))
     }
 
+    /// For path finding queries, returns all nodes in the path.
     pub fn path_nodes(&self) -> &[NodeRef] {
-        &self.path_nodes
+        &self.dynamic_nodes
+    }
+
+    /// For neighbors queries, returns the neighbor node if present.
+    /// Returns None for non-neighbors queries or if neighbor is null.
+    pub fn neighbor_node(&self) -> Option<&NodeRef> {
+        self.dynamic_nodes.first()
     }
 
     pub fn is_authorized(&self) -> bool {
@@ -143,6 +154,7 @@ impl QueryResult {
     pub fn from_batches(batches: &[RecordBatch], ctx: &ResultContext) -> Self {
         let node_aliases: Vec<String> = ctx.nodes().map(|n| n.alias.clone()).collect();
         let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
+        let is_neighbors = ctx.query_type == Some(QueryType::Neighbors);
 
         let mut rows = Vec::new();
         for batch in batches {
@@ -156,14 +168,18 @@ impl QueryResult {
                     );
                 }
 
-                // For path finding, also extract nodes from the path column
-                let path_nodes = if is_path_finding {
+                // Extract dynamic nodes that need redaction checks.
+                // For path finding: nodes from the _gkg_path column.
+                // For neighbors: the neighbor node from neighbor_id/neighbor_type columns.
+                let dynamic_nodes = if is_path_finding {
                     extract_path_nodes(batch, row_idx)
+                } else if is_neighbors {
+                    extract_neighbor_node(batch, row_idx).into_iter().collect()
                 } else {
                     Vec::new()
                 };
 
-                rows.push(QueryResultRow::new(columns, path_nodes));
+                rows.push(QueryResultRow::new(columns, dynamic_nodes));
             }
         }
 
@@ -203,8 +219,9 @@ impl QueryResult {
                     nodes.add(node_ref.id, node_ref.entity_type);
                 }
             }
-            // For path finding, also extract intermediate nodes from path
-            for node_ref in &row.path_nodes {
+            // Extract dynamic nodes (path finding: intermediate path nodes,
+            // neighbors: the neighbor nodes)
+            for node_ref in &row.dynamic_nodes {
                 nodes.add(node_ref.id, &node_ref.entity_type);
             }
         }
@@ -219,7 +236,8 @@ impl QueryResult {
     /// - Has no authorization result from the redaction service
     /// - Is explicitly marked as unauthorized
     ///
-    /// For path finding queries, all nodes in the path are also checked.
+    /// For path finding queries, all nodes in the path are checked.
+    /// For neighbors queries, the neighbor node is checked.
     pub fn apply_authorizations(
         &mut self,
         authorizations: &[ResourceAuthorization],
@@ -249,9 +267,9 @@ impl QueryResult {
                 }
             }
 
-            // Check path nodes (for path finding queries)
+            // Check dynamic nodes (path finding nodes, neighbor nodes)
             if row.authorized {
-                for node_ref in &row.path_nodes {
+                for node_ref in &row.dynamic_nodes {
                     if !is_node_authorized(node_ref, authorizations, entity_to_resource) {
                         row.set_unauthorized();
                         redacted_count += 1;
@@ -337,6 +355,31 @@ fn extract_path_nodes(batch: &RecordBatch, row_idx: usize) -> Vec<NodeRef> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// Extract the neighbor node from neighbor_id/neighbor_type columns in neighbors queries.
+/// Returns None if either column is missing or null.
+fn extract_neighbor_node(batch: &RecordBatch, row_idx: usize) -> Option<NodeRef> {
+    let id_col_idx = batch.schema().index_of(NEIGHBOR_ID_COLUMN).ok()?;
+    let type_col_idx = batch.schema().index_of(NEIGHBOR_TYPE_COLUMN).ok()?;
+
+    let id_array = batch
+        .column(id_col_idx)
+        .as_any()
+        .downcast_ref::<Int64Array>()?;
+    let type_array = batch
+        .column(type_col_idx)
+        .as_any()
+        .downcast_ref::<StringArray>()?;
+
+    if id_array.is_null(row_idx) || type_array.is_null(row_idx) {
+        return None;
+    }
+
+    Some(NodeRef::new(
+        id_array.value(row_idx),
+        type_array.value(row_idx),
+    ))
 }
 
 #[cfg(test)]

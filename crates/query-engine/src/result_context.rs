@@ -8,6 +8,13 @@ use crate::input::QueryType;
 /// Contains Array(Tuple(Int64, String)) with (node_id, entity_type) for each step.
 pub const PATH_COLUMN: &str = "_gkg_path";
 
+/// Column names for neighbor queries. The neighbor's ID and type are dynamic
+/// (could be any entity type), similar to path finding nodes.
+pub const NEIGHBOR_ID_COLUMN: &str = "_gkg_neighbor_id";
+pub const NEIGHBOR_TYPE_COLUMN: &str = "_gkg_neighbor_type";
+
+pub const RELATIONSHIP_TYPE_COLUMN: &str = "_gkg_relationship_type";
+
 pub fn id_column(alias: &str) -> String {
     format!("_gkg_{alias}_id")
 }

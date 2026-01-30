@@ -2491,3 +2491,285 @@ async fn column_selection_fail_closed_no_authorization() {
     assert_eq!(redacted, 5, "all users should be redacted (fail-closed)");
     assert_eq!(result.authorized_count(), 0, "nothing should be authorized");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Neighbors Query Tests
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Neighbors queries discover connected nodes dynamically. Unlike traversals where
+// node types are known at query time, neighbors could be any entity type. This
+// requires checking authorization for both the center node AND each neighbor.
+
+/// Comprehensive test for neighbors queries with redaction.
+///
+/// Tests:
+/// - Neighbors query returns expected columns (_gkg_neighbor_id, _gkg_neighbor_type, _gkg_relationship_type)
+/// - Center node has mandatory redaction columns (_gkg_*_id, _gkg_*_type)
+/// - Both center node AND neighbor authorization is required (fail-closed)
+/// - Different directions (outgoing, incoming) work correctly
+/// - Relationship type filtering works with redaction
+#[tokio::test]
+#[serial]
+async fn neighbors_query_comprehensive() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // --- Test 1: Verify SQL structure and query execution ---
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Verify center node mandatory columns for redaction
+    assert!(
+        query.sql.contains("_gkg_u_id"),
+        "neighbors query must include _gkg_u_id for center node. SQL: {}",
+        query.sql
+    );
+    assert!(
+        query.sql.contains("_gkg_u_type"),
+        "neighbors query must include _gkg_u_type"
+    );
+
+    // Verify neighbor columns are present
+    assert!(
+        query.sql.contains("_gkg_neighbor_id"),
+        "must include _gkg_neighbor_id"
+    );
+    assert!(
+        query.sql.contains("_gkg_neighbor_type"),
+        "must include _gkg_neighbor_type"
+    );
+    assert!(
+        query.sql.contains("_gkg_relationship_type"),
+        "must include _gkg_relationship_type"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // User 1 is member of groups 100 and 102
+    assert_eq!(
+        result.len(),
+        2,
+        "user 1 should have 2 outgoing neighbors (groups 100, 102)"
+    );
+
+    // Verify center node metadata
+    for row in result.iter() {
+        assert_eq!(row.get_id("u"), Some(1));
+        assert_eq!(row.get_type("u"), Some("User"));
+        assert!(
+            row.neighbor_node().is_some(),
+            "neighbor node should be extracted"
+        );
+    }
+
+    // --- Test 2: Fail-closed when NO authorization provided ---
+    let mock_service = MockRedactionService::new();
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "fail-closed with no authorization"
+    );
+    assert_eq!(redacted, 2, "all rows should be redacted");
+
+    // --- Test 3: Fail-closed when only center node authorized (neighbors not authorized) ---
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]); // Only authorize center node
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    // Neighbors (groups 100, 102) are NOT authorized, so rows should be redacted
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "neighbors must also be authorized (fail-closed)"
+    );
+    assert_eq!(redacted, 2);
+
+    // --- Test 4: Both center node AND neighbors authorized ---
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100, 102]); // Authorize both neighbor groups
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 0, "nothing redacted when all nodes authorized");
+    assert_eq!(result.authorized_count(), 2);
+
+    // Verify neighbor data is accessible
+    let neighbor_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .collect();
+    assert_eq!(neighbor_ids, HashSet::from([100, 102]));
+
+    // --- Test 5: Partial neighbor authorization filters specific rows ---
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]); // Only authorize group 100
+    mock_service.deny("groups", &[102]); // Deny group 102
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        result.authorized_count(),
+        1,
+        "only one neighbor should pass"
+    );
+
+    let authorized_neighbor = result
+        .authorized_rows()
+        .next()
+        .and_then(|r| r.neighbor_node())
+        .expect("should have authorized neighbor");
+    assert_eq!(authorized_neighbor.id, 100);
+    assert_eq!(authorized_neighbor.entity_type, "Group");
+}
+
+/// Tests that denying the center node filters ALL its neighbors.
+#[tokio::test]
+#[serial]
+async fn neighbors_query_center_node_denied_filters_all() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 2, "should have 2 neighbors before redaction");
+
+    // Authorize neighbors but DENY center node
+    let mut mock_service = MockRedactionService::new();
+    mock_service.deny("users", &[1]);
+    mock_service.allow("groups", ALL_GROUP_IDS);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 2, "all rows redacted when center node denied");
+    assert_eq!(result.authorized_count(), 0);
+}
+
+/// Tests neighbors query with multiple center nodes and mixed authorization.
+#[tokio::test]
+#[serial]
+async fn neighbors_query_multiple_center_nodes_mixed_authorization() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Query neighbors for users 1 and 3
+    // User 1 -> groups 100, 102
+    // User 3 -> group 101
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 3]},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert_eq!(
+        raw_count, 3,
+        "should have 3 total neighbors (2 for user 1, 1 for user 3)"
+    );
+
+    // Authorize user 1 and its neighbors, deny user 3
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.deny("users", &[3]);
+    mock_service.allow("groups", &[100, 102]); // User 1's neighbors
+    mock_service.deny("groups", &[101]); // User 3's neighbor
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 1, "user 3's neighbor row should be redacted");
+    assert_eq!(result.authorized_count(), 2);
+
+    // Verify only user 1's neighbors remain
+    let authorized_center_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("u"))
+        .collect();
+    assert_eq!(authorized_center_ids, HashSet::from([1]));
+}
+
+/// Tests incoming direction with neighbor authorization.
+#[tokio::test]
+#[serial]
+async fn neighbors_query_incoming_with_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Find users who are members of group 100 (incoming MEMBER_OF edges)
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+        "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Group 100 has incoming MEMBER_OF from users 1 and 2
+    assert_eq!(result.len(), 2, "group 100 should have 2 incoming members");
+
+    // Authorize center (group 100) and one neighbor (user 1)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("groups", &[100]);
+    mock_service.allow("users", &[1]);
+    mock_service.deny("users", &[2]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        result.authorized_count(),
+        1,
+        "only user 1's row should pass"
+    );
+
+    let neighbor = result
+        .authorized_rows()
+        .next()
+        .and_then(|r| r.neighbor_node())
+        .unwrap();
+    assert_eq!(neighbor.id, 1);
+    assert_eq!(neighbor.entity_type, "User");
+}

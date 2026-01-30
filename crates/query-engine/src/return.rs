@@ -37,6 +37,7 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
 /// For traversal/pattern queries: all nodes are selectable.
 /// For aggregation queries: only nodes appearing in group_by are selectable.
 /// For path finding: handled separately in enforce_return.
+/// For neighbors queries: only the center node is selectable.
 fn selectable_node_ids(input: &Input) -> HashSet<String> {
     match input.query_type {
         QueryType::Aggregation => input
@@ -44,7 +45,7 @@ fn selectable_node_ids(input: &Input) -> HashSet<String> {
             .iter()
             .filter_map(|agg| agg.group_by.clone())
             .collect(),
-        QueryType::Traversal | QueryType::Search => {
+        QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
             input.nodes.iter().map(|n| n.id.clone()).collect()
         }
         QueryType::PathFinding => HashSet::new(),
@@ -132,6 +133,7 @@ mod tests {
             relationships: vec![],
             aggregations: vec![],
             path: None,
+            neighbors: None,
             limit: 30,
             order_by: None,
             aggregation_sort: None,
@@ -279,6 +281,7 @@ mod tests {
             relationships: vec![],
             aggregations: vec![],
             path: None,
+            neighbors: None,
             limit: 30,
             order_by: None,
             aggregation_sort: None,
@@ -368,6 +371,7 @@ mod tests {
                 alias: Some("note_count".to_string()),
             }],
             path: None,
+            neighbors: None,
             limit: 10,
             order_by: None,
             aggregation_sort: None,
@@ -453,6 +457,7 @@ mod tests {
                 max_depth: 3,
                 rel_types: vec![],
             }),
+            neighbors: None,
             limit: 30,
             order_by: None,
             aggregation_sort: None,
