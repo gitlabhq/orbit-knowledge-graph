@@ -703,10 +703,16 @@ struct RedactionYaml {
     resource_type: String,
     #[serde(default = "default_id_column")]
     id_column: String,
+    #[serde(default = "default_ability")]
+    ability: String,
 }
 
 fn default_id_column() -> String {
     "id".to_string()
+}
+
+fn default_ability() -> String {
+    "read".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -844,6 +850,7 @@ impl NodeYaml {
         let redaction = self.redaction.map(|r| RedactionConfig {
             resource_type: r.resource_type,
             id_column: r.id_column,
+            ability: r.ability,
         });
 
         Ok(NodeEntity {

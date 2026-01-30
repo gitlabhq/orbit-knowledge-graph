@@ -6,6 +6,7 @@ pub mod dispatcher;
 pub mod grpc;
 pub mod indexer;
 pub mod proto;
+pub mod query;
 pub mod redaction;
 pub mod shutdown;
 pub mod tools;

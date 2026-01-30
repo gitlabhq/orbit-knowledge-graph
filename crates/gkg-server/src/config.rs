@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
+    /// HTTP bind address for health checks and metrics
     pub bind_address: SocketAddr,
+    /// gRPC bind address for Knowledge Graph service
     pub grpc_bind_address: SocketAddr,
     pub jwt_secret: Option<String>,
     pub jwt_clock_skew_secs: u64,

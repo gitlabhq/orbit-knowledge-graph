@@ -15,6 +15,9 @@ pub struct RedactionConfig {
     pub resource_type: String,
     /// Column containing the ID for redaction (defaults to "id").
     pub id_column: String,
+    /// The ability to check for this resource (e.g., "read_project", "read_group").
+    /// Defaults to "read".
+    pub ability: String,
 }
 
 /// A node entity representing a record or row in the knowledge graph.

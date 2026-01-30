@@ -41,6 +41,7 @@ impl<'a> RedactionExtractor<'a> {
                 Some(ResourceCheck {
                     resource_type: config.resource_type.clone(),
                     ids,
+                    ability: config.ability.clone(),
                 })
             })
             .collect()

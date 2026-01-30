@@ -8,6 +8,7 @@ destination_table: gl_merge_requests
 redaction:
   resource_type: merge_requests
   id_column: id
+  ability: read_merge_request
 
 properties:
   id:

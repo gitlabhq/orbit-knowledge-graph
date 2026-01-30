@@ -8,6 +8,7 @@ destination_table: gl_users
 redaction:
   resource_type: users
   id_column: id
+  ability: read_user
 
 properties:
   id:
