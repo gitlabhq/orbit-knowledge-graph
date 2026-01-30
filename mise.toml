@@ -4,15 +4,17 @@
 GITALY_PROTO_ROOT = "~/gitlab/gdk/gitaly"
 
 [tools]
-"rust" = { version = "1.93.0", components = "rustfmt,clippy" }
+"rust" = { version = "1.93.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu" }
 "cargo:cargo-nextest" = "0.9.123"
 "cargo:cargo-edit" = "0.13.8"
 "cargo:cargo-audit" = "0.22.0"
 "cargo:cargo-deny" = "0.19.0"
 "cargo:cargo-geiger" = "0.13.0"
 "cargo:cargo-cyclonedx" = "0.5.7"
+"cargo:cargo-zigbuild" = "0.21"
 "sccache" = "0.13.0"
 "tilt" = "0.36.1"
+"zig" = "0.15"
 clickhouse = "latest"
 uv = "latest"
 
