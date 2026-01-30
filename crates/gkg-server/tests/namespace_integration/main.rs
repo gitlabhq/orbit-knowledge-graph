@@ -13,5 +13,6 @@ mod merge_requests;
 mod milestones;
 mod notes;
 mod projects;
+mod security;
 mod watermarking;
 mod work_items;

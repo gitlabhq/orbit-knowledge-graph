@@ -1,9 +1,9 @@
 # fixtures/ontology/nodes/security/identifier.yaml
 
-node_type: Identifier
+node_type: VulnerabilityIdentifier
 domain: security
 description: A vulnerability identifier such as a CVE, CWE, or other external reference
-destination_table: gl_identifier
+destination_table: gl_vulnerability_identifier
 
 properties:
   id:
@@ -48,7 +48,14 @@ properties:
     nullable: false
     description: "Timestamp when the identifier was last updated."
 
-# edges:
-#   - type: IDENTIFIES
-#     source_id: finding_id
-#     target_kind: Finding
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_vulnerability_identifiers
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: in_project
+      direction: outgoing

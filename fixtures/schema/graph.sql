@@ -201,3 +201,89 @@ CREATE TABLE IF NOT EXISTS gl_edges (
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (source_id, target_id) PRIMARY KEY (source_id, target_id);
+
+-- Security graph tables
+
+CREATE TABLE IF NOT EXISTS gl_vulnerability (
+    id Int64,
+    title String DEFAULT '',
+    description Nullable(String),
+    state String DEFAULT '',
+    severity String DEFAULT '',
+    report_type String DEFAULT '',
+    resolved_on_default_branch Bool DEFAULT false,
+    present_on_default_branch Bool DEFAULT true,
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    detected_at Nullable(DateTime64(6, 'UTC')),
+    resolved_at Nullable(DateTime64(6, 'UTC')),
+    confirmed_at Nullable(DateTime64(6, 'UTC')),
+    dismissed_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS gl_scanner (
+    id Int64,
+    external_id String DEFAULT '',
+    name String DEFAULT '',
+    vendor String DEFAULT 'GitLab',
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
+    id Int64,
+    external_type String DEFAULT '',
+    external_id String DEFAULT '',
+    name String DEFAULT '',
+    url Nullable(String),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS gl_finding (
+    id Int64,
+    uuid String DEFAULT '',
+    name Nullable(String),
+    description Nullable(String),
+    solution Nullable(String),
+    severity String DEFAULT '',
+    deduplicated Bool DEFAULT false,
+    overridden_uuid Nullable(String),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
+    id Int64,
+    uuid String DEFAULT '',
+    name String DEFAULT '',
+    description Nullable(String),
+    solution Nullable(String),
+    cve Nullable(String),
+    location Nullable(String),
+    location_fingerprint String DEFAULT '',
+    severity String DEFAULT '',
+    report_type String DEFAULT '',
+    detection_method String DEFAULT '',
+    created_at DateTime64(6, 'UTC') DEFAULT now(),
+    updated_at DateTime64(6, 'UTC') DEFAULT now(),
+    detected_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
