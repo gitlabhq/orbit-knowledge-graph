@@ -113,6 +113,7 @@ mod tests {
                 InputNode {
                     id: "u".to_string(),
                     entity: Some("User".to_string()),
+                    columns: None,
                     filters: std::collections::HashMap::new(),
                     node_ids: vec![],
                     id_range: None,
@@ -121,6 +122,7 @@ mod tests {
                 InputNode {
                     id: "p".to_string(),
                     entity: Some("Project".to_string()),
+                    columns: None,
                     filters: std::collections::HashMap::new(),
                     node_ids: vec![],
                     id_range: None,
@@ -268,6 +270,7 @@ mod tests {
             nodes: vec![InputNode {
                 id: "n".to_string(),
                 entity: None,
+                columns: None,
                 filters: std::collections::HashMap::new(),
                 node_ids: vec![],
                 id_range: None,
@@ -340,6 +343,7 @@ mod tests {
                 InputNode {
                     id: "u".to_string(),
                     entity: Some("User".to_string()),
+                    columns: None,
                     filters: std::collections::HashMap::new(),
                     node_ids: vec![],
                     id_range: None,
@@ -348,6 +352,7 @@ mod tests {
                 InputNode {
                     id: "n".to_string(),
                     entity: Some("Note".to_string()),
+                    columns: None,
                     filters: std::collections::HashMap::new(),
                     node_ids: vec![],
                     id_range: None,
@@ -423,6 +428,7 @@ mod tests {
                 InputNode {
                     id: "start".to_string(),
                     entity: Some("Project".to_string()),
+                    columns: None,
                     filters: std::collections::HashMap::new(),
                     node_ids: vec![100],
                     id_range: None,
@@ -431,6 +437,7 @@ mod tests {
                 InputNode {
                     id: "end".to_string(),
                     entity: Some("Project".to_string()),
+                    columns: None,
                     filters: std::collections::HashMap::new(),
                     node_ids: vec![200],
                     id_range: None,

@@ -190,6 +190,10 @@
           "$ref": "#/$defs/EntityType",
           "description": "Entity type (e.g., User, Project, MergeRequest). Determines which table to query. Required for most queries."
         },
+        "columns": {
+          "$ref": "#/$defs/ColumnSelection",
+          "description": "Columns to return for this node. Use '*' for all columns, or specify an array of column names. Mandatory columns (id, type) are always included for redaction."
+        },
         "filters": {
           "type": "object",
           "description": "Property filters. Keys are property names, values are Filter objects.",
@@ -219,6 +223,24 @@
           "default": "id"
         }
       }
+    },
+    "ColumnSelection": {
+      "description": "Column selection for a node. Use '*' for all columns or an array of specific column names.",
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "*",
+          "description": "Select all columns for this entity"
+        },
+        {
+          "type": "array",
+          "description": "List of specific column names to select",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1
+        }
+      ]
     },
     "IdRange": {
       "type": "object",

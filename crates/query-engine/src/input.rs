@@ -75,6 +75,11 @@ pub struct InputNode {
     /// Entity type (e.g., "User", "Project"). Determines which table to query.
     #[serde(default)]
     pub entity: Option<String>,
+    /// Columns to return for this node. Use `ColumnSelection::All` for all columns,
+    /// or `ColumnSelection::List` for specific columns. If not specified, only
+    /// mandatory columns (id, type) are returned.
+    #[serde(default, deserialize_with = "deserialize_columns")]
+    pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, InputFilter>,
     #[serde(default)]
@@ -82,6 +87,40 @@ pub struct InputNode {
     pub id_range: Option<InputIdRange>,
     #[serde(default = "default_id_property")]
     pub id_property: String,
+}
+
+/// Column selection for a node's result set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnSelection {
+    /// Select all columns for this entity ("*")
+    All,
+    /// Select specific columns by name
+    List(Vec<String>),
+}
+
+fn deserialize_columns<'de, D>(deserializer: D) -> Result<Option<ColumnSelection>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(Value::String(s)) if s == "*" => Ok(Some(ColumnSelection::All)),
+        Some(Value::Array(arr)) => {
+            let cols: Result<Vec<String>, _> = arr
+                .into_iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .ok_or_else(|| serde::de::Error::custom("column names must be strings"))
+                })
+                .collect();
+            Ok(Some(ColumnSelection::List(cols?)))
+        }
+        Some(_) => Err(serde::de::Error::custom(
+            "columns must be '*' or an array of column names",
+        )),
+    }
 }
 
 fn default_id_property() -> String {
@@ -435,5 +474,72 @@ mod tests {
         assert_eq!(input.query_type, QueryType::Search);
         assert_eq!(input.nodes.len(), 1);
         assert_eq!(input.nodes[0].id, "u");
+    }
+
+    #[test]
+    fn columns_wildcard() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": "*"}
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.nodes[0].columns, Some(ColumnSelection::All));
+    }
+
+    #[test]
+    fn columns_list() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "email", "created_at"]}
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            input.nodes[0].columns,
+            Some(ColumnSelection::List(vec![
+                "username".into(),
+                "email".into(),
+                "created_at".into()
+            ]))
+        );
+    }
+
+    #[test]
+    fn columns_not_specified() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"}
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.nodes[0].columns, None);
+    }
+
+    #[test]
+    fn columns_in_traversal() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "p", "entity": "Project", "columns": "*"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}]
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            input.nodes[0].columns,
+            Some(ColumnSelection::List(vec!["username".into()]))
+        );
+        assert_eq!(input.nodes[1].columns, Some(ColumnSelection::All));
     }
 }
