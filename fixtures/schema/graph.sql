@@ -202,6 +202,62 @@ CREATE TABLE IF NOT EXISTS gl_edges (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (source_id, target_id) PRIMARY KEY (source_id, target_id);
 
+-- CI graph tables
+
+CREATE TABLE IF NOT EXISTS gl_pipeline (
+    id Int64,
+    iid Nullable(Int64),
+    sha Nullable(String),
+    ref Nullable(String),
+    status String DEFAULT '',
+    source String DEFAULT '',
+    tag Bool DEFAULT false,
+    duration Nullable(Int64),
+    failure_reason Nullable(String),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    started_at Nullable(DateTime64(6, 'UTC')),
+    finished_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS gl_stage (
+    id Int64,
+    name Nullable(String),
+    status String DEFAULT '',
+    position Nullable(Int64),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    updated_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS gl_job (
+    id Int64,
+    name Nullable(String),
+    status String DEFAULT '',
+    ref Nullable(String),
+    tag Nullable(Bool),
+    allow_failure Bool DEFAULT false,
+    coverage Nullable(String),
+    environment Nullable(String),
+    `when` Nullable(String),
+    retried Nullable(Bool),
+    failure_reason Nullable(String),
+    created_at Nullable(DateTime64(6, 'UTC')),
+    started_at Nullable(DateTime64(6, 'UTC')),
+    finished_at Nullable(DateTime64(6, 'UTC')),
+    queued_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
 -- Security graph tables
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability (

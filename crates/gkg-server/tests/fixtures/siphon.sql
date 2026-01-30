@@ -618,3 +618,128 @@ CREATE TABLE IF NOT EXISTS siphon_vulnerability_occurrences
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
+
+-- Siphon source tables for CI pipelines
+CREATE TABLE IF NOT EXISTS siphon_p_ci_pipelines
+(
+    `ref` Nullable(String),
+    `sha` Nullable(String),
+    `before_sha` Nullable(String),
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `tag` Nullable(Bool) DEFAULT false,
+    `yaml_errors` Nullable(String),
+    `committed_at` Nullable(DateTime64(6, 'UTC')),
+    `project_id` Int64,
+    `status` Nullable(String),
+    `started_at` Nullable(DateTime64(6, 'UTC')),
+    `finished_at` Nullable(DateTime64(6, 'UTC')),
+    `duration` Nullable(Int64),
+    `user_id` Nullable(Int64),
+    `lock_version` Nullable(Int64) DEFAULT 0,
+    `pipeline_schedule_id` Nullable(Int64),
+    `source` Nullable(Int64),
+    `config_source` Nullable(Int64),
+    `protected` Nullable(Bool),
+    `failure_reason` Nullable(Int64),
+    `iid` Nullable(Int64),
+    `merge_request_id` Nullable(Int64),
+    `source_sha` Nullable(String),
+    `target_sha` Nullable(String),
+    `external_pull_request_id` Nullable(Int64),
+    `ci_ref_id` Nullable(Int64),
+    `locked` Int8 DEFAULT 1,
+    `partition_id` Int64 DEFAULT 1,
+    `id` Int64,
+    `auto_canceled_by_id` Nullable(Int64),
+    `auto_canceled_by_partition_id` Nullable(Int64),
+    `trigger_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id, partition_id)
+ORDER BY (traversal_path, id, partition_id);
+
+-- Siphon source tables for CI stages
+CREATE TABLE IF NOT EXISTS siphon_p_ci_stages
+(
+    `project_id` Int64,
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `name` Nullable(String),
+    `status` Nullable(Int64),
+    `lock_version` Nullable(Int64) DEFAULT 0,
+    `position` Nullable(Int64),
+    `id` Int64,
+    `partition_id` Int64 DEFAULT 1,
+    `pipeline_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id, partition_id)
+ORDER BY (traversal_path, id, partition_id);
+
+-- Siphon source tables for CI builds (jobs)
+CREATE TABLE IF NOT EXISTS siphon_p_ci_builds
+(
+    `status` Nullable(String),
+    `finished_at` Nullable(DateTime64(6, 'UTC')),
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `started_at` Nullable(DateTime64(6, 'UTC')),
+    `coverage` Nullable(Float64),
+    `name` Nullable(String),
+    `options` Nullable(String),
+    `allow_failure` Bool DEFAULT false,
+    `stage_idx` Nullable(Int64),
+    `tag` Nullable(Bool),
+    `ref` Nullable(String),
+    `type` Nullable(String),
+    `target_url` Nullable(String),
+    `description` Nullable(String),
+    `erased_at` Nullable(DateTime64(6, 'UTC')),
+    `artifacts_expire_at` Nullable(DateTime64(6, 'UTC')),
+    `environment` Nullable(String),
+    `when` Nullable(String),
+    `yaml_variables` Nullable(String),
+    `queued_at` Nullable(DateTime64(6, 'UTC')),
+    `lock_version` Nullable(Int64) DEFAULT 0,
+    `coverage_regex` Nullable(String),
+    `retried` Nullable(Bool),
+    `protected` Nullable(Bool),
+    `failure_reason` Nullable(Int64),
+    `scheduled_at` Nullable(DateTime64(6, 'UTC')),
+    `token_encrypted` Nullable(String),
+    `resource_group_id` Nullable(Int64),
+    `waiting_for_resource_at` Nullable(DateTime64(6, 'UTC')),
+    `processed` Nullable(Bool),
+    `scheduling_type` Nullable(Int8),
+    `id` Int64,
+    `stage_id` Nullable(Int64),
+    `partition_id` Int64 DEFAULT 1,
+    `auto_canceled_by_partition_id` Nullable(Int64),
+    `auto_canceled_by_id` Nullable(Int64),
+    `commit_id` Nullable(Int64),
+    `erased_by_id` Nullable(Int64),
+    `project_id` Int64,
+    `runner_id` Nullable(Int64),
+    `upstream_pipeline_id` Nullable(Int64),
+    `user_id` Nullable(Int64),
+    `execution_config_id` Nullable(Int64),
+    `upstream_pipeline_partition_id` Nullable(Int64),
+    `scoped_user_id` Nullable(Int64),
+    `timeout` Nullable(Int64),
+    `timeout_source` Nullable(Int8),
+    `exit_code` Nullable(Int8),
+    `debug_trace_enabled` Nullable(Bool),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id, partition_id)
+ORDER BY (traversal_path, id, partition_id);
