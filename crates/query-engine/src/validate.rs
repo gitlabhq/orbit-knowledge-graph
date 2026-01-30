@@ -27,6 +27,7 @@ pub fn validate(input: &Input, ontology: &Ontology) -> Result<()> {
     validate_aggregations(input, ontology)?;
     validate_order_by(input, ontology)?;
     validate_path(input, ontology)?;
+    validate_neighbors(input, ontology)?;
     Ok(())
 }
 
@@ -268,6 +269,41 @@ fn validate_path(input: &Input, ontology: &Ontology) -> Result<()> {
         if rel_type != "*" && !ontology.has_edge(rel_type) {
             return Err(err(format!(
                 "unknown relationship type \"{}\" in path configuration",
+                rel_type
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Neighbors validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn validate_neighbors(input: &Input, ontology: &Ontology) -> Result<()> {
+    if input.query_type != QueryType::Neighbors {
+        return Ok(());
+    }
+
+    let neighbors = input
+        .neighbors
+        .as_ref()
+        .ok_or_else(|| err("neighbors query requires a 'neighbors' configuration"))?;
+
+    let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
+
+    if !node_ids.contains(&neighbors.node.as_str()) {
+        return Err(err(format!(
+            "neighbors 'node' references undefined node \"{}\"",
+            neighbors.node
+        )));
+    }
+
+    for rel_type in &neighbors.rel_types {
+        if rel_type != "*" && !ontology.has_edge(rel_type) {
+            return Err(err(format!(
+                "unknown relationship type \"{}\" in neighbors configuration",
                 rel_type
             )));
         }

@@ -8,6 +8,7 @@ use crate::input::{
     ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
     InputRelationship, OrderDirection, QueryType,
 };
+use crate::result_context::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN};
 use ontology::{Ontology, EDGE_TABLE};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -18,6 +19,7 @@ pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
         QueryType::Traversal | QueryType::Search => lower_traversal(input, ontology),
         QueryType::Aggregation => lower_aggregation(input, ontology),
         QueryType::PathFinding => lower_path_finding(input, ontology),
+        QueryType::Neighbors => lower_neighbors(input, ontology),
     }
 }
 
@@ -323,6 +325,96 @@ fn path_final_query(end_ids: &[i64], end_table: &str, end_alias: &str, limit: u3
         }],
         limit: Some(limit),
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Neighbors
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn lower_neighbors(input: &Input, ontology: &Ontology) -> Result<Node> {
+    let neighbors_config = input
+        .neighbors
+        .as_ref()
+        .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?;
+
+    let center_node = find_node(&input.nodes, &neighbors_config.node)?;
+    let center_table = resolve_table(ontology, center_node)?;
+
+    let type_filter = if neighbors_config.rel_types.is_empty() {
+        None
+    } else {
+        single_type_filter(&neighbors_config.rel_types)
+    };
+
+    let edge_alias = "e";
+
+    let edge_table = edge_scan(edge_alias, &type_filter);
+
+    let from = TableRef::join(
+        JoinType::Inner,
+        TableRef::scan(&center_table, &center_node.id),
+        edge_table,
+        source_join_cond(&center_node.id, edge_alias, neighbors_config.direction),
+    );
+
+    let neighbor_id_expr = match neighbors_config.direction {
+        Direction::Outgoing => Expr::col(edge_alias, "target_id"),
+        Direction::Incoming => Expr::col(edge_alias, "source_id"),
+        Direction::Both => Expr::func(
+            "if",
+            vec![
+                Expr::eq(
+                    Expr::col(&center_node.id, "id"),
+                    Expr::col(edge_alias, "source_id"),
+                ),
+                Expr::col(edge_alias, "target_id"),
+                Expr::col(edge_alias, "source_id"),
+            ],
+        ),
+    };
+
+    let neighbor_type_expr = match neighbors_config.direction {
+        Direction::Outgoing => Expr::col(edge_alias, "target_kind"),
+        Direction::Incoming => Expr::col(edge_alias, "source_kind"),
+        Direction::Both => Expr::func(
+            "if",
+            vec![
+                Expr::eq(
+                    Expr::col(&center_node.id, "id"),
+                    Expr::col(edge_alias, "source_id"),
+                ),
+                Expr::col(edge_alias, "target_kind"),
+                Expr::col(edge_alias, "source_kind"),
+            ],
+        ),
+    };
+
+    let select = vec![
+        SelectExpr::new(neighbor_id_expr, NEIGHBOR_ID_COLUMN),
+        SelectExpr::new(neighbor_type_expr, NEIGHBOR_TYPE_COLUMN),
+        SelectExpr::new(
+            Expr::col(edge_alias, "relationship_kind"),
+            RELATIONSHIP_TYPE_COLUMN,
+        ),
+    ];
+
+    let where_clause = id_filter(&center_node.id, "id", &center_node.node_ids);
+
+    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
+        vec![OrderExpr {
+            expr: Expr::col(&ob.node, &ob.property),
+            desc: ob.direction == OrderDirection::Desc,
+        }]
+    });
+
+    Ok(Node::Query(Box::new(Query {
+        select,
+        from,
+        where_clause,
+        group_by: vec![],
+        order_by,
+        limit: Some(input.limit),
+    })))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

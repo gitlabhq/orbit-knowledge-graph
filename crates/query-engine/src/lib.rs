@@ -48,7 +48,10 @@ pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
 pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
 pub use r#return::enforce_return;
-pub use result_context::{id_column, type_column, RedactionNode, ResultContext, PATH_COLUMN};
+pub use result_context::{
+    id_column, type_column, RedactionNode, ResultContext, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN,
+    PATH_COLUMN,
+};
 pub use security::{apply_security_context, SecurityContext};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -270,6 +273,22 @@ mod tests {
         assert!(result.sql.contains("WITH RECURSIVE"));
         assert!(result.sql.contains("path_cte"));
         assert!(result.sql.contains("UNION ALL"));
+    }
+
+    #[test]
+    fn neighbors_query() {
+        let json = r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [100]},
+            "neighbors": {"node": "u", "direction": "both"}
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        assert!(result.sql.contains("SELECT"));
+        assert!(result.sql.contains("_gkg_neighbor_id"));
+        assert!(result.sql.contains("_gkg_neighbor_type"));
+        assert!(result.sql.contains("_gkg_relationship_type"));
+        assert!(result.sql.contains("INNER JOIN"));
     }
 
     #[test]

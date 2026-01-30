@@ -20,6 +20,7 @@ pub struct Input {
     #[serde(default)]
     pub aggregations: Vec<InputAggregation>,
     pub path: Option<InputPath>,
+    pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
     pub limit: u32,
     pub order_by: Option<InputOrderBy>,
@@ -63,6 +64,7 @@ pub enum QueryType {
     Aggregation,
     PathFinding,
     Search,
+    Neighbors,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -318,6 +320,19 @@ pub enum PathType {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Neighbors
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InputNeighbors {
+    pub node: String,
+    #[serde(default)]
+    pub direction: Direction,
+    #[serde(default)]
+    pub rel_types: Vec<String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Ordering
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -541,5 +556,22 @@ mod tests {
             Some(ColumnSelection::List(vec!["username".into()]))
         );
         assert_eq!(input.nodes[1].columns, Some(ColumnSelection::All));
+    }
+
+    #[test]
+    fn neighbors_query() {
+        let input = parse_input(
+            r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [100]},
+            "neighbors": {"node": "u", "direction": "both"}
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.query_type, QueryType::Neighbors);
+        let neighbors = input.neighbors.unwrap();
+        assert_eq!(neighbors.node, "u");
+        assert_eq!(neighbors.direction, Direction::Both);
     }
 }
