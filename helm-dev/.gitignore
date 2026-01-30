@@ -1,5 +1,9 @@
-# Helm dependency downloads (regenerate with: helm dependency update)
-charts/*.tgz
+# Helm dependency downloads (regenerate with: helm dependency build)
+gkg/charts/*.tgz
+gkg/Chart.lock
+observability/charts/*.tgz
+observability/Chart.lock
+observability/tmpcharts-*
 
 # Local secrets (contains passwords)
 .tilt-secrets

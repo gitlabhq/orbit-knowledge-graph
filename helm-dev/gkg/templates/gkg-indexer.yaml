@@ -31,9 +31,9 @@ spec:
               value: {{ include "gkg.natsUrl" . | quote }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 12 }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
-            {{- if .Values.observability.alloy.enabled }}
+            {{- if .Values.otel.enabled }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://{{ .Release.Name }}-alloy:4317"
+              value: {{ .Values.otel.endpoint | quote }}
             - name: OTEL_SERVICE_NAME
               value: "gkg-indexer"
             {{- end }}

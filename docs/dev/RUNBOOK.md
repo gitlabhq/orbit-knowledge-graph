@@ -95,7 +95,7 @@ gcloud secrets add-iam-policy-binding runner_authentication_token \
 gcloud iam service-accounts add-iam-policy-binding \
   gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com \
   --project=gl-knowledgegraph-prj-f2eec59d \
-  --member="principal://iam.googleapis.com/projects/1079327125344/locations/global/workloadIdentityPools/gl-knowledgegraph-prj-f2eec59d.svc.id.goog/subject/ns/gkg-sandbox/sa/gcp-secrets-sa" \
+  --member="principal://iam.googleapis.com/projects/1079327125344/locations/global/workloadIdentityPools/gl-knowledgegraph-prj-f2eec59d.svc.id.goog/subject/ns/gkg/sa/gcp-secrets-sa" \
   --role="roles/iam.workloadIdentityUser"
 ```
 
@@ -136,58 +136,81 @@ DNS for `gkg.dev` is managed externally. Ensure an A record for `grafana.gkg.dev
 
 ```bash
 # Get the load balancer IP after deploying the Helm chart
-kubectl get ingress grafana -n gkg-sandbox -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+kubectl get ingress grafana -n gkg -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
 
 The GCP ManagedCertificate will automatically provision a TLS certificate once DNS propagates (10-30 minutes).
 
-## Deploy Helm Chart
+## Deploy Helm Charts
+
+The deployment consists of two charts:
+- `helm-dev/observability` - Prometheus, Grafana, Loki, Alloy (release name: `gkg-obs`)
+- `helm-dev/gkg` - GKG indexer, webserver, siphon, NATS (release name: `gkg`)
 
 ### Install
 
 ```bash
-helm install gkg-sandbox ./helm-dev \
-  -f ./helm-dev/values-sandbox.yaml \
-  --namespace gkg-sandbox \
+# Build dependencies
+helm dependency build ./helm-dev/observability
+helm dependency build ./helm-dev/gkg
+
+# Deploy observability first (provides OTEL endpoint for gkg)
+helm install gkg-obs ./helm-dev/observability \
+  -f ./helm-dev/observability/values-sandbox.yaml \
+  --namespace gkg \
   --create-namespace \
+  --history-max 1 \
+  --wait
+
+# Deploy gkg
+helm install gkg ./helm-dev/gkg \
+  -f ./helm-dev/gkg/values-sandbox.yaml \
+  --namespace gkg \
+  --history-max 1 \
   --wait
 ```
 
 ### Upgrade
 
 ```bash
-helm upgrade gkg-sandbox ./helm-dev \
-  -f ./helm-dev/values-sandbox.yaml \
-  --namespace gkg-sandbox
+helm upgrade gkg-obs ./helm-dev/observability \
+  -f ./helm-dev/observability/values-sandbox.yaml \
+  --namespace gkg \
+  --history-max 1
+
+helm upgrade gkg ./helm-dev/gkg \
+  -f ./helm-dev/gkg/values-sandbox.yaml \
+  --namespace gkg \
+  --history-max 1
 ```
 
 ### Check Status
 
 ```bash
 # Pods
-kubectl get pods -n gkg-sandbox
+kubectl get pods -n gkg
 
 # External secrets sync status
-kubectl get externalsecrets -n gkg-sandbox
+kubectl get externalsecrets -n gkg
 
-# Helm release
-helm list -n gkg-sandbox
+# Helm releases
+helm list -n gkg
 ```
 
 ### View Logs
 
 ```bash
 # Producer
-kubectl logs -n gkg-sandbox deployment/siphon-producer -f
+kubectl logs -n gkg deployment/siphon-producer -f
 
 # Consumer
-kubectl logs -n gkg-sandbox deployment/siphon-consumer -f
+kubectl logs -n gkg deployment/siphon-consumer -f
 
 # NATS
-kubectl logs -n gkg-sandbox statefulset/nats -f
+kubectl logs -n gkg statefulset/gkg-nats -f
 
 # GitLab Runner
-kubectl logs -n gkg-sandbox deployment/gkg-sandbox-gitlab-runner -f
+kubectl logs -n gkg deployment/gkg-gitlab-runner -f
 ```
 
 ## Observability Stack
@@ -203,21 +226,21 @@ Authentication is via Google or GitLab OAuth. Users with `@gitlab.com` emails wh
 ### Check Observability Pods
 
 ```bash
-kubectl get pods -n gkg-sandbox -l "app.kubernetes.io/name in (grafana,prometheus,loki,alertmanager)"
+kubectl get pods -n gkg -l "app.kubernetes.io/name in (grafana,prometheus,loki,alertmanager)"
 ```
 
 ### Data Sources
 
 Grafana has two pre-configured data sources:
-- **Prometheus**: Metrics at `http://gkg-sandbox-kube-prometheus-prometheus:9090`
-- **Loki**: Logs at `http://gkg-sandbox-loki:3100`
+- **Prometheus**: Metrics at `http://gkg-obs-kube-prometheus-st-prometheus:9090`
+- **Loki**: Logs at `http://gkg-obs-loki:3100`
 
 ### Certificate Status
 
 The Grafana ingress uses a GCP ManagedCertificate for TLS:
 
 ```bash
-kubectl get managedcertificate grafana-cert -n gkg-sandbox -o yaml
+kubectl get managedcertificate grafana-cert -n gkg -o yaml
 ```
 
 Certificate provisioning requires DNS to be correctly configured and can take 10-30 minutes.
@@ -251,21 +274,21 @@ If the runner becomes unhealthy or is removed from GitLab:
    ```
 4. Force sync and restart:
    ```bash
-   kubectl annotate externalsecret gitlab-runner-token -n gkg-sandbox force-sync=$(date +%s) --overwrite
-   kubectl rollout restart deployment/gkg-sandbox-gitlab-runner -n gkg-sandbox
+   kubectl annotate externalsecret gitlab-runner-token -n gkg force-sync=$(date +%s) --overwrite
+   kubectl rollout restart deployment/gkg-gitlab-runner -n gkg
    ```
 
 ### Check Runner Status
 
 ```bash
 # Runner pod
-kubectl get pods -n gkg-sandbox -l app=gitlab-runner
+kubectl get pods -n gkg -l app=gitlab-runner
 
 # Runner logs
-kubectl logs -n gkg-sandbox deployment/gkg-sandbox-gitlab-runner --tail=50
+kubectl logs -n gkg deployment/gkg-gitlab-runner --tail=50
 
 # Job pods (created during CI runs)
-kubectl get pods -n gkg-sandbox | grep runner-
+kubectl get pods -n gkg | grep runner-
 ```
 
 ## Secrets
@@ -298,7 +321,7 @@ kubectl get pods -n gkg-sandbox | grep runner-
 echo -n "new-password" | gcloud secrets versions add postgres-password --data-file=-
 
 # Force refresh in Kubernetes (or wait for refresh interval)
-kubectl annotate externalsecret postgres-credentials -n gkg-sandbox force-sync=$(date +%s) --overwrite
+kubectl annotate externalsecret postgres-credentials -n gkg force-sync=$(date +%s) --overwrite
 ```
 
 ## Teardown
@@ -306,13 +329,14 @@ kubectl annotate externalsecret postgres-credentials -n gkg-sandbox force-sync=$
 ### Remove Helm Release
 
 ```bash
-helm uninstall gkg-sandbox --namespace gkg-sandbox
+helm uninstall gkg --namespace gkg
+helm uninstall gkg-obs --namespace gkg
 ```
 
 ### Remove Namespace (including PVCs)
 
 ```bash
-kubectl delete namespace gkg-sandbox
+kubectl delete namespace gkg
 ```
 
 ### Remove External Secrets Operator
