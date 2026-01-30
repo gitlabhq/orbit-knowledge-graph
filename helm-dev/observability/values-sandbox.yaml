@@ -82,6 +82,26 @@ kube-prometheus-stack:
     envFromSecret: grafana-oauth-credentials
     plugins:
       - grafana-clickhouse-datasource
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: 'grafana-dashboards'
+            orgId: 1
+            folder: ''
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/grafana-dashboards
+    dashboards:
+      grafana-dashboards:
+        nats-jetstream:
+          gnetId: 23983
+          revision: 1
+          datasource:
+            - name: DS__NATS-PROMETHEUS
+              value: Prometheus
     additionalDataSources:
       - name: Loki
         type: loki
@@ -171,7 +191,7 @@ alloy:
 
           rule {
             source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
-            regex = "(gkg-indexer|gkg-webserver|siphon-producer|siphon-consumer)"
+            regex = "(gkg-indexer|gkg-webserver|siphon-producer|siphon-consumer|nats)"
             action = "keep"
           }
 

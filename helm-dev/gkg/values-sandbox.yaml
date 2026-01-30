@@ -60,6 +60,15 @@ nats:
         pvc:
           enabled: true
           size: 10Gi
+  promExporter:
+    enabled: true
+    port: 7777
+    podMonitor:
+      enabled: true
+      merge:
+        metadata:
+          labels:
+            release: gkg-obs
   container:
     image:
       repository: nats
