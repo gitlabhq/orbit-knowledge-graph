@@ -60,6 +60,7 @@ impl TestContext {
     fn app_config(&self) -> AppConfig {
         AppConfig {
             bind_address: SocketAddr::from(([127, 0, 0, 1], 0)),
+            grpc_bind_address: SocketAddr::from(([127, 0, 0, 1], 0)),
             jwt_secret: Some("test".into()),
             jwt_clock_skew_secs: 0,
             nats: NatsConfiguration {

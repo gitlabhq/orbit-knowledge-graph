@@ -22,7 +22,7 @@ etl-engine = { path = "../etl-engine" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 jsonwebtoken = { workspace = true }
-labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum"] }
+labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum", "metrics-grpc"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
