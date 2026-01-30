@@ -1,8 +1,8 @@
 # fixtures/ontology/edges/scans.yaml
 
-description: Scanner scans a project for security vulnerabilities
+description: VulnerabilityScanner scans a project for security vulnerabilities
 
 variants:
-  - from_node: { type: Scanner, id: id }
+  - from_node: { type: VulnerabilityScanner, id: id }
     to_node: { type: Project, id: id }
-    description: "Scanner scans project."
+    description: "VulnerabilityScanner scans project."

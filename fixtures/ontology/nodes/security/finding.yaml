@@ -78,6 +78,7 @@ etl:
         overridden_uuid,
         project_id,
         scanner_id,
+        scan_id,
         _siphon_replicated_at AS _version,
         _siphon_deleted AS _deleted
     FROM siphon_security_findings
@@ -90,6 +91,10 @@ etl:
       as: IN_PROJECT
       direction: outgoing
     scanner_id:
-      to: Scanner
+      to: VulnerabilityScanner
       as: DETECTED_BY
       direction: outgoing
+    scan_id:
+      to: SecurityScan
+      as: HAS_FINDING
+      direction: incoming

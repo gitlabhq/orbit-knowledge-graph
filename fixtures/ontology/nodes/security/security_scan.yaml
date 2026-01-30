@@ -1,0 +1,81 @@
+# fixtures/ontology/nodes/security/security_scan.yaml
+
+node_type: SecurityScan
+domain: security
+description: A security scan execution that produces findings within a CI/CD pipeline
+destination_table: gl_security_scan
+redaction: null  # TODO: configure redaction
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the security scan."
+
+  scan_type:
+    type: enum
+    source: scan_type
+    nullable: false
+    description: "Type of security scan performed."
+    values:
+      1: sast
+      2: dependency_scanning
+      3: container_scanning
+      4: dast
+      5: secret_detection
+      6: coverage_fuzzing
+      7: api_fuzzing
+      8: cluster_image_scanning
+
+  status:
+    type: enum
+    source: status
+    nullable: false
+    description: "Current status of the security scan."
+    values:
+      0: created
+      1: succeeded
+      2: job_failed
+      3: report_error
+      4: preparing
+      5: preparation_failed
+      6: purged
+
+  latest:
+    type: boolean
+    source: latest
+    nullable: false
+    description: "Whether this is the latest scan for the project."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    description: "Timestamp when the security scan was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Timestamp when the security scan was last updated."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_security_scans
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  edges:
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+    pipeline_id:
+      to: Pipeline
+      as: IN_PIPELINE
+      direction: outgoing
+    build_id:
+      to: Job
+      as: RAN_BY
+      direction: outgoing

@@ -583,6 +583,28 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id, partition_number)
 ORDER BY (traversal_path, id, partition_number);
 
+-- Siphon source tables for security scans
+CREATE TABLE IF NOT EXISTS siphon_security_scans
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `build_id` Int64,
+    `scan_type` Int8,
+    `info` String DEFAULT '{}',
+    `project_id` Nullable(Int64),
+    `pipeline_id` Nullable(Int64),
+    `latest` Bool DEFAULT true CODEC(ZSTD(1)),
+    `status` Int8 DEFAULT 0,
+    `findings_partition_number` Int64 DEFAULT 1,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
 CREATE TABLE IF NOT EXISTS siphon_vulnerability_occurrences
 (
     `id` Int64 CODEC(DoubleDelta, ZSTD),
