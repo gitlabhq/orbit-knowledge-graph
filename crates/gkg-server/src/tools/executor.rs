@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::auth::Claims;
+use crate::query::QueryExecutor;
 use crate::redaction::ResourceCheck;
 
 #[derive(Debug, Error)]
@@ -32,40 +33,50 @@ pub struct ExecutionResult {
     pub resources_to_check: Vec<ResourceCheck>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ToolService;
+#[derive(Debug, Clone)]
+pub struct ToolService {
+    query_executor: QueryExecutor,
+}
 
 impl ToolService {
-    pub fn new() -> Self {
-        Self
+    pub fn new(query_executor: QueryExecutor) -> Self {
+        Self { query_executor }
     }
 
-    pub fn execute_tool(
+    pub async fn execute_tool(
         &self,
         tool_name: &str,
         arguments_json: &str,
-        _claims: &Claims,
+        claims: &Claims,
     ) -> Result<ExecutionResult, ExecutorError> {
         let arguments: Value = serde_json::from_str(arguments_json)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         match tool_name {
-            "query_graph" => self.execute_query_graph(&arguments),
+            "query_graph" => self.execute_query_graph(&arguments, claims).await,
             "get_graph_entities" => self.execute_get_graph_entities(&arguments),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
 
-    fn execute_query_graph(&self, arguments: &Value) -> Result<ExecutionResult, ExecutorError> {
-        let operation = arguments
-            .get("operation")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ExecutorError::InvalidArguments("operation is required".to_string()))?;
+    async fn execute_query_graph(
+        &self,
+        arguments: &Value,
+        claims: &Claims,
+    ) -> Result<ExecutionResult, ExecutorError> {
+        let query_json = serde_json::to_string(arguments)
+            .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
-        Err(ExecutorError::InvalidArguments(format!(
-            "Unknown operation: {}",
-            operation
-        )))
+        let result = self
+            .query_executor
+            .execute(&query_json, claims)
+            .await
+            .map_err(|e| ExecutorError::ExecutionFailed(e.to_string()))?;
+
+        Ok(ExecutionResult {
+            raw_result: result.result,
+            resources_to_check: result.resources_to_check,
+        })
     }
 
     fn execute_get_graph_entities(
