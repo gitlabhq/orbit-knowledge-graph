@@ -148,7 +148,7 @@ async fn namespace_handler_processes_scanners() {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, external_id, name, vendor FROM gl_scanner ORDER BY id")
+        .query("SELECT id, external_id, name, vendor FROM gl_vulnerability_scanner ORDER BY id")
         .await;
     assert!(!result.is_empty(), "scanners should exist");
 
@@ -163,7 +163,7 @@ async fn namespace_handler_processes_scanners() {
     assert_eq!(external_ids.value(0), "gemnasium");
     assert_eq!(external_ids.value(1), "bandit");
 
-    assert_edge_count(&context, "SCANS", "Scanner", "Project", 2).await;
+    assert_edge_count(&context, "SCANS", "VulnerabilityScanner", "Project", 2).await;
 }
 
 #[tokio::test]
@@ -345,7 +345,14 @@ async fn namespace_handler_processes_findings() {
     assert!(!deduplicated.value(1));
 
     assert_edge_count(&context, "IN_PROJECT", "Finding", "Project", 2).await;
-    assert_edge_count(&context, "DETECTED_BY", "Finding", "Scanner", 2).await;
+    assert_edge_count(
+        &context,
+        "DETECTED_BY",
+        "Finding",
+        "VulnerabilityScanner",
+        2,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -622,7 +629,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
         &context,
         "DETECTED_BY",
         "VulnerabilityOccurrence",
-        "Scanner",
+        "VulnerabilityScanner",
         2,
     )
     .await;
@@ -825,4 +832,174 @@ async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
         3,
     )
     .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_security_scans() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
+            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
+            VALUES (1000, '1/100/1000/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_p_ci_pipelines
+                (id, project_id, status, source, tag, traversal_path, _siphon_replicated_at)
+            VALUES (500, 1000, 'success', 1, false, '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_p_ci_builds
+                (id, name, status, project_id, stage_id, allow_failure, traversal_path, _siphon_replicated_at)
+            VALUES (600, 'sast-job', 'success', 1000, 1, false, '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_security_scans
+                (id, build_id, scan_type, status, latest, project_id, pipeline_id,
+                 traversal_path, created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 600, 1, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 600, 2, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let namespace_handler = get_namespace_handler(&context).await;
+    let watermark = default_test_watermark();
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    let result = context
+        .query("SELECT id, scan_type, status, latest FROM gl_security_scan ORDER BY id")
+        .await;
+    assert!(!result.is_empty(), "security scans should exist");
+
+    let batch = &result[0];
+    assert_eq!(batch.num_rows(), 2);
+
+    let scan_types = get_string_column(batch, "scan_type");
+    assert_eq!(scan_types.value(0), "sast");
+    assert_eq!(scan_types.value(1), "dependency_scanning");
+
+    let statuses = get_string_column(batch, "status");
+    assert_eq!(statuses.value(0), "succeeded");
+    assert_eq!(statuses.value(1), "succeeded");
+
+    let latest_values = get_boolean_column(batch, "latest");
+    assert!(latest_values.value(0));
+    assert!(latest_values.value(1));
+
+    assert_edge_count(&context, "IN_PROJECT", "SecurityScan", "Project", 2).await;
+    assert_edge_count(&context, "IN_PIPELINE", "SecurityScan", "Pipeline", 2).await;
+    assert_edge_count(&context, "RAN_BY", "SecurityScan", "Job", 2).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_security_scan_finding_edges() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
+            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
+            VALUES (1000, '1/100/1000/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_vulnerability_scanners
+                (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+            VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_security_scans
+                (id, build_id, scan_type, status, latest, project_id, pipeline_id,
+                 traversal_path, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 600, 1, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_security_findings
+                (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
+            VALUES
+                (1, 'finding-uuid-001', 100, 1, 5, true, '{\"name\": \"SQL Injection\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
+                (2, 'finding-uuid-002', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let namespace_handler = get_namespace_handler(&context).await;
+    let watermark = default_test_watermark();
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    assert_edge_count(&context, "HAS_FINDING", "SecurityScan", "Finding", 2).await;
 }

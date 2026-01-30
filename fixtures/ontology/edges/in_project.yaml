@@ -46,3 +46,7 @@ variants:
   - from_node: { type: Label, id: id }
     to_node: { type: Project, id: id }
     description: "Label belongs to project."
+
+  - from_node: { type: SecurityScan, id: id }
+    to_node: { type: Project, id: id }
+    description: "Security scan belongs to project."

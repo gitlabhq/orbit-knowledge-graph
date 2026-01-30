@@ -1,9 +1,9 @@
 # fixtures/ontology/nodes/security/scanner.yaml
 
-node_type: Scanner
+node_type: VulnerabilityScanner
 domain: security
 description: A security scanner that detects vulnerabilities in projects
-destination_table: gl_scanner
+destination_table: gl_vulnerability_scanner
 redaction: null  # TODO: configure redaction
 
 properties:

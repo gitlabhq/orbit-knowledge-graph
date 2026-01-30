@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_scanner (
+CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     id Int64,
     external_id String DEFAULT '',
     name String DEFAULT '',
@@ -317,6 +317,19 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     severity String DEFAULT '',
     deduplicated Bool DEFAULT false,
     overridden_uuid Nullable(String),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS gl_security_scan (
+    id Int64,
+    scan_type String DEFAULT '',
+    status String DEFAULT '',
+    latest Bool DEFAULT true,
+    created_at DateTime64(6, 'UTC') DEFAULT now(),
+    updated_at DateTime64(6, 'UTC') DEFAULT now(),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now(),
     _deleted Bool DEFAULT false

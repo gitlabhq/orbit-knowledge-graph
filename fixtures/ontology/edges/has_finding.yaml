@@ -1,8 +1,12 @@
 # fixtures/ontology/edges/has_finding.yaml
 
-description: Vulnerability has associated scan finding
+description: Entity has associated scan finding
 
 variants:
   - from_node: { type: Vulnerability, id: id }
     to_node: { type: Finding, id: id }
     description: "Vulnerability has finding."
+
+  - from_node: { type: SecurityScan, id: id }
+    to_node: { type: Finding, id: id }
+    description: "Security scan has finding."

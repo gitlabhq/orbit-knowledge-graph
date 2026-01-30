@@ -127,7 +127,7 @@ etl:
       as: IN_PROJECT
       direction: outgoing
     scanner_id:
-      to: Scanner
+      to: VulnerabilityScanner
       as: DETECTED_BY
       direction: outgoing
     primary_identifier_id:

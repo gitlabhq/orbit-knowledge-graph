@@ -35,8 +35,9 @@ domains:
       Vulnerability: nodes/security/vulnerability.yaml
       VulnerabilityOccurrence: nodes/security/occurrence.yaml
       Finding: nodes/security/finding.yaml
-      Scanner: nodes/security/scanner.yaml
+      VulnerabilityScanner: nodes/security/scanner.yaml
       VulnerabilityIdentifier: nodes/security/identifier.yaml
+      SecurityScan: nodes/security/security_scan.yaml
   plan:
     description: "Entities related to planning, tracking, and organizing work."
     nodes:
@@ -87,3 +88,5 @@ edges:
   ON_BRANCH: edges/on_branch.yaml
   OCCURRENCE_OF: edges/occurrence.yaml
   SCANS: edges/scans.yaml
+  RAN_BY: edges/ran_by.yaml
+  IN_PIPELINE: edges/in_pipeline.yaml
