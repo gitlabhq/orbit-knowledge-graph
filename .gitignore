@@ -1,4 +1,5 @@
-target
+target/
+gkg-server
 .DS_Store
 report.xml
 public
