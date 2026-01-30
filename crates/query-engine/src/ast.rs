@@ -99,6 +99,9 @@ pub enum TableRef {
         right: Box<TableRef>,
         on: Expr,
     },
+    /// Union of queries as a derived table → `(SELECT ... UNION ALL SELECT ...) AS alias`
+    /// Used for multi-hop traversals with unrolled joins.
+    Union { queries: Vec<Query>, alias: String },
 }
 
 /// SQL JOIN types.
@@ -134,6 +137,15 @@ impl JoinType {
 pub struct SelectExpr {
     pub expr: Expr,
     pub alias: Option<String>,
+}
+
+impl SelectExpr {
+    pub fn new(expr: Expr, alias: impl Into<String>) -> Self {
+        Self {
+            expr,
+            alias: Some(alias.into()),
+        }
+    }
 }
 
 /// Ordering specification → `expr ASC` or `expr DESC`
@@ -243,6 +255,11 @@ impl Expr {
             .flatten()
             .reduce(|a, b| Expr::binary(Op::Or, a, b))
     }
+
+    /// Combine two expressions with OR.
+    pub fn or(left: Expr, right: Expr) -> Expr {
+        Expr::binary(Op::Or, left, right)
+    }
 }
 
 impl TableRef {
@@ -272,6 +289,13 @@ impl TableRef {
             left: Box::new(left),
             right: Box::new(right),
             on,
+        }
+    }
+
+    pub fn union(queries: Vec<Query>, alias: impl Into<String>) -> Self {
+        TableRef::Union {
+            queries,
+            alias: alias.into(),
         }
     }
 }

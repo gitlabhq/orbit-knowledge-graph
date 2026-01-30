@@ -1,7 +1,6 @@
 //! Lower: Input → AST
 //!
-//! Transformation from validated input to SQL-oriented AST.
-//! Returns errors for missing nodes, entities, or ontology lookups.
+//! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{Expr, JoinType, Node, Op, OrderExpr, Query, RecursiveCte, SelectExpr, TableRef};
 use crate::error::{QueryError, Result};
@@ -13,13 +12,7 @@ use ontology::{Ontology, EDGE_TABLE};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public entry point
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Lower validated input into an AST node.
-///
-/// Returns errors if nodes, entities, or ontology lookups fail.
 pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
     match input.query_type {
         QueryType::Traversal | QueryType::Pattern => lower_traversal(input, ontology),
@@ -29,22 +22,25 @@ pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Traversal queries
+// Traversal & Aggregation
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
-    let where_clause = build_where(&input.nodes, &input.relationships, &edge_aliases);
-    let order_by = build_order_by(&input.order_by);
+    let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
     let select = input
         .nodes
         .iter()
-        .map(|n| SelectExpr {
-            expr: Expr::col(&n.id, "id"),
-            alias: Some(format!("{}_id", n.id)),
-        })
+        .map(|n| SelectExpr::new(Expr::col(&n.id, "id"), format!("{}_id", n.id)))
         .collect();
+
+    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
+        vec![OrderExpr {
+            expr: Expr::col(&ob.node, &ob.property),
+            desc: ob.direction == OrderDirection::Desc,
+        }]
+    });
 
     Ok(Node::Query(Box::new(Query {
         select,
@@ -56,40 +52,40 @@ fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
     })))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregation queries
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
-    let where_clause = build_where(&input.nodes, &input.relationships, &edge_aliases);
+    let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
     let mut select = Vec::new();
     let mut group_by = Vec::new();
-    let mut grouped = HashSet::new();
+    let mut seen_groups = HashSet::new();
 
     for agg in &input.aggregations {
+        // Add GROUP BY column once per unique group
         if let Some(gb) = &agg.group_by {
-            if grouped.insert(gb.clone()) {
+            if seen_groups.insert(gb.clone()) {
                 group_by.push(Expr::col(gb, "id"));
-                select.push(SelectExpr {
-                    expr: Expr::col(gb, "id"),
-                    alias: Some(format!("{gb}_id")),
-                });
+                select.push(SelectExpr::new(Expr::col(gb, "id"), format!("{gb}_id")));
             }
         }
-
-        select.push(SelectExpr {
-            expr: build_agg_expr(agg),
-            alias: Some(
-                agg.alias
-                    .clone()
-                    .unwrap_or_else(|| agg.function.as_sql().to_lowercase()),
-            ),
-        });
+        select.push(SelectExpr::new(
+            agg_expr(agg),
+            agg.alias
+                .clone()
+                .unwrap_or_else(|| agg.function.as_sql().to_lowercase()),
+        ));
     }
 
-    let order_by = build_agg_order_by(&input.aggregation_sort, &input.aggregations);
+    let order_by = input
+        .aggregation_sort
+        .as_ref()
+        .filter(|s| s.agg_index < input.aggregations.len())
+        .map_or(vec![], |s| {
+            vec![OrderExpr {
+                expr: agg_expr(&input.aggregations[s.agg_index]),
+                desc: s.direction == OrderDirection::Desc,
+            }]
+        });
 
     Ok(Node::Query(Box::new(Query {
         select,
@@ -101,7 +97,7 @@ fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
     })))
 }
 
-fn build_agg_expr(agg: &InputAggregation) -> Expr {
+fn agg_expr(agg: &InputAggregation) -> Expr {
     let arg = match (&agg.property, &agg.target) {
         (Some(prop), Some(target)) => Expr::col(target, prop),
         (None, Some(target)) => Expr::col(target, "id"),
@@ -110,22 +106,8 @@ fn build_agg_expr(agg: &InputAggregation) -> Expr {
     Expr::func(agg.function.as_sql(), vec![arg])
 }
 
-fn build_agg_order_by(
-    sort: &Option<crate::input::InputAggSort>,
-    aggs: &[InputAggregation],
-) -> Vec<OrderExpr> {
-    let Some(s) = sort else { return vec![] };
-    if s.agg_index >= aggs.len() {
-        return vec![];
-    }
-    vec![OrderExpr {
-        expr: build_agg_expr(&aggs[s.agg_index]),
-        desc: s.direction == OrderDirection::Desc,
-    }]
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Path finding queries (recursive CTE)
+// Path Finding (recursive CTE)
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
@@ -133,55 +115,39 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
         .path
         .as_ref()
         .ok_or_else(|| QueryError::Lowering("path config missing".into()))?;
-    let start = node(&input.nodes, &path.from)?;
-    let end = node(&input.nodes, &path.to)?;
 
-    let start_table = table_name(ontology, entity(start)?)?;
-    let end_table = table_name(ontology, entity(end)?)?;
+    let start = find_node(&input.nodes, &path.from)?;
+    let end = find_node(&input.nodes, &path.to)?;
+    let start_table = resolve_table(ontology, start)?;
+    let end_table = resolve_table(ontology, end)?;
 
     Ok(Node::RecursiveCte(Box::new(RecursiveCte {
         name: "path_cte".into(),
-        base: build_path_base(&start.node_ids, &start_table),
-        recursive: build_path_recursive(path.max_depth),
+        base: path_base_query(&start.node_ids, &start_table),
+        recursive: path_recursive_query(path.max_depth),
         max_depth: path.max_depth,
-        final_query: build_path_final(&end.node_ids, &end_table, input.limit),
+        final_query: path_final_query(&end.node_ids, &end_table, input.limit),
     })))
 }
 
-fn build_path_base(start_ids: &[i64], table: &str) -> Query {
+fn path_base_query(start_ids: &[i64], table: &str) -> Query {
     Query {
         select: vec![
-            SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: Some("node_id".into()),
-            },
-            SelectExpr {
-                expr: Expr::func("array", vec![Expr::col("n", "id")]),
-                alias: Some("path".into()),
-            },
-            SelectExpr {
-                expr: Expr::lit(0),
-                alias: Some("depth".into()),
-            },
+            SelectExpr::new(Expr::col("n", "id"), "node_id"),
+            SelectExpr::new(Expr::func("array", vec![Expr::col("n", "id")]), "path"),
+            SelectExpr::new(Expr::lit(0), "depth"),
         ],
         from: TableRef::scan(table, "n"),
-        where_clause: node_ids_condition("n", "id", start_ids),
+        where_clause: id_filter("n", "id", start_ids),
         group_by: vec![],
         order_by: vec![],
         limit: None,
     }
 }
 
-/// Build recursive part that traverses through ANY entity type in BOTH directions.
-/// Uses edges directly without joining to specific entity tables,
-/// enabling multi-hop paths across different entity types.
-/// Follows edges bidirectionally: both source->target and target->source.
-fn build_path_recursive(max_depth: u32) -> Query {
-    // We use a subquery to UNION both edge directions, then join with path_cte
-    // next_node = e.target when p.node_id = e.source (forward)
-    // next_node = e.source when p.node_id = e.target (backward)
-    //
-    // Using CASE expression: if(p.node_id = e.source, e.target, e.source)
+/// Recursive step: traverse edges bidirectionally, avoiding cycles.
+fn path_recursive_query(max_depth: u32) -> Query {
+    // next_node = if(p.node_id = e.source_id, e.target_id, e.source_id)
     let next_node = Expr::func(
         "if",
         vec![
@@ -193,41 +159,31 @@ fn build_path_recursive(max_depth: u32) -> Query {
 
     Query {
         select: vec![
-            SelectExpr {
-                expr: next_node.clone(),
-                alias: Some("node_id".into()),
-            },
-            SelectExpr {
-                expr: Expr::func(
+            SelectExpr::new(next_node.clone(), "node_id"),
+            SelectExpr::new(
+                Expr::func(
                     "arrayConcat",
                     vec![
                         Expr::col("p", "path"),
                         Expr::func("array", vec![next_node.clone()]),
                     ],
                 ),
-                alias: Some("path".into()),
-            },
-            SelectExpr {
-                expr: Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::lit(1)),
-                alias: Some("depth".into()),
-            },
+                "path",
+            ),
+            SelectExpr::new(
+                Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::lit(1)),
+                "depth",
+            ),
         ],
         from: TableRef::join(
             JoinType::Inner,
             TableRef::scan("path_cte", "p"),
             TableRef::scan(EDGE_TABLE, "e"),
-            // Join on either direction: node_id matches source OR target
-            Expr::or_all([
-                Some(Expr::eq(
-                    Expr::col("p", "node_id"),
-                    Expr::col("e", "source_id"),
-                )),
-                Some(Expr::eq(
-                    Expr::col("p", "node_id"),
-                    Expr::col("e", "target_id"),
-                )),
-            ])
-            .expect("or_all has elements"),
+            // Join on either direction
+            Expr::or(
+                Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id")),
+                Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "target_id")),
+            ),
         ),
         where_clause: Expr::and_all([
             Some(Expr::binary(
@@ -246,20 +202,11 @@ fn build_path_recursive(max_depth: u32) -> Query {
     }
 }
 
-/// Build final query that filters paths ending at the target entity.
-/// Joins with the end entity table to ensure the final node is of the correct type
-/// and to apply security filters.
-fn build_path_final(end_ids: &[i64], end_table: &str, limit: u32) -> Query {
+fn path_final_query(end_ids: &[i64], end_table: &str, limit: u32) -> Query {
     Query {
         select: vec![
-            SelectExpr {
-                expr: Expr::col("path_cte", "path"),
-                alias: Some("path".into()),
-            },
-            SelectExpr {
-                expr: Expr::col("path_cte", "depth"),
-                alias: Some("depth".into()),
-            },
+            SelectExpr::new(Expr::col("path_cte", "path"), "path"),
+            SelectExpr::new(Expr::col("path_cte", "depth"), "depth"),
         ],
         from: TableRef::join(
             JoinType::Inner,
@@ -270,7 +217,7 @@ fn build_path_final(end_ids: &[i64], end_table: &str, limit: u32) -> Query {
                 Expr::col("end_node", "id"),
             ),
         ),
-        where_clause: node_ids_condition("end_node", "id", end_ids),
+        where_clause: id_filter("end_node", "id", end_ids),
         group_by: vec![],
         order_by: vec![OrderExpr {
             expr: Expr::col("path_cte", "depth"),
@@ -280,23 +227,65 @@ fn build_path_final(end_ids: &[i64], end_table: &str, limit: u32) -> Query {
     }
 }
 
-fn node_ids_condition(table: &str, column: &str, ids: &[i64]) -> Option<Expr> {
-    match ids.len() {
-        0 => None,
-        1 => Some(Expr::eq(Expr::col(table, column), Expr::lit(ids[0]))),
-        _ => {
-            let arr = Value::Array(ids.iter().map(|&id| Value::from(id)).collect());
-            Some(Expr::binary(
-                Op::In,
-                Expr::col(table, column),
-                Expr::lit(arr),
-            ))
-        }
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-hop Union Building
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Build a UNION ALL subquery for multi-hop traversal (1 to max_hops).
+fn build_hop_union(rel: &InputRelationship, alias: &str) -> TableRef {
+    let type_filter = single_type_filter(&rel.types);
+    let queries = (1..=rel.max_hops)
+        .map(|depth| build_hop_arm(depth, &type_filter, rel.direction))
+        .collect();
+    TableRef::union(queries, alias)
+}
+
+/// Build one arm of the union: a chain of edge joins for a specific depth.
+fn build_hop_arm(depth: u32, type_filter: &Option<String>, direction: Direction) -> Query {
+    let (start_col, end_col) = direction.edge_columns();
+
+    // Build chain: e1 -> e2 -> e3 -> ...
+    let mut from = edge_scan("e1", type_filter);
+
+    for i in 2..=depth {
+        let prev = format!("e{}", i - 1);
+        let curr = format!("e{i}");
+        let join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
+        from = TableRef::join(
+            JoinType::Inner,
+            from,
+            edge_scan(&curr, type_filter),
+            join_cond,
+        );
+    }
+
+    Query {
+        select: vec![
+            SelectExpr::new(Expr::col("e1", start_col), "start_id"),
+            SelectExpr::new(Expr::col(format!("e{depth}"), end_col), "end_id"),
+            SelectExpr::new(Expr::lit(depth as i64), "depth"),
+        ],
+        from,
+        where_clause: None,
+        group_by: vec![],
+        order_by: vec![],
+        limit: None,
     }
 }
 
+fn edge_scan(alias: &str, type_filter: &Option<String>) -> TableRef {
+    match type_filter {
+        Some(tf) => TableRef::scan_with_filter(EDGE_TABLE, alias, tf),
+        None => TableRef::scan(EDGE_TABLE, alias),
+    }
+}
+
+fn single_type_filter(types: &[String]) -> Option<String> {
+    (types.len() == 1 && types[0] != "*").then(|| types[0].clone())
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Join building (FROM clause)
+// Join Building
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn build_joins(
@@ -304,122 +293,129 @@ fn build_joins(
     rels: &[InputRelationship],
     ontology: &Ontology,
 ) -> Result<(TableRef, HashMap<usize, String>)> {
-    let start = match rels.first() {
-        Some(rel) => node(nodes, &rel.from)?,
-        None => &nodes[0],
-    };
-
-    let start_table = table_name(ontology, entity(start)?)?;
+    let start = rels.first().map_or(&nodes[0], |r| {
+        nodes.iter().find(|n| n.id == r.from).unwrap_or(&nodes[0])
+    });
+    let start_table = resolve_table(ontology, start)?;
     let mut result = TableRef::scan(&start_table, &start.id);
     let mut edge_aliases = HashMap::new();
 
     for (i, rel) in rels.iter().enumerate() {
-        let edge_alias = format!("e{i}");
-        edge_aliases.insert(i, edge_alias.clone());
+        let target = find_node(nodes, &rel.to)?;
+        let target_table = resolve_table(ontology, target)?;
 
-        let type_filter = rel_type_filter(&rel.types);
+        if rel.max_hops > 1 {
+            // Multi-hop: UNION subquery
+            let alias = format!("hop_e{i}");
+            edge_aliases.insert(i, alias.clone());
 
-        let edge_cond = edge_join_condition(&rel.from, &edge_alias, rel.direction);
-        let edge_table = match &type_filter {
-            Some(tf) => TableRef::scan_with_filter(EDGE_TABLE, &edge_alias, tf),
-            None => TableRef::scan(EDGE_TABLE, &edge_alias),
-        };
-        result = TableRef::join(JoinType::Inner, result, edge_table, edge_cond);
+            let union = build_hop_union(rel, &alias);
+            let (from_col, to_col) = rel.direction.union_columns();
 
-        let target = node(nodes, &rel.to)?;
-        let target_table = table_name(ontology, entity(target)?)?;
-        let target_cond = target_join_condition(&edge_alias, &rel.to, rel.direction);
-        result = TableRef::join(
-            JoinType::Inner,
-            result,
-            TableRef::scan(&target_table, &rel.to),
-            target_cond,
-        );
+            result = TableRef::join(
+                JoinType::Inner,
+                result,
+                union,
+                Expr::eq(Expr::col(&rel.from, "id"), Expr::col(&alias, from_col)),
+            );
+            result = TableRef::join(
+                JoinType::Inner,
+                result,
+                TableRef::scan(&target_table, &rel.to),
+                Expr::eq(Expr::col(&alias, to_col), Expr::col(&rel.to, "id")),
+            );
+        } else {
+            // Single-hop: direct edge join
+            let alias = format!("e{i}");
+            edge_aliases.insert(i, alias.clone());
+
+            let edge = edge_scan(&alias, &single_type_filter(&rel.types));
+            result = TableRef::join(
+                JoinType::Inner,
+                result,
+                edge,
+                source_join_cond(&rel.from, &alias, rel.direction),
+            );
+            result = TableRef::join(
+                JoinType::Inner,
+                result,
+                TableRef::scan(&target_table, &rel.to),
+                target_join_cond(&alias, &rel.to, rel.direction),
+            );
+        }
     }
 
     Ok((result, edge_aliases))
 }
 
-fn rel_type_filter(types: &[String]) -> Option<String> {
-    if types.len() == 1 && types[0] != "*" {
-        Some(types[0].clone())
-    } else {
-        None
+/// Join from source node to edge table.
+fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
+    match dir {
+        Direction::Outgoing => Expr::eq(Expr::col(node, "id"), Expr::col(edge, "source_id")),
+        Direction::Incoming => Expr::eq(Expr::col(node, "id"), Expr::col(edge, "target_id")),
+        Direction::Both => Expr::or(
+            Expr::eq(Expr::col(node, "id"), Expr::col(edge, "source_id")),
+            Expr::eq(Expr::col(node, "id"), Expr::col(edge, "target_id")),
+        ),
     }
 }
 
-fn edge_join_condition(from_node: &str, edge_alias: &str, dir: Direction) -> Expr {
+/// Join from edge table to target node.
+fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
     match dir {
-        Direction::Outgoing => Expr::eq(
-            Expr::col(from_node, "id"),
-            Expr::col(edge_alias, "source_id"),
+        Direction::Outgoing => Expr::eq(Expr::col(edge, "target_id"), Expr::col(node, "id")),
+        Direction::Incoming => Expr::eq(Expr::col(edge, "source_id"), Expr::col(node, "id")),
+        Direction::Both => Expr::or(
+            Expr::eq(Expr::col(edge, "target_id"), Expr::col(node, "id")),
+            Expr::eq(Expr::col(edge, "source_id"), Expr::col(node, "id")),
         ),
-        Direction::Incoming => Expr::eq(
-            Expr::col(from_node, "id"),
-            Expr::col(edge_alias, "target_id"),
-        ),
-        Direction::Both => Expr::or_all([
-            Some(Expr::eq(
-                Expr::col(from_node, "id"),
-                Expr::col(edge_alias, "source_id"),
-            )),
-            Some(Expr::eq(
-                Expr::col(from_node, "id"),
-                Expr::col(edge_alias, "target_id"),
-            )),
-        ])
-        .expect("validated: or_all has elements"),
-    }
-}
-
-fn target_join_condition(edge_alias: &str, to_node: &str, dir: Direction) -> Expr {
-    match dir {
-        Direction::Outgoing => {
-            Expr::eq(Expr::col(edge_alias, "target_id"), Expr::col(to_node, "id"))
-        }
-        Direction::Incoming => {
-            Expr::eq(Expr::col(edge_alias, "source_id"), Expr::col(to_node, "id"))
-        }
-        Direction::Both => Expr::or_all([
-            Some(Expr::eq(
-                Expr::col(edge_alias, "target_id"),
-                Expr::col(to_node, "id"),
-            )),
-            Some(Expr::eq(
-                Expr::col(edge_alias, "source_id"),
-                Expr::col(to_node, "id"),
-            )),
-        ])
-        .expect("validated: or_all has elements"),
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WHERE clause building
+// WHERE Clause
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn build_where(
+fn build_full_where(
     nodes: &[InputNode],
     rels: &[InputRelationship],
     edge_aliases: &HashMap<usize, String>,
 ) -> Option<Expr> {
-    let mut conds = Vec::new();
+    let mut conds: Vec<Expr> = Vec::new();
 
+    // Node conditions: IDs, ranges, filters
     for node in nodes {
-        conds.extend(build_id_conditions(
-            &node.id,
-            &node.node_ids,
-            &node.id_range,
-        ));
+        conds.extend(id_filter(&node.id, "id", &node.node_ids));
+        if let Some(r) = &node.id_range {
+            conds.push(Expr::binary(
+                Op::Ge,
+                Expr::col(&node.id, "id"),
+                Expr::lit(r.start),
+            ));
+            conds.push(Expr::binary(
+                Op::Le,
+                Expr::col(&node.id, "id"),
+                Expr::lit(r.end),
+            ));
+        }
         for (prop, filter) in &node.filters {
-            conds.push(filter_to_expr(&node.id, prop, filter));
+            conds.push(filter_expr(&node.id, prop, filter));
         }
     }
 
+    // Edge filters
     for (i, rel) in rels.iter().enumerate() {
         if let Some(alias) = edge_aliases.get(&i) {
             for (prop, filter) in &rel.filters {
-                conds.push(filter_to_expr(alias, prop, filter));
+                conds.push(filter_expr(alias, prop, filter));
+            }
+            // min_hops filter for multi-hop
+            if rel.max_hops > 1 && rel.min_hops > 1 {
+                conds.push(Expr::binary(
+                    Op::Ge,
+                    Expr::col(alias, "depth"),
+                    Expr::lit(rel.min_hops as i64),
+                ));
             }
         }
     }
@@ -427,39 +423,18 @@ fn build_where(
     Expr::and_all(conds.into_iter().map(Some))
 }
 
-fn build_id_conditions(
-    table: &str,
-    ids: &[i64],
-    range: &Option<crate::input::InputIdRange>,
-) -> Vec<Expr> {
-    let mut conds = Vec::new();
-
+fn id_filter(table: &str, col: &str, ids: &[i64]) -> Option<Expr> {
     match ids.len() {
-        0 => {}
-        1 => conds.push(Expr::eq(Expr::col(table, "id"), Expr::lit(ids[0]))),
+        0 => None,
+        1 => Some(Expr::eq(Expr::col(table, col), Expr::lit(ids[0]))),
         _ => {
             let arr = Value::Array(ids.iter().map(|&id| Value::from(id)).collect());
-            conds.push(Expr::binary(Op::In, Expr::col(table, "id"), Expr::lit(arr)));
+            Some(Expr::binary(Op::In, Expr::col(table, col), Expr::lit(arr)))
         }
     }
-
-    if let Some(r) = range {
-        conds.push(Expr::binary(
-            Op::Ge,
-            Expr::col(table, "id"),
-            Expr::lit(r.start),
-        ));
-        conds.push(Expr::binary(
-            Op::Le,
-            Expr::col(table, "id"),
-            Expr::lit(r.end),
-        ));
-    }
-
-    conds
 }
 
-fn filter_to_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
+fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(table, column);
     let val = || Expr::Literal(filter.value.clone().unwrap_or(Value::Null));
 
@@ -470,49 +445,35 @@ fn filter_to_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
         Some(FilterOp::Gte) => Expr::binary(Op::Ge, col, val()),
         Some(FilterOp::Lte) => Expr::binary(Op::Le, col, val()),
         Some(FilterOp::In) => Expr::binary(Op::In, col, val()),
-        Some(FilterOp::Contains) => like_expr(col, filter, "%", "%"),
-        Some(FilterOp::StartsWith) => like_expr(col, filter, "", "%"),
-        Some(FilterOp::EndsWith) => like_expr(col, filter, "%", ""),
+        Some(FilterOp::Contains) => like_pattern(col, filter, "%", "%"),
+        Some(FilterOp::StartsWith) => like_pattern(col, filter, "", "%"),
+        Some(FilterOp::EndsWith) => like_pattern(col, filter, "%", ""),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
     }
 }
 
-fn like_expr(col: Expr, filter: &InputFilter, prefix: &str, suffix: &str) -> Expr {
+fn like_pattern(col: Expr, filter: &InputFilter, prefix: &str, suffix: &str) -> Expr {
     let s = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
     Expr::binary(Op::Like, col, Expr::lit(format!("{prefix}{s}{suffix}")))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ORDER BY building
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn build_order_by(order_by: &Option<crate::input::InputOrderBy>) -> Vec<OrderExpr> {
-    let Some(ob) = order_by else { return vec![] };
-    vec![OrderExpr {
-        expr: Expr::col(&ob.node, &ob.property),
-        desc: ob.direction == OrderDirection::Desc,
-    }]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn node<'a>(nodes: &'a [InputNode], id: &str) -> Result<&'a InputNode> {
+fn find_node<'a>(nodes: &'a [InputNode], id: &str) -> Result<&'a InputNode> {
     nodes
         .iter()
         .find(|n| n.id == id)
         .ok_or_else(|| QueryError::Lowering(format!("node '{id}' not found")))
 }
 
-fn entity(node: &InputNode) -> Result<&str> {
-    node.entity
+fn resolve_table(ontology: &Ontology, node: &InputNode) -> Result<String> {
+    let entity = node
+        .entity
         .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no entity", node.id)))
-}
-
-fn table_name(ontology: &Ontology, entity: &str) -> Result<String> {
+        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no entity", node.id)))?;
     Ok(ontology.table_name(entity)?)
 }
 
@@ -646,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lower_multi_hop() {
+    fn test_lower_multi_relationship() {
         let input = validated_input(
             r#"{
             "query_type": "traversal",
@@ -672,8 +633,167 @@ mod tests {
             match t {
                 TableRef::Join { left, right, .. } => 1 + count_joins(left) + count_joins(right),
                 TableRef::Scan { .. } => 0,
+                TableRef::Union { .. } => 0,
             }
         }
         assert!(count_joins(&q.from) >= 4);
+    }
+
+    /// Count union subqueries in a table reference tree
+    fn count_unions(table_ref: &TableRef) -> usize {
+        match table_ref {
+            TableRef::Union { .. } => 1,
+            TableRef::Join { left, right, .. } => count_unions(left) + count_unions(right),
+            TableRef::Scan { .. } => 0,
+        }
+    }
+
+    /// Find union with a specific alias
+    fn find_union_alias(table_ref: &TableRef, alias: &str) -> bool {
+        match table_ref {
+            TableRef::Union { alias: a, .. } => a == alias,
+            TableRef::Join { left, right, .. } => {
+                find_union_alias(left, alias) || find_union_alias(right, alias)
+            }
+            TableRef::Scan { .. } => false,
+        }
+    }
+
+    #[test]
+    fn test_lower_variable_length_path() {
+        let input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "min_hops": 1,
+                "max_hops": 3
+            }],
+            "limit": 25
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+        println!("{:?}", q);
+
+        // Should have a union subquery for the multi-hop relationship
+        assert_eq!(
+            count_unions(&q.from),
+            1,
+            "expected one union subquery for multi-hop"
+        );
+        assert!(
+            find_union_alias(&q.from, "hop_e0"),
+            "expected union with alias hop_e0"
+        );
+    }
+
+    #[test]
+    fn test_lower_variable_length_with_min_hops() {
+        let input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "min_hops": 2,
+                "max_hops": 3
+            }],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+        println!("{:?}", q);
+
+        // Should have a union subquery for the multi-hop relationship
+        assert_eq!(count_unions(&q.from), 1);
+        // Should have a WHERE clause that includes depth >= 2
+        assert!(
+            q.where_clause.is_some(),
+            "expected min_hops filter in WHERE"
+        );
+    }
+
+    #[test]
+    fn test_lower_mixed_single_and_multi_hop() {
+        let input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "n"},
+                {"type": "CONTAINS", "from": "p", "to": "n", "min_hops": 1, "max_hops": 2}
+            ],
+            "limit": 20
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+        println!("{:?}", q);
+
+        // Should have one union subquery for the second relationship (multi-hop)
+        assert_eq!(
+            count_unions(&q.from),
+            1,
+            "expected one union subquery for multi-hop relationship"
+        );
+        assert!(
+            find_union_alias(&q.from, "hop_e1"),
+            "expected union with alias hop_e1 for second relationship"
+        );
+    }
+
+    #[test]
+    fn test_lower_single_hop_no_union() {
+        let input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{
+                "type": "AUTHORED",
+                "from": "u",
+                "to": "n",
+                "min_hops": 1,
+                "max_hops": 1
+            }],
+            "limit": 25
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Single hop should NOT generate a union subquery
+        assert_eq!(
+            count_unions(&q.from),
+            0,
+            "single hop should not generate union subquery"
+        );
     }
 }

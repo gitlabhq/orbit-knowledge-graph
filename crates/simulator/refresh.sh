@@ -10,7 +10,14 @@ echo "Stopping and removing existing container..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 echo "Removing data volume for fresh start..."
-docker volume rm "$VOLUME_NAME" 2>/dev/null || true
+docker volume rm -f "$VOLUME_NAME" 2>/dev/null || true
+
+# Force prune to ensure Colima VM properly cleans up
+echo "Pruning unused volumes..."
+docker volume prune -f >/dev/null 2>&1 || true
+
+# Pause to ensure Colima VM syncs the deletion
+sleep 3
 
 echo "Starting ClickHouse 25.12..."
 docker run -d --name "$CONTAINER_NAME" \

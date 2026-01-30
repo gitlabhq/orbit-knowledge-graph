@@ -370,20 +370,14 @@ mod tests {
 #[cfg(test)]
 mod ontology_integration_tests {
     use super::*;
-    use std::path::Path;
+    use ontology::Ontology;
 
     fn test_ctx() -> SecurityContext {
         SecurityContext::new(1, vec!["1/".into()]).unwrap()
     }
 
     fn load_test_ontology() -> Ontology {
-        let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/ontology");
-        Ontology::load_from_dir(&fixtures_dir).expect("Failed to load test ontology")
+        Ontology::load_embedded().expect("Failed to load test ontology")
     }
 
     #[test]
@@ -524,5 +518,144 @@ mod ontology_integration_tests {
         assert!(result.sql.contains("_gkg_u_type"));
         assert!(result.sql.contains("_gkg_p_id"));
         assert!(result.sql.contains("_gkg_p_type"));
+    }
+
+    #[test]
+    fn multi_hop_traversal_generates_union_subquery() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "min_hops": 1,
+                "max_hops": 3
+            }],
+            "limit": 25
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Multi-hop SQL: {}", result.sql);
+
+        // Should generate a union subquery with multiple arms (one per hop count)
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "expected UNION ALL for unrolled multi-hop: {}",
+            result.sql
+        );
+        // Should have the hop_e0 union subquery aliased
+        assert!(
+            result.sql.contains("AS hop_e0"),
+            "expected hop_e0 subquery alias: {}",
+            result.sql
+        );
+        // Should have depth column for filtering
+        assert!(
+            result.sql.contains("AS depth"),
+            "expected depth column: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn multi_hop_with_min_hops_filter() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "min_hops": 2,
+                "max_hops": 3
+            }],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Min-hops SQL: {}", result.sql);
+
+        // Should have depth >= 2 filter
+        assert!(
+            result.sql.contains("hop_e0.depth"),
+            "expected depth reference: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn single_hop_does_not_generate_cte() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{
+                "type": "AUTHORED",
+                "from": "u",
+                "to": "n",
+                "min_hops": 1,
+                "max_hops": 1
+            }],
+            "limit": 25
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Single-hop SQL: {}", result.sql);
+
+        // Should NOT generate a recursive CTE for single hop
+        assert!(
+            !result.sql.contains("WITH RECURSIVE"),
+            "single hop should not generate CTE: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn multi_hop_aggregation() {
+        let json = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "min_hops": 1,
+                "max_hops": 2
+            }],
+            "aggregations": [{"function": "count", "target": "p", "group_by": "u", "alias": "project_count"}],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Multi-hop aggregation SQL: {}", result.sql);
+
+        // Should generate union subquery for multi-hop in aggregation queries
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "aggregation should support multi-hop with union: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("AS hop_e0"),
+            "expected hop_e0 subquery alias: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("COUNT"),
+            "expected COUNT in query: {}",
+            result.sql
+        );
     }
 }

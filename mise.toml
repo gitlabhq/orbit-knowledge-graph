@@ -13,6 +13,7 @@ GITALY_PROTO_ROOT = "~/gitlab/gdk/gitaly"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "sccache" = "0.13.0"
 "tilt" = "0.36.1"
+clickhouse = "latest"
 
 [tasks.build]
 run = "cargo build --release"

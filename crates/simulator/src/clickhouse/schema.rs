@@ -66,10 +66,10 @@ impl<'a> SchemaGenerator<'a> {
 
         for node in self.ontology.nodes() {
             let tbl_name = self.ontology.table_name(&node.name).unwrap();
-            drops.push(format!("DROP TABLE IF EXISTS {}", tbl_name));
+            drops.push(format!("DROP TABLE IF EXISTS {} SYNC", tbl_name));
         }
 
-        drops.push(format!("DROP TABLE IF EXISTS {}", EDGE_TABLE));
+        drops.push(format!("DROP TABLE IF EXISTS {} SYNC", EDGE_TABLE));
         drops
     }
 
