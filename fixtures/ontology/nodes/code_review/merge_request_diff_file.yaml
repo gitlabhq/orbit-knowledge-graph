@@ -86,5 +86,5 @@ etl:
   edges:
     merge_request_diff_id:
       to: MergeRequestDiff
-      as: has_file
+      as: HAS_FILE
       direction: incoming

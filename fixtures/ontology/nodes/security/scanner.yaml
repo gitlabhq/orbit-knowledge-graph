@@ -52,5 +52,5 @@ etl:
   edges:
     project_id:
       to: Project
-      as: scans
+      as: SCANS
       direction: outgoing

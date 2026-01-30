@@ -58,5 +58,5 @@ etl:
   edges:
     project_id:
       to: Project
-      as: in_project
+      as: IN_PROJECT
       direction: outgoing

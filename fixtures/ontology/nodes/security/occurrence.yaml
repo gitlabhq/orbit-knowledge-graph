@@ -124,17 +124,17 @@ etl:
   edges:
     project_id:
       to: Project
-      as: in_project
+      as: IN_PROJECT
       direction: outgoing
     scanner_id:
       to: Scanner
-      as: detected_by
+      as: DETECTED_BY
       direction: outgoing
     primary_identifier_id:
       to: VulnerabilityIdentifier
-      as: has_identifier
+      as: HAS_IDENTIFIER
       direction: outgoing
     vulnerability_id:
       to: Vulnerability
-      as: occurrence_of
+      as: OCCURRENCE_OF
       direction: outgoing

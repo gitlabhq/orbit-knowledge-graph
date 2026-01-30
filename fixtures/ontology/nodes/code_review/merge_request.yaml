@@ -115,32 +115,32 @@ etl:
   edges:
     target_project_id:
       to: Project
-      as: in_project
+      as: IN_PROJECT
       direction: outgoing
     author_id:
       to: User
-      as: authored
+      as: AUTHORED
       direction: incoming
     merge_user_id:
       to: User
-      as: merged_by
+      as: MERGED_BY
       direction: incoming
     milestone_id:
       to: Milestone
-      as: in_milestone
+      as: IN_MILESTONE
       direction: outgoing
     assignee_ids:
       to: User
-      as: assigned
+      as: ASSIGNED
       direction: incoming
       delimiter: "/"
     label_ids:
       to: Label
-      as: has_label
+      as: HAS_LABEL
       direction: outgoing
       delimiter: "/"
     approver_ids:
       to: User
-      as: reviewer
+      as: REVIEWER
       direction: outgoing
       delimiter: "/"

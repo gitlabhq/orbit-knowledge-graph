@@ -81,6 +81,6 @@ async fn namespace_handler_processes_labels_with_edges() {
     assert_eq!(colors.value(1), "#00ff00");
     assert_eq!(colors.value(2), "#0000ff");
 
-    assert_edge_count(&context, "in_project", "Label", "Project", 2).await;
-    assert_edge_count(&context, "in_group", "Label", "Group", 1).await;
+    assert_edge_count(&context, "IN_PROJECT", "Label", "Project", 2).await;
+    assert_edge_count(&context, "IN_GROUP", "Label", "Group", 1).await;
 }

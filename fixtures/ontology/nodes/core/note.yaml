@@ -105,10 +105,10 @@ etl:
   edges:
     author_id:
       to: User
-      as: authored
+      as: AUTHORED
       direction: incoming
     noteable_id:
       to_column: noteable_type
-      as: has_note
+      as: HAS_NOTE
       direction: incoming
 

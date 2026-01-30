@@ -157,13 +157,13 @@ etl:
   edges:
     project_id:
       to: Project
-      as: in_project
+      as: IN_PROJECT
       direction: outgoing
     stage_id:
       to: Stage
-      as: has_job
+      as: HAS_JOB
       direction: incoming
     user_id:
       to: User
-      as: triggered
+      as: TRIGGERED
       direction: incoming
