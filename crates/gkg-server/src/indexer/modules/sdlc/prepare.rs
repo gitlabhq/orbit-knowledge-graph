@@ -137,15 +137,15 @@ fn build_edge_extract_query(config: &EdgeSourceEtlConfig) -> String {
         format!("{} AS _deleted", config.deleted),
     ];
 
-    if let EdgeEndpointType::Column(ref col) = config.from.node_type
-        && !columns.contains(col)
+    if let EdgeEndpointType::Column { column, .. } = &config.from.node_type
+        && !columns.contains(column)
     {
-        columns.push(col.clone());
+        columns.push(column.clone());
     }
-    if let EdgeEndpointType::Column(ref col) = config.to.node_type
-        && !columns.contains(col)
+    if let EdgeEndpointType::Column { column, .. } = &config.to.node_type
+        && !columns.contains(column)
     {
-        columns.push(col.clone());
+        columns.push(column.clone());
     }
 
     let namespace_filter = if config.scope == EtlScope::Namespaced {
@@ -176,16 +176,35 @@ fn prepare_endpoint(
         EdgeEndpointType::Literal(node_type) => {
             (id_column, SqlExpr::Literal(node_type.clone()), None)
         }
-        EdgeEndpointType::Column(type_column) => {
+        EdgeEndpointType::Column {
+            column,
+            type_mapping,
+        } => {
             let allowed_types = if is_source {
                 ontology.get_edge_source_types(relationship_kind)
             } else {
                 ontology.get_edge_all_target_types(relationship_kind)
             };
-            let type_filter = build_type_filter(type_column, &allowed_types);
-            (id_column, SqlExpr::Column(type_column.clone()), type_filter)
+            let type_filter = build_type_filter(column, &allowed_types);
+            let sql_expr = build_type_column_expr(column, type_mapping);
+            (id_column, sql_expr, type_filter)
         }
     }
+}
+
+fn build_type_column_expr(
+    column: &str,
+    type_mapping: &std::collections::BTreeMap<String, String>,
+) -> SqlExpr {
+    if type_mapping.is_empty() {
+        return SqlExpr::Column(column.to_string());
+    }
+
+    let cases: Vec<String> = type_mapping
+        .iter()
+        .map(|(from, to)| format!("WHEN {} = '{}' THEN '{}'", column, from, to))
+        .collect();
+    SqlExpr::Column(format!("CASE {} ELSE {} END", cases.join(" "), column))
 }
 
 fn build_extract_query(node: &NodeEntity, etl: &EtlConfig) -> Option<String> {
@@ -495,5 +514,66 @@ mod tests {
     #[test]
     fn sql_expr_column() {
         assert_eq!(SqlExpr::Column("type".to_string()).to_sql(), "type");
+    }
+
+    #[test]
+    fn build_type_column_expr_no_mapping() {
+        let type_mapping = BTreeMap::new();
+        let expr = build_type_column_expr("source_type", &type_mapping);
+        assert_eq!(expr, SqlExpr::Column("source_type".to_string()));
+    }
+
+    #[test]
+    fn build_type_column_expr_with_mapping() {
+        let mut type_mapping = BTreeMap::new();
+        type_mapping.insert("Namespace".to_string(), "Group".to_string());
+        type_mapping.insert("Project".to_string(), "Project".to_string());
+
+        let expr = build_type_column_expr("source_type", &type_mapping);
+
+        let sql = expr.to_sql();
+        assert!(sql.contains("CASE"));
+        assert!(sql.contains("WHEN source_type = 'Namespace' THEN 'Group'"));
+        assert!(sql.contains("WHEN source_type = 'Project' THEN 'Project'"));
+        assert!(sql.contains("ELSE source_type END"));
+    }
+
+    #[test]
+    fn prepared_edge_etl_with_type_mapping() {
+        use ontology::{EdgeEndpoint, EdgeEndpointType, EdgeSourceEtlConfig};
+
+        let mut type_mapping = BTreeMap::new();
+        type_mapping.insert("Namespace".to_string(), "Group".to_string());
+        type_mapping.insert("Project".to_string(), "Project".to_string());
+
+        let config = EdgeSourceEtlConfig {
+            scope: EtlScope::Namespaced,
+            source: "siphon_members".to_string(),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            from: EdgeEndpoint {
+                id_column: "user_id".to_string(),
+                node_type: EdgeEndpointType::Literal("User".to_string()),
+            },
+            to: EdgeEndpoint {
+                id_column: "source_id".to_string(),
+                node_type: EdgeEndpointType::Column {
+                    column: "source_type".to_string(),
+                    type_mapping,
+                },
+            },
+        };
+
+        let ontology = Ontology::new()
+            .with_nodes(["User", "Group", "Project"])
+            .with_edges(["MEMBER_OF"]);
+
+        let prepared = PreparedEdgeEtl::from_config("MEMBER_OF", &config, &ontology);
+
+        assert_eq!(prepared.source_kind, SqlExpr::Literal("User".to_string()));
+
+        let target_sql = prepared.target_kind.to_sql();
+        assert!(target_sql.contains("CASE"));
+        assert!(target_sql.contains("WHEN source_type = 'Namespace' THEN 'Group'"));
     }
 }

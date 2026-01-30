@@ -126,3 +126,76 @@ async fn namespace_handler_creates_group_edges() {
         "should have 1 parent-child edge (100 contains 101)"
     );
 }
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_creates_member_of_edges_for_groups() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespace_details (namespace_id, description)
+            VALUES (100, 'Organization 1')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_users (id, email, username, name, state, organization_id, _siphon_replicated_at)
+            VALUES
+            (1, 'user1@example.com', 'user1', 'User One', 'active', 1, '2024-01-15 12:00:00'),
+            (2, 'user2@example.com', 'user2', 'User Two', 'active', 1, '2024-01-15 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_members (id, access_level, source_id, source_type, user_id, state, traversal_path, _siphon_replicated_at)
+            VALUES
+            (1, 50, 100, 'Namespace', 1, 0, '1/100/', '2024-01-20 12:00:00'),
+            (2, 30, 100, 'Namespace', 2, 0, '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let namespace_handler = get_namespace_handler(&context).await;
+    let watermark = default_test_watermark();
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    let member_edges = context
+        .query("SELECT source_id, target_id, source_kind, target_kind FROM gl_edges WHERE relationship_kind = 'MEMBER_OF' AND target_kind = 'Group' ORDER BY source_id")
+        .await;
+
+    assert!(!member_edges.is_empty(), "member_of edges should exist");
+    let batch = &member_edges[0];
+    assert_eq!(
+        batch.num_rows(),
+        2,
+        "should have 2 member_of edges for group"
+    );
+
+    let source_kind = get_string_column(batch, "source_kind");
+    let target_kind = get_string_column(batch, "target_kind");
+    assert_eq!(source_kind.value(0), "User");
+    assert_eq!(target_kind.value(0), "Group");
+}
