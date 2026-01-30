@@ -18,3 +18,15 @@ variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }
     description: "Work item contains child work item (e.g., epic contains issue, epic contains epic, etc.)."
+
+etl:
+  scope: namespaced
+  source: siphon_work_item_parent_links
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  from:
+    id: work_item_parent_id
+    type: WorkItem
+  to:
+    id: work_item_id
+    type: WorkItem

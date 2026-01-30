@@ -4,8 +4,8 @@ use etl_engine::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, create_namespace_payload, default_test_watermark, get_namespace_handler,
-    get_string_column,
+    TestContext, assert_edge_count, create_namespace_payload, default_test_watermark,
+    get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -117,4 +117,81 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
         1,
         "only MR 1 has a milestone"
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_merge_requests_closing_issues() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_issues (id, title, project_id, author_id, state_id, work_item_type_id, _siphon_replicated_at)
+            VALUES
+                (1, 'Bug: Login fails', 1000, 1, 1, 0, '2024-01-20 12:00:00'),
+                (2, 'Bug: Signup broken', 1000, 1, 1, 0, '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO hierarchy_work_items
+                (id, title, author_id, state_id, work_item_type_id, confidential,
+                 namespace_id, traversal_path, version, custom_status_id, system_defined_status_id)
+            VALUES
+                (1, 'Bug: Login fails', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0),
+                (2, 'Bug: Signup broken', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0)",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO hierarchy_merge_requests
+                (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+                 draft, squash, target_project_id, author_id, traversal_path, version)
+            VALUES
+                (10, 101, 'Fix login bug', 'Fixes login issue', 'fix-login', 'main', 3, 'merged',
+                 false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),
+                (20, 102, 'Fix signup bug', 'Fixes signup issue', 'fix-signup', 'main', 3, 'merged',
+                 false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_merge_requests_closing_issues
+                (id, merge_request_id, issue_id, project_id, traversal_path,
+                 created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 10, 1, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 20, 2, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let namespace_handler = get_namespace_handler(&context).await;
+    let watermark = default_test_watermark();
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    assert_edge_count(&context, "CLOSES", "MergeRequest", "WorkItem", 2).await;
 }

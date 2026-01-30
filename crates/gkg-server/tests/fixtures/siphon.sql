@@ -743,3 +743,113 @@ CREATE TABLE IF NOT EXISTS siphon_p_ci_builds
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id, partition_id)
 ORDER BY (traversal_path, id, partition_id);
+
+-- Siphon source tables for vulnerability merge request links (join table)
+CREATE TABLE IF NOT EXISTS siphon_vulnerability_merge_request_links
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `vulnerability_id` Int64,
+    `merge_request_id` Int64,
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `project_id` Int64,
+    `vulnerability_occurrence_id` Nullable(Int64),
+    `readiness_score` Nullable(Float64),
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for merge requests closing issues (join table)
+CREATE TABLE IF NOT EXISTS siphon_merge_requests_closing_issues
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `merge_request_id` Int64,
+    `issue_id` Int64,
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `from_mr_description` Bool DEFAULT true CODEC(ZSTD(1)),
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for work item parent links (join table)
+CREATE TABLE IF NOT EXISTS siphon_work_item_parent_links
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `work_item_id` Int64,
+    `work_item_parent_id` Int64,
+    `relative_position` Nullable(Int64),
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `namespace_id` Int64,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for issue links (join table)
+CREATE TABLE IF NOT EXISTS siphon_issue_links
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `source_id` Int64,
+    `target_id` Int64,
+    `created_at` Nullable(DateTime64(6, 'UTC')) CODEC(Delta, ZSTD(1)),
+    `updated_at` Nullable(DateTime64(6, 'UTC')) CODEC(Delta, ZSTD(1)),
+    `link_type` Int8 DEFAULT 0,
+    `namespace_id` Int64,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for vulnerability occurrence identifiers (join table)
+CREATE TABLE IF NOT EXISTS siphon_vulnerability_occurrence_identifiers
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `occurrence_id` Int64,
+    `identifier_id` Int64,
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';

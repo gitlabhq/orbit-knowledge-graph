@@ -643,3 +643,186 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     )
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_vulnerability_merge_request_links() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
+            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
+            VALUES (1000, '1/100/1000/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_vulnerabilities
+                (id, title, project_id, author_id, state, severity, report_type, uuid,
+                 traversal_path, created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 'SQL Injection', 1000, 1, 0, 5, 0, 'vuln-uuid-001',
+                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 'XSS Vulnerability', 1000, 1, 0, 4, 0, 'vuln-uuid-002',
+                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO hierarchy_merge_requests
+                (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+                 draft, squash, target_project_id, author_id, traversal_path, version)
+            VALUES
+                (10, 101, 'Fix SQL injection', 'Fixes the vulnerability', 'fix-sql', 'main', 3, 'merged',
+                 false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),
+                (20, 102, 'Fix XSS', 'Fixes XSS issue', 'fix-xss', 'main', 3, 'merged',
+                 false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_vulnerability_merge_request_links
+                (id, vulnerability_id, merge_request_id, project_id, traversal_path,
+                 created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 1, 10, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 2, 20, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let namespace_handler = get_namespace_handler(&context).await;
+    let watermark = default_test_watermark();
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    assert_edge_count(&context, "FIXES", "MergeRequest", "Vulnerability", 2).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
+            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
+            VALUES (1000, '1/100/1000/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_vulnerability_scanners
+                (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+            VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_vulnerability_identifiers
+                (id, external_type, external_id, name, url, fingerprint, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 'cve', 'CVE-2021-44228', 'Log4Shell', 'https://nvd.nist.gov/vuln/detail/CVE-2021-44228', 'fp1', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 'cwe', 'CWE-89', 'SQL Injection', 'https://cwe.mitre.org/data/definitions/89.html', 'fp2', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (3, 'cve', 'CVE-2022-12345', 'Another CVE', 'https://nvd.nist.gov/vuln/detail/CVE-2022-12345', 'fp3', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_vulnerability_occurrences
+                (id, uuid, name, severity, report_type, detection_method, project_id, scanner_id,
+                 primary_identifier_id, metadata_version, location, location_fingerprint,
+                 traversal_path, created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 'occurrence-uuid-001', 'SQL Injection', 5, 0, 0, 1000, 1, 1, '1.0', 'src/main.rs:42', 'fp-loc-1',
+                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 'occurrence-uuid-002', 'XSS Vulnerability', 4, 0, 0, 1000, 1, 2, '1.0', 'src/web.rs:100', 'fp-loc-2',
+                 '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_vulnerability_occurrence_identifiers
+                (id, occurrence_id, identifier_id, project_id, traversal_path,
+                 created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 1, 1, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 1, 2, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (3, 2, 3, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let namespace_handler = get_namespace_handler(&context).await;
+    let watermark = default_test_watermark();
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    assert_edge_count(
+        &context,
+        "HAS_IDENTIFIER",
+        "VulnerabilityOccurrence",
+        "VulnerabilityIdentifier",
+        3,
+    )
+    .await;
+}

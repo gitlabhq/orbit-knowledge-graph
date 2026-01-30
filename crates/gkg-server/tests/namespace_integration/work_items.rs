@@ -4,8 +4,8 @@ use etl_engine::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, create_namespace_payload, default_test_watermark, get_namespace_handler,
-    get_string_column,
+    TestContext, assert_edge_count, create_namespace_payload, default_test_watermark,
+    get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -215,4 +215,139 @@ async fn namespace_handler_processes_work_item_multi_target_edges() {
         2,
         "work item should have 2 label edges (5, 6)"
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_work_item_parent_links() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_issues (id, title, project_id, author_id, state_id, work_item_type_id, _siphon_replicated_at)
+            VALUES
+                (1, 'Epic: Q1 Goals', 1000, 1, 1, 7, '2024-01-20 12:00:00'),
+                (2, 'Task: Design review', 1000, 1, 1, 4, '2024-01-20 12:00:00'),
+                (3, 'Task: Implementation', 1000, 1, 1, 4, '2024-01-20 12:00:00'),
+                (4, 'Sub-task: Frontend', 1000, 1, 1, 4, '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO hierarchy_work_items
+                (id, title, author_id, state_id, work_item_type_id, confidential,
+                 namespace_id, traversal_path, version, custom_status_id, system_defined_status_id)
+            VALUES
+                (1, 'Epic: Q1 Goals', 1, 1, 7, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0),
+                (2, 'Task: Design review', 1, 1, 4, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0),
+                (3, 'Task: Implementation', 1, 1, 4, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0),
+                (4, 'Sub-task: Frontend', 1, 1, 4, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0)",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_work_item_parent_links
+                (id, work_item_id, work_item_parent_id, namespace_id, traversal_path,
+                 created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 2, 1, 100, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 3, 1, 100, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (3, 4, 3, 100, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let namespace_handler = get_namespace_handler(&context).await;
+    let watermark = default_test_watermark();
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    assert_edge_count(&context, "CONTAINS", "WorkItem", "WorkItem", 3).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn namespace_handler_processes_issue_links() {
+    let context = TestContext::new().await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path)
+            VALUES (100, '1/100/')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_issues (id, title, project_id, author_id, state_id, work_item_type_id, _siphon_replicated_at)
+            VALUES
+                (1, 'Issue A', 1000, 1, 1, 0, '2024-01-20 12:00:00'),
+                (2, 'Issue B', 1000, 1, 1, 0, '2024-01-20 12:00:00'),
+                (3, 'Issue C', 1000, 1, 1, 0, '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO hierarchy_work_items
+                (id, title, author_id, state_id, work_item_type_id, confidential,
+                 namespace_id, traversal_path, version, custom_status_id, system_defined_status_id)
+            VALUES
+                (1, 'Issue A', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0),
+                (2, 'Issue B', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0),
+                (3, 'Issue C', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0)",
+        )
+        .await;
+
+    context
+        .execute(
+            "INSERT INTO siphon_issue_links
+                (id, source_id, target_id, link_type, namespace_id, traversal_path,
+                 created_at, updated_at, _siphon_replicated_at)
+            VALUES
+                (1, 1, 2, 0, 100, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+                (2, 2, 3, 1, 100, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+        )
+        .await;
+
+    let namespace_handler = get_namespace_handler(&context).await;
+    let watermark = default_test_watermark();
+
+    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
+    let handler_context = context.create_handler_context();
+
+    namespace_handler
+        .handle(handler_context, envelope)
+        .await
+        .expect("handler should succeed");
+
+    assert_edge_count(&context, "RELATED_TO", "WorkItem", "WorkItem", 2).await;
 }
