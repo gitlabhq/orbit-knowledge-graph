@@ -157,6 +157,8 @@ integration-test:
   extends:
     - .test-template
     - .mr-and-main-rules
+  tags:
+    - saas-linux-large-amd64
   services:
     - docker:dind
   variables:
@@ -167,7 +169,7 @@ integration-test:
   before_script:
     - !reference [.sccache-template, before_script]
   script:
-    - cargo nextest run --profile ci --all-features --test '*' -j 1 --ignore-default-filter -E 'not package(gitaly-client)'
+    - cargo nextest run --profile ci --all-features --test '*' -j 16 --ignore-default-filter -E 'not package(gitaly-client)'
     - sccache --show-stats || true
 
 gitaly-integration-test:
