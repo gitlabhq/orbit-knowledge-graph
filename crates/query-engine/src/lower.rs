@@ -15,14 +15,14 @@ use std::collections::{HashMap, HashSet};
 /// Lower validated input into an AST node.
 pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
     match input.query_type {
-        QueryType::Traversal | QueryType::Pattern => lower_traversal(input, ontology),
+        QueryType::Traversal | QueryType::Search => lower_traversal(input, ontology),
         QueryType::Aggregation => lower_aggregation(input, ontology),
         QueryType::PathFinding => lower_path_finding(input, ontology),
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Traversal & Aggregation
+// Traversal & Search
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
@@ -830,5 +830,55 @@ mod tests {
             0,
             "single hop should not generate union subquery"
         );
+    }
+
+    #[test]
+    fn test_lower_search() {
+        let input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "filters": {
+                    "username": {"op": "starts_with", "value": "admin"},
+                    "state": {"op": "in", "value": ["active", "blocked"]}
+                }
+            },
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+        println!("{:?}", q);
+
+        assert_eq!(q.limit, Some(10));
+        assert_eq!(q.select.len(), 1);
+        assert!(q.where_clause.is_some());
+        assert!(q.group_by.is_empty());
+        assert_eq!(count_unions(&q.from), 0);
+    }
+
+    #[test]
+    fn test_lower_search_simple() {
+        let input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {
+                "id": "p",
+                "entity": "Project"
+            },
+            "limit": 50
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert_eq!(q.limit, Some(50));
+        assert_eq!(q.select.len(), 1);
     }
 }

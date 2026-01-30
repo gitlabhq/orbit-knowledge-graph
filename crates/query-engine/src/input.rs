@@ -13,6 +13,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
     pub query_type: QueryType,
+    #[serde(flatten, deserialize_with = "deserialize_nodes_or_node")]
     pub nodes: Vec<InputNode>,
     #[serde(default)]
     pub relationships: Vec<InputRelationship>,
@@ -25,6 +26,32 @@ pub struct Input {
     pub aggregation_sort: Option<InputAggSort>,
 }
 
+fn deserialize_nodes_or_node<'de, D>(deserializer: D) -> Result<Vec<InputNode>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct Helper {
+        #[serde(default)]
+        node: Option<InputNode>,
+        #[serde(default)]
+        nodes: Option<Vec<InputNode>>,
+    }
+
+    let helper = Helper::deserialize(deserializer)?;
+
+    match (helper.node, helper.nodes) {
+        (Some(node), None) => Ok(vec![node]),
+        (None, Some(nodes)) => Ok(nodes),
+        (Some(_), Some(_)) => Err(serde::de::Error::custom(
+            "cannot specify both 'node' and 'nodes'",
+        )),
+        (None, None) => Err(serde::de::Error::custom(
+            "must specify either 'node' or 'nodes'",
+        )),
+    }
+}
+
 fn default_limit() -> u32 {
     30
 }
@@ -33,9 +60,9 @@ fn default_limit() -> u32 {
 #[serde(rename_all = "snake_case")]
 pub enum QueryType {
     Traversal,
-    Pattern,
     Aggregation,
     PathFinding,
+    Search,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -393,5 +420,20 @@ mod tests {
         assert_eq!(input.limit, 30);
         assert!(input.relationships.is_empty());
         assert!(input.aggregations.is_empty());
+    }
+
+    #[test]
+    fn search_with_single_node() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "filters": {"username": "admin"}}
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.query_type, QueryType::Search);
+        assert_eq!(input.nodes.len(), 1);
+        assert_eq!(input.nodes[0].id, "u");
     }
 }
