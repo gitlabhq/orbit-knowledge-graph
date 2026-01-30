@@ -1,9 +1,10 @@
 //! CLI for query evaluation.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::Parser;
 use ontology::Ontology;
 use simulator::Config;
+use simulator::clickhouse::check_clickhouse_health;
 use simulator::evaluation::{QueryExecutor, Report, ReportFormat, load_queries};
 use std::path::PathBuf;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -149,33 +150,4 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Check that ClickHouse is running and healthy.
-async fn check_clickhouse_health(client: &clickhouse_client::ArrowClickHouseClient) -> Result<()> {
-    // Try a simple query to verify connectivity
-    let result: Result<String, _> = client.inner().query("SELECT version()").fetch_one().await;
-
-    match result {
-        Ok(version) => {
-            tracing::debug!("ClickHouse version: {}", version);
-            Ok(())
-        }
-        Err(e) => {
-            let error_msg = e.to_string();
-
-            if error_msg.contains("Connect") || error_msg.contains("connection") {
-                bail!(
-                    "Cannot connect to ClickHouse.\n\n\
-                     Make sure ClickHouse is running:\n\
-                     - Docker: docker run -d -p 8123:8123 clickhouse/clickhouse-server\n\
-                     - Local: clickhouse-server\n\n\
-                     Error: {}",
-                    error_msg
-                );
-            } else {
-                bail!("ClickHouse health check failed: {}", error_msg)
-            }
-        }
-    }
 }

@@ -1,9 +1,11 @@
 //! Report generation for evaluation results.
 
 use super::ExecutionResult;
-use super::error::ErrorCategory;
 use serde::{Deserialize, Serialize};
+use sqlformat::{FormatOptions, QueryParams};
 use std::time::Duration;
+use tabled::settings::Style;
+use tabled::{Table, Tabled};
 
 /// Output format for reports.
 #[derive(Debug, Clone, Copy, Default)]
@@ -39,8 +41,55 @@ pub struct Summary {
     pub avg_time: Duration,
     pub min_time: Duration,
     pub max_time: Duration,
-    /// Breakdown of failures by error category.
     pub errors_by_category: std::collections::HashMap<String, usize>,
+}
+
+/// Wrapper for Duration to display as seconds.
+struct DurationSecs(Duration);
+
+impl std::fmt::Display for DurationSecs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.2}s", self.0.as_secs_f64())
+    }
+}
+
+/// Wrapper for Duration to display as milliseconds.
+struct DurationMs(Duration);
+
+impl std::fmt::Display for DurationMs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.2}ms", self.0.as_secs_f64() * 1000.0)
+    }
+}
+
+/// Display row for the summary table.
+#[derive(Tabled)]
+struct SummaryRow {
+    total_queries: usize,
+    successful: usize,
+    failed: usize,
+    empty_results: usize,
+    total_rows: u64,
+    total_time: DurationSecs,
+    avg_time: DurationMs,
+    min_time: DurationMs,
+    max_time: DurationMs,
+}
+
+impl SummaryRow {
+    fn from_summary(summary: &Summary) -> Self {
+        Self {
+            total_queries: summary.total_queries,
+            successful: summary.successful,
+            failed: summary.failed,
+            empty_results: summary.empty_results,
+            total_rows: summary.total_rows,
+            total_time: DurationSecs(summary.total_time),
+            avg_time: DurationMs(summary.avg_time),
+            min_time: DurationMs(summary.min_time),
+            max_time: DurationMs(summary.max_time),
+        }
+    }
 }
 
 impl Summary {
@@ -115,159 +164,56 @@ impl Report {
     pub fn to_text(&self) -> String {
         let mut output = String::new();
 
-        output.push_str("═══════════════════════════════════════════════════════════════════\n");
-        output.push_str("                    QUERY EVALUATION REPORT\n");
-        output.push_str("═══════════════════════════════════════════════════════════════════\n\n");
+        output.push_str("QUERY EVALUATION REPORT\n\n");
 
-        // Summary
-        output.push_str("SUMMARY\n");
-        output.push_str("───────────────────────────────────────────────────────────────────\n");
+        // Summary table
+        let summary_row = SummaryRow::from_summary(&self.summary);
+        let mut table = Table::new(vec![summary_row]);
+        table.with(Style::rounded());
+        output.push_str(&table.to_string());
         output.push_str(&format!(
-            "Total Queries:   {:>6}\n",
-            self.summary.total_queries
-        ));
-        output.push_str(&format!(
-            "Successful:      {:>6} ({:.1}%)\n",
-            self.summary.successful,
+            "\nSuccess Rate: {:.1}%\n",
             self.summary.success_rate()
         ));
-        output.push_str(&format!(
-            "  With results:  {:>6}\n",
-            self.summary.successful - self.summary.empty_results
-        ));
-        output.push_str(&format!(
-            "  Empty (0 rows):{:>6}\n",
-            self.summary.empty_results
-        ));
-        output.push_str(&format!("Failed:          {:>6}\n", self.summary.failed));
-        output.push_str(&format!(
-            "Total Rows:      {:>6}\n",
-            self.summary.total_rows
-        ));
-        output.push_str(&format!(
-            "Total Time:      {:>6.2}s\n",
-            self.summary.total_time.as_secs_f64()
-        ));
-        output.push_str(&format!(
-            "Avg Time:        {:>6.2}ms\n",
-            self.summary.avg_time.as_secs_f64() * 1000.0
-        ));
-        output.push_str(&format!(
-            "Min Time:        {:>6.2}ms\n",
-            self.summary.min_time.as_secs_f64() * 1000.0
-        ));
-        output.push_str(&format!(
-            "Max Time:        {:>6.2}ms\n",
-            self.summary.max_time.as_secs_f64() * 1000.0
-        ));
 
-        // Error breakdown
+        // Error breakdown if any failures
         if !self.summary.errors_by_category.is_empty() {
             output.push_str("\nErrors by Category:\n");
             let mut categories: Vec<_> = self.summary.errors_by_category.iter().collect();
             categories.sort_by(|a, b| b.1.cmp(a.1));
             for (category, count) in categories {
-                output.push_str(&format!("  {:18} {:>3}\n", category, count));
+                output.push_str(&format!("  {} x{}\n", category, count));
             }
         }
 
-        output.push('\n');
-
-        // Individual results
-        output.push_str("QUERY RESULTS\n");
-        output.push_str("───────────────────────────────────────────────────────────────────\n");
-
-        // Successful queries with results
-        let mut with_results: Vec<_> = self
-            .results
-            .iter()
-            .filter(|r| r.success && r.row_count.unwrap_or(0) > 0)
-            .collect();
-        with_results.sort_by(|a, b| b.execution_time.cmp(&a.execution_time));
-
-        if !with_results.is_empty() {
-            output.push_str("\n✓ Queries with Results:\n\n");
-            for result in &with_results {
-                output.push_str(&format!(
-                    "  {:45} {:>6} rows  {:>8.2}ms\n",
-                    truncate(&result.query_name, 45),
-                    result.row_count.unwrap_or(0),
-                    result.execution_time.as_secs_f64() * 1000.0
-                ));
-                // Show sample data
-                if let (Some(cols), Some(rows)) = (&result.column_names, &result.sample_rows)
-                    && !rows.is_empty()
-                {
-                    output.push_str(&format_sample_data(cols, rows));
-                }
-            }
-        }
-
-        // Successful queries with no results (potential issues)
+        // Show empty results (potential issues)
         let empty: Vec<_> = self
             .results
             .iter()
             .filter(|r| r.success && r.row_count == Some(0))
             .collect();
         if !empty.is_empty() {
-            output.push_str("\n⚠ Empty Results (0 rows - may need investigation):\n\n");
+            output.push_str(&format!("\n⚠ {} queries returned 0 rows:\n", empty.len()));
             for result in &empty {
-                output.push_str(&format!(
-                    "  • {} ({:.2}ms)\n",
-                    result.query_name,
-                    result.execution_time.as_secs_f64() * 1000.0
-                ));
-                if let Some(ref sampling) = result.sampling_info {
-                    output.push_str(&format!("    Sampling: {}\n", sampling.description()));
-                }
-                if let Some(sql) = &result.sql {
-                    output.push_str("    SQL:\n");
-                    output.push_str(&format_sql(sql, 6));
-                }
-                if let Some(params) = &result.params {
-                    output.push_str("    Params:\n");
-                    output.push_str(&format_params(params, 6));
-                }
+                output.push_str(&format!("  • {}\n", result.query_name));
             }
         }
 
-        // Failed queries grouped by error category
+        // Show failed queries with details
         let failed: Vec<_> = self.results.iter().filter(|r| !r.success).collect();
         if !failed.is_empty() {
-            output.push_str("\n✗ Failed Queries:\n");
+            output.push_str(&format!("\n✗ {} failed queries:\n", failed.len()));
 
-            // Group by error category
-            let mut by_category: std::collections::HashMap<ErrorCategory, Vec<&ExecutionResult>> =
-                std::collections::HashMap::new();
             for result in &failed {
-                let category = result.error_category().unwrap_or(ErrorCategory::Other);
-                by_category.entry(category).or_default().push(result);
-            }
-
-            // Sort categories for consistent output
-            let mut categories: Vec<_> = by_category.into_iter().collect();
-            categories.sort_by_key(|(cat, _)| format!("{}", cat));
-
-            for (category, results) in categories {
-                output.push_str(&format!(
-                    "\n  [{:}] ({} queries)\n",
-                    category,
-                    results.len()
-                ));
-                for result in results {
-                    output.push_str(&format!("    • {}\n", result.query_name));
-                    if let Some(parsed) = &result.parsed_error {
-                        output.push_str(&format!("      Error: {}\n", parsed.summary));
-                    }
-                    if let Some(sql) = &result.sql {
-                        output.push_str("      SQL:\n");
-                        output.push_str(&format_sql(sql, 8));
-                    }
+                output.push_str(&format!("\n  {}\n", result.query_name));
+                if let Some(parsed) = &result.parsed_error {
+                    output.push_str(&format!("  Error: {}\n", parsed.summary));
+                }
+                if let Some(sql) = &result.sql {
+                    output.push_str(&format_sql(sql));
                 }
             }
         }
-
-        output.push_str("\n═══════════════════════════════════════════════════════════════════\n");
 
         output
     }
@@ -364,194 +310,17 @@ impl Report {
     }
 }
 
-/// Format sample data for display.
-fn format_sample_data(columns: &[String], rows: &[Vec<String>]) -> String {
-    if rows.is_empty() || columns.is_empty() {
-        return String::new();
-    }
+/// Format SQL for pretty display.
+fn format_sql(sql: &str) -> String {
+    let formatted = sqlformat::format(sql, &QueryParams::None, &FormatOptions::default());
 
-    let mut output = String::new();
-
-    // Calculate column widths (max 20 chars per column, max 5 columns)
-    let display_cols: Vec<_> = columns.iter().take(5).collect();
-    let widths: Vec<usize> = display_cols
-        .iter()
-        .enumerate()
-        .map(|(i, col)| {
-            let max_val_width = rows
-                .iter()
-                .filter_map(|row| row.get(i))
-                .map(|v| v.len().min(20))
-                .max()
-                .unwrap_or(0);
-            col.len().max(max_val_width).min(20)
-        })
-        .collect();
-
-    // Header
-    output.push_str("      ┌");
-    for (i, w) in widths.iter().enumerate() {
-        output.push_str(&"─".repeat(*w + 2));
-        if i < widths.len() - 1 {
-            output.push('┬');
-        }
-    }
-    if columns.len() > 5 {
-        output.push_str("─...");
-    }
-    output.push_str("┐\n");
-
-    // Column names
-    output.push_str("      │");
-    for (i, (col, w)) in display_cols.iter().zip(&widths).enumerate() {
-        let truncated = if col.len() > *w {
-            format!("{}…", &col[..*w - 1])
-        } else {
-            col.to_string()
-        };
-        output.push_str(&format!(" {:width$} ", truncated, width = w));
-        if i < widths.len() - 1 {
-            output.push('│');
-        }
-    }
-    if columns.len() > 5 {
-        output.push_str(" ...");
-    }
-    output.push_str("│\n");
-
-    // Separator
-    output.push_str("      ├");
-    for (i, w) in widths.iter().enumerate() {
-        output.push_str(&"─".repeat(*w + 2));
-        if i < widths.len() - 1 {
-            output.push('┼');
-        }
-    }
-    if columns.len() > 5 {
-        output.push_str("─...");
-    }
-    output.push_str("┤\n");
-
-    // Data rows (first row only for brevity)
-    for row in rows.iter().take(1) {
-        output.push_str("      │");
-        for (i, w) in widths.iter().enumerate() {
-            let val = row.get(i).map(|s| s.as_str()).unwrap_or("");
-            let truncated = if val.len() > *w {
-                format!("{}…", &val[..*w - 1])
-            } else {
-                val.to_string()
-            };
-            output.push_str(&format!(" {:width$} ", truncated, width = w));
-            if i < widths.len() - 1 {
-                output.push('│');
-            }
-        }
-        if columns.len() > 5 {
-            output.push_str(" ...");
-        }
-        output.push_str("│\n");
-    }
-
-    // Footer
-    output.push_str("      └");
-    for (i, w) in widths.iter().enumerate() {
-        output.push_str(&"─".repeat(*w + 2));
-        if i < widths.len() - 1 {
-            output.push('┴');
-        }
-    }
-    if columns.len() > 5 {
-        output.push_str("─...");
-    }
-    output.push_str("┘\n");
-
-    output
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        format!("{:width$}", s, width = max_len)
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
-}
-
-/// Format SQL for pretty display with indentation.
-fn format_sql(sql: &str, indent: usize) -> String {
-    let prefix = " ".repeat(indent);
-    let mut output = String::new();
-
-    // Keywords that should start a new line
-    let line_break_before = [
-        "SELECT",
-        "FROM",
-        "WHERE",
-        "JOIN",
-        "LEFT JOIN",
-        "RIGHT JOIN",
-        "INNER JOIN",
-        "OUTER JOIN",
-        "ON",
-        "AND",
-        "OR",
-        "GROUP BY",
-        "ORDER BY",
-        "HAVING",
-        "LIMIT",
-        "UNION",
-        "EXCEPT",
-        "INTERSECT",
-        "WITH",
-        "AS (",
-        "SETTINGS",
-    ];
-
-    // Simple formatting: break on major keywords
-    let mut formatted = sql.to_string();
-
-    for keyword in &line_break_before {
-        // Case-insensitive replacement with line break
-        let pattern = format!(" {}", keyword);
-        let replacement = format!("\n{}", keyword);
-        formatted = formatted.replace(&pattern, &replacement);
-        formatted = formatted.replace(&pattern.to_lowercase(), &replacement.to_lowercase());
-    }
-
-    // Add indentation to each line
-    for line in formatted.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            output.push_str(&prefix);
-            output.push_str(trimmed);
-            output.push('\n');
-        }
-    }
-
-    output
-}
-
-/// Format parameters for display.
-fn format_params(params: &serde_json::Value, indent: usize) -> String {
-    let prefix = " ".repeat(indent);
-    let mut output = String::new();
-
-    if let Some(obj) = params.as_object() {
-        for (key, value) in obj {
-            let value_str = match value {
-                serde_json::Value::String(s) => format!("\"{}\"", s),
-                serde_json::Value::Number(n) => n.to_string(),
-                serde_json::Value::Bool(b) => b.to_string(),
-                serde_json::Value::Null => "null".to_string(),
-                _ => value.to_string(),
-            };
-            output.push_str(&format!("{}{}: {}\n", prefix, key, value_str));
-        }
-    } else {
-        output.push_str(&format!("{}{}\n", prefix, params));
-    }
-
-    output
+    // Indent each line for display
+    formatted
+        .lines()
+        .map(|line| format!("  {}", line))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }
 
 #[cfg(test)]
@@ -597,27 +366,38 @@ mod tests {
 
     #[test]
     fn test_report_format() {
-        let results = vec![ExecutionResult::success(
-            "test".to_string(),
-            10,
-            vec![vec!["val".to_string()]],
-            vec!["col".to_string()],
-            Duration::from_millis(100),
-            "SELECT 1".to_string(),
-            serde_json::json!({}),
-            None,
-        )];
+        let results = vec![
+            ExecutionResult::success(
+                "test_success".to_string(),
+                10,
+                vec![vec!["val".to_string()]],
+                vec!["col".to_string()],
+                Duration::from_millis(100),
+                "SELECT 1".to_string(),
+                serde_json::json!({}),
+                None,
+            ),
+            ExecutionResult::failure(
+                "test_failure".to_string(),
+                "Something went wrong".to_string(),
+                Duration::from_millis(50),
+            ),
+        ];
 
         let report = Report::new(results);
 
         let text = report.to_text();
         assert!(text.contains("QUERY EVALUATION REPORT"));
-        assert!(text.contains("test"));
+        assert!(text.contains("Success Rate"));
+        assert!(text.contains("test_failure"));
 
         let json = report.to_json();
         assert!(json.contains("\"query_name\""));
+        assert!(json.contains("test_success"));
+        assert!(json.contains("test_failure"));
 
         let md = report.to_markdown();
         assert!(md.contains("# Query Evaluation Report"));
+        assert!(md.contains("test_success"));
     }
 }

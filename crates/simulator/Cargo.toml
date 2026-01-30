@@ -20,14 +20,17 @@ tracing-subscriber.workspace = true
 # Simulator-specific dependencies
 clickhouse = { workspace = true }
 fake = { version = "3.0", features = ["derive", "chrono"] }
+# Note: Use fake::rand re-export to avoid version conflicts
 indicatif = "0.18"
 parquet = "57"
-# Note: Use fake::rand re-export to avoid version conflicts
+sqlformat = "0.5"
+tabled = "0.20"
 
 # Internal crates
 clickhouse-client = { path = "../clickhouse-client" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
+
 
 [[bin]]
 name = "generate"

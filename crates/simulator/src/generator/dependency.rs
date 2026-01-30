@@ -128,6 +128,7 @@ impl DependencyGraph {
                 | "HAS_LABEL"
                 | "HAS_FINDING"
                 | "HAS_IDENTIFIER"
+                | "HAS_DIFF"
         )
     }
 
@@ -215,6 +216,7 @@ mod tests {
         assert!(DependencyGraph::is_parent_to_child("CONTAINS"));
         assert!(DependencyGraph::is_parent_to_child("HAS_STAGE"));
         assert!(DependencyGraph::is_parent_to_child("HAS_JOB"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_DIFF"));
         assert!(!DependencyGraph::is_parent_to_child("IN_PROJECT"));
         assert!(!DependencyGraph::is_parent_to_child("IN_GROUP"));
         assert!(!DependencyGraph::is_parent_to_child("AUTHORED"));
