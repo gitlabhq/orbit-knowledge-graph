@@ -13,48 +13,36 @@ pub struct ToolDefinition {
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub description: ::prost::alloc::string::String,
-    /// JSON Schema as string
     #[prost(string, tag = "3")]
     pub parameters_json_schema: ::prost::alloc::string::String,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ExecuteToolMessage {
-    #[prost(oneof = "execute_tool_message::Message", tags = "1, 2, 3, 4, 5")]
-    pub message: ::core::option::Option<execute_tool_message::Message>,
-}
-/// Nested message and enum types in `ExecuteToolMessage`.
-pub mod execute_tool_message {
-    #[derive(Clone, PartialEq, ::prost::Oneof)]
-    pub enum Message {
-        /// Client -> Server: Initial tool execution request
-        #[prost(message, tag = "1")]
-        Request(super::ExecuteToolRequest),
-        /// Server -> Client: Resources that need permission checks
-        #[prost(message, tag = "2")]
-        RedactionRequired(super::RedactionRequired),
-        /// Client -> Server: Results of permission checks
-        #[prost(message, tag = "3")]
-        RedactionResponse(super::RedactionResponse),
-        /// Server -> Client: Final context-engineered result
-        #[prost(message, tag = "4")]
-        Result(super::ToolResult),
-        /// Either direction: Error
-        #[prost(message, tag = "5")]
-        Error(super::ToolError),
-    }
-}
-/// Client -> Server: Initial request
+/// Shared error type for all RPCs
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ExecuteToolRequest {
+pub struct Error {
     #[prost(string, tag = "1")]
-    pub tool_name: ::prost::alloc::string::String,
+    pub code: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub arguments_json: ::prost::alloc::string::String,
+    pub message: ::prost::alloc::string::String,
+}
+/// Shared redaction exchange - encapsulates the authorization back-and-forth
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RedactionExchange {
+    #[prost(oneof = "redaction_exchange::Exchange", tags = "1, 2")]
+    pub exchange: ::core::option::Option<redaction_exchange::Exchange>,
+}
+/// Nested message and enum types in `RedactionExchange`.
+pub mod redaction_exchange {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Exchange {
+        #[prost(message, tag = "1")]
+        Required(super::RedactionRequired),
+        #[prost(message, tag = "2")]
+        Response(super::RedactionResponse),
+    }
 }
 /// Server -> Client: Resources needing authorization checks
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RedactionRequired {
-    /// Correlation ID for this result
     #[prost(string, tag = "1")]
     pub result_id: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
@@ -62,17 +50,16 @@ pub struct RedactionRequired {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ResourceCheck {
-    /// "issues", "merge_requests", "projects", etc.
     #[prost(string, tag = "1")]
     pub resource_type: ::prost::alloc::string::String,
-    /// Resource IDs to check
     #[prost(int64, repeated, tag = "2")]
     pub ids: ::prost::alloc::vec::Vec<i64>,
+    #[prost(string, tag = "3")]
+    pub ability: ::prost::alloc::string::String,
 }
 /// Client -> Server: Authorization results from Rails
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RedactionResponse {
-    /// Must match result_id from RedactionRequired
     #[prost(string, tag = "1")]
     pub result_id: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
@@ -82,24 +69,70 @@ pub struct RedactionResponse {
 pub struct ResourceAuthorization {
     #[prost(string, tag = "1")]
     pub resource_type: ::prost::alloc::string::String,
-    /// id -> authorized (true/false)
     #[prost(map = "int64, bool", tag = "2")]
     pub authorized: ::std::collections::HashMap<i64, bool>,
 }
-/// Server -> Client: Final redacted and context-engineered result
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ExecuteToolMessage {
+    #[prost(oneof = "execute_tool_message::Message", tags = "1, 2, 3, 4")]
+    pub message: ::core::option::Option<execute_tool_message::Message>,
+}
+/// Nested message and enum types in `ExecuteToolMessage`.
+pub mod execute_tool_message {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Message {
+        #[prost(message, tag = "1")]
+        Request(super::ExecuteToolRequest),
+        #[prost(message, tag = "2")]
+        Redaction(super::RedactionExchange),
+        #[prost(message, tag = "3")]
+        Result(super::ToolResult),
+        #[prost(message, tag = "4")]
+        Error(super::Error),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExecuteToolRequest {
+    #[prost(string, tag = "1")]
+    pub tool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub arguments_json: ::prost::alloc::string::String,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ToolResult {
-    /// Redacted, context-engineered result
     #[prost(string, tag = "1")]
     pub result_json: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ExecuteQueryMessage {
+    #[prost(oneof = "execute_query_message::Message", tags = "1, 2, 3, 4")]
+    pub message: ::core::option::Option<execute_query_message::Message>,
+}
+/// Nested message and enum types in `ExecuteQueryMessage`.
+pub mod execute_query_message {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Message {
+        #[prost(message, tag = "1")]
+        Request(super::ExecuteQueryRequest),
+        #[prost(message, tag = "2")]
+        Redaction(super::RedactionExchange),
+        #[prost(message, tag = "3")]
+        Result(super::QueryResult),
+        #[prost(message, tag = "4")]
+        Error(super::Error),
+    }
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ToolError {
-    /// e.g., "tool_not_found", "invalid_arguments", "execution_error"
+pub struct ExecuteQueryRequest {
     #[prost(string, tag = "1")]
-    pub code: ::prost::alloc::string::String,
+    pub query_json: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryResult {
+    #[prost(string, tag = "1")]
+    pub result_json: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub message: ::prost::alloc::string::String,
+    pub generated_sql: ::prost::alloc::string::String,
 }
 /// Generated client implementations.
 pub mod knowledge_graph_service_client {
@@ -112,7 +145,7 @@ pub mod knowledge_graph_service_client {
     )]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    /// Knowledge Graph service for tool execution
+    /// Knowledge Graph service for tool execution and raw queries
     #[derive(Debug, Clone)]
     pub struct KnowledgeGraphServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -221,8 +254,8 @@ pub mod knowledge_graph_service_client {
         /// Execute a tool with bidirectional streaming for redaction:
         ///
         /// 1. Client sends ExecuteToolRequest
-        /// 1. Server sends RedactionRequired with resources to check
-        /// 1. Client sends RedactionResponse with authorized resources
+        /// 1. Server sends RedactionExchange.required with resources to check
+        /// 1. Client sends RedactionExchange.response with authorized resources
         /// 1. Server sends ToolResult with redacted, context-engineered response
         pub async fn execute_tool(
             &mut self,
@@ -248,6 +281,35 @@ pub mod knowledge_graph_service_client {
             let mut req = request.into_streaming_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ExecuteTool"));
+            self.inner.streaming(req, path, codec).await
+        }
+        /// Execute a raw query with bidirectional streaming for redaction:
+        /// Same redaction flow as ExecuteTool but returns raw filtered result
+        /// (no context-engine processing) for the query playground
+        pub async fn execute_query(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<
+                Message = super::ExecuteQueryMessage,
+            >,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::ExecuteQueryMessage>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/ExecuteQuery",
+            );
+            let mut req = request.into_streaming_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ExecuteQuery"));
             self.inner.streaming(req, path, codec).await
         }
     }
@@ -282,8 +344,8 @@ pub mod knowledge_graph_service_server {
         /// Execute a tool with bidirectional streaming for redaction:
         ///
         /// 1. Client sends ExecuteToolRequest
-        /// 1. Server sends RedactionRequired with resources to check
-        /// 1. Client sends RedactionResponse with authorized resources
+        /// 1. Server sends RedactionExchange.required with resources to check
+        /// 1. Client sends RedactionExchange.response with authorized resources
         /// 1. Server sends ToolResult with redacted, context-engineered response
         async fn execute_tool(
             &self,
@@ -292,8 +354,24 @@ pub mod knowledge_graph_service_server {
             tonic::Response<Self::ExecuteToolStream>,
             tonic::Status,
         >;
+        /// Server streaming response type for the ExecuteQuery method.
+        type ExecuteQueryStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::ExecuteQueryMessage, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Execute a raw query with bidirectional streaming for redaction:
+        /// Same redaction flow as ExecuteTool but returns raw filtered result
+        /// (no context-engine processing) for the query playground
+        async fn execute_query(
+            &self,
+            request: tonic::Request<tonic::Streaming<super::ExecuteQueryMessage>>,
+        ) -> std::result::Result<
+            tonic::Response<Self::ExecuteQueryStream>,
+            tonic::Status,
+        >;
     }
-    /// Knowledge Graph service for tool execution
+    /// Knowledge Graph service for tool execution and raw queries
     #[derive(Debug)]
     pub struct KnowledgeGraphServiceServer<T> {
         inner: Arc<T>,
@@ -451,6 +529,55 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ExecuteToolSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/ExecuteQuery" => {
+                    #[allow(non_camel_case_types)]
+                    struct ExecuteQuerySvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::StreamingService<super::ExecuteQueryMessage>
+                    for ExecuteQuerySvc<T> {
+                        type Response = super::ExecuteQueryMessage;
+                        type ResponseStream = T::ExecuteQueryStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                tonic::Streaming<super::ExecuteQueryMessage>,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::execute_query(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ExecuteQuerySvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

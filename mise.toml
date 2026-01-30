@@ -64,6 +64,22 @@ arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
+[tasks."proto:ruby"]
+run = '''
+mkdir -p crates/gkg-server/proto/ruby
+protoc --ruby_out=crates/gkg-server/proto/ruby \
+  --grpc_out=crates/gkg-server/proto/ruby \
+  --plugin=protoc-gen-grpc=$(which grpc_ruby_plugin) \
+  -I crates/gkg-server/proto \
+  crates/gkg-server/proto/gkg.proto
+echo "Ruby proto files generated in crates/gkg-server/proto/ruby/"
+'''
+description = "Generate Ruby protobuf files for Rails client"
+
+[tasks."server:start"]
+run = 'GKG_JWT_SECRET=${GKG_JWT_SECRET:-$(cat ~/gitlab/gdk/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
+description = "Start the GKG server (webserver mode)"
+
 [tasks."ontology:validate"]
 run = "find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile fixtures/ontology/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"

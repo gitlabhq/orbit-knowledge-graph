@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde_json::Value;
+
 use crate::redaction::{QueryResult, ResourceAuthorization};
 
 #[derive(Debug, Clone, Default)]
@@ -17,6 +19,49 @@ impl ContextEngine {
         entity_to_resource: &HashMap<&str, &str>,
     ) -> usize {
         result.apply_authorizations(authorizations, entity_to_resource)
+    }
+
+    pub fn prepare_response(&self, result: Value) -> Value {
+        result
+    }
+
+    pub fn apply_redaction_and_prepare(
+        &self,
+        result: Value,
+        authorizations: &[ResourceAuthorization],
+    ) -> Value {
+        if authorizations.is_empty() {
+            return result;
+        }
+
+        match result {
+            Value::Array(rows) => {
+                let filtered: Vec<Value> = rows
+                    .into_iter()
+                    .filter(|row| {
+                        for auth in authorizations {
+                            let id_key = match auth.resource_type.as_str() {
+                                "projects" => "project_id",
+                                "issues" => "issue_id",
+                                "merge_requests" => "merge_request_id",
+                                "users" => "user_id",
+                                "groups" => "group_id",
+                                _ => continue,
+                            };
+
+                            if let Some(id) = row.get(id_key).and_then(|v| v.as_i64())
+                                && auth.authorized.get(&id) == Some(&false)
+                            {
+                                return false;
+                            }
+                        }
+                        true
+                    })
+                    .collect();
+                Value::Array(filtered)
+            }
+            other => other,
+        }
     }
 }
 

@@ -8,6 +8,7 @@ destination_table: gl_projects
 redaction:
   resource_type: projects
   id_column: id
+  ability: read_project
 
 properties:
   id:
