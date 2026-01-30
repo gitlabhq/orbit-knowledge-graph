@@ -83,9 +83,9 @@ etl:
   edges:
     owner_id:
       to: User
-      as: owner
+      as: OWNER
       direction: incoming
     parent_id:
       to: Group
-      as: contains
+      as: CONTAINS
       direction: incoming

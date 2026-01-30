@@ -86,3 +86,4 @@ edges:
   FROM_BRANCH: edges/from_branch.yaml
   ON_BRANCH: edges/on_branch.yaml
   OCCURRENCE_OF: edges/occurrence.yaml
+  SCANS: edges/scans.yaml

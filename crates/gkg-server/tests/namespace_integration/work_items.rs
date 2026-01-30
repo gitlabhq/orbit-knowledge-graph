@@ -124,7 +124,7 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
     let authored_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'authored' AND target_kind = 'WorkItem'",
+             WHERE relationship_kind = 'AUTHORED' AND target_kind = 'WorkItem'",
         )
         .await;
     assert_eq!(
@@ -136,7 +136,7 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
     let in_milestone_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'in_milestone' AND source_kind = 'WorkItem'",
+             WHERE relationship_kind = 'IN_MILESTONE' AND source_kind = 'WorkItem'",
         )
         .await;
     assert_eq!(
@@ -148,7 +148,7 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
     let in_group_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'in_group' AND source_kind = 'WorkItem'",
+             WHERE relationship_kind = 'IN_GROUP' AND source_kind = 'WorkItem'",
         )
         .await;
     assert_eq!(
@@ -193,7 +193,7 @@ async fn namespace_handler_processes_work_item_multi_target_edges() {
     let assigned_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'assigned' AND target_kind = 'WorkItem'
+             WHERE relationship_kind = 'ASSIGNED' AND target_kind = 'WorkItem'
              ORDER BY source_id",
         )
         .await;
@@ -206,7 +206,7 @@ async fn namespace_handler_processes_work_item_multi_target_edges() {
     let has_label_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'has_label' AND source_kind = 'WorkItem'
+             WHERE relationship_kind = 'HAS_LABEL' AND source_kind = 'WorkItem'
              ORDER BY target_id",
         )
         .await;

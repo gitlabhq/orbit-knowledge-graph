@@ -103,9 +103,9 @@ etl:
   edges:
     creator_id:
       to: User
-      as: creator
+      as: CREATOR
       direction: incoming
     namespace_id:
       to: Group
-      as: contains
+      as: CONTAINS
       direction: incoming

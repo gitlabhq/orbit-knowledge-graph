@@ -66,10 +66,10 @@ etl:
   edges:
     project_id:
       to: Project
-      as: in_project
+      as: IN_PROJECT
       direction: outgoing
     pipeline_id:
       to: Pipeline
-      as: has_stage
+      as: HAS_STAGE
       direction: incoming
 

@@ -89,8 +89,8 @@ async fn namespace_handler_processes_vulnerabilities() {
     assert_eq!(severities.value(0), "critical");
     assert_eq!(severities.value(1), "medium");
 
-    assert_edge_count(&context, "in_project", "Vulnerability", "Project", 2).await;
-    assert_edge_count(&context, "authored", "User", "Vulnerability", 2).await;
+    assert_edge_count(&context, "IN_PROJECT", "Vulnerability", "Project", 2).await;
+    assert_edge_count(&context, "AUTHORED", "User", "Vulnerability", 2).await;
 }
 
 #[tokio::test]
@@ -163,7 +163,7 @@ async fn namespace_handler_processes_scanners() {
     assert_eq!(external_ids.value(0), "gemnasium");
     assert_eq!(external_ids.value(1), "bandit");
 
-    assert_edge_count(&context, "scans", "Scanner", "Project", 2).await;
+    assert_edge_count(&context, "SCANS", "Scanner", "Project", 2).await;
 }
 
 #[tokio::test]
@@ -242,7 +242,7 @@ async fn namespace_handler_processes_vulnerability_identifiers() {
 
     assert_edge_count(
         &context,
-        "in_project",
+        "IN_PROJECT",
         "VulnerabilityIdentifier",
         "Project",
         2,
@@ -344,8 +344,8 @@ async fn namespace_handler_processes_findings() {
     assert!(deduplicated.value(0));
     assert!(!deduplicated.value(1));
 
-    assert_edge_count(&context, "in_project", "Finding", "Project", 2).await;
-    assert_edge_count(&context, "detected_by", "Finding", "Scanner", 2).await;
+    assert_edge_count(&context, "IN_PROJECT", "Finding", "Project", 2).await;
+    assert_edge_count(&context, "DETECTED_BY", "Finding", "Scanner", 2).await;
 }
 
 #[tokio::test]
@@ -417,10 +417,10 @@ async fn namespace_handler_processes_vulnerability_with_user_edges() {
     assert!(!result.is_empty(), "vulnerabilities should exist");
     assert_eq!(result[0].num_rows(), 3);
 
-    assert_edge_count(&context, "authored", "User", "Vulnerability", 3).await;
-    assert_edge_count(&context, "confirmed_by", "User", "Vulnerability", 1).await;
-    assert_edge_count(&context, "resolved_by", "User", "Vulnerability", 1).await;
-    assert_edge_count(&context, "dismissed_by", "User", "Vulnerability", 1).await;
+    assert_edge_count(&context, "AUTHORED", "User", "Vulnerability", 3).await;
+    assert_edge_count(&context, "CONFIRMED_BY", "User", "Vulnerability", 1).await;
+    assert_edge_count(&context, "RESOLVED_BY", "User", "Vulnerability", 1).await;
+    assert_edge_count(&context, "DISMISSED_BY", "User", "Vulnerability", 1).await;
 }
 
 #[tokio::test]
@@ -486,7 +486,7 @@ async fn namespace_handler_processes_vulnerability_finding_edge() {
         .await
         .expect("handler should succeed");
 
-    assert_edge_count(&context, "has_finding", "Vulnerability", "Finding", 1).await;
+    assert_edge_count(&context, "HAS_FINDING", "Vulnerability", "Finding", 1).await;
 }
 
 #[tokio::test]
@@ -612,7 +612,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
 
     assert_edge_count(
         &context,
-        "in_project",
+        "IN_PROJECT",
         "VulnerabilityOccurrence",
         "Project",
         2,
@@ -620,7 +620,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     .await;
     assert_edge_count(
         &context,
-        "detected_by",
+        "DETECTED_BY",
         "VulnerabilityOccurrence",
         "Scanner",
         2,
@@ -628,7 +628,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     .await;
     assert_edge_count(
         &context,
-        "has_identifier",
+        "HAS_IDENTIFIER",
         "VulnerabilityOccurrence",
         "VulnerabilityIdentifier",
         2,
@@ -636,7 +636,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     .await;
     assert_edge_count(
         &context,
-        "occurrence_of",
+        "OCCURRENCE_OF",
         "VulnerabilityOccurrence",
         "Vulnerability",
         1,

@@ -52,9 +52,9 @@ etl:
   edges:
     project_id:
       to: Project
-      as: in_project
+      as: IN_PROJECT
       direction: outgoing
     group_id:
       to: Group
-      as: in_group
+      as: IN_GROUP
       direction: outgoing

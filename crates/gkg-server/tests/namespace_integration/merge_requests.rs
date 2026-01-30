@@ -64,7 +64,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
     let in_project_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'in_project' AND source_kind = 'MergeRequest'",
+             WHERE relationship_kind = 'IN_PROJECT' AND source_kind = 'MergeRequest'",
         )
         .await;
     assert_eq!(
@@ -76,7 +76,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
     let authored_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'authored' AND target_kind = 'MergeRequest'
+             WHERE relationship_kind = 'AUTHORED' AND target_kind = 'MergeRequest'
              ORDER BY target_id",
         )
         .await;
@@ -89,7 +89,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
     let assigned_edges = context
         .query(
             "SELECT target_id FROM gl_edges
-             WHERE relationship_kind = 'assigned' AND target_kind = 'MergeRequest'",
+             WHERE relationship_kind = 'ASSIGNED' AND target_kind = 'MergeRequest'",
         )
         .await;
     assert_eq!(
@@ -101,7 +101,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
     let merged_by_edges = context
         .query(
             "SELECT target_id FROM gl_edges
-             WHERE relationship_kind = 'merged_by' AND target_kind = 'MergeRequest'",
+             WHERE relationship_kind = 'MERGED_BY' AND target_kind = 'MergeRequest'",
         )
         .await;
     assert_eq!(merged_by_edges[0].num_rows(), 1, "only MR 2 was merged");
@@ -109,7 +109,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
     let in_milestone_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'in_milestone' AND source_kind = 'MergeRequest' AND target_kind = 'Milestone'",
+             WHERE relationship_kind = 'IN_MILESTONE' AND source_kind = 'MergeRequest' AND target_kind = 'Milestone'",
         )
         .await;
     assert_eq!(

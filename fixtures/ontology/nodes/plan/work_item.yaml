@@ -134,23 +134,23 @@ etl:
   edges:
     author_id:
       to: User
-      as: authored
+      as: AUTHORED
       direction: incoming
     milestone_id:
       to: Milestone
-      as: in_milestone
+      as: IN_MILESTONE
       direction: outgoing
     namespace_id:
       to: Group
-      as: in_group
+      as: IN_GROUP
       direction: outgoing
     assignee_ids:
       to: User
-      as: assigned
+      as: ASSIGNED
       direction: incoming
       delimiter: "/"
     label_ids:
       to: Label
-      as: has_label
+      as: HAS_LABEL
       direction: outgoing
       delimiter: "/"

@@ -84,7 +84,7 @@ async fn namespace_handler_processes_milestones_with_edges() {
     let in_project_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'in_project' AND source_kind = 'Milestone' AND target_kind = 'Project'",
+             WHERE relationship_kind = 'IN_PROJECT' AND source_kind = 'Milestone' AND target_kind = 'Project'",
         )
         .await;
     assert_eq!(
@@ -96,7 +96,7 @@ async fn namespace_handler_processes_milestones_with_edges() {
     let in_group_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'in_group' AND source_kind = 'Milestone' AND target_kind = 'Group'",
+             WHERE relationship_kind = 'IN_GROUP' AND source_kind = 'Milestone' AND target_kind = 'Group'",
         )
         .await;
     assert_eq!(

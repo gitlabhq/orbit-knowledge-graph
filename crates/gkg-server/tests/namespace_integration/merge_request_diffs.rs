@@ -61,7 +61,7 @@ async fn namespace_handler_processes_merge_request_diffs_with_edges() {
     let has_diff_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'has_diff' AND source_kind = 'MergeRequest' AND target_kind = 'MergeRequestDiff'
+             WHERE relationship_kind = 'HAS_DIFF' AND source_kind = 'MergeRequest' AND target_kind = 'MergeRequestDiff'
              ORDER BY target_id",
         )
         .await;
@@ -136,7 +136,7 @@ async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
     let has_file_edges = context
         .query(
             "SELECT source_id, target_id FROM gl_edges
-             WHERE relationship_kind = 'has_file' AND source_kind = 'MergeRequestDiff' AND target_kind = 'MergeRequestDiffFile'",
+             WHERE relationship_kind = 'HAS_FILE' AND source_kind = 'MergeRequestDiff' AND target_kind = 'MergeRequestDiffFile'",
         )
         .await;
     assert_eq!(

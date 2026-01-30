@@ -41,14 +41,14 @@ async fn namespace_handler_processes_notes_with_edges() {
     assert_eq!(batch.num_rows(), 3);
 
     let author_edges = context
-        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'authored' AND source_kind = 'User' AND target_kind = 'Note' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'AUTHORED' AND source_kind = 'User' AND target_kind = 'Note' ORDER BY target_id")
         .await;
 
     assert!(!author_edges.is_empty(), "author edges should exist");
     assert_eq!(author_edges[0].num_rows(), 3, "should have 3 author edges");
 
     let has_note_edges = context
-        .query("SELECT source_id, source_kind, target_id FROM gl_edges WHERE relationship_kind = 'has_note' ORDER BY target_id")
+        .query("SELECT source_id, source_kind, target_id FROM gl_edges WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")
         .await;
 
     assert!(!has_note_edges.is_empty(), "has_note edges should exist");

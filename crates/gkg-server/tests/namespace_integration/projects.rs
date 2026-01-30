@@ -73,14 +73,14 @@ async fn namespace_handler_processes_projects() {
     assert_eq!(visibility_column.value(1), "public");
 
     let creator_edges = context
-        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'creator' AND source_kind = 'User' AND target_kind = 'Project' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'CREATOR' AND source_kind = 'User' AND target_kind = 'Project' ORDER BY target_id")
         .await;
 
     assert!(!creator_edges.is_empty(), "creator edges should exist");
     assert_eq!(creator_edges[0].num_rows(), 2);
 
     let contains_edges = context
-        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'contains' AND source_kind = 'Group' AND target_kind = 'Project'")
+        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Group' AND target_kind = 'Project'")
         .await;
 
     assert!(!contains_edges.is_empty(), "contains edges should exist");

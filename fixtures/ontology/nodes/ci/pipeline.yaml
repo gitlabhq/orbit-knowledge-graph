@@ -135,13 +135,13 @@ etl:
   edges:
     project_id:
       to: Project
-      as: in_project
+      as: IN_PROJECT
       direction: outgoing
     user_id:
       to: User
-      as: triggered
+      as: TRIGGERED
       direction: incoming
     merge_request_id:
       to: MergeRequest
-      as: triggered
+      as: TRIGGERED
       direction: incoming
