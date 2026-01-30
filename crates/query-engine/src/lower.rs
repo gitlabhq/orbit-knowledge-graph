@@ -5,8 +5,8 @@
 use crate::ast::{Expr, JoinType, Node, Op, OrderExpr, Query, RecursiveCte, SelectExpr, TableRef};
 use crate::error::{QueryError, Result};
 use crate::input::{
-    Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode, InputRelationship,
-    OrderDirection, QueryType,
+    ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
+    InputRelationship, OrderDirection, QueryType,
 };
 use ontology::{Ontology, EDGE_TABLE};
 use serde_json::Value;
@@ -29,11 +29,7 @@ fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
-    let select = input
-        .nodes
-        .iter()
-        .map(|n| SelectExpr::new(Expr::col(&n.id, "id"), format!("{}_id", n.id)))
-        .collect();
+    let select = build_select_columns(&input.nodes, ontology);
 
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
@@ -50,6 +46,73 @@ fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
         order_by,
         limit: Some(input.limit),
     })))
+}
+
+/// Build SELECT columns based on node column selections.
+///
+/// For each node:
+/// - If `columns` is None: only return `{node_id}_id` (mandatory columns added by return.rs)
+/// - If `columns` is `All` ("*"): return all columns from the ontology for that entity
+/// - If `columns` is `List`: return the specified columns
+///
+/// Column aliases follow the pattern `{node_id}_{column_name}`.
+fn build_select_columns(nodes: &[InputNode], ontology: &Ontology) -> Vec<SelectExpr> {
+    let mut select = Vec::new();
+
+    for node in nodes {
+        match &node.columns {
+            None => {
+                // No columns specified - just add the id column (type added by return.rs)
+                select.push(SelectExpr::new(
+                    Expr::col(&node.id, "id"),
+                    format!("{}_id", node.id),
+                ));
+            }
+            Some(ColumnSelection::All) => {
+                // Wildcard - get all columns from ontology
+                if let Some(entity) = &node.entity {
+                    // Always include id first
+                    select.push(SelectExpr::new(
+                        Expr::col(&node.id, "id"),
+                        format!("{}_id", node.id),
+                    ));
+
+                    // Add all entity columns from ontology
+                    if let Some(node_entity) = ontology.get_node(entity) {
+                        for field in &node_entity.fields {
+                            // Skip 'id' since we already added it
+                            if field.name != "id" {
+                                select.push(SelectExpr::new(
+                                    Expr::col(&node.id, &field.name),
+                                    format!("{}_{}", node.id, field.name),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            Some(ColumnSelection::List(columns)) => {
+                // Specific columns - always include id first if not in list
+                let has_id = columns.iter().any(|c| c == "id");
+                if !has_id {
+                    select.push(SelectExpr::new(
+                        Expr::col(&node.id, "id"),
+                        format!("{}_id", node.id),
+                    ));
+                }
+
+                // Add requested columns
+                for col in columns {
+                    select.push(SelectExpr::new(
+                        Expr::col(&node.id, col),
+                        format!("{}_{}", node.id, col),
+                    ));
+                }
+            }
+        }
+    }
+
+    select
 }
 
 fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
@@ -880,5 +943,136 @@ mod tests {
 
         assert_eq!(q.limit, Some(50));
         assert_eq!(q.select.len(), 1);
+    }
+
+    #[test]
+    fn test_lower_with_specific_columns() {
+        let input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "columns": ["username", "state"]
+            },
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Should have: u_id (always), u_username, u_state
+        assert_eq!(q.select.len(), 3);
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"u_id".to_string()));
+        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(aliases.contains(&&"u_state".to_string()));
+    }
+
+    #[test]
+    fn test_lower_with_wildcard_columns() {
+        let input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "columns": "*"
+            },
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Should have id + all fields from ontology (username, state, created_at)
+        assert!(q.select.len() >= 4);
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"u_id".to_string()));
+        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(aliases.contains(&&"u_state".to_string()));
+        assert!(aliases.contains(&&"u_created_at".to_string()));
+    }
+
+    #[test]
+    fn test_lower_traversal_with_columns() {
+        let input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "n", "entity": "Note", "columns": ["confidential"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 20
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Should have: u_id, u_username, n_id, n_confidential
+        assert_eq!(q.select.len(), 4);
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"u_id".to_string()));
+        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(aliases.contains(&&"n_id".to_string()));
+        assert!(aliases.contains(&&"n_confidential".to_string()));
+    }
+
+    #[test]
+    fn test_lower_no_columns_only_id() {
+        let input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User"
+            },
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // No columns specified - should only have id
+        assert_eq!(q.select.len(), 1);
+        assert_eq!(q.select[0].alias, Some("u_id".to_string()));
+    }
+
+    #[test]
+    fn test_lower_columns_with_id_in_list() {
+        let input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "columns": ["id", "username"]
+            },
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // When id is explicitly in the list, it should appear once
+        assert_eq!(q.select.len(), 2);
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"u_id".to_string()));
+        assert!(aliases.contains(&&"u_username".to_string()));
     }
 }

@@ -4,7 +4,7 @@
 //! After validation, the input is guaranteed to be correct and lowering cannot fail.
 
 use crate::error::{QueryError, Result};
-use crate::input::{Input, InputNode, QueryType};
+use crate::input::{ColumnSelection, Input, InputNode, QueryType};
 use ontology::Ontology;
 
 /// Validate parsed input against the ontology.
@@ -23,6 +23,7 @@ pub fn validate(input: &Input, ontology: &Ontology) -> Result<()> {
     validate_nodes(&input.nodes, ontology)?;
     validate_relationships(input, ontology)?;
     validate_filters(input, ontology)?;
+    validate_columns(input, ontology)?;
     validate_aggregations(input, ontology)?;
     validate_order_by(input, ontology)?;
     validate_path(input, ontology)?;
@@ -119,6 +120,38 @@ fn validate_filters(input: &Input, ontology: &Ontology) -> Result<()> {
     }
 
     // Edge filters don't need ontology validation (dynamic properties)
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Column validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn validate_columns(input: &Input, ontology: &Ontology) -> Result<()> {
+    for node in &input.nodes {
+        let Some(columns) = &node.columns else {
+            continue;
+        };
+
+        let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
+
+        match columns {
+            ColumnSelection::All => {
+                // Wildcard is always valid if entity exists (already validated)
+            }
+            ColumnSelection::List(cols) => {
+                for col in cols {
+                    ontology.validate_field(entity, col).map_err(|e| {
+                        err(format!(
+                            "invalid column \"{}\" on node \"{}\": {}",
+                            col, node.id, e
+                        ))
+                    })?;
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -452,6 +485,60 @@ mod tests {
                 "min_hops": 1,
                 "max_hops": 3
             }]
+        }"#,
+        )
+        .unwrap();
+
+        assert!(validate(&input, &test_ontology()).is_ok());
+    }
+
+    #[test]
+    fn valid_columns_accepted() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "created_at"]}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(validate(&input, &test_ontology()).is_ok());
+    }
+
+    #[test]
+    fn wildcard_columns_accepted() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": "*"}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(validate(&input, &test_ontology()).is_ok());
+    }
+
+    #[test]
+    fn invalid_column_rejected() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "nonexistent_column"]}
+        }"#,
+        )
+        .unwrap();
+
+        let err = validate(&input, &test_ontology()).unwrap_err();
+        assert!(err.to_string().contains("invalid column"));
+        assert!(err.to_string().contains("nonexistent_column"));
+    }
+
+    #[test]
+    fn id_column_always_valid() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["id", "username"]}
         }"#,
         )
         .unwrap();

@@ -1698,3 +1698,796 @@ fn fail_closed_null_type_denies_row() {
         "NULL type row must be denied (fail-closed)"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Column Selection Integration Tests
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// These tests verify the column selection feature introduced in the query DSL.
+// Users can now specify which columns to return:
+//   - `"columns": "*"` - all columns for the entity
+//   - `"columns": ["username", "state"]` - specific columns
+//   - omitted - only mandatory columns (_gkg_*_id, _gkg_*_type) for redaction
+//
+// CRITICAL: Mandatory columns must ALWAYS be present for redaction to work.
+
+/// Verify mandatory columns (`_gkg_*_id`, `_gkg_*_type`) are present when
+/// requesting specific columns, and redaction works correctly.
+#[tokio::test]
+#[serial]
+async fn column_selection_specific_columns_includes_mandatory_columns() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Request only username and state, but mandatory columns must still appear
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "u",
+            "entity": "User",
+            "columns": ["username", "state"]
+        },
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // The generated SQL MUST contain the mandatory redaction columns
+    assert!(
+        query.sql.contains("_gkg_u_id"),
+        "SQL must include _gkg_u_id for redaction. Got: {}",
+        query.sql
+    );
+    assert!(
+        query.sql.contains("_gkg_u_type"),
+        "SQL must include _gkg_u_type for redaction. Got: {}",
+        query.sql
+    );
+
+    // Also verify the requested columns are present
+    assert!(
+        query.sql.contains("u_username"),
+        "SQL must include requested column u_username"
+    );
+    assert!(
+        query.sql.contains("u_state"),
+        "SQL must include requested column u_state"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 5, "should have all 5 users before redaction");
+
+    // Run redaction with partial authorization
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1, 2, 3]);
+    mock_service.deny("users", &[4, 5]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 2, "users 4 and 5 should be redacted");
+    assert_eq!(result.authorized_count(), 3);
+
+    // Verify authorized rows have correct IDs and types
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("u"))
+        .collect();
+    assert_eq!(authorized_ids, HashSet::from([1, 2, 3]));
+
+    for row in result.authorized_rows() {
+        assert_eq!(row.get_type("u"), Some("User"));
+    }
+}
+
+/// Verify wildcard `"*"` returns all entity columns plus mandatory columns,
+/// and redaction works correctly with all columns selected.
+/// Uses Group entity which has all ontology columns present in the test schema.
+#[tokio::test]
+#[serial]
+async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Use Group entity - all its ontology columns exist in gl_groups
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "g",
+            "entity": "Group",
+            "columns": "*"
+        },
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // CRITICAL: Mandatory columns must be present for redaction
+    assert!(
+        query.sql.contains("_gkg_g_id"),
+        "wildcard must include _gkg_g_id for redaction"
+    );
+    assert!(
+        query.sql.contains("_gkg_g_type"),
+        "wildcard must include _gkg_g_type for redaction"
+    );
+
+    // Group entity columns from ontology
+    assert!(
+        query.sql.contains("g_id"),
+        "wildcard should include g_id column"
+    );
+    assert!(
+        query.sql.contains("g_name"),
+        "wildcard should include g_name column"
+    );
+    assert!(
+        query.sql.contains("g_visibility_level"),
+        "wildcard should include g_visibility_level column"
+    );
+    assert!(
+        query.sql.contains("g_traversal_path"),
+        "wildcard should include g_traversal_path column"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 3, "should have all 3 groups before redaction");
+
+    // Run redaction - allow only group 100 (Public Group)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("groups", &[100]);
+    mock_service.deny("groups", &[101, 102]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 2, "groups 101 and 102 should be redacted");
+    assert_eq!(result.authorized_count(), 1);
+
+    // Verify the authorized row is group 100
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert_eq!(authorized.len(), 1);
+    assert_eq!(authorized[0].get_id("g"), Some(100));
+    assert_eq!(authorized[0].get_type("g"), Some("Group"));
+}
+
+/// Verify omitting `columns` entirely still includes mandatory columns
+/// and redaction works correctly.
+#[tokio::test]
+#[serial]
+async fn column_selection_omitted_includes_mandatory_columns() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // No columns specified - should still work for redaction
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Mandatory columns MUST be present even when columns is omitted
+    assert!(
+        query.sql.contains("_gkg_u_id"),
+        "mandatory _gkg_u_id must be present when columns omitted"
+    );
+    assert!(
+        query.sql.contains("_gkg_u_type"),
+        "mandatory _gkg_u_type must be present when columns omitted"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 5, "should have all 5 users");
+
+    // Run redaction - allow users 1, 2; deny the rest
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1, 2]);
+    mock_service.deny("users", &[3, 4, 5]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 3, "users 3, 4, 5 should be redacted");
+    assert_eq!(result.authorized_count(), 2);
+
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("u"))
+        .collect();
+    assert_eq!(authorized_ids, HashSet::from([1, 2]));
+
+    for row in result.authorized_rows() {
+        assert_eq!(row.get_type("u"), Some("User"));
+    }
+}
+
+/// Deep test: Verify multi-hop traversal with different column selections
+/// per node still includes mandatory columns for ALL nodes, and redaction
+/// works correctly across the entire path.
+///
+/// This is the most complex case: User -> Group -> Project with different
+/// column selections on each node. Redaction must verify authorization
+/// for every node in the path.
+#[tokio::test]
+#[serial]
+async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Three-hop traversal with mixed column selections:
+    // - User: specific columns
+    // - Group: specific columns (not wildcard to avoid missing columns)
+    // - Project: specific columns
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]},
+            {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"]}
+        ],
+        "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+        ],
+        "limit": 30
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // CRITICAL: ALL nodes must have mandatory columns for redaction
+    assert!(
+        query.sql.contains("_gkg_u_id"),
+        "User node must have _gkg_u_id. SQL: {}",
+        query.sql
+    );
+    assert!(
+        query.sql.contains("_gkg_u_type"),
+        "User node must have _gkg_u_type"
+    );
+    assert!(
+        query.sql.contains("_gkg_g_id"),
+        "Group node must have _gkg_g_id"
+    );
+    assert!(
+        query.sql.contains("_gkg_g_type"),
+        "Group node must have _gkg_g_type"
+    );
+    assert!(
+        query.sql.contains("_gkg_p_id"),
+        "Project node must have _gkg_p_id"
+    );
+    assert!(
+        query.sql.contains("_gkg_p_type"),
+        "Project node must have _gkg_p_type"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count > 0, "should have traversal results");
+
+    // Run redaction: allow specific path (user 1 -> group 100 -> project 1000)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.deny("users", &[2, 3, 4, 5]);
+    mock_service.allow("groups", &[100]);
+    mock_service.deny("groups", &[101, 102]);
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1001, 1002, 1003, 1004]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert!(redacted > 0, "some paths should be redacted");
+
+    // Only one path should remain: user 1 -> group 100 -> project 1000
+    assert_eq!(
+        result.authorized_count(),
+        1,
+        "only one path should be authorized"
+    );
+
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert_eq!(authorized[0].get_id("u"), Some(1));
+    assert_eq!(authorized[0].get_id("g"), Some(100));
+    assert_eq!(authorized[0].get_id("p"), Some(1000));
+    assert_eq!(authorized[0].get_type("u"), Some("User"));
+    assert_eq!(authorized[0].get_type("g"), Some("Group"));
+    assert_eq!(authorized[0].get_type("p"), Some("Project"));
+}
+
+/// Deep test: Verify redaction works correctly when using specific column selection.
+/// Authorization checks depend on mandatory columns - if they were missing,
+/// redaction would fail or behave incorrectly.
+#[tokio::test]
+#[serial]
+async fn column_selection_redaction_works_with_specific_columns() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username", "state"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "limit": 20
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count > 0, "should have raw results");
+
+    // Authorize only user 1 and group 100
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]);
+    mock_service.deny("users", &[2, 3, 4, 5]);
+    mock_service.deny("groups", &[101, 102]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    // Should have filtered out unauthorized rows
+    assert!(redacted > 0, "some rows should be redacted");
+    assert!(
+        result.authorized_count() < raw_count,
+        "authorized count should be less than raw"
+    );
+
+    // Verify only authorized combinations remain
+    for row in result.authorized_rows() {
+        let user_id = row.get_id("u").expect("user ID must exist after redaction");
+        let group_id = row
+            .get_id("g")
+            .expect("group ID must exist after redaction");
+
+        assert_eq!(user_id, 1, "only user 1 should be authorized");
+        assert_eq!(group_id, 100, "only group 100 should be authorized");
+
+        // Verify types are correct (used for redaction lookup)
+        assert_eq!(row.get_type("u"), Some("User"));
+        assert_eq!(row.get_type("g"), Some("Group"));
+    }
+}
+
+/// Deep test: Verify that denying ANY node in a path filters the entire row,
+/// even when using column selection. This ensures fail-closed behavior.
+#[tokio::test]
+#[serial]
+async fn column_selection_fail_closed_on_any_unauthorized_node() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Three-hop query with column selection
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]},
+            {"id": "p", "entity": "Project", "columns": ["name"]}
+        ],
+        "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+        ],
+        "limit": 50
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Authorize user and group, but DENY the project
+    // This should filter ALL rows because fail-closed
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", ALL_USER_IDS);
+    mock_service.allow("groups", ALL_GROUP_IDS);
+    mock_service.deny("projects", ALL_PROJECT_IDS); // Deny all projects
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    // All rows should be filtered because projects are denied
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "all rows should be filtered when any node is unauthorized"
+    );
+    assert!(
+        redacted > 0,
+        "redaction should have removed rows: redacted {}",
+        redacted
+    );
+}
+
+/// Deep test: Verify column values are preserved correctly through
+/// the entire query and redaction pipeline.
+#[tokio::test]
+#[serial]
+async fn column_selection_data_values_preserved_through_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "u",
+            "entity": "User",
+            "columns": ["username", "name", "state"],
+            "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
+        },
+        "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Before redaction, verify we have data
+    assert_eq!(result.len(), 2, "should find alice and bob");
+
+    // Allow both users
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1, 2]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(result.authorized_count(), 2);
+
+    // Collect authorized rows and verify data integrity
+    let authorized: Vec<_> = result.authorized_rows().collect();
+
+    // Find alice (user 1) and verify her data
+    let alice = authorized
+        .iter()
+        .find(|r| r.get_id("u") == Some(1))
+        .unwrap();
+    assert_eq!(alice.get_id("u"), Some(1));
+    assert_eq!(alice.get_type("u"), Some("User"));
+
+    // Find bob (user 2) and verify his data
+    let bob = authorized
+        .iter()
+        .find(|r| r.get_id("u") == Some(2))
+        .unwrap();
+    assert_eq!(bob.get_id("u"), Some(2));
+    assert_eq!(bob.get_type("u"), Some("User"));
+}
+
+/// Deep test: Verify that requesting the same column as a mandatory column
+/// (e.g., "id" in the columns list) doesn't cause duplicates or errors,
+/// and redaction still works correctly.
+#[tokio::test]
+#[serial]
+async fn column_selection_id_in_list_no_duplication() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Explicitly request "id" alongside other columns
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "p",
+            "entity": "Project",
+            "columns": ["id", "name", "visibility_level"]
+        },
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Should have mandatory columns plus requested columns (no duplicates)
+    assert!(
+        query.sql.contains("_gkg_p_id"),
+        "mandatory _gkg_p_id must exist"
+    );
+    assert!(
+        query.sql.contains("_gkg_p_type"),
+        "mandatory _gkg_p_type must exist"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 5, "should have all 5 projects");
+
+    // Run redaction - allow only public projects (1000, 1004)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000, 1004]);
+    mock_service.deny("projects", &[1001, 1002, 1003]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 3, "3 projects should be redacted");
+    assert_eq!(result.authorized_count(), 2);
+
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("p"))
+        .collect();
+    assert_eq!(authorized_ids, HashSet::from([1000, 1004]));
+
+    for row in result.authorized_rows() {
+        assert_eq!(row.get_type("p"), Some("Project"));
+    }
+}
+
+/// Deep test: Verify aggregation queries properly handle column selection
+/// and redaction works on the group_by node.
+/// Aggregations only add mandatory columns for the group_by node, not the target.
+#[tokio::test]
+#[serial]
+async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    // Insert some additional data for aggregation
+    ctx.execute(
+        "INSERT INTO gl_merge_requests (id, iid, title, state, traversal_path) VALUES
+         (10001, 1, 'MR 1', 'merged', '1/100/1000/'),
+         (10002, 2, 'MR 2', 'merged', '1/100/1000/'),
+         (10003, 3, 'MR 3', 'open', '1/100/1000/')",
+    )
+    .await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1, 'User', 'AUTHORED', 10001, 'MergeRequest'),
+         (1, 'User', 'AUTHORED', 10002, 'MergeRequest'),
+         (2, 'User', 'AUTHORED', 10003, 'MergeRequest')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "mr", "entity": "MergeRequest"}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // User (group_by node) should have mandatory columns
+    assert!(
+        query.sql.contains("_gkg_u_id"),
+        "group_by node must have _gkg_u_id"
+    );
+    assert!(
+        query.sql.contains("_gkg_u_type"),
+        "group_by node must have _gkg_u_type"
+    );
+
+    // MergeRequest (target node, being aggregated) should NOT have mandatory columns
+    // because it doesn't appear as individual rows
+    assert!(
+        !query.sql.contains("_gkg_mr_id"),
+        "aggregated target node should not have _gkg_mr_id"
+    );
+    assert!(
+        !query.sql.contains("_gkg_mr_type"),
+        "aggregated target node should not have _gkg_mr_type"
+    );
+
+    // Should have the aggregation
+    assert!(query.sql.contains("COUNT"), "should have COUNT aggregation");
+    assert!(
+        query.sql.contains("GROUP BY"),
+        "should have GROUP BY clause"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
+    assert_eq!(result.len(), 2, "should have 2 aggregation rows");
+
+    // Run redaction - only allow user 1
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.deny("users", &[2]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 1, "user 2's row should be redacted");
+    assert_eq!(result.authorized_count(), 1);
+
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert_eq!(authorized[0].get_id("u"), Some(1));
+    assert_eq!(authorized[0].get_type("u"), Some("User"));
+}
+
+/// Deep test: Verify that column selection with traversal maintains proper
+/// JOIN semantics. Rows should still match correctly across relationships.
+#[tokio::test]
+#[serial]
+async fn column_selection_traversal_join_semantics_preserved() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Two-hop traversal with specific columns
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "g", "entity": "Group", "columns": ["name", "visibility_level"]},
+            {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"]}
+        ],
+        "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+        "limit": 20
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Verify raw data matches expected relationships
+    let raw_pairs: HashSet<(i64, i64)> = result
+        .iter()
+        .filter_map(|r| Some((r.get_id("g")?, r.get_id("p")?)))
+        .collect();
+
+    let expected_pairs = HashSet::from([
+        (100, 1000), // Public Group -> Public Project
+        (100, 1002), // Public Group -> Internal Project
+        (101, 1001), // Private Group -> Private Project
+        (101, 1003), // Private Group -> Secret Project
+        (102, 1004), // Internal Group -> Shared Project
+    ]);
+
+    assert_eq!(
+        raw_pairs, expected_pairs,
+        "column selection should not affect JOIN results"
+    );
+
+    // Apply redaction and verify it still works
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("groups", &[100]);
+    mock_service.allow("projects", &[1000, 1002]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    let authorized_pairs: HashSet<(i64, i64)> = result
+        .authorized_rows()
+        .filter_map(|r| Some((r.get_id("g")?, r.get_id("p")?)))
+        .collect();
+
+    assert_eq!(
+        authorized_pairs,
+        HashSet::from([(100, 1000), (100, 1002)]),
+        "redaction should work correctly with column selection"
+    );
+}
+
+/// Deep test: Verify filters work correctly with column selection.
+/// Even if a column is used in a filter, it must be explicitly requested
+/// or only mandatory columns appear.
+#[tokio::test]
+#[serial]
+async fn column_selection_filters_work_with_columns() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Filter by state, but only select username
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "u",
+            "entity": "User",
+            "columns": ["username"],
+            "filters": {"state": "active"}
+        },
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Should have mandatory columns and requested column
+    assert!(query.sql.contains("_gkg_u_id"));
+    assert!(query.sql.contains("_gkg_u_type"));
+    assert!(query.sql.contains("u_username"));
+
+    // Filter by state should be in WHERE clause
+    assert!(
+        query.sql.contains("state") || query.sql.contains("WHERE"),
+        "query should filter by state"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Should find 4 active users (eve is blocked)
+    assert_eq!(result.len(), 4, "should find 4 active users");
+
+    // Redaction should work
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1, 2, 3, 4]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(result.authorized_count(), 4);
+    for row in result.authorized_rows() {
+        assert!(row.get_id("u").is_some());
+        assert_eq!(row.get_type("u"), Some("User"));
+    }
+}
+
+/// Deep test: Ensure that column selection with no authorization
+/// still exhibits fail-closed behavior.
+#[tokio::test]
+#[serial]
+async fn column_selection_fail_closed_no_authorization() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {
+            "id": "u",
+            "entity": "User",
+            "columns": ["username", "name", "state"]
+        },
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert_eq!(raw_count, 5, "should have all 5 users");
+
+    // No authorizations - fail closed
+    let mock_service = MockRedactionService::new();
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 5, "all users should be redacted (fail-closed)");
+    assert_eq!(result.authorized_count(), 0, "nothing should be authorized");
+}

@@ -21,8 +21,8 @@
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
 //! let json = r#"{
-//!     "query_type": "traversal",
-//!     "nodes": [{"id": "u", "entity": "User"}],
+//!     "query_type": "search",
+//!     "node": {"id": "u", "entity": "User"},
 //!     "limit": 10
 //! }"#;
 //!
@@ -555,6 +555,127 @@ mod ontology_integration_tests {
 
         // Verify multiple filters are combined with AND
         assert!(result.sql.contains("AND"));
+    }
+
+    #[test]
+    fn search_with_specific_columns() {
+        let json = r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "columns": ["username", "state"]
+            },
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Search with columns SQL: {}", result.sql);
+
+        // Should have the selected columns
+        assert!(result.sql.contains("u_username"));
+        assert!(result.sql.contains("u_state"));
+        // Should always have mandatory columns for redaction
+        assert!(result.sql.contains("_gkg_u_id"));
+        assert!(result.sql.contains("_gkg_u_type"));
+    }
+
+    #[test]
+    fn search_with_wildcard_columns() {
+        let json = r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "columns": "*"
+            },
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Search with wildcard SQL: {}", result.sql);
+
+        // Should have all columns from the ontology
+        assert!(result.sql.contains("u_id"));
+        assert!(result.sql.contains("u_username"));
+        // Should always have mandatory columns for redaction
+        assert!(result.sql.contains("_gkg_u_id"));
+        assert!(result.sql.contains("_gkg_u_type"));
+    }
+
+    #[test]
+    fn traversal_with_columns() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Traversal with columns SQL: {}", result.sql);
+
+        // Should have the selected columns for both nodes
+        assert!(result.sql.contains("u_username"));
+        assert!(result.sql.contains("p_name"));
+        // Should always have mandatory columns for redaction
+        assert!(result.sql.contains("_gkg_u_id"));
+        assert!(result.sql.contains("_gkg_u_type"));
+        assert!(result.sql.contains("_gkg_p_id"));
+        assert!(result.sql.contains("_gkg_p_type"));
+    }
+
+    #[test]
+    fn aggregation_includes_mandatory_columns_for_group_by_node() {
+        let json = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Aggregation SQL: {}", result.sql);
+
+        // Aggregation queries only add mandatory columns for group_by nodes (u)
+        // The target node (mr) is aggregated so doesn't get individual row columns
+        assert!(result.sql.contains("_gkg_u_id"));
+        assert!(result.sql.contains("_gkg_u_type"));
+        // MR is aggregated, not returned as individual rows
+        assert!(!result.sql.contains("_gkg_mr_id"));
+        assert!(!result.sql.contains("_gkg_mr_type"));
+        // Should have the aggregation
+        assert!(result.sql.contains("COUNT"));
+        assert!(result.sql.contains("GROUP BY"));
+    }
+
+    #[test]
+    fn path_finding_uses_gkg_path_not_node_columns() {
+        let json = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Project", "node_ids": [100], "columns": ["name"]},
+                {"id": "end", "entity": "Project", "node_ids": [200], "columns": ["name"]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Path finding SQL: {}", result.sql);
+
+        // Path finding queries use _gkg_path column (Array of tuples)
+        // which contains all node IDs and types along the path
+        assert!(result.sql.contains("_gkg_path"));
+        // The columns selection on nodes is ignored for path finding
+        // because the result is a path, not individual node rows
+        assert!(result.result_context.query_type == Some(QueryType::PathFinding));
     }
 
     #[test]
