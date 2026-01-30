@@ -75,6 +75,12 @@ properties:
     nullable: true
     description: "Timestamp of last activity in the project."
 
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
 etl:
   type: query
   scope: namespaced

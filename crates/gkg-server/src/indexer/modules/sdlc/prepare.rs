@@ -72,7 +72,6 @@ pub struct PreparedEtlConfig {
     pub extract_query: String,
     pub fields: Vec<PreparedField>,
     pub edges: Vec<PreparedEdge>,
-    pub is_namespaced: bool,
 }
 
 impl PreparedEtlConfig {
@@ -85,7 +84,6 @@ impl PreparedEtlConfig {
             extract_query: build_extract_query(node, etl)?,
             fields: node.fields.iter().map(PreparedField::from_field).collect(),
             edges: prepare_edges(node, etl, ontology),
-            is_namespaced: etl.scope() == EtlScope::Namespaced,
         })
     }
 }
@@ -149,6 +147,7 @@ fn build_edge_extract_query(config: &EdgeSourceEtlConfig) -> String {
     }
 
     let namespace_filter = if config.scope == EtlScope::Namespaced {
+        columns.push("traversal_path".to_string());
         " AND startsWith(traversal_path, {traversal_path:String})"
     } else {
         ""
@@ -213,7 +212,7 @@ fn build_extract_query(node: &NodeEntity, etl: &EtlConfig) -> Option<String> {
             source,
             watermark,
             deleted,
-            scope,
+            scope: _,
             edges,
             ..
         } => {
@@ -225,9 +224,6 @@ fn build_extract_query(node: &NodeEntity, etl: &EtlConfig) -> Option<String> {
                 }
             }
 
-            if *scope == EtlScope::Namespaced {
-                columns.push("traversal_path".to_string());
-            }
             columns.push(format!("{} AS _version", watermark));
             columns.push(format!("{} AS _deleted", deleted));
 

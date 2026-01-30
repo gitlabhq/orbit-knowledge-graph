@@ -62,6 +62,12 @@ properties:
     nullable: true
     description: "UUID of the finding this one overrides."
 
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
 etl:
   type: query
   scope: namespaced
