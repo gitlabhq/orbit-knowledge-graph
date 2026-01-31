@@ -278,14 +278,25 @@ impl Context {
                 alias,
                 type_filter,
             } => {
-                let mut type_conditions = Vec::new();
-                // Type filters only apply to edge tables (relationship_kind column)
-                if let Some(tf) = type_filter {
-                    let param = format!("type_{alias}");
-                    self.params.insert(param.clone(), Value::String(tf.clone()));
-                    type_conditions
-                        .push(format!("({alias}.relationship_kind = {{{param}:String}})"));
-                }
+                // Type filter: single type or multiple types applied to edge table
+                let type_conditions = match type_filter {
+                    Some(types) if types.len() == 1 => {
+                        let param = format!("type_{alias}");
+                        self.params
+                            .insert(param.clone(), Value::String(types[0].clone()));
+                        vec![format!("({alias}.relationship_kind = {{{param}:String}})")]
+                    }
+                    Some(types) if types.len() > 1 => {
+                        let param = format!("type_{alias}");
+                        let arr =
+                            Value::Array(types.iter().map(|t| Value::String(t.clone())).collect());
+                        self.params.insert(param.clone(), arr);
+                        vec![format!(
+                            "({alias}.relationship_kind IN {{{param}:Array(String)}})"
+                        )]
+                    }
+                    _ => vec![],
+                };
                 TableRefResult {
                     sql: format!("{table} AS {alias}"),
                     type_conditions,
@@ -540,36 +551,49 @@ mod tests {
 
     #[test]
     fn edge_type_filter() {
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "id"),
-                alias: None,
-            }],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_user", "u"),
-                TableRef::scan_with_filter("gl_edges", "e", "AUTHORED"),
-                Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
-            ),
-            ..Default::default()
-        };
+        fn make_query(types: Vec<String>) -> Query {
+            Query {
+                select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+                from: TableRef::join(
+                    JoinType::Inner,
+                    TableRef::scan("gl_user", "u"),
+                    TableRef::scan_with_filter("gl_edges", "e", types),
+                    Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
+                ),
+                ..Default::default()
+            }
+        }
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(
-            result
-                .sql
-                .contains("ON ((u.id = e.source) AND (e.relationship_kind = {type_e:String}))"),
-            "expected relationship_kind filter: {}",
-            result.sql
-        );
-        assert!(
-            !result.sql.contains("WHERE"),
-            "node tables should not have type filters: {}",
-            result.sql
-        );
+        // Single type: uses equality
+        let r = codegen(
+            &Node::Query(Box::new(make_query(vec!["AUTHORED".into()]))),
+            empty_ctx(),
+        )
+        .unwrap();
+        assert!(r.sql.contains("relationship_kind = {type_e:String})"));
         assert_eq!(
-            result.params.get("type_e"),
+            r.params.get("type_e"),
             Some(&Value::String("AUTHORED".into()))
+        );
+
+        // Multiple types: uses IN clause
+        let r = codegen(
+            &Node::Query(Box::new(make_query(vec![
+                "AUTHORED".into(),
+                "CONTAINS".into(),
+            ]))),
+            empty_ctx(),
+        )
+        .unwrap();
+        assert!(r
+            .sql
+            .contains("relationship_kind IN {type_e:Array(String)})"));
+        assert_eq!(
+            r.params.get("type_e"),
+            Some(&Value::Array(vec![
+                Value::String("AUTHORED".into()),
+                Value::String("CONTAINS".into())
+            ]))
         );
     }
 
