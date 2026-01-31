@@ -1,4 +1,7 @@
 {{- if and .Values.gkgServer .Values.gkgServer.webserver .Values.gkgServer.webserver.enabled }}
+{{- if and .Values.gkgServer.webserver.internalLoadBalancer (not .Values.gkgServer.webserver.loadBalancerIP) }}
+{{- fail "loadBalancerIP is required when internalLoadBalancer is enabled" }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -6,11 +9,24 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-webserver") | nindent 4 }}
+  {{- if .Values.gkgServer.webserver.internalLoadBalancer }}
+  annotations:
+    networking.gke.io/load-balancer-type: "Internal"
+  {{- end }}
 spec:
+  {{- if .Values.gkgServer.webserver.internalLoadBalancer }}
+  type: LoadBalancer
+  {{- if .Values.gkgServer.webserver.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.gkgServer.webserver.loadBalancerIP | quote }}
+  {{- end }}
+  {{- end }}
   ports:
     - name: http
       port: 8080
       targetPort: 8080
+    - name: grpc
+      port: 50051
+      targetPort: 50051
   selector:
     {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-webserver") | nindent 4 }}
 ---
@@ -42,6 +58,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: grpc
+              containerPort: 50051
           env:
             - name: LOG_FORMAT
               value: "json"
@@ -54,6 +72,8 @@ spec:
                   key: jwt-secret
             - name: GKG_BIND_ADDRESS
               value: "0.0.0.0:8080"
+            - name: GKG_GRPC_BIND_ADDRESS
+              value: "0.0.0.0:50051"
             {{- if and .Values.gkgServer.healthCheck .Values.gkgServer.healthCheck.enabled }}
             - name: GKG_HEALTH_CHECK_URL
               value: "http://gkg-health-check:4201"

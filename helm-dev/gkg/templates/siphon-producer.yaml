@@ -30,6 +30,8 @@ data:
       slot_name: {{ .Values.producer.slotName | quote }}
       standby_timeout_ms: 3000
       memory_buffer_size_in_bytes: {{ .Values.producer.memoryBufferSize | int }}
+      initial_data_snapshot_threads_per_table: {{ .Values.producer.initialDataSnapshotThreadsPerTable | int }}
+      snapshot_memory_buffer_size_bytes: {{ .Values.producer.snapshotMemoryBufferSize | int }}
 
     queueing:
       driver: nats

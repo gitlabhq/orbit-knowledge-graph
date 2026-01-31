@@ -12,6 +12,7 @@ secrets:
   clickhouseSecretName: clickhouse-password
   runnerTokenSecretName: runner_authentication_token
   jwtSecretName: ""
+  gitalySecretName: ""
 
 postgres:
   host: ""
@@ -83,6 +84,8 @@ producer:
   advisoryLockId: 144324
   maxColumnSizeBytes: 8000000
   memoryBufferSize: 104857600
+  initialDataSnapshotThreadsPerTable: 3
+  snapshotMemoryBufferSize: 10485760
   logLevel: info
   resources:
     requests:
@@ -134,6 +137,8 @@ gkgServer:
   webserver:
     enabled: false
     replicas: 1
+    internalLoadBalancer: false
+    loadBalancerIP: ""
     resources:
       requests:
         cpu: 100m
@@ -149,7 +154,6 @@ gkgServer:
       - siphon-consumer
       - siphon-producer
       - gkg-indexer
-      - nats
     resources:
       requests:
         cpu: 50m
