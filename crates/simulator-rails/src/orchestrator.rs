@@ -3,7 +3,7 @@ use crate::api_client::{ApiClient, Group, Member, PersonalAccessToken, User};
 use crate::config::Config;
 use crate::data_generator::DataGenerator;
 use crate::metrics::MetricsCollector;
-use crate::shared_state::SharedState;
+use crate::shared_state::SharedStateRegistry;
 use anyhow::Result;
 use serde_json::json;
 use std::fs;
@@ -16,16 +16,17 @@ pub struct Orchestrator {
     metrics: MetricsCollector,
     admin_client: ApiClient,
     namespaces: Vec<Group>,
-    shared_state: SharedState,
+    shared_states: SharedStateRegistry,
 }
 
 impl Orchestrator {
     pub fn new(mut config: Config) -> Result<Self> {
         config.start();
-        let admin_client = ApiClient::with_dry_run(
+        let admin_client = ApiClient::with_options(
             &config.base_url,
             &config.admin_token,
             config.dry_run,
+            config.request_timeout,
         )?;
 
         Ok(Self {
@@ -33,7 +34,7 @@ impl Orchestrator {
             metrics: MetricsCollector::new(),
             admin_client,
             namespaces: Vec::new(),
-            shared_state: SharedState::new(),
+            shared_states: SharedStateRegistry::new(),
         })
     }
 
@@ -59,16 +60,39 @@ impl Orchestrator {
     async fn create_namespaces(&mut self) -> Result<()> {
         info!(
             "Finding or creating {} namespaces...",
-            Config::NAMESPACE_COUNT
+            self.config.namespace_count
         );
 
-        for i in 1..=Config::NAMESPACE_COUNT {
+        for i in 1..=self.config.namespace_count {
             let path = self.config.namespace_path(i);
             let name = self.config.namespace_name(i);
 
             let namespace = self.find_or_create_namespace(&path, &name).await?;
-            info!("Namespace ready: {} (id: {})", namespace.path, namespace.id);
+            self.enable_knowledge_graph(namespace.id).await?;
+            info!(
+                "Namespace ready: {} (id: {}, KG enabled)",
+                namespace.path, namespace.id
+            );
             self.namespaces.push(namespace);
+        }
+
+        Ok(())
+    }
+
+    async fn enable_knowledge_graph(&self, namespace_id: u64) -> Result<()> {
+        let (status, _) = self
+            .admin_client
+            .put_with_status(
+                &format!("/admin/knowledge_graph/namespaces/{}", namespace_id),
+                &json!({}),
+            )
+            .await?;
+
+        if !status.is_success() && status.as_u16() != 409 {
+            warn!(
+                "Failed to enable Knowledge Graph for namespace {}: {}",
+                namespace_id, status
+            );
         }
 
         Ok(())
@@ -108,7 +132,7 @@ impl Orchestrator {
         let email = DataGenerator::random_email(&username);
 
         // Always create a new user with random name (no reuse for random names)
-        let password = format!("LoadTest{}!", uuid::Uuid::new_v4());
+        let password = format!("Xy9#{}Zk!", uuid::Uuid::new_v4().simple());
         let user: User = self
             .admin_client
             .post(
@@ -150,14 +174,14 @@ impl Orchestrator {
             return Ok(());
         }
 
-        // Add as developer (access_level = 30)
+        // Add as maintainer (access_level = 50) to allow pushing to protected branches
         let (status, _) = self
             .admin_client
             .post_with_status(
                 &format!("/groups/{}/members", namespace_id),
                 &json!({
                     "user_id": user_id,
-                    "access_level": 30
+                    "access_level": 50
                 }),
             )
             .await?;
@@ -180,21 +204,25 @@ impl Orchestrator {
         for i in 1..=self.config.agent_count {
             let (user, token) = self.find_or_create_user(i).await?;
 
+            // Add user only to their assigned namespace
             let namespace = &self.namespaces[(i - 1) % self.namespaces.len()];
             self.ensure_membership(namespace.id, user.id).await?;
 
-            let client = ApiClient::with_dry_run(
+            let client = ApiClient::with_options(
                 &self.config.base_url,
                 &token,
                 self.config.dry_run,
+                self.config.request_timeout,
             )?;
+            // Get the SharedState for this agent's namespace
+            let shared_state = self.shared_states.get(namespace.id);
             let mut agent = Agent::new(
                 i,
                 client,
                 self.config.clone(),
                 user.id,
                 namespace.id,
-                self.shared_state.clone(),
+                shared_state,
                 self.metrics.clone(),
             );
 

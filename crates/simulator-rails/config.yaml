@@ -1,0 +1,45 @@
+# GitLab Rails Simulator Configuration
+# Run: cargo run -p simulator-rails -- -c crates/simulator-rails/config.yaml
+
+gitlab:
+  base_url: "http://localhost:3000"
+  admin_token: "glpat-ACLdk64i1k33DNnQHxVTxmM6MQpvOjEKdToxCw.01.121jz2y2t"
+
+execution:
+  agent_count: 20
+  duration_minutes: 5
+  dry_run: false
+  verbose: false
+
+timing:
+  min_action_delay: 0.5
+  max_action_delay: 2.0
+  request_timeout: 60
+
+namespaces:
+  prefix: "load-test-namespace"
+  count: 2
+
+users:
+  prefix: "load-test-user"
+  email_domain: "example.com"
+
+# High interaction weights applied directly
+action_weights:
+  create_project: 3
+  create_file: 8
+  update_file: 5
+  create_issue: 10
+  close_issue: 5
+  link_issues: 15
+  comment_on_issue: 20
+  reply_to_issue_comment: 25
+  create_milestone: 3
+  attach_milestone: 5
+  create_merge_request: 8
+  push_to_merge_request: 8
+  comment_on_merge_request: 20
+  approve_merge_request: 15
+  merge_merge_request: 5
+  close_merge_request: 3
+  reply_to_mr_discussion: 25

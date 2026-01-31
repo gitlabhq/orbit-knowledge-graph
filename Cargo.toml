@@ -15,6 +15,7 @@ members = [
   "crates/simulator",
   "crates/health-check",
   "crates/siphon-proto",
+  "crates/simulator-rails",
 ]
 
 [workspace.dependencies]

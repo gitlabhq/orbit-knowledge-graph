@@ -1,0 +1,159 @@
+# GitLab Rails Simulator Configuration
+# Copy this file to config.yaml and adjust values as needed.
+
+# GitLab instance settings
+gitlab:
+  # Base URL of the GitLab instance
+  base_url: "http://localhost:3000"
+  # Admin API token (can also be set via GITLAB_QA_ADMIN_ACCESS_TOKEN env var)
+  # admin_token: "glpat-xxxxxxxxxxxxxxxxxxxx"
+
+# Test execution settings
+execution:
+  # Number of concurrent agents to simulate
+  agent_count: 100
+  # Total test duration in minutes
+  duration_minutes: 60
+  # Dry run mode - simulate actions without making API calls
+  dry_run: false
+  # Enable verbose logging
+  verbose: false
+
+# Timing settings for agent actions
+timing:
+  # Minimum delay between actions (seconds)
+  min_action_delay: 0.5
+  # Maximum delay between actions (seconds)
+  max_action_delay: 3.0
+  # Progress report interval (seconds)
+  progress_interval: 60
+  # HTTP request timeout (seconds)
+  request_timeout: 30
+
+# Namespace configuration
+namespaces:
+  # Prefix for namespace paths (e.g., "load-test-namespace-1")
+  prefix: "load-test-namespace"
+  # Number of namespaces to create and distribute agents across
+  count: 2
+
+# User configuration
+users:
+  # Prefix for usernames (e.g., "load-test-user-001")
+  prefix: "load-test-user"
+  # Email domain for generated users
+  email_domain: "example.com"
+
+# Action weights control the probability of each action type.
+# Higher weight = more likely to be selected.
+# Set to 0 to disable an action type entirely.
+action_weights:
+  # Project management
+  create_project: 5
+
+  # File operations
+  create_file: 20
+  update_file: 15
+
+  # Issue management
+  create_issue: 15
+  close_issue: 10
+  link_issues: 5
+  comment_on_issue: 5
+  reply_to_issue_comment: 5
+
+  # Milestone management
+  create_milestone: 5
+  attach_milestone: 5
+
+  # Merge request management
+  create_merge_request: 8
+  push_to_merge_request: 10
+  comment_on_merge_request: 5
+  approve_merge_request: 5
+  merge_merge_request: 3
+  close_merge_request: 2
+  reply_to_mr_discussion: 5
+
+# Preset profiles for common scenarios (optional, overrides above settings)
+# Use with --profile flag
+profiles:
+  # Light load for development/testing
+  light:
+    agent_count: 10
+    duration_minutes: 5
+    timing:
+      min_action_delay: 1.0
+      max_action_delay: 5.0
+
+  # Heavy load for stress testing
+  heavy:
+    agent_count: 500
+    duration_minutes: 120
+    timing:
+      min_action_delay: 0.1
+      max_action_delay: 1.0
+
+  # Issue-focused testing
+  issues:
+    action_weights:
+      create_project: 2
+      create_file: 5
+      update_file: 5
+      create_issue: 30
+      close_issue: 15
+      link_issues: 10
+      comment_on_issue: 20
+      reply_to_issue_comment: 15
+      create_milestone: 5
+      attach_milestone: 10
+      create_merge_request: 2
+      push_to_merge_request: 2
+      comment_on_merge_request: 2
+      approve_merge_request: 1
+      merge_merge_request: 1
+      close_merge_request: 1
+      reply_to_mr_discussion: 2
+
+  # Merge request-focused testing
+  merge_requests:
+    action_weights:
+      create_project: 3
+      create_file: 10
+      update_file: 10
+      create_issue: 5
+      close_issue: 3
+      link_issues: 2
+      comment_on_issue: 2
+      reply_to_issue_comment: 2
+      create_milestone: 2
+      attach_milestone: 2
+      create_merge_request: 20
+      push_to_merge_request: 25
+      comment_on_merge_request: 15
+      approve_merge_request: 12
+      merge_merge_request: 8
+      close_merge_request: 5
+      reply_to_mr_discussion: 10
+
+  # High interaction mode - maximizes cross-agent collaboration
+  # Focuses on comments, replies, approvals, and linking
+  high_interaction:
+    action_weights:
+      create_project: 3
+      create_file: 8
+      update_file: 5
+      create_issue: 10
+      close_issue: 5
+      link_issues: 15
+      comment_on_issue: 20
+      reply_to_issue_comment: 25
+      create_milestone: 3
+      attach_milestone: 5
+      create_merge_request: 8
+      push_to_merge_request: 8
+      comment_on_merge_request: 20
+      approve_merge_request: 15
+      merge_merge_request: 5
+      close_merge_request: 3
+      reply_to_mr_discussion: 25

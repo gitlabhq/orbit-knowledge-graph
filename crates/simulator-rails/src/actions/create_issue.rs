@@ -38,7 +38,6 @@ impl Action for CreateIssue {
             )
             .await?;
 
-        // Publish to shared state for other agents to comment on
         shared.publish_issue(issue.clone());
         state.add_issue(issue);
         Ok(())

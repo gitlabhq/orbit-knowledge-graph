@@ -17,7 +17,6 @@ impl Action for ReplyToMrDiscussion {
     }
 
     fn can_execute(&self, state: &AgentState, shared: &SharedState) -> bool {
-        // Can reply to any MR discussion from another agent
         shared.has_mr_discussions_from_others(state.user_id)
     }
 
@@ -27,7 +26,6 @@ impl Action for ReplyToMrDiscussion {
         state: &mut AgentState,
         shared: &SharedState,
     ) -> Result<()> {
-        // Get a random MR discussion from another agent
         let discussion = shared
             .random_mr_discussion_not_by(state.user_id)
             .ok_or_else(|| anyhow::anyhow!("No MR discussions from other agents available"))?;

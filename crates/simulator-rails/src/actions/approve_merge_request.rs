@@ -16,7 +16,6 @@ impl Action for ApproveMergeRequest {
     }
 
     fn can_execute(&self, _state: &AgentState, shared: &SharedState) -> bool {
-        // Need open MRs in the shared pool
         shared.has_open_merge_requests()
     }
 
@@ -27,7 +26,6 @@ impl Action for ApproveMergeRequest {
         shared: &SharedState,
     ) -> Result<()> {
         // Get a random open MR that wasn't created by this user
-        // (you can't approve your own MR)
         let mr = shared
             .random_open_merge_request_not_by(state.user_id)
             .ok_or_else(|| anyhow::anyhow!("No merge requests from other users available"))?;

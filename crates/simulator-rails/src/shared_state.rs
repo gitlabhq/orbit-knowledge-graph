@@ -1,9 +1,10 @@
 use crate::api_client::{Issue, MergeRequest, Project, PublishedDiscussion, PublishedNote};
 use rand::seq::SliceRandom;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-/// Thread-safe shared state for cross-agent resource interaction.
-/// Agents publish their resources here so other agents can discover and interact with them.
+/// Thread-safe shared state for cross-agent resource interaction within a namespace.
+/// Each namespace has its own SharedState to ensure agents only collaborate within their group.
 #[derive(Debug, Default)]
 struct SharedStateInner {
     projects: Vec<Project>,
@@ -68,12 +69,6 @@ impl SharedState {
         state.issues.choose(&mut rand::thread_rng()).cloned()
     }
 
-    pub fn random_open_issue(&self) -> Option<Issue> {
-        let state = self.inner.read().ok()?;
-        let open: Vec<_> = state.issues.iter().filter(|i| i.state == "opened").collect();
-        open.choose(&mut rand::thread_rng()).map(|i| (*i).clone())
-    }
-
     pub fn random_issues(&self, count: usize) -> Vec<Issue> {
         let state = match self.inner.read() {
             Ok(s) => s,
@@ -91,18 +86,7 @@ impl SharedState {
         state.merge_requests.choose(&mut rand::thread_rng()).cloned()
     }
 
-    pub fn random_open_merge_request(&self) -> Option<MergeRequest> {
-        let state = self.inner.read().ok()?;
-        let open: Vec<_> = state
-            .merge_requests
-            .iter()
-            .filter(|m| m.state == "opened")
-            .collect();
-        open.choose(&mut rand::thread_rng()).map(|m| (*m).clone())
-    }
-
     /// Get a random open MR that wasn't created by the given user.
-    /// This is needed for approvals since you can't approve your own MR.
     pub fn random_open_merge_request_not_by(&self, user_id: u64) -> Option<MergeRequest> {
         let state = self.inner.read().ok()?;
         let candidates: Vec<_> = state
@@ -207,5 +191,37 @@ impl SharedState {
             .read()
             .map(|s| s.mr_discussions.iter().any(|d| d.author_id != user_id))
             .unwrap_or(false)
+    }
+}
+
+/// Registry that holds a SharedState per namespace
+#[derive(Debug, Clone, Default)]
+pub struct SharedStateRegistry {
+    states: Arc<RwLock<HashMap<u64, SharedState>>>,
+}
+
+impl SharedStateRegistry {
+    pub fn new() -> Self {
+        Self {
+            states: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Get or create the SharedState for a namespace
+    pub fn get(&self, namespace_id: u64) -> SharedState {
+        if let Ok(states) = self.states.read() {
+            if let Some(state) = states.get(&namespace_id) {
+                return state.clone();
+            }
+        }
+
+        if let Ok(mut states) = self.states.write() {
+            states
+                .entry(namespace_id)
+                .or_insert_with(SharedState::new)
+                .clone()
+        } else {
+            SharedState::new()
+        }
     }
 }

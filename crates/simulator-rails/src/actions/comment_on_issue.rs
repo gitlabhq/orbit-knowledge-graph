@@ -17,7 +17,6 @@ impl Action for CommentOnIssue {
     }
 
     fn can_execute(&self, _state: &AgentState, shared: &SharedState) -> bool {
-        // Can comment on any issue in the shared pool
         shared.has_issues()
     }
 
@@ -27,8 +26,9 @@ impl Action for CommentOnIssue {
         state: &mut AgentState,
         shared: &SharedState,
     ) -> Result<()> {
-        // Get a random issue from the shared pool (could be any agent's issue)
-        let issue = shared.random_issue().ok_or_else(|| anyhow::anyhow!("No issues available"))?;
+        let issue = shared
+            .random_issue()
+            .ok_or_else(|| anyhow::anyhow!("No issues available"))?;
 
         let body = DataGenerator::comment_body();
         let note: Note = client
@@ -41,7 +41,6 @@ impl Action for CommentOnIssue {
             )
             .await?;
 
-        // Publish to shared state so other agents can reply
         shared.publish_issue_note(PublishedNote {
             note_id: note.id,
             project_id: issue.project_id,

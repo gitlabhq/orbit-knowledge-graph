@@ -88,7 +88,6 @@ impl Action for CreateMergeRequest {
             )
             .await?;
 
-        // Publish to shared state for other agents to approve/comment on
         shared.publish_merge_request(mr.clone());
         state.add_merge_request(mr);
         Ok(())

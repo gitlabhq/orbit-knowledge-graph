@@ -17,7 +17,6 @@ impl Action for LinkIssues {
     }
 
     fn can_execute(&self, _state: &AgentState, shared: &SharedState) -> bool {
-        // Need at least 2 issues in the shared pool
         shared.has_multiple_issues()
     }
 
@@ -27,7 +26,6 @@ impl Action for LinkIssues {
         _state: &mut AgentState,
         shared: &SharedState,
     ) -> Result<()> {
-        // Get 2 random issues from the shared pool (could be from different agents)
         let issues = shared.random_issues(2);
         if issues.len() < 2 {
             return Ok(());

@@ -5,6 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+const MAX_RETRIES: u32 = 3;
+const INITIAL_RETRY_DELAY_MS: u64 = 500;
+
 // Global counter for generating unique IDs in dry-run mode
 static DRY_RUN_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -22,12 +25,21 @@ pub struct ApiClient {
 
 impl ApiClient {
     pub fn new(base_url: &str, token: &str) -> Result<Self> {
-        Self::with_dry_run(base_url, token, false)
+        Self::with_options(base_url, token, false, 30)
     }
 
     pub fn with_dry_run(base_url: &str, token: &str, dry_run: bool) -> Result<Self> {
+        Self::with_options(base_url, token, dry_run, 30)
+    }
+
+    pub fn with_options(
+        base_url: &str,
+        token: &str,
+        dry_run: bool,
+        request_timeout_secs: u64,
+    ) -> Result<Self> {
         let client = Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(request_timeout_secs))
             .danger_accept_invalid_certs(true)
             .build()?;
 
@@ -43,25 +55,49 @@ impl ApiClient {
         format!("{}/api/v4{}", self.base_url, path)
     }
 
+    fn is_retryable_error(err: &reqwest::Error) -> bool {
+        err.is_timeout() || err.is_connect() || err.is_request()
+    }
+
+    async fn retry_delay(attempt: u32) {
+        let delay_ms = INITIAL_RETRY_DELAY_MS * 2u64.pow(attempt);
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+    }
+
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = self.api_url(path);
         debug!("GET {}", url);
 
         if self.dry_run {
             info!("[DRY-RUN] GET {}", url);
-            // Return empty array for list endpoints
             return serde_json::from_str("[]")
                 .map_err(|e| anyhow!("Dry-run JSON parse error: {}", e));
         }
 
-        let response = self
-            .client
-            .get(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .send()
-            .await?;
+        let mut last_error = None;
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                warn!("Retrying GET {} (attempt {}/{})", url, attempt + 1, MAX_RETRIES + 1);
+                Self::retry_delay(attempt - 1).await;
+            }
 
-        self.handle_response(response).await
+            match self
+                .client
+                .get(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .send()
+                .await
+            {
+                Ok(response) => return self.handle_response(response).await,
+                Err(e) if Self::is_retryable_error(&e) && attempt < MAX_RETRIES => {
+                    warn!("GET {} failed (retryable): {}", url, e);
+                    last_error = Some(e);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Err(last_error.map(Into::into).unwrap_or_else(|| anyhow!("Request failed after retries")))
     }
 
     pub async fn get_optional<T: DeserializeOwned>(&self, path: &str) -> Result<Option<T>> {
@@ -73,18 +109,35 @@ impl ApiClient {
             return Ok(None);
         }
 
-        let response = self
-            .client
-            .get(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .send()
-            .await?;
+        let mut last_error = None;
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                warn!("Retrying GET {} (attempt {}/{})", url, attempt + 1, MAX_RETRIES + 1);
+                Self::retry_delay(attempt - 1).await;
+            }
 
-        if response.status() == StatusCode::NOT_FOUND {
-            return Ok(None);
+            match self
+                .client
+                .get(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    if response.status() == StatusCode::NOT_FOUND {
+                        return Ok(None);
+                    }
+                    return Ok(Some(self.handle_response(response).await?));
+                }
+                Err(e) if Self::is_retryable_error(&e) && attempt < MAX_RETRIES => {
+                    warn!("GET {} failed (retryable): {}", url, e);
+                    last_error = Some(e);
+                }
+                Err(e) => return Err(e.into()),
+            }
         }
 
-        Ok(Some(self.handle_response(response).await?))
+        Err(last_error.map(Into::into).unwrap_or_else(|| anyhow!("Request failed after retries")))
     }
 
     pub async fn post<T: DeserializeOwned + DryRunnable, B: Serialize>(
@@ -101,15 +154,31 @@ impl ApiClient {
             return Ok(T::dry_run_response(path));
         }
 
-        let response = self
-            .client
-            .post(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .json(body)
-            .send()
-            .await?;
+        let mut last_error = None;
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                warn!("Retrying POST {} (attempt {}/{})", url, attempt + 1, MAX_RETRIES + 1);
+                Self::retry_delay(attempt - 1).await;
+            }
 
-        self.handle_response(response).await
+            match self
+                .client
+                .post(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .json(body)
+                .send()
+                .await
+            {
+                Ok(response) => return self.handle_response(response).await,
+                Err(e) if Self::is_retryable_error(&e) && attempt < MAX_RETRIES => {
+                    warn!("POST {} failed (retryable): {}", url, e);
+                    last_error = Some(e);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Err(last_error.map(Into::into).unwrap_or_else(|| anyhow!("Request failed after retries")))
     }
 
     pub async fn post_empty<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -145,15 +214,31 @@ impl ApiClient {
             return Ok(T::dry_run_response(path));
         }
 
-        let response = self
-            .client
-            .put(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .json(body)
-            .send()
-            .await?;
+        let mut last_error = None;
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                warn!("Retrying PUT {} (attempt {}/{})", url, attempt + 1, MAX_RETRIES + 1);
+                Self::retry_delay(attempt - 1).await;
+            }
 
-        self.handle_response(response).await
+            match self
+                .client
+                .put(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .json(body)
+                .send()
+                .await
+            {
+                Ok(response) => return self.handle_response(response).await,
+                Err(e) if Self::is_retryable_error(&e) && attempt < MAX_RETRIES => {
+                    warn!("PUT {} failed (retryable): {}", url, e);
+                    last_error = Some(e);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Err(last_error.map(Into::into).unwrap_or_else(|| anyhow!("Request failed after retries")))
     }
 
     pub async fn post_with_status<B: Serialize>(
@@ -170,17 +255,35 @@ impl ApiClient {
             return Ok((StatusCode::CREATED, "{}".to_string()));
         }
 
-        let response = self
-            .client
-            .post(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .json(body)
-            .send()
-            .await?;
+        let mut last_error = None;
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                warn!("Retrying POST {} (attempt {}/{})", url, attempt + 1, MAX_RETRIES + 1);
+                Self::retry_delay(attempt - 1).await;
+            }
 
-        let status = response.status();
-        let body = response.text().await?;
-        Ok((status, body))
+            match self
+                .client
+                .post(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .json(body)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    let status = response.status();
+                    let body = response.text().await?;
+                    return Ok((status, body));
+                }
+                Err(e) if Self::is_retryable_error(&e) && attempt < MAX_RETRIES => {
+                    warn!("POST {} failed (retryable): {}", url, e);
+                    last_error = Some(e);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Err(last_error.map(Into::into).unwrap_or_else(|| anyhow!("Request failed after retries")))
     }
 
     pub async fn put_with_status<B: Serialize>(
@@ -197,17 +300,35 @@ impl ApiClient {
             return Ok((StatusCode::OK, "{}".to_string()));
         }
 
-        let response = self
-            .client
-            .put(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .json(body)
-            .send()
-            .await?;
+        let mut last_error = None;
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                warn!("Retrying PUT {} (attempt {}/{})", url, attempt + 1, MAX_RETRIES + 1);
+                Self::retry_delay(attempt - 1).await;
+            }
 
-        let status = response.status();
-        let body = response.text().await?;
-        Ok((status, body))
+            match self
+                .client
+                .put(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .json(body)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    let status = response.status();
+                    let body = response.text().await?;
+                    return Ok((status, body));
+                }
+                Err(e) if Self::is_retryable_error(&e) && attempt < MAX_RETRIES => {
+                    warn!("PUT {} failed (retryable): {}", url, e);
+                    last_error = Some(e);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Err(last_error.map(Into::into).unwrap_or_else(|| anyhow!("Request failed after retries")))
     }
 
     async fn handle_response<T: DeserializeOwned>(&self, response: Response) -> Result<T> {
@@ -341,7 +462,6 @@ pub struct Issue {
 impl DryRunnable for Issue {
     fn dry_run_response(path: &str) -> Self {
         let id = next_dry_run_id();
-        // Extract project_id from path like "/projects/123/issues"
         let project_id = path
             .split('/')
             .find(|s| s.parse::<u64>().is_ok())
@@ -398,7 +518,7 @@ impl DryRunnable for MergeRequest {
             source_branch: format!("feature-{}", id),
             target_branch: "main".to_string(),
             author: MergeRequestAuthor {
-                id: 1, // Default author for dry-run
+                id: 1,
                 username: "dry-run-author".to_string(),
             },
         }
