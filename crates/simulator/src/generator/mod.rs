@@ -136,6 +136,9 @@ impl Generator {
             }
         }
 
+        // Compact registry to free traversal path memory before associations
+        registry.compact();
+
         let association_edges = self.generate_association_edges(&registry, &mut rng);
         data.edges.extend(association_edges);
 
@@ -238,6 +241,8 @@ impl Generator {
         );
         let mut edges = Vec::new();
         let is_group = node.name == "Group";
+        // Only store full context for parent types; leaves only need IDs for associations
+        let is_parent_type = self.dependency_graph.is_parent_type(&node.name);
 
         for parent_edge in parent_edges {
             // Clone parent IDs and paths to avoid borrow conflict with registry.add()
@@ -265,7 +270,13 @@ impl Generator {
                     };
 
                     builder.add_row(traversal_path.clone(), entity_id);
-                    registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
+                    
+                    // For leaf entities, only store ID (saves ~44 bytes per entity)
+                    if is_parent_type {
+                        registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
+                    } else {
+                        registry.add_id_only(&node.name, entity_id);
+                    }
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
                     {
@@ -308,13 +319,14 @@ impl Generator {
         for (edge_type, source_kind, target_kind, ratio, direction) in
             self.config.generation.associations.all_associations()
         {
-            let sources = match registry.get(&source_kind) {
-                Some(entities) if !entities.is_empty() => entities,
+            // Use compacted ID-only data
+            let source_ids = match registry.get_ids_slice(&source_kind) {
+                Some(ids) if !ids.is_empty() => ids,
                 _ => continue,
             };
 
-            let targets = match registry.get(&target_kind) {
-                Some(entities) if !entities.is_empty() => entities,
+            let target_ids = match registry.get_ids_slice(&target_kind) {
+                Some(ids) if !ids.is_empty() => ids,
                 _ => continue,
             };
 
@@ -324,15 +336,14 @@ impl Generator {
             let tgt_kind = self.intern(&target_kind);
 
             // Determine which side to iterate over based on direction
-            let (iterate_over, sample_from, is_source_iteration) = match direction {
-                IterationDirection::Target => (targets, sources, false),
-                IterationDirection::Source => (sources, targets, true),
+            let (iterate_over, sample_from) = match direction {
+                IterationDirection::Target => (target_ids, source_ids),
+                IterationDirection::Source => (source_ids, target_ids),
             };
 
-            // Pre-compute sample_from length for index-based sampling
             let sample_len = sample_from.len();
 
-            for primary in iterate_over {
+            for &primary_id in iterate_over {
                 let edge_count = match &ratio {
                     EdgeRatio::Count(n) => *n,
                     EdgeRatio::Probability(p) => {
@@ -348,23 +359,21 @@ impl Generator {
                     continue;
                 }
 
-                // Sample random indices directly - faster than iterator-based sampling
                 let count = edge_count.min(sample_len);
                 for _ in 0..count {
                     let idx = rng.gen_range(0..sample_len);
-                    let secondary = &sample_from[idx];
+                    let secondary_id = sample_from[idx];
 
-                    let (source, target) = if is_source_iteration {
-                        (primary, secondary)
-                    } else {
-                        (secondary, primary)
+                    let (source_id, target_id) = match direction {
+                        IterationDirection::Target => (secondary_id, primary_id),
+                        IterationDirection::Source => (primary_id, secondary_id),
                     };
 
                     edges.push(EdgeRecord {
                         relationship_kind: rel_kind.clone(),
-                        source: source.id,
+                        source: source_id,
                         source_kind: src_kind.clone(),
-                        target: target.id,
+                        target: target_id,
                         target_kind: tgt_kind.clone(),
                     });
                 }

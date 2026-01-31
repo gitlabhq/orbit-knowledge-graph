@@ -50,51 +50,49 @@ generation:
   organizations: 1
 
   roots:
-    User: 10000                       # 10k users
-    Group: 20                         # 20 top-level groups
+    User: 30000                       # 50k users
+    Group: 50                        # 100 top-level groups
 
   subgroups:
     max_depth: 3                      # 3 levels deep
-    per_group: 2                      # 2 subgroups per parent
-    # Total groups: 20 × (1 + 2 + 4 + 8) = 300
+    per_group: 3                      # 3 subgroups per parent
+    # Total groups: 100 × (1 + 3 + 9 + 27) = 4,000
 
-  # Estimated: ~10M edges
-  # - 300 groups × 10 projects = 3k projects
-  # - 3k × 100 MRs = 300k MRs
-  # - 300k × 2 diffs = 600k diffs
-  # - 600k × 4 files = 2.4M files
-  # - 3k × 100 pipelines = 300k pipelines  
-  # - 300k × 3 stages = 900k stages
-  # - 900k × 4 jobs = 3.6M jobs
+  # Estimated: ~100M edges
+  # - 4k groups × 20 projects = 80k projects
+  # - 80k × 50 MRs = 4M MRs → 4M + 8M diffs + 24M files = 36M edges
+  # - 80k × 50 pipelines = 4M → 4M + 12M stages + 36M jobs = 52M edges
+  # - 80k × 50 work items = 4M → 4M + 4M notes = 8M edges
+  # Plus associations ~10M
 
   relationships:
     CONTAINS:
-      "Group -> Project": 10          # 10 projects per group = 3k projects
+      "Group -> Project": 20          # 20 projects per group = 80k projects
 
     IN_PROJECT:
-      "MergeRequest -> Project": 100  # 100 MRs per project = 300k MRs
-      "WorkItem -> Project": 100      # 100 work items = 300k
-      "Pipeline -> Project": 100      # 100 pipelines = 300k
+      "MergeRequest -> Project": 50   # 50 MRs per project = 4M MRs
+      "WorkItem -> Project": 50       # 50 work items = 4M
+      "Pipeline -> Project": 50       # 50 pipelines = 4M
       "Vulnerability -> Project": 5
       "Finding -> Project": 10
       "Milestone -> Project": 3
       "Label -> Project": 5
 
     HAS_STAGE:
-      "Pipeline -> Stage": 3          # 900k stages
+      "Pipeline -> Stage": 3          # 12M stages
 
     HAS_JOB:
-      "Stage -> Job": 4               # 3.6M jobs
+      "Stage -> Job": 3               # 36M jobs
 
     HAS_DIFF:
-      "MergeRequest -> MergeRequestDiff": 2  # 600k diffs
+      "MergeRequest -> MergeRequestDiff": 2  # 8M diffs
 
     HAS_FILE:
-      "MergeRequestDiff -> MergeRequestDiffFile": 4  # 2.4M files
+      "MergeRequestDiff -> MergeRequestDiffFile": 3  # 24M files
 
     HAS_NOTE:
-      "MergeRequest -> Note": 2
-      "WorkItem -> Note": 1
+      "MergeRequest -> Note": 2       # 8M notes
+      "WorkItem -> Note": 1           # 4M notes
 
     HAS_FINDING:
       "Vulnerability -> Finding": 2
