@@ -6,6 +6,7 @@ use gkg_server::cli::{Args, Mode};
 use gkg_server::config::AppConfig;
 use gkg_server::dispatcher;
 use gkg_server::grpc::GrpcServer;
+use gkg_server::health_check as health_check_mode;
 use gkg_server::indexer;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
@@ -27,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
 
     let result = match args.mode {
         Mode::DispatchIndexing => dispatcher::run(&config).await.map_err(Into::into),
+        Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
         Mode::Indexer => indexer::run(&config, shutdown).await.map_err(Into::into),
         Mode::Webserver => run_webserver(&config).await,
     };

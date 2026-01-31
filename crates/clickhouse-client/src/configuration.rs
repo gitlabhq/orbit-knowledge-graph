@@ -41,7 +41,9 @@ impl ClickHouseConfiguration {
             url: env_var_or(&format!("{prefix}_URL"), "http://127.0.0.1:8123".into()),
             database: env_var_or(&format!("{prefix}_DATABASE"), "default".into()),
             username: env_var_or(&format!("{prefix}_USERNAME"), "default".into()),
-            password: std::env::var(format!("{prefix}_PASSWORD")).ok(),
+            password: std::env::var(format!("{prefix}_PASSWORD"))
+                .ok()
+                .filter(|p| !p.is_empty()),
         }
     }
 
@@ -208,6 +210,21 @@ mod tests {
         unsafe {
             std::env::remove_var("CLICKHOUSE_URL");
             std::env::remove_var("CLICKHOUSE_DATABASE");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_empty_password_treated_as_none() {
+        unsafe {
+            std::env::set_var("CLICKHOUSE_PASSWORD", "");
+        }
+
+        let config = ClickHouseConfiguration::from_env_with_prefix("");
+        assert_eq!(config.password, None);
+
+        unsafe {
+            std::env::remove_var("CLICKHOUSE_PASSWORD");
         }
     }
 }

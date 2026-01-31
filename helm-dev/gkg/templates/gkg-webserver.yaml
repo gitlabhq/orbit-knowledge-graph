@@ -54,6 +54,10 @@ spec:
                   key: jwt-secret
             - name: GKG_BIND_ADDRESS
               value: "0.0.0.0:8080"
+            {{- if and .Values.gkgServer.healthCheck .Values.gkgServer.healthCheck.enabled }}
+            - name: GKG_HEALTH_CHECK_URL
+              value: "http://gkg-health-check:4201"
+            {{- end }}
             {{- if .Values.otel.enabled }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.otel.endpoint | quote }}

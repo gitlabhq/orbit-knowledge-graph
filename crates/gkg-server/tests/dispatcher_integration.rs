@@ -63,6 +63,7 @@ impl TestContext {
             grpc_bind_address: SocketAddr::from(([127, 0, 0, 1], 0)),
             jwt_secret: Some("test".into()),
             jwt_clock_skew_secs: 0,
+            health_check_url: None,
             nats: NatsConfiguration {
                 url: self.nats_url.clone(),
                 ..Default::default()
