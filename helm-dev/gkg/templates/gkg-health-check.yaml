@@ -1,0 +1,118 @@
+{{- if and .Values.gkgServer .Values.gkgServer.healthCheck .Values.gkgServer.healthCheck.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gkg-health-check
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-health-check") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gkg-health-check
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-health-check") | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gkg-health-check
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-health-check") | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: gkg-health-check
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: gkg-health-check
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gkg-health-check
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-health-check") | nindent 4 }}
+spec:
+  replicas: {{ .Values.gkgServer.healthCheck.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-health-check") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-health-check") | nindent 8 }}
+    spec:
+      serviceAccountName: gkg-health-check
+      securityContext:
+        {{- include "gkg.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: gkg-health-check
+          image: "{{ .Values.gkgServer.image.repository }}:{{ .Values.gkgServer.image.tag }}"
+          imagePullPolicy: {{ .Values.gkgServer.image.pullPolicy }}
+          args:
+            - "--mode=health-check"
+          ports:
+            - name: http
+              containerPort: 4201
+              protocol: TCP
+          env:
+            - name: LOG_FORMAT
+              value: "json"
+            - name: GKG_HEALTH_CHECK_BIND_ADDRESS
+              value: "0.0.0.0:4201"
+            - name: GKG_HEALTH_CHECK_NAMESPACE
+              value: {{ .Values.gkgServer.healthCheck.namespace | default .Release.Namespace | quote }}
+            - name: GKG_HEALTH_CHECK_SERVICES
+              value: {{ .Values.gkgServer.healthCheck.services | default (list "siphon-consumer" "siphon-producer" "gkg-indexer" "nats") | join "," | quote }}
+            {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
+            {{- if .Values.otel.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: "gkg-health-check"
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            {{- include "gkg.securityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.gkgServer.healthCheck.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gkg-health-check
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-health-check") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4201
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-health-check") | nindent 4 }}
+{{- end }}

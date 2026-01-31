@@ -56,6 +56,20 @@ gkgServer:
       limits:
         cpu: 500m
         memory: 512Mi
+  healthCheck:
+    enabled: true
+    replicas: 1
+    namespace: default
+    services:
+      - gkg-indexer
+      - gkg-webserver
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
 
 nats:
   enabled: true

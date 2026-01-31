@@ -1,3 +1,4 @@
+mod health_client;
 mod router;
 
 use std::net::SocketAddr;
@@ -7,6 +8,7 @@ use tracing::info;
 
 use crate::auth::JwtValidator;
 
+pub use health_client::InfrastructureHealthClient;
 pub use router::create_router;
 
 pub struct Server {

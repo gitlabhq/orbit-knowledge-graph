@@ -13,6 +13,8 @@ pub struct AppConfig {
     pub grpc_bind_address: SocketAddr,
     pub jwt_secret: Option<String>,
     pub jwt_clock_skew_secs: u64,
+    /// URL of the health-check service (for webserver mode)
+    pub health_check_url: Option<String>,
     #[serde(default)]
     pub nats: NatsConfiguration,
     #[serde(default)]
@@ -42,11 +44,14 @@ impl AppConfig {
             .parse()
             .unwrap_or(60);
 
+        let health_check_url = std::env::var("GKG_HEALTH_CHECK_URL").ok();
+
         Ok(Self {
             bind_address,
             grpc_bind_address,
             jwt_secret,
             jwt_clock_skew_secs,
+            health_check_url,
             nats: NatsConfiguration::from_env(),
             datalake: ClickHouseConfiguration::from_env_with_prefix("DATALAKE"),
             graph: ClickHouseConfiguration::from_env_with_prefix("GRAPH"),

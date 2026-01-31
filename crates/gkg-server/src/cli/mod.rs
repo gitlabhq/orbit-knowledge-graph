@@ -10,6 +10,7 @@ pub struct Args {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Mode {
     DispatchIndexing,
+    HealthCheck,
     Indexer,
     Webserver,
 }

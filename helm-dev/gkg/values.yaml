@@ -132,6 +132,22 @@ gkgServer:
       limits:
         cpu: 500m
         memory: 512Mi
+  healthCheck:
+    enabled: false
+    replicas: 1
+    namespace: ""  # defaults to release namespace
+    services:
+      - siphon-consumer
+      - siphon-producer
+      - gkg-indexer
+      - nats
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
 
 # OTEL configuration for telemetry
 otel:

@@ -20,6 +20,8 @@ axum = { workspace = true }
 clap = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 etl-engine = { path = "../etl-engine" }
+health-check = { path = "../health-check" }
+reqwest = { workspace = true }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 jsonwebtoken = { workspace = true }

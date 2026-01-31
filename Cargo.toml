@@ -13,6 +13,7 @@ members = [
   "crates/gkg-server",
   "crates/ontology",
   "crates/simulator",
+  "crates/health-check",
 ]
 
 [workspace.dependencies]
@@ -96,6 +97,12 @@ axum = { version = "0.8.8", features = ["macros"] }
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 tower-http = { version = "0.6.8", features = ["trace"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
+
+# Health check dependencies
+kube = { version = "0.99", features = ["client", "runtime"] }
+k8s-openapi = { version = "0.24", features = ["v1_31"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+health-check = { path = "crates/health-check" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
