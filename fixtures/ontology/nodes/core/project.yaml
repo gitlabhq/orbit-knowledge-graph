@@ -3,7 +3,12 @@
 node_type: Project
 domain: core
 description: A GitLab project/repository
+label: name
 destination_table: gl_projects
+
+style:
+  size: 40
+  color: "#3B82F6"
 
 redaction:
   resource_type: projects

@@ -20,8 +20,8 @@ mod entities;
 pub mod etl;
 
 pub use entities::{
-    DataType, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, Field, NodeEntity,
-    RedactionConfig,
+    DataType, DomainInfo, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, Field,
+    NodeEntity, NodeStyle, RedactionConfig,
 };
 pub use etl::{
     DELETED_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope,
@@ -102,8 +102,11 @@ impl fmt::Display for OntologyError {
 /// A loaded ontology containing all node and edge entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
+    schema_version: String,
+    domains: BTreeMap<String, DomainInfo>,
     nodes: BTreeMap<String, NodeEntity>,
     edges: BTreeMap<String, Vec<EdgeEntity>>,
+    edge_descriptions: BTreeMap<String, String>,
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
     edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
 }
@@ -119,8 +122,11 @@ impl Ontology {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            schema_version: String::new(),
+            domains: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
+            edge_descriptions: BTreeMap::new(),
             edge_etl_configs: BTreeMap::new(),
         }
     }
@@ -134,11 +140,15 @@ impl Ontology {
                 name.clone(),
                 NodeEntity {
                     name: name.clone(),
+                    domain: String::new(),
+                    description: String::new(),
+                    label: String::new(),
                     fields: vec![],
                     primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
                     destination_table: format!("gl_{}", name.to_lowercase()),
                     etl: None,
                     redaction: None,
+                    style: NodeStyle::default(),
                 },
             );
         }
@@ -231,8 +241,11 @@ impl Ontology {
         let schema: SchemaYaml = parse_yaml(&schema_content, "schema.yaml")?;
 
         let mut ontology = Ontology::new();
+        ontology.schema_version = schema.schema_version.unwrap_or_default();
 
-        for domain in schema.domains.values() {
+        for (domain_name, domain) in &schema.domains {
+            let mut node_names = Vec::new();
+
             for (node_name, node_path) in &domain.nodes {
                 if ontology.nodes.contains_key(node_name) {
                     return Err(OntologyError::Validation(format!(
@@ -246,7 +259,18 @@ impl Ontology {
 
                 let entity = node_def.into_entity(node_name.clone())?;
                 ontology.nodes.insert(node_name.clone(), entity);
+                node_names.push(node_name.clone());
             }
+
+            node_names.sort();
+            ontology.domains.insert(
+                domain_name.clone(),
+                DomainInfo {
+                    name: domain_name.clone(),
+                    description: domain.description.clone().unwrap_or_default(),
+                    node_names,
+                },
+            );
         }
 
         for (edge_name, edge_path) in &schema.edges {
@@ -271,6 +295,12 @@ impl Ontology {
             }
 
             ontology.edges.insert(edge_name.clone(), entities);
+
+            if let Some(desc) = &edge_def.description {
+                ontology
+                    .edge_descriptions
+                    .insert(edge_name.clone(), desc.clone());
+            }
 
             if let Some(etl_config) = edge_def.into_etl_config()? {
                 ontology
@@ -409,6 +439,25 @@ impl Ontology {
     #[must_use]
     pub fn edge_count(&self) -> usize {
         self.edges.len()
+    }
+
+    #[must_use]
+    pub fn schema_version(&self) -> &str {
+        &self.schema_version
+    }
+
+    pub fn domains(&self) -> impl Iterator<Item = &DomainInfo> {
+        self.domains.values()
+    }
+
+    #[must_use]
+    pub fn get_domain(&self, name: &str) -> Option<&DomainInfo> {
+        self.domains.get(name)
+    }
+
+    #[must_use]
+    pub fn get_edge_description(&self, name: &str) -> Option<&str> {
+        self.edge_descriptions.get(name).map(|s| s.as_str())
     }
 
     /// Get ETL config for an edge by relationship kind.
@@ -669,6 +718,8 @@ fn parse_data_type(s: &str, field_name: &str) -> Result<DataType, OntologyError>
 #[derive(Debug, Deserialize)]
 struct SchemaYaml {
     #[serde(default)]
+    schema_version: Option<String>,
+    #[serde(default)]
     domains: BTreeMap<String, DomainYaml>,
     #[serde(default)]
     edges: BTreeMap<String, String>,
@@ -677,6 +728,8 @@ struct SchemaYaml {
 #[derive(Debug, Deserialize)]
 struct DomainYaml {
     #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
     nodes: BTreeMap<String, String>,
 }
 
@@ -684,11 +737,11 @@ struct DomainYaml {
 struct NodeYaml {
     #[allow(dead_code)]
     node_type: String,
-    #[allow(dead_code)]
     domain: String,
     #[serde(default)]
-    #[allow(dead_code)]
     description: String,
+    #[serde(default)]
+    label: String,
     destination_table: String,
     #[serde(default)]
     properties: BTreeMap<String, PropertyYaml>,
@@ -696,6 +749,24 @@ struct NodeYaml {
     etl: Option<EtlYaml>,
     #[serde(default)]
     redaction: Option<RedactionYaml>,
+    #[serde(default)]
+    style: Option<StyleYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StyleYaml {
+    #[serde(default = "default_size")]
+    size: i32,
+    #[serde(default = "default_color")]
+    color: String,
+}
+
+fn default_size() -> i32 {
+    30
+}
+
+fn default_color() -> String {
+    "#6B7280".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -762,6 +833,8 @@ struct PropertyYaml {
 
 #[derive(Debug, Deserialize)]
 struct EdgeYaml {
+    #[serde(default)]
+    description: Option<String>,
     #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
@@ -848,20 +921,28 @@ impl NodeYaml {
         // Convert ETL config
         let etl = self.etl.map(|e| e.into_config()).transpose()?;
 
-        // Convert redaction config
         let redaction = self.redaction.map(|r| RedactionConfig {
             resource_type: r.resource_type,
             id_column: r.id_column,
             ability: r.ability,
         });
 
+        let style = self.style.map_or_else(NodeStyle::default, |s| NodeStyle {
+            size: s.size,
+            color: s.color,
+        });
+
         Ok(NodeEntity {
             name,
+            domain: self.domain,
+            description: self.description,
+            label: self.label,
             fields,
             primary_keys,
             destination_table: self.destination_table,
             etl,
             redaction,
+            style,
         })
     }
 }
@@ -1341,6 +1422,9 @@ mod tests {
 
         let node = NodeEntity {
             name: "User".to_string(),
+            domain: "core".to_string(),
+            description: String::new(),
+            label: "username".to_string(),
             fields: vec![Field {
                 name: "status".to_string(),
                 source: "status".to_string(),
@@ -1352,6 +1436,7 @@ mod tests {
             destination_table: "gl_user".to_string(),
             etl: None,
             redaction: None,
+            style: NodeStyle::default(),
         };
 
         let mut ontology = Ontology::new();

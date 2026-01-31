@@ -3,7 +3,13 @@
 node_type: File
 domain: source_code
 description: A source code file within a repository
+label: path
 destination_table: gl_file
+
+style:
+  size: 24
+  color: "#22D3EE"
+
 redaction: null  # TODO: configure redaction
 
 properties:

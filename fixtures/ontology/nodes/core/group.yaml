@@ -3,7 +3,12 @@
 node_type: Group
 domain: core
 description: A GitLab group (top-level group or subgroup)
+label: name
 destination_table: gl_groups
+
+style:
+  size: 45
+  color: "#8B5CF6"
 
 redaction:
   resource_type: groups

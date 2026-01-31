@@ -3,7 +3,13 @@
 node_type: Pipeline
 domain: ci
 description: A CI/CD pipeline that runs a series of stages and jobs to build, test, and deploy code
+label: id
 destination_table: gl_pipeline
+
+style:
+  size: 30
+  color: "#6366F1"
+
 redaction: null  # TODO: configure redaction
 
 properties:

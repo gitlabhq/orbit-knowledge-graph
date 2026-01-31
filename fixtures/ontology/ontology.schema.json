@@ -155,6 +155,26 @@
       "additionalProperties": false
     },
 
+    "styleConfig": {
+      "type": "object",
+      "description": "Visual styling configuration for graph visualization.",
+      "properties": {
+        "size": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 64,
+          "description": "Node size in pixels for visualization (16-64)."
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Hex color code for the node (e.g., '#3B82F6')."
+        }
+      },
+      "required": ["size", "color"],
+      "additionalProperties": false
+    },
+
     "domainDefinition": {
       "type": "object",
       "description": "A domain grouping related entities.",
@@ -218,10 +238,15 @@
           "type": "string",
           "description": "Human-readable description of the node."
         },
+        "label": {
+          "type": "string",
+          "description": "Property name to use as the display label for this node type."
+        },
         "destination_table": {
           "type": "string",
           "description": "ClickHouse table name for storing this entity."
         },
+        "style": { "$ref": "#/definitions/styleConfig" },
         "properties": {
           "type": "object",
           "description": "Property definitions for this node.",
@@ -236,7 +261,7 @@
           "description": "Redaction configuration for access control. Set to null if not yet configured."
         }
       },
-      "required": ["node_type", "domain", "description", "destination_table", "properties", "redaction"],
+      "required": ["node_type", "domain", "description", "label", "destination_table", "style", "properties", "redaction"],
       "additionalProperties": false
     },
 

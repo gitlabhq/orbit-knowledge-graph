@@ -134,6 +134,80 @@ pub struct QueryResult {
     #[prost(string, tag = "2")]
     pub generated_sql: ::prost::alloc::string::String,
 }
+/// Empty for now, could add filters in the future
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOntologyRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetOntologyResponse {
+    #[prost(string, tag = "1")]
+    pub schema_version: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub nodes: ::prost::alloc::vec::Vec<NodeDefinition>,
+    #[prost(message, repeated, tag = "3")]
+    pub edges: ::prost::alloc::vec::Vec<EdgeDefinition>,
+    #[prost(message, repeated, tag = "4")]
+    pub domains: ::prost::alloc::vec::Vec<DomainDefinition>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DomainDefinition {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "3")]
+    pub node_names: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NodeDefinition {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub domain: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub primary_key: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub label_field: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "6")]
+    pub properties: ::prost::alloc::vec::Vec<PropertyDefinition>,
+    #[prost(message, optional, tag = "7")]
+    pub style: ::core::option::Option<NodeStyle>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PropertyDefinition {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub data_type: ::prost::alloc::string::String,
+    #[prost(bool, tag = "3")]
+    pub nullable: bool,
+    #[prost(string, repeated, tag = "4")]
+    pub enum_values: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NodeStyle {
+    #[prost(int32, tag = "1")]
+    pub size: i32,
+    #[prost(string, tag = "2")]
+    pub color: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct EdgeDefinition {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "3")]
+    pub variants: ::prost::alloc::vec::Vec<EdgeVariant>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EdgeVariant {
+    #[prost(string, tag = "1")]
+    pub source_type: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub target_type: ::prost::alloc::string::String,
+}
 /// Generated client implementations.
 pub mod knowledge_graph_service_client {
     #![allow(
@@ -312,6 +386,31 @@ pub mod knowledge_graph_service_client {
                 .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ExecuteQuery"));
             self.inner.streaming(req, path, codec).await
         }
+        /// Returns the complete ontology schema (nodes, edges, domains)
+        pub async fn get_ontology(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetOntologyRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetOntologyResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetOntology",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetOntology"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -368,6 +467,14 @@ pub mod knowledge_graph_service_server {
             request: tonic::Request<tonic::Streaming<super::ExecuteQueryMessage>>,
         ) -> std::result::Result<
             tonic::Response<Self::ExecuteQueryStream>,
+            tonic::Status,
+        >;
+        /// Returns the complete ontology schema (nodes, edges, domains)
+        async fn get_ontology(
+            &self,
+            request: tonic::Request<super::GetOntologyRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetOntologyResponse>,
             tonic::Status,
         >;
     }
@@ -589,6 +696,52 @@ pub mod knowledge_graph_service_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/GetOntology" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetOntologySvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::GetOntologyRequest>
+                    for GetOntologySvc<T> {
+                        type Response = super::GetOntologyResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetOntologyRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::get_ontology(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetOntologySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

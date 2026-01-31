@@ -355,6 +355,9 @@ mod tests {
     fn create_test_node() -> NodeEntity {
         NodeEntity {
             name: "User".to_string(),
+            domain: "core".to_string(),
+            description: String::new(),
+            label: "username".to_string(),
             fields: vec![
                 Field {
                     name: "id".to_string(),
@@ -381,6 +384,7 @@ mod tests {
                 edges: BTreeMap::new(),
             }),
             redaction: None,
+            style: ontology::NodeStyle::default(),
         }
     }
 
@@ -400,11 +404,15 @@ mod tests {
     fn from_node_returns_none_without_etl() {
         let node = NodeEntity {
             name: "NoEtl".to_string(),
+            domain: String::new(),
+            description: String::new(),
+            label: String::new(),
             fields: vec![],
             primary_keys: vec!["id".to_string()],
             destination_table: "test".to_string(),
             etl: None,
             redaction: None,
+            style: ontology::NodeStyle::default(),
         };
         let ontology = Ontology::new();
         let datalake = Arc::new(MockDatalake);

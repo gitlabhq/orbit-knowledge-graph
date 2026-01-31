@@ -3,7 +3,13 @@
 node_type: SecurityScan
 domain: security
 description: A security scan execution that produces findings within a CI/CD pipeline
+label: id
 destination_table: gl_security_scan
+
+style:
+  size: 26
+  color: "#B91C1C"
+
 redaction: null  # TODO: configure redaction
 
 properties:

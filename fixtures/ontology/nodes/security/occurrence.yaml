@@ -3,7 +3,13 @@
 node_type: VulnerabilityOccurrence
 domain: security
 description: A specific occurrence of a vulnerability detected in a project
+label: uuid
 destination_table: gl_vulnerability_occurrence
+
+style:
+  size: 28
+  color: "#EF4444"
+
 redaction: null  # TODO: configure redaction
 
 properties:

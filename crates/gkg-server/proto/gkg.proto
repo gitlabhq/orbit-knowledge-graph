@@ -21,6 +21,9 @@ service KnowledgeGraphService {
   // Same redaction flow as ExecuteTool but returns raw filtered result
   // (no context-engine processing) for the query playground
   rpc ExecuteQuery(stream ExecuteQueryMessage) returns (stream ExecuteQueryMessage);
+
+  // Returns the complete ontology schema (nodes, edges, domains)
+  rpc GetOntology(GetOntologyRequest) returns (GetOntologyResponse);
 }
 
 // --- List Tools ---
@@ -116,4 +119,56 @@ message ExecuteQueryRequest {
 message QueryResult {
   string result_json = 1;
   string generated_sql = 2;
+}
+
+// --- Get Ontology ---
+
+message GetOntologyRequest {
+  // Empty for now, could add filters in the future
+}
+
+message GetOntologyResponse {
+  string schema_version = 1;
+  repeated NodeDefinition nodes = 2;
+  repeated EdgeDefinition edges = 3;
+  repeated DomainDefinition domains = 4;
+}
+
+message DomainDefinition {
+  string name = 1;
+  string description = 2;
+  repeated string node_names = 3;
+}
+
+message NodeDefinition {
+  string name = 1;
+  string domain = 2;
+  string description = 3;
+  string primary_key = 4;
+  string label_field = 5;
+  repeated PropertyDefinition properties = 6;
+  NodeStyle style = 7;
+}
+
+message PropertyDefinition {
+  string name = 1;
+  string data_type = 2;
+  bool nullable = 3;
+  repeated string enum_values = 4;
+}
+
+message NodeStyle {
+  int32 size = 1;
+  string color = 2;
+}
+
+message EdgeDefinition {
+  string name = 1;
+  string description = 2;
+  repeated EdgeVariant variants = 3;
+}
+
+message EdgeVariant {
+  string source_type = 1;
+  string target_type = 2;
 }

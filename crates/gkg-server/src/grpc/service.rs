@@ -16,9 +16,11 @@ use tracing::{error, info, instrument, warn};
 use crate::auth::JwtValidator;
 use crate::context_engine::ContextEngine;
 use crate::proto::{
-    Error as ProtoError, ExecuteQueryMessage, ExecuteToolMessage, ListToolsRequest,
-    ListToolsResponse, QueryResult, ToolDefinition as ProtoToolDefinition, ToolResult,
-    execute_query_message, execute_tool_message,
+    DomainDefinition, EdgeDefinition, EdgeVariant, Error as ProtoError, ExecuteQueryMessage,
+    ExecuteToolMessage, GetOntologyRequest, GetOntologyResponse, ListToolsRequest,
+    ListToolsResponse, NodeDefinition, NodeStyle as ProtoNodeStyle, PropertyDefinition,
+    QueryResult, ToolDefinition as ProtoToolDefinition, ToolResult, execute_query_message,
+    execute_tool_message,
 };
 use crate::query::QueryExecutor;
 use crate::redaction::RedactionService;
@@ -32,6 +34,7 @@ static METRICS: LazyLock<GrpcMetrics> = LazyLock::new(GrpcMetrics::new);
 
 pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
+    ontology: Arc<Ontology>,
     tool_service: ToolService,
     query_executor: QueryExecutor,
     context_engine: ContextEngine,
@@ -40,11 +43,12 @@ pub struct KnowledgeGraphServiceImpl {
 impl KnowledgeGraphServiceImpl {
     pub fn new(validator: Arc<JwtValidator>, clickhouse_config: &ClickHouseConfiguration) -> Self {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let query_executor = QueryExecutor::new(clickhouse_config, ontology);
+        let query_executor = QueryExecutor::new(clickhouse_config, Arc::clone(&ontology));
         let tool_service = ToolService::new(query_executor.clone());
         let context_engine = ContextEngine::new();
         Self {
             validator,
+            ontology,
             tool_service,
             query_executor,
             context_engine,
@@ -322,6 +326,115 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             metered_stream,
         ))))
     }
+
+    #[instrument(skip(self, request), fields(user_id))]
+    async fn get_ontology(
+        &self,
+        request: Request<GetOntologyRequest>,
+    ) -> Result<Response<GetOntologyResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+
+        METRICS
+            .record(SERVICE_NAME, "GetOntology", || {
+                with_correlation(&request, async {
+                    info!("Fetching ontology for user");
+
+                    let response = self.build_ontology_response();
+                    Ok(Response::new(response))
+                })
+            })
+            .await
+    }
+}
+
+impl KnowledgeGraphServiceImpl {
+    fn build_ontology_response(&self) -> GetOntologyResponse {
+        let domains: Vec<DomainDefinition> = self
+            .ontology
+            .domains()
+            .map(|d| DomainDefinition {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                node_names: d.node_names.clone(),
+            })
+            .collect();
+
+        let nodes: Vec<NodeDefinition> = self
+            .ontology
+            .nodes()
+            .map(|n| {
+                let properties: Vec<PropertyDefinition> = n
+                    .fields
+                    .iter()
+                    .map(|f| PropertyDefinition {
+                        name: f.name.clone(),
+                        data_type: format!("{}", f.data_type),
+                        nullable: f.nullable,
+                        enum_values: f
+                            .enum_values
+                            .as_ref()
+                            .map(|ev| ev.values().cloned().collect())
+                            .unwrap_or_default(),
+                    })
+                    .collect();
+
+                NodeDefinition {
+                    name: n.name.clone(),
+                    domain: n.domain.clone(),
+                    description: n.description.clone(),
+                    primary_key: n
+                        .primary_keys
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "id".to_string()),
+                    label_field: n.label.clone(),
+                    properties,
+                    style: Some(ProtoNodeStyle {
+                        size: n.style.size,
+                        color: n.style.color.clone(),
+                    }),
+                }
+            })
+            .collect();
+
+        let edges: Vec<EdgeDefinition> = self
+            .ontology
+            .edge_names()
+            .map(|name| {
+                let variants: Vec<EdgeVariant> = self
+                    .ontology
+                    .get_edge(name)
+                    .map(|edges| {
+                        edges
+                            .iter()
+                            .map(|e| EdgeVariant {
+                                source_type: e.source_kind.clone(),
+                                target_type: e.target_kind.clone(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                EdgeDefinition {
+                    name: name.to_string(),
+                    description: self
+                        .ontology
+                        .get_edge_description(name)
+                        .unwrap_or_default()
+                        .to_string(),
+                    variants,
+                }
+            })
+            .collect();
+
+        GetOntologyResponse {
+            schema_version: self.ontology.schema_version().to_string(),
+            nodes,
+            edges,
+            domains,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -347,6 +460,26 @@ mod tests {
                 .await
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn test_build_ontology_response() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config());
+
+        let response = service.build_ontology_response();
+
+        assert!(!response.schema_version.is_empty());
+        assert!(!response.nodes.is_empty());
+        assert!(!response.edges.is_empty());
+        assert!(!response.domains.is_empty());
+
+        let user_node = response.nodes.iter().find(|n| n.name == "User");
+        assert!(user_node.is_some());
+        let user = user_node.unwrap();
+        assert_eq!(user.domain, "core");
+        assert!(!user.properties.is_empty());
+        assert!(user.style.is_some());
     }
 
     fn test_claims() -> crate::auth::Claims {

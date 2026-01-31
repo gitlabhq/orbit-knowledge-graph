@@ -3,7 +3,13 @@
 node_type: ImportedSymbol
 domain: source_code
 description: An imported symbol or module reference within a source file
+label: name
 destination_table: gl_imported_symbol
+
+style:
+  size: 22
+  color: "#5EEAD4"
+
 redaction: null  # TODO: configure redaction
 
 properties:

@@ -207,6 +207,9 @@ mod tests {
     fn test_node() -> NodeEntity {
         NodeEntity {
             name: "TestNode".to_string(),
+            domain: "core".to_string(),
+            description: "Test node entity".to_string(),
+            label: "name".to_string(),
             fields: vec![
                 Field {
                     name: "id".to_string(),
@@ -232,6 +235,7 @@ mod tests {
             ],
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_test_nodes".to_string(),
+            style: Default::default(),
             etl: None,
             redaction: None,
         }

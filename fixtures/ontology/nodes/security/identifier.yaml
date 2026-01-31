@@ -3,7 +3,13 @@
 node_type: VulnerabilityIdentifier
 domain: security
 description: A vulnerability identifier such as a CVE, CWE, or other external reference
+label: name
 destination_table: gl_vulnerability_identifier
+
+style:
+  size: 22
+  color: "#7F1D1D"
+
 redaction: null  # TODO: configure redaction
 
 properties:

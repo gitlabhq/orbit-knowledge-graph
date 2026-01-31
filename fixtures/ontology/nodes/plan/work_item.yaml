@@ -3,7 +3,13 @@
 node_type: WorkItem
 domain: plan
 description: A work item representing an issue, epic, task, incident, or other trackable unit of work
+label: title
 destination_table: gl_work_items
+
+style:
+  size: 32
+  color: "#EC4899"
+
 redaction: null  # TODO: configure redaction
 
 properties:

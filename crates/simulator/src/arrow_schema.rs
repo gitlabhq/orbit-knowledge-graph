@@ -135,6 +135,9 @@ mod tests {
     fn test_node_to_arrow_schema() {
         let node = NodeEntity {
             name: "User".to_string(),
+            domain: "core".to_string(),
+            description: "Test user entity".to_string(),
+            label: "username".to_string(),
             fields: vec![
                 Field {
                     name: "id".to_string(),
@@ -160,6 +163,7 @@ mod tests {
             ],
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_users".to_string(),
+            style: Default::default(),
             etl: None,
             redaction: None,
         };

@@ -201,6 +201,9 @@ mod tests {
     fn create_test_node(name: &str, destination_table: &str, source_table: &str) -> NodeEntity {
         NodeEntity {
             name: name.to_string(),
+            domain: String::new(),
+            description: String::new(),
+            label: String::new(),
             fields: vec![Field {
                 name: "id".to_string(),
                 source: "id".to_string(),
@@ -218,6 +221,7 @@ mod tests {
                 edges: BTreeMap::new(),
             }),
             redaction: None,
+            style: ontology::NodeStyle::default(),
         }
     }
 
