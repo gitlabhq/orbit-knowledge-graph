@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod cli;
+pub mod cluster_health;
 pub mod config;
 pub mod context_engine;
 pub mod dispatcher;
