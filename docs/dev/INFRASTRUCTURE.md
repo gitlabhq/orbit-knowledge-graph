@@ -19,6 +19,14 @@ See [GITLAB_INSTANCE.md](GITLAB_INSTANCE.md) for GitLab-specific configuration.
 |------|----------|----------|
 | knowledge-graph-test | us-central1 | 10.83.0.0/17 |
 
+### Internal Services
+
+| Service | Internal IP | Ports | GCP Address Name |
+|---------|-------------|-------|------------------|
+| gkg-webserver | 10.128.0.51 | 8080 (HTTP), 50051 (gRPC) | `gkg-webserver-ip` |
+
+Static internal IP reserved in GCP ensures the address persists across service recreations.
+
 ## Secrets (GCP Secret Manager)
 
 | Name | Purpose |
@@ -47,6 +55,7 @@ DNS for `gkg.dev` is managed externally.
 |------|--------|-------|--------|
 | allow-gke-pods-to-postgres | 10.83.0.0/17 | tcp:5432 | gitlab-omnibus-vm |
 | allow-gke-pods-to-clickhouse | 10.83.0.0/17 | tcp:8123,8443,9000 | clickhouse-vm |
+| allow-gke-pods-to-gitaly | 10.83.0.0/17 | tcp:8075 | gitlab-omnibus-vm |
 | default-allow-internal | 10.128.0.0/9 | all | all instances |
 
 ## PostgreSQL (GitLab Omnibus)

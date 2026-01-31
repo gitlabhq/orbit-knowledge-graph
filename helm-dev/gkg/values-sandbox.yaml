@@ -12,6 +12,7 @@ secrets:
   clickhouseSecretName: clickhouse-password
   runnerTokenSecretName: runner_authentication_token
   jwtSecretName: gkg-jwt-secret
+  gitalySecretName: gitaly-token
 
 gitlab-runner:
   enabled: true
@@ -28,6 +29,14 @@ gitlab-runner:
           namespace = "{{.Release.Namespace}}"
           image = "alpine:latest"
           helper_image = "registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-v18.8.0"
+
+gitaly:
+  enabled: true
+  address: "tcp://10.128.0.4:8075"
+  storage: "default"
+  tokenSecret:
+    name: "gitaly-credentials"
+    key: "token"
 
 postgres:
   host: 10.128.0.4
@@ -254,6 +263,14 @@ tableMappings:
     schema: public
     subject: work_item_parent_links
     target: siphon_work_item_parent_links
+  # - table: events
+  #   schema: public
+  #   subject: events
+  #   target: siphon_events
+  # - table: push_event_payloads
+  #   schema: public
+  #   subject: push_event_payloads
+  #   target: siphon_push_event_payloads
 
 producer:
   enabled: true
@@ -314,6 +331,8 @@ gkgServer:
   webserver:
     enabled: true
     replicas: 1
+    internalLoadBalancer: true
+    loadBalancerIP: "10.128.0.51"
     resources:
       requests:
         cpu: 100m
@@ -321,6 +340,16 @@ gkgServer:
       limits:
         cpu: 500m
         memory: 512Mi
+  healthCheck:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
 
 otel:
   enabled: true
