@@ -5,10 +5,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use etl_engine::module::{Handler, HandlerContext};
 use etl_engine::testkit::{MockMetricCollector, MockNatsServices, TestEnvelopeFactory};
-use gitaly_client::{GitalyClient, GitalyConfig, RepositorySource};
+use gitaly_client::{GitalyClient, GitalyRepositoryConfig, RepositorySource};
 use gkg_server::indexer::modules::code::{
     ClickHouseCodeWatermarkStore, ClickHouseProjectStore, CodeIndexingConfig, GitalyConfiguration,
-    PushEventHandler,
+    GitalyRepositoryService, PushEventHandler,
 };
 use prost::Message;
 use sha2::{Digest, Sha256};
@@ -43,12 +43,13 @@ async fn indexes_repository_from_gitaly() {
         ))
         .await;
 
+    let gitaly_config = GitalyConfiguration {
+        address: gitaly_address,
+        storage: "default".to_string(),
+        token: Some(GITALY_TOKEN.to_string()),
+    };
     let handler = PushEventHandler::new(
-        GitalyConfiguration {
-            address: gitaly_address,
-            storage: "default".to_string(),
-            token: Some(GITALY_TOKEN.to_string()),
-        },
+        GitalyRepositoryService::create(gitaly_config),
         Arc::new(ClickHouseCodeWatermarkStore::new(Arc::new(
             clickhouse.config.build_client(),
         ))),
@@ -172,7 +173,7 @@ async fn start_gitaly() -> (String, testcontainers::ContainerAsync<GenericImage>
 
     // Wait for Gitaly to accept connections
     for _ in 0..30 {
-        let cfg = GitalyConfig {
+        let cfg = GitalyRepositoryConfig {
             address: address.clone(),
             storage: "default".into(),
             relative_path: "x.git".into(),

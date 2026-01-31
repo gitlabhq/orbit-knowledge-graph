@@ -13,12 +13,12 @@ Rust gRPC client for [Gitaly](https://gitlab.com/gitlab-org/gitaly), GitLab's Gi
 ## Usage
 
 ```rust
-use gitaly_client::{GitalyClient, GitalyConfig, RepositorySource};
+use gitaly_client::{GitalyClient, GitalyRepositoryConfig, RepositorySource};
 use std::path::Path;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = GitalyConfig {
+    let config = GitalyRepositoryConfig {
         address: "unix:/path/to/gitaly.socket".to_string(),
         storage: "default".to_string(),
         relative_path: "@hashed/ab/cd/abcd1234.git".to_string(),
@@ -37,10 +37,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Configuration
 
-The `GitalyConfig` struct supports JSON deserialization:
+The `GitalyRepositoryConfig` struct supports JSON deserialization:
 
 ```rust
-let config = GitalyConfig::from_json(r#"{
+let config = GitalyRepositoryConfig::from_json(r#"{
     "address": "tcp://gitaly:8075",
     "storage": "default",
     "relative_path": "project.git",

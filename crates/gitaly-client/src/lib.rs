@@ -14,6 +14,6 @@ mod error;
 mod traits;
 
 pub use client::GitalyClient;
-pub use config::GitalyConfig;
+pub use config::GitalyRepositoryConfig;
 pub use error::GitalyError;
 pub use traits::RepositorySource;

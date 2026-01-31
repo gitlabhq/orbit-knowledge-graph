@@ -1,14 +1,14 @@
 #![cfg(feature = "integration")]
 
-use gitaly_client::{GitalyClient, GitalyConfig, RepositorySource};
+use gitaly_client::{GitalyClient, GitalyRepositoryConfig, RepositorySource};
 use std::env;
 use tempfile::TempDir;
 
 const TEST_RELATIVE_PATH: &str = "gitlab-org/gitlab-test.git";
 
-fn get_config() -> Option<GitalyConfig> {
+fn get_config() -> Option<GitalyRepositoryConfig> {
     let json = env::var("GITALY_CONNECTION_INFO").ok()?;
-    GitalyConfig::from_json(&json).ok()
+    GitalyRepositoryConfig::from_json(&json).ok()
 }
 
 async fn require_test_repo(client: &GitalyClient) -> bool {
@@ -83,7 +83,7 @@ async fn test_pull_and_extract() {
 
 #[tokio::test]
 async fn test_invalid_connection() {
-    let config = GitalyConfig {
+    let config = GitalyRepositoryConfig {
         address: "tcp://invalid-host:9999".to_string(),
         storage: "default".to_string(),
         relative_path: "test.git".to_string(),

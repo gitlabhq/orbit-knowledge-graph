@@ -2,9 +2,48 @@
 
 use std::env;
 use std::path::Path;
+use std::sync::Arc;
 
-use gitaly_client::{GitalyClient, GitalyConfig, GitalyError, RepositorySource};
+use async_trait::async_trait;
+use gitaly_client::{GitalyClient, GitalyError, GitalyRepositoryConfig, RepositorySource};
 use sha2::{Digest, Sha256};
+
+#[async_trait]
+pub trait RepositoryService: Send + Sync {
+    async fn find_default_branch(&self, project_id: i64) -> Result<Option<String>, GitalyError>;
+    async fn extract_repository(
+        &self,
+        project_id: i64,
+        target_dir: &Path,
+        commit_id: &str,
+    ) -> Result<(), GitalyError>;
+}
+
+pub struct GitalyRepositoryService {
+    config: GitalyConfiguration,
+}
+
+impl GitalyRepositoryService {
+    pub fn create(config: GitalyConfiguration) -> Arc<dyn RepositoryService> {
+        Arc::new(Self { config })
+    }
+}
+
+#[async_trait]
+impl RepositoryService for GitalyRepositoryService {
+    async fn find_default_branch(&self, project_id: i64) -> Result<Option<String>, GitalyError> {
+        find_default_branch_name(&self.config, project_id).await
+    }
+
+    async fn extract_repository(
+        &self,
+        project_id: i64,
+        target_dir: &Path,
+        commit_id: &str,
+    ) -> Result<(), GitalyError> {
+        extract_repository(&self.config, project_id, target_dir, commit_id).await
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct GitalyConfiguration {
@@ -50,7 +89,7 @@ pub async fn extract_repository(
     commit_id: &str,
 ) -> Result<(), GitalyError> {
     // TODO: This should be fetched from Rails instead before starting the communication
-    let gitaly_config = GitalyConfig {
+    let gitaly_config = GitalyRepositoryConfig {
         address: config.address.clone(),
         storage: config.storage.clone(),
         relative_path: compute_hashed_path(project_id),
@@ -59,6 +98,70 @@ pub async fn extract_repository(
 
     let client = GitalyClient::connect(gitaly_config).await?;
     RepositorySource::extract_to(&client, target_dir, Some(commit_id)).await
+}
+
+pub async fn find_default_branch_name(
+    config: &GitalyConfiguration,
+    project_id: i64,
+) -> Result<Option<String>, GitalyError> {
+    let gitaly_config = GitalyRepositoryConfig {
+        address: config.address.clone(),
+        storage: config.storage.clone(),
+        relative_path: compute_hashed_path(project_id),
+        token: config.token.clone(),
+    };
+
+    let client = GitalyClient::connect(gitaly_config).await?;
+    client.find_default_branch_name().await
+}
+
+#[cfg(test)]
+pub mod test_utils {
+    use super::*;
+    use parking_lot::Mutex;
+    use std::collections::HashMap;
+
+    pub struct MockRepositoryService {
+        default_branches: Mutex<HashMap<i64, String>>,
+    }
+
+    impl MockRepositoryService {
+        pub fn create() -> Arc<dyn RepositoryService> {
+            Arc::new(Self {
+                default_branches: Mutex::new(HashMap::new()),
+            })
+        }
+
+        pub fn with_default_branch(project_id: i64, branch: &str) -> Arc<Self> {
+            let service = Self {
+                default_branches: Mutex::new(HashMap::new()),
+            };
+            service
+                .default_branches
+                .lock()
+                .insert(project_id, branch.to_string());
+            Arc::new(service)
+        }
+    }
+
+    #[async_trait]
+    impl RepositoryService for MockRepositoryService {
+        async fn find_default_branch(
+            &self,
+            project_id: i64,
+        ) -> Result<Option<String>, GitalyError> {
+            Ok(self.default_branches.lock().get(&project_id).cloned())
+        }
+
+        async fn extract_repository(
+            &self,
+            _project_id: i64,
+            _target_dir: &Path,
+            _commit_id: &str,
+        ) -> Result<(), GitalyError> {
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

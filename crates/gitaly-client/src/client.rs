@@ -1,6 +1,7 @@
 use crate::auth::authorization_metadata;
+use crate::proto::ref_service_client::RefServiceClient;
 use crate::proto::repository_service_client::RepositoryServiceClient;
-use crate::{GitalyConfig, GitalyError};
+use crate::{GitalyError, GitalyRepositoryConfig};
 use hyper_util::rt::TokioIo;
 use regex::Regex;
 use std::fs::File;
@@ -116,11 +117,11 @@ fn extract_archive<R: std::io::Read>(
 #[derive(Clone)]
 pub struct GitalyClient {
     channel: Channel,
-    config: GitalyConfig,
+    config: GitalyRepositoryConfig,
 }
 
 impl GitalyClient {
-    pub async fn connect(config: GitalyConfig) -> Result<Self, GitalyError> {
+    pub async fn connect(config: GitalyRepositoryConfig) -> Result<Self, GitalyError> {
         let caps = ADDRESS_PATTERN
             .captures(&config.address)
             .ok_or_else(|| GitalyError::Connection("invalid address format".to_string()))?;
@@ -156,7 +157,7 @@ impl GitalyClient {
         Ok(Self { channel, config })
     }
 
-    pub fn config(&self) -> &GitalyConfig {
+    pub fn config(&self) -> &GitalyRepositoryConfig {
         &self.config
     }
 
@@ -217,6 +218,28 @@ impl GitalyClient {
         extract_archive(&mut archive, target_dir)?;
         std::fs::remove_file(&tar_path).map_err(|e| GitalyError::Io(e.to_string()))?;
         Ok(())
+    }
+
+    pub async fn find_default_branch_name(&self) -> Result<Option<String>, GitalyError> {
+        let mut client = RefServiceClient::new(self.channel.clone());
+        let mut req = Request::new(crate::proto::FindDefaultBranchNameRequest {
+            repository: Some(crate::proto::Repository {
+                storage_name: self.config.storage.clone(),
+                relative_path: self.config.relative_path.clone(),
+                ..Default::default()
+            }),
+            head_only: false,
+        });
+        if let Some(t) = &self.config.token {
+            let auth = authorization_metadata(t)?;
+            req.metadata_mut().insert("authorization", auth);
+        }
+        let resp = client.find_default_branch_name(req).await?;
+        let name = resp.into_inner().name;
+        if name.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(String::from_utf8_lossy(&name).to_string()))
     }
 }
 
