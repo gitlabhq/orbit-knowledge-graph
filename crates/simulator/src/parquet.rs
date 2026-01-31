@@ -80,12 +80,12 @@ impl ParquetWriter {
 
         let relationship_kind: StringArray = edges
             .iter()
-            .map(|e| Some(e.relationship_kind.as_str()))
+            .map(|e| Some(&*e.relationship_kind))
             .collect();
         let source: Int64Array = edges.iter().map(|e| Some(e.source)).collect();
-        let source_kind: StringArray = edges.iter().map(|e| Some(e.source_kind.as_str())).collect();
+        let source_kind: StringArray = edges.iter().map(|e| Some(&*e.source_kind)).collect();
         let target: Int64Array = edges.iter().map(|e| Some(e.target)).collect();
-        let target_kind: StringArray = edges.iter().map(|e| Some(e.target_kind.as_str())).collect();
+        let target_kind: StringArray = edges.iter().map(|e| Some(&*e.target_kind)).collect();
 
         let batch = RecordBatch::try_new(
             schema.clone(),

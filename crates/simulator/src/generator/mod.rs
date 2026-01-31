@@ -24,14 +24,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+/// Interned string type for edge records to avoid millions of small allocations.
+pub type IStr = Arc<str>;
+
 /// Edge record for storage.
 #[derive(Debug, Clone)]
 pub struct EdgeRecord {
-    pub relationship_kind: String,
+    pub relationship_kind: IStr,
     pub source: i64,
-    pub source_kind: String,
+    pub source_kind: IStr,
     pub target: i64,
-    pub target_kind: String,
+    pub target_kind: IStr,
 }
 
 /// Generated data for an organization.
@@ -43,6 +46,23 @@ pub struct OrganizationData {
     pub edges: Vec<EdgeRecord>,
 }
 
+/// Simple string interner for edge record strings.
+#[derive(Debug, Default)]
+struct StringInterner {
+    cache: HashMap<String, IStr>,
+}
+
+impl StringInterner {
+    fn intern(&mut self, s: &str) -> IStr {
+        if let Some(cached) = self.cache.get(s) {
+            return cached.clone();
+        }
+        let interned: IStr = s.into();
+        self.cache.insert(s.to_string(), interned.clone());
+        interned
+    }
+}
+
 pub struct Generator {
     ontology: Ontology,
     config: Config,
@@ -50,6 +70,8 @@ pub struct Generator {
     dependency_graph: DependencyGraph,
     /// Global entity ID counter (shared across all orgs for unique IDs).
     global_entity_counter: AtomicI64,
+    /// String interner for edge records.
+    interner: std::sync::Mutex<StringInterner>,
 }
 
 impl Generator {
@@ -61,7 +83,13 @@ impl Generator {
             config,
             dependency_graph,
             global_entity_counter: AtomicI64::new(1),
+            interner: std::sync::Mutex::new(StringInterner::default()),
         })
+    }
+
+    /// Intern a string for use in edge records.
+    fn intern(&self, s: &str) -> IStr {
+        self.interner.lock().unwrap().intern(s)
     }
 
     /// Get the next globally unique entity ID.
@@ -181,11 +209,11 @@ impl Generator {
             registry.add("Group", ctx.clone());
 
             edges.push(EdgeRecord {
-                relationship_kind: "CONTAINS".to_string(),
+                relationship_kind: self.intern("CONTAINS"),
                 source: parent.id,
-                source_kind: "Group".to_string(),
+                source_kind: self.intern("Group"),
                 target: ns_id,
-                target_kind: "Group".to_string(),
+                target_kind: self.intern("Group"),
             });
 
             self.generate_subgroup_hierarchy(&ctx, depth + 1, registry, builder, edges)?;
@@ -212,22 +240,28 @@ impl Generator {
         let is_group = node.name == "Group";
 
         for parent_edge in parent_edges {
-            let parents = match registry.get(&parent_edge.parent_kind) {
-                Some(p) if !p.is_empty() => p.to_vec(),
+            // Clone parent IDs and paths to avoid borrow conflict with registry.add()
+            let parents: Vec<_> = match registry.get(&parent_edge.parent_kind) {
+                Some(p) if !p.is_empty() => p.iter().map(|e| (e.id, e.traversal_path.clone())).collect(),
                 _ => continue,
             };
 
-            for parent in &parents {
+            // Intern strings once per parent_edge type
+            let rel_kind = self.intern(&parent_edge.edge_type);
+            let parent_kind_str = self.intern(&parent_edge.parent_kind);
+            let node_name_str = self.intern(&node.name);
+
+            for (parent_id, parent_path) in &parents {
                 let child_count = parent_edge.ratio.sample_with_variance(rng);
 
                 for _ in 0..child_count {
                     let (entity_id, traversal_path) = if is_group {
                         let ns_id = registry.next_namespace_id();
-                        let trav = format!("{}{}/", parent.traversal_path, ns_id);
+                        let trav = format!("{}{}/", parent_path, ns_id);
                         (ns_id, trav)
                     } else {
                         let eid = self.next_entity_id();
-                        (eid, parent.traversal_path.clone())
+                        (eid, parent_path.clone())
                     };
 
                     builder.add_row(traversal_path.clone(), entity_id);
@@ -235,25 +269,13 @@ impl Generator {
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
                     {
-                        // Parent -> Child (e.g., CONTAINS: Group -> Project)
-                        (
-                            parent.id,
-                            parent_edge.parent_kind.clone(),
-                            entity_id,
-                            node.name.clone(),
-                        )
+                        (*parent_id, parent_kind_str.clone(), entity_id, node_name_str.clone())
                     } else {
-                        // Child -> Parent (e.g., IN_PROJECT: MergeRequest -> Project)
-                        (
-                            entity_id,
-                            node.name.clone(),
-                            parent.id,
-                            parent_edge.parent_kind.clone(),
-                        )
+                        (entity_id, node_name_str.clone(), *parent_id, parent_kind_str.clone())
                     };
 
                     edges.push(EdgeRecord {
-                        relationship_kind: parent_edge.edge_type.clone(),
+                        relationship_kind: rel_kind.clone(),
                         source,
                         source_kind,
                         target,
@@ -296,6 +318,11 @@ impl Generator {
                 _ => continue,
             };
 
+            // Intern strings once per association type
+            let rel_kind = self.intern(&edge_type);
+            let src_kind = self.intern(&source_kind);
+            let tgt_kind = self.intern(&target_kind);
+
             // Determine which side to iterate over based on direction
             let (iterate_over, sample_from, is_source_iteration) = match direction {
                 IterationDirection::Target => (targets, sources, false),
@@ -334,11 +361,11 @@ impl Generator {
                     };
 
                     edges.push(EdgeRecord {
-                        relationship_kind: edge_type.clone(),
+                        relationship_kind: rel_kind.clone(),
                         source: source.id,
-                        source_kind: source_kind.clone(),
+                        source_kind: src_kind.clone(),
                         target: target.id,
-                        target_kind: target_kind.clone(),
+                        target_kind: tgt_kind.clone(),
                     });
                 }
             }
