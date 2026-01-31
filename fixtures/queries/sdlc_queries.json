@@ -1,9 +1,7 @@
 {
     "List active users": {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "filters": {"state": "active"}}
-      ],
+      "query_type": "search",
+      "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
       "limit": 30,
       "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
     },
@@ -91,13 +89,11 @@
     },
   
     "Long-running pipelines": {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "pipe", "entity": "Pipeline", "filters": {
-          "status": "success",
-          "duration": {"op": "gt", "value": 60}
-        }}
-      ],
+      "query_type": "search",
+      "node": {"id": "pipe", "entity": "Pipeline", "filters": {
+        "status": "success",
+        "duration": {"op": "gt", "value": 60}
+      }},
       "limit": 20,
       "order_by": {"node": "pipe", "property": "duration", "direction": "DESC"}
     },
@@ -156,10 +152,8 @@
     },
   
     "Overdue work items": {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}}
-      ],
+      "query_type": "search",
+      "node": {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
       "limit": 30,
       "order_by": {"node": "wi", "property": "due_date", "direction": "ASC"}
     },
@@ -234,13 +228,11 @@
     },
   
     "Public projects": {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "p", "entity": "Project", "filters": {
-          "visibility_level": "public",
-          "archived": false
-        }}
-      ],
+      "query_type": "search",
+      "node": {"id": "p", "entity": "Project", "filters": {
+        "visibility_level": "public",
+        "archived": false
+      }},
       "limit": 20,
       "order_by": {"node": "p", "property": "star_count", "direction": "DESC"}
     },
@@ -325,20 +317,16 @@
     },
   
     "Users by state": {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "filters": {"state": "active"}}
-      ],
+      "query_type": "search",
+      "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
       "limit": 20
     },
   
     "Bot accounts": {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "filters": {
-          "user_type": {"op": "in", "value": ["project_bot", "service_account", "automation_bot"]}
-        }}
-      ],
+      "query_type": "search",
+      "node": {"id": "u", "entity": "User", "filters": {
+        "user_type": {"op": "in", "value": ["project_bot", "service_account", "automation_bot"]}
+      }},
       "limit": 30,
       "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
     },
