@@ -2,7 +2,7 @@
 //!
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
-use crate::ast::{Cte, Expr, Node, Op, Query, RecursiveCte, TableRef};
+use crate::ast::{Cte, Expr, Node, Op, Query, TableRef};
 use crate::error::Result;
 use crate::result_context::ResultContext;
 use serde_json::Value;
@@ -44,7 +44,6 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
     let mut ctx = Context::new();
     let sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
-        Node::RecursiveCte(cte) => ctx.emit_cte(cte)?,
     };
     Ok(ParameterizedQuery {
         sql,
@@ -205,19 +204,6 @@ impl Context {
         }
 
         Ok(parts.join(" "))
-    }
-
-    fn emit_cte(&mut self, cte: &RecursiveCte) -> Result<String> {
-        let mut sql = format!("WITH RECURSIVE {} AS (\n  ", cte.name);
-        sql.push_str(&self.emit_query(&cte.base)?);
-        sql.push_str("\n  UNION ALL\n  ");
-        sql.push_str(&self.emit_query(&cte.recursive)?);
-        sql.push_str("\n)\n");
-        sql.push_str(&self.emit_query(&cte.final_query)?);
-        // Force hash join to support OR conditions in JOIN ON clause
-        // (ClickHouse's default join algorithm doesn't support multiple ORs in recursive CTEs)
-        sql.push_str(" SETTINGS join_algorithm = 'hash'");
-        Ok(sql)
     }
 
     fn emit_expr(&mut self, e: &Expr) -> String {

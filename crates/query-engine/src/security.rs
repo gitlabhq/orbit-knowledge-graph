@@ -86,11 +86,6 @@ pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<
             }
             apply_to_query(q, ctx)
         }
-        Node::RecursiveCte(cte) => {
-            apply_to_query(&mut cte.base, ctx)?;
-            apply_to_query(&mut cte.recursive, ctx)?;
-            apply_to_query(&mut cte.final_query, ctx)
-        }
     }
 }
 
