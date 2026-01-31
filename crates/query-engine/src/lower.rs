@@ -145,12 +145,15 @@ fn add_edge_columns(
 }
 
 fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
+    use crate::utils::ids_array_column;
+
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
     let mut select = Vec::new();
     let mut group_by = Vec::new();
     let mut seen_groups = HashSet::new();
+    let mut seen_targets = HashSet::new();
 
     for agg in &input.aggregations {
         // Add GROUP BY column once per unique group
@@ -160,6 +163,19 @@ fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
                 select.push(SelectExpr::new(Expr::col(gb, "id"), format!("{gb}_id")));
             }
         }
+
+        // Add groupUniqArray(target.id) to collect all aggregated entity IDs for redaction.
+        // This enables fail-closed redaction: if ANY aggregated entity is unauthorized,
+        // the entire row is filtered.
+        if let Some(target) = &agg.target {
+            if seen_targets.insert(target.clone()) {
+                select.push(SelectExpr::new(
+                    Expr::func("groupUniqArray", vec![Expr::col(target, "id")]),
+                    ids_array_column(target),
+                ));
+            }
+        }
+
         select.push(SelectExpr::new(
             agg_expr(agg),
             agg.alias

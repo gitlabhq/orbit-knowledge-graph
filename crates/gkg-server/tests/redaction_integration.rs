@@ -2508,7 +2508,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
         "group_by node must have _gkg_u_type"
     );
 
-    // MergeRequest (target node, being aggregated) should NOT have mandatory columns
+    // MergeRequest (target node, being aggregated) should NOT have individual ID/type columns
     // because it doesn't appear as individual rows
     assert!(
         !query.sql.contains("_gkg_mr_id"),
@@ -2517,6 +2517,12 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
     assert!(
         !query.sql.contains("_gkg_mr_type"),
         "aggregated target node should not have _gkg_mr_type"
+    );
+
+    // But it SHOULD have a groupUniqArray column to collect all MR IDs for redaction
+    assert!(
+        query.sql.contains("_gkg_mr_ids"),
+        "aggregated target node should have _gkg_mr_ids for fail-closed redaction"
     );
 
     // Should have the aggregation
@@ -2545,6 +2551,294 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
     let authorized: Vec<_> = result.authorized_rows().collect();
     assert_eq!(authorized[0].get_id("u"), Some(1));
     assert_eq!(authorized[0].get_type("u"), Some("User"));
+}
+
+/// Aggregation without GROUP BY produces a global scalar result with aggregated IDs.
+/// No group_by nodes exist, but the target's IDs are still collected for redaction.
+/// This tests fail-closed behavior: even global aggregations must verify all entities.
+#[tokio::test]
+#[serial]
+async fn aggregation_global_count_collects_ids_for_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Global count without group_by - just count all projects
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "p", "entity": "Project"}],
+        "aggregations": [{"function": "count", "target": "p", "alias": "total_projects"}],
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Global aggregation should NOT have individual ID/type columns (no group_by)
+    assert!(
+        !query.sql.contains("_gkg_p_id"),
+        "global aggregation should not have _gkg_p_id (no group_by)"
+    );
+    assert!(
+        !query.sql.contains("_gkg_p_type"),
+        "global aggregation should not have _gkg_p_type (no group_by)"
+    );
+
+    // But it SHOULD have groupUniqArray to collect all project IDs for redaction
+    assert!(
+        query.sql.contains("_gkg_p_ids"),
+        "global aggregation should collect target IDs in _gkg_p_ids"
+    );
+    assert!(
+        query.sql.contains("groupUniqArray"),
+        "should use groupUniqArray to collect IDs"
+    );
+
+    // Should have COUNT and no GROUP BY
+    assert!(query.sql.contains("COUNT"), "should have COUNT");
+    assert!(
+        !query.sql.contains("GROUP BY"),
+        "global aggregation should not have GROUP BY"
+    );
+
+    // Security filters should still be applied (traversal_path on gl_projects)
+    assert!(
+        query.sql.contains("startsWith"),
+        "security filters should be applied even in global aggregation"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Should return exactly 1 row with the count
+    assert_eq!(result.len(), 1, "global aggregation returns 1 row");
+
+    // ResultContext should have no group_by nodes but should have the aggregated target
+    assert_eq!(
+        query.result_context.len(),
+        0,
+        "no group_by nodes in global aggregation"
+    );
+    assert_eq!(
+        query.result_context.aggregated_len(),
+        1,
+        "should have 1 aggregated node (the target)"
+    );
+    assert!(
+        query.result_context.get_aggregated("p").is_some(),
+        "should have project as aggregated node"
+    );
+}
+
+/// Aggregation with multiple functions (COUNT, SUM, AVG) on different properties.
+/// Verifies that complex aggregations work correctly and redaction applies
+/// only to the group_by node.
+#[tokio::test]
+#[serial]
+async fn aggregation_multiple_functions_redaction_on_group_by() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    // Insert merge requests with varied data for aggregation
+    ctx.execute(
+        "INSERT INTO gl_merge_requests (id, iid, title, state, traversal_path) VALUES
+         (20001, 101, 'Feature A', 'merged', '1/100/1000/'),
+         (20002, 102, 'Feature B', 'merged', '1/100/1000/'),
+         (20003, 103, 'Feature C', 'open', '1/100/1000/'),
+         (20004, 104, 'Bugfix A', 'merged', '1/100/1002/'),
+         (20005, 105, 'Bugfix B', 'open', '1/100/1002/')",
+    )
+    .await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1000, 'Project', 'CONTAINS', 20001, 'MergeRequest'),
+         (1000, 'Project', 'CONTAINS', 20002, 'MergeRequest'),
+         (1000, 'Project', 'CONTAINS', 20003, 'MergeRequest'),
+         (1002, 'Project', 'CONTAINS', 20004, 'MergeRequest'),
+         (1002, 'Project', 'CONTAINS', 20005, 'MergeRequest')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Multiple aggregations: count MRs per project, also get min/max IID
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "p", "entity": "Project", "columns": ["name"]},
+            {"id": "mr", "entity": "MergeRequest"}
+        ],
+        "relationships": [{"type": "CONTAINS", "from": "p", "to": "mr"}],
+        "aggregations": [
+            {"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"},
+            {"function": "min", "target": "mr", "property": "iid", "group_by": "p", "alias": "min_iid"},
+            {"function": "max", "target": "mr", "property": "iid", "group_by": "p", "alias": "max_iid"}
+        ],
+        "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Group-by node (p) should have mandatory columns
+    assert!(
+        query.sql.contains("_gkg_p_id"),
+        "group_by node must have _gkg_p_id"
+    );
+    assert!(
+        query.sql.contains("_gkg_p_type"),
+        "group_by node must have _gkg_p_type"
+    );
+
+    // Target node (mr) should NOT have individual ID/type columns
+    assert!(
+        !query.sql.contains("_gkg_mr_id"),
+        "aggregated target should not have _gkg_mr_id"
+    );
+    assert!(
+        !query.sql.contains("_gkg_mr_type"),
+        "aggregated target should not have _gkg_mr_type"
+    );
+
+    // But target node SHOULD have groupUniqArray to collect IDs for redaction
+    assert!(
+        query.sql.contains("_gkg_mr_ids"),
+        "aggregated target should have _gkg_mr_ids for fail-closed redaction"
+    );
+
+    // All aggregate functions should be present
+    assert!(query.sql.contains("COUNT"), "should have COUNT");
+    assert!(
+        query.sql.contains("MIN") || query.sql.contains("min"),
+        "should have MIN"
+    );
+    assert!(
+        query.sql.contains("MAX") || query.sql.contains("max"),
+        "should have MAX"
+    );
+    assert!(query.sql.contains("GROUP BY"), "should have GROUP BY");
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Should have 2 rows (project 1000 and 1002)
+    assert_eq!(
+        result.len(),
+        2,
+        "should have 2 aggregation rows (one per project)"
+    );
+
+    // ResultContext should have the group_by node and the aggregated target
+    assert_eq!(
+        query.result_context.len(),
+        1,
+        "should have 1 group_by node"
+    );
+    assert_eq!(
+        query.result_context.aggregated_len(),
+        1,
+        "should have 1 aggregated node"
+    );
+    assert!(
+        query.result_context.get("p").is_some(),
+        "ResultContext should have project (p) as group_by node"
+    );
+    assert!(
+        query.result_context.get_aggregated("mr").is_some(),
+        "ResultContext should have MR as aggregated node"
+    );
+
+    // Test redaction: allow only project 1000
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1002]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 1, "project 1002's row should be redacted");
+    assert_eq!(result.authorized_count(), 1);
+
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert_eq!(authorized[0].get_id("p"), Some(1000));
+    assert_eq!(authorized[0].get_type("p"), Some("Project"));
+}
+
+/// Aggregation with security context filtering ensures data from unauthorized
+/// traversal paths is excluded BEFORE aggregation, not just at redaction time.
+/// This is critical: security filters in WHERE must prevent unauthorized data
+/// from being counted.
+#[tokio::test]
+#[serial]
+async fn aggregation_security_context_filters_data_before_aggregation() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    // Insert issues in different traversal paths (different orgs)
+    // Org 1 issues (authorized by our security context "1/")
+    ctx.execute(
+        "INSERT INTO gl_issues (id, iid, title, state, traversal_path) VALUES
+         (30001, 1, 'Org1 Issue A', 'opened', '1/100/1000/'),
+         (30002, 2, 'Org1 Issue B', 'closed', '1/100/1000/'),
+         (30003, 3, 'Org1 Issue C', 'opened', '1/101/1001/')",
+    )
+    .await;
+
+    // Org 2 issues (NOT authorized - different org prefix)
+    ctx.execute(
+        "INSERT INTO gl_issues (id, iid, title, state, traversal_path) VALUES
+         (30004, 1, 'Org2 Issue A', 'opened', '2/200/2000/'),
+         (30005, 2, 'Org2 Issue B', 'opened', '2/200/2000/')",
+    )
+    .await;
+
+    let ontology = load_ontology();
+
+    // Security context only allows org 1 (traversal_path starting with "1/")
+    let security_ctx = SecurityContext::new(1, vec!["1/".into()]).expect("valid security context");
+
+    // Count all issues globally
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "i", "entity": "Issue"}],
+        "aggregations": [{"function": "count", "target": "i", "alias": "issue_count"}],
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Security filter should be in WHERE clause
+    assert!(
+        query.sql.contains("startsWith"),
+        "security filter should be applied"
+    );
+    assert!(
+        query.sql.contains("traversal_path"),
+        "filter should reference traversal_path"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 1, "should return 1 aggregation row");
+
+    // The count should be 3 (only org 1 issues), NOT 5 (all issues)
+    // We need to extract the actual count value from the result
+    let count_col = batches[0]
+        .column_by_name("issue_count")
+        .expect("issue_count column should exist");
+    let count_array = count_col
+        .as_any()
+        .downcast_ref::<arrow::array::UInt64Array>()
+        .expect("should be UInt64Array");
+
+    assert_eq!(
+        count_array.value(0),
+        3,
+        "security filter must exclude org 2 issues - count should be 3, not 5"
+    );
 }
 
 /// Deep test: Verify that column selection with traversal maintains proper

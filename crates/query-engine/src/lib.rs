@@ -32,6 +32,7 @@
 
 pub mod ast;
 pub mod codegen;
+pub mod utils;
 pub mod error;
 pub mod input;
 pub mod lower;
@@ -48,8 +49,9 @@ pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
 pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
 pub use r#return::enforce_return;
+pub use utils::{id_column, ids_array_column, type_column};
 pub use result_context::{
-    id_column, type_column, RedactionNode, ResultContext, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN,
+    AggregatedNode, RedactionNode, ResultContext, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN,
     PATH_COLUMN,
 };
 pub use security::{apply_security_context, SecurityContext};
@@ -256,6 +258,106 @@ mod tests {
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
         assert!(result.sql.contains("COUNT"));
         assert!(result.sql.contains("GROUP BY"));
+    }
+
+    #[test]
+    fn aggregation_collects_target_ids_for_redaction() {
+        let json = r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User"}],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+
+        // Should have groupUniqArray to collect target IDs for fail-closed redaction
+        assert!(
+            result.sql.contains("groupUniqArray"),
+            "should use groupUniqArray to collect target IDs: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("_gkg_n_ids"),
+            "should have _gkg_n_ids column for target: {}",
+            result.sql
+        );
+
+        // Group-by node should have individual ID/type columns
+        assert!(result.sql.contains("_gkg_u_id"));
+        assert!(result.sql.contains("_gkg_u_type"));
+
+        // Target node should NOT have individual ID/type columns
+        assert!(!result.sql.contains("_gkg_n_id,"));
+        assert!(!result.sql.contains("_gkg_n_type"));
+
+        // ResultContext should have both group_by and aggregated nodes
+        assert_eq!(result.result_context.len(), 1);
+        assert!(result.result_context.get("u").is_some());
+        assert_eq!(result.result_context.aggregated_len(), 1);
+        assert!(result.result_context.get_aggregated("n").is_some());
+    }
+
+    #[test]
+    fn aggregation_global_no_group_by() {
+        let json = r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project"}],
+            "aggregations": [{"function": "count", "target": "p", "alias": "total"}],
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+
+        assert!(result.sql.contains("COUNT"));
+        assert!(
+            !result.sql.contains("GROUP BY"),
+            "global aggregation should not have GROUP BY"
+        );
+
+        // Should still collect target IDs for redaction
+        assert!(
+            result.sql.contains("groupUniqArray"),
+            "should collect target IDs: {}",
+            result.sql
+        );
+        assert!(result.sql.contains("_gkg_p_ids"));
+
+        // No group_by nodes, only aggregated
+        assert_eq!(result.result_context.len(), 0);
+        assert_eq!(result.result_context.aggregated_len(), 1);
+    }
+
+    #[test]
+    fn aggregation_multiple_functions() {
+        let json = r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User"}],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "aggregations": [
+                {"function": "count", "target": "n", "group_by": "u", "alias": "note_count"},
+                {"function": "min", "target": "n", "property": "created_at", "group_by": "u", "alias": "first_note"},
+                {"function": "max", "target": "n", "property": "created_at", "group_by": "u", "alias": "last_note"}
+            ],
+            "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+
+        assert!(result.sql.contains("COUNT"));
+        assert!(result.sql.contains("MIN"));
+        assert!(result.sql.contains("MAX"));
+        assert!(result.sql.contains("GROUP BY"));
+        assert!(result.sql.contains("ORDER BY"));
+
+        // Should only have ONE groupUniqArray for the target (deduplicated)
+        assert_eq!(
+            result.sql.matches("groupUniqArray").count(),
+            1,
+            "should deduplicate groupUniqArray for same target"
+        );
     }
 
     #[test]
@@ -726,9 +828,14 @@ mod ontology_integration_tests {
         // The target node (mr) is aggregated so doesn't get individual row columns
         assert!(result.sql.contains("_gkg_u_id"));
         assert!(result.sql.contains("_gkg_u_type"));
-        // MR is aggregated, not returned as individual rows
-        assert!(!result.sql.contains("_gkg_mr_id"));
+        // MR is aggregated, not returned as individual rows (no _id or _type, but HAS _ids)
+        assert!(
+            !result.sql.contains("_gkg_mr_id,") && !result.sql.contains("_gkg_mr_id AS"),
+            "should not have individual _gkg_mr_id"
+        );
         assert!(!result.sql.contains("_gkg_mr_type"));
+        // But it SHOULD have groupUniqArray for target IDs
+        assert!(result.sql.contains("_gkg_mr_ids"));
         // Should have the aggregation
         assert!(result.sql.contains("COUNT"));
         assert!(result.sql.contains("GROUP BY"));

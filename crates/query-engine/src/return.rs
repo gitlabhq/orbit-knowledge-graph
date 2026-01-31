@@ -3,16 +3,18 @@
 //! Ensures all query results include ID and type columns for entities, enabling
 //! the gkg-server to extract entity IDs and types for redaction validation.
 //!
-//! For aggregation queries, only nodes that appear in GROUP BY clauses can have
-//! their ID columns selected (aggregated nodes don't have individual IDs).
+//! For aggregation queries:
+//! - GROUP BY nodes get individual ID/type columns (like traversal nodes)
+//! - Target nodes get their IDs collected via groupUniqArray() for fail-closed redaction
 //!
 //! For path finding queries, the start node's ID is added to the base query and
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, Node, Query, SelectExpr};
+use crate::utils::{id_column, type_column};
 use crate::error::Result;
 use crate::input::{Input, QueryType};
-use crate::result_context::{id_column, type_column, ResultContext};
+use crate::result_context::ResultContext;
 use std::collections::HashSet;
 
 pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
@@ -29,7 +31,32 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
         }
     }
 
+    // For aggregation queries, register aggregated targets for redaction.
+    // These have their IDs collected via groupUniqArray() in lower.rs.
+    if input.query_type == QueryType::Aggregation {
+        register_aggregated_targets(input, &mut ctx);
+    }
+
     Ok(ctx)
+}
+
+/// Register aggregation targets in the ResultContext.
+/// These are nodes whose IDs are collected in arrays for fail-closed redaction.
+fn register_aggregated_targets(input: &Input, ctx: &mut ResultContext) {
+    let mut seen = HashSet::new();
+
+    for agg in &input.aggregations {
+        if let Some(target) = &agg.target {
+            if seen.insert(target.clone()) {
+                // Find the entity type for this target from the input nodes
+                if let Some(node) = input.nodes.iter().find(|n| &n.id == target) {
+                    if let Some(entity) = &node.entity {
+                        ctx.add_aggregated_node(target, entity);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Determine which node IDs can have their columns selected.
