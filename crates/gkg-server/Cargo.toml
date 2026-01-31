@@ -17,17 +17,25 @@ anyhow = { workspace = true }
 arrow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
 clap = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+indexer = { path = "../code-indexer" }
 etl-engine = { path = "../etl-engine" }
+gitaly-client = { path = "../gitaly-client" }
 health-check = { path = "../health-check" }
-reqwest = { workspace = true }
+siphon-proto = { path = "../siphon-proto" }
 ontology = { path = "../ontology" }
+reqwest = { workspace = true }
+parking_lot = { workspace = true }
 query-engine = { path = "../query-engine" }
 jsonwebtoken = { workspace = true }
 labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum", "metrics-grpc"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util.workspace = true
@@ -47,6 +55,7 @@ tonic = { workspace = true }
 tonic-prost = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 toon-format = { version = "0.4.1", default-features = false }
+zstd = "0.13.3"
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

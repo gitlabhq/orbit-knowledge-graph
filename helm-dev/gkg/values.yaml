@@ -33,6 +33,14 @@ clickhouse:
     user: default
     ssl: false
 
+gitaly:
+  enabled: false
+  address: ""
+  storage: "default"
+  tokenSecret:
+    name: "gitaly-credentials"
+    key: ""
+
 nats:
   enabled: true
   url: ""  # External NATS URL when enabled=false (e.g., host.docker.internal:4222)

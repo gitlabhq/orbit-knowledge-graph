@@ -7,13 +7,15 @@ use etl_engine::clickhouse::ClickHouseDestination;
 use etl_engine::engine::EngineBuilder;
 use etl_engine::module::{ModuleInitError, ModuleRegistry};
 use etl_engine::nats::NatsBroker;
+use gitaly_client::GitalyError;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::config::AppConfig;
+use crate::indexer::modules::code::GitalyConfiguration;
 
-use self::modules::SdlcModule;
+use self::modules::{CodeModule, SdlcModule};
 
 #[derive(Debug, Error)]
 pub enum IndexerError {
@@ -22,6 +24,9 @@ pub enum IndexerError {
 
     #[error("ClickHouse connection failed: {0}")]
     ClickHouseConnection(#[from] etl_engine::destination::DestinationError),
+
+    #[error("Gitaly configuration failed: {0}")]
+    GitalyConfiguration(#[from] GitalyError),
 
     #[error("Engine error: {0}")]
     Engine(#[from] etl_engine::engine::EngineError),
@@ -43,6 +48,18 @@ pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), 
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);
+
+    if std::env::var("GITALY_ADDRESS").is_ok() {
+        info!("initializing Code module");
+        let gitaly_config =
+            GitalyConfiguration::from_env().map_err(IndexerError::GitalyConfiguration)?;
+        let code_module =
+            CodeModule::new(&config.graph, &gitaly_config).map_err(IndexerError::ModuleInit)?;
+        registry.register_module(&code_module);
+    } else {
+        info!("Code module disabled (GITALY_ADDRESS not set)");
+    }
+
     info!(topics = registry.topics().len(), "registered modules");
 
     let engine = Arc::new(EngineBuilder::new(broker, registry, destination).build());

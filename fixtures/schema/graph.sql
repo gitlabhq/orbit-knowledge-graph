@@ -356,3 +356,68 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
+
+-- Code indexing tables
+
+CREATE TABLE IF NOT EXISTS gl_directory (
+    traversal_path String,
+    project_id Int64,
+    branch String,
+    path String,
+    name String,
+    _version UInt64
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (traversal_path, project_id, branch, path);
+
+CREATE TABLE IF NOT EXISTS gl_file (
+    traversal_path String,
+    project_id Int64,
+    branch String,
+    path String,
+    name String,
+    extension String,
+    language String,
+    _version UInt64
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (traversal_path, project_id, branch, path);
+
+CREATE TABLE IF NOT EXISTS gl_definition (
+    traversal_path String,
+    project_id Int64,
+    branch String,
+    file_path String,
+    fqn String,
+    name String,
+    definition_type String,
+    start_line Int32,
+    end_line Int32,
+    start_byte Int64,
+    end_byte Int64,
+    _version UInt64
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (traversal_path, project_id, branch, file_path, start_byte);
+
+CREATE TABLE IF NOT EXISTS gl_imported_symbol (
+    traversal_path String,
+    project_id Int64,
+    branch String,
+    file_path String,
+    import_type String,
+    import_path String,
+    identifier_name Nullable(String),
+    identifier_alias Nullable(String),
+    start_byte Int64,
+    end_byte Int64,
+    _version UInt64
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (traversal_path, project_id, branch, file_path, start_byte);
+
+CREATE TABLE IF NOT EXISTS project_code_indexing_watermark (
+    project_id Int64,
+    branch String,
+    last_event_id Int64,
+    last_commit String,
+    indexed_at DateTime64(6, 'UTC'),
+    _version UInt64
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (project_id, branch);
