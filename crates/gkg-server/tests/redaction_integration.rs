@@ -2984,3 +2984,294 @@ async fn neighbors_query_incoming_with_redaction() {
     assert_eq!(neighbor.id, 1);
     assert_eq!(neighbor.entity_type, "User");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edge Column Tests
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// These tests verify that edge columns (relationship metadata) are correctly
+// returned in query results and preserved through the redaction flow.
+
+/// Verifies edge columns are present and preserved through redaction.
+///
+/// Tests:
+/// - Edge columns (e0_type, e0_src, e0_src_type, e0_dst, e0_dst_type) are in SQL
+/// - Edge values correctly reflect the relationship data
+/// - Edge columns are preserved in authorized rows after redaction
+/// - Redacted rows still had valid edge data before being filtered
+#[tokio::test]
+#[serial]
+async fn traversal_edge_columns_preserved_through_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "g", "entity": "Group"}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "limit": 20
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Verify edge columns are in the SQL
+    assert!(
+        query.sql.contains("e0_type"),
+        "SQL must contain e0_type. SQL: {}",
+        query.sql
+    );
+    assert!(query.sql.contains("e0_src"), "SQL must contain e0_src");
+    assert!(
+        query.sql.contains("e0_src_type"),
+        "SQL must contain e0_src_type"
+    );
+    assert!(query.sql.contains("e0_dst"), "SQL must contain e0_dst");
+    assert!(
+        query.sql.contains("e0_dst_type"),
+        "SQL must contain e0_dst_type"
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // We have 7 MEMBER_OF edges in test data
+    assert_eq!(result.len(), 7, "should have 7 user-group memberships");
+
+    // Verify edge columns are present and correct BEFORE redaction
+    for row in result.iter() {
+        let user_id = row.get_id("u").expect("user id should be present");
+        let group_id = row.get_id("g").expect("group id should be present");
+
+        assert_eq!(
+            row.get("e0_type").and_then(|v| v.as_str()),
+            Some("MEMBER_OF"),
+            "edge type should be MEMBER_OF"
+        );
+        assert_eq!(
+            row.get("e0_src").and_then(|v| v.as_i64()),
+            Some(user_id),
+            "edge source should match user id"
+        );
+        assert_eq!(
+            row.get("e0_src_type").and_then(|v| v.as_str()),
+            Some("User"),
+            "edge source type should be User"
+        );
+        assert_eq!(
+            row.get("e0_dst").and_then(|v| v.as_i64()),
+            Some(group_id),
+            "edge target should match group id"
+        );
+        assert_eq!(
+            row.get("e0_dst_type").and_then(|v| v.as_str()),
+            Some("Group"),
+            "edge target type should be Group"
+        );
+    }
+
+    // Now apply redaction - allow only user 1 and group 100
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    // User 1 is member of groups 100 and 102, but only 100 is allowed
+    assert_eq!(redacted, 6, "6 rows should be redacted");
+    assert_eq!(result.authorized_count(), 1, "only 1 row should pass");
+
+    // Verify unauthorized data is NOT present in authorized results
+    let authorized_user_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("u"))
+        .collect();
+    let authorized_group_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("g"))
+        .collect();
+
+    // Unauthorized users (2, 3, 4, 5) must NOT appear
+    for unauthorized_user in [2, 3, 4, 5] {
+        assert!(
+            !authorized_user_ids.contains(&unauthorized_user),
+            "unauthorized user {} should NOT be in results",
+            unauthorized_user
+        );
+    }
+
+    // Unauthorized groups (101, 102) must NOT appear
+    for unauthorized_group in [101, 102] {
+        assert!(
+            !authorized_group_ids.contains(&unauthorized_group),
+            "unauthorized group {} should NOT be in results",
+            unauthorized_group
+        );
+    }
+
+    // Verify edge columns are preserved in the authorized row
+    let authorized_row = result.authorized_rows().next().expect("should have 1 row");
+    assert_eq!(authorized_row.get_id("u"), Some(1));
+    assert_eq!(authorized_row.get_id("g"), Some(100));
+    assert_eq!(
+        authorized_row.get("e0_type").and_then(|v| v.as_str()),
+        Some("MEMBER_OF"),
+        "edge type should be preserved after redaction"
+    );
+    assert_eq!(
+        authorized_row.get("e0_src").and_then(|v| v.as_i64()),
+        Some(1),
+        "edge source should be user 1"
+    );
+    assert_eq!(
+        authorized_row.get("e0_dst").and_then(|v| v.as_i64()),
+        Some(100),
+        "edge target should be group 100"
+    );
+
+    // Verify edge data for unauthorized entities is also not exposed
+    let authorized_edge_sources: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get("e0_src").and_then(|v| v.as_i64()))
+        .collect();
+    let authorized_edge_targets: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get("e0_dst").and_then(|v| v.as_i64()))
+        .collect();
+
+    // Edge sources should only contain authorized user IDs
+    assert_eq!(
+        authorized_edge_sources,
+        HashSet::from([1]),
+        "edge sources should only contain authorized user 1"
+    );
+
+    // Edge targets should only contain authorized group IDs
+    assert_eq!(
+        authorized_edge_targets,
+        HashSet::from([100]),
+        "edge targets should only contain authorized group 100"
+    );
+}
+
+/// Verifies multi-hop traversals have edge columns for each relationship,
+/// and that edge data is correctly associated with its hop after redaction.
+#[tokio::test]
+#[serial]
+async fn multi_hop_edge_columns_survive_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "g", "entity": "Group"},
+            {"id": "p", "entity": "Project"}
+        ],
+        "relationships": [
+            {"type": "MEMBER_OF", "from": "u", "to": "g"},
+            {"type": "CONTAINS", "from": "g", "to": "p"}
+        ],
+        "limit": 30
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Verify both edge column sets are in SQL
+    assert!(query.sql.contains("e0_type"), "SQL must contain e0_type");
+    assert!(query.sql.contains("e0_src"), "SQL must contain e0_src");
+    assert!(query.sql.contains("e1_type"), "SQL must contain e1_type");
+    assert!(query.sql.contains("e1_src"), "SQL must contain e1_src");
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Should have 12 paths total (see three_hop test for breakdown)
+    assert_eq!(
+        result.len(),
+        12,
+        "should have 12 user->group->project paths"
+    );
+
+    // Allow specific path: user 1 -> group 100 -> project 1000
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]);
+    mock_service.allow("projects", &[1000]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 11, "11 rows should be redacted");
+    assert_eq!(result.authorized_count(), 1, "only 1 path should pass");
+
+    // Verify the surviving row has correct edge data for BOTH hops
+    let row = result.authorized_rows().next().expect("should have 1 row");
+
+    // Verify node IDs
+    assert_eq!(row.get_id("u"), Some(1), "user should be 1");
+    assert_eq!(row.get_id("g"), Some(100), "group should be 100");
+    assert_eq!(row.get_id("p"), Some(1000), "project should be 1000");
+
+    // First edge: User 1 -> Group 100 (MEMBER_OF)
+    assert_eq!(
+        row.get("e0_type").and_then(|v| v.as_str()),
+        Some("MEMBER_OF"),
+        "first edge type should be MEMBER_OF"
+    );
+    assert_eq!(
+        row.get("e0_src").and_then(|v| v.as_i64()),
+        Some(1),
+        "e0 source should be user 1"
+    );
+    assert_eq!(
+        row.get("e0_src_type").and_then(|v| v.as_str()),
+        Some("User"),
+        "e0 source type should be User"
+    );
+    assert_eq!(
+        row.get("e0_dst").and_then(|v| v.as_i64()),
+        Some(100),
+        "e0 target should be group 100"
+    );
+    assert_eq!(
+        row.get("e0_dst_type").and_then(|v| v.as_str()),
+        Some("Group"),
+        "e0 target type should be Group"
+    );
+
+    // Second edge: Group 100 -> Project 1000 (CONTAINS)
+    assert_eq!(
+        row.get("e1_type").and_then(|v| v.as_str()),
+        Some("CONTAINS"),
+        "second edge type should be CONTAINS"
+    );
+    assert_eq!(
+        row.get("e1_src").and_then(|v| v.as_i64()),
+        Some(100),
+        "e1 source should be group 100"
+    );
+    assert_eq!(
+        row.get("e1_src_type").and_then(|v| v.as_str()),
+        Some("Group"),
+        "e1 source type should be Group"
+    );
+    assert_eq!(
+        row.get("e1_dst").and_then(|v| v.as_i64()),
+        Some(1000),
+        "e1 target should be project 1000"
+    );
+    assert_eq!(
+        row.get("e1_dst_type").and_then(|v| v.as_str()),
+        Some("Project"),
+        "e1 target type should be Project"
+    );
+}

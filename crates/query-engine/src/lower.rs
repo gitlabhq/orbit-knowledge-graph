@@ -9,9 +9,22 @@ use crate::input::{
     InputRelationship, OrderDirection, QueryType,
 };
 use crate::result_context::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN};
-use ontology::{Ontology, EDGE_TABLE};
+use ontology::{Ontology, EDGE_RESERVED_COLUMNS, EDGE_TABLE};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+
+/// Maps edge column names to output alias suffixes.
+/// Uses EDGE_RESERVED_COLUMNS order: relationship_kind, source_id, source_kind, target_id, target_kind
+const EDGE_ALIAS_SUFFIXES: &[&str] = &["type", "src", "src_type", "dst", "dst_type"];
+
+/// Generate SELECT expressions for all edge columns with the given table alias.
+fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
+    EDGE_RESERVED_COLUMNS
+        .iter()
+        .zip(EDGE_ALIAS_SUFFIXES.iter())
+        .map(|(col, suffix)| SelectExpr::new(Expr::col(alias, *col), format!("{alias}_{suffix}")))
+        .collect()
+}
 
 /// Lower validated input into an AST node.
 pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
@@ -30,7 +43,9 @@ pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
 fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
-    let select = build_select_columns(&input.nodes, ontology);
+
+    let mut select = build_select_columns(&input.nodes, ontology);
+    add_edge_columns(&mut select, &input.relationships, &edge_aliases);
 
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
@@ -114,6 +129,19 @@ fn build_select_columns(nodes: &[InputNode], ontology: &Ontology) -> Vec<SelectE
     }
 
     select
+}
+
+/// Add edge columns to SELECT for each relationship.
+fn add_edge_columns(
+    select: &mut Vec<SelectExpr>,
+    rels: &[InputRelationship],
+    edge_aliases: &HashMap<usize, String>,
+) {
+    for (i, _rel) in rels.iter().enumerate() {
+        if let Some(alias) = edge_aliases.get(&i) {
+            select.extend(edge_select_exprs(alias));
+        }
+    }
 }
 
 fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
@@ -218,6 +246,7 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
         ctes,
         select: vec![
             SelectExpr::new(Expr::col("all_paths", "path"), "_gkg_path"),
+            SelectExpr::new(Expr::col("all_paths", "edges"), "_gkg_edges"),
             SelectExpr::new(Expr::col("all_paths", "depth"), "depth"),
         ],
         from: TableRef::join(
@@ -246,12 +275,48 @@ fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_enti
             SelectExpr::new(start_id.clone(), "node_id"),
             SelectExpr::new(Expr::func("array", vec![start_id]), "path_ids"),
             SelectExpr::new(Expr::func("array", vec![start_tuple]), "path"),
+            // Empty edges array - no edges at depth 0
+            SelectExpr::new(
+                Expr::func(
+                    "arrayResize",
+                    vec![path_edge_tuple_template(), Expr::lit(0)],
+                ),
+                "edges",
+            ),
             SelectExpr::new(Expr::lit(0), "depth"),
         ],
         from: TableRef::scan(table, start_alias),
         where_clause: id_filter(start_alias, "id", start_ids),
         ..Default::default()
     }
+}
+
+/// Build a tuple template for path edges using EDGE_RESERVED_COLUMNS order.
+fn path_edge_tuple_template() -> Expr {
+    Expr::func(
+        "array",
+        vec![Expr::func(
+            "tuple",
+            vec![
+                Expr::lit(""),   // relationship_kind
+                Expr::lit(0i64), // source_id
+                Expr::lit(""),   // source_kind
+                Expr::lit(0i64), // target_id
+                Expr::lit(""),   // target_kind
+            ],
+        )],
+    )
+}
+
+/// Build the edge tuple for the current hop using EDGE_RESERVED_COLUMNS order.
+fn path_edge_tuple() -> Expr {
+    Expr::func(
+        "tuple",
+        EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|col| Expr::col("e", *col))
+            .collect(),
+    )
 }
 
 /// Depth N query: extend paths from the previous CTE by one hop.
@@ -301,6 +366,17 @@ fn path_depth_query(prev_cte: &str, depth: u32) -> Query {
                 ),
                 "path",
             ),
+            // Append current edge to edges array
+            SelectExpr::new(
+                Expr::func(
+                    "arrayConcat",
+                    vec![
+                        Expr::col("p", "edges"),
+                        Expr::func("array", vec![path_edge_tuple()]),
+                    ],
+                ),
+                "edges",
+            ),
             SelectExpr::new(Expr::lit(depth as i64), "depth"),
         ],
         from: TableRef::join(
@@ -328,6 +404,7 @@ fn path_select_from_cte(cte_name: &str) -> Query {
             SelectExpr::new(Expr::col(cte_name, "node_id"), "node_id"),
             SelectExpr::new(Expr::col(cte_name, "path_ids"), "path_ids"),
             SelectExpr::new(Expr::col(cte_name, "path"), "path"),
+            SelectExpr::new(Expr::col(cte_name, "edges"), "edges"),
             SelectExpr::new(Expr::col(cte_name, "depth"), "depth"),
         ],
         from: TableRef::scan(cte_name, cte_name),
@@ -397,7 +474,7 @@ fn lower_neighbors(input: &Input, ontology: &Ontology) -> Result<Node> {
         ),
     };
 
-    let select = vec![
+    let mut select = vec![
         SelectExpr::new(neighbor_id_expr, NEIGHBOR_ID_COLUMN),
         SelectExpr::new(neighbor_type_expr, NEIGHBOR_TYPE_COLUMN),
         SelectExpr::new(
@@ -405,6 +482,7 @@ fn lower_neighbors(input: &Input, ontology: &Ontology) -> Result<Node> {
             RELATIONSHIP_TYPE_COLUMN,
         ),
     ];
+    select.extend(edge_select_exprs(edge_alias));
 
     let where_clause = id_filter(&center_node.id, "id", &center_node.node_ids);
 
@@ -730,7 +808,8 @@ mod tests {
         };
         println!("{:?}", q);
         assert_eq!(q.limit, Some(25));
-        assert_eq!(q.select.len(), 2);
+        // 2 node columns + 5 edge columns (type, src, src_type, dst, dst_type)
+        assert_eq!(q.select.len(), 7);
     }
 
     #[test]
@@ -1117,14 +1196,17 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Should have: u_id, u_username, n_id, n_confidential
-        assert_eq!(q.select.len(), 4);
+        // Should have: u_id, u_username, n_id, n_confidential + 5 edge columns
+        assert_eq!(q.select.len(), 9);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_id".to_string()));
         assert!(aliases.contains(&&"u_username".to_string()));
         assert!(aliases.contains(&&"n_id".to_string()));
         assert!(aliases.contains(&&"n_confidential".to_string()));
+        // Edge columns
+        assert!(aliases.contains(&&"e0_type".to_string()));
+        assert!(aliases.contains(&&"e0_src".to_string()));
     }
 
     #[test]
@@ -1173,5 +1255,131 @@ mod tests {
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_id".to_string()));
         assert!(aliases.contains(&&"u_username".to_string()));
+    }
+
+    #[test]
+    fn test_edge_select_exprs_generates_all_columns() {
+        let exprs = edge_select_exprs("e0");
+
+        assert_eq!(exprs.len(), 5);
+
+        let aliases: Vec<_> = exprs.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"e0_type".to_string()));
+        assert!(aliases.contains(&&"e0_src".to_string()));
+        assert!(aliases.contains(&&"e0_src_type".to_string()));
+        assert!(aliases.contains(&&"e0_dst".to_string()));
+        assert!(aliases.contains(&&"e0_dst_type".to_string()));
+    }
+
+    #[test]
+    fn test_path_finding_includes_edges_column() {
+        let input = validated_input(
+            r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Project", "node_ids": [100]},
+                {"id": "end", "entity": "Project", "node_ids": [200]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Final select should have _gkg_path, _gkg_edges, depth
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"_gkg_path".to_string()));
+        assert!(aliases.contains(&&"_gkg_edges".to_string()));
+        assert!(aliases.contains(&&"depth".to_string()));
+
+        // CTEs should have edges column
+        assert!(!q.ctes.is_empty());
+        let d0_select: Vec<_> = q.ctes[0]
+            .query
+            .select
+            .iter()
+            .filter_map(|s| s.alias.as_ref())
+            .collect();
+        assert!(d0_select.contains(&&"edges".to_string()));
+    }
+
+    #[test]
+    fn test_neighbors_includes_edge_columns() {
+        use crate::input::{Direction, InputNeighbors};
+
+        let input = Input {
+            query_type: QueryType::Neighbors,
+            nodes: vec![InputNode {
+                id: "u".to_string(),
+                entity: Some("User".to_string()),
+                columns: None,
+                filters: std::collections::HashMap::new(),
+                node_ids: vec![123],
+                id_range: None,
+                id_property: "id".to_string(),
+            }],
+            relationships: vec![],
+            aggregations: vec![],
+            path: None,
+            neighbors: Some(InputNeighbors {
+                node: "u".to_string(),
+                direction: Direction::Outgoing,
+                rel_types: vec![],
+            }),
+            limit: 10,
+            order_by: None,
+            aggregation_sort: None,
+        };
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+
+        // Should have neighbor columns
+        assert!(aliases.contains(&&"_gkg_neighbor_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_neighbor_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_relationship_type".to_string()));
+
+        // Should have edge columns from edge_select_exprs
+        assert!(aliases.contains(&&"e_type".to_string()));
+        assert!(aliases.contains(&&"e_src".to_string()));
+        assert!(aliases.contains(&&"e_src_type".to_string()));
+        assert!(aliases.contains(&&"e_dst".to_string()));
+        assert!(aliases.contains(&&"e_dst_type".to_string()));
+    }
+
+    #[test]
+    fn test_multi_relationship_has_multiple_edge_columns() {
+        let input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "n"},
+                {"type": "CONTAINS", "from": "p", "to": "n"}
+            ],
+            "limit": 20
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+
+        // Should have edge columns for both relationships (e0 and e1)
+        assert!(aliases.contains(&&"e0_type".to_string()));
+        assert!(aliases.contains(&&"e0_src".to_string()));
+        assert!(aliases.contains(&&"e1_type".to_string()));
+        assert!(aliases.contains(&&"e1_src".to_string()));
     }
 }
