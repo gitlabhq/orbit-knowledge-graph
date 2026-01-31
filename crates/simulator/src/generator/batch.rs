@@ -19,7 +19,6 @@ pub struct BatchBuilder {
     /// Schema for building batches.
     schema: Arc<Schema>,
     fake_gen: FakeValueGenerator,
-    organization_ids: Vec<u32>,
     traversal_paths: Vec<String>,
     columns: Vec<ColumnData>,
     batches: Vec<RecordBatch>,
@@ -74,15 +73,13 @@ impl BatchBuilder {
             batch_size,
             schema,
             fake_gen,
-            organization_ids: Vec::with_capacity(batch_size),
             traversal_paths: Vec::with_capacity(batch_size),
             columns,
             batches: Vec::new(),
         }
     }
 
-    pub fn add_row(&mut self, organization_id: u32, traversal_path: String, id: i64) {
-        self.organization_ids.push(organization_id);
+    pub fn add_row(&mut self, traversal_path: String, id: i64) {
         self.traversal_paths.push(traversal_path);
 
         for col_data in &mut self.columns {
@@ -96,21 +93,17 @@ impl BatchBuilder {
             }
         }
 
-        if self.organization_ids.len() >= self.batch_size {
+        if self.traversal_paths.len() >= self.batch_size {
             self.flush();
         }
     }
 
     fn flush(&mut self) {
-        if self.organization_ids.is_empty() {
+        if self.traversal_paths.is_empty() {
             return;
         }
 
-        let mut arrays: Vec<ArrayRef> = Vec::with_capacity(2 + self.columns.len());
-
-        arrays.push(Arc::new(UInt32Array::from(std::mem::take(
-            &mut self.organization_ids,
-        ))));
+        let mut arrays: Vec<ArrayRef> = Vec::with_capacity(1 + self.columns.len());
 
         arrays.push(Arc::new(StringArray::from(std::mem::take(
             &mut self.traversal_paths,
@@ -125,7 +118,6 @@ impl BatchBuilder {
             self.batches.push(batch);
         }
 
-        self.organization_ids = Vec::with_capacity(self.batch_size);
         self.traversal_paths = Vec::with_capacity(self.batch_size);
     }
 
@@ -251,7 +243,7 @@ mod tests {
 
         // Add some rows (less than batch_size)
         for i in 0..10 {
-            builder.add_row(1, format!("1/{}", i), i + 1);
+            builder.add_row(format!("1/{}/", i), i + 1);
         }
 
         let batches = builder.finish();
@@ -259,19 +251,11 @@ mod tests {
 
         let batch = &batches[0];
         assert_eq!(batch.num_rows(), 10);
-        assert_eq!(batch.num_columns(), 5); // organization_id + traversal_path + 3 fields
-
-        // Check organization_id column
-        let org_ids = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-        assert!(org_ids.iter().all(|v| v == Some(1)));
+        assert_eq!(batch.num_columns(), 4); // traversal_path + 3 fields
 
         // Check traversal_path column
         let traversal_paths = batch
-            .column(1)
+            .column(0)
             .as_any()
             .downcast_ref::<StringArray>()
             .unwrap();
@@ -279,7 +263,7 @@ mod tests {
 
         // Check id column
         let ids = batch
-            .column(2)
+            .column(1)
             .as_any()
             .downcast_ref::<Int64Array>()
             .unwrap();
@@ -297,7 +281,7 @@ mod tests {
 
         // Add 12 rows - should create 3 batches (5, 5, 2)
         for i in 0..12 {
-            builder.add_row(1, format!("1/{}", i), i + 1);
+            builder.add_row(format!("1/{}/", i), i + 1);
         }
 
         let batches = builder.finish();

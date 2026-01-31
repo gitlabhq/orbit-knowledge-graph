@@ -70,6 +70,11 @@ impl Context {
     fn emit_query(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
+        // SET statements (must come before WITH for recursive CTEs)
+        for (key, value) in &q.set_statements {
+            parts.push(format!("SET {key} = {value};"));
+        }
+
         // WITH clause (CTEs)
         if !q.ctes.is_empty() {
             parts.push(self.emit_ctes(&q.ctes)?);
@@ -183,6 +188,11 @@ impl Context {
         if !q.group_by.is_empty() {
             let groups: Vec<_> = q.group_by.iter().map(|g| self.emit_expr(g)).collect();
             parts.push(format!("GROUP BY {}", groups.join(", ")));
+        }
+
+        // UNION ALL (for recursive CTEs)
+        for union_q in &q.union_all {
+            parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
         }
 
         // ORDER BY
