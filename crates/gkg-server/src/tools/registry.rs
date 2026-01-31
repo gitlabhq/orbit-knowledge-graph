@@ -28,10 +28,21 @@ impl ToolRegistry {
     fn get_graph_entities() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_entities".to_string(),
-            description: "Get graph schema including node types, relationship types, \
-                          and their properties."
+            description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
+                          and edges with their source/target types. Use expand_nodes to get \
+                          property details for specific types."
                 .to_string(),
-            parameters: json!({}),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "expand_nodes": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Node types to expand with properties and relationships."
+                    }
+                },
+                "additionalProperties": false
+            }),
         }
     }
 }
@@ -73,5 +84,18 @@ mod tests {
 
         assert!(names.contains(&"query_graph"));
         assert!(names.contains(&"get_graph_entities"));
+    }
+
+    #[test]
+    fn test_get_graph_entities_has_expand_nodes_param() {
+        let tools = ToolRegistry::get_all_tools();
+        let get_entities = tools
+            .iter()
+            .find(|t| t.name == "get_graph_entities")
+            .expect("get_graph_entities tool should exist");
+
+        let params = &get_entities.parameters;
+        assert_eq!(params["type"], "object");
+        assert!(params["properties"]["expand_nodes"].is_object());
     }
 }

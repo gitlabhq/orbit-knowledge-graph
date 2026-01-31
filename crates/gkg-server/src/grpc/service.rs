@@ -44,7 +44,7 @@ impl KnowledgeGraphServiceImpl {
     pub fn new(validator: Arc<JwtValidator>, clickhouse_config: &ClickHouseConfiguration) -> Self {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
         let query_executor = QueryExecutor::new(clickhouse_config, Arc::clone(&ontology));
-        let tool_service = ToolService::new(query_executor.clone());
+        let tool_service = ToolService::new(query_executor.clone(), Arc::clone(&ontology));
         let context_engine = ContextEngine::new();
         Self {
             validator,
@@ -453,13 +453,20 @@ mod tests {
     async fn test_service_can_be_created() {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(validator, &test_config());
+        let result = service
+            .tool_service
+            .execute_tool("get_graph_entities", "{}", &test_claims())
+            .await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap().raw_result;
         assert!(
-            service
-                .tool_service
-                .execute_tool("get_graph_entities", "{}", &test_claims())
-                .await
-                .is_ok()
+            response.is_string(),
+            "Response should be toon-encoded string"
         );
+        let toon_str = response.as_str().unwrap();
+        assert!(toon_str.contains("domains"));
+        assert!(toon_str.contains("edges"));
     }
 
     #[test]
