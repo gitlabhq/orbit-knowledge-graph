@@ -1265,6 +1265,217 @@ async fn path_finding_denying_end_node_filters_those_paths() {
     assert!(!authorized_ends.contains(&1002));
 }
 
+/// Path finding with multiple valid paths to same destination - authorization
+/// must check ALL nodes in EACH path independently. Denying a node in one path
+/// should not affect other paths that don't traverse that node.
+#[tokio::test]
+#[serial]
+async fn path_finding_multiple_paths_independent_authorization() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // User 1 can reach project 1000 via group 100
+    // User 1 can also reach project 1002 via group 100
+    // These are independent paths that share intermediate nodes
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1002]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count >= 2, "should find paths to both projects");
+
+    // Authorize the path through group 100 to project 1000 only
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]);
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1002]); // Deny one destination
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Only paths ending at 1000 should remain
+    let authorized_ends: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .collect();
+
+    assert!(
+        authorized_ends.contains(&1000),
+        "path to 1000 should be authorized"
+    );
+    assert!(
+        !authorized_ends.contains(&1002),
+        "path to denied project 1002 should be filtered"
+    );
+}
+
+/// Verify that path finding correctly handles the case where the same node
+/// appears at different depths. Each path instance is checked independently.
+#[tokio::test]
+#[serial]
+async fn path_finding_shared_intermediate_node_authorization() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Multiple users can reach the same projects through group 100
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count >= 2, "should find paths from both users");
+
+    // Authorize user 1's path but deny user 2
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.deny("users", &[2]);
+    mock_service.allow("groups", &[100]);
+    mock_service.allow("projects", &[1000]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Only user 1's path should remain
+    let authorized_starts: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().first().map(|n| n.id))
+        .collect();
+
+    assert_eq!(
+        authorized_starts,
+        HashSet::from([1]),
+        "only user 1's path should be authorized"
+    );
+}
+
+/// Path finding with max depth traversal - verifies that authorization
+/// is checked for ALL nodes in paths, not just start/end.
+#[tokio::test]
+#[serial]
+async fn path_finding_deep_traversal_all_nodes_verified() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Path: User -> Group -> Project (depth 2 is realistic for our data, max allowed is 3)
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count > 0, "should find some paths");
+
+    // Authorize everything except intermediate group 102
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]); // Only group 100
+    mock_service.deny("groups", &[102]); // Deny group 102
+    mock_service.allow("projects", ALL_PROJECT_IDS);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Verify no paths go through group 102
+    for row in result.authorized_rows() {
+        for node in row.path_nodes() {
+            if node.entity_type == "Group" {
+                assert_ne!(
+                    node.id, 102,
+                    "denied group 102 should never appear in authorized paths"
+                );
+            }
+        }
+    }
+
+    // Paths through group 100 (to 1000, 1002) should work
+    let authorized_ends: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .collect();
+
+    assert!(
+        authorized_ends.contains(&1000) || authorized_ends.contains(&1002),
+        "at least one path through group 100 should be authorized"
+    );
+    assert!(
+        !authorized_ends.contains(&1004),
+        "path to 1004 (via group 102) should be filtered"
+    );
+}
+
+/// Verify path finding with zero valid paths after authorization returns empty.
+#[tokio::test]
+#[serial]
+async fn path_finding_all_paths_denied_returns_empty() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert!(!result.is_empty(), "should have paths before redaction");
+
+    // Deny ALL intermediate nodes - paths cannot complete
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.deny("groups", ALL_GROUP_IDS); // Deny all groups
+    mock_service.allow("projects", &[1000]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "all paths should be denied when intermediates are denied"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Search Query Tests
 // ─────────────────────────────────────────────────────────────────────────────

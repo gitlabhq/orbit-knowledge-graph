@@ -270,9 +270,68 @@ mod tests {
         }"#;
 
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-        assert!(result.sql.contains("WITH RECURSIVE"));
-        assert!(result.sql.contains("path_cte"));
+        // Unrolled CTEs: d0 (base), d1, d2, d3 (one per depth level)
+        assert!(result.sql.contains("WITH d0 AS"));
+        assert!(result.sql.contains("d1 AS"));
+        assert!(result.sql.contains("d2 AS"));
+        assert!(result.sql.contains("d3 AS"));
         assert!(result.sql.contains("UNION ALL"));
+
+        // Verify CTE chain structure: each depth references previous
+        assert!(result.sql.contains("FROM d0"), "d1 should reference d0");
+        assert!(result.sql.contains("FROM d1"), "d2 should reference d1");
+        assert!(result.sql.contains("FROM d2"), "d3 should reference d2");
+
+        // Verify cycle detection in each depth
+        assert!(
+            result.sql.matches("NOT has").count() >= 3,
+            "each depth CTE should have cycle detection"
+        );
+
+        // Verify path construction
+        assert!(
+            result.sql.contains("arrayConcat"),
+            "paths should be extended"
+        );
+        assert!(
+            result.sql.contains("tuple"),
+            "path nodes should be typed tuples"
+        );
+    }
+
+    #[test]
+    fn path_finding_depth_isolation() {
+        // Verify depth 1 query produces simpler structure than depth 3
+        let shallow = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Project", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [2]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
+        }"#;
+
+        let deep = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Project", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [2]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#;
+
+        let shallow_result = compile(shallow, &test_ontology(), &test_ctx()).unwrap();
+        let deep_result = compile(deep, &test_ontology(), &test_ctx()).unwrap();
+
+        // Shallow should have d0, d1 only
+        assert!(shallow_result.sql.contains("d0 AS"));
+        assert!(shallow_result.sql.contains("d1 AS"));
+        assert!(!shallow_result.sql.contains("d2 AS"));
+
+        // Deep should have d0 through d3
+        assert!(deep_result.sql.contains("d0 AS"));
+        assert!(deep_result.sql.contains("d3 AS"));
+        assert!(!deep_result.sql.contains("d4 AS"));
     }
 
     #[test]

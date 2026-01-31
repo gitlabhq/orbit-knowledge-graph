@@ -154,10 +154,8 @@ mod tests {
                 },
             ],
             from: TableRef::scan("kg_user", "u"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
             limit: Some(30),
+            ..Default::default()
         };
 
         let input = test_input();
@@ -205,10 +203,8 @@ mod tests {
                 },
             ],
             from: TableRef::scan("kg_user", "u"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
             limit: Some(30),
+            ..Default::default()
         };
 
         let input = test_input();
@@ -235,10 +231,8 @@ mod tests {
                 alias: Some("name".into()),
             }],
             from: TableRef::scan("kg_user", "u"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
             limit: Some(30),
+            ..Default::default()
         };
 
         let input = test_input();
@@ -293,10 +287,8 @@ mod tests {
                 alias: Some("n_id".into()),
             }],
             from: TableRef::scan("kg_node", "n"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
             limit: Some(30),
+            ..Default::default()
         };
 
         let mut node = Node::Query(Box::new(query));
@@ -316,10 +308,8 @@ mod tests {
         let query = Query {
             select: vec![],
             from: TableRef::scan("kg_user", "u"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
             limit: Some(30),
+            ..Default::default()
         };
 
         let mut node = Node::Query(Box::new(query));
@@ -383,10 +373,9 @@ mod tests {
                 alias: Some("u_id".into()),
             }],
             from: TableRef::scan("kg_user", "u"),
-            where_clause: None,
             group_by: vec![Expr::col("u", "id")],
-            order_by: vec![],
             limit: Some(10),
+            ..Default::default()
         };
 
         let mut node = Node::Query(Box::new(query));
@@ -423,7 +412,7 @@ mod tests {
 
     #[test]
     fn path_finding_uses_gkg_path_column() {
-        use crate::ast::RecursiveCte;
+        use crate::ast::Cte;
         use crate::input::InputPath;
 
         let input = Input {
@@ -463,43 +452,38 @@ mod tests {
             aggregation_sort: None,
         };
 
-        // Path finding generates a RecursiveCte
-        let mut cte = Node::RecursiveCte(Box::new(RecursiveCte {
-            name: "path_cte".into(),
-            base: Query {
-                select: vec![SelectExpr {
-                    expr: Expr::col("start", "id"),
-                    alias: Some("node_id".into()),
-                }],
-                from: TableRef::scan("gl_projects", "start"),
-                where_clause: None,
-                group_by: vec![],
-                order_by: vec![],
-                limit: None,
-            },
-            recursive: Query {
-                select: vec![],
-                from: TableRef::scan("path_cte", "p"),
-                where_clause: None,
-                group_by: vec![],
-                order_by: vec![],
-                limit: None,
-            },
-            max_depth: 3,
-            final_query: Query {
-                select: vec![SelectExpr {
-                    expr: Expr::col("path_cte", "path"),
-                    alias: Some("_gkg_path".into()),
-                }],
-                from: TableRef::scan("gl_projects", "end"),
-                where_clause: None,
-                group_by: vec![],
-                order_by: vec![],
-                limit: Some(30),
-            },
+        // Path finding generates a Query with unrolled CTEs
+        let mut query = Node::Query(Box::new(Query {
+            ctes: vec![
+                Cte::new(
+                    "d0",
+                    Query {
+                        select: vec![SelectExpr {
+                            expr: Expr::col("start", "id"),
+                            alias: Some("node_id".into()),
+                        }],
+                        from: TableRef::scan("gl_projects", "start"),
+                        ..Default::default()
+                    },
+                ),
+                Cte::new(
+                    "d1",
+                    Query {
+                        from: TableRef::scan("d0", "p"),
+                        ..Default::default()
+                    },
+                ),
+            ],
+            select: vec![SelectExpr {
+                expr: Expr::col("all_paths", "path"),
+                alias: Some("_gkg_path".into()),
+            }],
+            from: TableRef::scan("gl_projects", "end"),
+            limit: Some(30),
+            ..Default::default()
         }));
 
-        let ctx = enforce_return(&mut cte, &input).unwrap();
+        let ctx = enforce_return(&mut query, &input).unwrap();
 
         // Path finding queries use _gkg_path column for redaction data.
         // No additional _gkg_* columns are added by enforce_return.

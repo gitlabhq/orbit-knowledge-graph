@@ -155,18 +155,64 @@ pub struct OrderExpr {
     pub desc: bool,
 }
 
+/// Named Common Table Expression (CTE) for WITH clauses.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cte {
+    pub name: String,
+    pub query: Box<Query>,
+    pub recursive: bool,
+}
+
+impl Cte {
+    pub fn new(name: impl Into<String>, query: Query) -> Self {
+        Self {
+            name: name.into(),
+            query: Box::new(query),
+            recursive: false,
+        }
+    }
+
+    pub fn recursive(name: impl Into<String>, query: Query) -> Self {
+        Self {
+            name: name.into(),
+            query: Box::new(query),
+            recursive: true,
+        }
+    }
+}
+
 /// Complete SQL query:
 /// ```sql
+/// WITH cte1 AS (...), cte2 AS (...)
 /// SELECT ... FROM ... WHERE ... GROUP BY ... ORDER BY ... LIMIT ...
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
+    pub ctes: Vec<Cte>,
     pub select: Vec<SelectExpr>,
     pub from: TableRef,
     pub where_clause: Option<Expr>,
     pub group_by: Vec<Expr>,
     pub order_by: Vec<OrderExpr>,
     pub limit: Option<u32>,
+}
+
+impl Default for Query {
+    fn default() -> Self {
+        Self {
+            ctes: vec![],
+            select: vec![],
+            from: TableRef::Scan {
+                table: String::new(),
+                alias: String::new(),
+                type_filter: None,
+            },
+            where_clause: None,
+            group_by: vec![],
+            order_by: vec![],
+            limit: None,
+        }
+    }
 }
 
 /// Recursive CTE for path finding:
