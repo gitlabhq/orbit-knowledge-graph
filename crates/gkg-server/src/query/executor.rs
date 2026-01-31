@@ -105,7 +105,7 @@ impl QueryExecutor {
 
 fn security_context_from_claims(claims: &Claims) -> Result<SecurityContext, QueryError> {
     let org_id = claims.organization_id.unwrap_or(1) as i64;
-    let traversal_paths = if claims.group_traversal_ids.is_empty() {
+    let traversal_paths = if claims.admin {
         vec![format!("{}/", org_id)]
     } else {
         claims.group_traversal_ids.clone()
@@ -156,4 +156,87 @@ fn row_to_json(row: &QueryResultRow, ctx: &query_engine::ResultContext) -> Value
         }
     }
     Value::Object(obj)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_claims(
+        admin: bool,
+        group_traversal_ids: Vec<String>,
+        organization_id: Option<u64>,
+    ) -> Claims {
+        Claims {
+            sub: "user:1".to_string(),
+            iss: "gitlab".to_string(),
+            aud: "gitlab-knowledge-graph".to_string(),
+            iat: 0,
+            exp: i64::MAX,
+            user_id: 1,
+            username: "test_user".to_string(),
+            admin,
+            organization_id,
+            min_access_level: Some(20),
+            group_traversal_ids,
+        }
+    }
+
+    #[test]
+    fn admin_gets_org_wide_access() {
+        let claims = make_claims(true, vec![], Some(42));
+        let ctx = security_context_from_claims(&claims).unwrap();
+
+        assert_eq!(ctx.org_id, 42);
+        assert_eq!(ctx.traversal_paths, vec!["42/"]);
+    }
+
+    #[test]
+    fn admin_with_default_org_gets_org_1() {
+        let claims = make_claims(true, vec![], None);
+        let ctx = security_context_from_claims(&claims).unwrap();
+
+        assert_eq!(ctx.org_id, 1);
+        assert_eq!(ctx.traversal_paths, vec!["1/"]);
+    }
+
+    #[test]
+    fn admin_ignores_group_traversal_ids() {
+        let claims = make_claims(
+            true,
+            vec!["1/22/".to_string(), "1/33/".to_string()],
+            Some(1),
+        );
+        let ctx = security_context_from_claims(&claims).unwrap();
+
+        assert_eq!(ctx.traversal_paths, vec!["1/"]);
+    }
+
+    #[test]
+    fn non_admin_gets_their_group_paths() {
+        let claims = make_claims(
+            false,
+            vec!["1/22/".to_string(), "1/33/".to_string()],
+            Some(1),
+        );
+        let ctx = security_context_from_claims(&claims).unwrap();
+
+        assert_eq!(ctx.traversal_paths, vec!["1/22/", "1/33/"]);
+    }
+
+    #[test]
+    fn non_admin_with_empty_groups_gets_no_access() {
+        let claims = make_claims(false, vec![], Some(1));
+        let ctx = security_context_from_claims(&claims).unwrap();
+
+        assert!(ctx.traversal_paths.is_empty());
+    }
+
+    #[test]
+    fn non_admin_with_single_group_path() {
+        let claims = make_claims(false, vec!["1/24/111/".to_string()], Some(1));
+        let ctx = security_context_from_claims(&claims).unwrap();
+
+        assert_eq!(ctx.traversal_paths, vec!["1/24/111/"]);
+    }
 }
