@@ -27,8 +27,10 @@ impl GrpcServer {
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
         clickhouse_config: &ClickHouseConfiguration,
+        health_check_url: Option<String>,
     ) -> Self {
-        let service = KnowledgeGraphServiceImpl::new(validator, clickhouse_config);
+        let service =
+            KnowledgeGraphServiceImpl::new(validator, clickhouse_config, health_check_url);
         Self {
             addr,
             service: KnowledgeGraphServiceServer::with_interceptor(service, server_interceptor),
@@ -61,7 +63,7 @@ mod tests {
             Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
         let clickhouse_config = ClickHouseConfiguration::default();
 
-        let server = GrpcServer::new(addr, validator, &clickhouse_config);
+        let server = GrpcServer::new(addr, validator, &clickhouse_config, None);
         assert_eq!(server.addr(), addr);
     }
 }

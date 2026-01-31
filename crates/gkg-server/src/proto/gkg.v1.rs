@@ -208,6 +208,73 @@ pub struct EdgeVariant {
     #[prost(string, tag = "2")]
     pub target_type: ::prost::alloc::string::String,
 }
+/// Empty for now
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetClusterHealthRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetClusterHealthResponse {
+    #[prost(enumeration = "ClusterStatus", tag = "1")]
+    pub status: i32,
+    #[prost(string, tag = "2")]
+    pub timestamp: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "4")]
+    pub components: ::prost::alloc::vec::Vec<ComponentHealth>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ComponentHealth {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(enumeration = "ClusterStatus", tag = "2")]
+    pub status: i32,
+    #[prost(message, optional, tag = "3")]
+    pub replicas: ::core::option::Option<ReplicaStatus>,
+    #[prost(map = "string, string", tag = "4")]
+    pub metrics: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        ::prost::alloc::string::String,
+    >,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReplicaStatus {
+    #[prost(int32, tag = "1")]
+    pub ready: i32,
+    #[prost(int32, tag = "2")]
+    pub desired: i32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ClusterStatus {
+    Unspecified = 0,
+    Healthy = 1,
+    Degraded = 2,
+    Unhealthy = 3,
+}
+impl ClusterStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "CLUSTER_STATUS_UNSPECIFIED",
+            Self::Healthy => "CLUSTER_STATUS_HEALTHY",
+            Self::Degraded => "CLUSTER_STATUS_DEGRADED",
+            Self::Unhealthy => "CLUSTER_STATUS_UNHEALTHY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "CLUSTER_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "CLUSTER_STATUS_HEALTHY" => Some(Self::Healthy),
+            "CLUSTER_STATUS_DEGRADED" => Some(Self::Degraded),
+            "CLUSTER_STATUS_UNHEALTHY" => Some(Self::Unhealthy),
+            _ => None,
+        }
+    }
+}
 /// Generated client implementations.
 pub mod knowledge_graph_service_client {
     #![allow(
@@ -411,6 +478,33 @@ pub mod knowledge_graph_service_client {
                 .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetOntology"));
             self.inner.unary(req, path, codec).await
         }
+        /// Returns cluster health status for the Orbit dashboard
+        pub async fn get_cluster_health(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetClusterHealthRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetClusterHealthResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetClusterHealth",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetClusterHealth"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -475,6 +569,14 @@ pub mod knowledge_graph_service_server {
             request: tonic::Request<super::GetOntologyRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetOntologyResponse>,
+            tonic::Status,
+        >;
+        /// Returns cluster health status for the Orbit dashboard
+        async fn get_cluster_health(
+            &self,
+            request: tonic::Request<super::GetClusterHealthRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetClusterHealthResponse>,
             tonic::Status,
         >;
     }
@@ -731,6 +833,55 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetOntologySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/GetClusterHealth" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetClusterHealthSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::GetClusterHealthRequest>
+                    for GetClusterHealthSvc<T> {
+                        type Response = super::GetClusterHealthResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetClusterHealthRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::get_cluster_health(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetClusterHealthSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
