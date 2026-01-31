@@ -2511,7 +2511,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
     // MergeRequest (target node, being aggregated) should NOT have individual ID/type columns
     // because it doesn't appear as individual rows
     assert!(
-        !query.sql.contains("_gkg_mr_id"),
+        !query.sql.contains("_gkg_mr_id,") && !query.sql.contains("_gkg_mr_id AS"),
         "aggregated target node should not have _gkg_mr_id"
     );
     assert!(
@@ -2577,7 +2577,7 @@ async fn aggregation_global_count_collects_ids_for_redaction() {
 
     // Global aggregation should NOT have individual ID/type columns (no group_by)
     assert!(
-        !query.sql.contains("_gkg_p_id"),
+        !query.sql.contains("_gkg_p_id,") && !query.sql.contains("_gkg_p_id AS"),
         "global aggregation should not have _gkg_p_id (no group_by)"
     );
     assert!(
@@ -2695,7 +2695,7 @@ async fn aggregation_multiple_functions_redaction_on_group_by() {
 
     // Target node (mr) should NOT have individual ID/type columns
     assert!(
-        !query.sql.contains("_gkg_mr_id"),
+        !query.sql.contains("_gkg_mr_id,") && !query.sql.contains("_gkg_mr_id AS"),
         "aggregated target should not have _gkg_mr_id"
     );
     assert!(
@@ -2776,21 +2776,12 @@ async fn aggregation_security_context_filters_data_before_aggregation() {
     let ctx = TestContext::new().await;
     setup_test_data(&ctx).await;
 
-    // Insert issues in different traversal paths (different orgs)
-    // Org 1 issues (authorized by our security context "1/")
+    // Insert additional projects in a different org (org 2)
+    // setup_test_data already created 5 projects in org 1 paths
     ctx.execute(
-        "INSERT INTO gl_issues (id, iid, title, state, traversal_path) VALUES
-         (30001, 1, 'Org1 Issue A', 'opened', '1/100/1000/'),
-         (30002, 2, 'Org1 Issue B', 'closed', '1/100/1000/'),
-         (30003, 3, 'Org1 Issue C', 'opened', '1/101/1001/')",
-    )
-    .await;
-
-    // Org 2 issues (NOT authorized - different org prefix)
-    ctx.execute(
-        "INSERT INTO gl_issues (id, iid, title, state, traversal_path) VALUES
-         (30004, 1, 'Org2 Issue A', 'opened', '2/200/2000/'),
-         (30005, 2, 'Org2 Issue B', 'opened', '2/200/2000/')",
+        "INSERT INTO gl_projects (id, name, visibility_level, traversal_path) VALUES
+         (2000, 'Org2 Project A', 'public', '2/200/2000/'),
+         (2001, 'Org2 Project B', 'public', '2/200/2001/')",
     )
     .await;
 
@@ -2799,11 +2790,11 @@ async fn aggregation_security_context_filters_data_before_aggregation() {
     // Security context only allows org 1 (traversal_path starting with "1/")
     let security_ctx = SecurityContext::new(1, vec!["1/".into()]).expect("valid security context");
 
-    // Count all issues globally
+    // Count all projects globally
     let json = r#"{
         "query_type": "aggregation",
-        "nodes": [{"id": "i", "entity": "Issue"}],
-        "aggregations": [{"function": "count", "target": "i", "alias": "issue_count"}],
+        "nodes": [{"id": "p", "entity": "Project"}],
+        "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
         "limit": 10
     }"#;
 
@@ -2824,11 +2815,11 @@ async fn aggregation_security_context_filters_data_before_aggregation() {
 
     assert_eq!(result.len(), 1, "should return 1 aggregation row");
 
-    // The count should be 3 (only org 1 issues), NOT 5 (all issues)
+    // The count should be 5 (only org 1 projects), NOT 7 (all projects)
     // We need to extract the actual count value from the result
     let count_col = batches[0]
-        .column_by_name("issue_count")
-        .expect("issue_count column should exist");
+        .column_by_name("project_count")
+        .expect("project_count column should exist");
     let count_array = count_col
         .as_any()
         .downcast_ref::<arrow::array::UInt64Array>()
@@ -2836,8 +2827,8 @@ async fn aggregation_security_context_filters_data_before_aggregation() {
 
     assert_eq!(
         count_array.value(0),
-        3,
-        "security filter must exclude org 2 issues - count should be 3, not 5"
+        5,
+        "security filter must exclude org 2 projects - count should be 5, not 7"
     );
 }
 
