@@ -200,7 +200,7 @@ fn agg_expr(agg: &InputAggregation) -> Expr {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Path Finding (unrolled CTEs)
+// Path Finding (recursive CTE)
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
@@ -219,45 +219,32 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
         .as_deref()
         .ok_or_else(|| QueryError::Lowering("start node has no entity".into()))?;
 
-    // Build unrolled CTEs: d0 (base), d1, d2, ... d{max_depth}
-    let mut ctes = Vec::with_capacity(path.max_depth as usize + 1);
+    // Recursive CTE with full path/edges materialization.
+    // Limited to 1000 paths to prevent memory explosion in dense graphs.
+    let mut base = path_base_query(&start.node_ids, &start_table, &start.id, start_entity);
+    let forward = path_recursive_branch(path.max_depth, true, &end.node_ids, &path.rel_types);
+    let reverse = path_recursive_branch(path.max_depth, false, &end.node_ids, &path.rel_types);
+    base.union_all = vec![forward, reverse];
+    base.limit = Some(1000);
 
-    // d0: base query
-    ctes.push(Cte::new(
-        "d0",
-        path_base_query(&start.node_ids, &start_table, &start.id, start_entity),
-    ));
-
-    // d1..dN: each references the previous depth
-    for depth in 1..=path.max_depth {
-        let prev_cte = format!("d{}", depth - 1);
-        ctes.push(Cte::new(
-            format!("d{depth}"),
-            path_depth_query(&prev_cte, depth),
-        ));
-    }
-
-    // Final query: UNION ALL of all depths, filter to target
-    let union_queries: Vec<Query> = (0..=path.max_depth)
-        .map(|d| path_select_from_cte(&format!("d{d}")))
-        .collect();
+    let recursive_cte = Cte::recursive("paths", base);
 
     Ok(Node::Query(Box::new(Query {
-        ctes,
+        ctes: vec![recursive_cte],
         select: vec![
-            SelectExpr::new(Expr::col("all_paths", "path"), "_gkg_path"),
-            SelectExpr::new(Expr::col("all_paths", "edges"), "_gkg_edges"),
-            SelectExpr::new(Expr::col("all_paths", "depth"), "depth"),
+            SelectExpr::new(Expr::col("paths", "path"), "_gkg_path"),
+            SelectExpr::new(Expr::col("paths", "edges"), "_gkg_edges"),
+            SelectExpr::new(Expr::col("paths", "depth"), "depth"),
         ],
         from: TableRef::join(
             JoinType::Inner,
-            TableRef::union(union_queries, "all_paths"),
+            TableRef::scan("paths", "paths"),
             TableRef::scan(&end_table, &end.id),
-            Expr::eq(Expr::col("all_paths", "node_id"), Expr::col(&end.id, "id")),
+            Expr::eq(Expr::col("paths", "node_id"), Expr::col(&end.id, "id")),
         ),
         where_clause: id_filter(&end.id, "id", &end.node_ids),
         order_by: vec![OrderExpr {
-            expr: Expr::col("all_paths", "depth"),
+            expr: Expr::col("paths", "depth"),
             desc: false,
         }],
         limit: Some(input.limit),
@@ -265,7 +252,7 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
     })))
 }
 
-/// Base query (d0): start the path with the first node.
+/// Base query for path finding with full materialization.
 fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_entity: &str) -> Query {
     let start_id = Expr::col(start_alias, "id");
     let start_tuple = Expr::func("tuple", vec![start_id.clone(), Expr::lit(start_entity)]);
@@ -275,7 +262,6 @@ fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_enti
             SelectExpr::new(start_id.clone(), "node_id"),
             SelectExpr::new(Expr::func("array", vec![start_id]), "path_ids"),
             SelectExpr::new(Expr::func("array", vec![start_tuple]), "path"),
-            // Empty edges array - no edges at depth 0
             SelectExpr::new(
                 Expr::func(
                     "arrayResize",
@@ -291,65 +277,36 @@ fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_enti
     }
 }
 
-/// Build a tuple template for path edges using EDGE_RESERVED_COLUMNS order.
+/// Empty edge tuple template for initializing edges array.
 fn path_edge_tuple_template() -> Expr {
     Expr::func(
         "array",
         vec![Expr::func(
             "tuple",
             vec![
-                Expr::lit(""),   // relationship_kind
-                Expr::lit(0i64), // source_id
-                Expr::lit(""),   // source_kind
-                Expr::lit(0i64), // target_id
-                Expr::lit(""),   // target_kind
+                Expr::lit(""),
+                Expr::lit(0i64),
+                Expr::lit(""),
+                Expr::lit(0i64),
+                Expr::lit(""),
             ],
         )],
     )
 }
 
-/// Build the edge tuple for the current hop using EDGE_RESERVED_COLUMNS order.
-fn path_edge_tuple() -> Expr {
-    Expr::func(
-        "tuple",
-        EDGE_RESERVED_COLUMNS
-            .iter()
-            .map(|col| Expr::col("e", *col))
-            .collect(),
-    )
-}
-
-/// Depth N query: extend paths from the previous CTE by one hop.
-/// Uses UNION ALL of two joins instead of OR to avoid ClickHouse join limitations.
-fn path_depth_query(prev_cte: &str, depth: u32) -> Query {
-    // Build two separate queries: one joining on source_id, one on target_id
-    let source_branch = path_hop_branch(prev_cte, depth, true);
-    let target_branch = path_hop_branch(prev_cte, depth, false);
-
-    // Wrap in outer SELECT from UNION ALL
-    Query {
-        select: vec![
-            SelectExpr::new(Expr::col("u", "node_id"), "node_id"),
-            SelectExpr::new(Expr::col("u", "path_ids"), "path_ids"),
-            SelectExpr::new(Expr::col("u", "path"), "path"),
-            SelectExpr::new(Expr::col("u", "edges"), "edges"),
-            SelectExpr::new(Expr::col("u", "depth"), "depth"),
-        ],
-        from: TableRef::union(vec![source_branch, target_branch], "u"),
-        ..Default::default()
-    }
-}
-
-/// Build one branch of the path hop: join on either source_id or target_id.
-fn path_hop_branch(prev_cte: &str, depth: u32, join_on_source: bool) -> Query {
-    // When joining on source: we're at source, going to target
-    // When joining on target: we're at target, going to source
+/// Recursive branch with full path/edges materialization.
+/// Includes depth limit, cycle detection, early termination, and edge type filtering.
+fn path_recursive_branch(
+    max_depth: u32,
+    join_on_source: bool,
+    target_ids: &[i64],
+    rel_types: &[String],
+) -> Query {
     let (next_id_col, next_type_col) = if join_on_source {
         ("target_id", "target_kind")
     } else {
         ("source_id", "source_kind")
     };
-
     let join_col = if join_on_source {
         "source_id"
     } else {
@@ -357,18 +314,81 @@ fn path_hop_branch(prev_cte: &str, depth: u32, join_on_source: bool) -> Query {
     };
 
     let next_node_id = Expr::col("e", next_id_col);
-    let next_node_type = Expr::col("e", next_type_col);
-    let next_tuple = Expr::func("tuple", vec![next_node_id.clone(), next_node_type]);
+    let next_tuple = Expr::func(
+        "tuple",
+        vec![next_node_id.clone(), Expr::col("e", next_type_col)],
+    );
+    let edge_tuple = Expr::func(
+        "tuple",
+        vec![
+            Expr::col("e", "relationship_kind"),
+            Expr::col("e", "source_id"),
+            Expr::col("e", "source_kind"),
+            Expr::col("e", "target_id"),
+            Expr::col("e", "target_kind"),
+        ],
+    );
+
+    // depth < max_depth
+    let depth_check = Expr::binary(Op::Lt, Expr::col("p", "depth"), Expr::lit(max_depth as i64));
+
+    // cycle detection: NOT has(path_ids, next_node)
+    let cycle_check = Expr::unary(
+        Op::Not,
+        Expr::func(
+            "has",
+            vec![Expr::col("p", "path_ids"), next_node_id.clone()],
+        ),
+    );
+
+    // early termination: stop if target already in path
+    let early_term = if target_ids.is_empty() {
+        None
+    } else {
+        let target_array = Expr::func(
+            "array",
+            target_ids.iter().map(|id| Expr::lit(*id)).collect(),
+        );
+        Some(Expr::unary(
+            Op::Not,
+            Expr::func("has", vec![target_array, Expr::col("p", "node_id")]),
+        ))
+    };
+
+    // relationship type filter
+    let rel_filter = if rel_types.is_empty() {
+        None
+    } else if rel_types.len() == 1 {
+        Some(Expr::eq(
+            Expr::col("e", "relationship_kind"),
+            Expr::lit(rel_types[0].clone()),
+        ))
+    } else {
+        Some(Expr::binary(
+            Op::In,
+            Expr::col("e", "relationship_kind"),
+            Expr::lit(serde_json::Value::Array(
+                rel_types
+                    .iter()
+                    .map(|t| serde_json::Value::String(t.clone()))
+                    .collect(),
+            )),
+        ))
+    };
+
+    // Combine all conditions
+    let where_clause =
+        Expr::and_all([Some(depth_check), Some(cycle_check), early_term, rel_filter]);
 
     Query {
         select: vec![
-            SelectExpr::new(next_node_id.clone(), "node_id"),
+            SelectExpr::new(next_node_id, "node_id"),
             SelectExpr::new(
                 Expr::func(
                     "arrayConcat",
                     vec![
                         Expr::col("p", "path_ids"),
-                        Expr::func("array", vec![next_node_id.clone()]),
+                        Expr::func("array", vec![Expr::col("e", next_id_col)]),
                     ],
                 ),
                 "path_ids",
@@ -388,39 +408,23 @@ fn path_hop_branch(prev_cte: &str, depth: u32, join_on_source: bool) -> Query {
                     "arrayConcat",
                     vec![
                         Expr::col("p", "edges"),
-                        Expr::func("array", vec![path_edge_tuple()]),
+                        Expr::func("array", vec![edge_tuple]),
                     ],
                 ),
                 "edges",
             ),
-            SelectExpr::new(Expr::lit(depth as i64), "depth"),
+            SelectExpr::new(
+                Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::lit(1i64)),
+                "depth",
+            ),
         ],
         from: TableRef::join(
             JoinType::Inner,
-            TableRef::scan(prev_cte, "p"),
+            TableRef::scan("paths", "p"),
             TableRef::scan(EDGE_TABLE, "e"),
             Expr::eq(Expr::col("p", "node_id"), Expr::col("e", join_col)),
         ),
-        // Cycle detection: next node must not already be in path
-        where_clause: Some(Expr::unary(
-            Op::Not,
-            Expr::func("has", vec![Expr::col("p", "path_ids"), next_node_id]),
-        )),
-        ..Default::default()
-    }
-}
-
-/// Select all columns from a CTE for use in UNION ALL.
-fn path_select_from_cte(cte_name: &str) -> Query {
-    Query {
-        select: vec![
-            SelectExpr::new(Expr::col(cte_name, "node_id"), "node_id"),
-            SelectExpr::new(Expr::col(cte_name, "path_ids"), "path_ids"),
-            SelectExpr::new(Expr::col(cte_name, "path"), "path"),
-            SelectExpr::new(Expr::col(cte_name, "edges"), "edges"),
-            SelectExpr::new(Expr::col(cte_name, "depth"), "depth"),
-        ],
-        from: TableRef::scan(cte_name, cte_name),
+        where_clause,
         ..Default::default()
     }
 }
@@ -865,11 +869,11 @@ mod tests {
         let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
             panic!("expected Query");
         };
-        println!("{:?}", q);
-        // Should have d0, d1, d2, d3 CTEs (base + 3 depth levels)
-        assert_eq!(q.ctes.len(), 4);
-        assert_eq!(q.ctes[0].name, "d0");
-        assert_eq!(q.ctes[3].name, "d3");
+
+        // Single recursive CTE named "paths"
+        assert_eq!(q.ctes.len(), 1);
+        assert_eq!(q.ctes[0].name, "paths");
+        assert!(q.ctes[0].recursive);
     }
 
     #[test]
@@ -1286,7 +1290,7 @@ mod tests {
     }
 
     #[test]
-    fn test_path_finding_includes_edges_column() {
+    fn test_path_finding_full_materialization() {
         let input = validated_input(
             r#"{
             "query_type": "path_finding",
@@ -1302,21 +1306,28 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Final select should have _gkg_path, _gkg_edges, depth
+        // Final select should have _gkg_path, _gkg_edges, and depth
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"_gkg_path".to_string()));
         assert!(aliases.contains(&&"_gkg_edges".to_string()));
         assert!(aliases.contains(&&"depth".to_string()));
 
-        // CTEs should have edges column
+        // CTE should have full columns including path and edges
         assert!(!q.ctes.is_empty());
-        let d0_select: Vec<_> = q.ctes[0]
+        let cte_select: Vec<_> = q.ctes[0]
             .query
             .select
             .iter()
             .filter_map(|s| s.alias.as_ref())
             .collect();
-        assert!(d0_select.contains(&&"edges".to_string()));
+        assert!(cte_select.contains(&&"node_id".to_string()));
+        assert!(cte_select.contains(&&"path_ids".to_string()));
+        assert!(cte_select.contains(&&"path".to_string()));
+        assert!(cte_select.contains(&&"edges".to_string()));
+        assert!(cte_select.contains(&&"depth".to_string()));
+
+        // CTE should have a limit to prevent memory explosion
+        assert_eq!(q.ctes[0].query.limit, Some(1000));
     }
 
     #[test]

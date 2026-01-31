@@ -5,16 +5,17 @@ use ontology::{DataType, Field, NodeEntity};
 
 /// Extension trait to convert ontology types to Arrow types.
 pub trait ToArrowSchema {
-    /// Convert to an Arrow schema, prepending organization_id and traversal_path.
+    /// Convert to an Arrow schema, prepending traversal_path.
     fn to_arrow_schema(&self) -> Schema;
 }
 
 impl ToArrowSchema for NodeEntity {
     fn to_arrow_schema(&self) -> Schema {
-        let mut fields = vec![
-            ArrowField::new("organization_id", ArrowDataType::UInt32, false),
-            ArrowField::new("traversal_path", ArrowDataType::Utf8, false),
-        ];
+        let mut fields = vec![ArrowField::new(
+            "traversal_path",
+            ArrowDataType::Utf8,
+            false,
+        )];
 
         for field in &self.fields {
             // Skip traversal_path if defined in ontology - it's a system column
@@ -169,19 +170,16 @@ mod tests {
         };
 
         let schema = node.to_arrow_schema();
-        assert_eq!(schema.fields().len(), 5); // organization_id + traversal_path + 3 fields
+        assert_eq!(schema.fields().len(), 4); // traversal_path + 3 fields
 
-        assert_eq!(schema.field(0).name(), "organization_id");
-        assert_eq!(schema.field(0).data_type(), &ArrowDataType::UInt32);
+        assert_eq!(schema.field(0).name(), "traversal_path");
+        assert_eq!(schema.field(0).data_type(), &ArrowDataType::Utf8);
 
-        assert_eq!(schema.field(1).name(), "traversal_path");
-        assert_eq!(schema.field(1).data_type(), &ArrowDataType::Utf8);
+        assert_eq!(schema.field(1).name(), "id");
+        assert_eq!(schema.field(1).data_type(), &ArrowDataType::Int64);
 
-        assert_eq!(schema.field(2).name(), "id");
-        assert_eq!(schema.field(2).data_type(), &ArrowDataType::Int64);
-
-        assert_eq!(schema.field(3).name(), "username");
-        assert_eq!(schema.field(3).data_type(), &ArrowDataType::Utf8);
+        assert_eq!(schema.field(2).name(), "username");
+        assert_eq!(schema.field(2).data_type(), &ArrowDataType::Utf8);
     }
 
     #[test]

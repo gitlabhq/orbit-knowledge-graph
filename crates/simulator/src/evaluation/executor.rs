@@ -11,12 +11,12 @@ use std::time::{Duration, Instant};
 
 /// ClickHouse query settings to prevent server crashes.
 ///
-/// - max_memory_usage: 200MB limit per query (fails instead of crashing)
+/// - max_memory_usage: 1GB limit per query (graph traversals can be memory-intensive)
 /// - max_execution_time: 30 second timeout
 /// - max_bytes_before_external_*: Spill to disk instead of using more RAM
 /// - join_algorithm: Use disk-based partial_merge joins for large tables
 const SAFE_QUERY_SETTINGS: &str = "\
-    max_memory_usage = 200000000, \
+    max_memory_usage = 1000000000, \
     max_execution_time = 30, \
     max_bytes_before_external_group_by = 100000000, \
     max_bytes_before_external_sort = 100000000, \
