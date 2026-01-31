@@ -2682,6 +2682,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "toon-format",
  "tower",
  "tower-http",
  "tracing",
@@ -6808,6 +6809,18 @@ dependencies = [
  "syn",
  "tempfile",
  "tonic-build",
+]
+
+[[package]]
+name = "toon-format"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "349a10106f2c703fbfbe4a2eef6683af0acca60a0b8334c7a33795231dbf92d5"
+dependencies = [
+ "indexmap 2.13.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
