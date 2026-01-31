@@ -286,14 +286,14 @@ tableMappings:
     schema: public
     subject: bulk_import_entities
     target: siphon_bulk_import_entities
-  # - table: events
-  #   schema: public
-  #   subject: events
-  #   target: siphon_events
-  # - table: push_event_payloads
-  #   schema: public
-  #   subject: push_event_payloads
-  #   target: siphon_push_event_payloads
+  - table: events
+    schema: public
+    subject: events
+    target: siphon_events
+  - table: push_event_payloads
+    schema: public
+    subject: push_event_payloads
+    target: siphon_push_event_payloads
 
 producer:
   enabled: true
