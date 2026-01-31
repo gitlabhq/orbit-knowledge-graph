@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::utils::{id_column, ids_array_column, type_column};
 use crate::input::QueryType;
+use crate::utils::{id_column, ids_array_column, type_column};
 
 /// Column name for the typed path array in path finding queries.
 /// Contains Array(Tuple(Int64, String)) with (node_id, entity_type) for each step.

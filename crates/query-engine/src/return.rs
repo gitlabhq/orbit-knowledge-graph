@@ -11,10 +11,10 @@
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, Node, Query, SelectExpr};
-use crate::utils::{id_column, type_column};
 use crate::error::Result;
 use crate::input::{Input, QueryType};
 use crate::result_context::ResultContext;
+use crate::utils::{id_column, type_column};
 use std::collections::HashSet;
 
 pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {

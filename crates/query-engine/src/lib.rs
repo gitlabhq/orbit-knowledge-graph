@@ -32,13 +32,13 @@
 
 pub mod ast;
 pub mod codegen;
-pub mod utils;
 pub mod error;
 pub mod input;
 pub mod lower;
 pub mod result_context;
 pub mod r#return;
 pub mod security;
+pub mod utils;
 pub mod validate;
 
 use std::sync::OnceLock;
@@ -49,12 +49,12 @@ pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
 pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
 pub use r#return::enforce_return;
-pub use utils::{id_column, ids_array_column, type_column};
 pub use result_context::{
     AggregatedNode, RedactionNode, ResultContext, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN,
     PATH_COLUMN,
 };
 pub use security::{apply_security_context, SecurityContext};
+pub use utils::{id_column, ids_array_column, type_column};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schema validation

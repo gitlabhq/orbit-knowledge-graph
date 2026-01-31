@@ -2732,11 +2732,7 @@ async fn aggregation_multiple_functions_redaction_on_group_by() {
     );
 
     // ResultContext should have the group_by node and the aggregated target
-    assert_eq!(
-        query.result_context.len(),
-        1,
-        "should have 1 group_by node"
-    );
+    assert_eq!(query.result_context.len(), 1, "should have 1 group_by node");
     assert_eq!(
         query.result_context.aggregated_len(),
         1,
