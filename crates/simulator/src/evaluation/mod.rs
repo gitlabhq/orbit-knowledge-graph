@@ -22,6 +22,11 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryDefinition {
     pub query_type: String,
+    /// Single node for search queries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<serde_json::Value>,
+    /// Multiple nodes for traversal/aggregation queries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nodes: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relationships: Vec<serde_json::Value>,
@@ -35,6 +40,17 @@ pub struct QueryDefinition {
     pub order_by: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aggregation_sort: Option<serde_json::Value>,
+}
+
+impl QueryDefinition {
+    /// Get all nodes (combines `node` and `nodes` fields).
+    pub fn all_nodes(&self) -> Vec<&serde_json::Value> {
+        let mut result: Vec<&serde_json::Value> = self.nodes.iter().collect();
+        if let Some(ref n) = self.node {
+            result.push(n);
+        }
+        result
+    }
 }
 
 /// Load queries from a JSON file.
@@ -55,7 +71,7 @@ pub struct QueryParameters {
 pub fn extract_parameters(query: &QueryDefinition) -> QueryParameters {
     let mut params = QueryParameters::default();
 
-    for node in &query.nodes {
+    for node in query.all_nodes() {
         if let Some(obj) = node.as_object() {
             // Check if this node has node_ids that are placeholders
             if obj.contains_key("node_ids")

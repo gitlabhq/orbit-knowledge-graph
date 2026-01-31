@@ -17,6 +17,10 @@ impl ToArrowSchema for NodeEntity {
         ];
 
         for field in &self.fields {
+            // Skip traversal_path if defined in ontology - it's a system column
+            if field.name == "traversal_path" {
+                continue;
+            }
             fields.push(field.to_arrow_field());
         }
 

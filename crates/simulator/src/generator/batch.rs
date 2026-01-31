@@ -51,9 +51,11 @@ impl BatchBuilder {
         batch_size: usize,
         seed: Option<u64>,
     ) -> Self {
+        // Skip traversal_path - it's a system column handled separately
         let columns: Vec<ColumnData> = node
             .fields
             .iter()
+            .filter(|field| field.name != "traversal_path")
             .map(|field| ColumnData {
                 field: field.clone(),
                 values: ColumnValues::new(&field.data_type),
