@@ -353,3 +353,67 @@ gcloud iam service-accounts delete \
   gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com \
   --project=gl-knowledgegraph-prj-f2eec59d
 ```
+
+## Reset Siphon Replication
+
+Full re-snapshot of all PostgreSQL tables. Deletes existing ClickHouse siphon data.
+
+### 1. Scale down siphon
+
+```bash
+kubectl -n gkg scale deployment siphon-producer --replicas=0
+kubectl -n gkg scale deployment siphon-consumer --replicas=0
+```
+
+### 2. Drop replication slot and publication
+
+In PostgreSQL (`sudo gitlab-psql` on vm-gitlab-omnibus):
+
+```sql
+SELECT pg_drop_replication_slot('gkg_slot');
+DROP PUBLICATION IF EXISTS gkg_publication;
+```
+
+### 3. Reset NATS stream
+
+```bash
+kubectl -n gkg delete pod gkg-nats-0
+kubectl -n gkg delete pvc gkg-nats-js-gkg-nats-0
+kubectl -n gkg wait --for=condition=ready pod/gkg-nats-0 --timeout=120s
+```
+
+### 4. Truncate ClickHouse tables
+
+In ClickHouse (`clickhouse-client --password=...` on vm-clickhouse):
+
+**Siphon tables (datalake):**
+
+```sql
+SELECT 'TRUNCATE TABLE ' || database || '.' || name || ';'
+FROM system.tables
+WHERE database = 'gitlab_clickhouse_main_production' AND name LIKE 'siphon_%';
+```
+
+**Graph tables (if re-indexing):**
+
+```sql
+SELECT 'TRUNCATE TABLE ' || database || '.' || name || ';'
+FROM system.tables
+WHERE database = 'gkg-sandbox';
+```
+
+Run the generated statements, or use `--multiquery` to pipe them back.
+
+### 5. Redeploy
+
+```bash
+helm upgrade gkg ./helm-dev/gkg -n gkg -f ./helm-dev/gkg/values-sandbox.yaml
+```
+
+### 6. Verify snapshots
+
+```bash
+kubectl -n gkg logs deployment/siphon-producer --tail=50 | grep "snapshot complete"
+```
+
+Producer recreates the slot, publication, and snapshots all configured tables.
