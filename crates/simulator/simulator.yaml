@@ -1,4 +1,4 @@
-# Simulator configuration
+# Simulator configuration - 100M edge scale test
 #
 # Workflow:
 #   1. Generate data:  cargo run --bin generate -- -c simulator.yaml
@@ -18,29 +18,20 @@ clickhouse:
     engine: MergeTree
     index_granularity: 8192
 
-    # Node tables: traversal_path first for trie-based ordering
-    # PRIMARY KEY = sparse index, ORDER BY = disk sort order
     node_primary_key: [traversal_path, id]
     node_order_by: [traversal_path, id]
 
-    # Edge table: ordered for forward traversal by source_id
-    # source_id FIRST so WHERE source_id = X uses primary key
     edge_primary_key: [source_id]
     edge_order_by: [source_id, source_kind, relationship_kind]
 
-    # Data skipping indexes for filtering
     indexes:
-      # Bloom filter for relationship filtering
       - name: idx_relationship
         table: edges
         expression: relationship_kind
         type: bloom_filter
         granularity: 4
 
-    # Projections for reverse traversal
     projections:
-      # Find edges by target_id (reverse lookup)
-      # target_id FIRST so WHERE target_id = Y uses this projection
       - name: by_target
         table: edges
         columns: [source_kind, source_id, relationship_kind, target_kind, target_id]
@@ -49,141 +40,114 @@ clickhouse:
 generation:
   ontology_path: fixtures/ontology
   output_dir: gl_synthetic_data
-  skip_if_present: true
-  parallel: true
-  batch_size: 50000
+  skip_if_present: false
+  parallel: false
+  batch_size: 100000
 
-  # Random seed for reproducible data generation.
-  # Remove or set to null for non-deterministic generation.
   seed: 42
 
-  # Scale: 10 organizations (tenants)
-  organizations: 3
+  # Single org, scaled for ~100M edges
+  organizations: 1
 
-  # Root entities (absolute counts per organization)
-  # These have no parent and are generated first.
   roots:
-    User: 1000                        # Many users per org
-    Group: 5                         # Few top-level groups (subgroups expand this)
+    User: 10000                       # 10k users
+    Group: 20                         # 20 top-level groups
 
-  # Subgroup hierarchy (Group -> Group)
-  # Generates nested groups under each root group
   subgroups:
-    max_depth: 3      # 3 levels of nesting
-    per_group: 2      # 2 subgroups per parent group
+    max_depth: 3                      # 3 levels deep
+    per_group: 2                      # 2 subgroups per parent
+    # Total groups: 20 × (1 + 2 + 4 + 8) = 300
 
-  # Relationship-based generation
-  # Entities are generated from their parents based on ontology edge types.
-  # Format: EDGE_TYPE: { "Source -> Target": ratio }
-  #
-  # Traversal IDs:
-  # - Groups extend parent's path: "1/2" -> "1/2/3"
-  # - All other entities inherit from their container
+  # Estimated: ~10M edges
+  # - 300 groups × 10 projects = 3k projects
+  # - 3k × 100 MRs = 300k MRs
+  # - 300k × 2 diffs = 600k diffs
+  # - 600k × 4 files = 2.4M files
+  # - 3k × 100 pipelines = 300k pipelines  
+  # - 300k × 3 stages = 900k stages
+  # - 900k × 4 jobs = 3.6M jobs
+
   relationships:
-    # Group -> Project containment
-    # Note: Group -> Group (subgroups) is handled specially via max_subgroup_depth
     CONTAINS:
-      "Group -> Project": 5      # 5 projects per group
+      "Group -> Project": 10          # 10 projects per group = 3k projects
 
-    # SDLC entities belong to projects
     IN_PROJECT:
-      "MergeRequest -> Project": 30   # 30 MRs per project
-      "WorkItem -> Project": 50       # 50 work items per project
-      "Pipeline -> Project": 60       # 60 pipelines per project
-      "Vulnerability -> Project": 4   # 4 vulnerabilities per project
-      "Finding -> Project": 12        # 12 findings per project
-      # "Scanner -> Project": 1         # 1 scanner config per project
-      "Milestone -> Project": 2       # 2 milestones per project
-      "Label -> Project": 5           # 5 labels per project
+      "MergeRequest -> Project": 100  # 100 MRs per project = 300k MRs
+      "WorkItem -> Project": 100      # 100 work items = 300k
+      "Pipeline -> Project": 100      # 100 pipelines = 300k
+      "Vulnerability -> Project": 5
+      "Finding -> Project": 10
+      "Milestone -> Project": 3
+      "Label -> Project": 5
 
-    # CI/CD pipeline structure
     HAS_STAGE:
-      "Pipeline -> Stage": 3          # 3 stages per pipeline
+      "Pipeline -> Stage": 3          # 900k stages
 
     HAS_JOB:
-      "Stage -> Job": 5               # 5 jobs per stage
+      "Stage -> Job": 4               # 3.6M jobs
 
-    # MR diffs and files
     HAS_DIFF:
-      "MergeRequest -> MergeRequestDiff": 2  # 2 diffs per MR (initial + updates)
+      "MergeRequest -> MergeRequestDiff": 2  # 600k diffs
 
     HAS_FILE:
-      "MergeRequestDiff -> MergeRequestDiffFile": 4  # 4 files per diff
+      "MergeRequestDiff -> MergeRequestDiffFile": 4  # 2.4M files
 
-    # Notes (comments) on entities
     HAS_NOTE:
-      "MergeRequest -> Note": 2       # 2 notes per MR
-      "WorkItem -> Note": 1           # 1 note per work item
+      "MergeRequest -> Note": 2
+      "WorkItem -> Note": 1
 
-    # Security relationships
     HAS_FINDING:
-      "Vulnerability -> Finding": 3   # 3 findings per vulnerability
+      "Vulnerability -> Finding": 2
 
     HAS_IDENTIFIER:
-      "Finding -> VulnerabilityIdentifier": 2  # 2 identifiers per finding
+      "Finding -> VulnerabilityIdentifier": 1
 
-  # Association edges
-  # Connect existing entities together (no new entities generated).
-  # Format: "Source -> Target": ratio
-  # Semantics: For each TARGET entity, sample RATIO source entities.
   associations:
-    # Authorship - who created what
     AUTHORED:
-      "User -> MergeRequest": 1       # Each MR has 1 author
-      "User -> WorkItem": 1           # Each work item has 1 author
-      "User -> Note": 1               # Each note has 1 author
+      "User -> MergeRequest": 1
+      "User -> WorkItem": 1
+      "User -> Note": 1
 
-    # Membership - who belongs where
     MEMBER_OF:
-      "User -> Group": 3              # Each group has 3 members
+      "User -> Group": 5
 
-    # Assignment - who is working on what
     ASSIGNED:
-      "User -> MergeRequest": 0.7     # 70% of MRs have an assignee
-      "User -> WorkItem": 0.8         # 80% of work items have an assignee
+      "User -> MergeRequest": 0.5
+      "User -> WorkItem": 0.6
 
-    # Review - who reviews what
     REVIEWER:
       "MergeRequest -> User":
-        ratio: 0.5                    # 50% of MRs have a reviewer
-        per: source                   # Iterate over MRs, not Users
+        ratio: 0.3
+        per: source
 
-    # Pipeline triggers
     TRIGGERED:
-      "User -> Pipeline": 1           # Each pipeline was triggered by someone
-      "MergeRequest -> Pipeline": 0.8 # 80% of MRs trigger a pipeline
+      "User -> Pipeline": 1
+      "MergeRequest -> Pipeline": 0.5
 
-    # Project/Group ownership
     CREATOR:
-      "User -> Project": 1            # Each project has a creator
+      "User -> Project": 1
     OWNER:
-      "User -> Group": 1              # Each group has an owner
+      "User -> Group": 1
 
-    # MR merge action
     MERGED_BY:
       "MergeRequest -> User":
-        ratio: 0.3                    # 30% of MRs are merged (have a merger)
-        per: source                   # Iterate over MRs, not Users
+        ratio: 0.2
+        per: source
 
-    # MR closes work items
     CLOSES:
-      "MergeRequest -> WorkItem": 0.2 # 20% of MRs close a work item
+      "MergeRequest -> WorkItem": 0.1
 
-    # MR fixes vulnerabilities
     FIXES:
-      "MergeRequest -> Vulnerability": 0.1  # 10% of MRs fix a vulnerability
+      "MergeRequest -> Vulnerability": 0.05
 
-    # Work items in milestones
     IN_MILESTONE:
-      "WorkItem -> Milestone": 0.4    # 40% of work items are in a milestone
+      "WorkItem -> Milestone": 0.3
 
-    # Labels on entities
     HAS_LABEL:
-      "WorkItem -> Label": 0.3        # 30% of work items have a label
+      "WorkItem -> Label": 0.2
 
-    # Projects belong to groups
     IN_GROUP:
-      "Project -> Group": 1           # Each project is in a group
+      "Project -> Group": 1
 
 evaluation:
   queries_path: fixtures/queries/sdlc_queries.json
