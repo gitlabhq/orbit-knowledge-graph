@@ -22,8 +22,6 @@ pub mod siphon_ref_types {
     pub const BRANCH: i32 = 0;
 }
 
-pub const MAIN_BRANCHES: &[&str] = &["main", "master"];
-
 pub mod subjects {
     pub const PUSH_EVENT_PAYLOADS: &str = "push_event_payloads";
     pub const EVENTS: &str = "events";

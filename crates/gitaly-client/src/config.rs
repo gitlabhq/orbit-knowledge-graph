@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GitalyConfig {
+pub struct GitalyRepositoryConfig {
     pub address: String,
     #[serde(default = "default_storage")]
     pub storage: String,
@@ -14,7 +14,7 @@ fn default_storage() -> String {
     "default".to_string()
 }
 
-impl GitalyConfig {
+impl GitalyRepositoryConfig {
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }

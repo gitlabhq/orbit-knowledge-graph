@@ -16,17 +16,16 @@ use tracing::{debug, info, warn};
 
 use super::arrow_converter::ArrowConverter;
 use super::config::{
-    CodeIndexingConfig, LOCK_TTL, MAIN_BRANCHES, buckets, siphon_actions, siphon_ref_types,
-    subjects, tables,
+    CodeIndexingConfig, LOCK_TTL, buckets, siphon_actions, siphon_ref_types, subjects, tables,
 };
 use super::event_cache_handler::CachedEventInfo;
-use super::gitaly::GitalyConfiguration;
+use super::gitaly::RepositoryService;
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use super::watermark_store::{CodeIndexingWatermark, CodeWatermarkStore};
 
 pub struct PushEventHandler {
-    gitaly_config: GitalyConfiguration,
+    repository_service: Arc<dyn RepositoryService>,
     watermark_store: Arc<dyn CodeWatermarkStore>,
     project_store: Arc<dyn ProjectStore>,
     config: CodeIndexingConfig,
@@ -34,13 +33,13 @@ pub struct PushEventHandler {
 
 impl PushEventHandler {
     pub fn new(
-        gitaly_config: GitalyConfiguration,
+        repository_service: Arc<dyn RepositoryService>,
         watermark_store: Arc<dyn CodeWatermarkStore>,
         project_store: Arc<dyn ProjectStore>,
         config: CodeIndexingConfig,
     ) -> Self {
         Self {
-            gitaly_config,
+            repository_service,
             watermark_store,
             project_store,
             config,
@@ -115,6 +114,16 @@ impl PushEventHandler {
             ));
         };
 
+        if !self.is_default_branch(project_id, &branch).await {
+            debug!(
+                event_id = event.event_id,
+                project_id = project_id,
+                branch = %branch,
+                "skipping non-default branch"
+            );
+            return Ok(());
+        }
+
         let Some(project) = self.lookup_project(event.event_id, project_id).await? else {
             return Err(HandlerError::Processing(
                 "project not found in knowledge graph".into(),
@@ -183,14 +192,10 @@ impl PushEventHandler {
         let temp_dir = TempDir::new()
             .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
 
-        super::gitaly::extract_repository(
-            &self.gitaly_config,
-            project_id,
-            temp_dir.path(),
-            commit_id,
-        )
-        .await
-        .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))?;
+        self.repository_service
+            .extract_repository(project_id, temp_dir.path(), commit_id)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))?;
 
         let repo_path = temp_dir.path().to_string_lossy().to_string();
         let indexer = RepositoryIndexer::new(format!("project-{project_id}"), repo_path.clone());
@@ -257,13 +262,7 @@ impl PushEventHandler {
             return None;
         }
 
-        let branch = Self::extract_branch_name(&event.ref_name);
-        if !MAIN_BRANCHES.contains(&branch.as_str()) {
-            debug!(event_id = event.event_id, branch = %branch, "skipping non-main branch");
-            return None;
-        }
-
-        Some(branch)
+        Some(Self::extract_branch_name(&event.ref_name))
     }
 
     fn extract_branch_name(ref_name: &str) -> String {
@@ -271,6 +270,30 @@ impl PushEventHandler {
             .strip_prefix("refs/heads/")
             .unwrap_or(ref_name)
             .to_string()
+    }
+
+    // TODO: Look into what load this creates on Gitaly, we should probably cache it.
+    async fn is_default_branch(&self, project_id: i64, branch: &str) -> bool {
+        match self
+            .repository_service
+            .find_default_branch(project_id)
+            .await
+        {
+            Ok(Some(default_branch)) => {
+                let default_branch_name = default_branch
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(&default_branch);
+                branch == default_branch_name
+            }
+            Ok(None) => {
+                debug!(project_id, "repository has no default branch");
+                false
+            }
+            Err(e) => {
+                warn!(project_id, error = %e, "failed to fetch default branch");
+                false
+            }
+        }
     }
 }
 
@@ -472,7 +495,7 @@ impl PushEventPayload {
 mod tests {
     use super::*;
     use crate::indexer::modules::code::event_cache_handler::CachedEventInfo;
-    use crate::indexer::modules::code::gitaly::GitalyConfiguration;
+    use crate::indexer::modules::code::gitaly::test_utils::MockRepositoryService;
     use crate::indexer::modules::code::project_store::ProjectInfo;
     use crate::indexer::modules::code::project_store::test_utils::MockProjectStore;
     use crate::indexer::modules::code::test_helpers::{
@@ -493,12 +516,16 @@ mod tests {
 
     impl TestContext {
         fn new() -> Self {
+            Self::with_repository_service(MockRepositoryService::create())
+        }
+
+        fn with_repository_service(repository_service: Arc<dyn RepositoryService>) -> Self {
             let mock_nats = Arc::new(MockNatsServices::new());
             let watermark_store = Arc::new(MockCodeWatermarkStore::new());
             let project_store = Arc::new(MockProjectStore::new());
 
             let handler = PushEventHandler::new(
-                GitalyConfiguration::default(),
+                repository_service,
                 watermark_store.clone(),
                 project_store.clone(),
                 CodeIndexingConfig::default(),
@@ -570,8 +597,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ignores_feature_branch_pushes() {
-        let ctx = TestContext::new();
+    async fn ignores_non_default_branch_pushes() {
+        let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
+        let ctx = TestContext::with_repository_service(mock_repo);
         ctx.add_project(123);
 
         let payload = build_replication_events(vec![
@@ -587,7 +615,8 @@ mod tests {
 
     #[tokio::test]
     async fn skips_already_indexed_commits() {
-        let ctx = TestContext::new();
+        let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
+        let ctx = TestContext::with_repository_service(mock_repo);
         ctx.add_project(123);
         ctx.set_watermark(123, "main", 100).await;
 
@@ -620,12 +649,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolves_project_id_from_cache_but_skips_missing_project() {
-        let ctx = TestContext::new();
+    async fn resolves_project_id_from_cache_but_skips_when_not_default_branch() {
+        let mock_repo = MockRepositoryService::with_default_branch(456, "refs/heads/main");
+        let ctx = TestContext::with_repository_service(mock_repo);
         ctx.cache_event(100, 456);
 
         let payload = build_replication_events(vec![
-            push_payload_columns(100, None, "refs/heads/main", "abc123").build(),
+            push_payload_columns(100, None, "refs/heads/develop", "abc123").build(),
         ]);
         let envelope = TestEnvelopeFactory::with_bytes(payload);
 
@@ -634,12 +664,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!ctx.lock_exists(456, "main"));
+        assert!(!ctx.lock_exists(456, "develop"));
     }
 
     #[tokio::test]
     async fn does_not_acquire_lock_when_project_not_in_knowledge_graph() {
-        let ctx = TestContext::new();
+        let mock_repo = MockRepositoryService::with_default_branch(999, "refs/heads/main");
+        let ctx = TestContext::with_repository_service(mock_repo);
 
         let payload = build_replication_events(vec![
             push_payload_columns(100, Some(999), "refs/heads/main", "abc123").build(),
@@ -656,7 +687,8 @@ mod tests {
 
     #[tokio::test]
     async fn skips_when_lock_already_held() {
-        let ctx = TestContext::new();
+        let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
+        let ctx = TestContext::with_repository_service(mock_repo);
         ctx.add_project(123);
         ctx.set_lock(123, "main");
 
