@@ -9,8 +9,10 @@ const FETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
 use async_nats::jetstream::Context;
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
+use async_nats::jetstream::kv::Store as KvStore;
 use async_nats::jetstream::stream::Stream;
-use futures::StreamExt;
+use bytes::Bytes;
+use futures::{StreamExt, TryStreamExt};
 use parking_lot::Mutex;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -21,6 +23,7 @@ use crate::types::{Envelope, MessageId, Topic};
 
 use super::configuration::NatsConfiguration;
 use super::error::{NatsError, map_connect_error, map_subscribe_error};
+use super::kv_types::{KvEntry, KvPutOptions, KvPutResult};
 use super::message::{NatsMessage, NatsSubscription};
 
 /// NATS JetStream message broker.
@@ -32,6 +35,7 @@ pub struct NatsBroker {
     jetstream: Context,
     config: NatsConfiguration,
     streams: RwLock<HashMap<Arc<str>, Stream>>,
+    kv_stores: RwLock<HashMap<String, KvStore>>,
     subscription_handles: Mutex<Vec<JoinHandle<()>>>,
     cancellation_token: CancellationToken,
 }
@@ -51,6 +55,7 @@ impl NatsBroker {
             jetstream,
             config: config.clone(),
             streams: RwLock::new(HashMap::new()),
+            kv_stores: RwLock::new(HashMap::new()),
             subscription_handles: Mutex::new(Vec::new()),
             cancellation_token: CancellationToken::new(),
         })
@@ -288,5 +293,146 @@ impl NatsBroker {
         }
 
         Ok(Box::pin(ReceiverStream::new(receiver)))
+    }
+
+    async fn get_or_create_kv_store(&self, bucket: &str) -> Result<KvStore, NatsError> {
+        {
+            let cache = self.kv_stores.read().await;
+            if let Some(store) = cache.get(bucket) {
+                return Ok(store.clone());
+            }
+        }
+
+        let mut cache = self.kv_stores.write().await;
+        if let Some(store) = cache.get(bucket) {
+            return Ok(store.clone());
+        }
+
+        let store = match self.jetstream.get_key_value(bucket).await {
+            Ok(store) => store,
+            Err(_) => self
+                .jetstream
+                .create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: bucket.to_string(),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| NatsError::KvBucket {
+                    bucket: bucket.to_string(),
+                    message: e.to_string(),
+                })?,
+        };
+
+        cache.insert(bucket.to_string(), store.clone());
+        Ok(store)
+    }
+
+    pub async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
+        let store = self.get_or_create_kv_store(bucket).await?;
+
+        match store.entry(key).await {
+            Ok(Some(entry)) => Ok(Some(KvEntry {
+                key: entry.key,
+                value: entry.value,
+                revision: entry.revision,
+            })),
+            Ok(None) => Ok(None),
+            Err(e) => Err(NatsError::KvGet {
+                bucket: bucket.to_string(),
+                key: key.to_string(),
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn kv_put(
+        &self,
+        bucket: &str,
+        key: &str,
+        value: Bytes,
+        options: KvPutOptions,
+    ) -> Result<KvPutResult, NatsError> {
+        let store = self.get_or_create_kv_store(bucket).await?;
+
+        if options.create_only {
+            let result = if let Some(ttl) = options.ttl {
+                store.create_with_ttl(key, value, ttl).await
+            } else {
+                store.create(key, value).await
+            };
+            return match result {
+                Ok(revision) => Ok(KvPutResult::Success(revision)),
+                // NOTE: async_nats doesn't expose typed errors for KV conflict conditions.
+                // See: https://github.com/nats-io/nats.rs/issues/1200
+                Err(e) => {
+                    let error_string = e.to_string();
+                    if error_string.contains("wrong last sequence")
+                        || error_string.contains("key exists")
+                    {
+                        Ok(KvPutResult::AlreadyExists)
+                    } else {
+                        Err(NatsError::KvPut {
+                            bucket: bucket.to_string(),
+                            key: key.to_string(),
+                            message: error_string,
+                        })
+                    }
+                }
+            };
+        }
+
+        // Optimistic concurrency control using the expected revision
+        if let Some(rev) = options.expected_revision {
+            let result = store.update(key, value, rev).await;
+            return match result {
+                Ok(revision) => Ok(KvPutResult::Success(revision)),
+                Err(e) => {
+                    let error_string = e.to_string();
+                    if error_string.contains("wrong last sequence") {
+                        Ok(KvPutResult::RevisionMismatch)
+                    } else {
+                        Err(NatsError::KvPut {
+                            bucket: bucket.to_string(),
+                            key: key.to_string(),
+                            message: error_string,
+                        })
+                    }
+                }
+            };
+        }
+        let result = store.put(key, value).await;
+        match result {
+            Ok(revision) => Ok(KvPutResult::Success(revision)),
+            Err(e) => Err(NatsError::KvPut {
+                bucket: bucket.to_string(),
+                key: key.to_string(),
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        let store = self.get_or_create_kv_store(bucket).await?;
+
+        store.delete(key).await.map_err(|e| NatsError::KvDelete {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            message: e.to_string(),
+        })
+    }
+
+    pub async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        let store = self.get_or_create_kv_store(bucket).await?;
+
+        let keys = store.keys().await.map_err(|e| NatsError::KvKeys {
+            bucket: bucket.to_string(),
+            message: e.to_string(),
+        })?;
+
+        let result: Result<Vec<String>, _> = keys.try_collect().await;
+        result.map_err(|e| NatsError::KvKeys {
+            bucket: bucket.to_string(),
+            message: e.to_string(),
+        })
     }
 }

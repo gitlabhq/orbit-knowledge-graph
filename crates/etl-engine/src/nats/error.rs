@@ -4,34 +4,26 @@ use thiserror::Error;
 
 use crate::types::SerializationError;
 
-/// Errors that can occur during NATS broker operations.
 #[derive(Debug, Error)]
 pub enum NatsError {
-    /// Failed to serialize or deserialize a message.
     #[error("serialization failed: {0}")]
     Serialization(#[from] SerializationError),
 
-    /// Failed to publish a message to the broker.
     #[error("failed to publish message: {0}")]
     Publish(String),
 
-    /// Failed to subscribe to a topic.
     #[error("failed to subscribe to topic: {0}")]
     Subscribe(String),
 
-    /// Failed to acknowledge a message.
     #[error("failed to acknowledge message: {0}")]
     Ack(String),
 
-    /// Failed to negatively acknowledge a message.
     #[error("failed to reject message: {0}")]
     Nack(String),
 
-    /// Failed to connect to the broker.
     #[error("connection error: {0}")]
     Connection(String),
 
-    /// Stream not found.
     #[error("stream '{stream}' not found: {source}")]
     StreamNotFound {
         stream: String,
@@ -39,13 +31,39 @@ pub enum NatsError {
         source: async_nats::error::Error<async_nats::jetstream::context::GetStreamErrorKind>,
     },
 
-    /// Failed to create a stream.
     #[error("failed to create stream '{stream}': {source}")]
     StreamCreationFailed {
         stream: String,
         #[source]
         source: async_nats::error::Error<async_nats::jetstream::context::CreateStreamErrorKind>,
     },
+
+    #[error("KV bucket operation failed for '{bucket}': {message}")]
+    KvBucket { bucket: String, message: String },
+
+    #[error("KV get failed for '{bucket}/{key}': {message}")]
+    KvGet {
+        bucket: String,
+        key: String,
+        message: String,
+    },
+
+    #[error("KV put failed for '{bucket}/{key}': {message}")]
+    KvPut {
+        bucket: String,
+        key: String,
+        message: String,
+    },
+
+    #[error("KV delete failed for '{bucket}/{key}': {message}")]
+    KvDelete {
+        bucket: String,
+        key: String,
+        message: String,
+    },
+
+    #[error("KV keys listing failed for '{bucket}': {message}")]
+    KvKeys { bucket: String, message: String },
 }
 
 pub(crate) fn map_connect_error(error: async_nats::ConnectError) -> NatsError {

@@ -1,5 +1,6 @@
 //! Mock implementations for testing.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -15,12 +16,13 @@ use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::entities::Entity;
 use crate::metrics::MetricCollector;
 use crate::module::{Handler, HandlerContext, HandlerError, Module};
-use crate::nats::{NatsError, NatsServices};
+use crate::nats::{KvEntry, KvPutOptions, KvPutResult, NatsError, NatsServices};
 use crate::types::{Envelope, MessageId, Topic};
 
 /// Mock implementation of [`NatsServices`] for testing handlers.
 ///
 /// Records all published messages for later verification.
+/// Provides an in-memory KV store for testing KV operations.
 ///
 /// # Example
 ///
@@ -36,6 +38,13 @@ use crate::types::{Envelope, MessageId, Topic};
 #[derive(Clone, Default)]
 pub struct MockNatsServices {
     published: Arc<Mutex<Vec<(Topic, Envelope)>>>,
+    kv_stores: Arc<Mutex<HashMap<String, HashMap<String, MockKvEntry>>>>,
+}
+
+#[derive(Clone)]
+struct MockKvEntry {
+    value: Bytes,
+    revision: u64,
 }
 
 impl MockNatsServices {
@@ -46,6 +55,21 @@ impl MockNatsServices {
     pub fn get_published(&self) -> Vec<(Topic, Envelope)> {
         self.published.lock().clone()
     }
+
+    pub fn get_kv(&self, bucket: &str, key: &str) -> Option<Bytes> {
+        let stores = self.kv_stores.lock();
+        stores
+            .get(bucket)
+            .and_then(|b| b.get(key))
+            .map(|e| e.value.clone())
+    }
+
+    pub fn set_kv(&self, bucket: &str, key: &str, value: Bytes) {
+        let mut stores = self.kv_stores.lock();
+        let bucket_store = stores.entry(bucket.to_string()).or_default();
+        let revision = bucket_store.get(key).map(|e| e.revision + 1).unwrap_or(1);
+        bucket_store.insert(key.to_string(), MockKvEntry { value, revision });
+    }
 }
 
 #[async_trait]
@@ -55,6 +79,70 @@ impl NatsServices for MockNatsServices {
             .lock()
             .push((topic.clone(), envelope.clone()));
         Ok(())
+    }
+
+    async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
+        let stores = self.kv_stores.lock();
+        let entry = stores
+            .get(bucket)
+            .and_then(|b| b.get(key))
+            .map(|e| KvEntry {
+                key: key.to_string(),
+                value: e.value.clone(),
+                revision: e.revision,
+            });
+        Ok(entry)
+    }
+
+    async fn kv_put(
+        &self,
+        bucket: &str,
+        key: &str,
+        value: Bytes,
+        options: KvPutOptions,
+    ) -> Result<KvPutResult, NatsError> {
+        let mut stores = self.kv_stores.lock();
+        let bucket_store = stores.entry(bucket.to_string()).or_default();
+
+        let existing = bucket_store.get(key);
+
+        if options.create_only && existing.is_some() {
+            return Ok(KvPutResult::AlreadyExists);
+        }
+
+        if let Some(expected_rev) = options.expected_revision {
+            match existing {
+                Some(e) if e.revision != expected_rev => {
+                    return Ok(KvPutResult::RevisionMismatch);
+                }
+                None => {
+                    return Ok(KvPutResult::RevisionMismatch);
+                }
+                _ => {}
+            }
+        }
+
+        let revision = existing.map(|e| e.revision + 1).unwrap_or(1);
+        bucket_store.insert(key.to_string(), MockKvEntry { value, revision });
+
+        Ok(KvPutResult::Success(revision))
+    }
+
+    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        let mut stores = self.kv_stores.lock();
+        if let Some(bucket_store) = stores.get_mut(bucket) {
+            bucket_store.remove(key);
+        }
+        Ok(())
+    }
+
+    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        let stores = self.kv_stores.lock();
+        let keys = stores
+            .get(bucket)
+            .map(|b| b.keys().cloned().collect())
+            .unwrap_or_default();
+        Ok(keys)
     }
 }
 
@@ -255,6 +343,15 @@ impl TestEnvelopeFactory {
         (0..count)
             .map(|i| Self::simple(&format!("message-{}", i)))
             .collect()
+    }
+
+    pub fn with_bytes(payload: Bytes) -> Envelope {
+        Envelope {
+            id: MessageId(Uuid::new_v4().to_string().into()),
+            payload,
+            timestamp: Utc::now(),
+            attempt: 1,
+        }
     }
 }
 
