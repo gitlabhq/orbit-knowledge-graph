@@ -3,7 +3,13 @@
 node_type: Directory
 domain: source_code
 description: A directory within a repository's file structure
+label: path
 destination_table: gl_directory
+
+style:
+  size: 26
+  color: "#06B6D4"
+
 redaction: null  # TODO: configure redaction
 
 properties:

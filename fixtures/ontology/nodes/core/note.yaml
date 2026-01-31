@@ -3,7 +3,13 @@
 node_type: Note
 domain: core
 description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
+label: id
 destination_table: gl_notes
+
+style:
+  size: 24
+  color: "#64748B"
+
 redaction: null  # TODO: configure redaction
 
 properties:

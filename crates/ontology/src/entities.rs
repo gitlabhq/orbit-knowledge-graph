@@ -4,6 +4,28 @@ use std::{collections::BTreeMap, fmt};
 
 use crate::etl::EtlConfig;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainInfo {
+    pub name: String,
+    pub description: String,
+    pub node_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeStyle {
+    pub size: i32,
+    pub color: String,
+}
+
+impl Default for NodeStyle {
+    fn default() -> Self {
+        Self {
+            size: 30,
+            color: "#6B7280".to_string(),
+        }
+    }
+}
+
 /// Redaction configuration for an entity.
 ///
 /// Defines how this entity should be validated against Rails' RedactionService
@@ -25,6 +47,9 @@ pub struct RedactionConfig {
 pub struct NodeEntity {
     /// The name of the entity (e.g., "User", "Project").
     pub name: String,
+    pub domain: String,
+    pub description: String,
+    pub label: String,
     /// The fields that make up this entity.
     pub fields: Vec<Field>,
     /// The field names that form the primary key.
@@ -36,6 +61,7 @@ pub struct NodeEntity {
     /// Redaction configuration for permission checks.
     /// If `None`, this entity does not require redaction validation.
     pub redaction: Option<RedactionConfig>,
+    pub style: NodeStyle,
 }
 
 impl fmt::Display for NodeEntity {

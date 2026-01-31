@@ -3,7 +3,12 @@
 node_type: MergeRequest
 domain: code_review
 description: A merge request for code review and merging changes into a target branch
+label: title
 destination_table: gl_merge_requests
+
+style:
+  size: 28
+  color: "#F59E0B"
 
 redaction:
   resource_type: merge_requests

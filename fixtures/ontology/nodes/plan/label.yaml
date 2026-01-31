@@ -3,7 +3,13 @@
 node_type: Label
 domain: plan
 description: A label for categorizing and filtering work items
+label: title
 destination_table: gl_labels
+
+style:
+  size: 22
+  color: "#A855F7"
+
 redaction: null  # TODO: configure redaction
 
 properties:

@@ -3,7 +3,12 @@
 node_type: User
 domain: core
 description: A GitLab user account
+label: username
 destination_table: gl_users
+
+style:
+  size: 32
+  color: "#10B981"
 
 redaction:
   resource_type: users

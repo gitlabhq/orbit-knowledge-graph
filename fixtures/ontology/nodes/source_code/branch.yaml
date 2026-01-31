@@ -3,7 +3,13 @@
 node_type: Branch
 domain: source_code
 description: A Git branch in a repository
+label: name
 destination_table: gl_branch
+
+style:
+  size: 28
+  color: "#14B8A6"
+
 redaction: null  # TODO: configure redaction
 
 properties:

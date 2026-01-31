@@ -3,7 +3,12 @@
 node_type: Definition
 domain: source_code
 description: A code definition such as a class, function, method, or module
+label: name
 destination_table: gl_definition
+
+style:
+  size: 26
+  color: "#2DD4BF"
 
 redaction:
   resource_type: projects

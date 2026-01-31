@@ -3,7 +3,13 @@
 node_type: Finding
 domain: security
 description: A security scan finding (occurrence) that may be linked to a vulnerability
+label: uuid
 destination_table: gl_finding
+
+style:
+  size: 26
+  color: "#F87171"
+
 redaction: null  # TODO: configure redaction
 
 properties:

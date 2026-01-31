@@ -3,7 +3,13 @@
 node_type: Job
 domain: ci
 description: A CI/CD job that executes scripts within a pipeline stage
+label: name
 destination_table: gl_job
+
+style:
+  size: 24
+  color: "#8B5CF6"
+
 redaction: null  # TODO: configure redaction
 
 properties:

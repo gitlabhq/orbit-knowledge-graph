@@ -132,12 +132,16 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn create_user_node() -> NodeEntity {
+        use ontology::NodeStyle;
         let mut enum_values = BTreeMap::new();
         enum_values.insert(0, "human".to_string());
         enum_values.insert(1, "bot".to_string());
 
         NodeEntity {
             name: "User".to_string(),
+            domain: "core".to_string(),
+            description: String::new(),
+            label: String::new(),
             fields: vec![
                 Field {
                     name: "id".to_string(),
@@ -178,6 +182,7 @@ mod tests {
                 edges: BTreeMap::new(),
             }),
             redaction: None,
+            style: NodeStyle::default(),
         }
     }
 
@@ -225,6 +230,9 @@ mod tests {
 
         let node = NodeEntity {
             name: "Group".to_string(),
+            domain: "core".to_string(),
+            description: String::new(),
+            label: String::new(),
             fields: vec![],
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_groups".to_string(),
@@ -236,6 +244,7 @@ mod tests {
                 edges,
             }),
             redaction: None,
+            style: ontology::NodeStyle::default(),
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
@@ -265,6 +274,9 @@ mod tests {
 
         let node = NodeEntity {
             name: "Note".to_string(),
+            domain: "core".to_string(),
+            description: String::new(),
+            label: String::new(),
             fields: vec![],
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_note".to_string(),
@@ -276,6 +288,7 @@ mod tests {
                 edges,
             }),
             redaction: None,
+            style: ontology::NodeStyle::default(),
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
@@ -305,6 +318,9 @@ mod tests {
 
         let node = NodeEntity {
             name: "WorkItem".to_string(),
+            domain: "plan".to_string(),
+            description: String::new(),
+            label: String::new(),
             fields: vec![],
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_work_item".to_string(),
@@ -316,6 +332,7 @@ mod tests {
                 edges,
             }),
             redaction: None,
+            style: ontology::NodeStyle::default(),
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
@@ -347,6 +364,9 @@ mod tests {
 
         let node = NodeEntity {
             name: "WorkItem".to_string(),
+            domain: "plan".to_string(),
+            description: String::new(),
+            label: String::new(),
             fields: vec![],
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_work_item".to_string(),
@@ -358,6 +378,7 @@ mod tests {
                 edges,
             }),
             redaction: None,
+            style: ontology::NodeStyle::default(),
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
