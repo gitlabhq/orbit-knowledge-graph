@@ -65,9 +65,14 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 
 {{/*
 NATS URL - host:port only, code adds nats:// prefix
+When nats.enabled is false, uses nats.url config value
 */}}
 {{- define "gkg.natsUrl" -}}
+{{- if .Values.nats.enabled -}}
 {{ .Release.Name }}-nats:4222
+{{- else -}}
+{{ .Values.nats.url }}
+{{- end -}}
 {{- end }}
 
 {{/*

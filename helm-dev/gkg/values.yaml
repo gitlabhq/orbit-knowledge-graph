@@ -35,6 +35,7 @@ clickhouse:
 
 nats:
   enabled: true
+  url: ""  # External NATS URL when enabled=false (e.g., host.docker.internal:4222)
   streamName: ""
   config:
     jetstream:
