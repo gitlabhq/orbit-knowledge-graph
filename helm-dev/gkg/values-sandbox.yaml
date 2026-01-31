@@ -98,163 +98,50 @@ siphon:
     tag: "0.0.25-beta"
     pullPolicy: Always
 
+# Table order matters for initial snapshots. Tables are snapshotted in config order.
+# Hierarchy MVs run at insert time and LEFT JOIN against other tables.
+# Dependencies must be populated BEFORE the tables that trigger their MVs.
+#
+# Dependency chain:
+#   1. organizations, namespaces -> namespace_traversal_paths_mv -> dictionaries
+#   2. projects -> project_namespace_traversal_paths_mv -> dictionaries
+#   3. issue_assignees, label_links, work_item_current_statuses (before issues)
+#   4. merge_request_assignees, approvals, merge_request_metrics, label_links (before merge_requests)
+#   5. issues -> hierarchy_work_items_mv
+#   6. merge_requests -> hierarchy_merge_requests_mv
+#   7. group_audit_events -> hierarchy_audit_events_mv
 tableMappings:
-  - table: approvals
-    schema: public
-    subject: approvals
-    target: siphon_approvals
-  - table: award_emoji
-    schema: public
-    subject: award_emoji
-    target: siphon_award_emoji
-  - table: bulk_import_entities
-    schema: public
-    subject: bulk_import_entities
-    target: siphon_bulk_import_entities
-  - table: deployment_merge_requests
-    schema: public
-    subject: deployment_merge_requests
-    target: siphon_deployment_merge_requests
-  - table: deployments
-    schema: public
-    subject: deployments
-    target: siphon_deployments
-  - table: environments
-    schema: public
-    subject: environments
-    target: siphon_environments
-  - table: group_audit_events
-    schema: public
-    subject: group_audit_events
-    target: siphon_group_audit_events
-  - table: issue_assignees
-    schema: public
-    subject: issue_assignees
-    target: siphon_issue_assignees
-  - table: issue_links
-    schema: public
-    subject: issue_links
-    target: siphon_issue_links
-  - table: issues
-    schema: public
-    subject: issues
-    target: siphon_issues
-  - table: knowledge_graph_enabled_namespaces
-    schema: public
-    subject: knowledge_graph_enabled_namespaces
-    target: siphon_knowledge_graph_enabled_namespaces
-  - table: label_links
-    schema: public
-    subject: label_links
-    target: siphon_label_links
-  - table: labels
-    schema: public
-    subject: labels
-    target: siphon_labels
-  - table: members
-    schema: public
-    subject: members
-    target: siphon_members
-  - table: merge_request_assignees
-    schema: public
-    subject: merge_request_assignees
-    target: siphon_merge_request_assignees
-  - table: merge_request_diff_files
-    schema: public
-    subject: merge_request_diff_files
-    target: siphon_merge_request_diff_files
-  - table: merge_request_diffs
-    schema: public
-    subject: merge_request_diffs
-    target: siphon_merge_request_diffs
-  - table: merge_request_metrics
-    schema: public
-    subject: merge_request_metrics
-    target: siphon_merge_request_metrics
-  - table: merge_requests
-    schema: public
-    subject: merge_requests
-    target: siphon_merge_requests
-  - table: merge_requests_closing_issues
-    schema: public
-    subject: merge_requests_closing_issues
-    target: siphon_merge_requests_closing_issues
-  - table: milestones
-    schema: public
-    subject: milestones
-    target: siphon_milestones
-  - table: namespace_details
-    schema: public
-    subject: namespace_details
-    target: siphon_namespace_details
-  - table: namespaces
-    schema: public
-    subject: namespaces
-    target: siphon_namespaces
-  - table: notes
-    schema: public
-    subject: notes
-    target: siphon_notes
+  # Tier 1: Foundation (feeds namespace_traversal_paths_mv and dictionaries)
   - table: organizations
     schema: public
     subject: organizations
     target: siphon_organizations
-  - table: p_ci_builds
+  - table: namespaces
     schema: public
-    subject: p_ci_builds
-    target: siphon_p_ci_builds
-  - table: p_ci_pipelines
+    subject: namespaces
+    target: siphon_namespaces
+  - table: namespace_details
     schema: public
-    subject: p_ci_pipelines
-    target: siphon_p_ci_pipelines
-  - table: p_ci_stages
-    schema: public
-    subject: p_ci_stages
-    target: siphon_p_ci_stages
-  - table: project_authorizations
-    schema: public
-    subject: project_authorizations
-    target: siphon_project_authorizations
-  - table: projects
-    schema: public
-    subject: projects
-    target: siphon_projects
-  - table: security_findings
-    schema: public
-    subject: security_findings
-    target: siphon_security_findings
-  - table: security_scans
-    schema: public
-    subject: security_scans
-    target: siphon_security_scans
+    subject: namespace_details
+    target: siphon_namespace_details
   - table: users
     schema: public
     subject: users
     target: siphon_users
-  - table: vulnerabilities
+  # Tier 2: Projects (feeds project_namespace_traversal_paths_mv)
+  - table: projects
     schema: public
-    subject: vulnerabilities
-    target: siphon_vulnerabilities
-  - table: vulnerability_identifiers
+    subject: projects
+    target: siphon_projects
+  - table: knowledge_graph_enabled_namespaces
     schema: public
-    subject: vulnerability_identifiers
-    target: siphon_vulnerability_identifiers
-  - table: vulnerability_merge_request_links
+    subject: knowledge_graph_enabled_namespaces
+    target: siphon_knowledge_graph_enabled_namespaces
+  # Tier 3: Work item associations (hierarchy_work_items_mv JOINs these)
+  - table: issue_assignees
     schema: public
-    subject: vulnerability_merge_request_links
-    target: siphon_vulnerability_merge_request_links
-  - table: vulnerability_occurrence_identifiers
-    schema: public
-    subject: vulnerability_occurrence_identifiers
-    target: siphon_vulnerability_occurrence_identifiers
-  - table: vulnerability_occurrences
-    schema: public
-    subject: vulnerability_occurrences
-    target: siphon_vulnerability_occurrences
-  - table: vulnerability_scanners
-    schema: public
-    subject: vulnerability_scanners
-    target: siphon_vulnerability_scanners
+    subject: issue_assignees
+    target: siphon_issue_assignees
   - table: work_item_current_statuses
     schema: public
     subject: work_item_current_statuses
@@ -263,6 +150,142 @@ tableMappings:
     schema: public
     subject: work_item_parent_links
     target: siphon_work_item_parent_links
+  # Tier 4: MR associations (hierarchy_merge_requests_mv JOINs these)
+  - table: merge_request_assignees
+    schema: public
+    subject: merge_request_assignees
+    target: siphon_merge_request_assignees
+  - table: approvals
+    schema: public
+    subject: approvals
+    target: siphon_approvals
+  - table: merge_request_metrics
+    schema: public
+    subject: merge_request_metrics
+    target: siphon_merge_request_metrics
+  # Tier 5: Shared associations (both hierarchy MVs JOIN these)
+  - table: label_links
+    schema: public
+    subject: label_links
+    target: siphon_label_links
+  - table: labels
+    schema: public
+    subject: labels
+    target: siphon_labels
+  # Tier 6: Entity tables (trigger hierarchy MVs on insert)
+  - table: issues
+    schema: public
+    subject: issues
+    target: siphon_issues
+  - table: merge_requests
+    schema: public
+    subject: merge_requests
+    target: siphon_merge_requests
+  - table: group_audit_events
+    schema: public
+    subject: group_audit_events
+    target: siphon_group_audit_events
+  # Tier 7: Other entity tables (no hierarchy MV dependencies)
+  - table: milestones
+    schema: public
+    subject: milestones
+    target: siphon_milestones
+  - table: members
+    schema: public
+    subject: members
+    target: siphon_members
+  - table: environments
+    schema: public
+    subject: environments
+    target: siphon_environments
+  - table: deployments
+    schema: public
+    subject: deployments
+    target: siphon_deployments
+  # Tier 8: CI tables
+  - table: p_ci_pipelines
+    schema: public
+    subject: p_ci_pipelines
+    target: siphon_p_ci_pipelines
+  - table: p_ci_stages
+    schema: public
+    subject: p_ci_stages
+    target: siphon_p_ci_stages
+  - table: p_ci_builds
+    schema: public
+    subject: p_ci_builds
+    target: siphon_p_ci_builds
+  # Tier 9: Security tables
+  - table: vulnerabilities
+    schema: public
+    subject: vulnerabilities
+    target: siphon_vulnerabilities
+  - table: vulnerability_scanners
+    schema: public
+    subject: vulnerability_scanners
+    target: siphon_vulnerability_scanners
+  - table: vulnerability_identifiers
+    schema: public
+    subject: vulnerability_identifiers
+    target: siphon_vulnerability_identifiers
+  - table: vulnerability_occurrences
+    schema: public
+    subject: vulnerability_occurrences
+    target: siphon_vulnerability_occurrences
+  - table: vulnerability_occurrence_identifiers
+    schema: public
+    subject: vulnerability_occurrence_identifiers
+    target: siphon_vulnerability_occurrence_identifiers
+  - table: vulnerability_merge_request_links
+    schema: public
+    subject: vulnerability_merge_request_links
+    target: siphon_vulnerability_merge_request_links
+  - table: security_scans
+    schema: public
+    subject: security_scans
+    target: siphon_security_scans
+  - table: security_findings
+    schema: public
+    subject: security_findings
+    target: siphon_security_findings
+  # Tier 10: Detail tables (no MV dependencies)
+  - table: notes
+    schema: public
+    subject: notes
+    target: siphon_notes
+  - table: award_emoji
+    schema: public
+    subject: award_emoji
+    target: siphon_award_emoji
+  - table: issue_links
+    schema: public
+    subject: issue_links
+    target: siphon_issue_links
+  - table: merge_request_diffs
+    schema: public
+    subject: merge_request_diffs
+    target: siphon_merge_request_diffs
+  - table: merge_request_diff_files
+    schema: public
+    subject: merge_request_diff_files
+    target: siphon_merge_request_diff_files
+  - table: merge_requests_closing_issues
+    schema: public
+    subject: merge_requests_closing_issues
+    target: siphon_merge_requests_closing_issues
+  - table: deployment_merge_requests
+    schema: public
+    subject: deployment_merge_requests
+    target: siphon_deployment_merge_requests
+  - table: project_authorizations
+    schema: public
+    subject: project_authorizations
+    target: siphon_project_authorizations
+  # Tier 11: Misc tables
+  - table: bulk_import_entities
+    schema: public
+    subject: bulk_import_entities
+    target: siphon_bulk_import_entities
   # - table: events
   #   schema: public
   #   subject: events
