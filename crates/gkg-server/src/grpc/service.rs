@@ -14,13 +14,14 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, instrument, warn};
 
 use crate::auth::JwtValidator;
+use crate::cluster_health::ClusterHealthChecker;
 use crate::context_engine::ContextEngine;
 use crate::proto::{
     DomainDefinition, EdgeDefinition, EdgeVariant, Error as ProtoError, ExecuteQueryMessage,
-    ExecuteToolMessage, GetOntologyRequest, GetOntologyResponse, ListToolsRequest,
-    ListToolsResponse, NodeDefinition, NodeStyle as ProtoNodeStyle, PropertyDefinition,
-    QueryResult, ToolDefinition as ProtoToolDefinition, ToolResult, execute_query_message,
-    execute_tool_message,
+    ExecuteToolMessage, GetClusterHealthRequest, GetClusterHealthResponse, GetOntologyRequest,
+    GetOntologyResponse, ListToolsRequest, ListToolsResponse, NodeDefinition,
+    NodeStyle as ProtoNodeStyle, PropertyDefinition, QueryResult,
+    ToolDefinition as ProtoToolDefinition, ToolResult, execute_query_message, execute_tool_message,
 };
 use crate::query::QueryExecutor;
 use crate::redaction::RedactionService;
@@ -38,20 +39,27 @@ pub struct KnowledgeGraphServiceImpl {
     tool_service: ToolService,
     query_executor: QueryExecutor,
     context_engine: ContextEngine,
+    cluster_health: Arc<ClusterHealthChecker>,
 }
 
 impl KnowledgeGraphServiceImpl {
-    pub fn new(validator: Arc<JwtValidator>, clickhouse_config: &ClickHouseConfiguration) -> Self {
+    pub fn new(
+        validator: Arc<JwtValidator>,
+        clickhouse_config: &ClickHouseConfiguration,
+        health_check_url: Option<String>,
+    ) -> Self {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
         let query_executor = QueryExecutor::new(clickhouse_config, Arc::clone(&ontology));
         let tool_service = ToolService::new(query_executor.clone(), Arc::clone(&ontology));
         let context_engine = ContextEngine::new();
+        let cluster_health = ClusterHealthChecker::new(health_check_url).into_arc();
         Self {
             validator,
             ontology,
             tool_service,
             query_executor,
             context_engine,
+            cluster_health,
         }
     }
 }
@@ -346,6 +354,26 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             })
             .await
     }
+
+    #[instrument(skip(self, request), fields(user_id))]
+    async fn get_cluster_health(
+        &self,
+        request: Request<GetClusterHealthRequest>,
+    ) -> Result<Response<GetClusterHealthResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+
+        METRICS
+            .record(SERVICE_NAME, "GetClusterHealth", || {
+                with_correlation(&request, async {
+                    info!("Fetching cluster health for user");
+
+                    let response = self.cluster_health.get_cluster_health().await;
+                    Ok(Response::new(response))
+                })
+            })
+            .await
+    }
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -452,7 +480,7 @@ mod tests {
     #[tokio::test]
     async fn test_service_can_be_created() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
         let result = service
             .tool_service
             .execute_tool("get_graph_entities", "{}", &test_claims())
@@ -472,7 +500,7 @@ mod tests {
     #[test]
     fn test_build_ontology_response() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
 
         let response = service.build_ontology_response();
 

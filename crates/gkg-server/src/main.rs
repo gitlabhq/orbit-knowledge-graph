@@ -44,10 +44,20 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
         config.jwt_clock_skew_secs,
     )?);
 
-    let http_server = HttpServer::bind(config.bind_address, (*validator).clone()).await?;
+    let http_server = HttpServer::bind(
+        config.bind_address,
+        (*validator).clone(),
+        config.health_check_url.clone(),
+    )
+    .await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
-    let grpc_server = GrpcServer::new(config.grpc_bind_address, validator, &config.graph);
+    let grpc_server = GrpcServer::new(
+        config.grpc_bind_address,
+        validator,
+        &config.graph,
+        config.health_check_url.clone(),
+    );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
     tokio::select! {

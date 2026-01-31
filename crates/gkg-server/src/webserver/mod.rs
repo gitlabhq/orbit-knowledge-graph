@@ -17,9 +17,13 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn bind(addr: SocketAddr, validator: JwtValidator) -> std::io::Result<Self> {
+    pub async fn bind(
+        addr: SocketAddr,
+        validator: JwtValidator,
+        health_check_url: Option<String>,
+    ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr).await?;
-        let router = create_router(validator);
+        let router = create_router(validator, health_check_url);
         Ok(Self { listener, router })
     }
 

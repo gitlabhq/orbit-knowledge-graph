@@ -24,6 +24,9 @@ service KnowledgeGraphService {
 
   // Returns the complete ontology schema (nodes, edges, domains)
   rpc GetOntology(GetOntologyRequest) returns (GetOntologyResponse);
+
+  // Returns cluster health status for the Orbit dashboard
+  rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
 }
 
 // --- List Tools ---
@@ -171,4 +174,36 @@ message EdgeDefinition {
 message EdgeVariant {
   string source_type = 1;
   string target_type = 2;
+}
+
+// --- Cluster Health ---
+
+message GetClusterHealthRequest {
+  // Empty for now
+}
+
+message GetClusterHealthResponse {
+  ClusterStatus status = 1;
+  string timestamp = 2;
+  string version = 3;
+  repeated ComponentHealth components = 4;
+}
+
+enum ClusterStatus {
+  CLUSTER_STATUS_UNSPECIFIED = 0;
+  CLUSTER_STATUS_HEALTHY = 1;
+  CLUSTER_STATUS_DEGRADED = 2;
+  CLUSTER_STATUS_UNHEALTHY = 3;
+}
+
+message ComponentHealth {
+  string name = 1;
+  ClusterStatus status = 2;
+  ReplicaStatus replicas = 3;
+  map<string, string> metrics = 4;
+}
+
+message ReplicaStatus {
+  int32 ready = 1;
+  int32 desired = 2;
 }

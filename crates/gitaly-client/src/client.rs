@@ -32,6 +32,81 @@ fn normalize_path(path: &Path) -> std::path::PathBuf {
         })
 }
 
+fn extract_archive<R: std::io::Read>(
+    archive: &mut tar::Archive<R>,
+    target_dir: &Path,
+) -> Result<(), GitalyError> {
+    let target_canonical = target_dir
+        .canonicalize()
+        .map_err(|e| GitalyError::Io(e.to_string()))?;
+
+    for entry in archive
+        .entries()
+        .map_err(|e| GitalyError::Archive(e.to_string()))?
+    {
+        let mut entry = entry.map_err(|e| GitalyError::Archive(e.to_string()))?;
+        let entry_path = entry
+            .path()
+            .map_err(|e| GitalyError::Archive(e.to_string()))?;
+
+        let entry_path_str = entry_path.to_string_lossy();
+        if entry_path_str == "/" || entry_path_str == "." || entry_path_str.is_empty() {
+            continue;
+        }
+
+        let relative_path = entry_path.strip_prefix("/").unwrap_or(&entry_path);
+        let dest = target_canonical.join(relative_path);
+
+        let dest_canonical = if dest.exists() {
+            dest.canonicalize()
+                .map_err(|e| GitalyError::Io(e.to_string()))?
+        } else if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| GitalyError::Io(e.to_string()))?;
+            parent
+                .canonicalize()
+                .map_err(|e| GitalyError::Io(e.to_string()))?
+                .join(dest.file_name().unwrap_or_default())
+        } else {
+            dest.clone()
+        };
+
+        if !dest_canonical.starts_with(&target_canonical) {
+            return Err(GitalyError::Archive(format!(
+                "path traversal detected: {}",
+                relative_path.display()
+            )));
+        }
+
+        let entry_type = entry.header().entry_type();
+        let is_link = entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link;
+        if let (true, Ok(Some(link_name))) = (is_link, entry.link_name()) {
+            let link_target = if link_name.is_absolute() {
+                link_name.to_path_buf()
+            } else {
+                dest_canonical
+                    .parent()
+                    .unwrap_or(&target_canonical)
+                    .join(&link_name)
+            };
+
+            let normalized = normalize_path(&link_target);
+            if !normalized.starts_with(&target_canonical) {
+                return Err(GitalyError::Archive(format!(
+                    "symlink target escapes target directory: {} -> {}",
+                    relative_path.display(),
+                    link_name.display()
+                )));
+            }
+        }
+
+        entry
+            .unpack(&dest_canonical)
+            .map_err(|e| GitalyError::Archive(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
 /// Gitaly gRPC client for repository operations.
 ///
 /// The client uses tonic's `Channel` which provides built-in HTTP/2 connection
@@ -139,70 +214,7 @@ impl GitalyClient {
 
         let file = File::open(&tar_path).map_err(|e| GitalyError::Io(e.to_string()))?;
         let mut archive = tar::Archive::new(file);
-
-        let target_canonical = target_dir
-            .canonicalize()
-            .map_err(|e| GitalyError::Io(e.to_string()))?;
-
-        for entry in archive
-            .entries()
-            .map_err(|e| GitalyError::Archive(e.to_string()))?
-        {
-            let mut entry = entry.map_err(|e| GitalyError::Archive(e.to_string()))?;
-            let entry_path = entry
-                .path()
-                .map_err(|e| GitalyError::Archive(e.to_string()))?;
-
-            let dest = target_canonical.join(&entry_path);
-
-            let dest_canonical = if dest.exists() {
-                dest.canonicalize()
-                    .map_err(|e| GitalyError::Io(e.to_string()))?
-            } else if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| GitalyError::Io(e.to_string()))?;
-                parent
-                    .canonicalize()
-                    .map_err(|e| GitalyError::Io(e.to_string()))?
-                    .join(dest.file_name().unwrap_or_default())
-            } else {
-                dest.clone()
-            };
-
-            if !dest_canonical.starts_with(&target_canonical) {
-                return Err(GitalyError::Archive(format!(
-                    "path traversal detected: {}",
-                    entry_path.display()
-                )));
-            }
-
-            let entry_type = entry.header().entry_type();
-            let is_link =
-                entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link;
-            if let (true, Ok(Some(link_name))) = (is_link, entry.link_name()) {
-                let link_target = if link_name.is_absolute() {
-                    link_name.to_path_buf()
-                } else {
-                    dest_canonical
-                        .parent()
-                        .unwrap_or(&target_canonical)
-                        .join(&link_name)
-                };
-
-                let normalized = normalize_path(&link_target);
-                if !normalized.starts_with(&target_canonical) {
-                    return Err(GitalyError::Archive(format!(
-                        "symlink target escapes target directory: {} -> {}",
-                        entry_path.display(),
-                        link_name.display()
-                    )));
-                }
-            }
-
-            entry
-                .unpack(&dest_canonical)
-                .map_err(|e| GitalyError::Archive(e.to_string()))?;
-        }
-
+        extract_archive(&mut archive, target_dir)?;
         std::fs::remove_file(&tar_path).map_err(|e| GitalyError::Io(e.to_string()))?;
         Ok(())
     }
@@ -217,74 +229,9 @@ mod tests {
 
     fn extract_tar_to_dir(tar_data: &[u8], target_dir: &Path) -> Result<(), GitalyError> {
         std::fs::create_dir_all(target_dir).map_err(|e| GitalyError::Io(e.to_string()))?;
-
         let cursor = Cursor::new(tar_data);
         let mut archive = tar::Archive::new(cursor);
-
-        let target_canonical = target_dir
-            .canonicalize()
-            .map_err(|e| GitalyError::Io(e.to_string()))?;
-
-        for entry in archive
-            .entries()
-            .map_err(|e| GitalyError::Archive(e.to_string()))?
-        {
-            let mut entry = entry.map_err(|e| GitalyError::Archive(e.to_string()))?;
-            let entry_path = entry
-                .path()
-                .map_err(|e| GitalyError::Archive(e.to_string()))?;
-
-            let dest = target_canonical.join(&entry_path);
-
-            let dest_canonical = if dest.exists() {
-                dest.canonicalize()
-                    .map_err(|e| GitalyError::Io(e.to_string()))?
-            } else if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| GitalyError::Io(e.to_string()))?;
-                parent
-                    .canonicalize()
-                    .map_err(|e| GitalyError::Io(e.to_string()))?
-                    .join(dest.file_name().unwrap_or_default())
-            } else {
-                dest.clone()
-            };
-
-            if !dest_canonical.starts_with(&target_canonical) {
-                return Err(GitalyError::Archive(format!(
-                    "path traversal detected: {}",
-                    entry_path.display()
-                )));
-            }
-
-            let entry_type = entry.header().entry_type();
-            let is_link =
-                entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link;
-            if let (true, Ok(Some(link_name))) = (is_link, entry.link_name()) {
-                let link_target = if link_name.is_absolute() {
-                    link_name.to_path_buf()
-                } else {
-                    dest_canonical
-                        .parent()
-                        .unwrap_or(&target_canonical)
-                        .join(&link_name)
-                };
-
-                let normalized = normalize_path(&link_target);
-                if !normalized.starts_with(&target_canonical) {
-                    return Err(GitalyError::Archive(format!(
-                        "symlink target escapes target directory: {} -> {}",
-                        entry_path.display(),
-                        link_name.display()
-                    )));
-                }
-            }
-
-            entry
-                .unpack(&dest_canonical)
-                .map_err(|e| GitalyError::Archive(e.to_string()))?;
-        }
-
-        Ok(())
+        extract_archive(&mut archive, target_dir)
     }
 
     fn create_tar_with_file(path: &str, content: &[u8]) -> Vec<u8> {
@@ -428,6 +375,91 @@ mod tests {
         assert!(
             result.is_ok(),
             "symlink to relative path inside target should be allowed"
+        );
+    }
+
+    /// Create a tar entry with arbitrary path (including absolute paths).
+    fn append_entry(builder: &mut Builder<Vec<u8>>, path: &str, content: Option<&[u8]>) {
+        let mut header = Header::new_gnu();
+        let path_bytes = path.as_bytes();
+        header.as_mut_bytes()[..path_bytes.len().min(100)]
+            .copy_from_slice(&path_bytes[..path_bytes.len().min(100)]);
+
+        match content {
+            Some(data) => {
+                header.set_size(data.len() as u64);
+                // Set file mode to regular file permissions (rw-r--r--)
+                header.set_mode(0o644);
+                header.set_entry_type(tar::EntryType::Regular);
+                header.set_cksum();
+                builder.append(&header, data).unwrap();
+            }
+            None => {
+                header.set_size(0);
+                // Set directory mode to rwxr-xr-x
+                header.set_mode(0o755);
+                header.set_entry_type(tar::EntryType::Directory);
+                header.set_cksum();
+                builder.append(&header, std::io::empty()).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_root_slash_directory_skipped() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut builder = Builder::new(Vec::new());
+        append_entry(&mut builder, "/", None);
+        append_entry(&mut builder, "/test.txt", Some(b"content"));
+        let tar_data = builder.into_inner().unwrap();
+
+        extract_tar_to_dir(&tar_data, temp_dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(temp_dir.path().join("test.txt")).unwrap(),
+            "content"
+        );
+    }
+
+    #[test]
+    fn test_dot_directory_skipped() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut builder = Builder::new(Vec::new());
+        append_entry(&mut builder, ".", None);
+        append_entry(&mut builder, "test.txt", Some(b"hello"));
+        let tar_data = builder.into_inner().unwrap();
+
+        extract_tar_to_dir(&tar_data, temp_dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(temp_dir.path().join("test.txt")).unwrap(),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn test_absolute_path_leading_slash_stripped() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut builder = Builder::new(Vec::new());
+        append_entry(&mut builder, "/subdir/file.txt", Some(b"absolute"));
+        let tar_data = builder.into_inner().unwrap();
+
+        extract_tar_to_dir(&tar_data, temp_dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(temp_dir.path().join("subdir/file.txt")).unwrap(),
+            "absolute"
+        );
+    }
+
+    #[test]
+    fn test_nested_absolute_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut builder = Builder::new(Vec::new());
+        append_entry(&mut builder, "/a/b/c/deep.txt", Some(b"deep"));
+        let tar_data = builder.into_inner().unwrap();
+
+        extract_tar_to_dir(&tar_data, temp_dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(temp_dir.path().join("a/b/c/deep.txt")).unwrap(),
+            "deep"
         );
     }
 }
