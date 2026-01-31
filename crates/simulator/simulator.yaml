@@ -18,24 +18,18 @@ clickhouse:
     engine: MergeTree
     index_granularity: 8192
 
-    # Node tables: organization_id first for tenant isolation
+    # Node tables: traversal_path first for trie-based ordering
     # PRIMARY KEY = sparse index, ORDER BY = disk sort order
-    node_primary_key: [organization_id, id]
-    node_order_by: [organization_id, id]
+    node_primary_key: [traversal_path, id]
+    node_order_by: [traversal_path, id]
 
-    # Edge table: ordered for forward traversal (source -> target)
-    edge_primary_key: [source_kind, source_id]
-    edge_order_by: [source_kind, source_id, relationship_kind]
+    # Edge table: ordered for forward traversal by source_id
+    # source_id FIRST so WHERE source_id = X uses primary key
+    edge_primary_key: [source_id]
+    edge_order_by: [source_id, source_kind, relationship_kind]
 
-    # Data skipping indexes for FK lookups not in primary key
+    # Data skipping indexes for filtering
     indexes:
-      # Bloom filter for target lookups (reverse traversal)
-      - name: idx_target
-        table: edges
-        expression: target_id
-        type: bloom_filter
-        granularity: 4
-
       # Bloom filter for relationship filtering
       - name: idx_relationship
         table: edges
@@ -43,13 +37,14 @@ clickhouse:
         type: bloom_filter
         granularity: 4
 
-    # Projections for reverse traversal (5x+ speedup)
+    # Projections for reverse traversal
     projections:
-      # Find edges by target (reverse of source -> target)
+      # Find edges by target_id (reverse lookup)
+      # target_id FIRST so WHERE target_id = Y uses this projection
       - name: by_target
         table: edges
         columns: [source_kind, source_id, relationship_kind, target_kind, target_id]
-        order_by: [target_kind, target_id, relationship_kind]
+        order_by: [target_id, target_kind, relationship_kind]
 
 generation:
   ontology_path: fixtures/ontology

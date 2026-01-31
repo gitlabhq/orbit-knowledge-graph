@@ -187,6 +187,8 @@ impl Cte {
 /// ```sql
 /// WITH cte1 AS (...), cte2 AS (...)
 /// SELECT ... FROM ... WHERE ... GROUP BY ... ORDER BY ... LIMIT ...
+/// UNION ALL SELECT ...
+/// SETTINGS key = value
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
@@ -197,6 +199,10 @@ pub struct Query {
     pub group_by: Vec<Expr>,
     pub order_by: Vec<OrderExpr>,
     pub limit: Option<u32>,
+    /// Additional queries to UNION ALL with this one (for recursive CTEs).
+    pub union_all: Vec<Query>,
+    /// ClickHouse SET statements prepended to the query (for recursive CTEs).
+    pub set_statements: Vec<(String, String)>,
 }
 
 impl Default for Query {
@@ -213,6 +219,8 @@ impl Default for Query {
             group_by: vec![],
             order_by: vec![],
             limit: None,
+            union_all: vec![],
+            set_statements: vec![],
         }
     }
 }

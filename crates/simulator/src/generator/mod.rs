@@ -139,13 +139,8 @@ impl Generator {
                     data.edges.extend(edges);
                 }
             } else if let Some(parent_edges) = self.dependency_graph.parent_edges(node_type) {
-                let (batches, edges) = self.generate_child_entities(
-                    node,
-                    org_id,
-                    parent_edges,
-                    &mut registry,
-                    &mut rng,
-                )?;
+                let (batches, edges) =
+                    self.generate_child_entities(node, parent_edges, &mut registry, &mut rng)?;
                 if !batches.is_empty() {
                     data.nodes.insert(node_type.clone(), batches);
                 }
@@ -191,19 +186,12 @@ impl Generator {
                 (eid, format!("{}/", org_id))
             };
 
-            builder.add_row(org_id, traversal_path.clone(), entity_id);
+            builder.add_row(traversal_path.clone(), entity_id);
             let ctx = EntityContext::new(entity_id, traversal_path);
             registry.add(&node.name, ctx.clone());
 
             if is_group && self.config.generation.subgroups.max_depth > 0 {
-                self.generate_subgroup_hierarchy(
-                    org_id,
-                    &ctx,
-                    1,
-                    registry,
-                    &mut builder,
-                    &mut edges,
-                )?;
+                self.generate_subgroup_hierarchy(&ctx, 1, registry, &mut builder, &mut edges)?;
             }
         }
 
@@ -213,7 +201,6 @@ impl Generator {
     /// Recursively generate subgroup hierarchy with CONTAINS edges.
     fn generate_subgroup_hierarchy(
         &self,
-        org_id: u32,
         parent: &EntityContext,
         depth: usize,
         registry: &mut EntityRegistry,
@@ -229,7 +216,7 @@ impl Generator {
             let ns_id = registry.next_namespace_id();
             let traversal_path = format!("{}{}/", parent.traversal_path, ns_id);
 
-            builder.add_row(org_id, traversal_path.clone(), ns_id);
+            builder.add_row(traversal_path.clone(), ns_id);
             let ctx = EntityContext::new(ns_id, traversal_path);
             registry.add("Group", ctx.clone());
 
@@ -241,7 +228,7 @@ impl Generator {
                 target_kind: "Group".to_string(),
             });
 
-            self.generate_subgroup_hierarchy(org_id, &ctx, depth + 1, registry, builder, edges)?;
+            self.generate_subgroup_hierarchy(&ctx, depth + 1, registry, builder, edges)?;
         }
 
         Ok(())
@@ -250,7 +237,6 @@ impl Generator {
     fn generate_child_entities(
         &self,
         node: &NodeEntity,
-        org_id: u32,
         parent_edges: &[ParentEdge],
         registry: &mut EntityRegistry,
         rng: &mut impl Rng,
@@ -284,7 +270,7 @@ impl Generator {
                         (eid, parent.traversal_path.clone())
                     };
 
-                    builder.add_row(org_id, traversal_path.clone(), entity_id);
+                    builder.add_row(traversal_path.clone(), entity_id);
                     registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child

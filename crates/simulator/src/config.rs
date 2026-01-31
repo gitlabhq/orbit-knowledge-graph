@@ -182,13 +182,13 @@ fn default_engine_type() -> String {
 }
 
 fn default_node_order_by() -> Vec<String> {
-    vec!["organization_id".to_string(), "id".to_string()]
+    vec!["traversal_path".to_string(), "id".to_string()]
 }
 
 fn default_edge_order_by() -> Vec<String> {
     vec![
+        "source_id".to_string(),
         "source_kind".to_string(),
-        "source".to_string(),
         "relationship_kind".to_string(),
     ]
 }
