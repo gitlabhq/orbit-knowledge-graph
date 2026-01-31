@@ -42,7 +42,7 @@ pub mod validate;
 
 use std::sync::OnceLock;
 
-pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, RecursiveCte, SelectExpr, TableRef};
+pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use codegen::{codegen, ParameterizedQuery};
 pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
@@ -144,6 +144,7 @@ pub fn derive_schema(ontology: &Ontology) -> Result<serde_json::Value> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(irrefutable_let_patterns)]
 mod tests {
     use super::*;
 

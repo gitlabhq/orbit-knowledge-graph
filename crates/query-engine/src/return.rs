@@ -19,27 +19,11 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
 
     // For aggregation queries, only nodes in GROUP BY can be selected.
-    let selectable_nodes = selectable_node_ids(input);
-
-    match node {
-        Node::Query(q) => enforce_return_columns(q, input, &selectable_nodes, &mut ctx)?,
-        Node::RecursiveCte(_) => {
-            // Path finding queries use _gkg_path column (Array of (id, type) tuples)
-            // which contains all nodes. No additional columns needed here.
-        }
-    }
-
-    Ok(ctx)
-}
-
-/// Determine which node IDs can have their columns selected.
-///
-/// For traversal/pattern queries: all nodes are selectable.
-/// For aggregation queries: only nodes appearing in group_by are selectable.
-/// For path finding: handled separately in enforce_return.
-/// For neighbors queries: only the center node is selectable.
-fn selectable_node_ids(input: &Input) -> HashSet<String> {
-    match input.query_type {
+    // For traversal/pattern queries: all nodes are selectable.
+    // For aggregation queries: only nodes appearing in group_by are selectable.
+    // For path finding: handled separately in enforce_return.
+    // For neighbors queries: only the center node is selectable.
+    let selectable_nodes = match input.query_type {
         QueryType::Aggregation => input
             .aggregations
             .iter()
@@ -49,7 +33,13 @@ fn selectable_node_ids(input: &Input) -> HashSet<String> {
             input.nodes.iter().map(|n| n.id.clone()).collect()
         }
         QueryType::PathFinding => HashSet::new(),
+    };
+
+    match node {
+        Node::Query(q) => enforce_return_columns(q, input, &selectable_nodes, &mut ctx)?,
     }
+
+    Ok(ctx)
 }
 
 fn enforce_return_columns(
@@ -102,6 +92,7 @@ fn enforce_return_columns(
 }
 
 #[cfg(test)]
+#[allow(irrefutable_let_patterns)]
 mod tests {
     use super::*;
     use crate::ast::TableRef;

@@ -320,27 +320,44 @@ fn path_edge_tuple() -> Expr {
 }
 
 /// Depth N query: extend paths from the previous CTE by one hop.
+/// Uses UNION ALL of two joins instead of OR to avoid ClickHouse join limitations.
 fn path_depth_query(prev_cte: &str, depth: u32) -> Query {
-    // next_node_id = if(p.node_id = e.source_id, e.target_id, e.source_id)
-    let next_node_id = Expr::func(
-        "if",
-        vec![
-            Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id")),
-            Expr::col("e", "target_id"),
-            Expr::col("e", "source_id"),
-        ],
-    );
+    // Build two separate queries: one joining on source_id, one on target_id
+    let source_branch = path_hop_branch(prev_cte, depth, true);
+    let target_branch = path_hop_branch(prev_cte, depth, false);
 
-    // next_node_type = if(p.node_id = e.source_id, e.target_kind, e.source_kind)
-    let next_node_type = Expr::func(
-        "if",
-        vec![
-            Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id")),
-            Expr::col("e", "target_kind"),
-            Expr::col("e", "source_kind"),
+    // Wrap in outer SELECT from UNION ALL
+    Query {
+        select: vec![
+            SelectExpr::new(Expr::col("u", "node_id"), "node_id"),
+            SelectExpr::new(Expr::col("u", "path_ids"), "path_ids"),
+            SelectExpr::new(Expr::col("u", "path"), "path"),
+            SelectExpr::new(Expr::col("u", "edges"), "edges"),
+            SelectExpr::new(Expr::col("u", "depth"), "depth"),
         ],
-    );
+        from: TableRef::union(vec![source_branch, target_branch], "u"),
+        ..Default::default()
+    }
+}
 
+/// Build one branch of the path hop: join on either source_id or target_id.
+fn path_hop_branch(prev_cte: &str, depth: u32, join_on_source: bool) -> Query {
+    // When joining on source: we're at source, going to target
+    // When joining on target: we're at target, going to source
+    let (next_id_col, next_type_col) = if join_on_source {
+        ("target_id", "target_kind")
+    } else {
+        ("source_id", "source_kind")
+    };
+
+    let join_col = if join_on_source {
+        "source_id"
+    } else {
+        "target_id"
+    };
+
+    let next_node_id = Expr::col("e", next_id_col);
+    let next_node_type = Expr::col("e", next_type_col);
     let next_tuple = Expr::func("tuple", vec![next_node_id.clone(), next_node_type]);
 
     Query {
@@ -366,7 +383,6 @@ fn path_depth_query(prev_cte: &str, depth: u32) -> Query {
                 ),
                 "path",
             ),
-            // Append current edge to edges array
             SelectExpr::new(
                 Expr::func(
                     "arrayConcat",
@@ -383,10 +399,7 @@ fn path_depth_query(prev_cte: &str, depth: u32) -> Query {
             JoinType::Inner,
             TableRef::scan(prev_cte, "p"),
             TableRef::scan(EDGE_TABLE, "e"),
-            Expr::or(
-                Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id")),
-                Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "target_id")),
-            ),
+            Expr::eq(Expr::col("p", "node_id"), Expr::col("e", join_col)),
         ),
         // Cycle detection: next node must not already be in path
         where_clause: Some(Expr::unary(
@@ -755,6 +768,7 @@ fn resolve_table(ontology: &Ontology, node: &InputNode) -> Result<String> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(irrefutable_let_patterns)]
 mod tests {
     use super::*;
     use crate::input::parse_input;

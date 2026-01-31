@@ -217,29 +217,10 @@ impl Default for Query {
     }
 }
 
-/// Recursive CTE for path finding:
-/// ```sql
-/// WITH RECURSIVE name AS (
-///   base_query
-///   UNION ALL
-///   recursive_query
-/// )
-/// final_query
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-pub struct RecursiveCte {
-    pub name: String,
-    pub base: Query,
-    pub recursive: Query,
-    pub max_depth: u32,
-    pub final_query: Query,
-}
-
 /// Top-level AST node - either a simple query or a recursive CTE.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Query(Box<Query>),
-    RecursiveCte(Box<RecursiveCte>),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
