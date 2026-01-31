@@ -14,6 +14,7 @@ members = [
   "crates/ontology",
   "crates/simulator",
   "crates/health-check",
+  "crates/siphon-proto",
 ]
 
 [workspace.dependencies]
