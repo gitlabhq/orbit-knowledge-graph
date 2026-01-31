@@ -18,18 +18,11 @@ use crate::arrow_schema::ToArrowSchema;
 use crate::config::{Config, EdgeRatio};
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use rand::seq::IteratorRandom;
 use rand::Rng;
 use ontology::{NodeEntity, Ontology};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
-
-/// Entity types that don't have traversal path security filters applied.
-/// These are "root" entities whose visibility is relationship-based.
-/// Must match query-engine/src/security.rs SKIP_SECURITY_FILTER_TABLES.
-/// TODO: Make this compliant and derive from the ontology.
-const PATH_FILTER_EXEMPT_ENTITIES: &[&str] = &["User"];
 
 /// Edge record for storage.
 #[derive(Debug, Clone)]
@@ -309,9 +302,8 @@ impl Generator {
                 IterationDirection::Source => (sources, targets, true),
             };
 
-            // Optimization: within a single org, exempt entities (User) don't need path filtering.
-            // This avoids O(n²) filtering for the most common associations (User -> *).
-            let target_exempt = PATH_FILTER_EXEMPT_ENTITIES.contains(&target_kind.as_str());
+            // Pre-compute sample_from length for index-based sampling
+            let sample_len = sample_from.len();
 
             for primary in iterate_over {
                 let edge_count = match &ratio {
@@ -329,25 +321,12 @@ impl Generator {
                     continue;
                 }
 
-                // Fast path: if target is exempt (User), skip filtering entirely
-                let selected: Vec<_> = if target_exempt {
-                    sample_from.iter().choose_multiple(rng, edge_count)
-                } else {
-                    // Slow path: need to filter by path containment
-                    sample_from
-                        .iter()
-                        .filter(|candidate| {
-                            let (source_path, target_path) = if is_source_iteration {
-                                (&primary.traversal_path, &candidate.traversal_path)
-                            } else {
-                                (&candidate.traversal_path, &primary.traversal_path)
-                            };
-                            target_path.starts_with(source_path.as_str())
-                        })
-                        .choose_multiple(rng, edge_count)
-                };
+                // Sample random indices directly - faster than iterator-based sampling
+                let count = edge_count.min(sample_len);
+                for _ in 0..count {
+                    let idx = rng.gen_range(0..sample_len);
+                    let secondary = &sample_from[idx];
 
-                for secondary in selected {
                     let (source, target) = if is_source_iteration {
                         (primary, secondary)
                     } else {
