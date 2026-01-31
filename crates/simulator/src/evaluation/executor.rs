@@ -341,63 +341,127 @@ impl QueryExecutor {
             global_fallback_count: 0,
         };
 
+        // Track sampled IDs to ensure path-finding queries get distinct start/end
+        let mut sampled_by_entity: std::collections::HashMap<String, Vec<i64>> =
+            std::collections::HashMap::new();
+
+        // Process `nodes` array (for traversal/aggregation/path_finding queries)
         if let Some(nodes) = query_value.get_mut("nodes").and_then(|n| n.as_array_mut()) {
             for node in nodes.iter_mut() {
                 if let Some(obj) = node.as_object_mut() {
-                    // Check if this node has node_ids
-                    if obj.contains_key("node_ids")
-                        && let Some(entity) = obj.get("entity").and_then(|e| e.as_str())
-                    {
-                        // Get the current node_ids to determine how many we need
-                        let count = obj
-                            .get("node_ids")
-                            .and_then(|ids| ids.as_array())
-                            .map(|arr| arr.len())
-                            .unwrap_or(1);
-
-                        // Sample IDs within the security context path if available
-                        let sampled_ids = if let Some(ref path) = traversal_path {
-                            let ids = self
-                                .sampler
-                                .random_ids_in_path(entity, count, path, &self.ontology)
-                                .await?;
-                            if ids.is_empty() {
-                                // No entities in path, fall back to org-scoped sampling
-                                sampling_info.global_fallback_count += 1;
-                                self.sampler
-                                    .random_ids_in_org(
-                                        entity,
-                                        count,
-                                        security_ctx.org_id,
-                                        &self.ontology,
-                                    )
-                                    .await?
-                            } else {
-                                sampling_info.path_scoped_count += 1;
-                                ids
-                            }
-                        } else {
-                            // No path available, use org-scoped sampling
-                            sampling_info.global_fallback_count += 1;
-                            self.sampler
-                                .random_ids_in_org(
-                                    entity,
-                                    count,
-                                    security_ctx.org_id,
-                                    &self.ontology,
-                                )
-                                .await?
-                        };
-
-                        if !sampled_ids.is_empty() {
-                            obj.insert("node_ids".to_string(), serde_json::to_value(&sampled_ids)?);
-                        }
-                    }
+                    self.substitute_node_ids(
+                        obj,
+                        &traversal_path,
+                        security_ctx,
+                        &mut sampling_info,
+                        &mut sampled_by_entity,
+                    )
+                    .await?;
                 }
             }
         }
 
+        // Process singular `node` field (for search queries)
+        if let Some(node) = query_value.get_mut("node").and_then(|n| n.as_object_mut()) {
+            self.substitute_node_ids(
+                node,
+                &traversal_path,
+                security_ctx,
+                &mut sampling_info,
+                &mut sampled_by_entity,
+            )
+            .await?;
+        }
+
         Ok((query_value, sampling_info))
+    }
+
+    /// Substitute node_ids in a single node object.
+    ///
+    /// Supports placeholder syntax:
+    /// - `"$sample"` - sample 1 ID
+    /// - `"$sample:N"` - sample N IDs (e.g., `"$sample:3"` for 3 IDs)
+    /// - `[123]` - legacy: array length determines sample count (1 ID)
+    /// - `[1, 2]` - legacy: sample 2 IDs
+    async fn substitute_node_ids(
+        &mut self,
+        obj: &mut serde_json::Map<String, serde_json::Value>,
+        traversal_path: &Option<String>,
+        security_ctx: &SecurityContext,
+        sampling_info: &mut SamplingInfo,
+        sampled_by_entity: &mut std::collections::HashMap<String, Vec<i64>>,
+    ) -> Result<()> {
+        // Check if this node has node_ids that need substitution
+        if !obj.contains_key("node_ids") {
+            return Ok(());
+        }
+
+        let entity = match obj.get("entity").and_then(|e| e.as_str()) {
+            Some(e) => e.to_string(),
+            None => return Ok(()),
+        };
+
+        // Determine how many IDs to sample based on placeholder syntax
+        let count = parse_sample_count(obj.get("node_ids"));
+
+        // Sample IDs within the security context path if available
+        let mut sampled_ids = if let Some(path) = traversal_path {
+            let ids = self
+                .sampler
+                .random_ids_in_path(&entity, count, path, &self.ontology)
+                .await?;
+            if ids.is_empty() {
+                // No entities in path, fall back to org-scoped sampling
+                sampling_info.global_fallback_count += 1;
+                self.sampler
+                    .random_ids_in_org(&entity, count, security_ctx.org_id, &self.ontology)
+                    .await?
+            } else {
+                sampling_info.path_scoped_count += 1;
+                ids
+            }
+        } else {
+            // No path available, use org-scoped sampling
+            sampling_info.global_fallback_count += 1;
+            self.sampler
+                .random_ids_in_org(&entity, count, security_ctx.org_id, &self.ontology)
+                .await?
+        };
+
+        // For path-finding queries, ensure we don't reuse IDs for the same entity type.
+        // This prevents start/end being the same node.
+        if let Some(already_sampled) = sampled_by_entity.get(&entity) {
+            sampled_ids.retain(|id| !already_sampled.contains(id));
+            // If we filtered out all IDs, try to sample more
+            if sampled_ids.is_empty() {
+                let extra_ids = if let Some(path) = traversal_path {
+                    self.sampler
+                        .random_ids_in_path(&entity, count * 2, path, &self.ontology)
+                        .await?
+                } else {
+                    self.sampler
+                        .random_ids_in_org(&entity, count * 2, security_ctx.org_id, &self.ontology)
+                        .await?
+                };
+                sampled_ids = extra_ids
+                    .into_iter()
+                    .filter(|id| !already_sampled.contains(id))
+                    .take(count)
+                    .collect();
+            }
+        }
+
+        if !sampled_ids.is_empty() {
+            // Track these IDs as used for this entity type
+            sampled_by_entity
+                .entry(entity)
+                .or_default()
+                .extend(&sampled_ids);
+
+            obj.insert("node_ids".to_string(), serde_json::to_value(&sampled_ids)?);
+        }
+
+        Ok(())
     }
 
     /// Execute raw SQL and return row count plus sample rows.
@@ -537,9 +601,58 @@ fn substitute_params_in_sql(
     result
 }
 
+/// Parse sample count from node_ids placeholder value.
+///
+/// Supports:
+/// - `"$sample"` -> 1
+/// - `"$sample:N"` -> N (e.g., `"$sample:3"` -> 3)
+/// - `[...]` array -> array length (legacy compatibility)
+fn parse_sample_count(value: Option<&serde_json::Value>) -> usize {
+    let Some(v) = value else { return 1 };
+
+    // Check for string placeholder syntax
+    if let Some(s) = v.as_str() {
+        if s == "$sample" {
+            return 1;
+        }
+        if let Some(count_str) = s.strip_prefix("$sample:") {
+            return count_str.parse().unwrap_or(1);
+        }
+    }
+
+    // Legacy: array length determines count
+    if let Some(arr) = v.as_array() {
+        return arr.len().max(1);
+    }
+
+    1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_sample_count() {
+        // Placeholder syntax
+        assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample"))), 1);
+        assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample:1"))), 1);
+        assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample:3"))), 3);
+        assert_eq!(
+            parse_sample_count(Some(&serde_json::json!("$sample:10"))),
+            10
+        );
+
+        // Legacy array syntax
+        assert_eq!(parse_sample_count(Some(&serde_json::json!([123]))), 1);
+        assert_eq!(parse_sample_count(Some(&serde_json::json!([1, 2]))), 2);
+        assert_eq!(parse_sample_count(Some(&serde_json::json!([1, 2, 3]))), 3);
+
+        // Edge cases
+        assert_eq!(parse_sample_count(None), 1);
+        assert_eq!(parse_sample_count(Some(&serde_json::json!([]))), 1);
+        assert_eq!(parse_sample_count(Some(&serde_json::json!(42))), 1);
+    }
 
     #[test]
     fn test_substitute_params() {

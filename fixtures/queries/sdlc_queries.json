@@ -10,7 +10,7 @@
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-        {"id": "p", "entity": "Project", "node_ids": [123]}
+        {"id": "p", "entity": "Project", "node_ids": "$sample"}
       ],
       "relationships": [
         {"type": "IN_PROJECT", "from": "mr", "to": "p"}
@@ -35,7 +35,7 @@
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-        {"id": "merger", "entity": "User", "node_ids": [42]}
+        {"id": "merger", "entity": "User", "node_ids": "$sample"}
       ],
       "relationships": [
         {"type": "MERGED_BY", "from": "mr", "to": "merger"}
@@ -165,7 +165,7 @@
           "state": "opened",
           "weight": {"op": "gte", "value": 1}
         }},
-        {"id": "assignee", "entity": "User", "node_ids": [100]}
+        {"id": "assignee", "entity": "User", "node_ids": "$sample"}
       ],
       "relationships": [
         {"type": "ASSIGNED", "from": "wi", "to": "assignee"}
@@ -189,7 +189,7 @@
       "query_type": "traversal",
       "nodes": [
         {"id": "note", "entity": "Note", "filters": {"system": false, "noteable_type": "MergeRequest"}},
-        {"id": "author", "entity": "User", "node_ids": [42]}
+        {"id": "author", "entity": "User", "node_ids": "$sample"}
       ],
       "relationships": [
         {"type": "AUTHORED", "from": "author", "to": "note"}
@@ -218,7 +218,7 @@
       "query_type": "traversal",
       "nodes": [
         {"id": "p", "entity": "Project", "filters": {"archived": false}},
-        {"id": "g", "entity": "Group", "node_ids": [9970]}
+        {"id": "g", "entity": "Group", "node_ids": "$sample"}
       ],
       "relationships": [
         {"type": "IN_GROUP", "from": "p", "to": "g"}
@@ -274,7 +274,7 @@
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
-        {"id": "m", "entity": "Milestone", "node_ids": [500]}
+        {"id": "m", "entity": "Milestone", "node_ids": "$sample"}
       ],
       "relationships": [
         {"type": "IN_MILESTONE", "from": "wi", "to": "m"}
@@ -286,7 +286,7 @@
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
-        {"id": "lbl", "entity": "Label", "node_ids": [1234]}
+        {"id": "lbl", "entity": "Label", "node_ids": "$sample"}
       ],
       "relationships": [
         {"type": "HAS_LABEL", "from": "wi", "to": "lbl"}
@@ -298,7 +298,7 @@
       "query_type": "traversal",
       "nodes": [
         {"id": "pipe", "entity": "Pipeline", "filters": {"source": "merge_request_event"}},
-        {"id": "mr", "entity": "MergeRequest", "node_ids": [99999]}
+        {"id": "mr", "entity": "MergeRequest", "node_ids": "$sample"}
       ],
       "relationships": [
         {"type": "TRIGGERED", "from": "mr", "to": "pipe"}
@@ -310,8 +310,8 @@
     "Shortest path between two projects": {
       "query_type": "path_finding",
       "nodes": [
-        {"id": "start", "entity": "Project", "node_ids": [100]},
-        {"id": "end", "entity": "Project", "node_ids": [200]}
+        {"id": "start", "entity": "Project", "node_ids": "$sample"},
+        {"id": "end", "entity": "Project", "node_ids": "$sample"}
       ],
       "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     },

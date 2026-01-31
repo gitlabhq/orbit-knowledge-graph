@@ -19,7 +19,7 @@ use crate::config::{Config, EdgeRatio};
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use fake::rand::Rng;
-use fake::rand::seq::SliceRandom;
+use fake::rand::seq::IteratorRandom;
 use ontology::{NodeEntity, Ontology};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,39 +30,6 @@ use std::sync::atomic::{AtomicI64, Ordering};
 /// Must match query-engine/src/security.rs SKIP_SECURITY_FILTER_TABLES.
 /// TODO: Make this compliant and derive from the ontology.
 const PATH_FILTER_EXEMPT_ENTITIES: &[&str] = &["User"];
-
-/// Check if source and target are in the same organization.
-fn same_org(source_path: &str, target_path: &str) -> bool {
-    let source_org = source_path.split('/').next();
-    let target_org = target_path.split('/').next();
-    source_org == target_org && source_org.is_some()
-}
-
-/// Check if target is reachable from source via traversal path.
-///
-/// For edges to be queryable, the target's path must start with (or equal)
-/// the source's path. This matches the query engine's security filter which
-/// uses `startsWith(target.traversal_path, source_context_path)`.
-///
-/// Examples:
-/// - source `1/2/`, target `1/2/3/` → true (target is descendant)
-/// - source `1/2/`, target `1/2/` → true (same level)
-/// - source `1/2/3/`, target `1/2/` → false (target is ancestor, not reachable)
-fn target_reachable_from_source(source_path: &str, target_path: &str) -> bool {
-    target_path.starts_with(source_path)
-}
-
-/// Check if an edge between source and target is valid for querying.
-///
-/// - If target entity is exempt from path filtering (e.g., User), just check same org
-/// - Otherwise, target must be at or below source's path level
-fn edge_is_queryable(source_path: &str, target_path: &str, target_kind: &str) -> bool {
-    if PATH_FILTER_EXEMPT_ENTITIES.contains(&target_kind) {
-        same_org(source_path, target_path)
-    } else {
-        target_reachable_from_source(source_path, target_path)
-    }
-}
 
 /// Edge record for storage.
 #[derive(Debug, Clone)]
@@ -342,6 +309,10 @@ impl Generator {
                 IterationDirection::Source => (sources, targets, true),
             };
 
+            // Optimization: within a single org, exempt entities (User) don't need path filtering.
+            // This avoids O(n²) filtering for the most common associations (User -> *).
+            let target_exempt = PATH_FILTER_EXEMPT_ENTITIES.contains(&target_kind.as_str());
+
             for primary in iterate_over {
                 let edge_count = match &ratio {
                     EdgeRatio::Count(n) => *n,
@@ -358,38 +329,25 @@ impl Generator {
                     continue;
                 }
 
-                // Filter candidates where edge is queryable.
-                // For path-filtered targets: target must be at or below source level.
-                // For exempt targets (User): just need same org.
-                let compatible: Vec<_> = sample_from
-                    .iter()
-                    .filter(|candidate| {
-                        let (source_path, target_path) = if is_source_iteration {
-                            // primary is source, candidate is target
-                            (&primary.traversal_path, &candidate.traversal_path)
-                        } else {
-                            // candidate is source, primary is target
-                            (&candidate.traversal_path, &primary.traversal_path)
-                        };
-                        edge_is_queryable(source_path, target_path, &target_kind)
-                    })
-                    .collect();
-
-                if compatible.is_empty() {
-                    continue;
-                }
-
-                let selected: Vec<_> = if edge_count >= compatible.len() {
-                    compatible
+                // Fast path: if target is exempt (User), skip filtering entirely
+                let selected: Vec<_> = if target_exempt {
+                    sample_from.iter().choose_multiple(rng, edge_count)
                 } else {
-                    compatible
+                    // Slow path: need to filter by path containment
+                    sample_from
+                        .iter()
+                        .filter(|candidate| {
+                            let (source_path, target_path) = if is_source_iteration {
+                                (&primary.traversal_path, &candidate.traversal_path)
+                            } else {
+                                (&candidate.traversal_path, &primary.traversal_path)
+                            };
+                            target_path.starts_with(source_path.as_str())
+                        })
                         .choose_multiple(rng, edge_count)
-                        .copied()
-                        .collect()
                 };
 
                 for secondary in selected {
-                    // Create edge with correct source/target based on iteration direction
                     let (source, target) = if is_source_iteration {
                         (primary, secondary)
                     } else {
