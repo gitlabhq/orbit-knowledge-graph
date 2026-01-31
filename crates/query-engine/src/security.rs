@@ -80,7 +80,12 @@ fn validate_traversal_path(path: &str, org_id: i64) -> Result<()> {
 /// Inject security filters into an AST node (mutates in place).
 pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<()> {
     match node {
-        Node::Query(q) => apply_to_query(q, ctx),
+        Node::Query(q) => {
+            for cte in &mut q.ctes {
+                apply_to_query(&mut cte.query, ctx)?;
+            }
+            apply_to_query(q, ctx)
+        }
         Node::RecursiveCte(cte) => {
             apply_to_query(&mut cte.base, ctx)?;
             apply_to_query(&mut cte.recursive, ctx)?;
@@ -90,6 +95,7 @@ pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<
 }
 
 fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
+    // Apply security to the main query
     let aliases = collect_node_aliases(&q.from);
     if aliases.is_empty() {
         return Ok(());
@@ -201,9 +207,8 @@ mod tests {
             }],
             from: TableRef::scan("gl_project", "p"),
             where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
             limit: Some(10),
+            ..Default::default()
         }))
     }
 
@@ -276,10 +281,7 @@ mod tests {
                 alias: None,
             }],
             from: TableRef::scan(EDGE_TABLE, "e"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
-            limit: Some(10),
+            ..Default::default()
         }));
 
         apply_security_context(&mut node, &ctx).unwrap();

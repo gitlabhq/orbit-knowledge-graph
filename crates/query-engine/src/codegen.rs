@@ -2,7 +2,7 @@
 //!
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
-use crate::ast::{Expr, Node, Op, Query, RecursiveCte, TableRef};
+use crate::ast::{Cte, Expr, Node, Op, Query, RecursiveCte, TableRef};
 use crate::error::Result;
 use crate::result_context::ResultContext;
 use serde_json::Value;
@@ -69,6 +69,88 @@ impl Context {
     }
 
     fn emit_query(&mut self, q: &Query) -> Result<String> {
+        let mut parts = Vec::new();
+
+        // WITH clause (CTEs)
+        if !q.ctes.is_empty() {
+            parts.push(self.emit_ctes(&q.ctes)?);
+        }
+
+        // SELECT
+        let select_items: Vec<_> = q
+            .select
+            .iter()
+            .map(|sel| {
+                let expr = self.emit_expr(&sel.expr);
+                match &sel.alias {
+                    Some(alias) => format!("{expr} AS {alias}"),
+                    None => expr,
+                }
+            })
+            .collect();
+        parts.push(format!("SELECT {}", select_items.join(", ")));
+
+        // FROM
+        let from = self.emit_table_ref(&q.from);
+        parts.push(format!("FROM {}", from.sql));
+
+        // WHERE
+        let mut where_parts = from.type_conditions;
+        if let Some(w) = &q.where_clause {
+            where_parts.push(self.emit_expr(w));
+        }
+        if !where_parts.is_empty() {
+            parts.push(format!("WHERE {}", where_parts.join(" AND ")));
+        }
+
+        // GROUP BY
+        if !q.group_by.is_empty() {
+            let groups: Vec<_> = q.group_by.iter().map(|g| self.emit_expr(g)).collect();
+            parts.push(format!("GROUP BY {}", groups.join(", ")));
+        }
+
+        // ORDER BY
+        if !q.order_by.is_empty() {
+            let orders: Vec<_> = q
+                .order_by
+                .iter()
+                .map(|o| {
+                    let dir = if o.desc { "DESC" } else { "ASC" };
+                    format!("{} {dir}", self.emit_expr(&o.expr))
+                })
+                .collect();
+            parts.push(format!("ORDER BY {}", orders.join(", ")));
+        }
+
+        // LIMIT
+        if let Some(limit) = q.limit {
+            parts.push(format!("LIMIT {limit}"));
+        }
+
+        Ok(parts.join(" "))
+    }
+
+    fn emit_ctes(&mut self, ctes: &[Cte]) -> Result<String> {
+        let has_recursive = ctes.iter().any(|c| c.recursive);
+        let keyword = if has_recursive {
+            "WITH RECURSIVE"
+        } else {
+            "WITH"
+        };
+
+        let cte_parts: Vec<String> = ctes
+            .iter()
+            .map(|cte| {
+                let inner = self.emit_query_body(&cte.query)?;
+                Ok(format!("{} AS ({})", cte.name, inner))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(format!("{} {}", keyword, cte_parts.join(", ")))
+    }
+
+    /// Emit query body without CTEs (for use inside CTE definitions).
+    fn emit_query_body(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
         // SELECT
@@ -302,9 +384,8 @@ mod tests {
             ],
             from: TableRef::scan("nodes", "n"),
             where_clause: Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
-            group_by: vec![],
-            order_by: vec![],
             limit: Some(10),
+            ..Default::default()
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
@@ -334,10 +415,7 @@ mod tests {
                 TableRef::scan("edges", "e"),
                 Expr::eq(Expr::col("n", "id"), Expr::col("e", "source_id")),
             ),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
-            limit: None,
+            ..Default::default()
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
@@ -361,13 +439,12 @@ mod tests {
                 },
             ],
             from: TableRef::scan("nodes", "n"),
-            where_clause: None,
             group_by: vec![Expr::col("n", "label")],
             order_by: vec![OrderExpr {
                 expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
                 desc: true,
             }],
-            limit: None,
+            ..Default::default()
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
@@ -394,9 +471,7 @@ mod tests {
                     Value::from("Group"),
                 ])),
             )),
-            group_by: vec![],
-            order_by: vec![],
-            limit: None,
+            ..Default::default()
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
@@ -425,9 +500,7 @@ mod tests {
                     Some(Expr::unary(Op::IsNull, Expr::col("n", "deleted_at"))),
                 ]),
             ]),
-            group_by: vec![],
-            order_by: vec![],
-            limit: None,
+            ..Default::default()
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
@@ -478,10 +551,7 @@ mod tests {
                 TableRef::scan_with_filter("gl_edges", "e", "AUTHORED"),
                 Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
             ),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
-            limit: None,
+            ..Default::default()
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
@@ -511,10 +581,7 @@ mod tests {
         let q = Query {
             select: vec![],
             from: TableRef::scan("nodes", "n"),
-            where_clause: None,
-            group_by: vec![],
-            order_by: vec![],
-            limit: None,
+            ..Default::default()
         };
 
         let result = codegen(&Node::Query(Box::new(q)), ctx).unwrap();
