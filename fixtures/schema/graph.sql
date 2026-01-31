@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS gl_users (
     first_name String DEFAULT '',
     last_name String DEFAULT '',
     state String DEFAULT '',
+    avatar_url Nullable(String),
     public_email Nullable(String),
     preferred_language Nullable(String),
     last_activity_on Nullable(Date32),
