@@ -1,5 +1,6 @@
 mod datalake;
 mod global_handler;
+pub mod locking;
 mod namespace_handler;
 mod pipeline;
 mod prepare;

@@ -11,6 +11,7 @@ use etl_engine::types::{Envelope, Event, SerializationError, Topic};
 use serde::Serialize;
 use tracing::warn;
 
+use super::locking::{INDEXING_LOCKS_BUCKET, namespace_lock_key};
 use super::pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
 use crate::indexer::topic::NamespaceIndexingRequest;
@@ -129,6 +130,15 @@ impl Handler for NamespaceHandler {
                 .map_err(|e| {
                     HandlerError::Processing(format!("failed to update namespace watermark: {e}"))
                 })?;
+
+            let lock_key = namespace_lock_key(payload.namespace);
+            if let Err(error) = context
+                .nats
+                .kv_delete(INDEXING_LOCKS_BUCKET, &lock_key)
+                .await
+            {
+                warn!(%error, namespace = payload.namespace, "failed to release namespace lock, will expire via TTL");
+            }
         }
 
         // TODO: We should store per entity watermarks so we can resume for a specific entity and not the whole thing.
@@ -257,5 +267,45 @@ mod tests {
         let result = handler.handle(context, envelope).await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn handler_releases_lock_on_success() {
+        let datalake = Arc::new(MockDatalake);
+        let ontology = Ontology::new();
+        let group_node = create_test_node("Group", "gl_groups", "groups");
+
+        let pipelines =
+            vec![OntologyEntityPipeline::from_node(&group_node, &ontology, datalake).unwrap()];
+
+        let handler = NamespaceHandler::new(Arc::new(MockWatermarkStore), pipelines, vec![]);
+
+        let namespace_id = 42i64;
+        let payload = serde_json::json!({
+            "organization": 1,
+            "namespace": namespace_id,
+            "watermark": "2024-01-21T00:00:00Z"
+        })
+        .to_string();
+        let envelope = TestEnvelopeFactory::simple(&payload);
+
+        let mock_nats = MockNatsServices::new();
+        let lock_key = namespace_lock_key(namespace_id);
+        mock_nats.set_kv(INDEXING_LOCKS_BUCKET, &lock_key, bytes::Bytes::new());
+
+        let destination = Arc::new(MockDestination::new());
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockMetricCollector::new()),
+            Arc::new(mock_nats.clone()),
+        );
+
+        let result = handler.handle(context, envelope).await;
+
+        assert!(result.is_ok());
+        assert!(
+            mock_nats.get_kv(INDEXING_LOCKS_BUCKET, &lock_key).is_none(),
+            "namespace lock should be released after successful processing"
+        );
     }
 }

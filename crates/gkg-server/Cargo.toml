@@ -15,10 +15,10 @@ regenerate-protos = []
 [dependencies]
 anyhow = { workspace = true }
 arrow = { workspace = true }
+bytes = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
-bytes = { workspace = true }
 clap = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 indexer = { path = "../code-indexer" }
