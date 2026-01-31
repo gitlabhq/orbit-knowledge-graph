@@ -425,11 +425,7 @@ fn lower_neighbors(input: &Input, ontology: &Ontology) -> Result<Node> {
     let center_node = find_node(&input.nodes, &neighbors_config.node)?;
     let center_table = resolve_table(ontology, center_node)?;
 
-    let type_filter = if neighbors_config.rel_types.is_empty() {
-        None
-    } else {
-        single_type_filter(&neighbors_config.rel_types)
-    };
+    let type_filter = type_filter(&neighbors_config.rel_types);
 
     let edge_alias = "e";
 
@@ -509,15 +505,15 @@ fn lower_neighbors(input: &Input, ontology: &Ontology) -> Result<Node> {
 
 /// Build a UNION ALL subquery for multi-hop traversal (1 to max_hops).
 fn build_hop_union(rel: &InputRelationship, alias: &str) -> TableRef {
-    let type_filter = single_type_filter(&rel.types);
+    let rel_type_filter = type_filter(&rel.types);
     let queries = (1..=rel.max_hops)
-        .map(|depth| build_hop_arm(depth, &type_filter, rel.direction))
+        .map(|depth| build_hop_arm(depth, &rel_type_filter, rel.direction))
         .collect();
     TableRef::union(queries, alias)
 }
 
 /// Build one arm of the union: a chain of edge joins for a specific depth.
-fn build_hop_arm(depth: u32, type_filter: &Option<String>, direction: Direction) -> Query {
+fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direction) -> Query {
     let (start_col, end_col) = direction.edge_columns();
 
     // Build chain: e1 -> e2 -> e3 -> ...
@@ -546,15 +542,19 @@ fn build_hop_arm(depth: u32, type_filter: &Option<String>, direction: Direction)
     }
 }
 
-fn edge_scan(alias: &str, type_filter: &Option<String>) -> TableRef {
+fn edge_scan(alias: &str, type_filter: &Option<Vec<String>>) -> TableRef {
     match type_filter {
-        Some(tf) => TableRef::scan_with_filter(EDGE_TABLE, alias, tf),
+        Some(types) => TableRef::scan_with_filter(EDGE_TABLE, alias, types.clone()),
         None => TableRef::scan(EDGE_TABLE, alias),
     }
 }
 
-fn single_type_filter(types: &[String]) -> Option<String> {
-    (types.len() == 1 && types[0] != "*").then(|| types[0].clone())
+fn type_filter(types: &[String]) -> Option<Vec<String>> {
+    if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+        None
+    } else {
+        Some(types.to_vec())
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -602,7 +602,7 @@ fn build_joins(
             let alias = format!("e{i}");
             edge_aliases.insert(i, alias.clone());
 
-            let edge = edge_scan(&alias, &single_type_filter(&rel.types));
+            let edge = edge_scan(&alias, &type_filter(&rel.types));
             result = TableRef::join(
                 JoinType::Inner,
                 result,
@@ -1381,5 +1381,51 @@ mod tests {
         assert!(aliases.contains(&&"e0_src".to_string()));
         assert!(aliases.contains(&&"e1_type".to_string()));
         assert!(aliases.contains(&&"e1_src".to_string()));
+    }
+
+    #[test]
+    fn test_type_filter_variants() {
+        fn extract_edge_type_filter(from: &TableRef) -> Option<Vec<String>> {
+            match from {
+                TableRef::Scan { type_filter, .. } => type_filter.clone(),
+                TableRef::Join { left, right, .. } => {
+                    extract_edge_type_filter(left).or_else(|| extract_edge_type_filter(right))
+                }
+                TableRef::Union { .. } => None,
+            }
+        }
+
+        // Single type
+        let q = validated_input(
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
+        );
+        let Node::Query(q) = lower(&q, &test_ontology()).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            extract_edge_type_filter(&q.from),
+            Some(vec!["AUTHORED".into()])
+        );
+
+        // Multiple types
+        let q = validated_input(
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":["AUTHORED","CONTAINS"],"from":"u","to":"n"}]}"#,
+        );
+        let Node::Query(q) = lower(&q, &test_ontology()).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            extract_edge_type_filter(&q.from),
+            Some(vec!["AUTHORED".into(), "CONTAINS".into()])
+        );
+
+        // Wildcard - no filter
+        let q = validated_input(
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"*","from":"u","to":"n"}]}"#,
+        );
+        let Node::Query(q) = lower(&q, &test_ontology()).unwrap() else {
+            panic!()
+        };
+        assert_eq!(extract_edge_type_filter(&q.from), None);
     }
 }

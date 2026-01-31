@@ -86,11 +86,13 @@ impl Op {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
     /// Read from a physical table → `table AS alias`
-    /// If type_filter is set, adds `alias.label = {type_alias:String}` to WHERE/ON.
+    /// If type_filter is set, adds filtering on relationship_kind column.
+    /// Single type: `alias.relationship_kind = {type_alias:String}`
+    /// Multiple types: `alias.relationship_kind IN ({type_alias:Array(String)})`
     Scan {
         table: String,
         alias: String,
-        type_filter: Option<String>,
+        type_filter: Option<Vec<String>>,
     },
     /// Combine two sources → `left JOIN_TYPE JOIN right ON condition`
     Join {
@@ -320,12 +322,12 @@ impl TableRef {
     pub fn scan_with_filter(
         table: impl Into<String>,
         alias: impl Into<String>,
-        type_filter: impl Into<String>,
+        type_filter: Vec<String>,
     ) -> Self {
         TableRef::Scan {
             table: table.into(),
             alias: alias.into(),
-            type_filter: Some(type_filter.into()),
+            type_filter: Some(type_filter),
         }
     }
 
