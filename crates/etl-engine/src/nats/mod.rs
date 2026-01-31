@@ -35,11 +35,13 @@
 mod broker;
 mod configuration;
 mod error;
+mod kv_types;
 mod message;
 mod services;
 
 pub use broker::NatsBroker;
 pub use configuration::NatsConfiguration;
 pub use error::NatsError;
+pub use kv_types::{KvEntry, KvPutOptions, KvPutResult};
 pub use message::{NatsMessage, NatsSubscription};
 pub use services::{NatsServices, NatsServicesImpl};
