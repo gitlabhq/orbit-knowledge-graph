@@ -81,25 +81,36 @@ async fn main() -> Result<()> {
             org_id, config.generation.organizations
         );
 
+        // Create streaming edge writer to avoid accumulating all edges in memory
+        let mut edge_writer = writer.create_edge_writer(org_id)?;
+
         let gen_start = std::time::Instant::now();
-        let org_data = generator.generate_organization(org_id)?;
+        let org_nodes = generator.generate_organization_streaming(org_id, &mut edge_writer)?;
         let gen_elapsed = gen_start.elapsed().as_secs_f64();
 
-        let node_count: usize = org_data
+        let node_count: usize = org_nodes
             .nodes
             .values()
             .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
             .sum();
 
+        let edge_count = edge_writer.count();
+
         println!(
             "  Generated {} nodes + {} edges ({:.1}s)",
             node_count,
-            org_data.edges.len(),
+            edge_count,
             gen_elapsed
         );
 
         let write_start = std::time::Instant::now();
-        writer.write_organization_data(&ontology, org_id, &org_data)?;
+        
+        // Write nodes to Parquet
+        writer.write_organization_nodes(org_id, &org_nodes)?;
+        
+        // Close edge writer (flushes remaining edges)
+        edge_writer.close()?;
+        
         let write_elapsed = write_start.elapsed().as_secs_f64();
 
         println!("  Written to Parquet ({:.1}s)\n", write_elapsed);

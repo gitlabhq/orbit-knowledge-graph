@@ -16,6 +16,7 @@ pub use traversal::{EntityContext, EntityRegistry, TraversalPathGenerator};
 
 use crate::arrow_schema::ToArrowSchema;
 use crate::config::{Config, EdgeRatio};
+use crate::parquet::StreamingEdgeWriter;
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use rand::Rng;
@@ -44,6 +45,13 @@ pub struct OrganizationData {
     pub nodes: HashMap<String, Vec<RecordBatch>>,
     /// Edge records.
     pub edges: Vec<EdgeRecord>,
+}
+
+/// Generated node data only (edges streamed separately).
+#[derive(Debug, Default)]
+pub struct OrganizationNodes {
+    /// Node batches by node type name.
+    pub nodes: HashMap<String, Vec<RecordBatch>>,
 }
 
 /// Simple string interner for edge record strings.
@@ -141,6 +149,68 @@ impl Generator {
 
         let association_edges = self.generate_association_edges(&registry, &mut rng);
         data.edges.extend(association_edges);
+
+        Ok(data)
+    }
+
+    /// Generate organization data with streaming edge output.
+    /// Edges are written directly to the StreamingEdgeWriter, reducing peak memory.
+    pub fn generate_organization_streaming(
+        &self,
+        org_id: u32,
+        edge_writer: &mut StreamingEdgeWriter,
+    ) -> Result<OrganizationNodes> {
+        let mut data = OrganizationNodes::default();
+        let mut registry = EntityRegistry::new(org_id);
+        let mut rng = rand::thread_rng();
+
+        for node_type in self.dependency_graph.generation_order() {
+            let node = self
+                .ontology
+                .nodes()
+                .find(|n| n.name == *node_type)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Node type '{}' not found in ontology", node_type)
+                })?;
+
+            if self.dependency_graph.is_root(node_type) {
+                let count = self
+                    .config
+                    .generation
+                    .roots
+                    .get(node_type)
+                    .copied()
+                    .unwrap_or(0);
+
+                if count > 0 {
+                    let batches = self.generate_root_entities_streaming(
+                        node,
+                        org_id,
+                        count,
+                        &mut registry,
+                        &mut rng,
+                        edge_writer,
+                    )?;
+                    data.nodes.insert(node_type.clone(), batches);
+                }
+            } else if let Some(parent_edges) = self.dependency_graph.parent_edges(node_type) {
+                let batches = self.generate_child_entities_streaming(
+                    node,
+                    parent_edges,
+                    &mut registry,
+                    &mut rng,
+                    edge_writer,
+                )?;
+                if !batches.is_empty() {
+                    data.nodes.insert(node_type.clone(), batches);
+                }
+            }
+        }
+
+        // Compact registry to free traversal path memory before associations
+        registry.compact();
+
+        self.generate_association_edges_streaming(&registry, &mut rng, edge_writer)?;
 
         Ok(data)
     }
@@ -381,6 +451,227 @@ impl Generator {
         }
 
         edges
+    }
+
+    // ==================== Streaming variants ====================
+    // These write edges directly to StreamingEdgeWriter instead of accumulating
+
+    fn generate_root_entities_streaming(
+        &self,
+        node: &NodeEntity,
+        org_id: u32,
+        count: usize,
+        registry: &mut EntityRegistry,
+        _rng: &mut impl Rng,
+        edge_writer: &mut StreamingEdgeWriter,
+    ) -> Result<Vec<RecordBatch>> {
+        let schema = Arc::new(node.to_arrow_schema());
+        let mut builder = BatchBuilder::with_seed(
+            node,
+            schema,
+            self.config.generation.batch_size,
+            self.config.generation.seed,
+        );
+        let is_group = node.name == "Group";
+
+        for _ in 0..count {
+            let (entity_id, traversal_path) = if is_group {
+                let ns_id = registry.next_namespace_id();
+                let trav = format!("{}/{}/", org_id, ns_id);
+                (ns_id, trav)
+            } else {
+                let eid = self.next_entity_id();
+                (eid, format!("{}/", org_id))
+            };
+
+            builder.add_row(traversal_path.clone(), entity_id);
+            let ctx = EntityContext::new(entity_id, traversal_path);
+            registry.add(&node.name, ctx.clone());
+
+            if is_group && self.config.generation.subgroups.max_depth > 0 {
+                self.generate_subgroup_hierarchy_streaming(
+                    &ctx,
+                    1,
+                    registry,
+                    &mut builder,
+                    edge_writer,
+                )?;
+            }
+        }
+
+        Ok(builder.finish())
+    }
+
+    fn generate_subgroup_hierarchy_streaming(
+        &self,
+        parent: &EntityContext,
+        depth: usize,
+        registry: &mut EntityRegistry,
+        builder: &mut BatchBuilder,
+        edge_writer: &mut StreamingEdgeWriter,
+    ) -> Result<()> {
+        let subgroup_config = &self.config.generation.subgroups;
+        if depth > subgroup_config.max_depth {
+            return Ok(());
+        }
+
+        for _ in 0..subgroup_config.per_group {
+            let ns_id = registry.next_namespace_id();
+            let traversal_path = format!("{}{}/", parent.traversal_path, ns_id);
+
+            builder.add_row(traversal_path.clone(), ns_id);
+            let ctx = EntityContext::new(ns_id, traversal_path);
+            registry.add("Group", ctx.clone());
+
+            edge_writer.push(EdgeRecord {
+                relationship_kind: self.intern("CONTAINS"),
+                source: parent.id,
+                source_kind: self.intern("Group"),
+                target: ns_id,
+                target_kind: self.intern("Group"),
+            })?;
+
+            self.generate_subgroup_hierarchy_streaming(&ctx, depth + 1, registry, builder, edge_writer)?;
+        }
+
+        Ok(())
+    }
+
+    fn generate_child_entities_streaming(
+        &self,
+        node: &NodeEntity,
+        parent_edges: &[ParentEdge],
+        registry: &mut EntityRegistry,
+        rng: &mut impl Rng,
+        edge_writer: &mut StreamingEdgeWriter,
+    ) -> Result<Vec<RecordBatch>> {
+        let schema = Arc::new(node.to_arrow_schema());
+        let mut builder = BatchBuilder::with_seed(
+            node,
+            schema,
+            self.config.generation.batch_size,
+            self.config.generation.seed,
+        );
+        let is_group = node.name == "Group";
+        let is_parent_type = self.dependency_graph.is_parent_type(&node.name);
+
+        for parent_edge in parent_edges {
+            let parents: Vec<_> = match registry.get(&parent_edge.parent_kind) {
+                Some(p) if !p.is_empty() => p.iter().map(|e| (e.id, e.traversal_path.clone())).collect(),
+                _ => continue,
+            };
+
+            let rel_kind = self.intern(&parent_edge.edge_type);
+            let parent_kind_str = self.intern(&parent_edge.parent_kind);
+            let node_name_str = self.intern(&node.name);
+
+            for (parent_id, parent_path) in &parents {
+                let child_count = parent_edge.ratio.sample_with_variance(rng);
+
+                for _ in 0..child_count {
+                    let (entity_id, traversal_path) = if is_group {
+                        let ns_id = registry.next_namespace_id();
+                        let trav = format!("{}{}/", parent_path, ns_id);
+                        (ns_id, trav)
+                    } else {
+                        let eid = self.next_entity_id();
+                        (eid, parent_path.clone())
+                    };
+
+                    builder.add_row(traversal_path.clone(), entity_id);
+
+                    if is_parent_type {
+                        registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
+                    } else {
+                        registry.add_id_only(&node.name, entity_id);
+                    }
+
+                    let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child {
+                        (*parent_id, parent_kind_str.clone(), entity_id, node_name_str.clone())
+                    } else {
+                        (entity_id, node_name_str.clone(), *parent_id, parent_kind_str.clone())
+                    };
+
+                    edge_writer.push(EdgeRecord {
+                        relationship_kind: rel_kind.clone(),
+                        source,
+                        source_kind,
+                        target,
+                        target_kind,
+                    })?;
+                }
+            }
+        }
+
+        Ok(builder.finish())
+    }
+
+    fn generate_association_edges_streaming(
+        &self,
+        registry: &EntityRegistry,
+        rng: &mut impl Rng,
+        edge_writer: &mut StreamingEdgeWriter,
+    ) -> Result<()> {
+        use crate::config::IterationDirection;
+
+        for (edge_type, source_kind, target_kind, ratio, direction) in
+            self.config.generation.associations.all_associations()
+        {
+            let source_ids = match registry.get_ids_slice(&source_kind) {
+                Some(ids) if !ids.is_empty() => ids,
+                _ => continue,
+            };
+
+            let target_ids = match registry.get_ids_slice(&target_kind) {
+                Some(ids) if !ids.is_empty() => ids,
+                _ => continue,
+            };
+
+            let rel_kind = self.intern(&edge_type);
+            let src_kind = self.intern(&source_kind);
+            let tgt_kind = self.intern(&target_kind);
+
+            let (iterate_over, sample_from) = match direction {
+                IterationDirection::Target => (target_ids, source_ids),
+                IterationDirection::Source => (source_ids, target_ids),
+            };
+
+            let sample_len = sample_from.len();
+
+            for &primary_id in iterate_over {
+                let edge_count = match &ratio {
+                    EdgeRatio::Count(n) => *n,
+                    EdgeRatio::Probability(p) => {
+                        if rng.gen_bool(*p) { 1 } else { 0 }
+                    }
+                };
+
+                if edge_count == 0 {
+                    continue;
+                }
+
+                let count = edge_count.min(sample_len);
+                for _ in 0..count {
+                    let idx = rng.gen_range(0..sample_len);
+                    let secondary_id = sample_from[idx];
+
+                    let (source_id, target_id) = match direction {
+                        IterationDirection::Target => (secondary_id, primary_id),
+                        IterationDirection::Source => (primary_id, secondary_id),
+                    };
+
+                    edge_writer.push(EdgeRecord {
+                        relationship_kind: rel_kind.clone(),
+                        source: source_id,
+                        source_kind: src_kind.clone(),
+                        target: target_id,
+                        target_kind: tgt_kind.clone(),
+                    })?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn print_plan(&self) {

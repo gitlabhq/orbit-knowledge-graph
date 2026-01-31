@@ -4,6 +4,148 @@ use chrono::Utc;
 use ontology::{DataType, Field};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use std::borrow::Cow;
+
+/// Hex digits for fast formatting (avoids format! parsing overhead).
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+/// Fast hex formatting into a String buffer.
+#[inline]
+fn push_hex_u64(buf: &mut String, mut val: u64) {
+    if val == 0 {
+        buf.push('0');
+        return;
+    }
+    // Find the highest non-zero nibble
+    let leading_zeros = val.leading_zeros() as usize;
+    let nibbles = 16 - (leading_zeros / 4);
+    
+    // Reserve space
+    buf.reserve(nibbles);
+    
+    // Build hex string from high to low nibbles
+    let start = buf.len();
+    for _ in 0..nibbles {
+        buf.push('0'); // placeholder
+    }
+    let bytes = unsafe { buf.as_bytes_mut() };
+    for i in (0..nibbles).rev() {
+        bytes[start + i] = HEX_DIGITS[(val & 0xf) as usize];
+        val >>= 4;
+    }
+}
+
+#[inline]
+fn push_hex_u16(buf: &mut String, val: u16) {
+    push_hex_u64(buf, val as u64);
+}
+
+/// Pre-computed field generation strategy to avoid runtime string matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldKind {
+    // String kinds
+    NameOrTitle,
+    Email,
+    Url,
+    Path,
+    ShaOrHash,
+    DescriptionOrBody,
+    Status,
+    State,
+    RefOrBranch,
+    GenericString,
+    // Int kinds
+    Iid,
+    Weight,
+    StarCount,
+    Duration,
+    GenericInt,
+    // Bool kinds
+    Archived,
+    Confidential,
+    Draft,
+    Squash,
+    PrivateProfile,
+    IsAdminOrAuditor,
+    IsExternal,
+    DiscussionLocked,
+    Tag,
+    GenericBool,
+    // Other (uses DataType)
+    Float,
+    Date,
+    DateTime,
+    Enum,
+}
+
+impl FieldKind {
+    /// Classify a field once at startup to avoid repeated string matching.
+    pub fn classify(field: &Field) -> Self {
+        if field.enum_values.is_some() {
+            return FieldKind::Enum;
+        }
+        
+        match field.data_type {
+            DataType::Enum => FieldKind::Enum,
+            DataType::Float => FieldKind::Float,
+            DataType::Date => FieldKind::Date,
+            DataType::DateTime => FieldKind::DateTime,
+            DataType::String => Self::classify_string(&field.name),
+            DataType::Int => Self::classify_int(&field.name),
+            DataType::Bool => Self::classify_bool(&field.name),
+        }
+    }
+    
+    fn classify_string(name: &str) -> Self {
+        let lower = name.to_lowercase();
+        if lower.contains("name") || lower.contains("title") {
+            FieldKind::NameOrTitle
+        } else if lower.contains("email") {
+            FieldKind::Email
+        } else if lower.contains("url") {
+            FieldKind::Url
+        } else if lower.contains("path") {
+            FieldKind::Path
+        } else if lower.contains("sha") || lower.contains("hash") {
+            FieldKind::ShaOrHash
+        } else if lower.contains("description") || lower.contains("body") {
+            FieldKind::DescriptionOrBody
+        } else if lower.contains("status") {
+            FieldKind::Status
+        } else if lower.contains("state") {
+            FieldKind::State
+        } else if lower.contains("ref") || lower.contains("branch") {
+            FieldKind::RefOrBranch
+        } else {
+            FieldKind::GenericString
+        }
+    }
+    
+    fn classify_int(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "iid" => FieldKind::Iid,
+            "weight" => FieldKind::Weight,
+            "star_count" => FieldKind::StarCount,
+            "duration" => FieldKind::Duration,
+            _ => FieldKind::GenericInt,
+        }
+    }
+    
+    fn classify_bool(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "archived" => FieldKind::Archived,
+            "confidential" => FieldKind::Confidential,
+            "draft" => FieldKind::Draft,
+            "squash" => FieldKind::Squash,
+            "private_profile" => FieldKind::PrivateProfile,
+            "is_admin" | "is_auditor" => FieldKind::IsAdminOrAuditor,
+            "is_external" => FieldKind::IsExternal,
+            "discussion_locked" => FieldKind::DiscussionLocked,
+            "tag" => FieldKind::Tag,
+            _ => FieldKind::GenericBool,
+        }
+    }
+}
 
 /// Generates values for ontology fields using minimal randomness.
 pub struct FakeValueGenerator {
@@ -11,6 +153,8 @@ pub struct FakeValueGenerator {
     counter: u64,
     /// Cached current timestamp to avoid repeated syscalls.
     now_millis: i64,
+    /// Reusable string buffer to avoid allocations.
+    buf: String,
 }
 
 impl Default for FakeValueGenerator {
@@ -25,6 +169,7 @@ impl FakeValueGenerator {
             rng: StdRng::from_entropy(),
             counter: 0,
             now_millis: Utc::now().timestamp_millis(),
+            buf: String::with_capacity(64),
         }
     }
 
@@ -37,11 +182,18 @@ impl FakeValueGenerator {
             rng: StdRng::seed_from_u64(seed),
             counter: 0,
             now_millis: Utc::now().timestamp_millis(),
+            buf: String::with_capacity(64),
         }
     }
 
     pub fn fast_with_seed(seed: u64) -> Self {
         Self::with_seed(seed)
+    }
+
+    /// Clone the buffer contents and return as Cow::Owned. Buffer is reused next call.
+    #[inline]
+    fn emit_buf(&self) -> Cow<'static, str> {
+        Cow::Owned(self.buf.clone())
     }
 
     /// Generate a single u64 and use the counter for mixing.
@@ -52,77 +204,82 @@ impl FakeValueGenerator {
         r ^ self.counter.wrapping_mul(0x9e3779b97f4a7c15)
     }
 
+    /// Generate a value for a field. Use FieldKind::classify() once per field,
+    /// then call generate_with_kind() for each row.
     pub fn generate(&mut self, field: &Field) -> FakeValue {
+        let kind = FieldKind::classify(field);
+        self.generate_with_kind(kind, field.nullable, field.enum_values.as_ref())
+    }
+
+    /// Fast path: generate using pre-computed FieldKind.
+    #[inline]
+    pub fn generate_with_kind(
+        &mut self,
+        kind: FieldKind,
+        nullable: bool,
+        enum_values: Option<&std::collections::BTreeMap<i64, String>>,
+    ) -> FakeValue {
         let bits = self.next_random();
 
         // Use lowest bits for nullable check (10% ≈ 26/256)
-        if field.nullable && (bits & 0xff) < 26 {
+        if nullable && (bits & 0xff) < 26 {
             return FakeValue::Null;
         }
 
-        if field.enum_values.is_some() {
-            return self.generate_enum_from_bits(field, bits);
-        }
-
-        match field.data_type {
-            DataType::Enum => self.generate_enum_from_bits(field, bits),
-            DataType::String => self.generate_string_from_bits(&field.name, bits),
-            DataType::Int => self.generate_int_from_bits(&field.name, bits),
-            DataType::Float => {
-                // Use upper 32 bits for float
-                let f = (bits >> 32) as f64 / (u32::MAX as f64);
-                FakeValue::Float(f * 10000.0)
-            }
-            DataType::Bool => self.generate_bool_from_bits(&field.name, bits),
-            DataType::Date => {
-                // Use bits for days in range [0, 1825) (5 years)
-                let days_ago = ((bits >> 16) as i32) % 1825;
-                FakeValue::Date(-days_ago)
-            }
-            DataType::DateTime => {
-                // Extract days and hours from bits
-                let days_ago = ((bits >> 16) % 1825) as i64;
-                let hour_offset = ((bits >> 8) % 24) as i64;
-                let millis = (days_ago * 86400 + hour_offset * 3600) * 1000;
-                FakeValue::DateTime(self.now_millis - millis)
-            }
-        }
-    }
-
-    #[inline]
-    fn generate_string_from_bits(&self, field_name: &str, bits: u64) -> FakeValue {
         let low = bits as u32;
         let high = (bits >> 32) as u32;
-        let mixed = bits;
 
-        let value = match field_name.to_lowercase().as_str() {
-            name if name.contains("name") || name.contains("title") => {
+        match kind {
+            // String kinds - use buffer + fast hex instead of format!()
+            FieldKind::NameOrTitle => {
                 const PREFIXES: [&str; 8] =
-                    ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "theta", "omega"];
+                    ["alpha_", "beta_", "gamma_", "delta_", "epsilon_", "zeta_", "theta_", "omega_"];
                 let prefix = PREFIXES[low as usize % PREFIXES.len()];
-                format!("{}_{:x}", prefix, mixed)
+                self.buf.clear();
+                self.buf.push_str(prefix);
+                push_hex_u64(&mut self.buf, bits);
+                FakeValue::String(self.emit_buf())
             }
-            name if name.contains("email") => {
+            FieldKind::Email => {
                 const DOMAINS: [&str; 5] =
-                    ["example.com", "test.org", "demo.net", "sample.io", "mock.dev"];
+                    ["@example.com", "@test.org", "@demo.net", "@sample.io", "@mock.dev"];
                 let domain = DOMAINS[low as usize % DOMAINS.len()];
-                format!("user{:x}@{}", mixed & 0xffffff, domain)
+                self.buf.clear();
+                self.buf.push_str("user");
+                push_hex_u64(&mut self.buf, bits & 0xffffff);
+                self.buf.push_str(domain);
+                FakeValue::String(self.emit_buf())
             }
-            name if name.contains("url") => {
-                format!("https://example.com/{:x}/{:x}", mixed, high as u16)
+            FieldKind::Url => {
+                self.buf.clear();
+                self.buf.push_str("https://example.com/");
+                push_hex_u64(&mut self.buf, bits);
+                self.buf.push('/');
+                push_hex_u16(&mut self.buf, high as u16);
+                FakeValue::String(self.emit_buf())
             }
-            name if name.contains("path") => {
-                format!(
-                    "/p{:x}/d{:x}/{:x}",
-                    mixed & 0xff,
-                    (mixed >> 8) & 0xff,
-                    high as u16
-                )
+            FieldKind::Path => {
+                self.buf.clear();
+                self.buf.push_str("/p");
+                push_hex_u64(&mut self.buf, bits & 0xff);
+                self.buf.push_str("/d");
+                push_hex_u64(&mut self.buf, (bits >> 8) & 0xff);
+                self.buf.push('/');
+                push_hex_u16(&mut self.buf, high as u16);
+                FakeValue::String(self.emit_buf())
             }
-            name if name.contains("sha") || name.contains("hash") => {
-                format!("{:040x}", ((mixed as u128) << 64) | (low as u128))
+            FieldKind::ShaOrHash => {
+                // 40-char hex (160 bits) - use fixed-width formatting
+                self.buf.clear();
+                self.buf.reserve(40);
+                let val = ((bits as u128) << 64) | (low as u128);
+                for i in (0..40).rev() {
+                    let nibble = ((val >> (i * 4)) & 0xf) as usize;
+                    self.buf.push(HEX_DIGITS[nibble] as char);
+                }
+                FakeValue::String(self.emit_buf())
             }
-            name if name.contains("description") || name.contains("body") => {
+            FieldKind::DescriptionOrBody => {
                 const WORDS: [&str; 12] = [
                     "Lorem", "ipsum", "dolor", "sit", "amet", "consectetur",
                     "adipiscing", "elit", "sed", "do", "eiusmod", "tempor",
@@ -130,77 +287,91 @@ impl FakeValueGenerator {
                 let w1 = WORDS[low as usize % WORDS.len()];
                 let w2 = WORDS[(low >> 8) as usize % WORDS.len()];
                 let w3 = WORDS[(low >> 16) as usize % WORDS.len()];
-                format!("{} {} {} {:x}", w1, w2, w3, mixed & 0xffff)
+                self.buf.clear();
+                self.buf.push_str(w1);
+                self.buf.push(' ');
+                self.buf.push_str(w2);
+                self.buf.push(' ');
+                self.buf.push_str(w3);
+                self.buf.push(' ');
+                push_hex_u64(&mut self.buf, bits & 0xffff);
+                FakeValue::String(self.emit_buf())
             }
-            name if name.contains("status") => {
-                const STATUSES: [&str; 5] = ["open", "closed", "merged", "pending", "active"];
-                STATUSES[low as usize % STATUSES.len()].to_string()
+            FieldKind::Status => {
+                const STATUSES: [&'static str; 5] = ["open", "closed", "merged", "pending", "active"];
+                FakeValue::static_string(STATUSES[low as usize % STATUSES.len()])
             }
-            name if name.contains("state") => {
-                const STATES: [&str; 5] = ["pending", "running", "success", "failed", "canceled"];
-                STATES[low as usize % STATES.len()].to_string()
+            FieldKind::State => {
+                const STATES: [&'static str; 5] = ["pending", "running", "success", "failed", "canceled"];
+                FakeValue::static_string(STATES[low as usize % STATES.len()])
             }
-            name if name.contains("ref") || name.contains("branch") => {
-                const PREFIXES: [&str; 6] = ["feature", "fix", "hotfix", "release", "main", "develop"];
+            FieldKind::RefOrBranch => {
+                const PREFIXES: [&str; 6] = ["feature/branch-", "fix/branch-", "hotfix/branch-", "release/branch-", "main/branch-", "develop/branch-"];
                 let prefix = PREFIXES[low as usize % PREFIXES.len()];
-                format!("{}/branch-{:x}", prefix, mixed & 0xffff)
+                self.buf.clear();
+                self.buf.push_str(prefix);
+                push_hex_u64(&mut self.buf, bits & 0xffff);
+                FakeValue::String(self.emit_buf())
             }
-            _ => {
-                format!("val{:x}", mixed)
+            FieldKind::GenericString => {
+                self.buf.clear();
+                self.buf.push_str("val");
+                push_hex_u64(&mut self.buf, bits);
+                FakeValue::String(self.emit_buf())
             }
-        };
-        FakeValue::String(value)
-    }
-
-    #[inline]
-    fn generate_int_from_bits(&self, field_name: &str, bits: u64) -> FakeValue {
-        let low = bits as u32;
-        let value = match field_name.to_lowercase().as_str() {
-            "iid" => (low % 10000 + 1) as i64,
-            "weight" => (low % 19 + 1) as i64,
-            "star_count" => (low % 5000) as i64,
-            "duration" => (low % 7140 + 60) as i64,
-            _ => (low % 99999 + 1) as i64,
-        };
-        FakeValue::Int(value)
-    }
-
-    #[inline]
-    fn generate_bool_from_bits(&self, field_name: &str, bits: u64) -> FakeValue {
-        // Use bits 8-15 for bool probability (0-255 scale)
-        let threshold = match field_name.to_lowercase().as_str() {
-            "archived" => 13,            // 5%
-            "confidential" => 26,        // 10%
-            "draft" => 51,               // 20%
-            "squash" => 77,              // 30%
-            "private_profile" => 26,     // 10%
-            "is_admin" | "is_auditor" => 5, // 2%
-            "is_external" => 13,         // 5%
-            "discussion_locked" => 13,   // 5%
-            "tag" => 26,                 // 10%
-            _ => 128,                    // 50%
-        };
-        FakeValue::Bool(((bits >> 8) & 0xff) < threshold)
-    }
-
-    #[inline]
-    fn generate_enum_from_bits(&self, field: &Field, bits: u64) -> FakeValue {
-        if let Some(enum_values) = &field.enum_values {
-            let values: Vec<&String> = enum_values.values().collect();
-            if !values.is_empty() {
-                let index = (bits as usize) % values.len();
-                return FakeValue::String(values[index].clone());
+            // Int kinds
+            FieldKind::Iid => FakeValue::Int((low % 10000 + 1) as i64),
+            FieldKind::Weight => FakeValue::Int((low % 19 + 1) as i64),
+            FieldKind::StarCount => FakeValue::Int((low % 5000) as i64),
+            FieldKind::Duration => FakeValue::Int((low % 7140 + 60) as i64),
+            FieldKind::GenericInt => FakeValue::Int((low % 99999 + 1) as i64),
+            // Bool kinds
+            FieldKind::Archived => FakeValue::Bool(((bits >> 8) & 0xff) < 13),
+            FieldKind::Confidential => FakeValue::Bool(((bits >> 8) & 0xff) < 26),
+            FieldKind::Draft => FakeValue::Bool(((bits >> 8) & 0xff) < 51),
+            FieldKind::Squash => FakeValue::Bool(((bits >> 8) & 0xff) < 77),
+            FieldKind::PrivateProfile => FakeValue::Bool(((bits >> 8) & 0xff) < 26),
+            FieldKind::IsAdminOrAuditor => FakeValue::Bool(((bits >> 8) & 0xff) < 5),
+            FieldKind::IsExternal => FakeValue::Bool(((bits >> 8) & 0xff) < 13),
+            FieldKind::DiscussionLocked => FakeValue::Bool(((bits >> 8) & 0xff) < 13),
+            FieldKind::Tag => FakeValue::Bool(((bits >> 8) & 0xff) < 26),
+            FieldKind::GenericBool => FakeValue::Bool(((bits >> 8) & 0xff) < 128),
+            // Other types
+            FieldKind::Float => {
+                let f = (bits >> 32) as f64 / (u32::MAX as f64);
+                FakeValue::Float(f * 10000.0)
+            }
+            FieldKind::Date => {
+                let days_ago = ((bits >> 16) as i32) % 1825;
+                FakeValue::Date(-days_ago)
+            }
+            FieldKind::DateTime => {
+                let days_ago = ((bits >> 16) % 1825) as i64;
+                let hour_offset = ((bits >> 8) % 24) as i64;
+                let millis = (days_ago * 86400 + hour_offset * 3600) * 1000;
+                FakeValue::DateTime(self.now_millis - millis)
+            }
+            FieldKind::Enum => {
+                if let Some(enum_vals) = enum_values {
+                    let values: Vec<&String> = enum_vals.values().collect();
+                    if !values.is_empty() {
+                        let index = (bits as usize) % values.len();
+                        return FakeValue::owned_string(values[index].clone());
+                    }
+                }
+                FakeValue::static_string("unknown")
             }
         }
-        FakeValue::String("unknown".to_string())
     }
+
 }
 
 /// A generated fake value.
 #[derive(Debug, Clone)]
 pub enum FakeValue {
     Null,
-    String(String),
+    /// String value - uses Cow to avoid allocation for static strings.
+    String(Cow<'static, str>),
     Int(i64),
     Float(f64),
     Bool(bool),
@@ -211,5 +382,17 @@ pub enum FakeValue {
 impl FakeValue {
     pub fn is_null(&self) -> bool {
         matches!(self, FakeValue::Null)
+    }
+
+    /// Create a string value from an owned String.
+    #[inline]
+    pub fn owned_string(s: String) -> Self {
+        FakeValue::String(Cow::Owned(s))
+    }
+
+    /// Create a string value from a static str (zero allocation).
+    #[inline]
+    pub fn static_string(s: &'static str) -> Self {
+        FakeValue::String(Cow::Borrowed(s))
     }
 }
