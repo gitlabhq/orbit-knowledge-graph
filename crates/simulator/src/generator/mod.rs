@@ -18,8 +18,8 @@ use crate::arrow_schema::ToArrowSchema;
 use crate::config::{Config, EdgeRatio};
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use fake::rand::Rng;
-use fake::rand::seq::IteratorRandom;
+use rand::seq::IteratorRandom;
+use rand::Rng;
 use ontology::{NodeEntity, Ontology};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -79,7 +79,7 @@ impl Generator {
     pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
         let mut data = OrganizationData::default();
         let mut registry = EntityRegistry::new(org_id);
-        let mut rng = fake::rand::thread_rng();
+        let mut rng = rand::thread_rng();
 
         for node_type in self.dependency_graph.generation_order() {
             let node = self

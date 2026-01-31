@@ -205,13 +205,13 @@ impl QueryExecutor {
 
     /// Get a random security context for query execution.
     fn random_security_context(&self) -> Result<SecurityContext> {
-        use fake::rand::Rng;
+        use rand::Rng;
 
         if self.security_contexts.is_empty() {
             anyhow::bail!("No security contexts available - call warm_cache first");
         }
 
-        let mut rng = fake::rand::thread_rng();
+        let mut rng = rand::thread_rng();
         let idx = rng.gen_range(0..self.security_contexts.len());
         let (org_id, path) = &self.security_contexts[idx];
 

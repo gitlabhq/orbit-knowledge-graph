@@ -26,7 +26,7 @@
 //! - `EntityContext`: holds an entity's ID and traversal ID
 //! - `EntityRegistry`: maintains all generated entities by type for parent lookups
 
-use fake::rand::Rng;
+use rand::Rng;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 

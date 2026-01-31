@@ -19,8 +19,7 @@ tracing-subscriber.workspace = true
 
 # Simulator-specific dependencies
 clickhouse = { workspace = true }
-fake = { version = "3.0", features = ["derive", "chrono"] }
-# Note: Use fake::rand re-export to avoid version conflicts
+rand = "0.8"
 indicatif = "0.18"
 parquet = "57"
 sqlformat = "0.5"
