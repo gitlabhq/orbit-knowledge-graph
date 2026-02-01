@@ -174,16 +174,13 @@ impl AnalysisService {
             relationships.len()
         );
 
-        let mut graph_data = GraphData {
+        let graph_data = GraphData {
             directory_nodes,
             file_nodes,
             definition_nodes,
             imported_symbol_nodes,
             relationships,
         };
-
-        // Assign node IDs to populate source_id/target_id on relationships
-        graph_data.assign_node_ids();
 
         Ok(graph_data)
     }

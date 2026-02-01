@@ -114,7 +114,8 @@ pub async fn setup_kotlin_reference_pipeline() -> KotlinReferenceTestSetup {
         .expect("Failed to index repository");
 
     // Verify we have graph data
-    let graph_data = indexing_result.graph_data.expect("Should have graph data");
+    let mut graph_data = indexing_result.graph_data.expect("Should have graph data");
+    graph_data.assign_node_ids(1, "main");
 
     KotlinReferenceTestSetup {
         _local_repo: local_repo,

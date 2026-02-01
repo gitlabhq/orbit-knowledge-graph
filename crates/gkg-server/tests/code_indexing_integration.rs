@@ -90,6 +90,54 @@ async fn indexes_repository_from_gitaly() {
         definitions.first().is_some_and(|b| b.num_rows() > 0),
         "no definitions indexed"
     );
+
+    let file_defines_edges = clickhouse
+        .query(
+            "SELECT source_id, target_id, relationship_kind FROM gl_edges \
+             WHERE source_kind = 'File' AND target_kind = 'Definition' \
+             AND relationship_kind = 'FILE_DEFINES'",
+        )
+        .await;
+    assert!(
+        file_defines_edges.first().is_some_and(|b| b.num_rows() > 0),
+        "no FILE_DEFINES edges indexed"
+    );
+
+    let file_ids = clickhouse
+        .query(&format!(
+            "SELECT id FROM gl_file WHERE project_id = {}",
+            project_id
+        ))
+        .await;
+    let definition_ids = clickhouse
+        .query(&format!(
+            "SELECT id FROM gl_definition WHERE project_id = {}",
+            project_id
+        ))
+        .await;
+
+    assert!(
+        file_ids.first().is_some_and(|b| b.num_rows() > 0),
+        "file should have an id"
+    );
+    assert!(
+        definition_ids.first().is_some_and(|b| b.num_rows() > 0),
+        "definition should have an id"
+    );
+
+    let class_to_method_edges = clickhouse
+        .query(
+            "SELECT source_id, target_id, relationship_kind FROM gl_edges \
+             WHERE source_kind = 'Definition' AND target_kind = 'Definition' \
+             AND relationship_kind = 'CLASS_TO_METHOD'",
+        )
+        .await;
+    assert!(
+        class_to_method_edges
+            .first()
+            .is_some_and(|b| b.num_rows() > 0),
+        "no CLASS_TO_METHOD edges indexed"
+    );
 }
 
 /// GitLab's hashed storage path: @hashed/xx/yy/sha256(project_id).git
@@ -211,7 +259,15 @@ mkdir -p $(dirname /home/git/repositories/{repo_path})
 $GIT init -q --bare /home/git/repositories/{repo_path}
 rm -rf /tmp/work && mkdir -p /tmp/work && cd /tmp/work
 $GIT init -q && $GIT config user.email x@x && $GIT config user.name x
-mkdir -p src && echo 'public class Main {{ }}' > src/Main.java
+mkdir -p src && cat > src/Main.java << 'JAVA'
+public class Main {{
+    public void save() {{
+        validate();
+    }}
+    public void validate() {{
+    }}
+}}
+JAVA
 $GIT add . && $GIT commit -q -m init
 cp -r .git/objects/* /home/git/repositories/{repo_path}/objects/
 mkdir -p /home/git/repositories/{repo_path}/refs/heads

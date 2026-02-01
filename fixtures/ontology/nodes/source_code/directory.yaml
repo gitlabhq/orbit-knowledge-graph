@@ -20,13 +20,25 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Internal identifier for the directory node."
+    description: "Unique identifier for the directory node."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
     description: "ID of the project this directory belongs to."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    description: "Git branch where this directory exists."
 
   path:
     type: string
@@ -39,30 +51,3 @@ properties:
     source: name
     nullable: false
     description: "Name of the directory."
-
-  absolute_path:
-    type: string
-    source: absolute_path
-    nullable: true
-    description: "Absolute path of the directory on the filesystem."
-
-  repository_name:
-    type: string
-    source: repository_name
-    nullable: true
-    description: "Name of the repository this directory belongs to."
-
-  traversal_path:
-    type: string
-    source: traversal_path
-    nullable: false
-    description: "Namespace traversal path for authentication and authorization."
-
-# edges:
-#   - type: PARENT_DIRECTORY
-#     source_id: parent_directory_id
-#     target_kind: Directory
-#
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
