@@ -52,12 +52,6 @@ properties:
     nullable: true
     description: "ID of the object this note is attached to (null for commits)."
 
-  system:
-    type: boolean
-    source: system
-    nullable: false
-    description: "Whether this is a system-generated note."
-
   line_code:
     type: string
     source: line_code
@@ -113,11 +107,31 @@ properties:
     description: "Namespace traversal path for authentication and authorization."
 
 etl:
-  type: table
+  type: query
   scope: namespaced
-  source: siphon_notes
-  watermark: _siphon_replicated_at
-  deleted: _siphon_deleted
+  query: |
+    SELECT
+        id,
+        note,
+        noteable_type,
+        noteable_id,
+        line_code,
+        created_at,
+        updated_at,
+        discussion_id,
+        resolved_at,
+        internal,
+        confidential,
+        commit_id,
+        author_id,
+        traversal_path,
+        _siphon_deleted AS _deleted,
+        _siphon_replicated_at AS _version
+    FROM siphon_notes
+    WHERE system = false
+        AND startsWith(traversal_path, {traversal_path:String})
+        AND _siphon_replicated_at > {last_watermark:String}
+        AND _siphon_replicated_at <= {watermark:String}
   edges:
     author_id:
       to: User
