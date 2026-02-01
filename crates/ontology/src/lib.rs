@@ -20,8 +20,8 @@ mod entities;
 pub mod etl;
 
 pub use entities::{
-    DataType, DomainInfo, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, Field,
-    NodeEntity, NodeStyle, RedactionConfig,
+    DataType, DomainInfo, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig,
+    EnumType, Field, NodeEntity, NodeStyle, RedactionConfig,
 };
 pub use etl::{
     DELETED_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope,
@@ -185,6 +185,7 @@ impl Ontology {
                 data_type,
                 nullable,
                 enum_values: None,
+                enum_type: EnumType::default(),
             });
         }
         Ok(self)
@@ -827,8 +828,12 @@ struct PropertyYaml {
     #[serde(default)]
     #[allow(dead_code)]
     description: String,
+    /// Integer to string mapping for int-based enums.
     #[serde(default)]
     values: Option<BTreeMap<i64, String>>,
+    /// How the enum is stored: "int" (default) or "string".
+    #[serde(default)]
+    enum_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -891,12 +896,24 @@ impl NodeYaml {
 
                 let data_type = parse_data_type(&prop_def.property_type, &prop_name)?;
 
+                let enum_type = match prop_def.enum_type.as_deref() {
+                    Some("string") => EnumType::String,
+                    Some("int") | None => EnumType::Int,
+                    Some(other) => {
+                        return Err(OntologyError::Validation(format!(
+                            "unknown enum_type '{}' for field '{}', expected 'int' or 'string'",
+                            other, prop_name
+                        )));
+                    }
+                };
+
                 Ok(Field {
                     name: prop_name,
                     source: prop_def.source,
                     data_type,
                     nullable: prop_def.nullable,
                     enum_values: prop_def.values,
+                    enum_type,
                 })
             })
             .collect();
@@ -1207,6 +1224,7 @@ mod tests {
             data_type: DataType::String,
             nullable: true,
             enum_values: None,
+            enum_type: EnumType::default(),
         };
         assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
@@ -1215,6 +1233,7 @@ mod tests {
             data_type: DataType::Int,
             nullable: false,
             enum_values: None,
+            enum_type: EnumType::default(),
         };
         assert_eq!(format!("{field}"), "id: Int");
     }
@@ -1431,6 +1450,7 @@ mod tests {
                 data_type: DataType::Enum,
                 nullable: false,
                 enum_values: Some(enum_values),
+                enum_type: EnumType::Int,
             }],
             primary_keys: vec!["id".to_string()],
             destination_table: "gl_user".to_string(),

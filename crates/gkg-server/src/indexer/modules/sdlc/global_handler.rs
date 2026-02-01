@@ -225,6 +225,7 @@ mod tests {
                 data_type: DataType::Int,
                 nullable: false,
                 enum_values: None,
+                enum_type: ontology::EnumType::default(),
             }],
             primary_keys: vec!["id".to_string()],
             destination_table: destination_table.to_string(),

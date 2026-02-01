@@ -448,6 +448,7 @@ mod tests {
                     data_type: DataType::Int,
                     nullable: false,
                     enum_values: None,
+                    enum_type: ontology::EnumType::default(),
                 },
                 Field {
                     name: "username".to_string(),
@@ -455,6 +456,7 @@ mod tests {
                     data_type: DataType::String,
                     nullable: true,
                     enum_values: None,
+                    enum_type: ontology::EnumType::default(),
                 },
             ],
             primary_keys: vec!["id".to_string()],

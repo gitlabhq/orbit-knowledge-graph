@@ -149,6 +149,7 @@ mod tests {
                     data_type: DataType::Int,
                     nullable: false,
                     enum_values: None,
+                    enum_type: ontology::EnumType::default(),
                 },
                 Field {
                     name: "username".to_string(),
@@ -156,6 +157,7 @@ mod tests {
                     data_type: DataType::String,
                     nullable: true,
                     enum_values: None,
+                    enum_type: ontology::EnumType::default(),
                 },
                 Field {
                     name: "is_admin".to_string(),
@@ -163,6 +165,7 @@ mod tests {
                     data_type: DataType::Bool,
                     nullable: false,
                     enum_values: None,
+                    enum_type: ontology::EnumType::default(),
                 },
                 Field {
                     name: "user_type".to_string(),
@@ -170,6 +173,7 @@ mod tests {
                     data_type: DataType::Enum,
                     nullable: false,
                     enum_values: Some(enum_values),
+                    enum_type: ontology::EnumType::Int,
                 },
             ],
             primary_keys: vec!["id".to_string()],

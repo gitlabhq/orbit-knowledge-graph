@@ -38,10 +38,11 @@ properties:
     description: "Branch or tag name the pipeline runs for."
 
   status:
-    type: string
+    type: enum
     source: status
     nullable: false
     description: "Current execution status of the pipeline."
+    enum_type: string
     values:
       0: created
       1: pending
