@@ -18,7 +18,11 @@ async fn test_correlation_id_propagation() {
 
     let app = Router::new()
         .route("/test", get(|| async { "ok" }))
-        .layer(CorrelationLayer::new().propagate_incoming(true));
+        .layer(
+            CorrelationLayer::new()
+                .propagate_incoming(true)
+                .send_response_header(true),
+        );
 
     let request = Request::builder()
         .uri("/test")
@@ -29,12 +33,12 @@ async fn test_correlation_id_propagation() {
     let response = app.oneshot(request).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     // The correlation ID should be propagated to the response
-    let correlation_header = response.headers().get("X-Request-ID");
+    let correlation_header = response.headers().get("x-request-id");
     assert!(
         correlation_header.is_some(),
-        "Response should include X-Request-ID header"
+        "Response should include x-request-id header"
     );
     assert_eq!(
         correlation_header.unwrap().to_str().unwrap(),
@@ -50,7 +54,7 @@ async fn test_correlation_id_generation() {
 
     let app = Router::new()
         .route("/test", get(|| async { "ok" }))
-        .layer(CorrelationLayer::new());
+        .layer(CorrelationLayer::new().send_response_header(true));
 
     let request = Request::builder()
         .uri("/test")
@@ -60,14 +64,14 @@ async fn test_correlation_id_generation() {
     let response = app.oneshot(request).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     // A correlation ID should be generated
-    let correlation_header = response.headers().get("X-Request-ID");
+    let correlation_header = response.headers().get("x-request-id");
     assert!(
         correlation_header.is_some(),
-        "Response should include generated X-Request-ID header"
+        "Response should include generated x-request-id header"
     );
-    
+
     let id = correlation_header.unwrap().to_str().unwrap();
     assert!(!id.is_empty(), "Generated correlation ID should not be empty");
 }
@@ -101,7 +105,11 @@ async fn test_combined_layers() {
     let app = Router::new()
         .route("/api/test", get(|| async { "success" }))
         .layer(MetricsLayer::new())
-        .layer(CorrelationLayer::new().propagate_incoming(true))
+        .layer(
+            CorrelationLayer::new()
+                .propagate_incoming(true)
+                .send_response_header(true),
+        )
         .layer(TraceLayer::new_for_http());
 
     // Test with correlation ID
@@ -115,7 +123,12 @@ async fn test_combined_layers() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.headers().get("X-Request-ID").unwrap().to_str().unwrap(),
+        response
+            .headers()
+            .get("x-request-id")
+            .unwrap()
+            .to_str()
+            .unwrap(),
         "combined-test-id"
     );
 
@@ -128,7 +141,7 @@ async fn test_combined_layers() {
     let response = app.oneshot(request).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(response.headers().get("X-Request-ID").is_some());
+    assert!(response.headers().get("x-request-id").is_some());
 }
 
 /// Test gRPC server interceptor functionality.
@@ -211,10 +224,10 @@ fn test_logging_init_does_not_panic() {
 fn test_correlation_id_type() {
     use labkit::correlation::CorrelationId;
 
-    let id = CorrelationId::generate();
+    let id = CorrelationId::new();
     assert!(!id.as_ref().is_empty(), "Generated ID should not be empty");
     
-    let id_from_str = CorrelationId::from("custom-id");
+    let id_from_str = CorrelationId::from_string("custom-id");
     assert_eq!(id_from_str.as_ref(), "custom-id");
     
     let id_string = id.to_string();
