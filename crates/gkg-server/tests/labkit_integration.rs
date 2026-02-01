@@ -16,13 +16,11 @@ use tower::ServiceExt;
 async fn test_correlation_id_propagation() {
     use labkit::correlation::CorrelationLayer;
 
-    let app = Router::new()
-        .route("/test", get(|| async { "ok" }))
-        .layer(
-            CorrelationLayer::new()
-                .propagate_incoming(true)
-                .send_response_header(true),
-        );
+    let app = Router::new().route("/test", get(|| async { "ok" })).layer(
+        CorrelationLayer::new()
+            .propagate_incoming(true)
+            .send_response_header(true),
+    );
 
     let request = Request::builder()
         .uri("/test")
@@ -56,10 +54,7 @@ async fn test_correlation_id_generation() {
         .route("/test", get(|| async { "ok" }))
         .layer(CorrelationLayer::new().send_response_header(true));
 
-    let request = Request::builder()
-        .uri("/test")
-        .body(Body::empty())
-        .unwrap();
+    let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
     let response = app.oneshot(request).await.unwrap();
 
@@ -73,7 +68,10 @@ async fn test_correlation_id_generation() {
     );
 
     let id = correlation_header.unwrap().to_str().unwrap();
-    assert!(!id.is_empty(), "Generated correlation ID should not be empty");
+    assert!(
+        !id.is_empty(),
+        "Generated correlation ID should not be empty"
+    );
 }
 
 /// Test that MetricsLayer doesn't panic and allows requests through.
@@ -152,14 +150,16 @@ async fn test_grpc_server_interceptor() {
 
     // Create a request without correlation ID
     let request: Request<()> = Request::new(());
-    
+
     let result = server_interceptor(request);
     assert!(result.is_ok(), "Server interceptor should succeed");
-    
+
     let processed = result.unwrap();
-    
+
     // Check that a correlation ID was added to extensions
-    let correlation_id = processed.extensions().get::<labkit::correlation::CorrelationId>();
+    let correlation_id = processed
+        .extensions()
+        .get::<labkit::correlation::CorrelationId>();
     assert!(
         correlation_id.is_some(),
         "Server interceptor should add CorrelationId to extensions"
@@ -178,13 +178,15 @@ async fn test_grpc_server_interceptor_with_existing_id() {
         "x-request-id",
         MetadataValue::from_static("grpc-correlation-test-id"),
     );
-    
+
     let result = server_interceptor(request);
     assert!(result.is_ok(), "Server interceptor should succeed");
-    
+
     let processed = result.unwrap();
-    let correlation_id = processed.extensions().get::<labkit::correlation::CorrelationId>();
-    
+    let correlation_id = processed
+        .extensions()
+        .get::<labkit::correlation::CorrelationId>();
+
     assert!(correlation_id.is_some());
     assert_eq!(
         correlation_id.unwrap().as_ref(),
@@ -201,7 +203,7 @@ async fn test_context_from_request() {
 
     let request: Request<()> = Request::new(());
     let processed = server_interceptor(request).unwrap();
-    
+
     let correlation_id = context_from_request(&processed);
     assert!(
         correlation_id.is_some(),
@@ -214,7 +216,7 @@ async fn test_context_from_request() {
 fn test_logging_init_does_not_panic() {
     // Note: We can't actually call init_default() in tests as it sets global state.
     // Instead, we verify the types exist and the module is accessible.
-    
+
     // This just verifies the labkit::log module is properly exported
     let _ = std::any::type_name::<labkit::log::LogGuard>();
 }
@@ -226,10 +228,10 @@ fn test_correlation_id_type() {
 
     let id = CorrelationId::new();
     assert!(!id.as_ref().is_empty(), "Generated ID should not be empty");
-    
+
     let id_from_str = CorrelationId::from_string("custom-id");
     assert_eq!(id_from_str.as_ref(), "custom-id");
-    
+
     let id_string = id.to_string();
     assert!(!id_string.is_empty());
 }
