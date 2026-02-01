@@ -99,39 +99,33 @@ impl ArrowClickHouseClient {
     pub fn inner(&self) -> &Client {
         &self.client
     }
-    
-    pub fn bind_param(
-      query: ArrowQuery,
-      key: &str,
-      value: &Value,
-  ) -> ArrowQuery {
-      match value {
-          Value::String(s) => query.param(key, s.as_str()),
-          Value::Number(n) => {
-              if let Some(i) = n.as_i64() {
-                  query.param(key, i)
-              } else if let Some(f) = n.as_f64() {
-                  query.param(key, f)
-              } else {
-                  query.param(key, n.to_string())
-              }
-          }
-          Value::Bool(b) => query.param(key, *b),
-          Value::Array(arr) => {
-              let strings: Vec<String> = arr
-                  .iter()
-                  .map(|v| match v {
-                      Value::String(s) => s.clone(),
-                      other => other.to_string(),
-                  })
-                  .collect();
-              query.param(key, strings)
-          }
-          _ => query.param(key, value.to_string()),
-      }
-  }
-  
-  
+
+    pub fn bind_param(query: ArrowQuery, key: &str, value: &Value) -> ArrowQuery {
+        match value {
+            Value::String(s) => query.param(key, s.as_str()),
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    query.param(key, i)
+                } else if let Some(f) = n.as_f64() {
+                    query.param(key, f)
+                } else {
+                    query.param(key, n.to_string())
+                }
+            }
+            Value::Bool(b) => query.param(key, *b),
+            Value::Array(arr) => {
+                let strings: Vec<String> = arr
+                    .iter()
+                    .map(|v| match v {
+                        Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                    .collect();
+                query.param(key, strings)
+            }
+            _ => query.param(key, value.to_string()),
+        }
+    }
 }
 
 impl std::fmt::Debug for ArrowClickHouseClient {
