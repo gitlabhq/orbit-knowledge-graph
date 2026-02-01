@@ -53,7 +53,7 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
         let execution_output = ExecutionOutput {
             batches,
             result_context: compiled.result_context,
-            generated_sql: compiled.sql.clone(),
+            generated_sql: compiled.sql,
         };
 
         let extracted = self.extraction.execute(execution_output);
