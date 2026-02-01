@@ -10,7 +10,10 @@ style:
   size: 30
   color: "#D946EF"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: milestones
+  id_column: id
+  ability: read_milestone
 
 properties:
   id:
