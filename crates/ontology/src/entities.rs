@@ -144,8 +144,10 @@ pub struct Field {
     pub data_type: DataType,
     /// Whether the field can contain null values.
     pub nullable: bool,
-    /// Integer value to string label mapping for enum types.
+    /// Integer value to string label mapping for int-based enum types.
     pub enum_values: Option<BTreeMap<i64, String>>,
+    /// How the enum is stored in the source (int or string). Defaults to Int.
+    pub enum_type: EnumType,
 }
 
 impl fmt::Display for Field {
@@ -172,6 +174,16 @@ pub enum DataType {
     DateTime,
     /// Enum
     Enum,
+}
+
+/// Enum storage type - how the enum is stored in the source database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum EnumType {
+    /// Integer values that map to string labels (requires CASE transformation).
+    #[default]
+    Int,
+    /// Already stored as strings with constrained values (pass-through, no transformation).
+    String,
 }
 
 impl fmt::Display for DataType {

@@ -41,6 +41,13 @@
       "additionalProperties": { "type": "string" }
     },
 
+    "enumType": {
+      "type": "string",
+      "enum": ["int", "string"],
+      "description": "How the enum is stored in the source: 'int' (integer mapped to labels, requires CASE transformation) or 'string' (already a string, pass-through).",
+      "default": "int"
+    },
+
     "propertyDefinition": {
       "type": "object",
       "description": "Definition of a node property/field.",
@@ -62,6 +69,10 @@
         "values": {
           "$ref": "#/definitions/enumValues",
           "description": "For enum types, maps integer values to string labels."
+        },
+        "enum_type": {
+          "$ref": "#/definitions/enumType",
+          "description": "For enum types, specifies how the enum is stored in the source database."
         }
       },
       "required": ["type", "source"],

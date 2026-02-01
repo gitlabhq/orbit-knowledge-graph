@@ -26,10 +26,11 @@ properties:
     description: "Name of the job as defined in .gitlab-ci.yml."
 
   status:
-    type: string
+    type: enum
     source: status
     nullable: false
     description: "Current execution status of the job."
+    enum_type: string
     values:
       0: created
       1: pending
@@ -80,6 +81,7 @@ properties:
     source: when
     nullable: true
     description: "Condition that determines when the job runs."
+    enum_type: string
     values:
       0: on_success
       1: on_failure
