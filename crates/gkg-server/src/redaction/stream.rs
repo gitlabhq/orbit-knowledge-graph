@@ -12,6 +12,7 @@ use crate::proto::{
 
 use super::{ResourceAuthorization, ResourceCheck};
 
+#[derive(Debug)]
 pub enum RedactionExchangeError {
     StreamClosed,
     ReceiveFailed(Status),
