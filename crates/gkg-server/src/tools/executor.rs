@@ -9,7 +9,8 @@ use toon_format::{EncodeOptions, encode};
 
 use crate::auth::Claims;
 use crate::query::QueryExecutor;
-use crate::redaction::ResourceCheck;
+use crate::redaction::{QueryResult as RedactionQueryResult, ResourceCheck};
+use query_engine::ResultContext;
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
@@ -37,6 +38,8 @@ impl ExecutorError {
 pub struct ExecutionResult {
     pub raw_result: Value,
     pub resources_to_check: Vec<ResourceCheck>,
+    pub redaction_result: Option<RedactionQueryResult>,
+    pub result_context: Option<ResultContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,8 +87,10 @@ impl ToolService {
             .map_err(|e| ExecutorError::ExecutionFailed(e.to_string()))?;
 
         Ok(ExecutionResult {
-            raw_result: result.result,
+            raw_result: Value::Null,
             resources_to_check: result.resources_to_check,
+            redaction_result: Some(result.redaction_result),
+            result_context: Some(result.result_context),
         })
     }
 
@@ -102,6 +107,8 @@ impl ToolService {
         Ok(ExecutionResult {
             raw_result: result,
             resources_to_check: vec![],
+            redaction_result: None,
+            result_context: None,
         })
     }
 

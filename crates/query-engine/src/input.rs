@@ -77,6 +77,9 @@ pub struct InputNode {
     /// Entity type (e.g., "User", "Project"). Determines which table to query.
     #[serde(default)]
     pub entity: Option<String>,
+    /// Resolved table name (e.g., "gl_user"). Populated during normalization.
+    #[serde(skip)]
+    pub table: Option<String>,
     /// Columns to return for this node. Use `ColumnSelection::All` for all columns,
     /// or `ColumnSelection::List` for specific columns. If not specified, only
     /// mandatory columns (id, type) are returned.

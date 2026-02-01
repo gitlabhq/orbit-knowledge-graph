@@ -30,9 +30,9 @@ fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
 pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
     match input.query_type {
         QueryType::Traversal | QueryType::Search => lower_traversal(input, ontology),
-        QueryType::Aggregation => lower_aggregation(input, ontology),
-        QueryType::PathFinding => lower_path_finding(input, ontology),
-        QueryType::Neighbors => lower_neighbors(input, ontology),
+        QueryType::Aggregation => lower_aggregation(input),
+        QueryType::PathFinding => lower_path_finding(input),
+        QueryType::Neighbors => lower_neighbors(input),
     }
 }
 
@@ -41,7 +41,7 @@ pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
-    let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
+    let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
     let mut select = build_select_columns(&input.nodes, ontology);
@@ -144,8 +144,8 @@ fn add_edge_columns(
     }
 }
 
-fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
-    let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
+fn lower_aggregation(input: &Input) -> Result<Node> {
+    let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
     let mut select = Vec::new();
@@ -203,7 +203,7 @@ fn agg_expr(agg: &InputAggregation) -> Expr {
 // Path Finding (recursive CTE)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
+fn lower_path_finding(input: &Input) -> Result<Node> {
     let path = input
         .path
         .as_ref()
@@ -211,8 +211,8 @@ fn lower_path_finding(input: &Input, ontology: &Ontology) -> Result<Node> {
 
     let start = find_node(&input.nodes, &path.from)?;
     let end = find_node(&input.nodes, &path.to)?;
-    let start_table = resolve_table(ontology, start)?;
-    let end_table = resolve_table(ontology, end)?;
+    let start_table = resolve_table(start)?;
+    let end_table = resolve_table(end)?;
 
     let start_entity = start
         .entity
@@ -433,14 +433,14 @@ fn path_recursive_branch(
 // Neighbors
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_neighbors(input: &Input, ontology: &Ontology) -> Result<Node> {
+fn lower_neighbors(input: &Input) -> Result<Node> {
     let neighbors_config = input
         .neighbors
         .as_ref()
         .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?;
 
     let center_node = find_node(&input.nodes, &neighbors_config.node)?;
-    let center_table = resolve_table(ontology, center_node)?;
+    let center_table = resolve_table(center_node)?;
 
     let type_filter = type_filter(&neighbors_config.rel_types);
 
@@ -581,18 +581,17 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
 fn build_joins(
     nodes: &[InputNode],
     rels: &[InputRelationship],
-    ontology: &Ontology,
 ) -> Result<(TableRef, HashMap<usize, String>)> {
     let start = rels.first().map_or(&nodes[0], |r| {
         nodes.iter().find(|n| n.id == r.from).unwrap_or(&nodes[0])
     });
-    let start_table = resolve_table(ontology, start)?;
+    let start_table = resolve_table(start)?;
     let mut result = TableRef::scan(&start_table, &start.id);
     let mut edge_aliases = HashMap::new();
 
     for (i, rel) in rels.iter().enumerate() {
         let target = find_node(nodes, &rel.to)?;
-        let target_table = resolve_table(ontology, target)?;
+        let target_table = resolve_table(target)?;
 
         if rel.max_hops > 1 {
             // Multi-hop: UNION subquery
@@ -759,12 +758,10 @@ fn find_node<'a>(nodes: &'a [InputNode], id: &str) -> Result<&'a InputNode> {
         .ok_or_else(|| QueryError::Lowering(format!("node '{id}' not found")))
 }
 
-fn resolve_table(ontology: &Ontology, node: &InputNode) -> Result<String> {
-    let entity = node
-        .entity
-        .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no entity", node.id)))?;
-    Ok(ontology.table_name(entity)?)
+fn resolve_table(node: &InputNode) -> Result<String> {
+    node.table
+        .clone()
+        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no resolved table", node.id)))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -776,6 +773,7 @@ fn resolve_table(ontology: &Ontology, node: &InputNode) -> Result<String> {
 mod tests {
     use super::*;
     use crate::input::parse_input;
+    use crate::normalize;
     use crate::validate;
 
     fn test_ontology() -> Ontology {
@@ -802,9 +800,10 @@ mod tests {
     }
 
     fn validated_input(json: &str) -> Input {
+        let ontology = test_ontology();
         let input = parse_input(json).unwrap();
-        validate::validate(&input, &test_ontology()).unwrap();
-        input
+        validate::validate(&input, &ontology).unwrap();
+        normalize::normalize(input, &ontology)
     }
 
     #[test]
@@ -1339,6 +1338,7 @@ mod tests {
             nodes: vec![InputNode {
                 id: "u".to_string(),
                 entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
                 columns: None,
                 filters: std::collections::HashMap::new(),
                 node_ids: vec![123],
