@@ -21,7 +21,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
 
 const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
-const CLICKHOUSE_TAG: &str = "25.11";
+const CLICKHOUSE_TAG: &str = "25.12";
 const CLICKHOUSE_HTTP_PORT: u16 = 8123;
 
 const TEST_DATABASE: &str = "test";
