@@ -27,6 +27,8 @@ pub struct DependencyGraph {
     generation_order: Vec<String>,
     parent_edges: HashMap<String, Vec<ParentEdge>>,
     roots: HashSet<String>,
+    /// Entity types that are parents (have children in relationships).
+    parent_types: HashSet<String>,
 }
 
 impl DependencyGraph {
@@ -85,13 +87,25 @@ impl DependencyGraph {
             }
         }
 
+        // Collect all entity types that are parents (have children)
+        let parent_types: HashSet<String> = parent_edges
+            .values()
+            .flat_map(|edges| edges.iter().map(|e| e.parent_kind.clone()))
+            .collect();
+
         let generation_order = Self::topological_sort(&roots, &parent_edges, &all_nodes)?;
 
         Ok(Self {
             generation_order,
             parent_edges,
             roots,
+            parent_types,
         })
+    }
+
+    /// Check if an entity type is a parent (has children in relationships).
+    pub fn is_parent_type(&self, node_type: &str) -> bool {
+        self.parent_types.contains(node_type)
     }
 
     fn validate_edge(

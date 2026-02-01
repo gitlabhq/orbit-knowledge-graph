@@ -1,7 +1,7 @@
 //! Configuration for the simulator.
 
 use anyhow::{Context, Result};
-use fake::rand::Rng;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -689,14 +689,14 @@ generation:
     #[test]
     fn test_edge_ratio_count() {
         let ratio = EdgeRatio::Count(5);
-        let mut rng = fake::rand::thread_rng();
+        let mut rng = rand::thread_rng();
         assert_eq!(ratio.sample(&mut rng), 5);
     }
 
     #[test]
     fn test_edge_ratio_probability() {
         let ratio = EdgeRatio::Probability(1.0);
-        let mut rng = fake::rand::thread_rng();
+        let mut rng = rand::thread_rng();
         assert_eq!(ratio.sample(&mut rng), 1);
 
         let ratio_zero = EdgeRatio::Probability(0.0);
