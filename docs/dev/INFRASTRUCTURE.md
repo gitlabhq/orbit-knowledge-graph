@@ -8,7 +8,7 @@ For Kubernetes deployments, see `helm-dev/` charts (source of truth for componen
 
 | Name | Type | Zone | Internal IP | External IP |
 |------|------|------|-------------|-------------|
-| vm-clickhouse | n4-standard-4 | us-central1-b | 10.128.0.13 | 34.61.31.19 |
+| vm-clickhouse | n4-standard-16 | us-central1-b | 10.128.0.13 | 136.115.179.207 |
 | vm-gitlab-omnibus | n4-standard-8 | us-central1-b | 10.128.0.4 | 34.9.130.112 |
 
 See [GITLAB_INSTANCE.md](GITLAB_INSTANCE.md) for GitLab-specific configuration.
