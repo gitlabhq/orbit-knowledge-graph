@@ -6,7 +6,7 @@
 //! - Filter values are coerced to match ontology types
 
 use crate::input::Input;
-use ontology::Ontology;
+use ontology::{EnumType, Ontology};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -38,6 +38,10 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
             let Some(field) = node_entity.fields.iter().find(|f| f.name == *column) else {
                 continue;
             };
+            // Only coerce int-based enums; string enums are already strings in the source
+            if field.enum_type != EnumType::Int {
+                continue;
+            }
             let Some(enum_values) = field.enum_values.as_ref() else {
                 continue;
             };

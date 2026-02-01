@@ -84,20 +84,23 @@ impl MockRedactionService {
 const TABLE_USERS: &str = "gl_users";
 const TABLE_GROUPS: &str = "gl_groups";
 const TABLE_PROJECTS: &str = "gl_projects";
+const TABLE_MERGE_REQUESTS: &str = "gl_merge_requests";
 const TABLE_EDGES: &str = "gl_edges";
 
 const ALL_USER_IDS: &[i64] = &[1, 2, 3, 4, 5];
 const ALL_GROUP_IDS: &[i64] = &[100, 101, 102];
 const ALL_PROJECT_IDS: &[i64] = &[1000, 1001, 1002, 1003, 1004];
+const ALL_MR_IDS: &[i64] = &[2000, 2001, 2002, 2003];
 
 async fn setup_test_data(ctx: &TestContext) {
+    // User.state is string-based enum (enum_type: string), User.user_type is int-based enum
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_USERS} (id, username, name, state) VALUES
-         (1, 'alice', 'Alice Admin', 'active'),
-         (2, 'bob', 'Bob Builder', 'active'),
-         (3, 'charlie', 'Charlie Private', 'active'),
-         (4, 'diana', 'Diana Developer', 'active'),
-         (5, 'eve', 'Eve External', 'blocked')"
+        "INSERT INTO {TABLE_USERS} (id, username, name, state, user_type) VALUES
+         (1, 'alice', 'Alice Admin', 'active', 'human'),
+         (2, 'bob', 'Bob Builder', 'active', 'human'),
+         (3, 'charlie', 'Charlie Private', 'active', 'human'),
+         (4, 'diana', 'Diana Developer', 'active', 'project_bot'),
+         (5, 'eve', 'Eve External', 'blocked', 'service_account')"
     ))
     .await;
 
@@ -116,6 +119,17 @@ async fn setup_test_data(ctx: &TestContext) {
          (1002, 'Internal Project', 'internal', '1/100/1002/'),
          (1003, 'Secret Project', 'private', '1/101/1003/'),
          (1004, 'Shared Project', 'public', '1/102/1004/')"
+    ))
+    .await;
+
+    // MergeRequest.state is int-based enum (no enum_type in ontology)
+    // Values: 1=opened, 2=closed, 3=merged, 4=locked
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_MERGE_REQUESTS} (id, title, state, source_branch, target_branch, traversal_path) VALUES
+         (2000, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
+         (2001, 'Fix bug B', 'opened', 'fix-b', 'main', '1/100/1000/'),
+         (2002, 'Refactor C', 'merged', 'refactor-c', 'main', '1/101/1001/'),
+         (2003, 'Update D', 'closed', 'update-d', 'main', '1/102/1004/')"
     ))
     .await;
 
@@ -3273,5 +3287,204 @@ async fn multi_hop_edge_columns_survive_redaction() {
         row.get("e1_dst_type").and_then(|v| v.as_str()),
         Some("Project"),
         "e1 target type should be Project"
+    );
+}
+
+/// Comprehensive test for enum filter normalization across int and string enum types.
+///
+/// Tests the query normalization phase which coerces filter values to match ontology types:
+/// - Int-based enums: integer filter values are coerced to string labels (e.g., 1 → "opened")
+/// - String-based enums: string values pass through unchanged (no coercion needed)
+///
+/// This ensures the normalization layer correctly distinguishes between enum storage types
+/// and only applies int→string coercion where appropriate.
+#[tokio::test]
+#[serial]
+async fn enum_filter_normalization_int_vs_string_enums() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PART 1: Int-based enum (User.user_type) - filter by int, coerced to string
+    // ─────────────────────────────────────────────────────────────────────────
+    // User.user_type has no enum_type in ontology (defaults to int-based).
+    // Ontology values: 0=human, 6=project_bot, 11=service_account
+    // Filter by int 0 should be coerced to "human" and match.
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // We have 3 human users (alice, bob, charlie)
+    assert_eq!(
+        result.len(),
+        3,
+        "should find 3 human users when filtering by int 0 (coerced to 'human')"
+    );
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", ALL_USER_IDS);
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Verify the user_type values are the string labels
+    for row in result.authorized_rows() {
+        let user_type = row.get("u_user_type").and_then(|v| v.as_str());
+        assert_eq!(
+            user_type,
+            Some("human"),
+            "user_type should be 'human' string"
+        );
+    }
+
+    // Filter by int 6 should be coerced to "project_bot"
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(
+        result.len(),
+        1,
+        "should find 1 project_bot user when filtering by int 6"
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PART 2: Int-based enum (MergeRequest.state) - filter by int, coerced to string
+    // ─────────────────────────────────────────────────────────────────────────
+    // MergeRequest.state has no enum_type (defaults to int-based).
+    // Ontology values: 1=opened, 2=closed, 3=merged, 4=locked
+    // Filter by int 1 should be coerced to "opened" and match.
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // We have 2 opened MRs (2000, 2001)
+    assert_eq!(
+        result.len(),
+        2,
+        "should find 2 opened MRs when filtering by int 1 (coerced to 'opened')"
+    );
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("merge_requests", ALL_MR_IDS);
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    for row in result.authorized_rows() {
+        let state = row.get("mr_state").and_then(|v| v.as_str());
+        assert_eq!(state, Some("opened"), "MR state should be 'opened' string");
+    }
+
+    // Filter by int 3 should be coerced to "merged"
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(
+        result.len(),
+        1,
+        "should find 1 merged MR when filtering by int 3"
+    );
+
+    // IN operator with int values on int-based enum
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2]}}}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // 2 opened + 1 closed = 3
+    assert_eq!(
+        result.len(),
+        3,
+        "should find 3 MRs with IN filter on int-based enum [1, 2]"
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PART 3: String-based enum (User.state) - filter by string, no coercion
+    // ─────────────────────────────────────────────────────────────────────────
+    // User.state has enum_type: string in ontology.
+    // String filters pass through unchanged - no int→string coercion.
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // 4 active users (alice, bob, charlie, diana)
+    assert_eq!(
+        result.len(),
+        4,
+        "should find 4 active users with string enum filter"
+    );
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", ALL_USER_IDS);
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    for row in result.authorized_rows() {
+        let state = row.get("u_state").and_then(|v| v.as_str());
+        assert_eq!(state, Some("active"), "state should be 'active' string");
+    }
+
+    // Filter blocked user (string enum value)
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "filters": {"state": "blocked"}}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(
+        result.len(),
+        1,
+        "should find 1 blocked user with string enum filter"
+    );
+
+    // IN operator with string enum values
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "filters": {"state": {"op": "in", "value": ["active", "blocked"]}}}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(
+        result.len(),
+        5,
+        "should find all 5 users with IN filter on string enum"
     );
 }
