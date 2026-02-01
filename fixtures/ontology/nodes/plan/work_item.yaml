@@ -54,15 +54,15 @@ properties:
     nullable: false
     description: "Type of work item."
     values:
-      0: issue
-      1: incident
-      2: test_case
-      3: requirement
-      4: task
-      5: objective
-      6: key_result
-      7: epic
-      8: ticket
+      1: issue
+      2: incident
+      3: test_case
+      4: requirement
+      5: task
+      6: objective
+      7: key_result
+      8: epic
+      9: ticket
 
   confidential:
     type: boolean
