@@ -10,7 +10,10 @@ style:
   size: 24
   color: "#64748B"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: notes
+  id_column: id
+  ability: read_note
 
 properties:
   id:
