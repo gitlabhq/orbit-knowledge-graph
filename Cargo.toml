@@ -4,7 +4,6 @@ members = [
   "crates/treesitter-visit",
   "crates/code-parser",
   "crates/code-indexer",
-  "crates/labkit-rs",
   "crates/clickhouse-client",
   "crates/etl-engine",
   "crates/query-engine",

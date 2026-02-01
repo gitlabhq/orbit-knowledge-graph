@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::{Json, Router, routing::get};
-use labkit_rs::correlation::http::{CorrelationIdLayer, PropagateCorrelationIdLayer};
-use labkit_rs::metrics::http::HttpMetricsLayer;
+use labkit::correlation::CorrelationLayer;
+use labkit::metrics::MetricsLayer;
 use serde::Serialize;
 use tower_http::trace::TraceLayer;
 
@@ -100,8 +100,7 @@ pub fn create_router(_validator: JwtValidator, health_check_url: Option<String>)
         .route("/health", get(health))
         .route("/api/v1/cluster_health", get(cluster_health))
         .with_state(state)
-        .layer(HttpMetricsLayer::new())
-        .layer(CorrelationIdLayer::new())
+        .layer(MetricsLayer::new())
+        .layer(CorrelationLayer::new().propagate_incoming(true))
         .layer(TraceLayer::new_for_http())
-        .layer(PropagateCorrelationIdLayer::new())
 }

@@ -31,7 +31,9 @@ reqwest = { workspace = true }
 parking_lot = { workspace = true }
 query-engine = { path = "../query-engine" }
 jsonwebtoken = { workspace = true }
-labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum", "metrics-grpc"] }
+# Shared GitLab observability library
+# See: https://gitlab.com/gitlab-org/rust/labkit-rs
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs", features = ["full"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

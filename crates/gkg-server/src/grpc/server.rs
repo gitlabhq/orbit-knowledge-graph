@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfiguration;
-use labkit_rs::correlation::grpc::server_interceptor;
+use labkit::correlation::grpc::server_interceptor;
 use tonic::transport::Server as TonicServer;
 use tracing::info;
 

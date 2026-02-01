@@ -2018,7 +2018,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2190,7 +2190,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2602,7 +2602,7 @@ dependencies = [
  "health-check",
  "indexer",
  "jsonwebtoken",
- "labkit-rs",
+ "labkit",
  "ontology",
  "parking_lot",
  "prost",
@@ -3572,31 +3572,155 @@ dependencies = [
 ]
 
 [[package]]
-name = "labkit-rs"
+name = "labkit"
 version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
 dependencies = [
- "async-stream",
- "axum",
- "bytes",
- "chrono",
- "futures-core",
+ "labkit-correlation",
+ "labkit-fields",
+ "labkit-grpc",
+ "labkit-http",
+ "labkit-log",
+ "labkit-log-test",
+ "labkit-mask",
+ "labkit-metrics",
+ "labkit-monitoring",
+ "labkit-remoteip",
+ "labkit-tracing",
+ "tracing",
+]
+
+[[package]]
+name = "labkit-correlation"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
  "futures-util",
  "http",
- "http-body-util",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
- "pin-project",
+ "http-body",
+ "labkit-fields",
+ "pin-project-lite",
+ "tokio",
+ "tonic",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "labkit-fields"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+
+[[package]]
+name = "labkit-grpc"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "tonic",
+ "tracing",
+]
+
+[[package]]
+name = "labkit-http"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "http",
+ "labkit-correlation",
+ "labkit-mask",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "labkit-log"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "chrono",
+ "labkit-correlation",
+ "labkit-fields",
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "labkit-log-test"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "parking_lot",
  "serde_json",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "labkit-mask"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "once_cell",
+ "regex",
+ "url",
+]
+
+[[package]]
+name = "labkit-metrics"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "futures-util",
+ "http",
+ "http-body",
+ "opentelemetry",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "labkit-monitoring"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "axum",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
- "tonic",
- "tower",
  "tracing",
+]
+
+[[package]]
+name = "labkit-remoteip"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "http",
+ "thiserror 2.0.18",
+ "tonic",
+]
+
+[[package]]
+name = "labkit-tracing"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+dependencies = [
+ "labkit-correlation",
+ "opentelemetry",
+ "opentelemetry-stdout",
+ "opentelemetry_sdk",
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-core",
+ "tracing-opentelemetry",
  "tracing-subscriber",
- "ulid",
 ]
 
 [[package]]
@@ -3884,7 +4008,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4084,84 +4208,54 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "opentelemetry"
-version = "0.31.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b84bcd6ae87133e903af7ef497404dda70c60d0ea14895fc8a5e6722754fc2a0"
+checksum = "ab70038c28ed37b97d8ed414b6429d343a8bbf44c9f79ec854f3a643029ba6d7"
 dependencies = [
  "futures-core",
  "futures-sink",
  "js-sys",
  "pin-project-lite",
- "thiserror 2.0.18",
+ "thiserror 1.0.69",
  "tracing",
 ]
 
 [[package]]
-name = "opentelemetry-http"
-version = "0.31.0"
+name = "opentelemetry-stdout"
+version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7a6d09a73194e6b66df7c8f1b680f156d916a1a942abf2de06823dd02b7855d"
+checksum = "bc8a298402aa5c260be90d10dc54b5a7d4e1025c354848f8e2c976d761351049"
 dependencies = [
  "async-trait",
- "bytes",
- "http",
- "opentelemetry",
- "reqwest 0.12.28",
-]
-
-[[package]]
-name = "opentelemetry-otlp"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a2366db2dca4d2ad033cad11e6ee42844fd727007af5ad04a1730f4cb8163bf"
-dependencies = [
- "http",
- "opentelemetry",
- "opentelemetry-http",
- "opentelemetry-proto",
- "opentelemetry_sdk",
- "prost",
- "reqwest 0.12.28",
- "thiserror 2.0.18",
- "tokio",
- "tonic",
- "tracing",
-]
-
-[[package]]
-name = "opentelemetry-proto"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7175df06de5eaee9909d4805a3d07e28bb752c34cab57fa9cff549da596b30f"
-dependencies = [
+ "chrono",
+ "futures-util",
  "opentelemetry",
  "opentelemetry_sdk",
- "prost",
- "tonic",
- "tonic-prost",
+ "ordered-float 4.6.0",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
 name = "opentelemetry_sdk"
-version = "0.31.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e14ae4f5991976fd48df6d843de219ca6d31b01daaab2dad5af2badeded372bd"
+checksum = "231e9d6ceef9b0b2546ddf52335785ce41252bc7474ee8ba05bfad277be13ab8"
 dependencies = [
+ "async-trait",
  "futures-channel",
  "futures-executor",
  "futures-util",
+ "glob",
  "opentelemetry",
  "percent-encoding",
- "rand 0.9.2",
- "thiserror 2.0.18",
+ "rand 0.8.5",
+ "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -4175,6 +4269,15 @@ name = "ordered-float"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "ordered-float"
+version = "4.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bb71e1b3fa6ca1c61f383464aaf2bb0e2f8e772a1f01d486832464de363b951"
 dependencies = [
  "num-traits",
 ]
@@ -4921,7 +5024,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5129,9 +5232,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
- "futures-channel",
  "futures-core",
- "futures-util",
  "h2",
  "http",
  "http-body",
@@ -5337,7 +5438,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5417,7 +5518,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5621,7 +5722,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
- "ordered-float",
+ "ordered-float 2.10.1",
  "serde",
 ]
 
@@ -6368,7 +6469,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6477,7 +6578,7 @@ checksum = "7e54bc85fc7faa8bc175c4bab5b92ba8d9a3ce893d0e9f42cc455c8ab16a9e09"
 dependencies = [
  "byteorder",
  "integer-encoding",
- "ordered-float",
+ "ordered-float 2.10.1",
 ]
 
 [[package]]
@@ -6569,6 +6670,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -6862,6 +6964,24 @@ dependencies = [
  "log",
  "once_cell",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-opentelemetry"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97a971f6058498b5c0f1affa23e7ea202057a7301dbff68e968b2d578bcbd053"
+dependencies = [
+ "js-sys",
+ "once_cell",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "smallvec",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
+ "tracing-subscriber",
+ "web-time",
 ]
 
 [[package]]
@@ -7396,7 +7516,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

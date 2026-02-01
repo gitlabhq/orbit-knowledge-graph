@@ -15,8 +15,11 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    labkit_rs::logging::init();
-    let _metrics = labkit_rs::metrics::try_init().ok();
+    // Initialize structured logging with correlation ID support
+    let _log_guard = labkit::log::init_default().expect("Failed to initialize logging");
+
+    // Note: Metrics initialization is handled via OTel if OTEL_EXPORTER_OTLP_ENDPOINT is set
+    // For local Prometheus export, add the "prometheus-export" feature to labkit
 
     let args = Args::parse();
     let config = AppConfig::from_env()?;

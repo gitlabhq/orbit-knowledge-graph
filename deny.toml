@@ -83,7 +83,32 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "labkit-rs"
+name = "labkit"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "labkit-correlation"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "labkit-log"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "labkit-mask"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "labkit-metrics"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "labkit-fields"
 expression = "MIT"
 license-files = []
 
@@ -111,4 +136,7 @@ external-default-features = "allow"
 unknown-registry = "deny"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://gitlab.com/gitlab-org/rust/gitalisk.git"]
+allow-git = [
+    "https://gitlab.com/gitlab-org/rust/gitalisk.git",
+    "https://gitlab.com/gitlab-org/rust/labkit-rs",
+]

@@ -1,12 +1,9 @@
 use std::pin::Pin;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfiguration;
 use futures::StreamExt;
-use labkit_rs::correlation::grpc::{
-    context_from_request, with_correlation, with_correlation_stream,
-};
-use labkit_rs::metrics::grpc::GrpcMetrics;
+use labkit::correlation::grpc::{context_from_request, with_correlation, with_correlation_stream};
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -29,9 +26,8 @@ use crate::tools::{ToolRegistry, ToolService};
 
 use super::auth::extract_claims;
 
-const SERVICE_NAME: &str = "gkg.v1.KnowledgeGraphService";
-
-static METRICS: LazyLock<GrpcMetrics> = LazyLock::new(GrpcMetrics::new);
+// Note: gRPC metrics are now handled at the service/interceptor level
+// via labkit::metrics if needed, rather than per-method recording.
 
 pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
@@ -82,24 +78,21 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "ListTools", || {
-                with_correlation(&request, async {
-                    info!("Listing tools for user");
+        with_correlation(&request, async {
+            info!("Listing tools for user");
 
-                    let tools = ToolRegistry::get_all_tools()
-                        .into_iter()
-                        .map(|t| ProtoToolDefinition {
-                            name: t.name,
-                            description: t.description,
-                            parameters_json_schema: t.parameters.to_string(),
-                        })
-                        .collect();
-
-                    Ok(Response::new(ListToolsResponse { tools }))
+            let tools = ToolRegistry::get_all_tools()
+                .into_iter()
+                .map(|t| ProtoToolDefinition {
+                    name: t.name,
+                    description: t.description,
+                    parameters_json_schema: t.parameters.to_string(),
                 })
-            })
-            .await
+                .collect();
+
+            Ok(Response::new(ListToolsResponse { tools }))
+        })
+        .await
     }
 
     type ExecuteToolStream = ExecuteToolStream;
@@ -222,11 +215,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         });
 
         let stream = ReceiverStream::new(rx);
-        let metered_stream = METRICS.record_stream(SERVICE_NAME, "ExecuteTool", stream);
 
         Ok(Response::new(Box::pin(with_correlation_stream(
-            context,
-            metered_stream,
+            context, stream,
         ))))
     }
 
@@ -350,11 +341,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         });
 
         let stream = ReceiverStream::new(rx);
-        let metered_stream = METRICS.record_stream(SERVICE_NAME, "ExecuteQuery", stream);
 
         Ok(Response::new(Box::pin(with_correlation_stream(
-            context,
-            metered_stream,
+            context, stream,
         ))))
     }
 
@@ -366,16 +355,13 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "GetOntology", || {
-                with_correlation(&request, async {
-                    info!("Fetching ontology for user");
+        with_correlation(&request, async {
+            info!("Fetching ontology for user");
 
-                    let response = self.build_ontology_response();
-                    Ok(Response::new(response))
-                })
-            })
-            .await
+            let response = self.build_ontology_response();
+            Ok(Response::new(response))
+        })
+        .await
     }
 
     #[instrument(skip(self, request), fields(user_id))]
@@ -386,16 +372,13 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "GetClusterHealth", || {
-                with_correlation(&request, async {
-                    info!("Fetching cluster health for user");
+        with_correlation(&request, async {
+            info!("Fetching cluster health for user");
 
-                    let response = self.cluster_health.get_cluster_health().await;
-                    Ok(Response::new(response))
-                })
-            })
-            .await
+            let response = self.cluster_health.get_cluster_health().await;
+            Ok(Response::new(response))
+        })
+        .await
     }
 }
 
