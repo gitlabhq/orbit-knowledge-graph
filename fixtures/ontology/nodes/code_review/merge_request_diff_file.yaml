@@ -10,7 +10,10 @@ style:
   size: 20
   color: "#B45309"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: merge_requests
+  id_column: merge_request_id
+  ability: read_merge_request
 
 properties:
   id:
@@ -18,6 +21,12 @@ properties:
     source: id
     nullable: false
     description: "Synthetic identifier: sipHash64(merge_request_diff_id, relative_order)."
+
+  merge_request_id:
+    type: int64
+    source: merge_request_id
+    nullable: false
+    description: "ID of the parent merge request."
 
   merge_request_diff_id:
     type: int64
@@ -79,6 +88,7 @@ etl:
   query: |
     SELECT
         sipHash64(file.merge_request_diff_id, file.relative_order) AS id,
+        diff.merge_request_id AS merge_request_id,
         file.merge_request_diff_id AS merge_request_diff_id,
         file.too_large AS too_large,
         file.new_path AS new_path,

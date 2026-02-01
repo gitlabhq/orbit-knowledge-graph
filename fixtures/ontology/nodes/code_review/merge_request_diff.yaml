@@ -10,7 +10,10 @@ style:
   size: 22
   color: "#D97706"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: merge_requests
+  id_column: merge_request_id
+  ability: read_merge_request
 
 properties:
   id:
