@@ -74,7 +74,6 @@ CREATE TABLE IF NOT EXISTS gl_notes (
     note Nullable(String),
     noteable_type String DEFAULT '',
     noteable_id Nullable(Int64),
-    system Bool DEFAULT false,
     line_code Nullable(String),
     commit_id Nullable(String),
     discussion_id Nullable(String),
