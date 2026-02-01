@@ -46,7 +46,7 @@ generation:
 
   seed: 42
 
-  # Single org, scaled for ~100M edges
+  # Single org, scaled for ~100M edges with ~10M nodes
   organizations: 1
 
   roots:
@@ -58,7 +58,7 @@ generation:
     per_group: 2                      # 2 subgroups per parent
     # Total groups: 20 × (1 + 2 + 4 + 8) = 300
 
-  # Estimated: ~10M edges
+  # Node estimates (~10M nodes):
   # - 300 groups × 10 projects = 3k projects
   # - 3k × 100 MRs = 300k MRs
   # - 300k × 2 diffs = 600k diffs
@@ -66,6 +66,10 @@ generation:
   # - 3k × 100 pipelines = 300k pipelines  
   # - 300k × 3 stages = 900k stages
   # - 900k × 4 jobs = 3.6M jobs
+  #
+  # Edge estimates (~100M edges):
+  # - Relationship edges: ~10M (from hierarchy)
+  # - Association edges:  ~90M (high fanout associations)
 
   relationships:
     CONTAINS:
@@ -102,22 +106,30 @@ generation:
     HAS_IDENTIFIER:
       "Finding -> VulnerabilityIdentifier": 1
 
+  # High-volume associations to reach ~90M edges
+  # Using high counts per target to create dense connectivity
   associations:
     AUTHORED:
-      "User -> MergeRequest": 1
-      "User -> WorkItem": 1
-      "User -> Note": 1
+      # 300k MRs × 100 = 30M edges
+      "User -> MergeRequest": 100
+      # 300k WorkItems × 100 = 30M edges
+      "User -> WorkItem": 100
+      # ~1.5M Notes × 10 = 15M edges
+      "User -> Note": 10
 
     MEMBER_OF:
-      "User -> Group": 5
+      # 300 groups × 100 = 30k edges (small)
+      "User -> Group": 100
 
     ASSIGNED:
-      "User -> MergeRequest": 0.5
-      "User -> WorkItem": 0.6
+      # 300k MRs × 50 = 15M edges
+      "User -> MergeRequest": 50
+      # 300k WorkItems × 10 = 3M edges
+      "User -> WorkItem": 10
 
     REVIEWER:
       "MergeRequest -> User":
-        ratio: 0.3
+        ratio: 3
         per: source
 
     TRIGGERED:
@@ -131,20 +143,20 @@ generation:
 
     MERGED_BY:
       "MergeRequest -> User":
-        ratio: 0.2
+        ratio: 1
         per: source
 
     CLOSES:
-      "MergeRequest -> WorkItem": 0.1
+      "MergeRequest -> WorkItem": 0.5
 
     FIXES:
-      "MergeRequest -> Vulnerability": 0.05
+      "MergeRequest -> Vulnerability": 0.1
 
     IN_MILESTONE:
-      "WorkItem -> Milestone": 0.3
+      "WorkItem -> Milestone": 0.5
 
     HAS_LABEL:
-      "WorkItem -> Label": 0.2
+      "WorkItem -> Label": 0.5
 
     IN_GROUP:
       "Project -> Group": 1
