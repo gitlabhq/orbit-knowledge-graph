@@ -2,7 +2,6 @@ use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
 
 use clickhouse_client::ClickHouseConfiguration;
-use futures::StreamExt;
 use labkit_rs::correlation::grpc::{
     context_from_request, with_correlation, with_correlation_stream,
 };
@@ -11,21 +10,22 @@ use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{error, info, instrument, warn};
+use tracing::{info, instrument};
 
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
-use crate::context_engine::ContextEngine;
 use crate::proto::{
-    DomainDefinition, EdgeDefinition, EdgeVariant, Error as ProtoError, ExecuteQueryMessage,
-    ExecuteToolMessage, GetClusterHealthRequest, GetClusterHealthResponse, GetOntologyRequest,
-    GetOntologyResponse, ListToolsRequest, ListToolsResponse, NodeDefinition,
-    NodeStyle as ProtoNodeStyle, PropertyDefinition, QueryResult,
-    ToolDefinition as ProtoToolDefinition, ToolResult, execute_query_message, execute_tool_message,
+    DomainDefinition, EdgeDefinition, EdgeVariant, ExecuteQueryMessage, ExecuteToolMessage,
+    GetClusterHealthRequest, GetClusterHealthResponse, GetOntologyRequest, GetOntologyResponse,
+    ListToolsRequest, ListToolsResponse, NodeDefinition, NodeStyle as ProtoNodeStyle,
+    PropertyDefinition, QueryResult, ToolDefinition as ProtoToolDefinition, ToolResult,
+    execute_query_message, execute_tool_message,
 };
-use crate::query::QueryExecutor;
-use crate::redaction::RedactionService;
-use crate::tools::{ToolRegistry, ToolService};
+use crate::query_pipeline::{
+    ContextEngineFormatter, QueryPipelineService, RawRowFormatter, receive_query_request,
+    receive_tool_request, send_query_error, send_tool_executor_error, send_tool_pipeline_error,
+};
+use crate::tools::{ToolPlan, ToolRegistry, ToolService};
 
 use super::auth::extract_claims;
 
@@ -37,8 +37,8 @@ pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
     tool_service: ToolService,
-    query_executor: QueryExecutor,
-    context_engine: ContextEngine,
+    query_pipeline: QueryPipelineService<RawRowFormatter>,
+    tool_pipeline: QueryPipelineService<ContextEngineFormatter>,
     cluster_health: Arc<ClusterHealthChecker>,
 }
 
@@ -49,16 +49,19 @@ impl KnowledgeGraphServiceImpl {
         health_check_url: Option<String>,
     ) -> Self {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let query_executor = QueryExecutor::new(clickhouse_config, Arc::clone(&ontology));
-        let tool_service = ToolService::new(query_executor.clone(), Arc::clone(&ontology));
-        let context_engine = ContextEngine::new();
+        let client = Arc::new(clickhouse_config.build_client());
+        let tool_service = ToolService::new(Arc::clone(&ontology));
+        let query_pipeline =
+            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), RawRowFormatter);
+        let tool_pipeline =
+            QueryPipelineService::new(Arc::clone(&ontology), client, ContextEngineFormatter);
         let cluster_health = ClusterHealthChecker::new(health_check_url).into_arc();
         Self {
             validator,
             ontology,
             tool_service,
-            query_executor,
-            context_engine,
+            query_pipeline,
+            tool_pipeline,
             cluster_health,
         }
     }
@@ -116,109 +119,60 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
 
-        let executor = self.tool_service.clone();
-        let context_engine = self.context_engine.clone();
-        let tool_ontology = Arc::clone(&self.ontology);
+        let tool_service = self.tool_service.clone();
+        let tool_query_pipeline = self.tool_pipeline.clone();
 
         tokio::spawn(async move {
-            let first_msg = match stream.next().await {
-                Some(Ok(msg)) => msg,
-                Some(Err(e)) => {
-                    error!(error = %e, "Failed to receive initial message");
-                    let _ = tx.send(Err(e)).await;
-                    return;
-                }
-                None => {
-                    warn!("Empty stream received");
-                    let _ = tx.send(Err(Status::invalid_argument("Empty stream"))).await;
-                    return;
-                }
-            };
-
-            let req = match first_msg.message {
-                Some(execute_tool_message::Message::Request(r)) => r,
-                _ => {
-                    warn!("Expected ExecuteToolRequest as first message");
-                    let _ = tx
-                        .send(Err(Status::invalid_argument(
-                            "Expected ExecuteToolRequest as first message",
-                        )))
-                        .await;
-                    return;
-                }
+            let req = match receive_tool_request(&mut stream, &tx).await {
+                Some(r) => r,
+                None => return,
             };
 
             info!(tool_name = %req.tool_name, "Executing tool");
 
-            let execution_result = match executor
-                .execute_tool(&req.tool_name, &req.arguments_json, &claims)
-                .await
-            {
-                Ok(r) => r,
+            let plan = match tool_service.resolve(&req.tool_name, &req.arguments_json) {
+                Ok(p) => p,
                 Err(e) => {
-                    error!(error = %e, "Tool execution failed");
-                    let _ = tx
-                        .send(Ok(ExecuteToolMessage {
-                            message: Some(execute_tool_message::Message::Error(ProtoError {
-                                code: e.code(),
-                                message: e.to_string(),
-                            })),
-                        }))
-                        .await;
+                    send_tool_executor_error(&tx, e).await;
                     return;
                 }
             };
 
-            let final_result = match (
-                execution_result.redaction_result,
-                execution_result.result_context,
-            ) {
-                (Some(mut redaction_result), Some(result_context)) => {
-                    if execution_result.resources_to_check.is_empty() {
-                        info!("No redaction required, returning result directly");
-                        context_engine.apply_redaction_and_prepare(
-                            &mut redaction_result,
-                            &result_context,
-                            &[],
-                            &tool_ontology,
-                        )
-                    } else {
-                        let exchange_result = match RedactionService::request_authorization(
-                            &execution_result.resources_to_check,
-                            &tx,
-                            &mut stream,
-                        )
-                        .await
-                        {
-                            Ok(r) => r,
-                            Err(e) => {
-                                let _ = tx.send(Err(e.into_status())).await;
-                                return;
-                            }
-                        };
-                        context_engine.apply_redaction_and_prepare(
-                            &mut redaction_result,
-                            &result_context,
-                            &exchange_result.authorizations,
-                            &tool_ontology,
-                        )
+            match plan {
+                ToolPlan::RunGraphQuery { query_json } => {
+                    let result = tool_query_pipeline
+                        .run_query(&claims, &query_json, &tx, &mut stream)
+                        .await;
+
+                    match result {
+                        Ok(output) => {
+                            info!("Sending graph query result");
+                            let _ = tx
+                                .send(Ok(ExecuteToolMessage {
+                                    message: Some(execute_tool_message::Message::Result(
+                                        ToolResult {
+                                            result_json: output.formatted_result.to_string(),
+                                        },
+                                    )),
+                                }))
+                                .await;
+                        }
+                        Err(e) => {
+                            send_tool_pipeline_error(&tx, e).await;
+                        }
                     }
                 }
-                _ => {
-                    info!("No redaction required for this tool, returning raw result");
-                    context_engine.prepare_response(execution_result.raw_result)
+                ToolPlan::Immediate { result } => {
+                    info!("Sending immediate tool result");
+                    let _ = tx
+                        .send(Ok(ExecuteToolMessage {
+                            message: Some(execute_tool_message::Message::Result(ToolResult {
+                                result_json: result.to_string(),
+                            })),
+                        }))
+                        .await;
                 }
-            };
-
-            info!("Sending final redacted result");
-
-            let _ = tx
-                .send(Ok(ExecuteToolMessage {
-                    message: Some(execute_tool_message::Message::Result(ToolResult {
-                        result_json: final_result.to_string(),
-                    })),
-                }))
-                .await;
+            }
         });
 
         let stream = ReceiverStream::new(rx);
@@ -244,109 +198,36 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
 
-        let query_executor = self.query_executor.clone();
-        let context_engine = self.context_engine.clone();
-        let ontology = Arc::clone(&self.ontology);
+        let raw_query_pipeline = self.query_pipeline.clone();
 
         tokio::spawn(async move {
-            let first_msg = match stream.next().await {
-                Some(Ok(msg)) => msg,
-                Some(Err(e)) => {
-                    error!(error = %e, "Failed to receive initial message");
-                    let _ = tx.send(Err(e)).await;
-                    return;
-                }
-                None => {
-                    warn!("Empty stream received");
-                    let _ = tx.send(Err(Status::invalid_argument("Empty stream"))).await;
-                    return;
-                }
-            };
-
-            let req = match first_msg.message {
-                Some(execute_query_message::Message::Request(r)) => r,
-                _ => {
-                    warn!("Expected ExecuteQueryRequest as first message");
-                    let _ = tx
-                        .send(Err(Status::invalid_argument(
-                            "Expected ExecuteQueryRequest as first message",
-                        )))
-                        .await;
-                    return;
-                }
+            let req = match receive_query_request(&mut stream, &tx).await {
+                Some(r) => r,
+                None => return,
             };
 
             info!(query_len = req.query_json.len(), "Executing query");
 
-            let query_result = match query_executor.execute(&req.query_json, &claims).await {
-                Ok(r) => r,
-                Err(e) => {
-                    error!(error = %e, "Query execution failed");
+            let result = raw_query_pipeline
+                .run_query(&claims, &req.query_json, &tx, &mut stream)
+                .await;
+
+            match result {
+                Ok(output) => {
+                    info!("Sending final query result");
                     let _ = tx
                         .send(Ok(ExecuteQueryMessage {
-                            message: Some(execute_query_message::Message::Error(ProtoError {
-                                code: e.code(),
-                                message: e.to_string(),
+                            message: Some(execute_query_message::Message::Result(QueryResult {
+                                result_json: output.formatted_result.to_string(),
+                                generated_sql: output.generated_sql.unwrap_or_default(),
                             })),
                         }))
                         .await;
-                    return;
                 }
-            };
-
-            let mut redaction_result = query_result.redaction_result;
-            let result_context = query_result.result_context;
-
-            if query_result.resources_to_check.is_empty() {
-                info!("No redaction required, returning result directly");
-                let final_result = context_engine.apply_redaction_and_prepare(
-                    &mut redaction_result,
-                    &result_context,
-                    &[],
-                    &ontology,
-                );
-                let _ = tx
-                    .send(Ok(ExecuteQueryMessage {
-                        message: Some(execute_query_message::Message::Result(QueryResult {
-                            result_json: final_result.to_string(),
-                            generated_sql: query_result.generated_sql,
-                        })),
-                    }))
-                    .await;
-                return;
-            }
-
-            let exchange_result = match RedactionService::request_authorization(
-                &query_result.resources_to_check,
-                &tx,
-                &mut stream,
-            )
-            .await
-            {
-                Ok(r) => r,
                 Err(e) => {
-                    let _ = tx.send(Err(e.into_status())).await;
-                    return;
+                    send_query_error(&tx, e).await;
                 }
-            };
-
-            let final_result = context_engine.apply_redaction_and_prepare(
-                &mut redaction_result,
-                &result_context,
-                &exchange_result.authorizations,
-                &ontology,
-            );
-
-            info!("Sending final filtered query result");
-
-            let _ = tx
-                .send(Ok(ExecuteQueryMessage {
-                    message: Some(execute_query_message::Message::Result(QueryResult {
-                        result_json: final_result.to_string(),
-                        generated_sql: query_result.generated_sql,
-                    })),
-                }))
-                .await;
+            }
         });
 
         let stream = ReceiverStream::new(rx);
@@ -500,24 +381,25 @@ mod tests {
         ClickHouseConfiguration::default()
     }
 
-    #[tokio::test]
-    async fn test_service_can_be_created() {
+    #[test]
+    fn test_service_can_be_created() {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
-        let result = service
-            .tool_service
-            .execute_tool("get_graph_entities", "{}", &test_claims())
-            .await;
-        assert!(result.is_ok());
 
-        let response = result.unwrap().raw_result;
-        assert!(
-            response.is_string(),
-            "Response should be toon-encoded string"
-        );
-        let toon_str = response.as_str().unwrap();
-        assert!(toon_str.contains("domains"));
-        assert!(toon_str.contains("edges"));
+        let plan = service
+            .tool_service
+            .resolve("get_graph_entities", "{}")
+            .expect("Should resolve");
+
+        match plan {
+            ToolPlan::Immediate { result } => {
+                assert!(result.is_string(), "Response should be toon-encoded string");
+                let toon_str = result.as_str().unwrap();
+                assert!(toon_str.contains("domains"));
+                assert!(toon_str.contains("edges"));
+            }
+            _ => panic!("Expected Immediate plan"),
+        }
     }
 
     #[test]
@@ -538,21 +420,5 @@ mod tests {
         assert_eq!(user.domain, "core");
         assert!(!user.properties.is_empty());
         assert!(user.style.is_some());
-    }
-
-    fn test_claims() -> crate::auth::Claims {
-        crate::auth::Claims {
-            sub: "user:1".to_string(),
-            iss: "gitlab".to_string(),
-            aud: "gitlab-knowledge-graph".to_string(),
-            exp: i64::MAX,
-            iat: 0,
-            user_id: 1,
-            username: "testuser".to_string(),
-            admin: false,
-            organization_id: None,
-            min_access_level: None,
-            group_traversal_ids: vec![],
-        }
     }
 }

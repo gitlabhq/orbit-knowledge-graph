@@ -7,11 +7,6 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
 
-use crate::auth::Claims;
-use crate::query::QueryExecutor;
-use crate::redaction::{QueryResult as RedactionQueryResult, ResourceCheck};
-use query_engine::ResultContext;
-
 #[derive(Debug, Error)]
 pub enum ExecutorError {
     #[error("Tool not found: {0}")]
@@ -19,9 +14,6 @@ pub enum ExecutorError {
 
     #[error("Invalid arguments: {0}")]
     InvalidArguments(String),
-
-    #[error("Execution failed: {0}")]
-    ExecutionFailed(String),
 }
 
 impl ExecutorError {
@@ -29,87 +21,55 @@ impl ExecutorError {
         match self {
             Self::NotFound(_) => "tool_not_found".to_string(),
             Self::InvalidArguments(_) => "invalid_arguments".to_string(),
-            Self::ExecutionFailed(_) => "execution_error".to_string(),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct ExecutionResult {
-    pub raw_result: Value,
-    pub resources_to_check: Vec<ResourceCheck>,
-    pub redaction_result: Option<RedactionQueryResult>,
-    pub result_context: Option<ResultContext>,
+pub enum ToolPlan {
+    RunGraphQuery { query_json: String },
+    Immediate { result: Value },
 }
 
 #[derive(Debug, Clone)]
 pub struct ToolService {
-    query_executor: QueryExecutor,
     ontology: Arc<Ontology>,
 }
 
 impl ToolService {
-    pub fn new(query_executor: QueryExecutor, ontology: Arc<Ontology>) -> Self {
-        Self {
-            query_executor,
-            ontology,
-        }
+    pub fn new(ontology: Arc<Ontology>) -> Self {
+        Self { ontology }
     }
 
-    pub async fn execute_tool(
+    pub fn resolve(
         &self,
         tool_name: &str,
         arguments_json: &str,
-        claims: &Claims,
-    ) -> Result<ExecutionResult, ExecutorError> {
+    ) -> Result<ToolPlan, ExecutorError> {
         let arguments: Value = serde_json::from_str(arguments_json)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         match tool_name {
-            "query_graph" => self.execute_query_graph(&arguments, claims).await,
+            "query_graph" => self.resolve_query_graph(&arguments),
             "get_graph_entities" => self.execute_get_graph_entities(&arguments),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
 
-    async fn execute_query_graph(
-        &self,
-        arguments: &Value,
-        claims: &Claims,
-    ) -> Result<ExecutionResult, ExecutorError> {
+    fn resolve_query_graph(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
         let query_json = serde_json::to_string(arguments)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
-        let result = self
-            .query_executor
-            .execute(&query_json, claims)
-            .await
-            .map_err(|e| ExecutorError::ExecutionFailed(e.to_string()))?;
-
-        Ok(ExecutionResult {
-            raw_result: Value::Null,
-            resources_to_check: result.resources_to_check,
-            redaction_result: Some(result.redaction_result),
-            result_context: Some(result.result_context),
-        })
+        Ok(ToolPlan::RunGraphQuery { query_json })
     }
 
-    fn execute_get_graph_entities(
-        &self,
-        arguments: &Value,
-    ) -> Result<ExecutionResult, ExecutorError> {
+    fn execute_get_graph_entities(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
         let args: GetGraphEntitiesArgs = serde_json::from_value(arguments.clone())
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         let response = self.build_graph_entities_response(&args)?;
         let result = self.format_as_toon(&response)?;
 
-        Ok(ExecutionResult {
-            raw_result: result,
-            resources_to_check: vec![],
-            redaction_result: None,
-            result_context: None,
-        })
+        Ok(ToolPlan::Immediate { result })
     }
 
     fn build_graph_entities_response(
@@ -233,7 +193,7 @@ impl ToolService {
     fn format_as_toon(&self, response: &GraphEntitiesResponse) -> Result<Value, ExecutorError> {
         let options = EncodeOptions::default();
         let toon_str = encode(response, &options).map_err(|e| {
-            ExecutorError::ExecutionFailed(format!("Failed to encode as toon: {e}"))
+            ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
         })?;
 
         Ok(json!(toon_str))
@@ -288,15 +248,16 @@ mod tests {
 
     fn get_toon_output(args: &str) -> String {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let config = clickhouse_client::ClickHouseConfiguration::default();
-        let query_executor = QueryExecutor::new(&config, ontology.clone());
-        let service = ToolService::new(query_executor, ontology);
+        let service = ToolService::new(ontology);
 
-        let result = service
-            .execute_get_graph_entities(&serde_json::from_str(args).unwrap())
-            .expect("Should execute");
+        let plan = service
+            .resolve("get_graph_entities", args)
+            .expect("Should resolve");
 
-        result.raw_result.as_str().unwrap().to_string()
+        match plan {
+            ToolPlan::Immediate { result } => result.as_str().unwrap().to_string(),
+            _ => panic!("Expected Immediate plan"),
+        }
     }
 
     #[test]
@@ -402,19 +363,19 @@ mod tests {
     }
 
     #[test]
-    fn test_no_resources_to_check() {
+    fn test_query_graph_returns_run_graph_query_plan() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        let config = clickhouse_client::ClickHouseConfiguration::default();
-        let query_executor = QueryExecutor::new(&config, ontology.clone());
-        let service = ToolService::new(query_executor, ontology);
+        let service = ToolService::new(ontology);
 
-        let result = service
-            .execute_get_graph_entities(&json!({}))
-            .expect("Should execute");
+        let plan = service
+            .resolve("query_graph", r#"{"match":{}}"#)
+            .expect("Should resolve");
 
-        assert!(
-            result.resources_to_check.is_empty(),
-            "Should not require authorization"
-        );
+        match plan {
+            ToolPlan::RunGraphQuery { query_json } => {
+                assert!(query_json.contains("match"));
+            }
+            _ => panic!("Expected RunGraphQuery plan"),
+        }
     }
 }

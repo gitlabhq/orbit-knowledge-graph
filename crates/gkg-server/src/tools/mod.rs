@@ -1,5 +1,5 @@
-mod executor;
 mod registry;
+mod service;
 
-pub use executor::{ExecutionResult, ExecutorError, ToolService};
 pub use registry::{ToolDefinition, ToolRegistry};
+pub use service::{ExecutorError, ToolPlan, ToolService};
