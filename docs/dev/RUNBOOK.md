@@ -417,3 +417,51 @@ kubectl -n gkg logs deployment/siphon-producer --tail=50 | grep "snapshot comple
 ```
 
 Producer recreates the slot, publication, and snapshots all configured tables.
+
+## Trigger Dispatcher Manually
+
+Run the dispatcher to dispatch indexing requests to the indexer. The dispatcher CronJob is disabled by default in sandbox.
+
+```bash
+# Delete previous job if exists
+kubectl -n gkg delete job gkg-dispatcher-manual 2>/dev/null
+
+# Create and run dispatcher job
+kubectl -n gkg apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gkg-dispatcher-manual
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: gkg-dispatcher
+          image: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:develop
+          imagePullPolicy: Always
+          args:
+            - "--mode=dispatch-indexing"
+          env:
+            - name: LOG_FORMAT
+              value: "json"
+            - name: NATS_URL
+              value: "gkg-nats:4222"
+            - name: DATALAKE_CLICKHOUSE_URL
+              value: "http://10.128.0.13:8123"
+            - name: DATALAKE_CLICKHOUSE_DATABASE
+              value: "gitlab_clickhouse_main_production"
+            - name: DATALAKE_CLICKHOUSE_USERNAME
+              value: "default"
+            - name: DATALAKE_CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: clickhouse-credentials
+EOF
+
+# Wait for completion and check logs
+kubectl -n gkg wait --for=condition=complete job/gkg-dispatcher-manual --timeout=120s
+kubectl -n gkg logs job/gkg-dispatcher-manual
+```
