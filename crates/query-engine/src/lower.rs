@@ -441,6 +441,10 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
 
     let center_node = find_node(&input.nodes, &neighbors_config.node)?;
     let center_table = resolve_table(center_node)?;
+    let center_entity = center_node
+        .entity
+        .as_ref()
+        .ok_or_else(|| QueryError::Lowering("center node entity missing".into()))?;
 
     let type_filter = type_filter(&neighbors_config.rel_types);
 
@@ -452,7 +456,12 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         JoinType::Inner,
         TableRef::scan(&center_table, &center_node.id),
         edge_table,
-        source_join_cond(&center_node.id, edge_alias, neighbors_config.direction),
+        source_join_cond_with_kind(
+            &center_node.id,
+            edge_alias,
+            center_entity,
+            neighbors_config.direction,
+        ),
     );
 
     let neighbor_id_expr = match neighbors_config.direction {
@@ -645,6 +654,28 @@ fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
         Direction::Both => Expr::or(
             Expr::eq(Expr::col(node, "id"), Expr::col(edge, "source_id")),
             Expr::eq(Expr::col(node, "id"), Expr::col(edge, "target_id")),
+        ),
+    }
+}
+
+/// Join from source node to edge table, with entity type filter.
+/// Unlike `source_join_cond`, this also filters on source_kind/target_kind
+/// to prevent ID collisions across entity types.
+fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Direction) -> Expr {
+    let id_and_kind = |id_col, kind_col| {
+        Expr::binary(
+            Op::And,
+            Expr::eq(Expr::col(node, "id"), Expr::col(edge, id_col)),
+            Expr::eq(Expr::col(edge, kind_col), Expr::lit(entity)),
+        )
+    };
+
+    match dir {
+        Direction::Outgoing => id_and_kind("source_id", "source_kind"),
+        Direction::Incoming => id_and_kind("target_id", "target_kind"),
+        Direction::Both => Expr::or(
+            id_and_kind("source_id", "source_kind"),
+            id_and_kind("target_id", "target_kind"),
         ),
     }
 }
