@@ -12,8 +12,8 @@ style:
 
 redaction:
   resource_type: projects
-  id_column: id
-  ability: read_project
+  id_column: project_id
+  ability: read_code
 
 properties:
   id:
@@ -21,6 +21,12 @@ properties:
     source: id
     nullable: false
     description: "Internal identifier for the definition node."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "ID of the project this definition belongs to."
 
   fqn:
     type: string
