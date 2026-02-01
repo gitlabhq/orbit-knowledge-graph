@@ -31,7 +31,7 @@ const SUBJECT: &str = "test.events";
 const TABLE: &str = "processed_events";
 
 const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
-const CLICKHOUSE_TAG: &str = "25.11";
+const CLICKHOUSE_TAG: &str = "25.12";
 const USERNAME: &str = "default";
 const PASSWORD: &str = "testpass";
 const DATABASE: &str = "test";

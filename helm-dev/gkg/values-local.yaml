@@ -33,6 +33,7 @@ clickhouse:
     ssl: false
 
 gkgServer:
+  logLevel: "info,gkg_server=debug"
   image:
     repository: gkg-server
     tag: dev
@@ -76,6 +77,7 @@ gkgServer:
 nats:
   enabled: false
   url: "host.docker.internal:4222"
+  streamName: siphon_stream_main_db
 
 producer:
   enabled: false
