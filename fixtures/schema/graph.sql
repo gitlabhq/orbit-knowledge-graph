@@ -129,6 +129,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff_files (
     id Int64,
+    merge_request_id Int64,
     merge_request_diff_id Int64,
     too_large Bool DEFAULT false,
     new_path Nullable(String),

@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use arrow::array::{BooleanArray, StringArray, UInt64Array};
+use arrow::array::{BooleanArray, Int64Array, StringArray, UInt64Array};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use etl_engine::clickhouse::{
@@ -242,6 +242,16 @@ pub fn get_uint64_column<'a>(batch: &'a RecordBatch, name: &str) -> &'a UInt64Ar
         .as_any()
         .downcast_ref::<UInt64Array>()
         .unwrap_or_else(|| panic!("{name} should be UInt64Array"))
+}
+
+/// Extract an int64 column from a RecordBatch.
+pub fn get_int64_column<'a>(batch: &'a RecordBatch, name: &str) -> &'a Int64Array {
+    batch
+        .column_by_name(name)
+        .unwrap_or_else(|| panic!("{name} column should exist"))
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap_or_else(|| panic!("{name} should be Int64Array"))
 }
 
 /// Extract a boolean column from a RecordBatch.

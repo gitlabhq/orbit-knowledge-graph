@@ -5,7 +5,7 @@ use serial_test::serial;
 
 use crate::common::{
     TestContext, create_namespace_payload, default_test_watermark, get_boolean_column,
-    get_namespace_handler, get_string_column,
+    get_int64_column, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -121,12 +121,21 @@ async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT merge_request_diff_id, old_path, new_path, new_file, deleted_file FROM gl_merge_request_diff_files ORDER BY old_path")
+        .query("SELECT merge_request_id, merge_request_diff_id, old_path, new_path, new_file, deleted_file FROM gl_merge_request_diff_files ORDER BY old_path")
         .await;
     assert!(!result.is_empty(), "merge request diff files should exist");
 
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 3);
+
+    let merge_request_ids = get_int64_column(batch, "merge_request_id");
+    for i in 0..batch.num_rows() {
+        assert_eq!(
+            merge_request_ids.value(i),
+            1,
+            "all diff files should have merge_request_id from the parent diff"
+        );
+    }
 
     let new_file_flags = get_boolean_column(batch, "new_file");
 

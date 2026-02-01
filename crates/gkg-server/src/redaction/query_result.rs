@@ -111,6 +111,10 @@ impl QueryResultRow {
         self.columns.get(column)
     }
 
+    pub fn columns(&self) -> impl Iterator<Item = (&String, &ColumnValue)> {
+        self.columns.iter()
+    }
+
     pub fn get_id(&self, node_alias: &str) -> Option<i64> {
         self.columns.get(&id_column(node_alias))?.as_i64()
     }
@@ -683,6 +687,37 @@ mod tests {
 
             result.rows_mut()[0].set_unauthorized();
             assert!(!result.rows()[0].is_authorized());
+        }
+
+        #[test]
+        fn columns_iterator_returns_all_columns() {
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let row = &result.rows()[0];
+
+            let column_names: HashSet<&str> =
+                row.columns().map(|(name, _)| name.as_str()).collect();
+
+            assert!(column_names.contains("_gkg_u_id"));
+            assert!(column_names.contains("_gkg_u_type"));
+            assert!(column_names.contains("_gkg_p_id"));
+            assert!(column_names.contains("_gkg_p_type"));
+            assert_eq!(column_names.len(), 4);
+        }
+
+        #[test]
+        fn columns_iterator_returns_correct_values() {
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let row = &result.rows()[0];
+
+            let columns: HashMap<&str, &ColumnValue> =
+                row.columns().map(|(k, v)| (k.as_str(), v)).collect();
+
+            assert_eq!(columns.get("_gkg_u_id"), Some(&&ColumnValue::Int64(1)));
+            assert_eq!(
+                columns.get("_gkg_u_type"),
+                Some(&&ColumnValue::String("User".to_string()))
+            );
+            assert_eq!(columns.get("_gkg_p_id"), Some(&&ColumnValue::Int64(100)));
         }
     }
 
