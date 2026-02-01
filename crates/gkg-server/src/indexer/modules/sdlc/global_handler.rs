@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use etl_engine::module::{Handler, HandlerContext, HandlerError};
 use etl_engine::types::{Envelope, Event, SerializationError, Topic};
 use serde::Serialize;
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 use super::locking::{INDEXING_LOCKS_BUCKET, global_lock_key};
 use super::pipeline::OntologyEntityPipeline;
@@ -72,8 +72,17 @@ impl Handler for GlobalHandler {
         })?;
 
         let last_watermark = match self.watermark_store.get_global_watermark().await {
-            Ok(w) => w,
-            Err(WatermarkError::NoData) => DateTime::<Utc>::UNIX_EPOCH,
+            Ok(w) => {
+                debug!(
+                    watermark = %w.format(TIMESTAMP_FORMAT),
+                    "retrieved global watermark"
+                );
+                w
+            }
+            Err(WatermarkError::NoData) => {
+                debug!("no global watermark found, starting from epoch");
+                DateTime::<Utc>::UNIX_EPOCH
+            }
             Err(error) => {
                 warn!(%error, "failed to fetch global watermark, using epoch");
                 DateTime::<Utc>::UNIX_EPOCH
@@ -82,14 +91,32 @@ impl Handler for GlobalHandler {
 
         let params = GlobalQueryParams::new(&last_watermark, &payload.watermark);
 
+        info!(
+            from_watermark = %params.last_watermark,
+            to_watermark = %params.watermark,
+            pipeline_count = self.pipelines.len(),
+            "starting global indexing"
+        );
+
         let mut errors = Vec::new();
+        let mut successful_pipelines = 0;
         for pipeline in &self.pipelines {
+            debug!(
+                entity = pipeline.entity_name(),
+                "processing global entity pipeline"
+            );
             if let Err(error) = pipeline
                 .process(params.to_json(), context.destination.as_ref())
                 .await
             {
                 warn!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
                 errors.push((pipeline.entity_name().to_string(), error));
+            } else {
+                debug!(
+                    entity = pipeline.entity_name(),
+                    "global entity pipeline completed"
+                );
+                successful_pipelines += 1;
             }
         }
 
@@ -101,13 +128,22 @@ impl Handler for GlobalHandler {
                     HandlerError::Processing(format!("failed to update global watermark: {e}"))
                 })?;
 
+            info!(
+                watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
+                "global watermark updated"
+            );
+
             if let Err(error) = context
                 .nats
                 .kv_delete(INDEXING_LOCKS_BUCKET, global_lock_key())
                 .await
             {
                 warn!(%error, "failed to release global lock, will expire via TTL");
+            } else {
+                debug!("global indexing lock released");
             }
+
+            info!(successful_pipelines, "global indexing completed");
         }
 
         // TODO: We should store per entity watermarks so we can resume for a specific entity and not the whole thing.

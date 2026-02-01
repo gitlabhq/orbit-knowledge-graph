@@ -9,6 +9,7 @@ use etl_engine::module::HandlerError;
 use futures::StreamExt;
 use ontology::{EDGE_TABLE, EdgeSourceEtlConfig, NodeEntity, Ontology};
 use serde_json::Value;
+use tracing::{debug, info};
 
 use super::datalake::DatalakeQuery;
 use super::prepare::{PreparedEdgeEtl, PreparedEtlConfig};
@@ -74,6 +75,12 @@ impl OntologyEntityPipeline {
                 ))
             })?;
 
+        debug!(
+            entity = %self.entity_name,
+            query = %self.extract_query,
+            "querying datalake for entity data"
+        );
+
         let mut stream = self
             .datalake
             .query_arrow(&self.extract_query, params)
@@ -81,6 +88,10 @@ impl OntologyEntityPipeline {
             .map_err(|e| {
                 HandlerError::Processing(format!("failed to query {} data: {e}", self.entity_name))
             })?;
+
+        let mut batch_count = 0;
+        let mut total_rows = 0;
+        let mut total_edges = 0;
 
         while let Some(result) = stream.next().await {
             let source_batch = result.map_err(|e| {
@@ -91,13 +102,35 @@ impl OntologyEntityPipeline {
                 continue;
             }
 
-            self.transform_and_write_batch(
-                source_batch,
-                entity_writer.as_ref(),
-                edge_writer.as_ref(),
-            )
-            .await?;
+            batch_count += 1;
+            let batch_rows = source_batch.num_rows();
+            total_rows += batch_rows;
+
+            debug!(
+                entity = %self.entity_name,
+                batch_number = batch_count,
+                batch_rows,
+                total_rows,
+                "processing entity batch"
+            );
+
+            let edges_written = self
+                .transform_and_write_batch(
+                    source_batch,
+                    entity_writer.as_ref(),
+                    edge_writer.as_ref(),
+                )
+                .await?;
+            total_edges += edges_written;
         }
+
+        info!(
+            entity = %self.entity_name,
+            batches_processed = batch_count,
+            total_rows,
+            total_edges,
+            "entity pipeline processing complete"
+        );
 
         Ok(())
     }
@@ -107,7 +140,7 @@ impl OntologyEntityPipeline {
         batch: RecordBatch,
         entity_writer: &dyn BatchWriter,
         edge_writer: &dyn BatchWriter,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<usize, HandlerError> {
         let session = SessionContext::new();
 
         let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
@@ -127,6 +160,7 @@ impl OntologyEntityPipeline {
             })?;
 
         let transformed = self.execute_query(&session, &self.transform_sql).await?;
+        let entity_rows = transformed.num_rows();
         entity_writer
             .write_batch(&[transformed])
             .await
@@ -134,19 +168,29 @@ impl OntologyEntityPipeline {
                 HandlerError::Processing(format!("failed to write {}: {e}", self.entity_name))
             })?;
 
+        let mut edges_written = 0;
         for edge_sql in &self.edge_transforms {
             let edges = self.execute_query(&session, edge_sql).await?;
-            if edges.num_rows() > 0 {
+            let edge_count = edges.num_rows();
+            if edge_count > 0 {
                 edge_writer.write_batch(&[edges]).await.map_err(|e| {
                     HandlerError::Processing(format!(
                         "failed to write edges for {}: {e}",
                         self.entity_name
                     ))
                 })?;
+                edges_written += edge_count;
             }
         }
 
-        Ok(())
+        debug!(
+            entity = %self.entity_name,
+            entities_written = entity_rows,
+            edges_written,
+            "batch transform and write complete"
+        );
+
+        Ok(edges_written)
     }
 
     async fn execute_query(
@@ -230,6 +274,12 @@ impl OntologyEdgePipeline {
                 ))
             })?;
 
+        debug!(
+            edge = %self.relationship_kind,
+            query = %self.extract_query,
+            "querying datalake for edge data"
+        );
+
         let mut stream = self
             .datalake
             .query_arrow(&self.extract_query, params)
@@ -240,6 +290,10 @@ impl OntologyEdgePipeline {
                     self.relationship_kind
                 ))
             })?;
+
+        let mut batch_count = 0;
+        let mut total_rows = 0;
+        let mut total_edges_written = 0;
 
         while let Some(result) = stream.next().await {
             let source_batch = result.map_err(|e| {
@@ -253,9 +307,31 @@ impl OntologyEdgePipeline {
                 continue;
             }
 
-            self.transform_and_write_batch(source_batch, edge_writer.as_ref())
+            batch_count += 1;
+            let batch_rows = source_batch.num_rows();
+            total_rows += batch_rows;
+
+            debug!(
+                edge = %self.relationship_kind,
+                batch_number = batch_count,
+                batch_rows,
+                total_rows,
+                "processing edge batch"
+            );
+
+            let edges_written = self
+                .transform_and_write_batch(source_batch, edge_writer.as_ref())
                 .await?;
+            total_edges_written += edges_written;
         }
+
+        info!(
+            edge = %self.relationship_kind,
+            batches_processed = batch_count,
+            source_rows = total_rows,
+            edges_written = total_edges_written,
+            "edge pipeline processing complete"
+        );
 
         Ok(())
     }
@@ -264,7 +340,7 @@ impl OntologyEdgePipeline {
         &self,
         batch: RecordBatch,
         edge_writer: &dyn BatchWriter,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<usize, HandlerError> {
         let session = SessionContext::new();
 
         let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
@@ -284,16 +360,23 @@ impl OntologyEdgePipeline {
             })?;
 
         let edges = self.execute_query(&session, &self.transform_sql).await?;
-        if edges.num_rows() > 0 {
+        let edges_count = edges.num_rows();
+        if edges_count > 0 {
             edge_writer.write_batch(&[edges]).await.map_err(|e| {
                 HandlerError::Processing(format!(
                     "failed to write {} edges: {e}",
                     self.relationship_kind
                 ))
             })?;
+
+            debug!(
+                edge = %self.relationship_kind,
+                edges_written = edges_count,
+                "edge batch transform and write complete"
+            );
         }
 
-        Ok(())
+        Ok(edges_count)
     }
 
     async fn execute_query(

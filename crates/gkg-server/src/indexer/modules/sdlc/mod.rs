@@ -16,7 +16,7 @@ use global_handler::GlobalHandler;
 use namespace_handler::NamespaceHandler;
 use ontology::{EtlScope, NodeEntity, Ontology};
 use pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
-use tracing::warn;
+use tracing::{debug, info, warn};
 use watermark_store::{ClickHouseWatermarkStore, WatermarkStore};
 
 pub struct SdlcModule {
@@ -116,6 +116,17 @@ impl Module for SdlcModule {
         let namespace_pipelines = self.create_namespace_pipelines();
         let namespace_edge_pipelines = self.create_namespace_edge_pipelines();
 
+        let global_pipeline_count = global_pipelines.len();
+        let namespace_pipeline_count = namespace_pipelines.len();
+        let namespace_edge_pipeline_count = namespace_edge_pipelines.len();
+
+        debug!(
+            global_entities = ?global_pipelines.iter().map(|p| p.entity_name()).collect::<Vec<_>>(),
+            namespace_entities = ?namespace_pipelines.iter().map(|p| p.entity_name()).collect::<Vec<_>>(),
+            namespace_edges = ?namespace_edge_pipelines.iter().map(|p| p.relationship_kind()).collect::<Vec<_>>(),
+            "sdlc pipeline details"
+        );
+
         let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
 
         if !global_pipelines.is_empty() {
@@ -132,6 +143,13 @@ impl Module for SdlcModule {
                 namespace_edge_pipelines,
             )));
         }
+
+        info!(
+            global_entity_pipelines = global_pipeline_count,
+            namespace_entity_pipelines = namespace_pipeline_count,
+            namespace_edge_pipelines = namespace_edge_pipeline_count,
+            "sdlc module initialized"
+        );
 
         handlers
     }
