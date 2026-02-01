@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use etl_engine::module::{Handler, HandlerContext, HandlerError};
 use etl_engine::types::{Envelope, Event, SerializationError, Topic};
 use serde::Serialize;
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 use super::locking::{INDEXING_LOCKS_BUCKET, namespace_lock_key};
 use super::pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
@@ -87,10 +87,27 @@ impl Handler for NamespaceHandler {
             .get_namespace_watermark(payload.namespace)
             .await
         {
-            Ok(w) => w,
-            Err(WatermarkError::NoData) => DateTime::<Utc>::UNIX_EPOCH,
+            Ok(w) => {
+                debug!(
+                    namespace_id = payload.namespace,
+                    watermark = %w.format(TIMESTAMP_FORMAT),
+                    "retrieved namespace watermark"
+                );
+                w
+            }
+            Err(WatermarkError::NoData) => {
+                debug!(
+                    namespace_id = payload.namespace,
+                    "no namespace watermark found, starting from epoch"
+                );
+                DateTime::<Utc>::UNIX_EPOCH
+            }
             Err(error) => {
-                warn!(%error, "failed to fetch namespace watermark, using epoch");
+                warn!(
+                    namespace_id = payload.namespace,
+                    %error,
+                    "failed to fetch namespace watermark, using epoch"
+                );
                 DateTime::<Utc>::UNIX_EPOCH
             }
         };
@@ -102,24 +119,71 @@ impl Handler for NamespaceHandler {
             &payload.watermark,
         );
 
+        info!(
+            namespace_id = payload.namespace,
+            organization_id = payload.organization,
+            from_watermark = %params.last_watermark,
+            to_watermark = %params.watermark,
+            entity_pipeline_count = self.pipelines.len(),
+            edge_pipeline_count = self.edge_pipelines.len(),
+            "starting namespace indexing"
+        );
+
         let mut errors = Vec::new();
+        let mut successful_entity_pipelines = 0;
+        let mut successful_edge_pipelines = 0;
+
         for pipeline in &self.pipelines {
+            debug!(
+                namespace_id = payload.namespace,
+                entity = pipeline.entity_name(),
+                "processing namespace entity pipeline"
+            );
             if let Err(error) = pipeline
                 .process(params.to_json(), context.destination.as_ref())
                 .await
             {
-                warn!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
+                warn!(
+                    namespace_id = payload.namespace,
+                    entity = pipeline.entity_name(),
+                    %error,
+                    "pipeline processing failed"
+                );
                 errors.push((pipeline.entity_name().to_string(), error));
+            } else {
+                debug!(
+                    namespace_id = payload.namespace,
+                    entity = pipeline.entity_name(),
+                    "namespace entity pipeline completed"
+                );
+                successful_entity_pipelines += 1;
             }
         }
 
         for edge_pipeline in &self.edge_pipelines {
+            debug!(
+                namespace_id = payload.namespace,
+                edge = edge_pipeline.relationship_kind(),
+                "processing namespace edge pipeline"
+            );
             if let Err(error) = edge_pipeline
                 .process(params.to_json(), context.destination.as_ref())
                 .await
             {
-                warn!(edge = edge_pipeline.relationship_kind(), %error, "edge pipeline processing failed");
+                warn!(
+                    namespace_id = payload.namespace,
+                    edge = edge_pipeline.relationship_kind(),
+                    %error,
+                    "edge pipeline processing failed"
+                );
                 errors.push((edge_pipeline.relationship_kind().to_string(), error));
+            } else {
+                debug!(
+                    namespace_id = payload.namespace,
+                    edge = edge_pipeline.relationship_kind(),
+                    "namespace edge pipeline completed"
+                );
+                successful_edge_pipelines += 1;
             }
         }
 
@@ -131,14 +195,37 @@ impl Handler for NamespaceHandler {
                     HandlerError::Processing(format!("failed to update namespace watermark: {e}"))
                 })?;
 
+            info!(
+                namespace_id = payload.namespace,
+                watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
+                "namespace watermark updated"
+            );
+
             let lock_key = namespace_lock_key(payload.namespace);
             if let Err(error) = context
                 .nats
                 .kv_delete(INDEXING_LOCKS_BUCKET, &lock_key)
                 .await
             {
-                warn!(%error, namespace = payload.namespace, "failed to release namespace lock, will expire via TTL");
+                warn!(
+                    namespace_id = payload.namespace,
+                    %error,
+                    "failed to release namespace lock, will expire via TTL"
+                );
+            } else {
+                debug!(
+                    namespace_id = payload.namespace,
+                    "namespace indexing lock released"
+                );
             }
+
+            info!(
+                namespace_id = payload.namespace,
+                organization_id = payload.organization,
+                successful_entity_pipelines,
+                successful_edge_pipelines,
+                "namespace indexing completed"
+            );
         }
 
         // TODO: We should store per entity watermarks so we can resume for a specific entity and not the whole thing.
