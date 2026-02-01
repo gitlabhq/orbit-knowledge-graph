@@ -65,10 +65,11 @@ properties:
     description: "Timestamp when the user record was last updated."
 
   state:
-    type: string
+    type: enum
     source: state
     nullable: true
     description: "Account state."
+    enum_type: string
     values:
       0: active
       1: blocked

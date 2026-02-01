@@ -1,6 +1,6 @@
 use ontology::{
-    DataType, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget, EtlConfig,
-    EtlScope, Field, NodeEntity, Ontology,
+    DataType, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget, EnumType,
+    EtlConfig, EtlScope, Field, NodeEntity, Ontology,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,18 +31,30 @@ impl PreparedField {
     }
 
     fn build_expression(field: &Field) -> String {
-        if field.data_type == DataType::Enum
-            && let Some(ref values) = field.enum_values
-        {
-            let cases: Vec<String> = values
-                .iter()
-                .map(|(k, v)| format!("WHEN {} = {} THEN '{}'", field.source, k, v))
-                .collect();
-            return format!(
-                "CASE {} ELSE 'unknown' END AS {}",
-                cases.join(" "),
-                field.name
-            );
+        if field.data_type == DataType::Enum {
+            match field.enum_type {
+                EnumType::Int => {
+                    if let Some(ref values) = field.enum_values {
+                        let cases: Vec<String> = values
+                            .iter()
+                            .map(|(k, v)| format!("WHEN {} = {} THEN '{}'", field.source, k, v))
+                            .collect();
+                        return format!(
+                            "CASE {} ELSE 'unknown' END AS {}",
+                            cases.join(" "),
+                            field.name
+                        );
+                    }
+                }
+                EnumType::String => {
+                    // String enums pass through as-is, no transformation needed
+                    if field.source == field.name {
+                        return field.name.clone();
+                    } else {
+                        return format!("{} AS {}", field.source, field.name);
+                    }
+                }
+            }
         }
 
         if field.source == field.name {
@@ -386,6 +398,7 @@ mod tests {
             data_type: DataType::Int,
             nullable: false,
             enum_values: None,
+            enum_type: EnumType::default(),
         };
         let resolved = PreparedField::from_field(&field);
         assert_eq!(resolved.expression, "id");
@@ -399,13 +412,14 @@ mod tests {
             data_type: DataType::Bool,
             nullable: false,
             enum_values: None,
+            enum_type: EnumType::default(),
         };
         let resolved = PreparedField::from_field(&field);
         assert_eq!(resolved.expression, "admin AS is_admin");
     }
 
     #[test]
-    fn prepared_field_enum() {
+    fn prepared_field_int_enum() {
         let mut values = BTreeMap::new();
         values.insert(0, "active".to_string());
         values.insert(1, "inactive".to_string());
@@ -416,14 +430,41 @@ mod tests {
             data_type: DataType::Enum,
             nullable: false,
             enum_values: Some(values),
+            enum_type: EnumType::Int,
         };
         let resolved = PreparedField::from_field(&field);
-        assert!(resolved.expression.contains("CASE"));
-        assert!(
-            resolved
-                .expression
-                .contains("WHEN status = 0 THEN 'active'")
+        assert_eq!(
+            resolved.expression,
+            "CASE WHEN status = 0 THEN 'active' WHEN status = 1 THEN 'inactive' ELSE 'unknown' END AS status"
         );
+    }
+
+    #[test]
+    fn prepared_field_string_enum() {
+        let field = Field {
+            name: "priority".to_string(),
+            source: "priority".to_string(),
+            data_type: DataType::Enum,
+            nullable: false,
+            enum_values: None,
+            enum_type: EnumType::String,
+        };
+        let resolved = PreparedField::from_field(&field);
+        assert_eq!(resolved.expression, "priority");
+    }
+
+    #[test]
+    fn prepared_field_string_enum_renamed() {
+        let field = Field {
+            name: "priority".to_string(),
+            source: "prio".to_string(),
+            data_type: DataType::Enum,
+            nullable: false,
+            enum_values: None,
+            enum_type: EnumType::String,
+        };
+        let resolved = PreparedField::from_field(&field);
+        assert_eq!(resolved.expression, "prio AS priority");
     }
 
     #[test]

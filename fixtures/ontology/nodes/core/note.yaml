@@ -30,6 +30,7 @@ properties:
     source: noteable_type
     nullable: false
     description: "Type of object this note is attached to."
+    enum_type: string
     values:
       0: Issue
       1: MergeRequest
