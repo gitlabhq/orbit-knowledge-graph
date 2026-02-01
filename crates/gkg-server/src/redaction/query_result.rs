@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
+use arrow::array::{
+    Array, Int64Array, ListArray, StringArray, StructArray, TimestampMicrosecondArray,
+    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt64Array,
+};
 use arrow::record_batch::RecordBatch;
 use query_engine::{
     NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, QueryType, ResultContext, id_column,
@@ -319,11 +322,37 @@ fn extract_value(array: &dyn Array, idx: usize) -> ColumnValue {
         return ColumnValue::Int64(arr.value(idx));
     }
 
+    if let Some(arr) = array.as_any().downcast_ref::<UInt64Array>() {
+        let val = arr.value(idx);
+        return ColumnValue::Int64(i64::try_from(val).unwrap_or(i64::MAX));
+    }
+
     if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
         return ColumnValue::String(arr.value(idx).to_string());
     }
 
+    if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
+        return timestamp_to_string(arr.value_as_datetime(idx));
+    }
+
+    if let Some(arr) = array.as_any().downcast_ref::<TimestampMillisecondArray>() {
+        return timestamp_to_string(arr.value_as_datetime(idx));
+    }
+
+    if let Some(arr) = array.as_any().downcast_ref::<TimestampMicrosecondArray>() {
+        return timestamp_to_string(arr.value_as_datetime(idx));
+    }
+
+    if let Some(arr) = array.as_any().downcast_ref::<TimestampNanosecondArray>() {
+        return timestamp_to_string(arr.value_as_datetime(idx));
+    }
+
     ColumnValue::Null
+}
+
+fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
+    dt.map(|d| ColumnValue::String(d.format("%Y-%m-%dT%H:%M:%SZ").to_string()))
+        .unwrap_or(ColumnValue::Null)
 }
 
 /// Extract nodes from the _gkg_path column in path finding queries.
@@ -1010,6 +1039,148 @@ mod tests {
 
             let result = QueryResult::from_batches(&[batch], &user_ctx());
             assert!(result.rows()[0].node_ref("u").is_none());
+        }
+    }
+
+    mod extract_value_tests {
+        use super::*;
+
+        #[test]
+        fn extract_uint64_as_int64() {
+            let batch = make_batch(vec![(
+                "count",
+                Arc::new(UInt64Array::from(vec![100u64, 200, 300])),
+            )]);
+
+            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
+
+            assert_eq!(
+                result.rows()[0].get("count"),
+                Some(&ColumnValue::Int64(100))
+            );
+            assert_eq!(
+                result.rows()[1].get("count"),
+                Some(&ColumnValue::Int64(200))
+            );
+            assert_eq!(
+                result.rows()[2].get("count"),
+                Some(&ColumnValue::Int64(300))
+            );
+        }
+
+        #[test]
+        fn extract_timestamp_second() {
+            let arr = TimestampSecondArray::new(
+                vec![1704067200i64].into(), // 2024-01-01T00:00:00Z
+                None,
+            );
+            let batch = make_batch(vec![("ts", Arc::new(arr))]);
+
+            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
+
+            assert_eq!(
+                result.rows()[0].get("ts"),
+                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
+            );
+        }
+
+        #[test]
+        fn extract_timestamp_millisecond() {
+            let arr = TimestampMillisecondArray::new(
+                vec![1704067200000i64].into(), // 2024-01-01T00:00:00Z in ms
+                None,
+            );
+            let batch = make_batch(vec![("ts", Arc::new(arr))]);
+
+            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
+
+            assert_eq!(
+                result.rows()[0].get("ts"),
+                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
+            );
+        }
+
+        #[test]
+        fn extract_timestamp_microsecond() {
+            let arr = TimestampMicrosecondArray::new(
+                vec![1704067200000000i64].into(), // 2024-01-01T00:00:00Z in μs
+                None,
+            );
+            let batch = make_batch(vec![("ts", Arc::new(arr))]);
+
+            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
+
+            assert_eq!(
+                result.rows()[0].get("ts"),
+                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
+            );
+        }
+
+        #[test]
+        fn extract_timestamp_nanosecond() {
+            let arr = TimestampNanosecondArray::new(
+                vec![1704067200000000000i64].into(), // 2024-01-01T00:00:00Z in ns
+                None,
+            );
+            let batch = make_batch(vec![("ts", Arc::new(arr))]);
+
+            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
+
+            assert_eq!(
+                result.rows()[0].get("ts"),
+                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
+            );
+        }
+
+        #[test]
+        fn extract_null_timestamp_returns_null() {
+            let arr: TimestampSecondArray = vec![Some(1704067200i64), None].into_iter().collect();
+            let batch = make_batch(vec![("ts", Arc::new(arr))]);
+
+            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
+
+            assert_eq!(
+                result.rows()[0].get("ts"),
+                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
+            );
+            assert_eq!(result.rows()[1].get("ts"), Some(&ColumnValue::Null));
+        }
+
+        #[test]
+        fn extract_uint64_overflow_clamps_to_max() {
+            let batch = make_batch(vec![("big", Arc::new(UInt64Array::from(vec![u64::MAX])))]);
+
+            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
+
+            assert_eq!(
+                result.rows()[0].get("big"),
+                Some(&ColumnValue::Int64(i64::MAX))
+            );
+        }
+
+        #[test]
+        fn mixed_data_types_in_batch() {
+            let ts_arr = TimestampMillisecondArray::new(vec![1704067200000i64].into(), None);
+            let batch = make_batch(vec![
+                ("_gkg_u_id", Arc::new(Int64Array::from(vec![1]))),
+                ("_gkg_u_type", Arc::new(StringArray::from(vec!["User"]))),
+                ("view_count", Arc::new(UInt64Array::from(vec![1000u64]))),
+                ("created_at", Arc::new(ts_arr)),
+            ]);
+
+            let mut ctx = ResultContext::new();
+            ctx.add_node("u", "User");
+
+            let result = QueryResult::from_batches(&[batch], &ctx);
+            let row = &result.rows()[0];
+
+            assert_eq!(row.get_id("u"), Some(1));
+            assert_eq!(row.get_type("u"), Some("User"));
+            assert_eq!(row.get("view_count"), Some(&ColumnValue::Int64(1000)));
+            assert_eq!(
+                row.get("created_at"),
+                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
+            );
         }
     }
 }
