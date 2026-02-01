@@ -72,8 +72,8 @@ impl ParameterSampler {
         if ids.is_empty() {
             return Ok(None);
         }
-        use fake::rand::Rng;
-        let mut rng = fake::rand::thread_rng();
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
         let idx = rng.gen_range(0..ids.len());
         Ok(Some(ids[idx]))
     }
@@ -90,8 +90,8 @@ impl ParameterSampler {
             return Ok(vec![]);
         }
 
-        use fake::rand::seq::SliceRandom;
-        let mut rng = fake::rand::thread_rng();
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
 
         let count = count.min(ids.len());
         Ok(ids.choose_multiple(&mut rng, count).copied().collect())

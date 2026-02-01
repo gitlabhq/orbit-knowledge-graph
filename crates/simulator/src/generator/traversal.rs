@@ -26,7 +26,7 @@
 //! - `EntityContext`: holds an entity's ID and traversal ID
 //! - `EntityRegistry`: maintains all generated entities by type for parent lookups
 
-use fake::rand::Rng;
+use rand::Rng;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -71,8 +71,12 @@ impl EntityContext {
 /// Registry of generated entities by type, for parent lookups during generation.
 #[derive(Debug)]
 pub struct EntityRegistry {
-    /// Entities by node type.
+    /// Full entities by node type (used during relationship generation).
     entities: HashMap<String, Vec<EntityContext>>,
+    /// Compact ID-only storage (used after compaction for associations).
+    ids_only: HashMap<String, Vec<i64>>,
+    /// Whether the registry has been compacted.
+    compacted: bool,
     /// Namespace ID counter (for Groups only, monotonically increasing).
     namespace_counter: AtomicI64,
     /// Entity ID counter (for non-namespace entities).
@@ -85,6 +89,8 @@ impl EntityRegistry {
     pub fn new(org_id: u32) -> Self {
         Self {
             entities: HashMap::new(),
+            ids_only: HashMap::new(),
+            compacted: false,
             namespace_counter: AtomicI64::new(org_id as i64 + 1),
             entity_counter: AtomicI64::new(1),
             org_id,
@@ -103,22 +109,60 @@ impl EntityRegistry {
         self.entity_counter.fetch_add(1, Ordering::SeqCst)
     }
 
+    /// Compact the registry to only store IDs, freeing traversal path memory.
+    /// Call this after relationship generation is complete, before associations.
+    pub fn compact(&mut self) {
+        if self.compacted {
+            return;
+        }
+        // Convert full entities to IDs and merge with existing id-only entries
+        for (node_type, contexts) in self.entities.drain() {
+            let ids: Vec<i64> = contexts.into_iter().map(|c| c.id).collect();
+            self.ids_only.entry(node_type).or_default().extend(ids);
+        }
+        self.compacted = true;
+    }
+
+    /// Add a full entity context (for parent entities that may have children).
     pub fn add(&mut self, node_type: &str, context: EntityContext) {
+        debug_assert!(!self.compacted, "Cannot add after compaction");
         self.entities
             .entry(node_type.to_string())
             .or_default()
             .push(context);
     }
 
+    /// Add only an entity ID (for leaf entities with no children).
+    /// This saves memory by not storing traversal paths for entities
+    /// that won't be used as parents.
+    pub fn add_id_only(&mut self, node_type: &str, id: i64) {
+        debug_assert!(!self.compacted, "Cannot add after compaction");
+        self.ids_only
+            .entry(node_type.to_string())
+            .or_default()
+            .push(id);
+    }
+
     pub fn get(&self, node_type: &str) -> Option<&[EntityContext]> {
+        debug_assert!(!self.compacted, "Use get_ids_slice after compaction");
         self.entities.get(node_type).map(|v| v.as_slice())
     }
 
+    /// Get entity IDs as a slice.
+    /// Works after compaction, or for leaf types that were added with add_id_only.
+    pub fn get_ids_slice(&self, node_type: &str) -> Option<&[i64]> {
+        self.ids_only.get(node_type).map(|v| v.as_slice())
+    }
+
     pub fn get_ids(&self, node_type: &str) -> Vec<i64> {
-        self.entities
-            .get(node_type)
-            .map(|v| v.iter().map(|e| e.id).collect())
-            .unwrap_or_default()
+        if self.compacted {
+            self.ids_only.get(node_type).cloned().unwrap_or_default()
+        } else {
+            self.entities
+                .get(node_type)
+                .map(|v| v.iter().map(|e| e.id).collect())
+                .unwrap_or_default()
+        }
     }
 
     pub fn all_entities(&self) -> &HashMap<String, Vec<EntityContext>> {
@@ -126,11 +170,15 @@ impl EntityRegistry {
     }
 
     pub fn count(&self, node_type: &str) -> usize {
-        self.entities.get(node_type).map(|v| v.len()).unwrap_or(0)
+        let full = self.entities.get(node_type).map(|v| v.len()).unwrap_or(0);
+        let ids = self.ids_only.get(node_type).map(|v| v.len()).unwrap_or(0);
+        full + ids
     }
 
     pub fn total_count(&self) -> usize {
-        self.entities.values().map(|v| v.len()).sum()
+        let full: usize = self.entities.values().map(|v| v.len()).sum();
+        let ids: usize = self.ids_only.values().map(|v| v.len()).sum();
+        full + ids
     }
 }
 

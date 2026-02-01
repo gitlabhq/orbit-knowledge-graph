@@ -1,6 +1,6 @@
 //! Dynamic RecordBatch builder from ontology definitions.
 
-use super::fake_data::{FakeValue, FakeValueGenerator};
+use super::fake_data::{FakeValue, FakeValueGenerator, FieldKind};
 use arrow::array::*;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
@@ -27,6 +27,10 @@ pub struct BatchBuilder {
 /// Holds data for a single column during batch building.
 struct ColumnData {
     field: Field,
+    /// Pre-computed field kind for fast generation.
+    kind: FieldKind,
+    /// Cached enum values for enum fields (uses i64 keys as per ontology).
+    enum_values: Option<std::collections::BTreeMap<i64, String>>,
     values: ColumnValues,
 }
 
@@ -51,11 +55,14 @@ impl BatchBuilder {
         seed: Option<u64>,
     ) -> Self {
         // Skip traversal_path - it's a system column handled separately
+        // Pre-compute FieldKind once per field to avoid runtime string matching
         let columns: Vec<ColumnData> = node
             .fields
             .iter()
             .filter(|field| field.name != "traversal_path")
             .map(|field| ColumnData {
+                kind: FieldKind::classify(field),
+                enum_values: field.enum_values.clone(),
                 field: field.clone(),
                 values: ColumnValues::new(&field.data_type),
             })
@@ -86,7 +93,12 @@ impl BatchBuilder {
             if self.primary_keys.contains(&col_data.field.name) {
                 col_data.values.push_int64(Some(id));
             } else {
-                let value = self.fake_gen.generate(&col_data.field);
+                // Use pre-computed FieldKind for fast generation
+                let value = self.fake_gen.generate_with_kind(
+                    col_data.kind,
+                    col_data.field.nullable,
+                    col_data.enum_values.as_ref(),
+                );
                 col_data
                     .values
                     .push_value(&value, &col_data.field.data_type);
@@ -147,7 +159,7 @@ impl ColumnValues {
             (ColumnValues::Float64(vec), FakeValue::Null) => vec.push(None),
             (ColumnValues::Bool(vec), FakeValue::Bool(v)) => vec.push(Some(*v)),
             (ColumnValues::Bool(vec), FakeValue::Null) => vec.push(None),
-            (ColumnValues::String(vec), FakeValue::String(v)) => vec.push(Some(v.clone())),
+            (ColumnValues::String(vec), FakeValue::String(v)) => vec.push(Some(v.to_string())),
             (ColumnValues::String(vec), FakeValue::Null) => vec.push(None),
             (ColumnValues::Date32(vec), FakeValue::Date(v)) => vec.push(Some(*v)),
             (ColumnValues::Date32(vec), FakeValue::Null) => vec.push(None),
