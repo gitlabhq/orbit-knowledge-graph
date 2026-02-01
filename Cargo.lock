@@ -3574,7 +3574,7 @@ dependencies = [
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "labkit-correlation",
  "labkit-fields",
@@ -3593,7 +3593,7 @@ dependencies = [
 [[package]]
 name = "labkit-correlation"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "futures-util",
  "http",
@@ -3611,12 +3611,12 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 
 [[package]]
 name = "labkit-grpc"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "tonic",
  "tracing",
@@ -3625,7 +3625,7 @@ dependencies = [
 [[package]]
 name = "labkit-http"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "http",
  "labkit-correlation",
@@ -3639,7 +3639,7 @@ dependencies = [
 [[package]]
 name = "labkit-log"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "chrono",
  "labkit-correlation",
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "labkit-log-test"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "parking_lot",
  "serde_json",
@@ -3665,7 +3665,7 @@ dependencies = [
 [[package]]
 name = "labkit-mask"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "once_cell",
  "regex",
@@ -3675,7 +3675,7 @@ dependencies = [
 [[package]]
 name = "labkit-metrics"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "futures-util",
  "http",
@@ -3689,7 +3689,7 @@ dependencies = [
 [[package]]
 name = "labkit-monitoring"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "axum",
  "thiserror 2.0.18",
@@ -3700,7 +3700,7 @@ dependencies = [
 [[package]]
 name = "labkit-remoteip"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "http",
  "thiserror 2.0.18",
@@ -3710,7 +3710,7 @@ dependencies = [
 [[package]]
 name = "labkit-tracing"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs#c3b05effd695ebf2852f4d3fc4c2dfd34a5223ec"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?rev=2433068#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
 dependencies = [
  "labkit-correlation",
  "opentelemetry",
