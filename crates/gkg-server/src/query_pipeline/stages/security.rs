@@ -9,7 +9,10 @@ impl SecurityStage {
     // If the user is not an admin, we filter by the user's group traversal paths.
     // We must ensure that if the traversal paths are empty, we also return an empty result.
     pub fn execute(claims: &Claims) -> Result<SecurityContext, SecurityError> {
-        let org_id = claims.organization_id.unwrap_or(1) as i64;
+        let org_id = claims
+            .organization_id
+            .ok_or_else(|| SecurityError("missing organization_id in claims".to_string()))?
+            as i64;
         let traversal_paths = if claims.admin {
             vec![format!("{}/", org_id)]
         } else {
@@ -64,12 +67,11 @@ mod tests {
     }
 
     #[test]
-    fn admin_with_default_org_gets_org_1() {
+    fn missing_org_id_returns_error() {
         let claims = make_claims(true, vec![], None);
-        let ctx = SecurityStage::execute(&claims).unwrap();
+        let err = SecurityStage::execute(&claims).unwrap_err();
 
-        assert_eq!(ctx.org_id, 1);
-        assert_eq!(ctx.traversal_paths, vec!["1/"]);
+        assert!(err.to_string().contains("missing organization_id"));
     }
 
     #[test]
