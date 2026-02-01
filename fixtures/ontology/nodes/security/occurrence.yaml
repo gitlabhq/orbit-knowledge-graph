@@ -10,7 +10,10 @@ style:
   size: 28
   color: "#EF4444"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: vulnerability_occurrences
+  id_column: id
+  ability: read_vulnerability
 
 properties:
   id:
