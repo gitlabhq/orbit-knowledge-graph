@@ -3290,6 +3290,95 @@ async fn multi_hop_edge_columns_survive_redaction() {
     );
 }
 
+/// Tests that neighbors query filters by entity type, preventing ID collisions.
+///
+/// This validates the fix for the bug where neighbors query would return edges
+/// for unrelated entities that happen to share the same numeric ID.
+/// For example, User 1's neighbors should not include edges where source_id=1
+/// but source_kind='Group'.
+#[tokio::test]
+#[serial]
+async fn neighbors_query_filters_by_entity_type() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    // Insert a "colliding" edge: source_id=1 but source_kind='Group'
+    // This simulates a Group with ID=1 having an edge, which should NOT
+    // appear when querying User 1's neighbors.
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1, 'Group', 'CONTAINS', 9999, 'Project')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Query User 1's outgoing neighbors
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // Verify the SQL contains source_kind filter to prevent ID collisions
+    // Note: the entity type 'User' is passed as a parameter, not embedded in SQL
+    assert!(
+        query.sql.contains("source_kind"),
+        "neighbors query must filter by source_kind to prevent ID collisions. SQL: {}",
+        query.sql
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // User 1 has exactly 2 MEMBER_OF edges (to groups 100 and 102)
+    // The "colliding" edge (Group 1 -> Project 9999) should NOT appear
+    assert_eq!(
+        result.len(),
+        2,
+        "User 1 should have exactly 2 neighbors (groups 100, 102), not 3. \
+         The edge with source_id=1, source_kind='Group' must be filtered out."
+    );
+
+    // Verify all neighbors are Groups (not the colliding Project 9999)
+    for row in result.iter() {
+        let neighbor_type = row.get("_gkg_neighbor_type").and_then(|v| v.as_str());
+        assert_eq!(
+            neighbor_type,
+            Some("Group"),
+            "all neighbors should be Groups, got {:?}",
+            neighbor_type
+        );
+    }
+
+    // Verify redaction works correctly on filtered neighbors
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]);
+    mock_service.deny("groups", &[102]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        result.authorized_count(),
+        1,
+        "only the edge to group 100 should be authorized after redaction"
+    );
+
+    let authorized_neighbor_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|row| row.get("_gkg_neighbor_id").and_then(|v| v.as_i64()))
+        .collect();
+    assert_eq!(
+        authorized_neighbor_ids,
+        HashSet::from([100]),
+        "only group 100 should remain after redaction"
+    );
+}
+
 /// Comprehensive test for enum filter normalization across int and string enum types.
 ///
 /// Tests the query normalization phase which coerces filter values to match ontology types:
