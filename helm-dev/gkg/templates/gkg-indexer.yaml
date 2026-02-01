@@ -27,6 +27,8 @@ spec:
           env:
             - name: LOG_FORMAT
               value: "json"
+            - name: RUST_LOG
+              value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
             - name: NATS_URL
               value: {{ include "gkg.natsUrl" . | quote }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 12 }}
@@ -50,9 +52,9 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: "gkg-indexer"
             {{- end }}
-            {{- with .Values.gkgServer.indexer.codeIndex }}
+            {{- if .Values.nats.streamName }}
             - name: CODE_INDEX_EVENTS_STREAM
-              value: {{ .eventsStreamName | quote }}
+              value: {{ .Values.nats.streamName | quote }}
             {{- end }}
           securityContext:
             {{- include "gkg.securityContext" . | nindent 12 }}

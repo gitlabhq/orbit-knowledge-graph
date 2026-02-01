@@ -17,7 +17,7 @@ use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 
 const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
-const CLICKHOUSE_TAG: &str = "25.11";
+const CLICKHOUSE_TAG: &str = "25.12";
 const TEST_USERNAME: &str = "default";
 const TEST_PASSWORD: &str = "testpass";
 const TEST_DATABASE: &str = "test";

@@ -63,6 +63,8 @@ spec:
           env:
             - name: LOG_FORMAT
               value: "json"
+            - name: RUST_LOG
+              value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 12 }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
             - name: GKG_JWT_SECRET

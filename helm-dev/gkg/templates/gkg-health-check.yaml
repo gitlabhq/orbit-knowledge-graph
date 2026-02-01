@@ -69,6 +69,8 @@ spec:
           env:
             - name: LOG_FORMAT
               value: "json"
+            - name: RUST_LOG
+              value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
             - name: GKG_HEALTH_CHECK_BIND_ADDRESS
               value: "0.0.0.0:4201"
             - name: GKG_HEALTH_CHECK_NAMESPACE

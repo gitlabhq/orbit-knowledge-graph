@@ -31,6 +31,8 @@ spec:
               env:
                 - name: LOG_FORMAT
                   value: "json"
+                - name: RUST_LOG
+                  value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
                 - name: NATS_URL
                   value: {{ include "gkg.natsUrl" . | quote }}
                 {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 16 }}

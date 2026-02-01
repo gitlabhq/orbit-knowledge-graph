@@ -1,9 +1,10 @@
 -- Watermark tables
 
 CREATE TABLE IF NOT EXISTS global_indexing_watermark (
+    id UInt8 DEFAULT 1,
     watermark DateTime64(6, 'UTC'),
     _version DateTime64(6, 'UTC') DEFAULT now64()
-) ENGINE = ReplacingMergeTree(_version) ORDER BY tuple();
+) ENGINE = ReplacingMergeTree(_version) ORDER BY (id);
 
 CREATE TABLE IF NOT EXISTS namespace_indexing_watermark (
     namespace Int64,

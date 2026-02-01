@@ -95,7 +95,7 @@ nats:
 siphon:
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.25-beta"
+    tag: "0.0.27-beta"
     pullPolicy: Always
 
 # Table order matters for initial snapshots. Tables are snapshotted in config order.
@@ -327,6 +327,8 @@ consumer:
       memory: 1Gi
 
 gkgServer:
+  # Use targeted debug: gkg_server=debug, other crates=info
+  logLevel: "info,gkg_server=debug"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
     tag: develop
@@ -346,11 +348,11 @@ gkgServer:
     replicas: 1
     resources:
       requests:
-        cpu: 100m
-        memory: 256Mi
+        cpu: 1
+        memory: 2Gi
       limits:
-        cpu: 500m
-        memory: 512Mi
+        cpu: 8
+        memory: 16Gi
   webserver:
     enabled: true
     replicas: 1
