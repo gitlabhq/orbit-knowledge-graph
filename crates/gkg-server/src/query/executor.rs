@@ -3,12 +3,12 @@ use std::sync::Arc;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfiguration};
 use ontology::Ontology;
 use query_engine::{SecurityContext, compile};
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::auth::Claims;
 use crate::redaction::{
-    QueryResult as RedactionQueryResult, QueryResultRow, RedactionExtractor, ResourceCheck,
+    QueryResult as RedactionQueryResult, RedactionExtractor, ResourceCheck,
 };
 
 #[derive(Debug, Error)]
@@ -39,7 +39,8 @@ impl QueryError {
 
 #[derive(Debug)]
 pub struct QueryResult {
-    pub result: Value,
+    pub redaction_result: RedactionQueryResult,
+    pub result_context: query_engine::ResultContext,
     pub generated_sql: String,
     pub resources_to_check: Vec<ResourceCheck>,
 }
@@ -89,14 +90,9 @@ impl QueryExecutor {
         let extractor = RedactionExtractor::new(&self.ontology);
         let (_, resources_to_check) = extractor.extract(&redaction_result);
 
-        let rows: Vec<Value> = redaction_result
-            .rows()
-            .iter()
-            .map(|row| row_to_json(row, &compiled.result_context))
-            .collect();
-
         Ok(QueryResult {
-            result: json!({ "rows": rows, "count": rows.len() }),
+            redaction_result,
+            result_context: compiled.result_context,
             generated_sql: compiled.sql.clone(),
             resources_to_check,
         })
@@ -143,19 +139,6 @@ fn bind_param(
         }
         _ => query.param(key, value.to_string()),
     }
-}
-
-fn row_to_json(row: &QueryResultRow, ctx: &query_engine::ResultContext) -> Value {
-    let mut obj = serde_json::Map::new();
-    for node in ctx.nodes() {
-        if let Some(id) = row.get_id(&node.alias) {
-            obj.insert(format!("{}_id", node.alias), json!(id));
-        }
-        if let Some(entity_type) = row.get_type(&node.alias) {
-            obj.insert(format!("{}_type", node.alias), json!(entity_type));
-        }
-    }
-    Value::Object(obj)
 }
 
 #[cfg(test)]

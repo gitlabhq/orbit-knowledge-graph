@@ -42,7 +42,7 @@ pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
 
 fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
-    let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
+    let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases, ontology);
 
     let mut select = build_select_columns(&input.nodes, ontology);
     add_edge_columns(&mut select, &input.relationships, &edge_aliases);
@@ -146,7 +146,7 @@ fn add_edge_columns(
 
 fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships, ontology)?;
-    let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
+    let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases, ontology);
 
     let mut select = Vec::new();
     let mut group_by = Vec::new();
@@ -666,6 +666,7 @@ fn build_full_where(
     nodes: &[InputNode],
     rels: &[InputRelationship],
     edge_aliases: &HashMap<usize, String>,
+    ontology: &Ontology,
 ) -> Option<Expr> {
     let mut conds: Vec<Expr> = Vec::new();
 
@@ -685,7 +686,7 @@ fn build_full_where(
             ));
         }
         for (prop, filter) in &node.filters {
-            conds.push(filter_expr(&node.id, prop, filter));
+            conds.push(filter_expr(&node.id, prop, filter, node.entity.as_deref(), ontology));
         }
     }
 
@@ -693,7 +694,7 @@ fn build_full_where(
     for (i, rel) in rels.iter().enumerate() {
         if let Some(alias) = edge_aliases.get(&i) {
             for (prop, filter) in &rel.filters {
-                conds.push(filter_expr(alias, prop, filter));
+                conds.push(filter_expr(alias, prop, filter, None, ontology));
             }
             // min_hops filter for multi-hop
             if rel.max_hops > 1 && rel.min_hops > 1 {
@@ -720,9 +721,16 @@ fn id_filter(table: &str, col: &str, ids: &[i64]) -> Option<Expr> {
     }
 }
 
-fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
+fn filter_expr(
+    table: &str,
+    column: &str,
+    filter: &InputFilter,
+    entity: Option<&str>,
+    ontology: &Ontology,
+) -> Expr {
     let col = Expr::col(table, column);
-    let val = || Expr::Literal(filter.value.clone().unwrap_or(Value::Null));
+    let coerced_value = coerce_filter_value(filter.value.as_ref(), column, entity, ontology);
+    let val = || Expr::Literal(coerced_value.clone().unwrap_or(Value::Null));
 
     match filter.op {
         None | Some(FilterOp::Eq) => Expr::eq(col, val()),
@@ -736,6 +744,54 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
         Some(FilterOp::EndsWith) => like_pattern(col, filter, "%", ""),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
+    }
+}
+
+fn coerce_filter_value(
+    value: Option<&Value>,
+    column: &str,
+    entity: Option<&str>,
+    ontology: &Ontology,
+) -> Option<Value> {
+    let value = value?;
+
+    let Some(entity_name) = entity else {
+        return Some(value.clone());
+    };
+    let Some(node_entity) = ontology.get_node(entity_name) else {
+        return Some(value.clone());
+    };
+    let Some(field) = node_entity.fields.iter().find(|f| f.name == column) else {
+        return Some(value.clone());
+    };
+    let Some(enum_values) = field.enum_values.as_ref() else {
+        return Some(value.clone());
+    };
+
+    match value {
+        Value::Number(n) => {
+            let key = n.as_i64()?;
+            let label = enum_values.get(&key)?;
+            Some(Value::String(label.clone()))
+        }
+        Value::Array(arr) => {
+            let coerced: Vec<Value> = arr
+                .iter()
+                .map(|v| match v {
+                    Value::Number(n) => {
+                        if let Some(key) = n.as_i64() {
+                            if let Some(label) = enum_values.get(&key) {
+                                return Value::String(label.clone());
+                            }
+                        }
+                        v.clone()
+                    }
+                    _ => v.clone(),
+                })
+                .collect();
+            Some(Value::Array(coerced))
+        }
+        _ => Some(value.clone()),
     }
 }
 

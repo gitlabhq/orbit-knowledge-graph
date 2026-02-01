@@ -10,7 +10,10 @@ style:
   size: 24
   color: "#22D3EE"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: projects
+  id_column: project_id
+  ability: read_code
 
 properties:
   id:
@@ -60,6 +63,12 @@ properties:
     source: traversal_path
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "ID of the project this file belongs to."
 
 # edges:
 #   - type: IN_DIRECTORY

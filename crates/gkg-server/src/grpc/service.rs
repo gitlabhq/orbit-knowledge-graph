@@ -118,6 +118,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         let executor = self.tool_service.clone();
         let context_engine = self.context_engine.clone();
+        let tool_ontology = Arc::clone(&self.ontology);
 
         tokio::spawn(async move {
             let first_msg = match stream.next().await {
@@ -168,37 +169,46 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                 }
             };
 
-            if execution_result.resources_to_check.is_empty() {
-                info!("No redaction required, returning result directly");
-                let final_result = context_engine.prepare_response(execution_result.raw_result);
-                let _ = tx
-                    .send(Ok(ExecuteToolMessage {
-                        message: Some(execute_tool_message::Message::Result(ToolResult {
-                            result_json: final_result.to_string(),
-                        })),
-                    }))
-                    .await;
-                return;
-            }
-
-            let exchange_result = match RedactionService::request_authorization(
-                &execution_result.resources_to_check,
-                &tx,
-                &mut stream,
-            )
-            .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = tx.send(Err(e.into_status())).await;
-                    return;
+            let final_result = match (
+                execution_result.redaction_result,
+                execution_result.result_context,
+            ) {
+                (Some(mut redaction_result), Some(result_context)) => {
+                    if execution_result.resources_to_check.is_empty() {
+                        info!("No redaction required, returning result directly");
+                        context_engine.apply_redaction_and_prepare(
+                            &mut redaction_result,
+                            &result_context,
+                            &[],
+                            &tool_ontology,
+                        )
+                    } else {
+                        let exchange_result = match RedactionService::request_authorization(
+                            &execution_result.resources_to_check,
+                            &tx,
+                            &mut stream,
+                        )
+                        .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => {
+                                let _ = tx.send(Err(e.into_status())).await;
+                                return;
+                            }
+                        };
+                        context_engine.apply_redaction_and_prepare(
+                            &mut redaction_result,
+                            &result_context,
+                            &exchange_result.authorizations,
+                            &tool_ontology,
+                        )
+                    }
+                }
+                _ => {
+                    info!("No redaction required for this tool, returning raw result");
+                    context_engine.prepare_response(execution_result.raw_result)
                 }
             };
-
-            let final_result = context_engine.apply_redaction_and_prepare(
-                execution_result.raw_result,
-                &exchange_result.authorizations,
-            );
 
             info!("Sending final redacted result");
 
@@ -236,6 +246,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         let query_executor = self.query_executor.clone();
         let context_engine = self.context_engine.clone();
+        let ontology = Arc::clone(&self.ontology);
 
         tokio::spawn(async move {
             let first_msg = match stream.next().await {
@@ -283,9 +294,17 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                 }
             };
 
+            let mut redaction_result = query_result.redaction_result;
+            let result_context = query_result.result_context;
+
             if query_result.resources_to_check.is_empty() {
                 info!("No redaction required, returning result directly");
-                let final_result = context_engine.prepare_response(query_result.result);
+                let final_result = context_engine.apply_redaction_and_prepare(
+                    &mut redaction_result,
+                    &result_context,
+                    &[],
+                    &ontology,
+                );
                 let _ = tx
                     .send(Ok(ExecuteQueryMessage {
                         message: Some(execute_query_message::Message::Result(QueryResult {
@@ -311,8 +330,12 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                 }
             };
 
-            let final_result = context_engine
-                .apply_redaction_and_prepare(query_result.result, &exchange_result.authorizations);
+            let final_result = context_engine.apply_redaction_and_prepare(
+                &mut redaction_result,
+                &result_context,
+                &exchange_result.authorizations,
+                &ontology,
+            );
 
             info!("Sending final filtered query result");
 

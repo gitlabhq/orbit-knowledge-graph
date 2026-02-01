@@ -10,7 +10,10 @@ style:
   size: 32
   color: "#EC4899"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: issues
+  id_column: id
+  ability: read_issue
 
 properties:
   id:

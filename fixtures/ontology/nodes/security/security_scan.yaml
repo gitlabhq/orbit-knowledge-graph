@@ -10,7 +10,10 @@ style:
   size: 26
   color: "#B91C1C"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: security_scans
+  id_column: id
+  ability: read_scan
 
 properties:
   id:

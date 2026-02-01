@@ -10,7 +10,10 @@ style:
   size: 24
   color: "#FCA5A5"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: vulnerability_scanners
+  id_column: id
+  ability: read_vulnerability_scanner
 
 properties:
   id:

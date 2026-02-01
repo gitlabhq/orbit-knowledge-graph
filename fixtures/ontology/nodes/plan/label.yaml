@@ -10,7 +10,10 @@ style:
   size: 22
   color: "#A855F7"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: labels
+  id_column: id
+  ability: read_label
 
 properties:
   id:

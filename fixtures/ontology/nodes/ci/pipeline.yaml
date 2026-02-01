@@ -10,7 +10,10 @@ style:
   size: 30
   color: "#6366F1"
 
-redaction: null  # TODO: configure redaction
+redaction:
+  resource_type: ci_pipelines
+  id_column: id
+  ability: read_pipeline
 
 properties:
   id:

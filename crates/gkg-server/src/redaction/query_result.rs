@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
+use arrow::array::{
+    Array, Int64Array, ListArray, StringArray, StructArray, TimestampMicrosecondArray,
+    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt64Array,
+};
 use arrow::record_batch::RecordBatch;
 use query_engine::{
     NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, QueryType, ResultContext, id_column,
@@ -106,6 +109,10 @@ impl QueryResultRow {
 
     pub fn get(&self, column: &str) -> Option<&ColumnValue> {
         self.columns.get(column)
+    }
+
+    pub fn columns(&self) -> impl Iterator<Item = (&String, &ColumnValue)> {
+        self.columns.iter()
     }
 
     pub fn get_id(&self, node_alias: &str) -> Option<i64> {
@@ -319,11 +326,37 @@ fn extract_value(array: &dyn Array, idx: usize) -> ColumnValue {
         return ColumnValue::Int64(arr.value(idx));
     }
 
+    if let Some(arr) = array.as_any().downcast_ref::<UInt64Array>() {
+        return ColumnValue::Int64(arr.value(idx) as i64);
+    }
+
     if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
         return ColumnValue::String(arr.value(idx).to_string());
     }
 
+    // Timestamp types - convert to ISO 8601 string
+    if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
+        return ColumnValue::String(timestamp_to_iso(arr.value(idx), 1));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<TimestampMillisecondArray>() {
+        return ColumnValue::String(timestamp_to_iso(arr.value(idx), 1_000));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<TimestampMicrosecondArray>() {
+        return ColumnValue::String(timestamp_to_iso(arr.value(idx), 1_000_000));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<TimestampNanosecondArray>() {
+        return ColumnValue::String(timestamp_to_iso(arr.value(idx), 1_000_000_000));
+    }
+
     ColumnValue::Null
+}
+
+fn timestamp_to_iso(value: i64, divisor: i64) -> String {
+    let secs = value / divisor;
+    let nanos = ((value % divisor) * (1_000_000_000 / divisor)) as u32;
+    chrono::DateTime::from_timestamp(secs, nanos)
+        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+        .unwrap_or_else(|| value.to_string())
 }
 
 /// Extract nodes from the _gkg_path column in path finding queries.

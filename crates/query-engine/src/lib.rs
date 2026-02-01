@@ -12,17 +12,18 @@
 //!
 //! ```rust
 //! use query_engine::{compile, SecurityContext};
-//! use ontology::Ontology;
+//! use ontology::{Ontology, DataType};
 //!
 //! let ontology = Ontology::new()
 //!     .with_nodes(["User", "Project"])
-//!     .with_edges(["MEMBER_OF"]);
+//!     .with_edges(["MEMBER_OF"])
+//!     .with_fields("User", [("username", DataType::String)]);
 //!
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
 //! let json = r#"{
 //!     "query_type": "search",
-//!     "node": {"id": "u", "entity": "User"},
+//!     "node": {"id": "u", "entity": "User", "columns": ["username"]},
 //!     "limit": 10
 //! }"#;
 //!
@@ -173,6 +174,7 @@ mod tests {
                 ],
             )
             .with_fields("Project", [("name", DataType::String)])
+            .with_fields("Group", [("name", DataType::String)])
     }
 
     /// Compile JSON and return the AST without generating SQL.
@@ -190,7 +192,7 @@ mod tests {
     fn compile_to_ast_works() {
         let json = r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User"},
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
             "limit": 10
         }"#;
 
@@ -198,7 +200,7 @@ mod tests {
             panic!("expected Query");
         };
         assert_eq!(q.limit, Some(10));
-        assert_eq!(q.select.len(), 1);
+        assert_eq!(q.select.len(), 2);
     }
 
     #[test]
@@ -206,8 +208,8 @@ mod tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "n", "entity": "Note", "filters": {"confidential": true}},
-                {"id": "u", "entity": "User"}
+                {"id": "n", "entity": "Note", "columns": ["confidential"], "filters": {"confidential": true}},
+                {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25,
@@ -245,10 +247,33 @@ mod tests {
     }
 
     #[test]
+    fn bool_filter_value_is_preserved() {
+        let json = r#"{
+            "query_type": "search",
+            "node": {
+                "id": "n",
+                "entity": "Note",
+                "columns": ["confidential"],
+                "filters": {
+                    "confidential": true
+                }
+            },
+            "limit": 5
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        assert!(
+            result.params.values().any(|v| v == &serde_json::Value::Bool(true)),
+            "expected boolean filter to remain true in params: {:?}",
+            result.params
+        );
+    }
+
+    #[test]
     fn aggregation_query() {
         let json = r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User"}],
+            "nodes": [{"id": "n", "entity": "Note", "columns": ["confidential"]}, {"id": "u", "entity": "User", "columns": ["username"]}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
             "limit": 10
@@ -264,8 +289,8 @@ mod tests {
         let json = r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "Project", "node_ids": [100]},
-                {"id": "end", "entity": "Project", "node_ids": [200]}
+                {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [100]},
+                {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [200]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#;
@@ -306,8 +331,8 @@ mod tests {
         let shallow = r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "Project", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [2]}
+                {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
+                {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
         }"#;
@@ -315,8 +340,8 @@ mod tests {
         let deep = r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "Project", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [2]}
+                {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
+                {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#;
@@ -339,7 +364,7 @@ mod tests {
     fn neighbors_query() {
         let json = r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [100]},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]},
             "neighbors": {"node": "u", "direction": "both"}
         }"#;
 
@@ -358,6 +383,7 @@ mod tests {
             "node": {
                 "id": "u",
                 "entity": "User",
+                "columns": ["username", "state", "created_at"],
                 "filters": {
                     "created_at": {"op": "gte", "value": "2024-01-01"},
                     "state": {"op": "in", "value": ["active", "blocked"]},
@@ -436,10 +462,10 @@ mod tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "user_node", "entity": "User"},
-                {"id": "_private", "entity": "Note"},
-                {"id": "CamelCase", "entity": "Project"},
-                {"id": "node123", "entity": "Group"}
+                {"id": "user_node", "entity": "User", "columns": ["username"]},
+                {"id": "_private", "entity": "Note", "columns": ["confidential"]},
+                {"id": "CamelCase", "entity": "Project", "columns": ["name"]},
+                {"id": "node123", "entity": "Group", "columns": ["name"]}
             ]
         }"#;
         assert!(compile(json, &test_ontology(), &test_ctx()).is_ok());
@@ -463,7 +489,7 @@ mod ontology_integration_tests {
     fn valid_column_in_order_by() {
         let json = r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User"},
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
             "limit": 10,
             "order_by": {"node": "u", "property": "username", "direction": "ASC"}
         }"#;
@@ -474,7 +500,7 @@ mod ontology_integration_tests {
     fn invalid_column_in_order_by() {
         let json = r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User"},
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
             "limit": 10,
             "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
         }"#;
@@ -486,7 +512,7 @@ mod ontology_integration_tests {
     fn valid_column_in_filter() {
         let json = r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "filters": {"username": "admin"}},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}},
             "limit": 10
         }"#;
         assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
@@ -496,7 +522,7 @@ mod ontology_integration_tests {
     fn invalid_column_in_filter() {
         let json = r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "filters": {"nonexistent_column": "value"}},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}},
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
@@ -507,7 +533,7 @@ mod ontology_integration_tests {
     fn valid_column_in_aggregation() {
         let json = r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "p", "entity": "Project"}],
+            "nodes": [{"id": "p", "entity": "Project", "columns": ["name"]}],
             "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
             "limit": 10
         }"#;
@@ -518,7 +544,7 @@ mod ontology_integration_tests {
     fn invalid_column_in_aggregation() {
         let json = r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "p", "entity": "Project"}],
+            "nodes": [{"id": "p", "entity": "Project", "columns": ["name"]}],
             "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
             "limit": 10
         }"#;
@@ -530,7 +556,7 @@ mod ontology_integration_tests {
     fn invalid_entity_type_rejected() {
         let json = r#"{
             "query_type": "search",
-            "node": {"id": "n", "entity": "NonexistentType"},
+            "node": {"id": "n", "entity": "NonexistentType", "columns": ["name"]},
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
@@ -548,8 +574,8 @@ mod ontology_integration_tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "n", "entity": "Note", "filters": {"confidential": true}},
-                {"id": "u", "entity": "User"}
+                {"id": "n", "entity": "Note", "columns": ["confidential"], "filters": {"confidential": true}},
+                {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25,
@@ -574,6 +600,7 @@ mod ontology_integration_tests {
             "node": {
                 "id": "u",
                 "entity": "User",
+                "columns": ["username"],
                 "filters": {
                     "username": {"op": "eq", "value": "admin"}
                 }
@@ -604,6 +631,7 @@ mod ontology_integration_tests {
             "node": {
                 "id": "u",
                 "entity": "User",
+                "columns": ["username", "state", "created_at"],
                 "filters": {
                     "username": {"op": "starts_with", "value": "admin"},
                     "state": {"op": "in", "value": ["active", "blocked"]},
@@ -713,7 +741,7 @@ mod ontology_integration_tests {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "mr", "entity": "MergeRequest"}
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
@@ -762,8 +790,8 @@ mod ontology_integration_tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "p", "entity": "Project"}
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
             "limit": 10
@@ -794,8 +822,8 @@ mod ontology_integration_tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "p", "entity": "Project"}
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
             ],
             "relationships": [{
                 "type": "MEMBER_OF",
@@ -835,8 +863,8 @@ mod ontology_integration_tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "p", "entity": "Project"}
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
             ],
             "relationships": [{
                 "type": "MEMBER_OF",
@@ -864,8 +892,8 @@ mod ontology_integration_tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"}
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "n", "entity": "Note", "columns": ["confidential"]}
             ],
             "relationships": [{
                 "type": "AUTHORED",
@@ -893,8 +921,8 @@ mod ontology_integration_tests {
         let json = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "p", "entity": "Project"}
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
             ],
             "relationships": [{
                 "type": "MEMBER_OF",

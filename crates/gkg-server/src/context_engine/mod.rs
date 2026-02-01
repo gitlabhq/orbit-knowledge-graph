@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
-use serde_json::Value;
+use ontology::Ontology;
+use serde_json::{Value, json};
 
-use crate::redaction::{QueryResult, ResourceAuthorization};
+use crate::redaction::{ColumnValue, QueryResult, QueryResultRow, ResourceAuthorization};
+use query_engine::ResultContext;
 
 #[derive(Debug, Clone, Default)]
 pub struct ContextEngine;
@@ -27,42 +29,57 @@ impl ContextEngine {
 
     pub fn apply_redaction_and_prepare(
         &self,
-        result: Value,
+        result: &mut QueryResult,
+        result_context: &ResultContext,
         authorizations: &[ResourceAuthorization],
+        ontology: &Ontology,
     ) -> Value {
-        if authorizations.is_empty() {
-            return result;
+        let entity_map = build_entity_to_resource_map(ontology);
+        self.apply_redaction(result, authorizations, &entity_map);
+
+        let rows: Vec<Value> = result
+            .authorized_rows()
+            .map(|row| row_to_json(row, result_context))
+            .collect();
+        Value::Array(rows)
+    }
+}
+
+fn build_entity_to_resource_map(ontology: &Ontology) -> HashMap<&str, &str> {
+    ontology
+        .nodes()
+        .filter_map(|node| {
+            let redaction = node.redaction.as_ref()?;
+            Some((node.name.as_str(), redaction.resource_type.as_str()))
+        })
+        .collect()
+}
+
+fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
+    let mut obj = serde_json::Map::new();
+
+    for node in ctx.nodes() {
+        if let Some(id) = row.get_id(&node.alias) {
+            obj.insert(format!("{}_id", node.alias), json!(id));
         }
-
-        match result {
-            Value::Array(rows) => {
-                let filtered: Vec<Value> = rows
-                    .into_iter()
-                    .filter(|row| {
-                        for auth in authorizations {
-                            let id_key = match auth.resource_type.as_str() {
-                                "projects" => "project_id",
-                                "issues" => "issue_id",
-                                "merge_requests" => "merge_request_id",
-                                "users" => "user_id",
-                                "groups" => "group_id",
-                                _ => continue,
-                            };
-
-                            if let Some(id) = row.get(id_key).and_then(|v| v.as_i64())
-                                && auth.authorized.get(&id) == Some(&false)
-                            {
-                                return false;
-                            }
-                        }
-                        true
-                    })
-                    .collect();
-                Value::Array(filtered)
-            }
-            other => other,
+        if let Some(entity_type) = row.get_type(&node.alias) {
+            obj.insert(format!("{}_type", node.alias), json!(entity_type));
         }
     }
+
+    for (name, value) in row.columns() {
+        if name.starts_with("_gkg_") {
+            continue;
+        }
+        let json_value = match value {
+            ColumnValue::Int64(v) => json!(v),
+            ColumnValue::String(v) => json!(v),
+            ColumnValue::Null => Value::Null,
+        };
+        obj.insert(name.clone(), json_value);
+    }
+
+    Value::Object(obj)
 }
 
 #[cfg(test)]

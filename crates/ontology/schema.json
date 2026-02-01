@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gitlab.com/gitlab-org/knowledge-graph/gkg-service",
   "title": "GraphQueryAsJSON",
-  "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
+  "description": "Graph query schema. Choose query_type based on what you know: search (filter one entity type), traversal (match a pattern of nodes and relationships), path_finding (find paths between two specific node IDs), neighbors (find nodes adjacent to one specific node ID).",
   "type": "object",
   "required": ["query_type"],
   "properties": {
@@ -155,8 +155,8 @@
     },
     "QueryType": {
       "type": "string",
-      "description": "Type of graph query to execute",
-      "enum": ["traversal", "aggregation", "path_finding", "search", "neighbors"]
+      "description": "search: filter/find nodes of one type, no relationships. traversal: match a pattern of nodes connected by relationships. path_finding: discover path between two nodes with known IDs. neighbors: find all nodes connected to one node with known ID.",
+      "enum": ["search", "traversal", "aggregation", "path_finding", "neighbors"]
     },
     "EntityType": {
       "type": "string",
@@ -197,7 +197,7 @@
     "NodeSelector": {
       "type": "object",
       "description": "Selector for matching nodes in the graph",
-      "required": ["id"],
+      "required": ["id", "entity", "columns"],
       "properties": {
         "id": {
           "$ref": "#/$defs/Identifier",
