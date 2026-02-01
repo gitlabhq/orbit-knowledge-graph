@@ -49,10 +49,10 @@ async fn namespace_handler_processes_vulnerabilities() {
                  resolved_on_default_branch, present_on_default_branch, uuid,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
             VALUES
-                (1, 'SQL Injection in login', 'Critical SQL injection vulnerability', 1000, 1, 3, 5, 0,
+                (1, 'SQL Injection in login', 'Critical SQL injection vulnerability', 1000, 1, 4, 7, 0,
                  false, true, 'uuid-001',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'XSS in comments', 'Cross-site scripting vulnerability', 1000, 2, 0, 3, 3,
+                (2, 'XSS in comments', 'Cross-site scripting vulnerability', 1000, 2, 1, 4, 3,
                  false, true, 'uuid-002',
                  '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
         )
@@ -395,13 +395,13 @@ async fn namespace_handler_processes_vulnerability_with_user_edges() {
                  confirmed_by_id, resolved_by_id, dismissed_by_id, uuid,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
             VALUES
-                (1, 'Confirmed vulnerability', 1000, 1, 3, 4, 0,
+                (1, 'Confirmed vulnerability', 1000, 1, 4, 6, 0,
                  2, NULL, NULL, 'uuid-003',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'Resolved vulnerability', 1000, 1, 2, 3, 1,
+                (2, 'Resolved vulnerability', 1000, 1, 3, 4, 1,
                  NULL, 3, NULL, 'uuid-004',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (3, 'Dismissed vulnerability', 1000, 1, 1, 2, 2,
+                (3, 'Dismissed vulnerability', 1000, 1, 2, 3, 2,
                  NULL, NULL, 4, 'uuid-005',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
         )
@@ -477,7 +477,7 @@ async fn namespace_handler_processes_vulnerability_finding_edge() {
                 (id, title, project_id, author_id, state, severity, report_type, finding_id, uuid,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
             VALUES
-                (1, 'Vulnerability with finding', 1000, 1, 0, 5, 0, 1, 'uuid-006',
+                (1, 'Vulnerability with finding', 1000, 1, 1, 7, 0, 1, 'uuid-006',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
         )
         .await;
@@ -550,7 +550,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
             "INSERT INTO siphon_vulnerabilities
                 (id, title, project_id, author_id, state, severity, report_type, uuid,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (1, 'Log4Shell Vulnerability', 1000, 1, 0, 5, 0, 'vuln-uuid-001',
+            VALUES (1, 'Log4Shell Vulnerability', 1000, 1, 1, 7, 0, 'vuln-uuid-001',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
         )
         .await;
@@ -690,9 +690,9 @@ async fn namespace_handler_processes_vulnerability_merge_request_links() {
                 (id, title, project_id, author_id, state, severity, report_type, uuid,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
             VALUES
-                (1, 'SQL Injection', 1000, 1, 0, 5, 0, 'vuln-uuid-001',
+                (1, 'SQL Injection', 1000, 1, 1, 7, 0, 'vuln-uuid-001',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'XSS Vulnerability', 1000, 1, 0, 4, 0, 'vuln-uuid-002',
+                (2, 'XSS Vulnerability', 1000, 1, 1, 6, 0, 'vuln-uuid-002',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
         )
         .await;
@@ -794,9 +794,9 @@ async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
                  primary_identifier_id, metadata_version, location, location_fingerprint,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
             VALUES
-                (1, 'occurrence-uuid-001', 'SQL Injection', 5, 0, 0, 1000, 1, 1, '1.0', 'src/main.rs:42', 'fp-loc-1',
+                (1, 'occurrence-uuid-001', 'SQL Injection', 7, 0, 0, 1000, 1, 1, '1.0', 'src/main.rs:42', 'fp-loc-1',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'occurrence-uuid-002', 'XSS Vulnerability', 4, 0, 0, 1000, 1, 2, '1.0', 'src/web.rs:100', 'fp-loc-2',
+                (2, 'occurrence-uuid-002', 'XSS Vulnerability', 5, 0, 0, 1000, 1, 2, '1.0', 'src/web.rs:100', 'fp-loc-2',
                  '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
         )
         .await;

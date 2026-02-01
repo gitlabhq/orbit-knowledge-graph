@@ -105,14 +105,14 @@ properties:
       1: config_error
       2: external_validation_failure
       3: user_not_verified
-      4: size_limit_exceeded
-      5: job_activity_limit_exceeded
-      6: deployments_limit_exceeded
-      7: project_deleted
-      8: filtered_by_rules
-      9: filtered_by_workflow_rules
-      10: composite_identity_forbidden
-      11: pipeline_ref_creation_failure
+      21: size_limit_exceeded
+      22: job_activity_limit_exceeded
+      23: deployments_limit_exceeded
+      25: project_deleted
+      26: filtered_by_rules
+      27: filtered_by_workflow_rules
+      28: composite_identity_forbidden
+      29: pipeline_ref_creation_failure
 
   created_at:
     type: timestamp
