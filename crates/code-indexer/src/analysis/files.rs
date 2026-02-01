@@ -62,6 +62,7 @@ impl FileSystemAnalyzer {
                         "Creating directory node: '{current_path}' (from file: '{file_path}')"
                     );
                     directory_nodes.push(DirectoryNode {
+                        id: None,
                         path: current_path.clone(),
                         absolute_path,
                         repository_name: self.repository_name.clone(),
@@ -144,6 +145,7 @@ impl FileSystemAnalyzer {
             .to_string();
 
         FileNode {
+            id: None,
             path: relative_path,
             absolute_path,
             language: format!("{:?}", file_result.language),

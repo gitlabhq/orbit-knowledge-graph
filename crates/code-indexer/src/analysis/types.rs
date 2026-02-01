@@ -1,9 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
 };
 
 use internment::ArcIntern;
+use rustc_hash::FxHasher;
 
 use crate::graph::{RelationshipKind, RelationshipType};
 use parser_core::{
@@ -28,6 +30,13 @@ use parser_core::{
 };
 use serde::{Deserialize, Serialize};
 
+// TODO: Use a more robust id generator: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/60
+fn compute_id(components: &[&str]) -> i64 {
+    let mut hasher = FxHasher::default();
+    components.hash(&mut hasher);
+    hasher.finish() as i64
+}
+
 /// Consolidated relationship data for efficient storage
 #[derive(Debug, Clone)]
 pub struct ConsolidatedRelationship {
@@ -41,7 +50,7 @@ pub struct ConsolidatedRelationship {
     pub target_range: ArcIntern<Range>,
     /// Definition location for source node (used for ID lookup)
     pub source_definition_range: Option<ArcIntern<Range>>,
-    /// Definition location for target node (used for ID lookup)  
+    /// Definition location for target node (used for ID lookup)
     pub target_definition_range: Option<ArcIntern<Range>>,
 }
 
@@ -182,44 +191,42 @@ pub struct GraphData {
 impl GraphData {
     /// Assign integer IDs to all nodes and populate relationship source_id/target_id fields.
     /// This replicates the logic from NodeIdGenerator and GraphMapper.
-    pub fn assign_node_ids(&mut self) {
-        // Build lookup maps: (file_path, start_byte, end_byte) -> index
-        let mut directory_ids: HashMap<String, u32> = HashMap::new();
-        let mut file_ids: HashMap<String, u32> = HashMap::new();
-        let mut definition_ids: HashMap<(String, usize, usize), u32> = HashMap::new();
-        let mut imported_symbol_ids: HashMap<(String, usize, usize), u32> = HashMap::new();
+    pub fn assign_node_ids(&mut self, project_id: i64, branch: &str) {
+        let mut directory_lookup: HashMap<String, u32> = HashMap::new();
+        let mut file_lookup: HashMap<String, u32> = HashMap::new();
+        let mut definition_lookup: HashMap<(String, usize, usize), u32> = HashMap::new();
+        let mut imported_symbol_lookup: HashMap<(String, usize, usize), u32> = HashMap::new();
 
-        // Assign directory IDs (using path as key)
-        for (idx, dir_node) in self.directory_nodes.iter().enumerate() {
-            directory_ids.insert(dir_node.path.clone(), idx as u32);
+        for (index, node) in self.directory_nodes.iter_mut().enumerate() {
+            node.assign_id(project_id, branch);
+            directory_lookup.insert(node.path.clone(), index as u32);
         }
 
-        // Assign file IDs (using path as key)
-        for (idx, file_node) in self.file_nodes.iter().enumerate() {
-            file_ids.insert(file_node.path.clone(), idx as u32);
+        for (index, node) in self.file_nodes.iter_mut().enumerate() {
+            node.assign_id(project_id, branch);
+            file_lookup.insert(node.path.clone(), index as u32);
         }
 
-        // Assign definition IDs (using file_path + byte range as key)
-        for (idx, def_node) in self.definition_nodes.iter().enumerate() {
+        for (index, node) in self.definition_nodes.iter_mut().enumerate() {
+            node.assign_id(project_id, branch);
             let key = (
-                def_node.file_path.as_ref().clone(),
-                def_node.range.byte_offset.0,
-                def_node.range.byte_offset.1,
+                node.file_path.as_ref().clone(),
+                node.range.byte_offset.0,
+                node.range.byte_offset.1,
             );
-            definition_ids.insert(key, idx as u32);
+            definition_lookup.insert(key, index as u32);
         }
 
-        // Assign imported symbol IDs (using file_path + byte range as key)
-        for (idx, import_node) in self.imported_symbol_nodes.iter().enumerate() {
+        for (index, node) in self.imported_symbol_nodes.iter_mut().enumerate() {
+            node.assign_id(project_id, branch);
             let key = (
-                import_node.location.file_path.clone(),
-                import_node.location.start_byte as usize,
-                import_node.location.end_byte as usize,
+                node.location.file_path.clone(),
+                node.location.start_byte as usize,
+                node.location.end_byte as usize,
             );
-            imported_symbol_ids.insert(key, idx as u32);
+            imported_symbol_lookup.insert(key, index as u32);
         }
 
-        // Now assign source_id and target_id on relationships
         for rel in &mut self.relationships {
             let from_path = rel.source_path.as_ref().map(|p| p.as_ref().as_str());
             let to_path = rel.target_path.as_ref().map(|p| p.as_ref().as_str());
@@ -230,33 +237,32 @@ impl GraphData {
 
             match rel.kind {
                 RelationshipKind::DirectoryToDirectory => {
-                    rel.source_id = directory_ids.get(from_path).copied();
-                    rel.target_id = directory_ids.get(to_path).copied();
+                    rel.source_id = directory_lookup.get(from_path).copied();
+                    rel.target_id = directory_lookup.get(to_path).copied();
                 }
                 RelationshipKind::DirectoryToFile => {
-                    rel.source_id = directory_ids.get(from_path).copied();
-                    rel.target_id = file_ids.get(to_path).copied();
+                    rel.source_id = directory_lookup.get(from_path).copied();
+                    rel.target_id = file_lookup.get(to_path).copied();
                 }
                 RelationshipKind::FileToDefinition => {
-                    rel.source_id = file_ids.get(from_path).copied();
+                    rel.source_id = file_lookup.get(from_path).copied();
                     let target_key = (
                         to_path.to_string(),
                         rel.target_range.byte_offset.0,
                         rel.target_range.byte_offset.1,
                     );
-                    rel.target_id = definition_ids.get(&target_key).copied();
+                    rel.target_id = definition_lookup.get(&target_key).copied();
                 }
                 RelationshipKind::FileToImportedSymbol => {
-                    rel.source_id = file_ids.get(from_path).copied();
+                    rel.source_id = file_lookup.get(from_path).copied();
                     let target_key = (
                         to_path.to_string(),
                         rel.target_range.byte_offset.0,
                         rel.target_range.byte_offset.1,
                     );
-                    rel.target_id = imported_symbol_ids.get(&target_key).copied();
+                    rel.target_id = imported_symbol_lookup.get(&target_key).copied();
                 }
                 RelationshipKind::DefinitionToDefinition => {
-                    // Use definition_range if available, otherwise fall back to source/target range
                     let (source_start, source_end) =
                         if let Some(def_range) = &rel.source_definition_range {
                             (def_range.byte_offset.0, def_range.byte_offset.1)
@@ -278,8 +284,8 @@ impl GraphData {
 
                     let source_key = (from_path.to_string(), source_start, source_end);
                     let target_key = (to_path.to_string(), target_start, target_end);
-                    rel.source_id = definition_ids.get(&source_key).copied();
-                    rel.target_id = definition_ids.get(&target_key).copied();
+                    rel.source_id = definition_lookup.get(&source_key).copied();
+                    rel.target_id = definition_lookup.get(&target_key).copied();
                 }
                 RelationshipKind::DefinitionToImportedSymbol => {
                     let (source_start, source_end) =
@@ -298,8 +304,8 @@ impl GraphData {
                         rel.target_range.byte_offset.0,
                         rel.target_range.byte_offset.1,
                     );
-                    rel.source_id = definition_ids.get(&source_key).copied();
-                    rel.target_id = imported_symbol_ids.get(&target_key).copied();
+                    rel.source_id = definition_lookup.get(&source_key).copied();
+                    rel.target_id = imported_symbol_lookup.get(&target_key).copied();
                 }
                 RelationshipKind::ImportedSymbolToImportedSymbol => {
                     let source_key = (
@@ -312,8 +318,8 @@ impl GraphData {
                         rel.target_range.byte_offset.0,
                         rel.target_range.byte_offset.1,
                     );
-                    rel.source_id = imported_symbol_ids.get(&source_key).copied();
-                    rel.target_id = imported_symbol_ids.get(&target_key).copied();
+                    rel.source_id = imported_symbol_lookup.get(&source_key).copied();
+                    rel.target_id = imported_symbol_lookup.get(&target_key).copied();
                 }
                 RelationshipKind::ImportedSymbolToDefinition => {
                     let source_key = (
@@ -331,8 +337,8 @@ impl GraphData {
                             )
                         };
                     let target_key = (to_path.to_string(), target_start, target_end);
-                    rel.source_id = imported_symbol_ids.get(&source_key).copied();
-                    rel.target_id = definition_ids.get(&target_key).copied();
+                    rel.source_id = imported_symbol_lookup.get(&source_key).copied();
+                    rel.target_id = definition_lookup.get(&target_key).copied();
                 }
                 RelationshipKind::ImportedSymbolToFile => {
                     let source_key = (
@@ -340,8 +346,8 @@ impl GraphData {
                         rel.source_range.byte_offset.0,
                         rel.source_range.byte_offset.1,
                     );
-                    rel.source_id = imported_symbol_ids.get(&source_key).copied();
-                    rel.target_id = file_ids.get(to_path).copied();
+                    rel.source_id = imported_symbol_lookup.get(&source_key).copied();
+                    rel.target_id = file_lookup.get(to_path).copied();
                 }
                 RelationshipKind::Empty => {}
             }
@@ -349,34 +355,42 @@ impl GraphData {
     }
 }
 
-/// Represents a directory node in the graph
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryNode {
-    /// Relative path from repository root
+    #[serde(skip)]
+    pub id: Option<i64>,
     pub path: String,
-    /// Absolute path on filesystem
     pub absolute_path: String,
-    /// Repository name
     pub repository_name: String,
-    /// Directory name (last component of path)
     pub name: String,
 }
 
-/// Represents a file node in the graph
+impl DirectoryNode {
+    pub fn assign_id(&mut self, project_id: i64, branch: &str) -> i64 {
+        let id = compute_id(&[&project_id.to_string(), branch, "dir", &self.path]);
+        self.id = Some(id);
+        id
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileNode {
-    /// Relative path from repository root
+    #[serde(skip)]
+    pub id: Option<i64>,
     pub path: String,
-    /// Absolute path on filesystem
     pub absolute_path: String,
-    /// Programming language detected
     pub language: String,
-    /// Repository name
     pub repository_name: String,
-    /// File extension
     pub extension: String,
-    /// File name (last component of path)
     pub name: String,
+}
+
+impl FileNode {
+    pub fn assign_id(&mut self, project_id: i64, branch: &str) -> i64 {
+        let id = compute_id(&[&project_id.to_string(), branch, "file", &self.path]);
+        self.id = Some(id);
+        id
+    }
 }
 
 /// Represents a language-specific definition type (e.g. class, module, method, etc.)
@@ -460,13 +474,10 @@ impl FqnType {
 /// Represents a definition node in the graph
 #[derive(Debug, Clone)]
 pub struct DefinitionNode {
-    /// Fully qualified name (unique identifier)
+    pub id: Option<i64>,
     pub fqn: FqnType,
-    /// Type of definition
     pub definition_type: DefinitionType,
-    // Lines, cols, byte offsets
     pub range: Range,
-    // File location of the definition
     pub file_path: ArcIntern<String>,
 }
 
@@ -477,7 +488,6 @@ impl HasRange for DefinitionNode {
 }
 
 impl DefinitionNode {
-    /// Create a new DefinitionNode
     pub fn new(
         fqn: FqnType,
         definition_type: DefinitionType,
@@ -485,11 +495,25 @@ impl DefinitionNode {
         file_path: ArcIntern<String>,
     ) -> Self {
         Self {
+            id: None,
             fqn,
             definition_type,
             range,
             file_path,
         }
+    }
+
+    pub fn assign_id(&mut self, project_id: i64, branch: &str) -> i64 {
+        let fqn_str = self.fqn.to_string();
+        let definition_type_str = self.definition_type.as_str();
+        let id = compute_id(&[
+            &project_id.to_string(),
+            branch,
+            definition_type_str,
+            &fqn_str,
+        ]);
+        self.id = Some(id);
+        id
     }
 
     #[inline(always)]
@@ -562,23 +586,16 @@ pub struct ImportIdentifier {
     pub alias: Option<String>,
 }
 
-/// Represents an imported symbol node in the graph
 #[derive(Debug, Clone)]
 pub struct ImportedSymbolNode {
-    /// Language-specific type of import (regular, from, aliased, wildcard, etc.)
+    pub id: Option<i64>,
     pub import_type: ImportType,
-    /// The import path as specified in the source code
-    /// e.g., "./my_module", "react", "../utils"
     pub import_path: String,
-    /// Information about the imported identifier(s)
-    /// None for side-effect imports like `import "./styles.css"`
     pub identifier: Option<ImportIdentifier>,
-    /// Location of the enclosing import statement
     pub location: ImportedSymbolLocation,
 }
 
 impl ImportedSymbolNode {
-    /// Create a new ImportedSymbolNode
     pub fn new(
         import_type: ImportType,
         import_path: String,
@@ -586,11 +603,27 @@ impl ImportedSymbolNode {
         location: ImportedSymbolLocation,
     ) -> Self {
         Self {
+            id: None,
             import_type,
             import_path,
             identifier,
             location,
         }
+    }
+
+    pub fn assign_id(&mut self, project_id: i64, branch: &str) -> i64 {
+        let identifier_name = self.identifier.as_ref().map(|i| i.name.as_str());
+        let identifier_alias = self.identifier.as_ref().and_then(|i| i.alias.as_deref());
+        let id = compute_id(&[
+            &project_id.to_string(),
+            branch,
+            &self.location.file_path,
+            &self.import_path,
+            identifier_name.unwrap_or(""),
+            identifier_alias.unwrap_or(""),
+        ]);
+        self.id = Some(id);
+        id
     }
 }
 

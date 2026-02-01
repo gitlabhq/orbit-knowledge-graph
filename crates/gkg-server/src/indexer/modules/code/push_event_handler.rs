@@ -206,7 +206,9 @@ impl PushEventHandler {
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to index code: {e}")))?;
 
-        if let Some(graph_data) = result.graph_data {
+        if let Some(mut graph_data) = result.graph_data {
+            // TODO: This should be done on construction of the GraphData struct.
+            graph_data.assign_node_ids(project_id, branch);
             self.write_graph_data(context, project_id, branch, traversal_path, &graph_data)
                 .await?;
         }
@@ -413,13 +415,8 @@ impl PushEventHandler {
         traversal_path: &str,
         graph_data: &indexer::analysis::types::GraphData,
     ) -> Result<(), HandlerError> {
-        let version = Utc::now().timestamp_micros() as u64;
-        let converter = ArrowConverter::new(
-            traversal_path.to_string(),
-            project_id,
-            branch.to_string(),
-            version,
-        );
+        let converter =
+            ArrowConverter::new(traversal_path.to_string(), project_id, branch.to_string());
 
         let converted = converter
             .convert_all(graph_data)

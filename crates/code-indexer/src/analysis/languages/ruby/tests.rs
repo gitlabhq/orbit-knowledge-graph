@@ -174,7 +174,8 @@ async fn setup_ruby_reference_pipeline() -> RubyReferenceTestSetup {
         .expect("Failed to index repository");
 
     // Verify we have graph data
-    let graph_data = indexing_result.graph_data.expect("Should have graph data");
+    let mut graph_data = indexing_result.graph_data.expect("Should have graph data");
+    graph_data.assign_node_ids(1, "main");
 
     let call_relationships: Vec<_> = graph_data
         .relationships

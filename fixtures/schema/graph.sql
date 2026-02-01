@@ -362,16 +362,21 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 -- Code indexing tables
 
 CREATE TABLE IF NOT EXISTS gl_directory (
+    id Int64,
     traversal_path String,
     project_id Int64,
     branch String,
     path String,
     name String,
-    _version UInt64
+    _version  DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false,
+    PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (traversal_path, project_id, branch, path);
+ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS deduplicate_merge_projection_mode = 'drop';
 
 CREATE TABLE IF NOT EXISTS gl_file (
+    id Int64,
     traversal_path String,
     project_id Int64,
     branch String,
@@ -379,11 +384,15 @@ CREATE TABLE IF NOT EXISTS gl_file (
     name String,
     extension String,
     language String,
-    _version UInt64
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false,
+    PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (traversal_path, project_id, branch, path);
+ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS deduplicate_merge_projection_mode = 'drop';
 
 CREATE TABLE IF NOT EXISTS gl_definition (
+    id Int64,
     traversal_path String,
     project_id Int64,
     branch String,
@@ -391,15 +400,19 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     fqn String,
     name String,
     definition_type String,
-    start_line Int32,
-    end_line Int32,
+    start_line Int64,
+    end_line Int64,
     start_byte Int64,
     end_byte Int64,
-    _version UInt64
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false,
+    PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (traversal_path, project_id, branch, file_path, start_byte);
+ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS deduplicate_merge_projection_mode = 'drop';
 
 CREATE TABLE IF NOT EXISTS gl_imported_symbol (
+    id Int64,
     traversal_path String,
     project_id Int64,
     branch String,
@@ -408,11 +421,16 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     import_path String,
     identifier_name Nullable(String),
     identifier_alias Nullable(String),
+    start_line Int64,
+    end_line Int64,
     start_byte Int64,
     end_byte Int64,
-    _version UInt64
+    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _deleted Bool DEFAULT false,
+    PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (traversal_path, project_id, branch, file_path, start_byte);
+ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS deduplicate_merge_projection_mode = 'drop';
 
 CREATE TABLE IF NOT EXISTS project_code_indexing_watermark (
     project_id Int64,

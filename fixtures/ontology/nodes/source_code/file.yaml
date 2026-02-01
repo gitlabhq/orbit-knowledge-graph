@@ -20,13 +20,25 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Internal identifier for the file node."
+    description: "Unique identifier for the file node."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
     description: "ID of the project this file belongs to."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    description: "Git branch where this file exists."
 
   path:
     type: string
@@ -40,41 +52,14 @@ properties:
     nullable: false
     description: "Name of the file including extension."
 
-  language:
-    type: string
-    source: language
-    nullable: true
-    description: "Programming language of the file (e.g., ruby, python, java)."
-
   extension:
     type: string
     source: extension
-    nullable: true
+    nullable: false
     description: "File extension (e.g., rb, py, java)."
 
-  absolute_path:
+  language:
     type: string
-    source: absolute_path
-    nullable: true
-    description: "Absolute path of the file on the filesystem."
-
-  repository_name:
-    type: string
-    source: repository_name
-    nullable: true
-    description: "Name of the repository this file belongs to."
-
-  traversal_path:
-    type: string
-    source: traversal_path
+    source: language
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
-
-# edges:
-#   - type: IN_DIRECTORY
-#     source_id: directory_id
-#     target_kind: Directory
-#
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
+    description: "Programming language of the file (e.g., ruby, python, java)."

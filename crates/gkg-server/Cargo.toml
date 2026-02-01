@@ -56,6 +56,7 @@ tonic-prost = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 toon-format = { version = "0.4.1", default-features = false }
 zstd = "0.13.3"
+rustc-hash = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
@@ -70,6 +71,9 @@ serial_test = { workspace = true }
 etl-engine = { path = "../etl-engine", features = ["testkit"] }
 query-engine = { path = "../query-engine" }
 regex = { workspace = true }
+parser-core = { workspace = true }
+internment = { workspace = true }
+smallvec = { workspace = true }
 
 [lints]
 workspace = true

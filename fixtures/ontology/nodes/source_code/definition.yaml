@@ -20,13 +20,31 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Internal identifier for the definition node."
+    description: "Unique identifier for the definition node."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
     description: "ID of the project this definition belongs to."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    description: "Git branch where this definition exists."
+
+  file_path:
+    type: string
+    source: file_path
+    nullable: false
+    description: "Path of the file containing this definition."
 
   fqn:
     type: string
@@ -41,70 +59,31 @@ properties:
     description: "Short name of the definition."
 
   definition_type:
-    type: enum
+    type: string
     source: definition_type
     nullable: false
-    description: "Type of code definition."
-    values:
-      0: class
-      1: module
-      2: method
-      3: function
-      4: variable
-      5: constant
-      6: interface
-      7: struct
-      8: enum
-      9: trait
-      10: type_alias
-
-  file_path:
-    type: string
-    source: primary_file_path
-    nullable: true
-    description: "Primary file path where the definition is located."
+    description: "Type of code definition. Language-specific values include: Class, Module, Method, Function, Struct, Enum, Trait, Lambda, etc."
 
   start_line:
     type: int64
     source: start_line
-    nullable: true
+    nullable: false
     description: "Starting line number of the definition."
 
   end_line:
     type: int64
     source: end_line
-    nullable: true
+    nullable: false
     description: "Ending line number of the definition."
 
-  start_col:
+  start_byte:
     type: int64
-    source: start_col
-    nullable: true
-    description: "Starting column of the definition."
-
-  end_col:
-    type: int64
-    source: end_col
-    nullable: true
-    description: "Ending column of the definition."
-
-  total_locations:
-    type: int64
-    source: total_locations
-    nullable: true
-    description: "Number of locations where this definition appears (for partial classes, etc.)."
-
-  traversal_path:
-    type: string
-    source: traversal_path
+    source: start_byte
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Starting byte offset of the definition in the file."
 
-# edges:
-#   - type: IN_FILE
-#     source_id: file_id
-#     target_kind: File
-#
-#   - type: CALLS
-#     source_id: caller_id
-#     target_kind: Definition
+  end_byte:
+    type: int64
+    source: end_byte
+    nullable: false
+    description: "Ending byte offset of the definition in the file."
