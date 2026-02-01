@@ -98,19 +98,17 @@ async fn main() -> Result<()> {
 
         println!(
             "  Generated {} nodes + {} edges ({:.1}s)",
-            node_count,
-            edge_count,
-            gen_elapsed
+            node_count, edge_count, gen_elapsed
         );
 
         let write_start = std::time::Instant::now();
-        
+
         // Write nodes to Parquet
         writer.write_organization_nodes(org_id, &org_nodes)?;
-        
+
         // Close edge writer (flushes remaining edges)
         edge_writer.close()?;
-        
+
         let write_elapsed = write_start.elapsed().as_secs_f64();
 
         println!("  Written to Parquet ({:.1}s)\n", write_elapsed);

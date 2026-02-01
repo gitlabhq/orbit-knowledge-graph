@@ -118,10 +118,7 @@ impl EntityRegistry {
         // Convert full entities to IDs and merge with existing id-only entries
         for (node_type, contexts) in self.entities.drain() {
             let ids: Vec<i64> = contexts.into_iter().map(|c| c.id).collect();
-            self.ids_only
-                .entry(node_type)
-                .or_default()
-                .extend(ids);
+            self.ids_only.entry(node_type).or_default().extend(ids);
         }
         self.compacted = true;
     }
@@ -159,10 +156,7 @@ impl EntityRegistry {
 
     pub fn get_ids(&self, node_type: &str) -> Vec<i64> {
         if self.compacted {
-            self.ids_only
-                .get(node_type)
-                .cloned()
-                .unwrap_or_default()
+            self.ids_only.get(node_type).cloned().unwrap_or_default()
         } else {
             self.entities
                 .get(node_type)

@@ -100,10 +100,8 @@ impl StreamingEdgeWriter {
 
     /// Convert edge buffer to Arrow RecordBatch.
     fn edges_to_batch(&self, edges: &[EdgeRecord]) -> Result<RecordBatch> {
-        let relationship_kind: StringArray = edges
-            .iter()
-            .map(|e| Some(&*e.relationship_kind))
-            .collect();
+        let relationship_kind: StringArray =
+            edges.iter().map(|e| Some(&*e.relationship_kind)).collect();
         let source: Int64Array = edges.iter().map(|e| Some(e.source)).collect();
         let source_kind: StringArray = edges.iter().map(|e| Some(&*e.source_kind)).collect();
         let target: Int64Array = edges.iter().map(|e| Some(e.target)).collect();
@@ -127,10 +125,10 @@ impl Drop for StreamingEdgeWriter {
         // Best effort flush on drop
         if !self.buffer.is_empty() {
             let buffer = std::mem::take(&mut self.buffer);
-            if let Ok(batch) = self.edges_to_batch(&buffer) {
-                if let Some(writer) = &mut self.writer {
-                    let _ = writer.write(&batch);
-                }
+            if let Ok(batch) = self.edges_to_batch(&buffer)
+                && let Some(writer) = &mut self.writer
+            {
+                let _ = writer.write(&batch);
             }
         }
         if let Some(writer) = self.writer.take() {
@@ -246,10 +244,8 @@ impl ParquetWriter {
     fn write_edges(&self, path: &Path, edges: &[EdgeRecord]) -> Result<()> {
         let schema = Arc::new(edge_schema());
 
-        let relationship_kind: StringArray = edges
-            .iter()
-            .map(|e| Some(&*e.relationship_kind))
-            .collect();
+        let relationship_kind: StringArray =
+            edges.iter().map(|e| Some(&*e.relationship_kind)).collect();
         let source: Int64Array = edges.iter().map(|e| Some(e.source)).collect();
         let source_kind: StringArray = edges.iter().map(|e| Some(&*e.source_kind)).collect();
         let target: Int64Array = edges.iter().map(|e| Some(e.target)).collect();

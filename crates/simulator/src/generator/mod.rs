@@ -19,8 +19,8 @@ use crate::config::{Config, EdgeRatio};
 use crate::parquet::StreamingEdgeWriter;
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use rand::Rng;
 use ontology::{NodeEntity, Ontology};
+use rand::Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -317,7 +317,9 @@ impl Generator {
         for parent_edge in parent_edges {
             // Clone parent IDs and paths to avoid borrow conflict with registry.add()
             let parents: Vec<_> = match registry.get(&parent_edge.parent_kind) {
-                Some(p) if !p.is_empty() => p.iter().map(|e| (e.id, e.traversal_path.clone())).collect(),
+                Some(p) if !p.is_empty() => {
+                    p.iter().map(|e| (e.id, e.traversal_path.clone())).collect()
+                }
                 _ => continue,
             };
 
@@ -340,7 +342,7 @@ impl Generator {
                     };
 
                     builder.add_row(traversal_path.clone(), entity_id);
-                    
+
                     // For leaf entities, only store ID (saves ~44 bytes per entity)
                     if is_parent_type {
                         registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
@@ -350,9 +352,19 @@ impl Generator {
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
                     {
-                        (*parent_id, parent_kind_str.clone(), entity_id, node_name_str.clone())
+                        (
+                            *parent_id,
+                            parent_kind_str.clone(),
+                            entity_id,
+                            node_name_str.clone(),
+                        )
                     } else {
-                        (entity_id, node_name_str.clone(), *parent_id, parent_kind_str.clone())
+                        (
+                            entity_id,
+                            node_name_str.clone(),
+                            *parent_id,
+                            parent_kind_str.clone(),
+                        )
                     };
 
                     edges.push(EdgeRecord {
@@ -531,7 +543,13 @@ impl Generator {
                 target_kind: self.intern("Group"),
             })?;
 
-            self.generate_subgroup_hierarchy_streaming(&ctx, depth + 1, registry, builder, edge_writer)?;
+            self.generate_subgroup_hierarchy_streaming(
+                &ctx,
+                depth + 1,
+                registry,
+                builder,
+                edge_writer,
+            )?;
         }
 
         Ok(())
@@ -557,7 +575,9 @@ impl Generator {
 
         for parent_edge in parent_edges {
             let parents: Vec<_> = match registry.get(&parent_edge.parent_kind) {
-                Some(p) if !p.is_empty() => p.iter().map(|e| (e.id, e.traversal_path.clone())).collect(),
+                Some(p) if !p.is_empty() => {
+                    p.iter().map(|e| (e.id, e.traversal_path.clone())).collect()
+                }
                 _ => continue,
             };
 
@@ -586,10 +606,21 @@ impl Generator {
                         registry.add_id_only(&node.name, entity_id);
                     }
 
-                    let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child {
-                        (*parent_id, parent_kind_str.clone(), entity_id, node_name_str.clone())
+                    let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
+                    {
+                        (
+                            *parent_id,
+                            parent_kind_str.clone(),
+                            entity_id,
+                            node_name_str.clone(),
+                        )
                     } else {
-                        (entity_id, node_name_str.clone(), *parent_id, parent_kind_str.clone())
+                        (
+                            entity_id,
+                            node_name_str.clone(),
+                            *parent_id,
+                            parent_kind_str.clone(),
+                        )
                     };
 
                     edge_writer.push(EdgeRecord {
@@ -642,7 +673,11 @@ impl Generator {
                 let edge_count = match &ratio {
                     EdgeRatio::Count(n) => *n,
                     EdgeRatio::Probability(p) => {
-                        if rng.gen_bool(*p) { 1 } else { 0 }
+                        if rng.gen_bool(*p) {
+                            1
+                        } else {
+                            0
+                        }
                     }
                 };
 

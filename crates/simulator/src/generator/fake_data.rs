@@ -19,10 +19,10 @@ fn push_hex_u64(buf: &mut String, mut val: u64) {
     // Find the highest non-zero nibble
     let leading_zeros = val.leading_zeros() as usize;
     let nibbles = 16 - (leading_zeros / 4);
-    
+
     // Reserve space
     buf.reserve(nibbles);
-    
+
     // Build hex string from high to low nibbles
     let start = buf.len();
     for _ in 0..nibbles {
@@ -84,7 +84,7 @@ impl FieldKind {
         if field.enum_values.is_some() {
             return FieldKind::Enum;
         }
-        
+
         match field.data_type {
             DataType::Enum => FieldKind::Enum,
             DataType::Float => FieldKind::Float,
@@ -95,7 +95,7 @@ impl FieldKind {
             DataType::Bool => Self::classify_bool(&field.name),
         }
     }
-    
+
     fn classify_string(name: &str) -> Self {
         let lower = name.to_lowercase();
         if lower.contains("name") || lower.contains("title") {
@@ -120,7 +120,7 @@ impl FieldKind {
             FieldKind::GenericString
         }
     }
-    
+
     fn classify_int(name: &str) -> Self {
         match name.to_lowercase().as_str() {
             "iid" => FieldKind::Iid,
@@ -130,7 +130,7 @@ impl FieldKind {
             _ => FieldKind::GenericInt,
         }
     }
-    
+
     fn classify_bool(name: &str) -> Self {
         match name.to_lowercase().as_str() {
             "archived" => FieldKind::Archived,
@@ -232,8 +232,9 @@ impl FakeValueGenerator {
         match kind {
             // String kinds - use buffer + fast hex instead of format!()
             FieldKind::NameOrTitle => {
-                const PREFIXES: [&str; 8] =
-                    ["alpha_", "beta_", "gamma_", "delta_", "epsilon_", "zeta_", "theta_", "omega_"];
+                const PREFIXES: [&str; 8] = [
+                    "alpha_", "beta_", "gamma_", "delta_", "epsilon_", "zeta_", "theta_", "omega_",
+                ];
                 let prefix = PREFIXES[low as usize % PREFIXES.len()];
                 self.buf.clear();
                 self.buf.push_str(prefix);
@@ -241,8 +242,13 @@ impl FakeValueGenerator {
                 FakeValue::String(self.emit_buf())
             }
             FieldKind::Email => {
-                const DOMAINS: [&str; 5] =
-                    ["@example.com", "@test.org", "@demo.net", "@sample.io", "@mock.dev"];
+                const DOMAINS: [&str; 5] = [
+                    "@example.com",
+                    "@test.org",
+                    "@demo.net",
+                    "@sample.io",
+                    "@mock.dev",
+                ];
                 let domain = DOMAINS[low as usize % DOMAINS.len()];
                 self.buf.clear();
                 self.buf.push_str("user");
@@ -281,8 +287,18 @@ impl FakeValueGenerator {
             }
             FieldKind::DescriptionOrBody => {
                 const WORDS: [&str; 12] = [
-                    "Lorem", "ipsum", "dolor", "sit", "amet", "consectetur",
-                    "adipiscing", "elit", "sed", "do", "eiusmod", "tempor",
+                    "Lorem",
+                    "ipsum",
+                    "dolor",
+                    "sit",
+                    "amet",
+                    "consectetur",
+                    "adipiscing",
+                    "elit",
+                    "sed",
+                    "do",
+                    "eiusmod",
+                    "tempor",
                 ];
                 let w1 = WORDS[low as usize % WORDS.len()];
                 let w2 = WORDS[(low >> 8) as usize % WORDS.len()];
@@ -298,15 +314,22 @@ impl FakeValueGenerator {
                 FakeValue::String(self.emit_buf())
             }
             FieldKind::Status => {
-                const STATUSES: [&'static str; 5] = ["open", "closed", "merged", "pending", "active"];
+                const STATUSES: [&str; 5] = ["open", "closed", "merged", "pending", "active"];
                 FakeValue::static_string(STATUSES[low as usize % STATUSES.len()])
             }
             FieldKind::State => {
-                const STATES: [&'static str; 5] = ["pending", "running", "success", "failed", "canceled"];
+                const STATES: [&str; 5] = ["pending", "running", "success", "failed", "canceled"];
                 FakeValue::static_string(STATES[low as usize % STATES.len()])
             }
             FieldKind::RefOrBranch => {
-                const PREFIXES: [&str; 6] = ["feature/branch-", "fix/branch-", "hotfix/branch-", "release/branch-", "main/branch-", "develop/branch-"];
+                const PREFIXES: [&str; 6] = [
+                    "feature/branch-",
+                    "fix/branch-",
+                    "hotfix/branch-",
+                    "release/branch-",
+                    "main/branch-",
+                    "develop/branch-",
+                ];
                 let prefix = PREFIXES[low as usize % PREFIXES.len()];
                 self.buf.clear();
                 self.buf.push_str(prefix);
@@ -363,7 +386,6 @@ impl FakeValueGenerator {
             }
         }
     }
-
 }
 
 /// A generated fake value.
