@@ -56,6 +56,8 @@ spec:
             - name: CODE_INDEX_EVENTS_STREAM
               value: {{ .Values.nats.streamName | quote }}
             {{- end }}
+            - name: NATS_CONSUMER_NAME
+              value: "gkg-indexer"
           securityContext:
             {{- include "gkg.securityContext" . | nindent 12 }}
           resources:
