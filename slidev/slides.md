@@ -620,35 +620,93 @@ Same pattern as enforce_return. Walk the AST, find table scans, inject WHERE cla
 # Step 8: Codegen
 
 ```rust {10}
-pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
-    let value = validate_json(json_input)?;
-    validate_ontology(&value, ontology)?;
-    let input: Input = serde_json::from_value(value)?;
-    validate::validate(&input, ontology)?;
-    let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input)?;
-    let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx)?;
-    codegen(&node, result_context)
+fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
+    let value = validate_json(json)?;            // JSON structure ok?
+    validate_ontology(&value, ontology)?;        // entities exist?
+    let input = parse(value)?;                   // JSON → typed struct
+    validate(&input, ontology)?;                 // references valid?
+    let input = normalize(input, ontology);      // canonicalize
+    let mut ast = lower(&input)?;                // build SQL AST
+    let ctx = enforce_return(&mut ast, &input)?; // for redaction
+    apply_security(&mut ast, ctx)?;              // tenant isolation
+    codegen(&ast, ctx)                           // AST → SQL
 }
 ```
-
-<v-click>
-
-AST → Parameterized SQL
-
-```rust
-ParameterizedQuery {
-    sql: "SELECT ... WHERE u.username = {p0:String}",
-    params: {"p0": "admin"},
-    result_context: ResultContext { ... }
-}
-```
-
-</v-click>
 
 <!--
-Finally, codegen walks the AST and emits SQL. Values become named parameters - no string interpolation. The result includes the SQL, a map of parameter values, and metadata about which columns map to which entities.
+Final step: walk the AST and emit SQL strings.
+-->
+
+---
+
+# Step 8: Codegen
+
+<div class="flex items-center justify-center gap-4 h-[80%]">
+
+<div class="text-[0.35rem] leading-tight">
+
+```rust
+Query {
+  select: vec![
+    SelectExpr::new(
+      Expr::col("u", "name"),
+      "u_name"
+    ),
+  ],
+  from: TableRef::scan(
+    "gl_user", "u"
+  ),
+  where_clause: Expr::eq(
+    Expr::col("u", "id"),
+    Expr::param("p0")
+  ),
+  limit: Some(10),
+}
+```
+
+</div>
+
+<div v-click="1" class="text-2xl">→</div>
+
+<div v-click="1" class="text-[0.35rem] leading-tight">
+
+```rust
+// emit_query
+parts.push(format!(
+  "SELECT {}",
+  select_items.join(", ")
+));
+parts.push(format!(
+  "FROM {}", from.sql
+));
+parts.push(format!(
+  "WHERE {}", where_parts.join(" AND ")
+));
+parts.push(format!(
+  "LIMIT {}", limit
+));
+parts.join("\n")
+```
+
+</div>
+
+<div v-click="2" class="text-2xl">→</div>
+
+<div v-click="2" class="text-[0.4rem] leading-tight">
+
+```sql
+SELECT u.name AS u_name
+FROM gl_user AS u
+WHERE u.id = {p0:Int64}
+LIMIT 10
+```
+
+</div>
+
+</div>
+
+<!--
+Codegen is just string formatting. Walk each part of the Query struct, emit the corresponding SQL fragment, join them together. Values become parameterized placeholders.
 -->
 
 ---
