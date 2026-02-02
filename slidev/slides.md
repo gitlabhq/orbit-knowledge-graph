@@ -470,43 +470,39 @@ The AST is verbose. That's the point - it captures everything needed to generate
 
 # It's just a query builder
 
-<div class="grid grid-cols-3 gap-4 h-[80%] items-center">
+<div class="flex justify-center gap-12 h-[75%] items-center">
 
-<div class="text-center">
+<div v-click="1" class="text-center">
 <div class="text-sm font-bold mb-2">Prisma</div>
-<div class="text-[0.5rem] leading-tight">
+<div class="text-[0.4rem] leading-tight">
 
 ```typescript
 prisma.user.findMany({
-  where: {
-    email: { contains: "@gitlab" }
-  },
-  include: {
-    posts: true
-  }
+  where: { email: { contains: "@" } },
+  include: { posts: true }
 })
 ```
 
 </div>
 </div>
 
-<div class="text-center">
+<div v-click="2" class="text-center">
 <div class="text-sm font-bold mb-2">Drizzle</div>
-<div class="text-[0.5rem] leading-tight">
+<div class="text-[0.4rem] leading-tight">
 
 ```typescript
 db.select()
   .from(users)
-  .leftJoin(posts, eq(users.id, posts.authorId))
-  .where(like(users.email, '%@gitlab%'))
+  .leftJoin(posts, eq(id, authorId))
+  .where(like(email, '%@%'))
 ```
 
 </div>
 </div>
 
-<div class="text-center">
+<div v-click="3" class="text-center">
 <div class="text-sm font-bold mb-2">Us</div>
-<div class="text-[0.5rem] leading-tight">
+<div class="text-[0.4rem] leading-tight">
 
 ```rust
 Query {
@@ -521,7 +517,7 @@ Query {
 
 </div>
 
-<div class="text-center text-gray-500 mt-4">
+<div v-click="4" class="text-center text-gray-500 mt-4">
   Same idea: build a tree, emit SQL
 </div>
 
