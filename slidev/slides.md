@@ -590,32 +590,29 @@ We walk the AST and inject hidden columns. The server reads these after the quer
 # Step 7: Security Context
 
 ```rust {9}
-pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
-    let value = validate_json(json_input)?;
-    validate_ontology(&value, ontology)?;
-    let input: Input = serde_json::from_value(value)?;
-    validate::validate(&input, ontology)?;
-    let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input)?;
-    let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx)?;
-    codegen(&node, result_context)
+fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
+    let value = validate_json(json)?;            // JSON structure ok?
+    validate_ontology(&value, ontology)?;        // entities exist?
+    let input = parse(value)?;                   // JSON → typed struct
+    validate(&input, ontology)?;                 // references valid?
+    let input = normalize(input, ontology);      // canonicalize
+    let mut ast = lower(&input)?;                // build SQL AST
+    let ctx = enforce_return(&mut ast, &input)?; // for redaction
+    apply_security(&mut ast, ctx)?;              // tenant isolation
+    codegen(&ast, ctx)                           // AST → SQL
 }
 ```
 
-<v-click>
+<v-clicks>
 
-Injects `traversal_path` filters for tenant isolation:
+- Walk AST, find all table scans (skip edge table, skip `gl_users`)
+- Inject `WHERE startsWith(traversal_path, $MY_TRAVERSAL_PATH)` for each table
+- Multiple paths? Use `startsWith(LOWEST_COMMON_PREFIX) AND (p1 OR p2 OR ...)`
 
-```sql
-WHERE startsWith(u.traversal_path, '1/')
-  AND startsWith(p.traversal_path, '1/')
-```
-
-</v-click>
+</v-clicks>
 
 <!--
-Multi-tenant isolation happens here. Every table scan gets a filter on traversal_path to ensure users only see data in their organization's namespace. The org_id is encoded in the path prefix.
+Same pattern as enforce_return. Walk the AST, find table scans, inject WHERE clauses. The path encodes the GitLab namespace hierarchy so you only see data in groups you have access to.
 -->
 
 ---
