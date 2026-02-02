@@ -1,637 +1,368 @@
 ---
-# try also 'default' to start simple
 theme: seriph
-# random image from a curated Unsplash collection by Anthony
-# like them? see https://unsplash.com/collections/94734566/slidev
 background: https://cover.sli.dev
-# some information about your slides (markdown enabled)
-title: Welcome to Slidev
-info: |
-  ## Slidev Starter Template
-  Presentation slides for developers.
-
-  Learn more at [Sli.dev](https://sli.dev)
-# apply UnoCSS classes to the current slide
+title: Query Engine Compiler
 class: text-center
-# https://sli.dev/features/drawing
 drawings:
   persist: false
-# slide transition: https://sli.dev/guide/animations.html#slide-transitions
 transition: slide-left
-# enable MDC Syntax: https://sli.dev/features/mdc
 mdc: true
-# duration of the presentation
-duration: 35min
 ---
 
-# Welcome to Slidev
+# Query Engine Compiler
 
-Presentation slides for developers
+JSON → SQL compilation pipeline
 
-<div @click="$slidev.nav.next" class="mt-12 py-1" hover:bg="white op-10">
-  Press Space for next page <carbon:arrow-right />
-</div>
-
-<div class="abs-br m-6 text-xl">
-  <button @click="$slidev.nav.openInEditor()" title="Open in Editor" class="slidev-icon-btn">
-    <carbon:edit />
-  </button>
-  <a href="https://github.com/slidevjs/slidev" target="_blank" class="slidev-icon-btn">
-    <carbon:logo-github />
-  </a>
+<div class="abs-br m-6 text-sm opacity-50">
+  GitLab Knowledge Graph
 </div>
 
 <!--
-The last comment block of each slide will be treated as slide notes. It will be visible and editable in Presenter Mode along with the slide. [Read more in the docs](https://sli.dev/guide/syntax.html#notes)
+We're going to walk through how the query engine turns JSON graph queries into ClickHouse SQL. It's a straightforward pipeline with seven steps.
 -->
 
 ---
 transition: fade-out
 ---
 
-# What is Slidev?
+# The Pipeline
 
-Slidev is a slides maker and presenter designed for developers, consist of the following features
+```text
+JSON → Schema Validate → Parse → Validate → Lower → Codegen → SQL
+```
 
-- 📝 **Text-based** - focus on the content with Markdown, and then style them later
-- 🎨 **Themable** - themes can be shared and re-used as npm packages
-- 🧑‍💻 **Developer Friendly** - code highlighting, live coding with autocompletion
-- 🤹 **Interactive** - embed Vue components to enhance your expressions
-- 🎥 **Recording** - built-in recording and camera view
-- 📤 **Portable** - export to PDF, PPTX, PNGs, or even a hostable SPA
-- 🛠 **Hackable** - virtually anything that's possible on a webpage is possible in Slidev
-<br>
-<br>
+<v-clicks>
 
-Read more about [Why Slidev?](https://sli.dev/guide/why)
+- **Schema Validate** - JSON structure is valid
+- **Parse** - Deserialize into typed Input struct
+- **Validate** - Semantic checks against ontology
+- **Normalize** - Canonicalize before lowering
+- **Lower** - Input → AST
+- **Enforce Return** - Add mandatory columns
+- **Security** - Inject tenant isolation
+- **Codegen** - AST → SQL
 
-<!--
-You can have `style` tag in markdown to override the style for the current page.
-Learn more: https://sli.dev/features/slide-scope-style
--->
-
-<style>
-h1 {
-  background-color: #2B90B6;
-  background-image: linear-gradient(45deg, #4EC5D4 10%, #146b8c 20%);
-  background-size: 100%;
-  -webkit-background-clip: text;
-  -moz-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  -moz-text-fill-color: transparent;
-}
-</style>
+</v-clicks>
 
 <!--
-Here is another comment.
+Here's the bird's-eye view. JSON comes in, SQL comes out. Each step does one thing and hands off to the next.
 -->
 
 ---
-transition: slide-up
-level: 2
----
 
-# Navigation
+# The compile() Function
 
-Hover on the bottom-left corner to see the navigation's controls panel, [learn more](https://sli.dev/guide/ui#navigation-bar)
+The entry point that orchestrates the pipeline:
 
-## Keyboard Shortcuts
-
-|                                                     |                             |
-| --------------------------------------------------- | --------------------------- |
-| <kbd>right</kbd> / <kbd>space</kbd>                 | next animation or slide     |
-| <kbd>left</kbd>  / <kbd>shift</kbd><kbd>space</kbd> | previous animation or slide |
-| <kbd>up</kbd>                                       | previous slide              |
-| <kbd>down</kbd>                                     | next slide                  |
-
-<!-- https://sli.dev/guide/animations.html#click-animation -->
-<img
-  v-click
-  class="absolute -bottom-9 -left-7 w-80 opacity-50"
-  src="https://sli.dev/assets/arrow-bottom-left.svg"
-  alt=""
-/>
-<p v-after class="absolute bottom-23 left-45 opacity-30 transform -rotate-10">Here!</p>
-
----
-layout: two-cols
-layoutClass: gap-16
----
-
-# Table of contents
-
-You can use the `Toc` component to generate a table of contents for your slides:
-
-```html
-<Toc minDepth="1" maxDepth="1" />
+```rust {all|2|3|4|5|6|7|8|9|10}
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
+    let value = validate_json(json_input)?;
+    validate_ontology(&value, ontology)?;
+    let input: Input = serde_json::from_value(value)?;
+    validate::validate(&input, ontology)?;
+    let input = normalize::normalize(input, ontology);
+    let mut node = lower::lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
+}
 ```
-
-The title will be inferred from your slide content, or you can override it with `title` and `level` in your frontmatter.
-
-::right::
-
-<Toc text-sm minDepth="1" maxDepth="2" />
-
----
-layout: image-right
-image: https://cover.sli.dev
----
-
-# Code
-
-Use code snippets and get the highlighting directly, and even types hover!
-
-```ts [filename-example.ts] {all|4|6|6-7|9|all} twoslash
-// TwoSlash enables TypeScript hover information
-// and errors in markdown code blocks
-// More at https://shiki.style/packages/twoslash
-import { computed, ref } from 'vue'
-
-const count = ref(0)
-const doubled = computed(() => count.value * 2)
-
-doubled.value = 2
-```
-
-<arrow v-click="[4, 5]" x1="350" y1="310" x2="195" y2="342" color="#953" width="2" arrowSize="1" />
-
-<!-- This allow you to embed external code blocks -->
-<<< @/snippets/external.ts#snippet
-
-<!-- Footer -->
-
-[Learn more](https://sli.dev/features/line-highlighting)
-
-<!-- Inline style -->
-<style>
-.footnotes-sep {
-  @apply mt-5 opacity-10;
-}
-.footnotes {
-  @apply text-sm opacity-75;
-}
-.footnote-backref {
-  display: none;
-}
-</style>
 
 <!--
-Notes can also sync with clicks
-
-[click] This will be highlighted after the first click
-
-[click] Highlighted with `count = ref(0)`
-
-[click:3] Last click (skip two clicks)
+This is the whole compiler in 10 lines. Each line is a pipeline stage. Let's walk through them.
 -->
 
 ---
-level: 2
----
 
-# Shiki Magic Move
+# Step 1: Schema Validation
 
-Powered by [shiki-magic-move](https://shiki-magic-move.netlify.app/), Slidev supports animations across multiple code snippets.
-
-Add multiple code blocks and wrap them with <code>````md magic-move</code> (four backticks) to enable the magic move. For example:
-
-````md magic-move {lines: true}
-```ts {*|2|*}
-// step 1
-const author = reactive({
-  name: 'John Doe',
-  books: [
-    'Vue 2 - Advanced Guide',
-    'Vue 3 - Basic Guide',
-    'Vue 4 - The Mystery'
-  ]
-})
-```
-
-```ts {*|1-2|3-4|3-4,8}
-// step 2
-export default {
-  data() {
-    return {
-      author: {
-        name: 'John Doe',
-        books: [
-          'Vue 2 - Advanced Guide',
-          'Vue 3 - Basic Guide',
-          'Vue 4 - The Mystery'
-        ]
-      }
-    }
-  }
+```rust {2}
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
+    let value = validate_json(json_input)?;
+    validate_ontology(&value, ontology)?;
+    let input: Input = serde_json::from_value(value)?;
+    validate::validate(&input, ontology)?;
+    let input = normalize::normalize(input, ontology);
+    let mut node = lower::lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
 }
 ```
-
-```ts
-// step 3
-export default {
-  data: () => ({
-    author: {
-      name: 'John Doe',
-      books: [
-        'Vue 2 - Advanced Guide',
-        'Vue 3 - Basic Guide',
-        'Vue 4 - The Mystery'
-      ]
-    }
-  })
-}
-```
-
-Non-code blocks are ignored.
-
-```vue
-<!-- step 4 -->
-<script setup>
-const author = {
-  name: 'John Doe',
-  books: [
-    'Vue 2 - Advanced Guide',
-    'Vue 3 - Basic Guide',
-    'Vue 4 - The Mystery'
-  ]
-}
-</script>
-```
-````
-
----
-
-# Components
-
-<div grid="~ cols-2 gap-4">
-<div>
-
-You can use Vue components directly inside your slides.
-
-We have provided a few built-in components like `<Tweet/>` and `<Youtube/>` that you can use directly. And adding your custom components is also super easy.
-
-```html
-<Counter :count="10" />
-```
-
-<!-- ./components/Counter.vue -->
-<Counter :count="10" m="t-4" />
-
-Check out [the guides](https://sli.dev/builtin/components.html) for more.
-
-</div>
-<div>
-
-```html
-<Tweet id="1390115482657726468" />
-```
-
-<Tweet id="1390115482657726468" scale="0.65" />
-
-</div>
-</div>
-
-<!--
-Presenter note with **bold**, *italic*, and ~~striked~~ text.
-
-Also, HTML elements are valid:
-<div class="flex w-full">
-  <span style="flex-grow: 1;">Left content</span>
-  <span>Right content</span>
-</div>
--->
-
----
-class: px-20
----
-
-# Themes
-
-Slidev comes with powerful theming support. Themes can provide styles, layouts, components, or even configurations for tools. Switching between themes by just **one edit** in your frontmatter:
-
-<div grid="~ cols-2 gap-2" m="t-2">
-
-```yaml
----
-theme: default
----
-```
-
-```yaml
----
-theme: seriph
----
-```
-
-<img border="rounded" src="https://github.com/slidevjs/themes/blob/main/screenshots/theme-default/01.png?raw=true" alt="">
-
-<img border="rounded" src="https://github.com/slidevjs/themes/blob/main/screenshots/theme-seriph/01.png?raw=true" alt="">
-
-</div>
-
-Read more about [How to use a theme](https://sli.dev/guide/theme-addon#use-theme) and
-check out the [Awesome Themes Gallery](https://sli.dev/resources/theme-gallery).
-
----
-
-# Clicks Animations
-
-You can add `v-click` to elements to add a click animation.
-
-<div v-click>
-
-This shows up when you click the slide:
-
-```html
-<div v-click>This shows up when you click the slide.</div>
-```
-
-</div>
-
-<br>
 
 <v-click>
 
-The <span v-mark.red="3"><code>v-mark</code> directive</span>
-also allows you to add
-<span v-mark.circle.orange="4">inline marks</span>
-, powered by [Rough Notation](https://roughnotation.com/):
+**Two-phase validation:**
 
-```html
-<span v-mark.underline.orange>inline markers</span>
+1. Base schema - query structure
+2. Ontology schema - valid entity types and relationships
+
+</v-click>
+
+<!--
+First we validate the JSON structure. There are two schemas: a base schema that checks the query structure, and a derived schema that validates entity types against what's in the ontology.
+-->
+
+---
+
+# Schema Validation Details
+
+```rust
+fn validate_json(json: &str) -> Result<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(json)?;
+    collect_schema_errors(base_validator(), &value)?;
+    Ok(value)
+}
+
+fn validate_ontology(value: &serde_json::Value, ontology: &Ontology) -> Result<()> {
+    let schema = ontology.derive_json_schema(BASE_SCHEMA_JSON)?;
+    let validator = jsonschema::validator_for(&schema)?;
+    collect_schema_errors(&validator, value)
+}
+```
+
+<v-click>
+
+The ontology generates allowed values for `entity` and `relationship` fields at runtime.
+
+</v-click>
+
+<!--
+The base schema is baked in, but the ontology derives a new schema with valid entity names. If you add a new node type to the ontology, it automatically becomes valid in queries.
+-->
+
+---
+
+# Step 2-3: Parse + Semantic Validation
+
+```rust {3-5}
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
+    let value = validate_json(json_input)?;
+    validate_ontology(&value, ontology)?;
+    let input: Input = serde_json::from_value(value)?;
+    validate::validate(&input, ontology)?;
+    let input = normalize::normalize(input, ontology);
+    let mut node = lower::lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
+}
+```
+
+<v-click>
+
+**validate::validate checks:**
+- Node references exist
+- Relationship endpoints match declared nodes
+- Filter columns exist on entities
+- Aggregation targets are valid
+
+</v-click>
+
+<!--
+After parsing into a typed Input struct, we run semantic validation. Schema validation only checks shape - this checks that node references actually point to declared nodes, that filter columns exist on those entities, and so on.
+-->
+
+---
+
+# Step 4: Normalize
+
+```rust {6}
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
+    let value = validate_json(json_input)?;
+    validate_ontology(&value, ontology)?;
+    let input: Input = serde_json::from_value(value)?;
+    validate::validate(&input, ontology)?;
+    let input = normalize::normalize(input, ontology);
+    let mut node = lower::lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
+}
+```
+
+<v-click>
+
+**Transforms:**
+- `"entity": "User"` → `"table": "gl_user"`
+- `"columns": "*"` → `["id", "username", "email", ...]`
+- Enum integers → string labels
+
+</v-click>
+
+<!--
+Normalization puts the input in canonical form. Entity names become table names. Wildcard column selections expand to explicit lists. Enum filter values get coerced from integers to their string labels.
+-->
+
+---
+
+# Step 5: Lower
+
+```rust {7}
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
+    let value = validate_json(json_input)?;
+    validate_ontology(&value, ontology)?;
+    let input: Input = serde_json::from_value(value)?;
+    validate::validate(&input, ontology)?;
+    let input = normalize::normalize(input, ontology);
+    let mut node = lower::lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
+}
+```
+
+<v-click>
+
+Input → AST (Query node with SELECT, FROM, WHERE, etc.)
+
+</v-click>
+
+<!--
+Lowering is the big transformation. It takes the validated, normalized input and builds a SQL-oriented AST. The result is a Query node with select clauses, joins, where conditions, and so on.
+-->
+
+---
+
+# Lower: Query Types
+
+```rust
+pub fn lower(input: &Input) -> Result<Node> {
+    match input.query_type {
+        QueryType::Traversal | QueryType::Search => lower_traversal(input),
+        QueryType::Aggregation => lower_aggregation(input),
+        QueryType::PathFinding => lower_path_finding(input),
+        QueryType::Neighbors => lower_neighbors(input),
+    }
+}
+```
+
+<v-click>
+
+Each query type has its own lowering strategy:
+- **Traversal/Search** - JOIN chain
+- **Aggregation** - GROUP BY
+- **PathFinding** - Recursive CTE
+- **Neighbors** - Edge table scan
+
+</v-click>
+
+<!--
+Different query types get different SQL patterns. Traversals become join chains. Aggregations add GROUP BY. Path finding generates recursive CTEs for graph traversal.
+-->
+
+---
+
+# Step 6: Enforce Return
+
+```rust {8}
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
+    let value = validate_json(json_input)?;
+    validate_ontology(&value, ontology)?;
+    let input: Input = serde_json::from_value(value)?;
+    validate::validate(&input, ontology)?;
+    let input = normalize::normalize(input, ontology);
+    let mut node = lower::lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
+}
+```
+
+<v-click>
+
+Adds mandatory columns: `_gkg_u_id`, `_gkg_u_type`
+
+These enable post-query redaction based on user permissions.
+
+</v-click>
+
+<!--
+The server needs to know which rows contain which entities so it can redact results the user shouldn't see. This step adds hidden ID and type columns for every node in the query.
+-->
+
+---
+
+# Step 7: Security Context
+
+```rust {9}
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
+    let value = validate_json(json_input)?;
+    validate_ontology(&value, ontology)?;
+    let input: Input = serde_json::from_value(value)?;
+    validate::validate(&input, ontology)?;
+    let input = normalize::normalize(input, ontology);
+    let mut node = lower::lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
+}
+```
+
+<v-click>
+
+Injects `traversal_path` filters for tenant isolation:
+
+```sql
+WHERE startsWith(u.traversal_path, '1/')
+  AND startsWith(p.traversal_path, '1/')
 ```
 
 </v-click>
 
-<div mt-20 v-click>
-
-[Learn more](https://sli.dev/guide/animations#click-animation)
-
-</div>
+<!--
+Multi-tenant isolation happens here. Every table scan gets a filter on traversal_path to ensure users only see data in their organization's namespace. The org_id is encoded in the path prefix.
+-->
 
 ---
 
-# Motions
+# Step 8: Codegen
 
-Motion animations are powered by [@vueuse/motion](https://motion.vueuse.org/), triggered by `v-motion` directive.
-
-```html
-<div
-  v-motion
-  :initial="{ x: -80 }"
-  :enter="{ x: 0 }"
-  :click-3="{ x: 80 }"
-  :leave="{ x: 1000 }"
->
-  Slidev
-</div>
-```
-
-<div class="w-60 relative">
-  <div class="relative w-40 h-40">
-    <img
-      v-motion
-      :initial="{ x: 800, y: -100, scale: 1.5, rotate: -50 }"
-      :enter="final"
-      class="absolute inset-0"
-      src="https://sli.dev/logo-square.png"
-      alt=""
-    />
-    <img
-      v-motion
-      :initial="{ y: 500, x: -100, scale: 2 }"
-      :enter="final"
-      class="absolute inset-0"
-      src="https://sli.dev/logo-circle.png"
-      alt=""
-    />
-    <img
-      v-motion
-      :initial="{ x: 600, y: 400, scale: 2, rotate: 100 }"
-      :enter="final"
-      class="absolute inset-0"
-      src="https://sli.dev/logo-triangle.png"
-      alt=""
-    />
-  </div>
-
-  <div
-    class="text-5xl absolute top-14 left-40 text-[#2B90B6] -z-1"
-    v-motion
-    :initial="{ x: -80, opacity: 0}"
-    :enter="{ x: 0, opacity: 1, transition: { delay: 2000, duration: 1000 } }">
-    Slidev
-  </div>
-</div>
-
-<!-- vue script setup scripts can be directly used in markdown, and will only affects current page -->
-<script setup lang="ts">
-const final = {
-  x: 0,
-  y: 0,
-  rotate: 0,
-  scale: 1,
-  transition: {
-    type: 'spring',
-    damping: 10,
-    stiffness: 20,
-    mass: 2
-  }
+```rust {10}
+pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
+    let value = validate_json(json_input)?;
+    validate_ontology(&value, ontology)?;
+    let input: Input = serde_json::from_value(value)?;
+    validate::validate(&input, ontology)?;
+    let input = normalize::normalize(input, ontology);
+    let mut node = lower::lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
 }
-</script>
-
-<div
-  v-motion
-  :initial="{ x:35, y: 30, opacity: 0}"
-  :enter="{ y: 0, opacity: 1, transition: { delay: 3500 } }">
-
-[Learn more](https://sli.dev/guide/animations.html#motion)
-
-</div>
-
----
-
-# $\LaTeX$
-
-$\LaTeX$ is supported out-of-box. Powered by [$\KaTeX$](https://katex.org/).
-
-<div h-3 />
-
-Inline $\sqrt{3x-1}+(1+x)^2$
-
-Block
-$$ {1|3|all}
-\begin{aligned}
-\nabla \cdot \vec{E} &= \frac{\rho}{\varepsilon_0} \\
-\nabla \cdot \vec{B} &= 0 \\
-\nabla \times \vec{E} &= -\frac{\partial\vec{B}}{\partial t} \\
-\nabla \times \vec{B} &= \mu_0\vec{J} + \mu_0\varepsilon_0\frac{\partial\vec{E}}{\partial t}
-\end{aligned}
-$$
-
-[Learn more](https://sli.dev/features/latex)
-
----
-
-# Diagrams
-
-You can create diagrams / graphs from textual descriptions, directly in your Markdown.
-
-<div class="grid grid-cols-4 gap-5 pt-4 -mb-6">
-
-```mermaid {scale: 0.5, alt: 'A simple sequence diagram'}
-sequenceDiagram
-    Alice->John: Hello John, how are you?
-    Note over Alice,John: A typical interaction
 ```
 
-```mermaid {theme: 'neutral', scale: 0.8}
-graph TD
-B[Text] --> C{Decision}
-C -->|One| D[Result 1]
-C -->|Two| E[Result 2]
-```
+<v-click>
 
-```mermaid
-mindmap
-  root((mindmap))
-    Origins
-      Long history
-      ::icon(fa fa-book)
-      Popularisation
-        British popular psychology author Tony Buzan
-    Research
-      On effectiveness<br/>and features
-      On Automatic creation
-        Uses
-            Creative techniques
-            Strategic planning
-            Argument mapping
-    Tools
-      Pen and paper
-      Mermaid
-```
+AST → Parameterized SQL
 
-```plantuml {scale: 0.7}
-@startuml
-
-package "Some Group" {
-  HTTP - [First Component]
-  [Another Component]
+```rust
+ParameterizedQuery {
+    sql: "SELECT ... WHERE u.username = {p0:String}",
+    params: {"p0": "admin"},
+    result_context: ResultContext { ... }
 }
-
-node "Other Groups" {
-  FTP - [Second Component]
-  [First Component] --> FTP
-}
-
-cloud {
-  [Example 1]
-}
-
-database "MySql" {
-  folder "This is my folder" {
-    [Folder 3]
-  }
-  frame "Foo" {
-    [Frame 4]
-  }
-}
-
-[Another Component] --> [Example 1]
-[Example 1] --> [Folder 3]
-[Folder 3] --> [Frame 4]
-
-@enduml
 ```
 
-</div>
+</v-click>
 
-Learn more: [Mermaid Diagrams](https://sli.dev/features/mermaid) and [PlantUML Diagrams](https://sli.dev/features/plantuml)
-
----
-foo: bar
-dragPos:
-  square: 691,32,167,_,-16
----
-
-# Draggable Elements
-
-Double-click on the draggable elements to edit their positions.
-
-<br>
-
-###### Directive Usage
-
-```md
-<img v-drag="'square'" src="https://sli.dev/logo.png">
-```
-
-<br>
-
-###### Component Usage
-
-```md
-<v-drag text-3xl>
-  <div class="i-carbon:arrow-up" />
-  Use the `v-drag` component to have a draggable container!
-</v-drag>
-```
-
-<v-drag pos="663,206,261,_,-15">
-  <div text-center text-3xl border border-main rounded>
-    Double-click me!
-  </div>
-</v-drag>
-
-<img v-drag="'square'" src="https://sli.dev/logo.png">
-
-###### Draggable Arrow
-
-```md
-<v-drag-arrow two-way />
-```
-
-<v-drag-arrow pos="67,452,253,46" two-way op70 />
-
----
-src: ./pages/imported-slides.md
-hide: false
----
-
----
-
-# Monaco Editor
-
-Slidev provides built-in Monaco Editor support.
-
-Add `{monaco}` to the code block to turn it into an editor:
-
-```ts {monaco}
-import { ref } from 'vue'
-import { emptyArray } from './external'
-
-const arr = ref(emptyArray(10))
-```
-
-Use `{monaco-run}` to create an editor that can execute the code directly in the slide:
-
-```ts {monaco-run}
-import { version } from 'vue'
-import { emptyArray, sayHello } from './external'
-
-sayHello()
-console.log(`vue ${version}`)
-console.log(emptyArray<number>(10).reduce(fib => [...fib, fib.at(-1)! + fib.at(-2)!], [1, 1]))
-```
+<!--
+Finally, codegen walks the AST and emits SQL. Values become named parameters - no string interpolation. The result includes the SQL, a map of parameter values, and metadata about which columns map to which entities.
+-->
 
 ---
 layout: center
 class: text-center
 ---
 
-# Learn More
+# Summary
 
-[Documentation](https://sli.dev) · [GitHub](https://github.com/slidevjs/slidev) · [Showcases](https://sli.dev/resources/showcases)
+```text
+JSON → Schema → Parse → Validate → Normalize → Lower → Return → Security → SQL
+```
 
-<PoweredBySlidev mt-10 />
+Each step does one thing. Errors surface early. SQL injection is impossible.
+
+<!--
+That's the whole pipeline. Each step has a single responsibility. Invalid input fails fast. And because codegen uses parameterized queries, SQL injection isn't possible.
+-->
