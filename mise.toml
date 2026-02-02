@@ -21,6 +21,7 @@ SIPHON_PROTO_ROOT = "~/gitlab/gdk/siphon"
 "zig" = "0.15.2"
 clickhouse = "25.12"
 uv = "0.9.28"
+node = "22"
 
 [tasks.build]
 run = "cargo build --release"
