@@ -22,6 +22,132 @@ We're going to walk through how the query engine turns JSON graph queries into C
 -->
 
 ---
+layout: two-cols
+layoutClass: gap-8
+---
+
+# Why not just write SQL?
+
+<v-clicks>
+
+- **Agent Friendly** - LLMs generate structured JSON reliably
+- **Security** - No string concatenation, no injection
+- **Portability** - Backend can change without breaking clients
+- **Easy to Sync** - Schema derived from ontology
+
+</v-clicks>
+
+::right::
+
+```json
+{
+  "query_type": "traversal",
+  "nodes": [
+    {
+      "id": "u",
+      "entity": "User",
+      "columns": ["username", "name"],
+      "node_ids": [1]
+    },
+    {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "columns": ["iid", "title", "state", "source_branch"]
+    },
+    {
+      "id": "p",
+      "entity": "Project",
+      "columns": ["name", "full_path"]
+    }
+  ],
+  "relationships": [
+    { "type": "AUTHORED", "from": "u", "to": "mr" },
+    { "type": "IN_PROJECT", "from": "mr", "to": "p" }
+  ],
+  "limit": 50
+}
+```
+
+<!--
+Why not just write SQL? Four reasons. First, agents can generate this reliably - structured output is easier than freeform SQL. Second, there's no string interpolation so injection is impossible. Third, we can change the SQL backend without breaking API clients. Fourth, the schema comes from the ontology so it stays in sync automatically.
+-->
+
+---
+
+# How
+
+<div class="grid grid-cols-[1fr_auto_1fr] gap-4 items-center h-[80%]">
+
+<div v-click="1" class="text-[0.55rem] leading-tight">
+
+```json
+{
+  "query_type": "traversal",
+  "nodes": [
+    { "id": "u", "entity": "User",
+      "columns": ["username", "name"],
+      "node_ids": [1] },
+    { "id": "mr", "entity": "MergeRequest",
+      "columns": ["iid", "title", "state"] },
+    { "id": "p", "entity": "Project",
+      "columns": ["name", "full_path"] }
+  ],
+  "relationships": [
+    { "type": "AUTHORED",
+      "from": "u", "to": "mr" },
+    { "type": "IN_PROJECT",
+      "from": "mr", "to": "p" }
+  ],
+  "limit": 50
+}
+```
+
+</div>
+
+<div v-click="2" class="flex flex-col items-center gap-2">
+  <div class="text-5xl text-red-500 font-bold">→</div>
+  <div class="border-2 border-red-500 rounded px-4 py-2">
+    <span v-if="$clicks < 3" class="text-4xl text-red-500 font-bold">?</span>
+    <span v-else class="text-lg">compiler</span>
+  </div>
+  <div class="text-5xl text-red-500 font-bold">→</div>
+</div>
+
+<div v-click="3" class="text-[0.55rem] leading-tight">
+
+```sql
+SELECT
+  u.username AS u_username,
+  u.name AS u_name,
+  mr.iid AS mr_iid,
+  mr.title AS mr_title,
+  mr.state AS mr_state,
+  p.name AS p_name,
+  p.full_path AS p_full_path
+FROM gl_user AS u
+INNER JOIN gl_edges AS e0
+  ON u.id = e0.source_id
+INNER JOIN gl_merge_request AS mr
+  ON e0.target_id = mr.id
+INNER JOIN gl_edges AS e1
+  ON mr.id = e1.source_id
+INNER JOIN gl_project AS p
+  ON e1.target_id = p.id
+WHERE u.id IN (1)
+  AND e0.relationship_kind = 'AUTHORED'
+  AND e1.relationship_kind = 'IN_PROJECT'
+LIMIT 50
+```
+
+</div>
+
+</div>
+
+<!--
+This is the transformation we're building. JSON query on the left, SQL on the right. The compiler in the middle is what we're going to walk through step by step.
+-->
+
+---
 transition: fade-out
 ---
 
