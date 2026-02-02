@@ -1,5 +1,10 @@
+use std::sync::Arc;
+
+use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+use super::schema::condensed_query_schema;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
@@ -11,17 +16,36 @@ pub struct ToolDefinition {
 pub struct ToolRegistry;
 
 impl ToolRegistry {
-    pub fn get_all_tools() -> Vec<ToolDefinition> {
-        vec![Self::query_graph(), Self::get_graph_entities()]
+    pub fn get_all_tools(ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+        vec![Self::query_graph(ontology), Self::get_graph_entities()]
     }
 
-    fn query_graph() -> ToolDefinition {
+    fn query_graph(ontology: &Arc<Ontology>) -> ToolDefinition {
+        let base_description = "Execute graph queries to find nodes, traverse relationships, \
+                                explore neighborhoods, find paths, or aggregate data.";
+
+        let description = match condensed_query_schema(ontology) {
+            Ok(schema) => format!(
+                "{}\n\nQuery DSL Schema (TOON format):\n{}",
+                base_description, schema
+            ),
+            Err(_) => base_description.to_string(),
+        };
+
         ToolDefinition {
             name: "query_graph".to_string(),
-            description: "Execute graph queries to find nodes, traverse relationships, \
-                          explore neighborhoods, find paths, or aggregate data."
-                .to_string(),
-            parameters: json!({}),
+            description,
+            parameters: json!({
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {
+                        "type": "object",
+                        "description": "Graph query following the DSL schema"
+                    }
+                },
+                "additionalProperties": false
+            }),
         }
     }
 
@@ -51,9 +75,14 @@ impl ToolRegistry {
 mod tests {
     use super::*;
 
+    fn test_ontology() -> Arc<Ontology> {
+        Arc::new(Ontology::load_embedded().expect("Failed to load ontology"))
+    }
+
     #[test]
     fn test_all_tools_have_valid_schemas() {
-        let tools = ToolRegistry::get_all_tools();
+        let ontology = test_ontology();
+        let tools = ToolRegistry::get_all_tools(&ontology);
         assert_eq!(tools.len(), 2, "Should have exactly 2 tools");
 
         for tool in &tools {
@@ -65,7 +94,8 @@ mod tests {
 
     #[test]
     fn test_tool_names_are_unique() {
-        let tools = ToolRegistry::get_all_tools();
+        let ontology = test_ontology();
+        let tools = ToolRegistry::get_all_tools(&ontology);
         let mut names = std::collections::HashSet::new();
 
         for tool in &tools {
@@ -79,7 +109,8 @@ mod tests {
 
     #[test]
     fn test_tool_names() {
-        let tools = ToolRegistry::get_all_tools();
+        let ontology = test_ontology();
+        let tools = ToolRegistry::get_all_tools(&ontology);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
 
         assert!(names.contains(&"query_graph"));
@@ -88,7 +119,8 @@ mod tests {
 
     #[test]
     fn test_get_graph_entities_has_expand_nodes_param() {
-        let tools = ToolRegistry::get_all_tools();
+        let ontology = test_ontology();
+        let tools = ToolRegistry::get_all_tools(&ontology);
         let get_entities = tools
             .iter()
             .find(|t| t.name == "get_graph_entities")
@@ -97,5 +129,53 @@ mod tests {
         let params = &get_entities.parameters;
         assert_eq!(params["type"], "object");
         assert!(params["properties"]["expand_nodes"].is_object());
+    }
+
+    #[test]
+    fn test_query_graph_has_query_parameter() {
+        let ontology = test_ontology();
+        let tools = ToolRegistry::get_all_tools(&ontology);
+        let query_graph = tools
+            .iter()
+            .find(|t| t.name == "query_graph")
+            .expect("query_graph tool should exist");
+
+        let params = &query_graph.parameters;
+        assert_eq!(params["type"], "object");
+        assert!(params["properties"]["query"].is_object());
+
+        let required = params["required"].as_array().expect("Should have required");
+        assert!(
+            required.iter().any(|v| v == "query"),
+            "query should be required"
+        );
+    }
+
+    #[test]
+    fn test_query_graph_description_contains_schema() {
+        let ontology = test_ontology();
+        let tools = ToolRegistry::get_all_tools(&ontology);
+        let query_graph = tools
+            .iter()
+            .find(|t| t.name == "query_graph")
+            .expect("query_graph tool should exist");
+
+        let desc = &query_graph.description;
+        assert!(
+            desc.contains("query_type"),
+            "Description should contain query_type"
+        );
+        assert!(
+            desc.contains("traversal"),
+            "Description should contain traversal"
+        );
+        assert!(
+            desc.contains("User"),
+            "Description should contain User entity"
+        );
+        assert!(
+            desc.contains("AUTHORED"),
+            "Description should contain AUTHORED relationship"
+        );
     }
 }

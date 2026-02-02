@@ -90,7 +90,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                 with_correlation(&request, async {
                     info!("Listing tools for user");
 
-                    let tools = ToolRegistry::get_all_tools()
+                    let tools = ToolRegistry::get_all_tools(&self.ontology)
                         .into_iter()
                         .map(|t| ProtoToolDefinition {
                             name: t.name,
