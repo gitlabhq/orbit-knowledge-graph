@@ -202,7 +202,8 @@ CREATE TABLE IF NOT EXISTS gl_edges (
     _version DateTime64(6, 'UTC') DEFAULT now(),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (source_id, target_id) PRIMARY KEY (source_id, target_id);
+ORDER BY (source_id, target_id) 
+PRIMARY KEY (source_kind, source_id, target_kind, target_id);
 
 -- CI graph tables
 
@@ -441,3 +442,28 @@ CREATE TABLE IF NOT EXISTS project_code_indexing_watermark (
     _version UInt64
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (project_id, branch);
+
+-- Mailbox plugin tables
+
+CREATE TABLE IF NOT EXISTS gl_mailbox_plugins (
+    plugin_id String,
+    namespace_id Int64,
+    api_key_hash String,
+    schema String,
+    schema_version Int64,
+    created_at DateTime64(6, 'UTC'),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (namespace_id, plugin_id);
+
+CREATE TABLE IF NOT EXISTS gl_mailbox_migrations (
+    plugin_id String,
+    schema_version Int64,
+    node_kind String,
+    table_name String,
+    ddl_hash String,
+    applied_at DateTime64(6, 'UTC'),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6)
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (plugin_id, schema_version, node_kind);

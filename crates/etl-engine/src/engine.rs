@@ -43,6 +43,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
 
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
@@ -171,9 +172,11 @@ impl Engine {
     pub async fn run(&self, configuration: &EngineConfiguration) -> Result<(), EngineError> {
         let topics = self.registry.topics();
         if topics.is_empty() {
+            info!("no topics registered, exiting");
             return Ok(());
         }
 
+        info!(count = topics.len(), "ensuring streams exist");
         self.broker.ensure_streams(&topics).await?;
 
         let worker_pool = Arc::new(WorkerPool::new(configuration));
@@ -187,13 +190,16 @@ impl Engine {
     }
 
     async fn listen(&self, topic: Topic, worker_pool: Arc<WorkerPool>) -> Result<(), EngineError> {
+        info!(stream = %topic.stream, subject = %topic.subject, "subscribing to topic");
         let mut subscription = self.broker.subscribe(&topic).await?;
+        info!(stream = %topic.stream, subject = %topic.subject, "subscribed, waiting for messages");
 
         loop {
             tokio::select! {
                 _ = self.cancel.cancelled() => break Ok(()),
                 Some(msg) = subscription.next() => {
                     let msg = msg?;
+                    info!(stream = %topic.stream, subject = %topic.subject, "received message");
                     let handlers = self.registry.handlers_for(&topic);
                     let context = HandlerContext::new(
                         self.destination.clone(),
@@ -202,8 +208,14 @@ impl Engine {
                     );
 
                     match dispatch(&handlers, context, msg.envelope.clone(), &worker_pool).await {
-                        Ok(_)  => msg.ack().await?,
-                        Err(_) => msg.nack().await?,
+                        Ok(_)  => {
+                            info!(stream = %topic.stream, subject = %topic.subject, "message processed successfully");
+                            msg.ack().await?;
+                        }
+                        Err(e) => {
+                            error!(stream = %topic.stream, subject = %topic.subject, error = %e, "message processing failed, nacking");
+                            msg.nack().await?;
+                        }
                     }
                 }
             }

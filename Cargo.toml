@@ -15,6 +15,8 @@ members = [
   "crates/simulator",
   "crates/health-check",
   "crates/siphon-proto",
+  "crates/mailbox",
+  "crates/trello-sync",
 ]
 
 [workspace.dependencies]
@@ -67,7 +69,7 @@ toml = "0.9.8"
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = "0.46.0"
-arrow-ipc = "57.2.0"
+arrow-ipc = { version = "57.2.0", features = ["lz4"] }
 clickhouse = { version = "0.14", features = ["inserter"] }
 testcontainers = "0.26.3"
 testcontainers-modules = { version = "0.14.0", features = ["nats", "clickhouse"] }

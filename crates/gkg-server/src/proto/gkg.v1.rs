@@ -137,6 +137,11 @@ pub struct QueryResult {
 /// Empty for now, could add filters in the future
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOntologyRequest {}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetNamespaceOntologyRequest {
+    #[prost(int64, tag = "1")]
+    pub namespace_id: i64,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetOntologyResponse {
     #[prost(string, tag = "1")]
@@ -173,6 +178,9 @@ pub struct NodeDefinition {
     pub properties: ::prost::alloc::vec::Vec<PropertyDefinition>,
     #[prost(message, optional, tag = "7")]
     pub style: ::core::option::Option<NodeStyle>,
+    /// Set for plugin-defined nodes, empty for base ontology nodes
+    #[prost(string, optional, tag = "8")]
+    pub plugin_id: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PropertyDefinition {
@@ -478,6 +486,36 @@ pub mod knowledge_graph_service_client {
                 .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetOntology"));
             self.inner.unary(req, path, codec).await
         }
+        /// Returns ontology merged with plugin-defined nodes/edges for a namespace
+        pub async fn get_namespace_ontology(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetNamespaceOntologyRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetOntologyResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetNamespaceOntology",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "gkg.v1.KnowledgeGraphService",
+                        "GetNamespaceOntology",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         /// Returns cluster health status for the Orbit dashboard
         pub async fn get_cluster_health(
             &mut self,
@@ -567,6 +605,14 @@ pub mod knowledge_graph_service_server {
         async fn get_ontology(
             &self,
             request: tonic::Request<super::GetOntologyRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetOntologyResponse>,
+            tonic::Status,
+        >;
+        /// Returns ontology merged with plugin-defined nodes/edges for a namespace
+        async fn get_namespace_ontology(
+            &self,
+            request: tonic::Request<super::GetNamespaceOntologyRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetOntologyResponse>,
             tonic::Status,
@@ -833,6 +879,55 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetOntologySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/GetNamespaceOntology" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetNamespaceOntologySvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::GetNamespaceOntologyRequest>
+                    for GetNamespaceOntologySvc<T> {
+                        type Response = super::GetOntologyResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetNamespaceOntologyRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::get_namespace_ontology(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetNamespaceOntologySvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

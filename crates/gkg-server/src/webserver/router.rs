@@ -91,15 +91,22 @@ async fn cluster_health(State(state): State<AppState>) -> Json<ClusterHealthResp
     })
 }
 
-pub fn create_router(_validator: JwtValidator, health_check_url: Option<String>) -> Router {
+pub fn create_router(
+    _validator: JwtValidator,
+    health_check_url: Option<String>,
+    mailbox_router: Router,
+) -> Router {
     let state = AppState {
         cluster_health: ClusterHealthChecker::new(health_check_url).into_arc(),
     };
 
-    Router::new()
+    let app_routes = Router::new()
         .route("/health", get(health))
         .route("/api/v1/cluster_health", get(cluster_health))
-        .with_state(state)
+        .with_state(state);
+
+    app_routes
+        .nest("/api/v1/mailbox", mailbox_router)
         .layer(HttpMetricsLayer::new())
         .layer(CorrelationIdLayer::new())
         .layer(TraceLayer::new_for_http())

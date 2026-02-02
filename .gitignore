@@ -21,6 +21,9 @@ crates/simulator/profiles
 # Tilt secrets (contains passwords)
 .tilt-secrets
 
+# Trello sync config (contains API credentials)
+trello-sync.yaml
+
 # Helm chart dependencies (downloaded by helm dependency build)
 helm-dev/charts/
 helm-dev/tmpcharts*/

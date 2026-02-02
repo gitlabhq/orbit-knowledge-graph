@@ -33,7 +33,7 @@ clickhouse:
     ssl: false
 
 gkgServer:
-  logLevel: "info,gkg_server=debug"
+  logLevel: "info,gkg_server=debug,mailbox=debug,etl_engine=debug"
   image:
     repository: gkg-server
     tag: dev
@@ -58,6 +58,16 @@ gkgServer:
       limits:
         cpu: 500m
         memory: 512Mi
+  dispatcher:
+    enabled: true
+    schedule: "*/1 * * * *"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
   healthCheck:
     enabled: true
     replicas: 1

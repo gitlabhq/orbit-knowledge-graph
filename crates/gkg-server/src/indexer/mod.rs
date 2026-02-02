@@ -14,6 +14,8 @@ use tracing::info;
 
 use crate::config::AppConfig;
 use crate::indexer::modules::code::GitalyConfiguration;
+use mailbox::storage::{PluginStore, TraversalPathResolver};
+use mailbox::MailboxModule;
 
 use self::modules::{CodeModule, SdlcModule};
 
@@ -48,6 +50,13 @@ pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), 
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);
+
+    info!("initializing Mailbox module");
+    let mailbox_client = Arc::new(config.graph.build_client());
+    let plugin_store = Arc::new(PluginStore::new(mailbox_client.clone()));
+    let traversal_resolver = Arc::new(TraversalPathResolver::new(mailbox_client));
+    let mailbox_module = MailboxModule::new(plugin_store, traversal_resolver);
+    registry.register_module(&mailbox_module);
 
     if std::env::var("GITALY_ADDRESS").is_ok() {
         info!("initializing Code module");

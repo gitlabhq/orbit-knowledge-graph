@@ -10,6 +10,7 @@ use gkg_server::health_check as health_check_mode;
 use gkg_server::indexer;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
+use mailbox::storage::PluginStore;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -30,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         Mode::DispatchIndexing => dispatcher::run(&config).await.map_err(Into::into),
         Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
         Mode::Indexer => indexer::run(&config, shutdown).await.map_err(Into::into),
+        Mode::TrelloSync => trello_sync::run(&args.trello_config).await.map_err(Into::into),
         Mode::Webserver => run_webserver(&config).await,
     };
 
@@ -44,10 +46,15 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
         config.jwt_clock_skew_secs,
     )?);
 
+    let clickhouse_client = Arc::new(config.graph.build_client());
+    let plugin_store = Arc::new(PluginStore::new(clickhouse_client));
+
     let http_server = HttpServer::bind(
         config.bind_address,
         (*validator).clone(),
         config.health_check_url.clone(),
+        &config.nats,
+        &config.graph,
     )
     .await?;
     info!(addr = %config.bind_address, "HTTP server bound");
@@ -57,6 +64,7 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
         validator,
         &config.graph,
         config.health_check_url.clone(),
+        plugin_store,
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 

@@ -166,7 +166,7 @@ impl NatsConfiguration {
     /// - `NATS_STREAM_MAX_MESSAGES`: Maximum messages per stream
     pub fn from_env() -> Self {
         Self {
-            url: std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".into()),
+            url: std::env::var("NATS_URL").unwrap_or_else(|_| "host.docker.internal:4222".into()),
             username: std::env::var("NATS_USERNAME").ok(),
             password: std::env::var("NATS_PASSWORD").ok(),
             consumer_name: std::env::var("NATS_CONSUMER_NAME").ok(),
@@ -186,7 +186,7 @@ impl NatsConfiguration {
 impl Default for NatsConfiguration {
     fn default() -> Self {
         Self {
-            url: "localhost:4222".to_string(),
+            url: "host.docker.internal:4222".to_string(),
             username: None,
             password: None,
             connection_timeout_secs: Self::default_connection_timeout_secs(),

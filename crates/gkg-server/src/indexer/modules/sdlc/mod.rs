@@ -137,11 +137,11 @@ impl Module for SdlcModule {
         }
 
         if !namespace_pipelines.is_empty() || !namespace_edge_pipelines.is_empty() {
-            handlers.push(Box::new(NamespaceHandler::new(
-                Arc::clone(&self.watermark_store),
-                namespace_pipelines,
-                namespace_edge_pipelines,
-            )));
+            // handlers.push(Box::new(NamespaceHandler::new(
+            //     Arc::clone(&self.watermark_store),
+            //     namespace_pipelines,
+            //     namespace_edge_pipelines,
+            // )));
         }
 
         info!(

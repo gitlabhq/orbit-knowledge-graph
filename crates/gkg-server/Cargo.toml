@@ -25,6 +25,8 @@ indexer = { path = "../code-indexer" }
 etl-engine = { path = "../etl-engine" }
 gitaly-client = { path = "../gitaly-client" }
 health-check = { path = "../health-check" }
+mailbox = { path = "../mailbox" }
+trello-sync = { path = "../trello-sync" }
 siphon-proto = { path = "../siphon-proto" }
 ontology = { path = "../ontology" }
 reqwest = { workspace = true }

@@ -25,6 +25,9 @@ service KnowledgeGraphService {
   // Returns the complete ontology schema (nodes, edges, domains)
   rpc GetOntology(GetOntologyRequest) returns (GetOntologyResponse);
 
+  // Returns ontology merged with plugin-defined nodes/edges for a namespace
+  rpc GetNamespaceOntology(GetNamespaceOntologyRequest) returns (GetOntologyResponse);
+
   // Returns cluster health status for the Orbit dashboard
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
 }
@@ -130,6 +133,10 @@ message GetOntologyRequest {
   // Empty for now, could add filters in the future
 }
 
+message GetNamespaceOntologyRequest {
+  int64 namespace_id = 1;
+}
+
 message GetOntologyResponse {
   string schema_version = 1;
   repeated NodeDefinition nodes = 2;
@@ -151,6 +158,8 @@ message NodeDefinition {
   string label_field = 5;
   repeated PropertyDefinition properties = 6;
   NodeStyle style = 7;
+  // Set for plugin-defined nodes, empty for base ontology nodes
+  optional string plugin_id = 8;
 }
 
 message PropertyDefinition {

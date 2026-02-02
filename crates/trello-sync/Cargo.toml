@@ -1,0 +1,20 @@
+[package]
+name = "trello-sync"
+version = "0.1.0"
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+mailbox = { path = "../mailbox" }
+regex = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

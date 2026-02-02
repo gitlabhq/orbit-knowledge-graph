@@ -1,0 +1,39 @@
+[package]
+name = "mailbox"
+version = "0.1.0"
+edition = "2024"
+license = "LicenseRef-EE"
+
+[features]
+default = []
+testkit = []
+
+[dependencies]
+arrow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+clickhouse-client = { path = "../clickhouse-client" }
+etl-engine = { path = "../etl-engine" }
+ontology = { path = "../ontology" }
+
+argon2 = "0.5"
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
+serial_test = { workspace = true }
+testcontainers = { workspace = true }
+testcontainers-modules = { workspace = true }
+etl-engine = { path = "../etl-engine", features = ["testkit"] }
+async-nats = { workspace = true }
+
+[lints]
+workspace = true

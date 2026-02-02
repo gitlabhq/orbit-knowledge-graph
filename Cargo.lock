@@ -143,6 +143,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "argon2"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072"
+dependencies = [
+ "base64ct",
+ "blake2",
+ "cpufeatures",
+ "password-hash",
+]
+
+[[package]]
 name = "arrow"
 version = "57.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -655,6 +667,15 @@ name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+
+[[package]]
+name = "blake2"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
+dependencies = [
+ "digest",
+]
 
 [[package]]
 name = "block-buffer"
@@ -2604,6 +2625,7 @@ dependencies = [
  "internment",
  "jsonwebtoken",
  "labkit-rs",
+ "mailbox",
  "ontology",
  "parking_lot",
  "parser-core",
@@ -2635,6 +2657,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "trello-sync",
  "uuid",
  "zstd",
 ]
@@ -3777,6 +3800,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
 
 [[package]]
+name = "mailbox"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "arrow",
+ "async-nats",
+ "async-trait",
+ "axum",
+ "bytes",
+ "chrono",
+ "clickhouse-client",
+ "etl-engine",
+ "ontology",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "testcontainers",
+ "testcontainers-modules",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4356,6 +4404,17 @@ dependencies = [
  "toml",
  "tracing",
  "treesitter-visit",
+]
+
+[[package]]
+name = "password-hash"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
+dependencies = [
+ "base64ct",
+ "rand_core 0.6.4",
+ "subtle",
 ]
 
 [[package]]
@@ -7024,6 +7083,22 @@ dependencies = [
  "tree-sitter-ruby",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+]
+
+[[package]]
+name = "trello-sync"
+version = "0.1.0"
+dependencies = [
+ "mailbox",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
