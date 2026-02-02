@@ -84,11 +84,11 @@ nats:
       tag: "2.10-alpine"
     resources:
       requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
+        cpu: 250m
         memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 2Gi
   natsBox:
     enabled: false
 
@@ -306,11 +306,11 @@ producer:
   logLevel: info
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1
+      cpu: 500m
       memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
 
 consumer:
   enabled: true
@@ -320,11 +320,11 @@ consumer:
   insertBatchSize: 10000
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1
+      cpu: 500m
       memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
 
 gkgServer:
   # Use targeted debug: gkg_server=debug, other crates=info
