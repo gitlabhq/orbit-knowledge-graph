@@ -70,69 +70,68 @@ Why not just write SQL? Four reasons. First, agents can generate this reliably -
 
 # How do we implement this?
 
-<div class="grid grid-cols-[1fr_auto_1fr] gap-4 items-center h-[80%]">
+<div class="flex items-center justify-center gap-3 h-[80%]">
 
-<div v-click="1" class="text-[0.55rem] leading-tight">
+<div v-click="1" class="flex flex-col">
+  <div class="text-xs font-bold mb-1 text-center">JSON DSL Query</div>
+  <div class="text-[0.5rem] leading-tight">
 
 ```json
 {
   "query_type": "traversal",
   "nodes": [
     { "id": "u", "entity": "User",
-      "columns": ["username", "name"],
+      "columns": ["username"],
       "node_ids": [1] },
     { "id": "mr", "entity": "MergeRequest",
-      "columns": ["iid", "title", "state"] },
+      "columns": ["title"] },
     { "id": "p", "entity": "Project",
-      "columns": ["name", "full_path"] }
+      "columns": ["name"] }
   ],
   "relationships": [
     { "type": "AUTHORED",
       "from": "u", "to": "mr" },
     { "type": "IN_PROJECT",
       "from": "mr", "to": "p" }
-  ],
-  "limit": 50
+  ]
 }
 ```
 
-</div>
-
-<div v-click="2" class="flex flex-col items-center gap-2">
-  <div class="text-5xl text-red-500 font-bold">→</div>
-  <div class="border-2 border-red-500 rounded px-4 py-2">
-    <span v-if="$clicks < 3" class="text-4xl text-red-500 font-bold">?</span>
-    <span v-else class="text-lg">compiler</span>
   </div>
-  <div class="text-5xl text-red-500 font-bold">→</div>
 </div>
 
-<div v-click="3" class="text-[0.55rem] leading-tight">
+<div v-click="2" class="text-3xl text-red-500 font-bold">→</div>
+
+<div v-click="2" class="border-2 border-red-500 rounded min-w-28 h-12 relative">
+  <span v-click.hide="4" class="text-2xl text-red-500 font-bold absolute inset-0 flex items-center justify-center">?</span>
+  <span v-click="4" class="text-lg text-red-500 font-bold absolute inset-0 flex items-center justify-center">compiler</span>
+</div>
+
+<div v-click="3" class="text-3xl text-red-500 font-bold">→</div>
+
+<div v-click="3" class="flex flex-col">
+  <div class="text-xs font-bold mb-1 text-center">Generated SQL</div>
+  <div class="text-[0.45rem] leading-tight">
 
 ```sql
-SELECT
-  u.username AS u_username,
-  u.name AS u_name,
-  mr.iid AS mr_iid,
-  mr.title AS mr_title,
-  mr.state AS mr_state,
-  p.name AS p_name,
-  p.full_path AS p_full_path
+SELECT u.username, mr.title, p.name
 FROM gl_user AS u
-INNER JOIN gl_edges AS e0
+JOIN gl_edges AS e0
   ON u.id = e0.source_id
-INNER JOIN gl_merge_request AS mr
+JOIN gl_merge_request AS mr
   ON e0.target_id = mr.id
-INNER JOIN gl_edges AS e1
+JOIN gl_edges AS e1
   ON mr.id = e1.source_id
-INNER JOIN gl_project AS p
+JOIN gl_project AS p
   ON e1.target_id = p.id
-WHERE u.id IN (1)
-  AND e0.relationship_kind = 'AUTHORED'
-  AND e1.relationship_kind = 'IN_PROJECT'
-LIMIT 50
+WHERE u.id IN ({p0:Int64})
+  AND e0.relationship_kind = {type_e0:String}
+  AND e1.relationship_kind = {type_e1:String}
+  AND startsWith(mr.traversal_path, {p1:String})
+  AND startsWith(p.traversal_path, {p1:String})
 ```
 
+  </div>
 </div>
 
 </div>
