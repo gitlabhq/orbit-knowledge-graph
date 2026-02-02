@@ -170,7 +170,9 @@ Here's the compiler. Nine lines, each doing one thing. We'll walk through what e
 
 <div class="grid grid-cols-[1fr_auto_auto_auto_1fr] gap-4 items-center h-[85%]">
 
-<div class="text-[0.5rem] leading-tight">
+<div class="flex flex-col">
+  <div class="text-xs font-bold mb-1 text-center">schema.json</div>
+  <div class="text-[0.5rem] leading-tight">
 
 ```json
 {
@@ -197,11 +199,14 @@ Here's the compiler. Nine lines, each doing one thing. We'll walk through what e
 }
 ```
 
+  </div>
 </div>
 
 <div v-click="1" class="text-3xl">→</div>
 
-<div v-click="1" class="text-[0.5rem] leading-tight">
+<div v-click="1" class="flex flex-col">
+  <div class="text-xs font-bold mb-1 text-center">JSON DSL Query</div>
+  <div class="text-[0.5rem] leading-tight">
 
 ```json
 {
@@ -214,18 +219,22 @@ Here's the compiler. Nine lines, each doing one thing. We'll walk through what e
 }
 ```
 
+  </div>
 </div>
 
-<div class="flex flex-col gap-6 text-sm">
+<div class="flex flex-col gap-4 text-sm">
   <div v-click="2" class="flex items-center gap-2">
-    <span class="text-3xl text-red-500">↗</span>
-    <span class="text-red-500 font-mono text-xs">
-      "traversal" requires "nodes"<br/>with minItems: 2
-    </span>
+    <span class="text-2xl">↗</span>
+    <div class="border-2 border-red-500 rounded px-3 py-2 bg-red-50 dark:bg-red-900/20">
+      <div class="text-red-600 dark:text-red-400 font-bold mb-1">Error:</div>
+      <span class="text-red-600 dark:text-red-400 font-mono text-xs">"traversal" requires<br/>"nodes" minItems: 2</span>
+    </div>
   </div>
   <div v-click="3" class="flex items-center gap-2">
-    <span class="text-3xl text-green-500">↘</span>
-    <span class="text-green-500 font-bold">Accept</span>
+    <span class="text-2xl">↘</span>
+    <div class="border-2 border-green-500 rounded px-3 py-2 bg-green-50 dark:bg-green-900/20">
+      <span class="text-green-600 dark:text-green-400 font-bold">Accept</span>
+    </div>
   </div>
 </div>
 
@@ -263,7 +272,9 @@ Now we validate that the entities and relationships in the query actually exist 
 
 <div class="flex items-center justify-center gap-3 h-[75%]">
 
-<div class="text-[0.5rem] leading-tight">
+<div class="flex flex-col">
+  <div class="text-xs font-bold mb-1 text-center">schema.json</div>
+  <div class="text-[0.5rem] leading-tight">
 
 ```json
 {
@@ -275,11 +286,14 @@ Now we validate that the entities and relationships in the query actually exist 
 }
 ```
 
+  </div>
 </div>
 
 <div v-click="1" class="text-2xl">+</div>
 
-<div v-click="1" class="text-[0.5rem] leading-tight">
+<div v-click="1" class="flex flex-col">
+  <div class="text-xs font-bold mb-1 text-center">ontology/core/nodes/project.yaml</div>
+  <div class="text-[0.5rem] leading-tight">
 
 ```yaml
 node_type: Project
@@ -288,22 +302,27 @@ properties:
   name: { type: string }
 ```
 
+  </div>
 </div>
 
 <div v-click="2" class="text-2xl">→</div>
 
-<div v-click="2" class="text-sm font-mono bg-gray-100 dark:bg-gray-800 rounded px-3 py-1">
-  Validator
+<div v-click="2" class="text-sm bg-gray-100 dark:bg-gray-800 rounded px-4 py-3 text-center font-bold">
+  Validate Populated<br/>JSON Schema
 </div>
 
-<div v-click="3" class="flex flex-col gap-1">
-  <div class="flex items-center gap-1">
-    <span class="text-2xl text-red-500">↗</span>
-    <span class="text-red-500 font-mono text-xs">error</span>
+<div v-click="3" class="flex flex-col gap-2">
+  <div class="flex items-center gap-2">
+    <span class="text-2xl">↗</span>
+    <div class="border-2 border-red-500 rounded px-3 py-2 bg-red-50 dark:bg-red-900/20">
+      <span class="text-red-600 dark:text-red-400 font-bold">Error</span>
+    </div>
   </div>
-  <div class="flex items-center gap-1">
-    <span class="text-2xl text-green-500">↘</span>
-    <span class="text-green-500 font-mono text-xs">parse()</span>
+  <div class="flex items-center gap-2">
+    <span class="text-2xl">↘</span>
+    <div class="border-2 border-green-500 rounded px-3 py-2 bg-green-50 dark:bg-green-900/20">
+      <span class="text-green-600 dark:text-green-400 font-bold">parse()</span>
+    </div>
   </div>
 </div>
 
