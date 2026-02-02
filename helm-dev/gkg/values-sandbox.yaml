@@ -84,11 +84,11 @@ nats:
       tag: "2.10-alpine"
     resources:
       requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
+        cpu: 250m
         memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 2Gi
   natsBox:
     enabled: false
 
@@ -306,24 +306,26 @@ producer:
   logLevel: info
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1
+      cpu: 500m
       memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
 
 consumer:
   enabled: true
   applicationIdentifier: gkg-consumer
-  replicas: 1
+  replicas: 5
   logLevel: info
   insertBatchSize: 10000
+  maxOpenConns: 50
+  dialTimeout: 30s
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
+      cpu: 125m
+      memory: 256Mi
     limits:
-      cpu: 1
+      cpu: 500m
       memory: 1Gi
 
 gkgServer:
@@ -334,7 +336,7 @@ gkgServer:
     tag: develop
     pullPolicy: Always
   dispatcher:
-    enabled: false
+    enabled: true
     schedule: "* * * * *"
     resources:
       requests:
