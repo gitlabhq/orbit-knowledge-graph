@@ -84,6 +84,22 @@
     {
       "if": {
         "properties": {
+          "query_type": { "const": "batch_search" }
+        }
+      },
+      "then": {
+        "required": ["nodes"],
+        "properties": {
+          "nodes": {
+            "minItems": 1,
+            "description": "Batch search requires at least 1 node specification"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "query_type": { "const": "aggregation" }
         }
       },
@@ -156,7 +172,7 @@
     "QueryType": {
       "type": "string",
       "description": "Type of graph query to execute",
-      "enum": ["traversal", "aggregation", "path_finding", "search", "neighbors"]
+      "enum": ["traversal", "aggregation", "path_finding", "search", "neighbors", "batch_search"]
     },
     "EntityType": {
       "type": "string",

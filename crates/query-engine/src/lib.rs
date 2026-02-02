@@ -963,4 +963,84 @@ mod ontology_integration_tests {
             result.sql
         );
     }
+
+    #[test]
+    fn batch_search_query() {
+        let json = r#"{
+            "query_type": "batch_search",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3]},
+                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [10, 20]}
+            ],
+            "limit": 100
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Batch search SQL: {}", result.sql);
+
+        // Should have UNION ALL for multiple entities
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "expected UNION ALL for batch search: {}",
+            result.sql
+        );
+
+        // Should have entity type column
+        assert!(
+            result.sql.contains("_gkg_entity_type"),
+            "expected _gkg_entity_type column: {}",
+            result.sql
+        );
+
+        // Should have unified ID column
+        assert!(
+            result.sql.contains("_gkg_id"),
+            "expected _gkg_id column: {}",
+            result.sql
+        );
+
+        // Should have entity-specific columns
+        assert!(
+            result.sql.contains("User_username"),
+            "expected User_username column: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("Project_name"),
+            "expected Project_name column: {}",
+            result.sql
+        );
+
+        // Should have limit
+        assert!(
+            result.sql.contains("LIMIT 100"),
+            "expected LIMIT 100: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn batch_search_single_entity() {
+        let json = r#"{
+            "query_type": "batch_search",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": "*", "node_ids": [1, 2, 3]}
+            ],
+            "limit": 50
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Single entity batch search SQL: {}", result.sql);
+
+        // Single entity should not have UNION ALL
+        assert!(
+            !result.sql.contains("UNION ALL"),
+            "single entity should not have UNION ALL: {}",
+            result.sql
+        );
+
+        // Should have entity type column
+        assert!(result.sql.contains("_gkg_entity_type"));
+        assert!(result.sql.contains("_gkg_id"));
+    }
 }

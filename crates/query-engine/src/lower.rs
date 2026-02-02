@@ -33,6 +33,7 @@ pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
+        QueryType::BatchSearch => lower_batch_search(input, ontology),
     }
 }
 
@@ -523,6 +524,148 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         limit: Some(input.limit),
         ..Default::default()
     })))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batch Search
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn lower_batch_search(input: &Input, ontology: &Ontology) -> Result<Node> {
+    if input.nodes.is_empty() {
+        return Err(QueryError::Lowering("batch_search requires at least one node".into()));
+    }
+
+    // Collect all columns across all entities to build unified schema
+    let mut all_columns: Vec<(String, String)> = Vec::new(); // (entity, column)
+    for node in &input.nodes {
+        let Some(entity) = &node.entity else { continue };
+        let Some(node_entity) = ontology.get_node(entity) else { continue };
+
+        match &node.columns {
+            None => {
+                // No columns specified - just id
+            }
+            Some(ColumnSelection::All) => {
+                for field in &node_entity.fields {
+                    let key = (entity.clone(), field.name.clone());
+                    if !all_columns.contains(&key) {
+                        all_columns.push(key);
+                    }
+                }
+            }
+            Some(ColumnSelection::List(cols)) => {
+                for col in cols {
+                    let key = (entity.clone(), col.clone());
+                    if !all_columns.contains(&key) {
+                        all_columns.push(key);
+                    }
+                }
+            }
+        }
+    }
+
+    // Build individual queries for each node
+    let mut queries: Vec<Query> = input
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let entity = node.entity.as_ref()?;
+            let table = node.table.as_ref()?;
+            Some(build_batch_search_arm(node, entity, table, &all_columns, ontology))
+        })
+        .collect();
+
+    if queries.is_empty() {
+        return Err(QueryError::Lowering("batch_search: no valid nodes to query".into()));
+    }
+
+    // If only one entity type, just return that query directly with limit
+    if queries.len() == 1 {
+        let mut query = queries.remove(0);
+        query.limit = Some(input.limit);
+        return Ok(Node::Query(Box::new(query)));
+    }
+
+    // Build UNION ALL of all entity queries
+    // First query becomes the base, rest go in union_all
+    let mut base_query = queries.remove(0);
+    base_query.union_all = queries;
+    base_query.limit = Some(input.limit);
+
+    Ok(Node::Query(Box::new(base_query)))
+}
+
+/// Build a single arm of the batch search UNION.
+fn build_batch_search_arm(
+    node: &InputNode,
+    entity: &str,
+    table: &str,
+    all_columns: &[(String, String)],
+    ontology: &Ontology,
+) -> Query {
+    let node_entity = ontology.get_node(entity);
+    let entity_fields: Vec<&str> = node_entity
+        .map(|e| e.fields.iter().map(|f| f.name.as_str()).collect())
+        .unwrap_or_default();
+
+    let mut select = Vec::new();
+
+    // Always include: _gkg_entity_type, _gkg_id
+    select.push(SelectExpr::new(Expr::lit(entity), "_gkg_entity_type"));
+    select.push(SelectExpr::new(Expr::col(&node.id, "id"), "_gkg_id"));
+
+    // Build columns based on what this node requested
+    let requested_cols: Vec<&str> = match &node.columns {
+        None => vec![],
+        Some(ColumnSelection::All) => entity_fields.clone(),
+        Some(ColumnSelection::List(cols)) => cols.iter().map(|s| s.as_str()).collect(),
+    };
+
+    // For each column in the unified schema, output it or NULL
+    for (col_entity, col_name) in all_columns {
+        let alias = format!("{}_{}", col_entity, col_name);
+        if col_entity == entity && requested_cols.contains(&col_name.as_str()) {
+            // This entity has this column - select it
+            select.push(SelectExpr::new(Expr::col(&node.id, col_name), alias));
+        } else {
+            // Not available for this entity - output NULL
+            select.push(SelectExpr::new(Expr::lit(Value::Null), alias));
+        }
+    }
+
+    // Build WHERE clause from filters and node_ids
+    let mut conds: Vec<Expr> = Vec::new();
+
+    // Node IDs filter
+    if let Some(filter) = id_filter(&node.id, "id", &node.node_ids) {
+        conds.push(filter);
+    }
+
+    // ID range filter
+    if let Some(r) = &node.id_range {
+        conds.push(Expr::binary(
+            Op::Ge,
+            Expr::col(&node.id, "id"),
+            Expr::lit(r.start),
+        ));
+        conds.push(Expr::binary(
+            Op::Le,
+            Expr::col(&node.id, "id"),
+            Expr::lit(r.end),
+        ));
+    }
+
+    // Property filters
+    for (prop, filter) in &node.filters {
+        conds.push(filter_expr(&node.id, prop, filter));
+    }
+
+    Query {
+        select,
+        from: TableRef::scan(table, &node.id),
+        where_clause: Expr::and_all(conds.into_iter().map(Some)),
+        ..Default::default()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1483,5 +1626,100 @@ mod tests {
             panic!()
         };
         assert_eq!(extract_edge_type_filter(&q.from), None);
+    }
+
+    #[test]
+    fn test_batch_search_single_entity() {
+        use crate::input::ColumnSelection;
+
+        let input = Input {
+            query_type: QueryType::BatchSearch,
+            nodes: vec![InputNode {
+                id: "u".to_string(),
+                entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
+                columns: Some(ColumnSelection::List(vec!["username".to_string()])),
+                filters: std::collections::HashMap::new(),
+                node_ids: vec![1, 2, 3],
+                id_range: None,
+                id_property: "id".to_string(),
+            }],
+            relationships: vec![],
+            aggregations: vec![],
+            path: None,
+            neighbors: None,
+            limit: 100,
+            order_by: None,
+            aggregation_sort: None,
+        };
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+
+        // Should have batch search standard columns
+        assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_id".to_string()));
+        // Should have entity-specific column
+        assert!(aliases.contains(&&"User_username".to_string()));
+    }
+
+    #[test]
+    fn test_batch_search_multiple_entities() {
+        use crate::input::ColumnSelection;
+
+        let input = Input {
+            query_type: QueryType::BatchSearch,
+            nodes: vec![
+                InputNode {
+                    id: "u".to_string(),
+                    entity: Some("User".to_string()),
+                    table: Some("gl_user".to_string()),
+                    columns: Some(ColumnSelection::List(vec!["username".to_string()])),
+                    filters: std::collections::HashMap::new(),
+                    node_ids: vec![1, 2],
+                    id_range: None,
+                    id_property: "id".to_string(),
+                },
+                InputNode {
+                    id: "p".to_string(),
+                    entity: Some("Project".to_string()),
+                    table: Some("gl_project".to_string()),
+                    columns: Some(ColumnSelection::List(vec!["name".to_string()])),
+                    filters: std::collections::HashMap::new(),
+                    node_ids: vec![10, 20],
+                    id_range: None,
+                    id_property: "id".to_string(),
+                },
+            ],
+            relationships: vec![],
+            aggregations: vec![],
+            path: None,
+            neighbors: None,
+            limit: 100,
+            order_by: None,
+            aggregation_sort: None,
+        };
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Should have UNION ALL for multiple entities
+        assert_eq!(q.union_all.len(), 1, "expected 1 union arm for second entity");
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+
+        // Should have batch search standard columns
+        assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_id".to_string()));
+        // Should have columns for both entities (with NULLs for non-matching)
+        assert!(aliases.contains(&&"User_username".to_string()));
+        assert!(aliases.contains(&&"Project_name".to_string()));
+
+        // Check limit is on the outer query
+        assert_eq!(q.limit, Some(100));
     }
 }

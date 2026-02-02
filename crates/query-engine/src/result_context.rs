@@ -15,6 +15,10 @@ pub const NEIGHBOR_TYPE_COLUMN: &str = "_gkg_neighbor_type";
 
 pub const RELATIONSHIP_TYPE_COLUMN: &str = "_gkg_relationship_type";
 
+/// Column names for batch_search queries. Each row has a single entity type and ID.
+pub const BATCH_ENTITY_TYPE_COLUMN: &str = "_gkg_entity_type";
+pub const BATCH_ID_COLUMN: &str = "_gkg_id";
+
 pub fn id_column(alias: &str) -> String {
     format!("_gkg_{alias}_id")
 }

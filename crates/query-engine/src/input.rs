@@ -47,9 +47,8 @@ where
         (Some(_), Some(_)) => Err(serde::de::Error::custom(
             "cannot specify both 'node' and 'nodes'",
         )),
-        (None, None) => Err(serde::de::Error::custom(
-            "must specify either 'node' or 'nodes'",
-        )),
+        // Allow empty for batch_search which requires nodes but validates later
+        (None, None) => Ok(vec![]),
     }
 }
 
@@ -65,6 +64,11 @@ pub enum QueryType {
     PathFinding,
     Search,
     Neighbors,
+    /// Batch search: query multiple entity types in a single request.
+    /// Each node can specify its own entity type, columns, filters, and node_ids.
+    /// Returns UNION ALL of all entity searches, with entity-specific columns
+    /// prefixed by entity type (e.g., User_username, Project_name).
+    BatchSearch,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

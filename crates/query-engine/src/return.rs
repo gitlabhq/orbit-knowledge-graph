@@ -23,6 +23,7 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     // For aggregation queries: only nodes appearing in group_by are selectable.
     // For path finding: handled separately in enforce_return.
     // For neighbors queries: only the center node is selectable.
+    // For batch_search: uses _gkg_entity_type and _gkg_id columns instead of per-node columns.
     let selectable_nodes = match input.query_type {
         QueryType::Aggregation => input
             .aggregations
@@ -32,7 +33,7 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
         QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
             input.nodes.iter().map(|n| n.id.clone()).collect()
         }
-        QueryType::PathFinding => HashSet::new(),
+        QueryType::PathFinding | QueryType::BatchSearch => HashSet::new(),
     };
 
     match node {

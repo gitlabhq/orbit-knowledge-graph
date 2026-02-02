@@ -28,6 +28,7 @@ pub fn validate(input: &Input, ontology: &Ontology) -> Result<()> {
     validate_order_by(input, ontology)?;
     validate_path(input, ontology)?;
     validate_neighbors(input, ontology)?;
+    validate_batch_search(input)?;
     Ok(())
 }
 
@@ -313,6 +314,32 @@ fn validate_neighbors(input: &Input, ontology: &Ontology) -> Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Batch search validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn validate_batch_search(input: &Input) -> Result<()> {
+    if input.query_type != QueryType::BatchSearch {
+        return Ok(());
+    }
+
+    if input.nodes.is_empty() {
+        return Err(err("batch_search query requires at least one node"));
+    }
+
+    // Each node must have node_ids for batch search (otherwise it's just a search)
+    for node in &input.nodes {
+        if node.node_ids.is_empty() && node.id_range.is_none() && node.filters.is_empty() {
+            return Err(err(format!(
+                "batch_search node \"{}\" should have node_ids, id_range, or filters to be useful",
+                node.id
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -575,6 +602,36 @@ mod tests {
             r#"{
             "query_type": "search",
             "node": {"id": "u", "entity": "User", "columns": ["id", "username"]}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(validate(&input, &test_ontology()).is_ok());
+    }
+
+    #[test]
+    fn batch_search_requires_nodes() {
+        let input = parse_input(
+            r#"{
+            "query_type": "batch_search",
+            "nodes": []
+        }"#,
+        )
+        .unwrap();
+
+        let err = validate(&input, &test_ontology()).unwrap_err();
+        assert!(err.to_string().contains("at least one node"));
+    }
+
+    #[test]
+    fn batch_search_valid() {
+        let input = parse_input(
+            r#"{
+            "query_type": "batch_search",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                {"id": "n", "entity": "Note", "node_ids": [10, 20]}
+            ]
         }"#,
         )
         .unwrap();
