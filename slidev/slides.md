@@ -725,18 +725,116 @@ Codegen is just string formatting. Walk each part of the Query struct, emit the 
 -->
 
 ---
-layout: center
-class: text-center
----
 
 # Summary
 
-```text
-JSON → Schema → Parse → Validate → Normalize → Lower → Return → Security → SQL
-```
+<div class="flex flex-col items-center gap-1">
 
-Each step does one thing. Errors surface early. SQL injection is impossible.
+<div class="border-2 border-red-400 bg-red-50 dark:bg-red-900/20 rounded px-6 py-1 text-sm">
+  🔓 JSON Input (untrusted)
+</div>
+
+<div class="text-lg">↓</div>
+
+<div class="flex gap-2 items-center text-xs">
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">schema</div>
+  <span>→</span>
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">ontology</div>
+  <span>→</span>
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">parse</div>
+  <span>→</span>
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">validate</div>
+  <span class="text-red-500 ml-2">→ ❌</span>
+</div>
+
+<div class="text-lg">↓</div>
+
+<div class="border-2 border-green-400 bg-green-50 dark:bg-green-900/20 rounded px-4 py-2">
+  <div class="text-xs text-center mb-1 font-bold">🔒 Trusted Zone</div>
+  <div class="flex gap-2 items-center text-xs">
+    <div class="border rounded px-2 py-1">normalize</div>
+    <span>→</span>
+    <div class="border rounded px-2 py-1">lower</div>
+    <span>→</span>
+    <div class="border-2 border-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded px-2 py-1 font-bold">AST</div>
+    <span>→</span>
+    <div class="border rounded px-2 py-1">+return</div>
+    <span>→</span>
+    <div class="border rounded px-2 py-1">+security</div>
+    <span>→</span>
+    <div class="border rounded px-2 py-1">codegen</div>
+  </div>
+</div>
+
+<div class="text-lg">↓</div>
+
+<div class="border-2 border-green-500 bg-green-100 dark:bg-green-900/30 rounded px-6 py-1 text-sm font-bold">
+  Parameterized SQL ✓
+</div>
+
+</div>
+
+<div class="mt-4 text-sm">
+<v-clicks>
+
+- Validate early, fail fast - bad queries never touch the database
+- After `validate()`, success is guaranteed
+- Security policies injected via AST manipulation
+- Parameterized SQL output - no injection possible
+
+</v-clicks>
+</div>
 
 <!--
-That's the whole pipeline. Each step has a single responsibility. Invalid input fails fast. And because codegen uses parameterized queries, SQL injection isn't possible.
+The funnel: untrusted JSON enters at top, validation gates reject bad queries, and only valid queries cross into the trusted zone where we build and manipulate the AST. Output is always safe parameterized SQL.
+-->
+
+---
+
+# Vision
+
+<div class="flex flex-col items-center gap-6 h-[80%] justify-center">
+
+<!-- Inputs row -->
+<div class="flex gap-8 items-center justify-center">
+  <div v-click="2" class="border-2 border-dashed border-gray-400 rounded px-4 py-2 text-gray-500 min-w-24 text-center">Cypher</div>
+  <div v-click="1" class="border-2 border-green-500 bg-green-50 dark:bg-green-900/20 rounded px-4 py-2 font-bold text-lg min-w-24 text-center">JSON DSL</div>
+  <div v-click="2" class="border-2 border-dashed border-gray-400 rounded px-4 py-2 text-gray-500 min-w-24 text-center">SQL</div>
+</div>
+
+<!-- Arrows down -->
+<div class="flex gap-8 items-center justify-center">
+  <span v-click="2" class="text-xl text-gray-400 min-w-24 text-center">↘</span>
+  <span v-click="1" class="text-2xl min-w-24 text-center">↓</span>
+  <span v-click="2" class="text-xl text-gray-400 min-w-24 text-center">↙</span>
+</div>
+
+<!-- Compiler -->
+<div class="border-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 rounded-full px-10 py-5 text-center">
+  <div class="font-bold text-xl">Compiler</div>
+  <div class="text-gray-600 dark:text-gray-400">AST</div>
+</div>
+
+<!-- Arrows down -->
+<div class="flex gap-8 items-center justify-center">
+  <span v-click="3" class="text-xl text-gray-400 min-w-24 text-center">↙</span>
+  <span v-click="1" class="text-2xl min-w-24 text-center">↓</span>
+  <span v-click="3" class="text-xl text-gray-400 min-w-24 text-center">↘</span>
+</div>
+
+<!-- Outputs row -->
+<div class="flex gap-8 items-center justify-center">
+  <div v-click="3" class="border-2 border-dashed border-gray-400 rounded px-4 py-2 text-gray-500 min-w-24 text-center">Postgres</div>
+  <div v-click="1" class="border-2 border-green-500 bg-green-50 dark:bg-green-900/20 rounded px-4 py-2 font-bold text-lg min-w-24 text-center">ClickHouse</div>
+  <div v-click="3" class="border-2 border-dashed border-gray-400 rounded px-4 py-2 text-gray-500 min-w-24 text-center">MySQL</div>
+</div>
+
+</div>
+
+<div v-click="4" class="text-center text-gray-500 mt-8">
+  The AST is the abstraction layer - add inputs or outputs without changing the core
+</div>
+
+<!--
+The compiler and AST are the stable core. Today we parse JSON and emit ClickHouse SQL. Tomorrow we could add Cypher parsing, GraphQL, or target Postgres, MySQL, whatever. The AST is the abstraction layer.
 -->
