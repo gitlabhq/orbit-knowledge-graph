@@ -42,7 +42,10 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
     let mut obj = serde_json::Map::new();
 
     for (name, value) in row.columns() {
-        if name.starts_with("_gkg_") {
+        if name.starts_with("_gkg_")
+            && !name.starts_with("_gkg_neighbor")
+            && !name.starts_with("_gkg_relationship")
+        {
             continue;
         }
         let json_value = match value {
