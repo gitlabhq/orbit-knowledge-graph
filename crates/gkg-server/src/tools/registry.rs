@@ -25,7 +25,10 @@ impl ToolRegistry {
                                 explore neighborhoods, find paths, or aggregate data.";
 
         let description = match condensed_query_schema(ontology) {
-            Ok(schema) => format!("{}\n\nQuery DSL Schema (TOON format):\n{}", base_description, schema),
+            Ok(schema) => format!(
+                "{}\n\nQuery DSL Schema (TOON format):\n{}",
+                base_description, schema
+            ),
             Err(_) => base_description.to_string(),
         };
 
@@ -166,11 +169,13 @@ mod tests {
             desc.contains("traversal"),
             "Description should contain traversal"
         );
-        assert!(desc.contains("User"), "Description should contain User entity");
+        assert!(
+            desc.contains("User"),
+            "Description should contain User entity"
+        );
         assert!(
             desc.contains("AUTHORED"),
             "Description should contain AUTHORED relationship"
         );
     }
-
 }

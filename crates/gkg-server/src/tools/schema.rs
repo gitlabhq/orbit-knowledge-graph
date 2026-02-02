@@ -44,10 +44,12 @@ fn condense_value(value: &mut Value) {
 fn condense_object(map: &mut Map<String, Value>) {
     map.remove("default");
 
-    if let Some(Value::String(desc)) = map.get("description") {
-        if is_trivial_description(desc) {
-            map.remove("description");
-        }
+    let should_remove = matches!(
+        map.get("description"),
+        Some(Value::String(desc)) if is_trivial_description(desc)
+    );
+    if should_remove {
+        map.remove("description");
     }
 
     for value in map.values_mut() {
@@ -56,7 +58,7 @@ fn condense_object(map: &mut Map<String, Value>) {
 }
 
 fn is_trivial_description(desc: &str) -> bool {
-    TRIVIAL_DESCRIPTIONS.iter().any(|&trivial| desc == trivial)
+    TRIVIAL_DESCRIPTIONS.contains(&desc)
 }
 
 #[cfg(test)]
