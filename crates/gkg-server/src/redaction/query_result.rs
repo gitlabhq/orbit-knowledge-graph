@@ -148,6 +148,18 @@ impl QueryResultRow {
     pub fn set_unauthorized(&mut self) {
         self.authorized = false;
     }
+
+    pub fn get_column_i64(&self, column: &str) -> Option<i64> {
+        self.columns.get(column)?.as_i64()
+    }
+
+    pub fn get_column_string(&self, column: &str) -> Option<String> {
+        self.columns.get(column)?.as_str().map(|s| s.to_string())
+    }
+
+    pub fn set_column(&mut self, column: String, value: ColumnValue) {
+        self.columns.insert(column, value);
+    }
 }
 
 /// Type-safe wrapper around Arrow RecordBatch results for redaction processing.
@@ -291,6 +303,10 @@ impl QueryResult {
 
     pub fn authorized_rows(&self) -> impl Iterator<Item = &QueryResultRow> {
         self.rows.iter().filter(|r| r.authorized)
+    }
+
+    pub fn authorized_rows_mut(&mut self) -> impl Iterator<Item = &mut QueryResultRow> {
+        self.rows.iter_mut().filter(|r| r.authorized)
     }
 
     pub fn authorized_count(&self) -> usize {

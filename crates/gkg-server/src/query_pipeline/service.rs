@@ -13,7 +13,8 @@ use crate::redaction::RedactionMessage;
 use super::error::PipelineError;
 use super::formatter::ResultFormatter;
 use super::stages::{
-    AuthorizationStage, ExtractionStage, FormattingStage, RedactionStage, SecurityStage,
+    AuthorizationStage, ExtractionStage, FormattingStage, HydrationStage, RedactionStage,
+    SecurityStage,
 };
 use super::types::{ExecutionOutput, PipelineOutput};
 
@@ -22,16 +23,22 @@ pub struct QueryPipelineService<F: ResultFormatter + Clone> {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
     extraction: Arc<ExtractionStage>,
+    hydration: Arc<HydrationStage>,
     formatter: F,
 }
 
 impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
     pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>, formatter: F) -> Self {
         let extraction = Arc::new(ExtractionStage::new(Arc::clone(&ontology)));
+        let hydration = Arc::new(HydrationStage::new(
+            Arc::clone(&ontology),
+            Arc::clone(&client),
+        ));
         Self {
             ontology,
             client,
             extraction,
+            hydration,
             formatter,
         }
     }
@@ -64,9 +71,19 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
 
         let authorized = AuthorizationStage::execute(extracted, tx, stream).await?;
         let redacted = RedactionStage::execute(authorized);
+
+        let result_context = redacted.result_context;
+        let redacted_count = redacted.redacted_count;
+        let generated_sql = redacted.generated_sql;
+
+        let hydrated = self
+            .hydration
+            .execute(redacted.query_result, &result_context, &security_context)
+            .await?;
+
         let formatting_stage =
             FormattingStage::new(self.formatter.clone(), Arc::clone(&self.ontology));
-        Ok(formatting_stage.execute(redacted))
+        Ok(formatting_stage.execute(hydrated, result_context, redacted_count, generated_sql))
     }
 
     async fn execute_query(
