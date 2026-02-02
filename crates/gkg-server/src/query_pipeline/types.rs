@@ -15,6 +15,7 @@ pub struct ExecutionOutput {
 pub struct RedactionPlan {
     pub resources_to_check: Vec<ResourceCheck>,
     pub entity_to_resource_map: HashMap<String, String>,
+    pub entity_to_id_column_map: HashMap<String, String>,
 }
 
 pub struct ExtractionOutput {
@@ -29,6 +30,7 @@ pub struct AuthorizationOutput {
     pub result_context: ResultContext,
     pub authorizations: Vec<ResourceAuthorization>,
     pub entity_to_resource_map: HashMap<String, String>,
+    pub entity_to_id_column_map: HashMap<String, String>,
     pub generated_sql: String,
 }
 

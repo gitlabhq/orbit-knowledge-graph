@@ -1,6 +1,6 @@
 //! Extract redaction data from query results using ontology configuration.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ontology::Ontology;
 
@@ -18,7 +18,7 @@ impl<'a> RedactionExtractor<'a> {
 
     pub fn extract(&self, result: &QueryResult) -> (RedactableNodes, Vec<ResourceCheck>) {
         let nodes = result.extract_redactable_nodes();
-        let resource_checks = self.build_resource_checks(&nodes);
+        let resource_checks = self.build_resource_checks(result);
         (nodes, resource_checks)
     }
 
@@ -32,17 +32,77 @@ impl<'a> RedactionExtractor<'a> {
         map
     }
 
-    fn build_resource_checks(&self, nodes: &RedactableNodes) -> Vec<ResourceCheck> {
-        nodes
-            .group_by_type()
+    /// Returns a mapping from entity type to its id_column for authorization lookups.
+    /// Entities with id_column != "id" need special handling during authorization.
+    pub fn entity_to_id_column_map(&self) -> HashMap<&str, &str> {
+        let mut map = HashMap::new();
+        for node in self.ontology.nodes() {
+            if let Some(config) = &node.redaction {
+                map.insert(node.name.as_str(), config.id_column.as_str());
+            }
+        }
+        map
+    }
+
+    /// Build resource checks using the correct id_column from each entity's redaction config.
+    ///
+    /// For entities where id_column == "id" (like Project, User), we use the node's ID.
+    /// For entities where id_column != "id" (like Definition with project_id), we extract
+    /// the value from that column instead.
+    fn build_resource_checks(&self, result: &QueryResult) -> Vec<ResourceCheck> {
+        // Collect resource IDs grouped by (resource_type, ability)
+        let mut resource_ids: HashMap<(&str, &str), HashSet<i64>> = HashMap::new();
+
+        for row in result.iter() {
+            // Check each node alias in the result
+            for alias in result.node_aliases() {
+                let Some(node_ref) = row.node_ref(alias) else {
+                    continue;
+                };
+
+                let Some(config) = self.ontology.get_redaction_config(&node_ref.entity_type) else {
+                    continue;
+                };
+
+                let auth_id = if config.id_column == "id" {
+                    node_ref.id
+                } else {
+                    let column_name = format!("{}_{}", alias, config.id_column);
+                    row.get(&column_name)
+                        .and_then(|v| v.as_i64())
+                        .or_else(|| row.get(&config.id_column).and_then(|v| v.as_i64()))
+                        .unwrap_or(node_ref.id)
+                };
+
+                resource_ids
+                    .entry((config.resource_type.as_str(), config.ability.as_str()))
+                    .or_default()
+                    .insert(auth_id);
+            }
+
+            // Also check dynamic nodes (path finding, neighbors)
+            for node_ref in row.dynamic_nodes() {
+                let Some(config) = self.ontology.get_redaction_config(&node_ref.entity_type) else {
+                    continue;
+                };
+
+                // For dynamic nodes, we only have the node ID available
+                // If id_column != "id", we cannot extract the correct value
+                // This is a limitation - dynamic nodes with indirect authorization
+                // will use their own ID, which may fail authorization
+                resource_ids
+                    .entry((config.resource_type.as_str(), config.ability.as_str()))
+                    .or_default()
+                    .insert(node_ref.id);
+            }
+        }
+
+        resource_ids
             .into_iter()
-            .filter_map(|(entity_type, ids)| {
-                let config = self.ontology.get_redaction_config(entity_type)?;
-                Some(ResourceCheck {
-                    resource_type: config.resource_type.clone(),
-                    ids,
-                    ability: config.ability.clone(),
-                })
+            .map(|((resource_type, ability), ids)| ResourceCheck {
+                resource_type: resource_type.to_string(),
+                ids: ids.into_iter().collect(),
+                ability: ability.to_string(),
             })
             .collect()
     }

@@ -141,6 +141,12 @@ impl QueryResultRow {
         self.dynamic_nodes.first()
     }
 
+    /// Returns all dynamic nodes discovered at query time.
+    /// This includes path nodes for path finding queries and neighbor nodes for neighbors queries.
+    pub fn dynamic_nodes(&self) -> &[NodeRef] {
+        &self.dynamic_nodes
+    }
+
     pub fn is_authorized(&self) -> bool {
         self.authorized
     }
@@ -262,6 +268,21 @@ impl QueryResult {
         authorizations: &[ResourceAuthorization],
         entity_to_resource: &HashMap<&str, &str>,
     ) -> usize {
+        self.apply_authorizations_with_id_columns(
+            authorizations,
+            entity_to_resource,
+            &HashMap::new(),
+        )
+    }
+
+    /// Apply authorization results with custom id_column mappings.
+    /// For entities where id_column != "id", looks up the correct column value for authorization.
+    pub fn apply_authorizations_with_id_columns(
+        &mut self,
+        authorizations: &[ResourceAuthorization],
+        entity_to_resource: &HashMap<&str, &str>,
+        entity_to_id_column: &HashMap<&str, &str>,
+    ) -> usize {
         let mut redacted_count = 0;
         let aliases = self.node_aliases.clone();
 
@@ -279,7 +300,15 @@ impl QueryResult {
                     break;
                 };
 
-                if !is_node_authorized(&node_ref, authorizations, entity_to_resource) {
+                // Determine the auth_id based on the entity's id_column
+                let auth_id = get_auth_id_for_node(row, alias, &node_ref, entity_to_id_column);
+
+                if !is_node_authorized_with_id(
+                    auth_id,
+                    &node_ref.entity_type,
+                    authorizations,
+                    entity_to_resource,
+                ) {
                     row.set_unauthorized();
                     redacted_count += 1;
                     break;
@@ -289,7 +318,13 @@ impl QueryResult {
             // Check dynamic nodes (path finding nodes, neighbor nodes)
             if row.authorized {
                 for node_ref in &row.dynamic_nodes {
-                    if !is_node_authorized(node_ref, authorizations, entity_to_resource) {
+                    // Dynamic nodes use their own ID (no column lookup available)
+                    if !is_node_authorized_with_id(
+                        node_ref.id,
+                        &node_ref.entity_type,
+                        authorizations,
+                        entity_to_resource,
+                    ) {
                         row.set_unauthorized();
                         redacted_count += 1;
                         break;
@@ -314,12 +349,37 @@ impl QueryResult {
     }
 }
 
-fn is_node_authorized(
+/// Get the auth_id to use for authorization lookup.
+/// For entities with id_column != "id", looks up the column value (e.g., project_id).
+fn get_auth_id_for_node(
+    row: &QueryResultRow,
+    alias: &str,
     node_ref: &NodeRef,
+    entity_to_id_column: &HashMap<&str, &str>,
+) -> i64 {
+    let Some(&id_column) = entity_to_id_column.get(node_ref.entity_type.as_str()) else {
+        return node_ref.id;
+    };
+
+    if id_column == "id" {
+        return node_ref.id;
+    }
+
+    // Look up the column value: try "{alias}_{id_column}" first, then "{id_column}"
+    let column_name = format!("{}_{}", alias, id_column);
+    row.get(&column_name)
+        .and_then(|v| v.as_i64())
+        .or_else(|| row.get(id_column).and_then(|v| v.as_i64()))
+        .unwrap_or(node_ref.id)
+}
+
+fn is_node_authorized_with_id(
+    auth_id: i64,
+    entity_type: &str,
     authorizations: &[ResourceAuthorization],
     entity_to_resource: &HashMap<&str, &str>,
 ) -> bool {
-    let Some(&resource_type) = entity_to_resource.get(node_ref.entity_type.as_str()) else {
+    let Some(&resource_type) = entity_to_resource.get(entity_type) else {
         return false;
     };
 
@@ -330,7 +390,7 @@ fn is_node_authorized(
         return false;
     };
 
-    auth.authorized.get(&node_ref.id).copied().unwrap_or(false)
+    auth.authorized.get(&auth_id).copied().unwrap_or(false)
 }
 
 fn extract_value(array: &dyn Array, idx: usize) -> ColumnValue {

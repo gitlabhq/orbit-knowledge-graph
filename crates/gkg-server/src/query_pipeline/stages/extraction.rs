@@ -26,11 +26,17 @@ impl ExtractionStage {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
+        let entity_to_id_column_map: HashMap<String, String> = extractor
+            .entity_to_id_column_map()
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         let (_, resources_to_check) = extractor.extract(&query_result);
 
         let redaction_plan = RedactionPlan {
             resources_to_check,
             entity_to_resource_map,
+            entity_to_id_column_map,
         };
 
         ExtractionOutput {

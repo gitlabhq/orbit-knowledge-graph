@@ -30,6 +30,7 @@ impl AuthorizationStage {
             result_context: input.result_context,
             authorizations,
             entity_to_resource_map: input.redaction_plan.entity_to_resource_map,
+            entity_to_id_column_map: input.redaction_plan.entity_to_id_column_map,
             generated_sql: input.generated_sql,
         })
     }

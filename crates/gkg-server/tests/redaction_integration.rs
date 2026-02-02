@@ -163,6 +163,26 @@ fn run_redaction(
     result.apply_authorizations(&authorizations, &entity_map)
 }
 
+fn run_redaction_with_id_columns(
+    result: &mut QueryResult,
+    ontology: &Ontology,
+    mock_service: &MockRedactionService,
+) -> usize {
+    let extractor = RedactionExtractor::new(ontology);
+    let (_nodes, checks) = extractor.extract(result);
+    let authorizations = mock_service.check(&checks);
+    let entity_map = extractor.entity_to_resource_map();
+    let id_column_map = extractor.entity_to_id_column_map();
+    let entity_map_ref: HashMap<&str, &str> = entity_map.iter().map(|(&k, &v)| (k, v)).collect();
+    let id_column_map_ref: HashMap<&str, &str> =
+        id_column_map.iter().map(|(&k, &v)| (k, v)).collect();
+    result.apply_authorizations_with_id_columns(
+        &authorizations,
+        &entity_map_ref,
+        &id_column_map_ref,
+    )
+}
+
 #[tokio::test]
 #[serial]
 async fn fail_closed_no_authorization_returns_nothing() {
@@ -3672,4 +3692,422 @@ async fn enum_filter_normalization_int_vs_string_enums() {
         5,
         "should find all 5 users with IN filter on string enum"
     );
+}
+
+// ============================================================================
+// Five-Node Traversal Tests
+// ============================================================================
+
+const TABLE_PIPELINES: &str = "gl_pipeline";
+const TABLE_SECURITY_SCANS: &str = "gl_security_scan";
+
+async fn setup_five_node_traversal_data(ctx: &TestContext) {
+    // Users
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_USERS} (id, username, name, state, user_type) VALUES
+         (1, 'alice', 'Alice Admin', 'active', 'human'),
+         (2, 'bob', 'Bob Builder', 'active', 'human'),
+         (3, 'charlie', 'Charlie Private', 'active', 'human')"
+    ))
+    .await;
+
+    // Projects
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_PROJECTS} (id, name, visibility_level, traversal_path) VALUES
+         (1000, 'Public Project', 'public', '1/100/1000/'),
+         (1001, 'Private Project', 'private', '1/101/1001/')"
+    ))
+    .await;
+
+    // MergeRequests
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_MERGE_REQUESTS} (id, title, state, source_branch, target_branch, traversal_path) VALUES
+         (2000, 'Feature A', 'merged', 'feature-a', 'main', '1/100/1000/'),
+         (2001, 'Feature B', 'merged', 'feature-b', 'main', '1/100/1000/'),
+         (2002, 'Feature C', 'opened', 'feature-c', 'main', '1/101/1001/')"
+    ))
+    .await;
+
+    // Pipelines
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_PIPELINES} (id, iid, status, ref, traversal_path) VALUES
+         (3000, 1, 'success', 'main', '1/100/1000/'),
+         (3001, 2, 'success', 'main', '1/100/1000/'),
+         (3002, 3, 'failed', 'main', '1/101/1001/')"
+    ))
+    .await;
+
+    // SecurityScans
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_SECURITY_SCANS} (id, scan_type, status, traversal_path) VALUES
+         (4000, 'sast', 'succeeded', '1/100/1000/'),
+         (4001, 'dependency_scanning', 'succeeded', '1/100/1000/'),
+         (4002, 'secret_detection', 'succeeded', '1/100/1000/'),
+         (4003, 'sast', 'succeeded', '1/101/1001/')"
+    ))
+    .await;
+
+    // Edges: Project -> User (MEMBER_OF incoming means User -> Project)
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1, 'User', 'MEMBER_OF', 1000, 'Project'),
+         (2, 'User', 'MEMBER_OF', 1000, 'Project'),
+         (3, 'User', 'MEMBER_OF', 1001, 'Project')"
+    ))
+    .await;
+
+    // Edges: User -> MergeRequest (AUTHORED)
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1, 'User', 'AUTHORED', 2000, 'MergeRequest'),
+         (1, 'User', 'AUTHORED', 2001, 'MergeRequest'),
+         (2, 'User', 'AUTHORED', 2002, 'MergeRequest')"
+    ))
+    .await;
+
+    // Edges: MergeRequest -> Pipeline (TRIGGERED)
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (2000, 'MergeRequest', 'TRIGGERED', 3000, 'Pipeline'),
+         (2001, 'MergeRequest', 'TRIGGERED', 3001, 'Pipeline'),
+         (2002, 'MergeRequest', 'TRIGGERED', 3002, 'Pipeline')"
+    ))
+    .await;
+
+    // Edges: SecurityScan -> Pipeline (IN_PIPELINE)
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (4000, 'SecurityScan', 'IN_PIPELINE', 3000, 'Pipeline'),
+         (4001, 'SecurityScan', 'IN_PIPELINE', 3000, 'Pipeline'),
+         (4002, 'SecurityScan', 'IN_PIPELINE', 3001, 'Pipeline'),
+         (4003, 'SecurityScan', 'IN_PIPELINE', 3002, 'Pipeline')"
+    ))
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn five_node_traversal_all_authorized() {
+    let ctx = TestContext::new().await;
+    setup_five_node_traversal_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "p", "entity": "Project", "columns": ["id", "name"]},
+            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"],
+             "filters": {"state": {"op": "eq", "value": "merged"}}},
+            {"id": "pl", "entity": "Pipeline", "columns": ["id", "status"],
+             "filters": {"status": {"op": "eq", "value": "success"}}},
+            {"id": "ss", "entity": "SecurityScan", "columns": ["id", "scan_type"]}
+        ],
+        "relationships": [
+            {"type": "MEMBER_OF", "from": "p", "to": "u", "direction": "incoming"},
+            {"type": "AUTHORED", "from": "u", "to": "mr"},
+            {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+            {"type": "IN_PIPELINE", "from": "pl", "to": "ss", "direction": "incoming"}
+        ],
+        "limit": 20
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(
+        raw_count > 0,
+        "should have traversal results before redaction"
+    );
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000, 1001]);
+    mock_service.allow("users", &[1, 2, 3]);
+    mock_service.allow("merge_requests", &[2000, 2001, 2002]);
+    mock_service.allow("ci_pipelines", &[3000, 3001, 3002]);
+    mock_service.allow("security_scans", &[4000, 4001, 4002, 4003]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        redacted, 0,
+        "nothing should be redacted when all authorized"
+    );
+    assert_eq!(result.authorized_count(), raw_count);
+}
+
+#[tokio::test]
+#[serial]
+async fn five_node_traversal_denying_pipeline_filters_downstream() {
+    let ctx = TestContext::new().await;
+    setup_five_node_traversal_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "p", "entity": "Project", "columns": ["id", "name"]},
+            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"],
+             "filters": {"state": {"op": "eq", "value": "merged"}}},
+            {"id": "pl", "entity": "Pipeline", "columns": ["id", "status"],
+             "filters": {"status": {"op": "eq", "value": "success"}}},
+            {"id": "ss", "entity": "SecurityScan", "columns": ["id", "scan_type"]}
+        ],
+        "relationships": [
+            {"type": "MEMBER_OF", "from": "p", "to": "u", "direction": "incoming"},
+            {"type": "AUTHORED", "from": "u", "to": "mr"},
+            {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+            {"type": "IN_PIPELINE", "from": "pl", "to": "ss", "direction": "incoming"}
+        ],
+        "limit": 20
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000, 1001]);
+    mock_service.allow("users", &[1, 2, 3]);
+    mock_service.allow("merge_requests", &[2000, 2001, 2002]);
+    mock_service.allow("ci_pipelines", &[3000]); // Only allow pipeline 3000
+    mock_service.deny("ci_pipelines", &[3001, 3002]);
+    mock_service.allow("security_scans", &[4000, 4001, 4002, 4003]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Only paths through pipeline 3000 should remain (scans 4000, 4001)
+    for row in result.authorized_rows() {
+        let pipeline_id = row.get_id("pl").unwrap();
+        assert_eq!(pipeline_id, 3000, "only pipeline 3000 should be authorized");
+    }
+
+    assert!(
+        result.authorized_count() < raw_count,
+        "some rows should be redacted"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn five_node_traversal_denying_security_scan_filters_row() {
+    let ctx = TestContext::new().await;
+    setup_five_node_traversal_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "p", "entity": "Project", "columns": ["id", "name"]},
+            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"],
+             "filters": {"state": {"op": "eq", "value": "merged"}}},
+            {"id": "pl", "entity": "Pipeline", "columns": ["id", "status"],
+             "filters": {"status": {"op": "eq", "value": "success"}}},
+            {"id": "ss", "entity": "SecurityScan", "columns": ["id", "scan_type"]}
+        ],
+        "relationships": [
+            {"type": "MEMBER_OF", "from": "p", "to": "u", "direction": "incoming"},
+            {"type": "AUTHORED", "from": "u", "to": "mr"},
+            {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+            {"type": "IN_PIPELINE", "from": "pl", "to": "ss", "direction": "incoming"}
+        ],
+        "limit": 20
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000, 1001]);
+    mock_service.allow("users", &[1, 2, 3]);
+    mock_service.allow("merge_requests", &[2000, 2001, 2002]);
+    mock_service.allow("ci_pipelines", &[3000, 3001, 3002]);
+    mock_service.allow("security_scans", &[4000]); // Only allow scan 4000
+    mock_service.deny("security_scans", &[4001, 4002, 4003]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    // Only security scan 4000 should remain
+    let authorized_scans: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("ss"))
+        .collect();
+
+    assert_eq!(
+        authorized_scans,
+        HashSet::from([4000]),
+        "only security scan 4000 should be authorized"
+    );
+}
+
+// ============================================================================
+// Definition Entity with project_id Authorization Tests
+// ============================================================================
+
+const TABLE_DEFINITIONS: &str = "gl_definition";
+
+async fn setup_definition_test_data(ctx: &TestContext) {
+    // Projects
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_PROJECTS} (id, name, visibility_level, traversal_path) VALUES
+         (1000, 'Public Project', 'public', '1/100/1000/'),
+         (1001, 'Private Project', 'private', '1/101/1001/'),
+         (1002, 'Internal Project', 'internal', '1/102/1002/')"
+    ))
+    .await;
+
+    // Definitions - note that Definition.id is a hash-based ID, but authorization uses project_id
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_DEFINITIONS}
+         (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+         (100001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'MyModule::Config', 'Config', 'Struct', 1, 10, 0, 100),
+         (100002, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'MyModule::run', 'run', 'Function', 12, 20, 110, 200),
+         (100003, '1/101/1001/', 1001, 'main', 'src/handler.rs', 'Handler', 'Handler', 'Class', 1, 50, 0, 500),
+         (100004, '1/102/1002/', 1002, 'main', 'src/auth.rs', 'authenticate', 'authenticate', 'Function', 1, 30, 0, 300)"
+    ))
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn definition_uses_project_id_for_authorization() {
+    let ctx = TestContext::new().await;
+    setup_definition_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "d", "entity": "Definition", "columns": ["id", "name", "definition_type", "project_id"]},
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(
+        result.len(),
+        4,
+        "should have 4 definitions before redaction"
+    );
+
+    // Allow only project 1000 - this should authorize definitions 100001 and 100002
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1001, 1002]);
+
+    let redacted = run_redaction_with_id_columns(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        redacted, 2,
+        "2 definitions from denied projects should be redacted"
+    );
+    assert_eq!(result.authorized_count(), 2);
+
+    // Verify the authorized definitions are from project 1000
+    let authorized_project_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get("d_project_id").and_then(|v| v.as_i64()))
+        .collect();
+
+    assert_eq!(
+        authorized_project_ids,
+        HashSet::from([1000]),
+        "only definitions from project 1000 should be authorized"
+    );
+
+    // Verify the Definition IDs don't match project IDs (they're hash-based)
+    let authorized_def_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("d"))
+        .collect();
+
+    assert_eq!(
+        authorized_def_ids,
+        HashSet::from([100001, 100002]),
+        "definitions 100001 and 100002 should be authorized"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn definition_authorization_all_projects_allowed() {
+    let ctx = TestContext::new().await;
+    setup_definition_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "d", "entity": "Definition", "columns": ["id", "name", "project_id"]},
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert_eq!(raw_count, 4);
+
+    // Allow all projects
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000, 1001, 1002]);
+
+    let redacted = run_redaction_with_id_columns(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        redacted, 0,
+        "nothing should be redacted when all projects allowed"
+    );
+    assert_eq!(result.authorized_count(), raw_count);
+}
+
+#[tokio::test]
+#[serial]
+async fn definition_authorization_no_projects_allowed() {
+    let ctx = TestContext::new().await;
+    setup_definition_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "d", "entity": "Definition", "columns": ["id", "name", "project_id"]},
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 4);
+
+    // Deny all projects (fail-closed behavior)
+    let mock_service = MockRedactionService::new();
+
+    let redacted = run_redaction_with_id_columns(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        redacted, 4,
+        "all definitions should be redacted when no projects allowed"
+    );
+    assert_eq!(result.authorized_count(), 0);
 }
