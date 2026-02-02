@@ -1532,7 +1532,7 @@ mod tests {
         let q = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
         );
-        let Node::Query(q) = lower(&q, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
         assert_eq!(
@@ -1544,7 +1544,7 @@ mod tests {
         let q = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":["AUTHORED","CONTAINS"],"from":"u","to":"n"}]}"#,
         );
-        let Node::Query(q) = lower(&q, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
         assert_eq!(
@@ -1556,7 +1556,7 @@ mod tests {
         let q = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"*","from":"u","to":"n"}]}"#,
         );
-        let Node::Query(q) = lower(&q, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
         assert_eq!(extract_edge_type_filter(&q.from), None);
