@@ -1,4 +1,5 @@
 mod registry;
+mod schema;
 mod service;
 
 pub use registry::{ToolDefinition, ToolRegistry};
