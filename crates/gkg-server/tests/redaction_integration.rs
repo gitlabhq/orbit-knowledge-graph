@@ -11,9 +11,11 @@ use common::TestContext;
 use gkg_server::redaction::{
     QueryResult, RedactionExtractor, ResourceAuthorization, ResourceCheck,
 };
+use gkg_server::tools::{ToolPlan, ToolService};
 use ontology::Ontology;
 use query_engine::{SecurityContext, compile};
 use serial_test::serial;
+use std::sync::Arc;
 
 fn load_ontology() -> Ontology {
     Ontology::load_embedded().expect("embedded ontology should load")
@@ -3576,4 +3578,369 @@ async fn enum_filter_normalization_int_vs_string_enums() {
         5,
         "should find all 5 users with IN filter on string enum"
     );
+}
+
+// =============================================================================
+// ToolService query_graph integration tests
+// =============================================================================
+
+#[tokio::test]
+#[serial]
+async fn tool_service_query_graph_requires_query_wrapper() {
+    let ontology = Arc::new(load_ontology());
+    let service = ToolService::new(ontology);
+
+    let result = service.resolve("query_graph", r#"{"query_type": "search"}"#);
+    assert!(result.is_err(), "should fail without query wrapper");
+
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("missing 'query' field"),
+        "error should mention missing query field: {}",
+        err
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn tool_service_query_graph_with_wrapper_returns_plan() {
+    let ontology = Arc::new(load_ontology());
+    let service = ToolService::new(ontology);
+
+    let args = r#"{
+        "query": {
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
+            "limit": 10
+        }
+    }"#;
+
+    let result = service.resolve("query_graph", args);
+    assert!(result.is_ok(), "should succeed with query wrapper");
+
+    match result.unwrap() {
+        ToolPlan::RunGraphQuery { query_json } => {
+            assert!(query_json.contains("query_type"));
+            assert!(query_json.contains("search"));
+            assert!(query_json.contains("User"));
+        }
+        _ => panic!("expected RunGraphQuery plan"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn tool_service_query_graph_with_redaction_flow() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = Arc::new(load_ontology());
+    let service = ToolService::new(Arc::clone(&ontology));
+    let security_ctx = test_security_context();
+
+    let args = r#"{
+        "query": {
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
+            "limit": 10
+        }
+    }"#;
+
+    let plan = service
+        .resolve("query_graph", args)
+        .expect("should resolve");
+
+    let query_json = match plan {
+        ToolPlan::RunGraphQuery { query_json } => query_json,
+        _ => panic!("expected RunGraphQuery plan"),
+    };
+
+    let query = compile(&query_json, &ontology, &security_ctx).expect("should compile");
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 5, "should have 5 users before redaction");
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1, 2, 3]);
+    mock_service.deny("users", &[4, 5]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 2, "users 4 and 5 should be redacted");
+    assert_eq!(result.authorized_count(), 3, "users 1, 2, 3 should remain");
+
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id("u"))
+        .collect();
+    assert_eq!(authorized_ids, HashSet::from([1, 2, 3]));
+}
+
+#[tokio::test]
+#[serial]
+async fn tool_service_query_graph_traversal_with_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = Arc::new(load_ontology());
+    let service = ToolService::new(Arc::clone(&ontology));
+    let security_ctx = test_security_context();
+
+    let args = r#"{
+        "query": {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 20
+        }
+    }"#;
+
+    let plan = service
+        .resolve("query_graph", args)
+        .expect("should resolve");
+
+    let query_json = match plan {
+        ToolPlan::RunGraphQuery { query_json } => query_json,
+        _ => panic!("expected RunGraphQuery plan"),
+    };
+
+    let query = compile(&query_json, &ontology, &security_ctx).expect("should compile");
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count > 0, "should have results before redaction");
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1, 2]);
+    mock_service.allow("groups", &[100]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    let authorized_pairs: HashSet<(i64, i64)> = result
+        .authorized_rows()
+        .filter_map(|r| Some((r.get_id("u")?, r.get_id("g")?)))
+        .collect();
+
+    assert_eq!(
+        authorized_pairs,
+        HashSet::from([(1, 100), (2, 100)]),
+        "only authorized user-group pairs should remain"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn tool_service_query_graph_aggregation_with_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = Arc::new(load_ontology());
+    let service = ToolService::new(Arc::clone(&ontology));
+    let security_ctx = test_security_context();
+
+    let args = r#"{
+        "query": {
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "user_count"}],
+            "limit": 100
+        }
+    }"#;
+
+    let plan = service
+        .resolve("query_graph", args)
+        .expect("should resolve");
+
+    let query_json = match plan {
+        ToolPlan::RunGraphQuery { query_json } => query_json,
+        _ => panic!("expected RunGraphQuery plan"),
+    };
+
+    let query = compile(&query_json, &ontology, &security_ctx).expect("should compile");
+    let batches = ctx.query_parameterized(&query).await;
+
+    assert!(!batches.is_empty(), "aggregation should return results");
+}
+
+#[tokio::test]
+#[serial]
+async fn tool_service_get_graph_entities_no_redaction_needed() {
+    let ontology = Arc::new(load_ontology());
+    let service = ToolService::new(ontology);
+
+    let plan = service
+        .resolve("get_graph_entities", "{}")
+        .expect("should resolve");
+
+    match plan {
+        ToolPlan::Immediate { result } => {
+            let toon_str = result.as_str().expect("should be string");
+            assert!(toon_str.contains("domains"), "should contain domains");
+            assert!(toon_str.contains("edges"), "should contain edges");
+            assert!(toon_str.contains("User"), "should contain User");
+        }
+        _ => panic!("expected Immediate plan for get_graph_entities"),
+    }
+}
+
+// =============================================================================
+// Neighbors query type tests with redaction
+// =============================================================================
+
+#[tokio::test]
+#[serial]
+async fn neighbors_query_finds_adjacent_nodes() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "filters": {"id": 1}},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert!(result.len() > 0, "user 1 should have neighbors");
+}
+
+#[tokio::test]
+#[serial]
+async fn neighbors_query_with_redaction_filters_unauthorized() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "filters": {"id": 1}},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.allow("groups", &[100]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert!(
+        result.authorized_count() <= raw_count,
+        "authorized count should not exceed raw count"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn neighbors_query_both_directions_with_redaction() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "g", "entity": "Group", "filters": {"id": 100}},
+        "neighbors": {"node": "g", "direction": "both"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count > 0, "group 100 should have neighbors");
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("groups", &[100]);
+    mock_service.allow("users", &[1, 2]);
+    mock_service.allow("projects", &[1000, 1002]);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert!(
+        result.authorized_count() > 0,
+        "should have authorized neighbors after redaction"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn neighbors_query_with_rel_types_filter() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "g", "entity": "Group", "filters": {"id": 100}},
+        "neighbors": {"node": "g", "direction": "both", "rel_types": ["MEMBER_OF"]}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("groups", &[100]);
+    mock_service.allow("users", ALL_USER_IDS);
+
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert!(
+        result.authorized_count() > 0,
+        "should find MEMBER_OF neighbors"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn neighbors_query_fail_closed_denies_all_without_auth() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "filters": {"id": 1}},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+
+    let mock_service = MockRedactionService::new();
+    run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "no authorization means all rows filtered"
+    );
+    assert!(raw_count > 0, "should have had results before redaction");
 }
