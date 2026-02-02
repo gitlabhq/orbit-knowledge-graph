@@ -326,34 +326,35 @@ The ontology fills in the schema gaps. EntityType is a placeholder - at runtime 
 
 ---
 
-# Step 2-3: Parse + Semantic Validation
+# Step 3: Semantic Validation
 
-```rust {3-5}
-pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
-    let value = validate_json(json_input)?;
-    validate_ontology(&value, ontology)?;
-    let input: Input = serde_json::from_value(value)?;
-    validate::validate(&input, ontology)?;
-    let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input)?;
-    let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx)?;
-    codegen(&node, result_context)
+```rust {5}
+fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
+    let value = validate_json(json)?;            // JSON structure ok?
+    validate_ontology(&value, ontology)?;        // entities exist?
+    let input = parse(value)?;                   // JSON → typed struct
+    validate(&input, ontology)?;                 // references valid?
+    let input = normalize(input, ontology);      // canonicalize
+    let mut ast = lower(&input)?;                // build SQL AST
+    let ctx = enforce_return(&mut ast, &input)?; // for redaction
+    apply_security(&mut ast, ctx)?;              // tenant isolation
+    codegen(&ast, ctx)                           // AST → SQL
 }
 ```
 
-<v-click>
+<v-clicks>
 
-**validate::validate checks:**
-- Node references exist
-- Relationship endpoints match declared nodes
-- Filter columns exist on entities
-- Aggregation targets are valid
+- Nodes exist and have entity types
+- Relationship endpoints point to declared nodes
+- Column names match the entity's schema
+- Aggregation targets are real nodes
+- Order by references valid node + property
+- <span class="text-red-500">Goal: fold this into jsonschema so we have one validation pass</span>
 
-</v-click>
+</v-clicks>
 
 <!--
-After parsing into a typed Input struct, we run semantic validation. Schema validation only checks shape - this checks that node references actually point to declared nodes, that filter columns exist on those entities, and so on.
+Semantic validation catches things the schema can't. Does node "u" actually exist when you reference it in a relationship? Does the "foobar" column exist on the User entity? This is where we catch typos and logic errors.
 -->
 
 ---
