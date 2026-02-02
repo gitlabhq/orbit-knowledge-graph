@@ -18,7 +18,7 @@ JSON → SQL compilation pipeline
 </div>
 
 <!--
-We're going to walk through how the query engine turns JSON graph queries into ClickHouse SQL. It's a straightforward pipeline with seven steps.
+We're going to walk through how the query engine turns JSON graph queries into ClickHouse SQL. It's a straightforward pipeline with eight phases.
 -->
 
 ---
@@ -166,7 +166,7 @@ Here's the compiler. Nine lines, each doing one thing. We'll walk through what e
 
 ---
 
-# Step 1: Schema Validation
+# Phase 1: Schema Validation
 
 <div class="grid grid-cols-[1fr_auto_auto_auto_1fr] gap-4 items-center h-[85%]">
 
@@ -202,7 +202,7 @@ Here's the compiler. Nine lines, each doing one thing. We'll walk through what e
   </div>
 </div>
 
-<div v-click="1" class="text-3xl">→</div>
+<div v-click="1" class="text-3xl">+</div>
 
 <div v-click="1" class="flex flex-col">
   <div class="text-xs font-bold mb-1 text-center">JSON DSL Query</div>
@@ -246,7 +246,7 @@ The schema does structural validation. It checks required fields, types, enums, 
 
 ---
 
-# Step 2: Ontology Validation + Parse
+# Phase 2: Ontology Validation + Parse
 
 ```rust {3-4}
 fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
@@ -268,7 +268,7 @@ Now we validate that the entities and relationships in the query actually exist 
 
 ---
 
-# Step 2: Ontology Validation + Parse
+# Phase 2: Ontology Validation + Parse (Cont.)
 
 <div class="flex items-center justify-center gap-3 h-[75%]">
 
@@ -338,7 +338,7 @@ The ontology fills in the schema gaps. EntityType is a placeholder - at runtime 
 
 ---
 
-# Step 3: Semantic Validation
+# Phase 3: Semantic Validation
 
 ```rust {5}
 fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
@@ -371,7 +371,7 @@ Semantic validation catches things the schema can't. Does node "u" actually exis
 
 ---
 
-# Step 4: Normalize
+# Phase 4: Normalize
 
 ```rust {6}
 pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
@@ -402,7 +402,7 @@ Normalization puts the input in canonical form. Entity names become table names.
 
 ---
 
-# Step 5: Lower
+# Phase 5: Lower
 
 ```rust {7}
 fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
@@ -424,7 +424,7 @@ Lowering builds a SQL AST from the validated input. This is where the magic happ
 
 ---
 
-# Step 5: Lower
+# Phase 5: Lower (Cont.)
 
 <div class="flex items-center justify-center gap-4 h-[80%]">
 
@@ -539,7 +539,7 @@ This pattern is everywhere. Prisma builds an AST from its query objects. Drizzle
 
 ---
 
-# Lower: Query Types
+# Phase 5: Lower (Cont.) - Query Types
 
 ```rust
 pub fn lower(input: &Input) -> Result<Node> {
@@ -568,7 +568,7 @@ Different query types get different SQL patterns. Traversals become join chains.
 
 ---
 
-# Step 6: Enforce Return
+# Phase 6: Enforce Return Context for Redaction
 
 ```rust {8}
 fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
@@ -599,7 +599,7 @@ We walk the AST and inject hidden columns. The server reads these after the quer
 
 ---
 
-# Step 7: Security Context
+# Phase 7: Security Context Injection
 
 ```rust {9}
 fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
@@ -629,7 +629,7 @@ Same pattern as enforce_return. Walk the AST, find table scans, inject WHERE cla
 
 ---
 
-# Step 8: Codegen
+# Phase 8: Codegen
 
 ```rust {10}
 fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
@@ -651,7 +651,7 @@ Final step: walk the AST and emit SQL strings.
 
 ---
 
-# Step 8: Codegen
+# Phase 8: Codegen (Cont.)
 
 <div class="flex items-center justify-center gap-3 h-[85%]">
 
