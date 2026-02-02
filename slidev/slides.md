@@ -393,27 +393,140 @@ Normalization puts the input in canonical form. Entity names become table names.
 # Step 5: Lower
 
 ```rust {7}
-pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
-    let value = validate_json(json_input)?;
-    validate_ontology(&value, ontology)?;
-    let input: Input = serde_json::from_value(value)?;
-    validate::validate(&input, ontology)?;
-    let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input)?;
-    let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx)?;
-    codegen(&node, result_context)
+fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
+    let value = validate_json(json)?;            // JSON structure ok?
+    validate_ontology(&value, ontology)?;        // entities exist?
+    let input = parse(value)?;                   // JSON → typed struct
+    validate(&input, ontology)?;                 // references valid?
+    let input = normalize(input, ontology);      // canonicalize
+    let mut ast = lower(&input)?;                // build SQL AST
+    let ctx = enforce_return(&mut ast, &input)?; // for redaction
+    apply_security(&mut ast, ctx)?;              // tenant isolation
+    codegen(&ast, ctx)                           // AST → SQL
 }
 ```
 
-<v-click>
+<!--
+Lowering builds a SQL AST from the validated input. This is where the magic happens.
+-->
 
-Input → AST (Query node with SELECT, FROM, WHERE, etc.)
+---
 
-</v-click>
+# Step 5: Lower
+
+<div class="flex items-center justify-center gap-4 h-[80%]">
+
+<div class="border rounded px-4 py-2 bg-blue-50 dark:bg-blue-900">
+  Validated Input
+</div>
+
+<div class="text-2xl">→</div>
+
+<div class="border rounded px-4 py-2 bg-green-50 dark:bg-green-900">
+  AST
+</div>
+
+<div class="text-2xl">→</div>
+
+<div v-click="1" class="text-[0.4rem] leading-tight">
+
+```rust
+Query {
+  select: vec![
+    SelectExpr::new(Expr::col("p", "path_ids"), "path_ids"),
+    SelectExpr::new(
+      Expr::func("arrayConcat", vec![
+        Expr::col("p", "path"),
+        Expr::func("array", vec![next_tuple])
+      ]), "path"),
+  ],
+  from: TableRef::join(
+    JoinType::Inner,
+    TableRef::scan("paths", "p"),
+    TableRef::scan("gl_edges", "e"),
+    Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id"))
+  ),
+  where_clause: Expr::and(
+    Expr::lt(Expr::col("p", "depth"), Expr::param("max_depth")),
+    Expr::not(Expr::func("has", vec![...]))
+  ),
+  ..Default::default()
+}
+```
+
+</div>
+
+<div v-click="2" class="text-3xl text-red-500 font-bold ml-2">
+  Scary!
+</div>
+
+</div>
 
 <!--
-Lowering is the big transformation. It takes the validated, normalized input and builds a SQL-oriented AST. The result is a Query node with select clauses, joins, where conditions, and so on.
+The AST is verbose. That's the point - it captures everything needed to generate correct SQL. We'll see in a minute how codegen turns this into readable SQL.
+-->
+
+---
+
+# It's just a query builder
+
+<div class="grid grid-cols-3 gap-4 h-[80%] items-center">
+
+<div class="text-center">
+<div class="text-sm font-bold mb-2">Prisma</div>
+<div class="text-[0.5rem] leading-tight">
+
+```typescript
+prisma.user.findMany({
+  where: {
+    email: { contains: "@gitlab" }
+  },
+  include: {
+    posts: true
+  }
+})
+```
+
+</div>
+</div>
+
+<div class="text-center">
+<div class="text-sm font-bold mb-2">Drizzle</div>
+<div class="text-[0.5rem] leading-tight">
+
+```typescript
+db.select()
+  .from(users)
+  .leftJoin(posts, eq(users.id, posts.authorId))
+  .where(like(users.email, '%@gitlab%'))
+```
+
+</div>
+</div>
+
+<div class="text-center">
+<div class="text-sm font-bold mb-2">Us</div>
+<div class="text-[0.5rem] leading-tight">
+
+```rust
+Query {
+  select: vec![...],
+  from: TableRef::join(...),
+  where_clause: Expr::and(...),
+}
+```
+
+</div>
+</div>
+
+</div>
+
+<div class="text-center text-gray-500 mt-4">
+  Same idea: build a tree, emit SQL
+</div>
+
+<!--
+This pattern is everywhere. Prisma builds an AST from its query objects. Drizzle chains methods to build a tree. We do the same thing - just in Rust with explicit struct construction.
 -->
 
 ---
