@@ -39,26 +39,18 @@ layoutClass: gap-8
 
 ::right::
 
+<div class="[&_pre]:!whitespace-pre-wrap [&_code]:!whitespace-pre-wrap mt-12">
+
 ```json
 {
   "query_type": "traversal",
   "nodes": [
-    {
-      "id": "u",
-      "entity": "User",
-      "columns": ["username", "name"],
-      "node_ids": [1]
-    },
-    {
-      "id": "mr",
-      "entity": "MergeRequest",
-      "columns": ["iid", "title", "state", "source_branch"]
-    },
-    {
-      "id": "p",
-      "entity": "Project",
-      "columns": ["name", "full_path"]
-    }
+    { "id": "u", "entity": "User",
+      "columns": ["username", "name"], "node_ids": [1] },
+    { "id": "mr", "entity": "MergeRequest",
+      "columns": ["iid", "title", "state", "source_branch"] },
+    { "id": "p", "entity": "Project",
+      "columns": ["name", "full_path"] }
   ],
   "relationships": [
     { "type": "AUTHORED", "from": "u", "to": "mr" },
@@ -68,13 +60,15 @@ layoutClass: gap-8
 }
 ```
 
+</div>
+
 <!--
 Why not just write SQL? Four reasons. First, agents can generate this reliably - structured output is easier than freeform SQL. Second, there's no string interpolation so injection is impossible. Third, we can change the SQL backend without breaking API clients. Fourth, the schema comes from the ontology so it stays in sync automatically.
 -->
 
 ---
 
-# How
+# How do we implement this?
 
 <div class="grid grid-cols-[1fr_auto_1fr] gap-4 items-center h-[80%]">
 
@@ -153,7 +147,7 @@ transition: fade-out
 
 # The Compiler
 
-```rust {all|2|3|4|5|6|7|8|9|10}
+```rust {all|2}
 fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
     let value = validate_json(json)?;            // JSON structure ok?
     validate_ontology(&value, ontology)?;        // entities exist?
