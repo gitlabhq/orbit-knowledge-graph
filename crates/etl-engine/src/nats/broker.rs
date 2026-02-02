@@ -171,17 +171,23 @@ impl NatsBroker {
     ) -> Result<PullConsumer, NatsError> {
         let max_deliver = self.config.max_deliver.map(|n| n as i64).unwrap_or(-1);
 
+        let durable_name = self
+            .config
+            .consumer_name
+            .as_ref()
+            .map(|base| format!("{}-{}", base, subject.replace('.', "_")));
+
         let consumer_config = ConsumerConfig {
             filter_subject: subject.to_string(),
             ack_wait: self.config.ack_wait(),
             max_deliver,
-            durable_name: self.config.consumer_name.clone(),
+            durable_name: durable_name.clone(),
             ..Default::default()
         };
 
-        match &self.config.consumer_name {
+        match durable_name {
             Some(name) => stream
-                .get_or_create_consumer(name, consumer_config)
+                .get_or_create_consumer(&name, consumer_config)
                 .await
                 .map_err(map_subscribe_error),
             None => stream
