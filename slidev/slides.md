@@ -151,82 +151,95 @@ This is the transformation we're building. JSON query on the left, SQL on the ri
 transition: fade-out
 ---
 
-# The Pipeline
-
-```text
-JSON → Schema Validate → Parse → Validate → Lower → Codegen → SQL
-```
-
-<v-clicks>
-
-- **Schema Validate** - JSON structure is valid
-- **Parse** - Deserialize into typed Input struct
-- **Validate** - Semantic checks against ontology
-- **Normalize** - Canonicalize before lowering
-- **Lower** - Input → AST
-- **Enforce Return** - Add mandatory columns
-- **Security** - Inject tenant isolation
-- **Codegen** - AST → SQL
-
-</v-clicks>
-
-<!--
-Here's the bird's-eye view. JSON comes in, SQL comes out. Each step does one thing and hands off to the next.
--->
-
----
-
-# The compile() Function
-
-The entry point that orchestrates the pipeline:
+# The Compiler
 
 ```rust {all|2|3|4|5|6|7|8|9|10}
-pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
-    let value = validate_json(json_input)?;
-    validate_ontology(&value, ontology)?;
-    let input: Input = serde_json::from_value(value)?;
-    validate::validate(&input, ontology)?;
-    let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input)?;
-    let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx)?;
-    codegen(&node, result_context)
+fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
+    let value = validate_json(json)?;            // JSON structure ok?
+    validate_ontology(&value, ontology)?;        // entities exist?
+    let input = parse(value)?;                   // JSON → typed struct
+    validate(&input, ontology)?;                 // references valid?
+    let input = normalize(input, ontology);      // canonicalize
+    let mut ast = lower(&input)?;                // build SQL AST
+    let ctx = enforce_return(&mut ast, &input)?; // for redaction
+    apply_security(&mut ast, ctx)?;              // tenant isolation
+    codegen(&ast, ctx)                           // AST → SQL
 }
 ```
 
 <!--
-This is the whole compiler in 10 lines. Each line is a pipeline stage. Let's walk through them.
+Here's the compiler. Nine lines, each doing one thing. We'll walk through what each step does.
 -->
 
 ---
 
 # Step 1: Schema Validation
 
-```rust {2}
-pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
-    let value = validate_json(json_input)?;
-    validate_ontology(&value, ontology)?;
-    let input: Input = serde_json::from_value(value)?;
-    validate::validate(&input, ontology)?;
-    let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input)?;
-    let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx)?;
-    codegen(&node, result_context)
+<div class="grid grid-cols-[1fr_auto_auto_auto_1fr] gap-4 items-center h-[85%]">
+
+<div class="text-[0.5rem] leading-tight">
+
+```json
+{
+  "required": ["query_type"],
+  "properties": {
+    "query_type": {
+      "enum": ["traversal", "search",
+               "aggregation", "path_finding"]
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NodeSelector" }
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    }
+  },
+  "allOf": [{
+    "if": { "query_type": "traversal" },
+    "then": { "nodes": { "minItems": 2 } }
+  }]
 }
 ```
 
-<v-click>
+</div>
 
-**Two-phase validation:**
+<div v-click="1" class="text-3xl">→</div>
 
-1. Base schema - query structure
-2. Ontology schema - valid entity types and relationships
+<div v-click="1" class="text-[0.5rem] leading-tight">
 
-</v-click>
+```json
+{
+  "query_type": "traversal",
+  "nodes": [
+    { "id": "u", "entity": "User" },
+    { "id": "mr", "entity": "MR" }
+  ],
+  "limit": 50
+}
+```
+
+</div>
+
+<div class="flex flex-col gap-6 text-sm">
+  <div v-click="2" class="flex items-center gap-2">
+    <span class="text-3xl text-red-500">↗</span>
+    <span class="text-red-500 font-mono text-xs">
+      "traversal" requires "nodes"<br/>with minItems: 2
+    </span>
+  </div>
+  <div v-click="3" class="flex items-center gap-2">
+    <span class="text-3xl text-green-500">↘</span>
+    <span class="text-green-500 font-bold">Accept</span>
+  </div>
+</div>
+
+</div>
 
 <!--
-First we validate the JSON structure. There are two schemas: a base schema that checks the query structure, and a derived schema that validates entity types against what's in the ontology.
+The schema does structural validation. It checks required fields, types, enums, and conditional rules. If you say query_type is traversal, you need at least two nodes. Errors are specific - the message tells you exactly what's wrong.
 -->
 
 ---
