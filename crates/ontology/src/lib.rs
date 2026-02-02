@@ -208,6 +208,78 @@ impl Ontology {
             .unwrap_or_else(|e| panic!("{e}"))
     }
 
+    /// Add a plugin node to the ontology.
+    ///
+    /// This creates a node entity suitable for plugin-defined nodes.
+    /// The destination table follows the plugin naming convention: `gl_plugin_{plugin_id}_{node_kind}`.
+    pub fn add_plugin_node(
+        &mut self,
+        plugin_id: &str,
+        name: impl Into<String>,
+        fields: Vec<(String, DataType, bool)>,
+    ) {
+        let name = name.into();
+        let normalized_kind = name.to_lowercase().replace('-', "_");
+        let normalized_plugin_id = plugin_id.replace('-', "_");
+        let destination_table = format!("gl_plugin_{}_{}", normalized_plugin_id, normalized_kind);
+
+        let fields: Vec<Field> = fields
+            .into_iter()
+            .map(|(field_name, data_type, nullable)| Field {
+                name: field_name.clone(),
+                source: field_name,
+                data_type,
+                nullable,
+                enum_values: None,
+                enum_type: EnumType::default(),
+            })
+            .collect();
+
+        self.nodes.insert(
+            name.clone(),
+            NodeEntity {
+                name,
+                domain: "plugins".to_string(),
+                description: String::new(),
+                label: String::new(),
+                fields,
+                primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
+                destination_table,
+                etl: None,
+                redaction: None,
+                style: NodeStyle::default(),
+            },
+        );
+    }
+
+    /// Add a plugin edge to the ontology.
+    ///
+    /// This creates edge variants for all combinations of from/to kinds.
+    pub fn add_plugin_edge(
+        &mut self,
+        relationship_kind: impl Into<String>,
+        from_kinds: Vec<String>,
+        to_kinds: Vec<String>,
+    ) {
+        let relationship_kind = relationship_kind.into();
+
+        let variants: Vec<EdgeEntity> = from_kinds
+            .iter()
+            .flat_map(|source| {
+                let rel_kind = relationship_kind.clone();
+                to_kinds.iter().map(move |target| EdgeEntity {
+                    relationship_kind: rel_kind.clone(),
+                    source: "id".to_string(),
+                    source_kind: source.clone(),
+                    target: "id".to_string(),
+                    target_kind: target.clone(),
+                })
+            })
+            .collect();
+
+        self.edges.insert(relationship_kind, variants);
+    }
+
     /// Load ontology from a directory containing schema.yaml and referenced files.
     ///
     /// # Errors

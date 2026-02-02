@@ -214,17 +214,25 @@ impl MailboxHandler {
                 &edge.external_id,
             );
 
-            let source_id = generate_node_id(
-                &plugin.plugin_id,
-                plugin.namespace_id,
-                &edge.source.node_kind,
-                &edge.source.external_id,
-            );
+            let plugin_prefix = format!("{}_", plugin.plugin_id.replace('-', "_"));
 
-            let target_id = if edge
-                .target
-                .node_kind
-                .starts_with(&format!("{}_", plugin.plugin_id.replace('-', "_")))
+            let source_id = if edge.source.node_kind.starts_with(&plugin_prefix) {
+                generate_node_id(
+                    &plugin.plugin_id,
+                    plugin.namespace_id,
+                    &edge.source.node_kind,
+                    &edge.source.external_id,
+                )
+            } else {
+                edge.source.external_id.parse::<i64>().map_err(|_| {
+                    HandlerError::Processing(format!(
+                        "system node external_id '{}' must be a valid int64",
+                        edge.source.external_id
+                    ))
+                })?
+            };
+
+            let target_id = if edge.target.node_kind.starts_with(&plugin_prefix)
             {
                 generate_node_id(
                     &plugin.plugin_id,

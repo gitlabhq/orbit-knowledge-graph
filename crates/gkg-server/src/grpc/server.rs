@@ -24,7 +24,7 @@ pub struct GrpcServer {
 }
 
 impl GrpcServer {
-    pub fn new(
+    pub async fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
         clickhouse_config: &ClickHouseConfiguration,
@@ -36,7 +36,8 @@ impl GrpcServer {
             clickhouse_config,
             health_check_url,
             plugin_store,
-        );
+        )
+        .await;
         Self {
             addr,
             service: KnowledgeGraphServiceServer::with_interceptor(service, server_interceptor),
@@ -62,15 +63,15 @@ mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
 
-    #[test]
-    fn test_server_creation() {
+    #[tokio::test]
+    async fn test_server_creation() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50051);
         let validator =
             Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
         let clickhouse_config = ClickHouseConfiguration::default();
         let plugin_store = Arc::new(PluginStore::new(Arc::new(clickhouse_config.build_client())));
 
-        let server = GrpcServer::new(addr, validator, &clickhouse_config, None, plugin_store);
+        let server = GrpcServer::new(addr, validator, &clickhouse_config, None, plugin_store).await;
         assert_eq!(server.addr(), addr);
     }
 }

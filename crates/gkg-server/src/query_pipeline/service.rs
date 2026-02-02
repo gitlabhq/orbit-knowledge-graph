@@ -23,6 +23,7 @@ pub struct QueryPipelineService<F: ResultFormatter + Clone> {
     client: Arc<ArrowClickHouseClient>,
     extraction: Arc<ExtractionStage>,
     formatter: F,
+    redaction_enabled: bool,
 }
 
 impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
@@ -33,7 +34,13 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             client,
             extraction,
             formatter,
+            redaction_enabled: true,
         }
+    }
+
+    pub fn with_redaction_disabled(mut self) -> Self {
+        self.redaction_enabled = false;
+        self
     }
 
     pub async fn run_query<M: RedactionMessage>(
@@ -58,12 +65,23 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
 
         let extracted = self.extraction.execute(execution_output);
 
-        if extracted.redaction_plan.resources_to_check.is_empty() {
-            info!("No redaction required, returning result directly");
-        }
+        let redacted = if self.redaction_enabled {
+            if extracted.redaction_plan.resources_to_check.is_empty() {
+                info!("No redaction required, returning result directly");
+            }
 
-        let authorized = AuthorizationStage::execute(extracted, tx, stream).await?;
-        let redacted = RedactionStage::execute(authorized);
+            let authorized = AuthorizationStage::execute(extracted, tx, stream).await?;
+            RedactionStage::execute(authorized)
+        } else {
+            info!("Redaction disabled, skipping authorization");
+            super::types::RedactionOutput {
+                query_result: extracted.query_result,
+                result_context: extracted.result_context,
+                redacted_count: 0,
+                generated_sql: extracted.generated_sql,
+            }
+        };
+
         let formatting_stage =
             FormattingStage::new(self.formatter.clone(), Arc::clone(&self.ontology));
         Ok(formatting_stage.execute(redacted))

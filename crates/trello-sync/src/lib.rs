@@ -155,8 +155,10 @@ fn build_plugin_schema() -> PluginSchema {
 }
 
 fn extract_merge_request_ids(description: &str, gitlab_base_url: &str) -> Vec<i64> {
+    info!("description: {}", description);
     let base_url = gitlab_base_url.trim_end_matches('/');
     let pattern = format!(r"{}/.+/-/merge_requests/(\d+)", regex::escape(base_url));
+    info!("pattern: {}", pattern);
 
     let Ok(regex) = Regex::new(&pattern) else {
         return Vec::new();
@@ -168,18 +170,35 @@ fn extract_merge_request_ids(description: &str, gitlab_base_url: &str) -> Vec<i6
         .collect()
 }
 
+fn capitalize_word(word: &str) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+    }
+}
+
+fn format_trello_name(name: &str) -> String {
+    name.split('_')
+        .map(|part| {
+            part.split('-')
+                .map(capitalize_word)
+                .collect::<Vec<_>>()
+                .join("-")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn match_gitlab_user_by_first_name<'a>(
     trello_member: &TrelloMember,
     gitlab_users: &'a [GitlabUser],
 ) -> Option<&'a GitlabUser> {
-    let trello_first_name = trello_member
-        .full_name
-        .split_whitespace()
-        .next()?
-        .to_lowercase();
+    let display_name = format_trello_name(&trello_member.full_name);
+    let trello_first_name = display_name.split_whitespace().next()?.to_lowercase();
 
+    info!(trello_first_name = %display_name, "matching Trello member");
 
-    info!("trello_first_name: {}", trello_first_name);
     gitlab_users.iter().find(|user| {
         user.name
             .split_whitespace()
@@ -378,6 +397,7 @@ fn build_edges(
                 continue;
             };
 
+            info!(gitlab_user_id = gitlab_user.id, gitlab_user = %gitlab_user.name, "matched GitLab user");
             let edge_id = format!("{}_{}", gitlab_user.id, card.id);
             edges.push(EdgePayload::new(
                 edge_id,

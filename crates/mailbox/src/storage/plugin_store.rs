@@ -143,6 +143,32 @@ impl PluginStore {
         Ok(plugins)
     }
 
+    pub async fn list_all(&self) -> Result<Vec<PluginInfo>, MailboxError> {
+        let sql = format!(
+            r#"SELECT plugin_id, namespace_id, api_key_hash, schema, schema_version, created_at
+            FROM {} FINAL
+            WHERE NOT _deleted
+            ORDER BY namespace_id, plugin_id"#,
+            super::PLUGINS_TABLE,
+        );
+
+        let batches = self
+            .client
+            .query_arrow(&sql)
+            .await
+            .map_err(|e| MailboxError::storage(format!("failed to list all plugins: {}", e)))?;
+
+        let mut plugins = Vec::new();
+        for batch in batches {
+            for row in 0..batch.num_rows() {
+                let plugin = parse_plugin_from_batch(&batch, row)?;
+                plugins.push(PluginInfo::from(plugin));
+            }
+        }
+
+        Ok(plugins)
+    }
+
     pub async fn exists(&self, namespace_id: i64, plugin_id: &str) -> Result<bool, MailboxError> {
         let sql = format!(
             r#"SELECT 1 FROM {} FINAL

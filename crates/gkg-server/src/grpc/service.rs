@@ -47,19 +47,32 @@ pub struct KnowledgeGraphServiceImpl {
 }
 
 impl KnowledgeGraphServiceImpl {
-    pub fn new(
+    pub async fn new(
         validator: Arc<JwtValidator>,
         clickhouse_config: &ClickHouseConfiguration,
         health_check_url: Option<String>,
         plugin_store: Arc<PluginStore>,
     ) -> Self {
-        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let mut ontology = Ontology::load_embedded().expect("Failed to load ontology");
+
+        if let Ok(plugins) = plugin_store.list_all().await {
+            for plugin in plugins {
+                Self::merge_plugin_schema(&mut ontology, &plugin);
+            }
+            info!(plugin_count = ontology.node_count(), "Loaded ontology with plugins");
+        } else {
+            info!("Loaded ontology without plugins (plugin store not available)");
+        }
+
+        let ontology = Arc::new(ontology);
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
         let query_pipeline =
-            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), RawRowFormatter);
+            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), RawRowFormatter)
+                .with_redaction_disabled();
         let tool_pipeline =
-            QueryPipelineService::new(Arc::clone(&ontology), client, ContextEngineFormatter);
+            QueryPipelineService::new(Arc::clone(&ontology), client, ContextEngineFormatter)
+                .with_redaction_disabled();
         let cluster_health = ClusterHealthChecker::new(health_check_url).into_arc();
         Self {
             validator,
@@ -69,6 +82,37 @@ impl KnowledgeGraphServiceImpl {
             query_pipeline,
             tool_pipeline,
             cluster_health,
+        }
+    }
+
+    fn merge_plugin_schema(ontology: &mut Ontology, plugin: &PluginInfo) {
+        for node in &plugin.schema.nodes {
+            let fields: Vec<(String, ontology::DataType, bool)> = node
+                .properties
+                .iter()
+                .map(|prop| {
+                    let data_type = match prop.property_type {
+                        PropertyType::String => ontology::DataType::String,
+                        PropertyType::Int64 => ontology::DataType::Int,
+                        PropertyType::Float => ontology::DataType::Float,
+                        PropertyType::Boolean => ontology::DataType::Bool,
+                        PropertyType::Date => ontology::DataType::Date,
+                        PropertyType::Timestamp => ontology::DataType::DateTime,
+                        PropertyType::Enum => ontology::DataType::Enum,
+                    };
+                    (prop.name.clone(), data_type, prop.nullable)
+                })
+                .collect();
+
+            ontology.add_plugin_node(&plugin.plugin_id, &node.name, fields);
+        }
+
+        for edge in &plugin.schema.edges {
+            ontology.add_plugin_edge(
+                &edge.relationship_kind,
+                edge.from_node_kinds.clone(),
+                edge.to_node_kinds.clone(),
+            );
         }
     }
 }
@@ -519,11 +563,12 @@ mod tests {
         Arc::new(PluginStore::new(Arc::new(config.build_client())))
     }
 
-    #[test]
-    fn test_service_can_be_created() {
+    #[tokio::test]
+    async fn test_service_can_be_created() {
         let validator = Arc::new(mock_validator());
         let service =
-            KnowledgeGraphServiceImpl::new(validator, &test_config(), None, test_plugin_store());
+            KnowledgeGraphServiceImpl::new(validator, &test_config(), None, test_plugin_store())
+                .await;
 
         let plan = service
             .tool_service
@@ -541,11 +586,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_build_ontology_response() {
+    #[tokio::test]
+    async fn test_build_ontology_response() {
         let validator = Arc::new(mock_validator());
         let service =
-            KnowledgeGraphServiceImpl::new(validator, &test_config(), None, test_plugin_store());
+            KnowledgeGraphServiceImpl::new(validator, &test_config(), None, test_plugin_store())
+                .await;
 
         let response = service.build_ontology_response();
 
@@ -563,11 +609,12 @@ mod tests {
         assert!(user.plugin_id.is_none());
     }
 
-    #[test]
-    fn test_build_namespaced_ontology_with_plugins() {
+    #[tokio::test]
+    async fn test_build_namespaced_ontology_with_plugins() {
         let validator = Arc::new(mock_validator());
         let service =
-            KnowledgeGraphServiceImpl::new(validator, &test_config(), None, test_plugin_store());
+            KnowledgeGraphServiceImpl::new(validator, &test_config(), None, test_plugin_store())
+                .await;
 
         let plugin = PluginInfo {
             plugin_id: "security-scanner".to_string(),
@@ -619,11 +666,12 @@ mod tests {
         assert!(plugin_edge.is_some());
     }
 
-    #[test]
-    fn test_empty_plugins_returns_base_ontology() {
+    #[tokio::test]
+    async fn test_empty_plugins_returns_base_ontology() {
         let validator = Arc::new(mock_validator());
         let service =
-            KnowledgeGraphServiceImpl::new(validator, &test_config(), None, test_plugin_store());
+            KnowledgeGraphServiceImpl::new(validator, &test_config(), None, test_plugin_store())
+                .await;
 
         let base_response = service.build_ontology_response();
         let namespaced_response = service.build_namespaced_ontology_response(vec![]);

@@ -65,7 +65,8 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
         &config.graph,
         config.health_check_url.clone(),
         plugin_store,
-    );
+    )
+    .await;
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
     tokio::select! {
