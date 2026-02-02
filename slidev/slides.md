@@ -244,30 +244,84 @@ The schema does structural validation. It checks required fields, types, enums, 
 
 ---
 
-# Schema Validation Details
+# Step 2: Ontology Validation + Parse
 
-```rust
-fn validate_json(json: &str) -> Result<serde_json::Value> {
-    let value: serde_json::Value = serde_json::from_str(json)?;
-    collect_schema_errors(base_validator(), &value)?;
-    Ok(value)
-}
-
-fn validate_ontology(value: &serde_json::Value, ontology: &Ontology) -> Result<()> {
-    let schema = ontology.derive_json_schema(BASE_SCHEMA_JSON)?;
-    let validator = jsonschema::validator_for(&schema)?;
-    collect_schema_errors(&validator, value)
+```rust {3-4}
+fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
+    let value = validate_json(json)?;            // JSON structure ok?
+    validate_ontology(&value, ontology)?;        // entities exist?
+    let input = parse(value)?;                   // JSON → typed struct
+    validate(&input, ontology)?;                 // references valid?
+    let input = normalize(input, ontology);      // canonicalize
+    let mut ast = lower(&input)?;                // build SQL AST
+    let ctx = enforce_return(&mut ast, &input)?; // for redaction
+    apply_security(&mut ast, ctx)?;              // tenant isolation
+    codegen(&ast, ctx)                           // AST → SQL
 }
 ```
 
-<v-click>
+<!--
+Now we validate that the entities and relationships in the query actually exist in our ontology, then parse into a typed struct.
+-->
 
-The ontology generates allowed values for `entity` and `relationship` fields at runtime.
+---
 
-</v-click>
+# Step 2: Ontology Validation + Parse
+
+<div class="flex items-center justify-center gap-3 h-[75%]">
+
+<div class="text-[0.5rem] leading-tight">
+
+```json
+{
+  "$defs": {
+    "EntityType": { "enum": [] },
+    "RelationshipTypeName": { "enum": [] },
+    "NodeProperties": {}
+  }
+}
+```
+
+</div>
+
+<div v-click="1" class="text-2xl">+</div>
+
+<div v-click="1" class="text-[0.5rem] leading-tight">
+
+```yaml
+node_type: Project
+properties:
+  id: { type: int64 }
+  name: { type: string }
+```
+
+</div>
+
+<div v-click="2" class="text-2xl">→</div>
+
+<div v-click="2" class="text-sm font-mono bg-gray-100 dark:bg-gray-800 rounded px-3 py-1">
+  Validator
+</div>
+
+<div v-click="3" class="flex flex-col gap-1">
+  <div class="flex items-center gap-1">
+    <span class="text-2xl text-red-500">↗</span>
+    <span class="text-red-500 font-mono text-xs">error</span>
+  </div>
+  <div class="flex items-center gap-1">
+    <span class="text-2xl text-green-500">↘</span>
+    <span class="text-green-500 font-mono text-xs">parse()</span>
+  </div>
+</div>
+
+</div>
+
+<div v-click="3" class="text-xs text-center text-gray-500">
+  At runtime: enum: [] becomes enum: ["User", "Project", "MergeRequest", ...]
+</div>
 
 <!--
-The base schema is baked in, but the ontology derives a new schema with valid entity names. If you add a new node type to the ontology, it automatically becomes valid in queries.
+The ontology fills in the schema gaps. EntityType is a placeholder - at runtime we inject the actual node types from our YAML definitions. So if you try to query a "Foobar" entity that doesn't exist, the schema validator catches it before we even parse.
 -->
 
 ---
