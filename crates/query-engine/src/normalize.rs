@@ -4,8 +4,9 @@
 //! After normalization:
 //! - Entity names are resolved to table names
 //! - Filter values are coerced to match ontology types
+//! - Wildcard column selections are expanded to explicit column lists
 
-use crate::input::Input;
+use crate::input::{ColumnSelection, Input};
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -15,6 +16,7 @@ use std::collections::BTreeMap;
 /// Performs the following transformations:
 /// - Resolves entity names to ClickHouse table names
 /// - Coerces filter values to match ontology field types (e.g., enum int → string)
+/// - Expands wildcard column selections ("*") to explicit column lists
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -26,11 +28,25 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
             node.table = Some(table);
         }
 
-        // Coerce filter values to match ontology field types (e.g., enum int → string)
         let Some(node_entity) = ontology.get_node(entity) else {
             continue;
         };
 
+        // Expand wildcard columns to explicit list from ontology
+        if matches!(node.columns, Some(ColumnSelection::All)) {
+            let columns: Vec<String> = std::iter::once("id".to_string())
+                .chain(
+                    node_entity
+                        .fields
+                        .iter()
+                        .filter(|f| f.name != "id")
+                        .map(|f| f.name.clone()),
+                )
+                .collect();
+            node.columns = Some(ColumnSelection::List(columns));
+        }
+
+        // Coerce filter values to match ontology field types (e.g., enum int → string)
         for (column, filter) in &mut node.filters {
             let Some(value) = &filter.value else {
                 continue;

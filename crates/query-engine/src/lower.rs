@@ -27,10 +27,13 @@ fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
 }
 
 /// Lower validated input into an AST node.
-pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
+///
+/// Note: Ontology-dependent transformations (wildcard expansion, enum coercion)
+/// are handled in normalize.rs. Lowering is purely mechanical.
+pub fn lower(input: &Input) -> Result<Node> {
     match input.query_type {
-        QueryType::Traversal | QueryType::Search => lower_traversal(input, ontology),
-        QueryType::Aggregation => lower_aggregation(input, ontology),
+        QueryType::Traversal | QueryType::Search => lower_traversal(input),
+        QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
     }
@@ -40,11 +43,11 @@ pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
 // Traversal & Search
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
+fn lower_traversal(input: &Input) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
-    let mut select = build_select_columns(&input.nodes, ontology);
+    let mut select = build_select_columns(&input.nodes);
     add_edge_columns(&mut select, &input.relationships, &edge_aliases);
 
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
@@ -68,63 +71,37 @@ fn lower_traversal(input: &Input, ontology: &Ontology) -> Result<Node> {
 ///
 /// For each node:
 /// - If `columns` is None: only return `{node_id}_id` (mandatory columns added by return.rs)
-/// - If `columns` is `All` ("*"): return all columns from the ontology for that entity
-/// - If `columns` is `List`: return the specified columns
+/// - If `columns` is `List`: return the specified columns (wildcards expanded by normalize)
 ///
 /// Column aliases follow the pattern `{node_id}_{column_name}`.
-fn build_select_columns(nodes: &[InputNode], ontology: &Ontology) -> Vec<SelectExpr> {
+///
+/// Note: `ColumnSelection::All` is expanded to `List` during normalization,
+/// so lowering only handles `None` and `List`.
+fn build_select_columns(nodes: &[InputNode]) -> Vec<SelectExpr> {
     let mut select = Vec::new();
 
     for node in nodes {
-        match &node.columns {
-            None => {
-                // No columns specified - just add the id column (type added by return.rs)
-                select.push(SelectExpr::new(
-                    Expr::col(&node.id, "id"),
-                    format!("{}_id", node.id),
-                ));
-            }
+        let columns: Vec<&str> = match &node.columns {
+            None => vec!["id"],
             Some(ColumnSelection::All) => {
-                // Wildcard - get all columns from ontology
-                if let Some(entity) = &node.entity {
-                    // Always include id first
-                    select.push(SelectExpr::new(
-                        Expr::col(&node.id, "id"),
-                        format!("{}_id", node.id),
-                    ));
-
-                    // Add all entity columns from ontology
-                    if let Some(node_entity) = ontology.get_node(entity) {
-                        for field in &node_entity.fields {
-                            // Skip 'id' since we already added it
-                            if field.name != "id" {
-                                select.push(SelectExpr::new(
-                                    Expr::col(&node.id, &field.name),
-                                    format!("{}_{}", node.id, field.name),
-                                ));
-                            }
-                        }
-                    }
-                }
+                // Wildcards should be expanded by normalize; treat as id-only fallback
+                vec!["id"]
             }
-            Some(ColumnSelection::List(columns)) => {
-                // Specific columns - always include id first if not in list
-                let has_id = columns.iter().any(|c| c == "id");
-                if !has_id {
-                    select.push(SelectExpr::new(
-                        Expr::col(&node.id, "id"),
-                        format!("{}_id", node.id),
-                    ));
+            Some(ColumnSelection::List(cols)) => {
+                let mut result: Vec<&str> = Vec::new();
+                if !cols.iter().any(|c| c == "id") {
+                    result.push("id");
                 }
-
-                // Add requested columns
-                for col in columns {
-                    select.push(SelectExpr::new(
-                        Expr::col(&node.id, col),
-                        format!("{}_{}", node.id, col),
-                    ));
-                }
+                result.extend(cols.iter().map(|s| s.as_str()));
+                result
             }
+        };
+
+        for col in columns {
+            select.push(SelectExpr::new(
+                Expr::col(&node.id, col),
+                format!("{}_{col}", node.id),
+            ));
         }
     }
 
@@ -144,7 +121,7 @@ fn add_edge_columns(
     }
 }
 
-fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
+fn lower_aggregation(input: &Input) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
@@ -156,6 +133,7 @@ fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
         .collect();
 
     // Build SELECT and GROUP BY columns for group_by nodes
+    // Note: Wildcards are expanded to List by normalize, so we only handle None/List
     let mut select = Vec::new();
     let mut group_by = Vec::new();
 
@@ -164,23 +142,11 @@ fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
             continue;
         }
 
-        // Collect columns to include based on node.columns setting
         let columns: Vec<&str> = match &node.columns {
             None => vec!["id"],
             Some(ColumnSelection::All) => {
-                let mut cols = vec!["id"];
-                if let Some(entity) = &node.entity {
-                    if let Some(node_entity) = ontology.get_node(entity) {
-                        cols.extend(
-                            node_entity
-                                .fields
-                                .iter()
-                                .filter(|f| f.name != "id")
-                                .map(|f| f.name.as_str()),
-                        );
-                    }
-                }
-                cols
+                // Wildcards should be expanded by normalize; treat as id-only fallback
+                vec!["id"]
             }
             Some(ColumnSelection::List(cols)) => {
                 let mut result: Vec<&str> = Vec::new();
@@ -892,7 +858,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -913,7 +879,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -939,7 +905,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -975,7 +941,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1007,7 +973,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1034,7 +1000,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1059,7 +1025,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1114,7 +1080,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1151,7 +1117,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1183,7 +1149,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1220,7 +1186,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1249,7 +1215,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1274,7 +1240,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1296,7 +1262,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1323,7 +1289,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1351,7 +1317,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1381,7 +1347,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1404,7 +1370,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1443,7 +1409,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1500,7 +1466,7 @@ mod tests {
             aggregation_sort: None,
         };
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1537,7 +1503,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+        let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
 
