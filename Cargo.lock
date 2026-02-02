@@ -2018,7 +2018,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2190,7 +2190,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3574,7 +3574,7 @@ dependencies = [
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "labkit-correlation",
  "labkit-fields",
@@ -3593,7 +3593,7 @@ dependencies = [
 [[package]]
 name = "labkit-correlation"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "futures-util",
  "http",
@@ -3611,12 +3611,12 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 
 [[package]]
 name = "labkit-grpc"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "tonic",
  "tracing",
@@ -3625,7 +3625,7 @@ dependencies = [
 [[package]]
 name = "labkit-http"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "http",
  "labkit-correlation",
@@ -3639,7 +3639,7 @@ dependencies = [
 [[package]]
 name = "labkit-log"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "chrono",
  "labkit-correlation",
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "labkit-log-test"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "parking_lot",
  "serde_json",
@@ -3665,7 +3665,7 @@ dependencies = [
 [[package]]
 name = "labkit-mask"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "once_cell",
  "regex",
@@ -3675,7 +3675,7 @@ dependencies = [
 [[package]]
 name = "labkit-metrics"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "futures-util",
  "http",
@@ -3689,7 +3689,7 @@ dependencies = [
 [[package]]
 name = "labkit-monitoring"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "axum",
  "thiserror 2.0.18",
@@ -3700,7 +3700,7 @@ dependencies = [
 [[package]]
 name = "labkit-remoteip"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "http",
  "thiserror 2.0.18",
@@ -3710,7 +3710,7 @@ dependencies = [
 [[package]]
 name = "labkit-tracing"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.1.0#24330684e37f32bec0f9f6a8e4ce6dcc1841ae4b"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs?tag=v0.2.0#61d49d1b41e08d7643f4d0d37a8ea71645594216"
 dependencies = [
  "labkit-correlation",
  "opentelemetry",
@@ -4008,7 +4008,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5024,7 +5024,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5438,7 +5438,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5518,7 +5518,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6147,6 +6147,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
@@ -6469,7 +6470,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7516,7 +7517,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
