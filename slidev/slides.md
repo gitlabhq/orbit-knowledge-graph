@@ -831,10 +831,6 @@ The funnel: untrusted JSON enters at top, validation gates reject bad queries, a
 
 </div>
 
-<div v-click="4" class="text-center text-gray-500 mt-8">
-  The AST is the abstraction layer - add inputs or outputs without changing the core
-</div>
-
 <!--
 The compiler and AST are the stable core. Today we parse JSON and emit ClickHouse SQL. Tomorrow we could add Cypher parsing, GraphQL, or target Postgres, MySQL, whatever. The AST is the abstraction layer.
 -->
