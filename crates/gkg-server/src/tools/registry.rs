@@ -16,15 +16,16 @@ pub struct ToolDefinition {
 pub struct ToolRegistry;
 
 impl ToolRegistry {
-    pub fn get_all_tools(ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
-        vec![Self::query_graph(ontology), Self::get_graph_entities()]
+    pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+        vec![Self::query_graph(), Self::get_graph_entities()]
     }
 
-    fn query_graph(ontology: &Arc<Ontology>) -> ToolDefinition {
+    fn query_graph() -> ToolDefinition {
         let base_description = "Execute graph queries to find nodes, traverse relationships, \
-                                explore neighborhoods, find paths, or aggregate data.";
+                                explore neighborhoods, find paths, or aggregate data. \
+                                Use get_graph_entities to discover available entity types and relationships.";
 
-        let description = match condensed_query_schema(ontology) {
+        let description = match condensed_query_schema() {
             Ok(schema) => format!(
                 "{}\n\nQuery DSL Schema (TOON format):\n{}",
                 base_description, schema
@@ -170,12 +171,28 @@ mod tests {
             "Description should contain traversal"
         );
         assert!(
-            desc.contains("User"),
-            "Description should contain User entity"
+            desc.contains("get_graph_entities"),
+            "Description should reference get_graph_entities for entity discovery"
+        );
+    }
+
+    #[test]
+    fn test_query_graph_excludes_ontology_data() {
+        let ontology = test_ontology();
+        let tools = ToolRegistry::get_all_tools(&ontology);
+        let query_graph = tools
+            .iter()
+            .find(|t| t.name == "query_graph")
+            .expect("query_graph tool should exist");
+
+        let desc = &query_graph.description;
+        assert!(
+            !desc.contains("username"),
+            "Description should not contain entity-specific fields"
         );
         assert!(
-            desc.contains("AUTHORED"),
-            "Description should contain AUTHORED relationship"
+            !desc.contains("AUTHORED"),
+            "Description should not contain relationship types (use get_graph_entities)"
         );
     }
 }
