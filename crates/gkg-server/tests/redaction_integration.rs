@@ -4111,3 +4111,376 @@ async fn definition_authorization_no_projects_allowed() {
     );
     assert_eq!(result.authorized_count(), 0);
 }
+
+/// Tests that neighbors query with Definition entities uses project_id for authorization.
+/// Definitions are connected to Projects via CONTAINS edges, and authorization should
+/// use the edge's source_id (project_id) instead of the Definition's hash-based ID.
+#[tokio::test]
+#[serial]
+async fn neighbors_with_definition_uses_project_id_for_authorization() {
+    let ctx = TestContext::new().await;
+    setup_definition_test_data(&ctx).await;
+
+    // Add edges from Project to Definition
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1000, 'Project', 'CONTAINS', 100001, 'Definition'),
+         (1000, 'Project', 'CONTAINS', 100002, 'Definition'),
+         (1001, 'Project', 'CONTAINS', 100003, 'Definition'),
+         (1002, 'Project', 'CONTAINS', 100004, 'Definition')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Query neighbors of Project 1000 - should return Definition entities
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1000]},
+        "neighbors": {"node": "p", "direction": "outgoing", "rel_types": ["CONTAINS"]}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(
+        result.len(),
+        2,
+        "Project 1000 should have 2 Definition neighbors"
+    );
+
+    // Allow project 1000 - this should authorize both Definition neighbors
+    // because they belong to project 1000 (via the edge's source_id)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000]);
+
+    let redacted = run_redaction_with_id_columns(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        redacted, 0,
+        "no rows should be redacted when project 1000 is allowed"
+    );
+    assert_eq!(result.authorized_count(), 2);
+
+    // Verify the authorized neighbors are Definitions from project 1000
+    for row in result.authorized_rows() {
+        let neighbor = row.neighbor_node().expect("should have neighbor");
+        assert_eq!(neighbor.entity_type, "Definition");
+    }
+}
+
+/// Tests that denying the project denies all Definition neighbors from that project.
+#[tokio::test]
+#[serial]
+async fn neighbors_with_definition_denied_project_filters_definitions() {
+    let ctx = TestContext::new().await;
+    setup_definition_test_data(&ctx).await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1000, 'Project', 'CONTAINS', 100001, 'Definition'),
+         (1000, 'Project', 'CONTAINS', 100002, 'Definition')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1000]},
+        "neighbors": {"node": "p", "direction": "outgoing", "rel_types": ["CONTAINS"]}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(result.len(), 2);
+
+    // Deny project 1000 - this should filter all Definition neighbors
+    let mut mock_service = MockRedactionService::new();
+    mock_service.deny("projects", &[1000]);
+
+    let redacted = run_redaction_with_id_columns(&mut result, &ontology, &mock_service);
+
+    assert_eq!(
+        redacted, 2,
+        "all definitions should be redacted when project is denied"
+    );
+    assert_eq!(result.authorized_count(), 0);
+}
+
+/// Comprehensive test: neighbors query with Definitions from multiple projects,
+/// some authorized and some denied. Verifies that only Definitions from authorized
+/// projects are returned.
+#[tokio::test]
+#[serial]
+async fn neighbors_with_definitions_mixed_project_authorization() {
+    let ctx = TestContext::new().await;
+    setup_definition_test_data(&ctx).await;
+
+    // Create edges from multiple projects to their Definitions
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1000, 'Project', 'CONTAINS', 100001, 'Definition'),
+         (1000, 'Project', 'CONTAINS', 100002, 'Definition'),
+         (1001, 'Project', 'CONTAINS', 100003, 'Definition'),
+         (1002, 'Project', 'CONTAINS', 100004, 'Definition')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Query neighbors of all three projects at once
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002]},
+        "neighbors": {"node": "p", "direction": "outgoing", "rel_types": ["CONTAINS"]}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    assert_eq!(
+        result.len(),
+        4,
+        "should have 4 Definition neighbors total (2+1+1)"
+    );
+
+    // Allow projects 1000 and 1002, deny project 1001
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000, 1002]);
+    mock_service.deny("projects", &[1001]);
+
+    let redacted = run_redaction_with_id_columns(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 1, "1 definition from project 1001 should be redacted");
+    assert_eq!(result.authorized_count(), 3);
+
+    // Verify the authorized neighbors are from projects 1000 and 1002
+    let authorized_neighbors: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .collect();
+    assert!(authorized_neighbors.contains(&100001), "definition 100001 should be authorized");
+    assert!(authorized_neighbors.contains(&100002), "definition 100002 should be authorized");
+    assert!(authorized_neighbors.contains(&100004), "definition 100004 should be authorized");
+    assert!(!authorized_neighbors.contains(&100003), "definition 100003 should be denied");
+}
+
+/// Comprehensive test: path finding through Project -> Definition where Definition
+/// authorization depends on the project. Tests that path authorization correctly uses
+/// project_id for Definition entities.
+#[tokio::test]
+#[serial]
+async fn path_finding_with_definitions_uses_project_id() {
+    let ctx = TestContext::new().await;
+
+    // Setup projects
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_PROJECTS} (id, name, visibility_level, traversal_path) VALUES
+         (1000, 'Allowed Project', 'public', '1/100/1000/'),
+         (1001, 'Denied Project', 'private', '1/101/1001/')"
+    ))
+    .await;
+
+    // Setup groups that contain the projects
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_GROUPS} (id, name, visibility_level, traversal_path) VALUES
+         (100, 'Public Group', 'public', '1/100/'),
+         (101, 'Private Group', 'private', '1/101/')"
+    ))
+    .await;
+
+    // Setup definitions
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_DEFINITIONS}
+         (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+         (100001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'allowed_func', 'allowed_func', 'Function', 1, 10, 0, 100),
+         (100002, '1/101/1001/', 1001, 'main', 'src/lib.rs', 'denied_func', 'denied_func', 'Function', 1, 10, 0, 100)"
+    ))
+    .await;
+
+    // Setup edges: Group -> Project -> Definition
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (100, 'Group', 'CONTAINS', 1000, 'Project'),
+         (101, 'Group', 'CONTAINS', 1001, 'Project'),
+         (1000, 'Project', 'CONTAINS', 100001, 'Definition'),
+         (1001, 'Project', 'CONTAINS', 100002, 'Definition')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Path: Group -> Project -> Definition
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "Group", "node_ids": [100, 101]},
+            {"id": "end", "entity": "Definition"}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count >= 2, "should find paths to both Definitions, got {}", raw_count);
+
+    // Allow group 100, 101 and project 1000, deny project 1001
+    // This should filter paths through project 1001 (and its Definition 100002)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("groups", &[100, 101]);
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1001]);
+
+    run_redaction_with_id_columns(&mut result, &ontology, &mock_service);
+
+    // Only paths to Definition 100001 (from allowed project 1000) should remain
+    let authorized_ends: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .collect();
+
+    assert!(
+        authorized_ends.contains(&100001),
+        "path to Definition 100001 (project 1000) should be authorized"
+    );
+    assert!(
+        !authorized_ends.contains(&100002),
+        "path to Definition 100002 (denied project 1001) should be filtered"
+    );
+}
+
+/// Complex test: neighbors with multiple entity types (Definition, MergeRequest, Pipeline)
+/// with different authorization rules. Verifies that each entity type uses its correct
+/// id_column for authorization.
+#[tokio::test]
+#[serial]
+async fn neighbors_multiple_entity_types_mixed_authorization() {
+    let ctx = TestContext::new().await;
+
+    // Setup projects
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_PROJECTS} (id, name, visibility_level, traversal_path) VALUES
+         (1000, 'Project Alpha', 'public', '1/100/1000/'),
+         (1001, 'Project Beta', 'private', '1/101/1001/')"
+    ))
+    .await;
+
+    // Setup definitions
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_DEFINITIONS}
+         (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+         (100001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'Config', 'Config', 'Struct', 1, 10, 0, 100),
+         (100002, '1/101/1001/', 1001, 'main', 'src/lib.rs', 'Handler', 'Handler', 'Class', 1, 10, 0, 100)"
+    ))
+    .await;
+
+    // Setup merge requests
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_MERGE_REQUESTS} (id, title, state, source_branch, target_branch, traversal_path) VALUES
+         (2000, 'MR in Alpha', 'opened', 'feature', 'main', '1/100/1000/'),
+         (2001, 'MR in Beta', 'opened', 'feature', 'main', '1/101/1001/')"
+    ))
+    .await;
+
+    // Setup users
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_USERS} (id, username, name, state, user_type) VALUES
+         (1, 'alice', 'Alice', 'active', 'human')"
+    ))
+    .await;
+
+    // Edges: Project -> Definition, Project -> MR, User -> MR (author)
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1000, 'Project', 'CONTAINS', 100001, 'Definition'),
+         (1001, 'Project', 'CONTAINS', 100002, 'Definition'),
+         (1000, 'Project', 'CONTAINS', 2000, 'MergeRequest'),
+         (1001, 'Project', 'CONTAINS', 2001, 'MergeRequest'),
+         (1, 'User', 'AUTHORED', 2000, 'MergeRequest'),
+         (1, 'User', 'AUTHORED', 2001, 'MergeRequest')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Query all outgoing neighbors from both projects
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1000, 1001]},
+        "neighbors": {"node": "p", "direction": "outgoing"}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    let raw_count = result.len();
+    assert!(
+        raw_count >= 4,
+        "should have at least 4 neighbors (2 Definitions + 2 MRs), got {}",
+        raw_count
+    );
+
+    // Allow project 1000, deny project 1001
+    // This should:
+    // - Allow Definition 100001 (project_id = 1000)
+    // - Deny Definition 100002 (project_id = 1001)
+    // - Allow MR 2000 (in project 1000)
+    // - Deny MR 2001 (in project 1001)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("projects", &[1000]);
+    mock_service.deny("projects", &[1001]);
+    mock_service.allow("merge_requests", &[2000]);
+    mock_service.deny("merge_requests", &[2001]);
+
+    run_redaction_with_id_columns(&mut result, &ontology, &mock_service);
+
+    // Collect authorized neighbors by type
+    let authorized: Vec<_> = result
+        .authorized_rows()
+        .filter_map(|r| r.neighbor_node().map(|n| (n.entity_type.clone(), n.id)))
+        .collect();
+
+    // Verify Definition authorization uses project_id
+    let definition_ids: HashSet<i64> = authorized
+        .iter()
+        .filter(|(t, _)| t == "Definition")
+        .map(|(_, id)| *id)
+        .collect();
+    assert!(
+        definition_ids.contains(&100001),
+        "Definition 100001 (project 1000) should be authorized"
+    );
+    assert!(
+        !definition_ids.contains(&100002),
+        "Definition 100002 (denied project 1001) should be filtered"
+    );
+
+    // Verify MR authorization uses its own ID
+    let mr_ids: HashSet<i64> = authorized
+        .iter()
+        .filter(|(t, _)| t == "MergeRequest")
+        .map(|(_, id)| *id)
+        .collect();
+    assert!(
+        mr_ids.contains(&2000),
+        "MR 2000 should be authorized"
+    );
+    assert!(
+        !mr_ids.contains(&2001),
+        "MR 2001 should be filtered"
+    );
+}

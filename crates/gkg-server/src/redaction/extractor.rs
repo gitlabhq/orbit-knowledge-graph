@@ -44,13 +44,25 @@ impl<'a> RedactionExtractor<'a> {
         map
     }
 
+    /// Find the entity that owns a resource_type (has id_column="id" for that resource).
+    fn find_owner_entity(&self, resource_type: &str) -> Option<&str> {
+        self.ontology.nodes().find_map(|node| {
+            node.redaction.as_ref().and_then(|config| {
+                if config.resource_type == resource_type && config.id_column == "id" {
+                    Some(node.name.as_str())
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
     /// Build resource checks using the correct id_column from each entity's redaction config.
     ///
     /// For entities where id_column == "id" (like Project, User), we use the node's ID.
     /// For entities where id_column != "id" (like Definition with project_id), we extract
     /// the value from that column instead.
     fn build_resource_checks(&self, result: &QueryResult) -> Vec<ResourceCheck> {
-        // Collect resource IDs grouped by (resource_type, ability)
         let mut resource_ids: HashMap<(&str, &str), HashSet<i64>> = HashMap::new();
 
         for row in result.iter() {
@@ -80,20 +92,25 @@ impl<'a> RedactionExtractor<'a> {
                     .insert(auth_id);
             }
 
-            // Also check dynamic nodes (path finding, neighbors)
+            // Check dynamic nodes (neighbors) - derive auth_id from edge columns
             for node_ref in row.dynamic_nodes() {
                 let Some(config) = self.ontology.get_redaction_config(&node_ref.entity_type) else {
                     continue;
                 };
 
-                // For dynamic nodes, we only have the node ID available
-                // If id_column != "id", we cannot extract the correct value
-                // This is a limitation - dynamic nodes with indirect authorization
-                // will use their own ID, which may fail authorization
+                let auth_id = if config.id_column == "id" {
+                    node_ref.id
+                } else {
+                    // Find the entity that owns this resource (has id_column="id" for same resource_type)
+                    self.find_owner_entity(&config.resource_type)
+                        .and_then(|owner| get_edge_id_for_entity(row, owner))
+                        .unwrap_or(node_ref.id)
+                };
+
                 resource_ids
                     .entry((config.resource_type.as_str(), config.ability.as_str()))
                     .or_default()
-                    .insert(node_ref.id);
+                    .insert(auth_id);
             }
         }
 
@@ -106,6 +123,24 @@ impl<'a> RedactionExtractor<'a> {
             })
             .collect()
     }
+}
+
+/// Get the ID from edge columns for a specific entity type.
+fn get_edge_id_for_entity(
+    row: &super::query_result::QueryResultRow,
+    entity_type: &str,
+) -> Option<i64> {
+    if let Some(src_type) = row.get("e_src_type").and_then(|v| v.as_str())
+        && src_type == entity_type
+    {
+        return row.get("e_src").and_then(|v| v.as_i64());
+    }
+    if let Some(dst_type) = row.get("e_dst_type").and_then(|v| v.as_str())
+        && dst_type == entity_type
+    {
+        return row.get("e_dst").and_then(|v| v.as_i64());
+    }
+    None
 }
 
 #[cfg(test)]

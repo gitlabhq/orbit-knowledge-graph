@@ -318,9 +318,17 @@ impl QueryResult {
             // Check dynamic nodes (path finding nodes, neighbor nodes)
             if row.authorized {
                 for node_ref in &row.dynamic_nodes {
-                    // Dynamic nodes use their own ID (no column lookup available)
+                    // For dynamic nodes with indirect auth (id_column != "id"),
+                    // find owner entity from ontology mappings and get its ID from edge
+                    let auth_id = get_auth_id_for_dynamic_node(
+                        row,
+                        node_ref,
+                        entity_to_resource,
+                        entity_to_id_column,
+                    );
+
                     if !is_node_authorized_with_id(
-                        node_ref.id,
+                        auth_id,
                         &node_ref.entity_type,
                         authorizations,
                         entity_to_resource,
@@ -371,6 +379,57 @@ fn get_auth_id_for_node(
         .and_then(|v| v.as_i64())
         .or_else(|| row.get(id_column).and_then(|v| v.as_i64()))
         .unwrap_or(node_ref.id)
+}
+
+/// Get the auth_id for a dynamic node (neighbor) by checking edge columns.
+/// For entities with indirect auth (id_column != "id"), find the owner entity
+/// (same resource_type, id_column="id") and use its ID from the edge.
+fn get_auth_id_for_dynamic_node(
+    row: &QueryResultRow,
+    node_ref: &NodeRef,
+    entity_to_resource: &HashMap<&str, &str>,
+    entity_to_id_column: &HashMap<&str, &str>,
+) -> i64 {
+    let Some(&id_column) = entity_to_id_column.get(node_ref.entity_type.as_str()) else {
+        return node_ref.id;
+    };
+
+    if id_column == "id" {
+        return node_ref.id;
+    }
+
+    // Find the resource_type for this entity
+    let Some(&resource_type) = entity_to_resource.get(node_ref.entity_type.as_str()) else {
+        return node_ref.id;
+    };
+
+    // Find the owner entity (has same resource_type with id_column="id")
+    let owner_entity = entity_to_id_column
+        .iter()
+        .find(|(entity, id_col)| {
+            **id_col == "id" && entity_to_resource.get(*entity) == Some(&resource_type)
+        })
+        .map(|(entity, _)| *entity);
+
+    let Some(owner) = owner_entity else {
+        return node_ref.id;
+    };
+
+    if let Some(src_type) = row.get("e_src_type").and_then(|v| v.as_str())
+        && src_type == owner
+        && let Some(src_id) = row.get("e_src").and_then(|v| v.as_i64())
+    {
+        return src_id;
+    }
+
+    if let Some(dst_type) = row.get("e_dst_type").and_then(|v| v.as_str())
+        && dst_type == owner
+        && let Some(dst_id) = row.get("e_dst").and_then(|v| v.as_i64())
+    {
+        return dst_id;
+    }
+
+    node_ref.id
 }
 
 fn is_node_authorized_with_id(
