@@ -2540,6 +2540,102 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
         "should have GROUP BY clause"
     );
 
+    // User's requested columns should be in SELECT and GROUP BY
+    assert!(
+        query.sql.contains("u_username"),
+        "group_by node requested columns should be in SELECT: {}",
+        query.sql
+    );
+
+    let batches = ctx.query_parameterized(&query).await;
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+
+    // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
+    assert_eq!(result.len(), 2, "should have 2 aggregation rows");
+
+    // Run redaction - only allow user 1
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.deny("users", &[2]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 1, "user 2's row should be redacted");
+    assert_eq!(result.authorized_count(), 1);
+
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert_eq!(authorized[0].get_id("u"), Some(1));
+    assert_eq!(authorized[0].get_type("u"), Some("User"));
+}
+
+/// Deep test: Verify aggregation with wildcard columns returns all entity fields
+/// for the group_by node.
+#[tokio::test]
+#[serial]
+async fn column_selection_aggregation_with_wildcard_columns() {
+    let ctx = TestContext::new().await;
+    setup_test_data(&ctx).await;
+
+    // Insert MRs for aggregation
+    ctx.execute(
+        "INSERT INTO gl_merge_requests (id, iid, title, state, traversal_path) VALUES
+         (10001, 1, 'MR 1', 'merged', '1/100/1000/'),
+         (10002, 2, 'MR 2', 'merged', '1/100/1000/'),
+         (10003, 3, 'MR 3', 'open', '1/100/1000/')",
+    )
+    .await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         (1, 'User', 'AUTHORED', 10001, 'MergeRequest'),
+         (1, 'User', 'AUTHORED', 10002, 'MergeRequest'),
+         (2, 'User', 'AUTHORED', 10003, 'MergeRequest')"
+    ))
+    .await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Use wildcard columns to get all user fields
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": "*"},
+            {"id": "mr", "entity": "MergeRequest"}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+        "limit": 10
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // User (group_by node) should have mandatory columns
+    assert!(
+        query.sql.contains("_gkg_u_id"),
+        "group_by node must have _gkg_u_id"
+    );
+    assert!(
+        query.sql.contains("_gkg_u_type"),
+        "group_by node must have _gkg_u_type"
+    );
+
+    // Wildcard should expand to include user columns from ontology
+    assert!(
+        query.sql.contains("u_id"),
+        "wildcard should include u_id: {}",
+        query.sql
+    );
+    assert!(
+        query.sql.contains("u_username"),
+        "wildcard should include u_username: {}",
+        query.sql
+    );
+
+    // All user columns should be in GROUP BY (required by ClickHouse)
+    let group_by_count = query.sql.matches("GROUP BY").count();
+    assert_eq!(group_by_count, 1, "should have exactly one GROUP BY clause");
+
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
 

@@ -30,7 +30,7 @@ fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
 pub fn lower(input: &Input, ontology: &Ontology) -> Result<Node> {
     match input.query_type {
         QueryType::Traversal | QueryType::Search => lower_traversal(input, ontology),
-        QueryType::Aggregation => lower_aggregation(input),
+        QueryType::Aggregation => lower_aggregation(input, ontology),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
     }
@@ -144,22 +144,63 @@ fn add_edge_columns(
     }
 }
 
-fn lower_aggregation(input: &Input) -> Result<Node> {
+fn lower_aggregation(input: &Input, ontology: &Ontology) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
+    // Collect unique group_by node IDs
+    let group_by_node_ids: HashSet<_> = input
+        .aggregations
+        .iter()
+        .filter_map(|agg| agg.group_by.clone())
+        .collect();
+
+    // Build SELECT and GROUP BY columns for group_by nodes
     let mut select = Vec::new();
     let mut group_by = Vec::new();
-    let mut seen_groups = HashSet::new();
 
-    for agg in &input.aggregations {
-        // Add GROUP BY column once per unique group
-        if let Some(gb) = &agg.group_by {
-            if seen_groups.insert(gb.clone()) {
-                group_by.push(Expr::col(gb, "id"));
-                select.push(SelectExpr::new(Expr::col(gb, "id"), format!("{gb}_id")));
-            }
+    for node in &input.nodes {
+        if !group_by_node_ids.contains(&node.id) {
+            continue;
         }
+
+        // Collect columns to include based on node.columns setting
+        let columns: Vec<&str> = match &node.columns {
+            None => vec!["id"],
+            Some(ColumnSelection::All) => {
+                let mut cols = vec!["id"];
+                if let Some(entity) = &node.entity {
+                    if let Some(node_entity) = ontology.get_node(entity) {
+                        cols.extend(
+                            node_entity
+                                .fields
+                                .iter()
+                                .filter(|f| f.name != "id")
+                                .map(|f| f.name.as_str()),
+                        );
+                    }
+                }
+                cols
+            }
+            Some(ColumnSelection::List(cols)) => {
+                let mut result: Vec<&str> = Vec::new();
+                if !cols.iter().any(|c| c == "id") {
+                    result.push("id");
+                }
+                result.extend(cols.iter().map(|s| s.as_str()));
+                result
+            }
+        };
+
+        for col in columns {
+            let expr = Expr::col(&node.id, col);
+            select.push(SelectExpr::new(expr.clone(), format!("{}_{col}", node.id)));
+            group_by.push(expr);
+        }
+    }
+
+    // Add aggregation expressions
+    for agg in &input.aggregations {
         select.push(SelectExpr::new(
             agg_expr(agg),
             agg.alias
@@ -881,6 +922,76 @@ mod tests {
             .select
             .iter()
             .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
+    }
+
+    #[test]
+    fn test_lower_aggregation_with_columns() {
+        let input = validated_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "Note"},
+                {"id": "u", "entity": "User", "columns": ["username", "state"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+            "limit": 20
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+
+        // Should have group-by node columns: u_id, u_username, u_state
+        assert!(aliases.contains(&&"u_id".to_string()));
+        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(aliases.contains(&&"u_state".to_string()));
+
+        // Should have aggregation result
+        assert!(aliases.contains(&&"mr_count".to_string()));
+
+        // Should NOT have target node id column (mr is aggregated, not grouped)
+        assert!(!aliases.contains(&&"mr_id".to_string()));
+
+        // GROUP BY should include all selected columns from group-by node
+        assert_eq!(q.group_by.len(), 3); // id, username, state
+    }
+
+    #[test]
+    fn test_lower_aggregation_with_wildcard_columns() {
+        let input = validated_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "n", "entity": "Note"},
+                {"id": "u", "entity": "User", "columns": "*"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input, &test_ontology()).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+
+        // Should have all user columns from ontology
+        assert!(aliases.contains(&&"u_id".to_string()));
+        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(aliases.contains(&&"u_state".to_string()));
+        assert!(aliases.contains(&&"u_created_at".to_string()));
+
+        // Should have aggregation result
+        assert!(aliases.contains(&&"note_count".to_string()));
+
+        // GROUP BY should include all entity columns
+        assert!(q.group_by.len() >= 4); // id + 3 fields from ontology
     }
 
     #[test]
