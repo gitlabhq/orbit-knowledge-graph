@@ -25,6 +25,7 @@ impl ExecutorError {
     }
 }
 
+#[derive(Debug)]
 pub enum ToolPlan {
     RunGraphQuery { query_json: String },
     Immediate { result: Value },
@@ -56,7 +57,11 @@ impl ToolService {
     }
 
     fn resolve_query_graph(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
-        let query_json = serde_json::to_string(arguments)
+        let query = arguments
+            .get("query")
+            .ok_or_else(|| ExecutorError::InvalidArguments("missing 'query' field".to_string()))?;
+
+        let query_json = serde_json::to_string(query)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         Ok(ToolPlan::RunGraphQuery { query_json })
@@ -368,7 +373,7 @@ mod tests {
         let service = ToolService::new(ontology);
 
         let plan = service
-            .resolve("query_graph", r#"{"match":{}}"#)
+            .resolve("query_graph", r#"{"query":{"match":{}}}"#)
             .expect("Should resolve");
 
         match plan {
@@ -377,5 +382,17 @@ mod tests {
             }
             _ => panic!("Expected RunGraphQuery plan"),
         }
+    }
+
+    #[test]
+    fn test_query_graph_requires_query_field() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let result = service.resolve("query_graph", r#"{"match":{}}"#);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("missing 'query' field"));
     }
 }
