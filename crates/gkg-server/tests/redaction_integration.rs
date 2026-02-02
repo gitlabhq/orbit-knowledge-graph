@@ -2637,10 +2637,24 @@ async fn column_selection_aggregation_with_wildcard_columns() {
     assert_eq!(group_by_count, 1, "should have exactly one GROUP BY clause");
 
     let batches = ctx.query_parameterized(&query).await;
-    let result = QueryResult::from_batches(&batches, &query.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.result_context);
 
     // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
     assert_eq!(result.len(), 2, "should have 2 aggregation rows");
+
+    // Run redaction - only allow user 1
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("users", &[1]);
+    mock_service.deny("users", &[2]);
+
+    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+
+    assert_eq!(redacted, 1, "user 2's row should be redacted");
+    assert_eq!(result.authorized_count(), 1);
+
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert_eq!(authorized[0].get_id("u"), Some(1));
+    assert_eq!(authorized[0].get_type("u"), Some("User"));
 }
 
 /// Deep test: Verify that column selection with traversal maintains proper
