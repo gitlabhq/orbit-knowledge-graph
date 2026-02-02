@@ -559,29 +559,30 @@ Different query types get different SQL patterns. Traversals become join chains.
 # Step 6: Enforce Return
 
 ```rust {8}
-pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<ParameterizedQuery> {
-    let value = validate_json(json_input)?;
-    validate_ontology(&value, ontology)?;
-    let input: Input = serde_json::from_value(value)?;
-    validate::validate(&input, ontology)?;
-    let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input)?;
-    let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx)?;
-    codegen(&node, result_context)
+fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL> {
+    let value = validate_json(json)?;            // JSON structure ok?
+    validate_ontology(&value, ontology)?;        // entities exist?
+    let input = parse(value)?;                   // JSON → typed struct
+    validate(&input, ontology)?;                 // references valid?
+    let input = normalize(input, ontology);      // canonicalize
+    let mut ast = lower(&input)?;                // build SQL AST
+    let ctx = enforce_return(&mut ast, &input)?; // for redaction
+    apply_security(&mut ast, ctx)?;              // tenant isolation
+    codegen(&ast, ctx)                           // AST → SQL
 }
 ```
 
-<v-click>
+<v-clicks>
 
-Adds mandatory columns: `_gkg_u_id`, `_gkg_u_type`
+- Walk the AST, find all SELECT clauses
+- For each node in the query, inject `_gkg_{node}_id` and `_gkg_{node}_type`
+- Server extracts a list of tuples like `[(102, "User"), (103, "Project")]` to check permissions
+- **This works because the query is an AST - we can manipulate it with code!**
 
-These enable post-query redaction based on user permissions.
-
-</v-click>
+</v-clicks>
 
 <!--
-The server needs to know which rows contain which entities so it can redact results the user shouldn't see. This step adds hidden ID and type columns for every node in the query.
+We walk the AST and inject hidden columns. The server reads these after the query runs to figure out which rows to redact. You can't do this with string concatenation.
 -->
 
 ---
