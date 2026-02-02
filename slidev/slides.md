@@ -641,9 +641,11 @@ Final step: walk the AST and emit SQL strings.
 
 # Step 8: Codegen
 
-<div class="flex items-center justify-center gap-4 h-[80%]">
+<div class="flex items-center justify-center gap-3 h-[85%]">
 
-<div class="text-[0.35rem] leading-tight">
+<div>
+<div class="text-xs font-bold mb-1 text-center">AST</div>
+<div class="text-[0.3rem] leading-tight text-left">
 
 ```rust
 Query {
@@ -665,42 +667,55 @@ Query {
 ```
 
 </div>
+</div>
 
-<div v-click="1" class="text-2xl">→</div>
+<div v-click="1" class="text-xl">→</div>
 
-<div v-click="1" class="text-[0.35rem] leading-tight">
+<div v-click="1">
+<div class="text-xs font-bold mb-1 text-center">codegen()</div>
+<div class="text-[0.25rem] leading-tight text-left">
 
 ```rust
-// emit_query
-parts.push(format!(
-  "SELECT {}",
-  select_items.join(", ")
-));
-parts.push(format!(
-  "FROM {}", from.sql
-));
-parts.push(format!(
-  "WHERE {}", where_parts.join(" AND ")
-));
-parts.push(format!(
-  "LIMIT {}", limit
-));
-parts.join("\n")
+let select_items: Vec<_> = q.select
+    .iter()
+    .map(|sel| {
+        let expr = self.emit_expr(&sel.expr);
+        match &sel.alias {
+            Some(a) => format!("{expr} AS {a}"),
+            None => expr,
+        }
+    }).collect();
+parts.push(format!("SELECT {}", 
+    select_items.join(", ")));
+parts.push(format!("FROM {}", from.sql));
+if !where_parts.is_empty() {
+    parts.push(format!("WHERE {}", 
+        where_parts.join(" AND ")));
+}
 ```
 
 </div>
+</div>
 
-<div v-click="2" class="text-2xl">→</div>
+<div v-click="2" class="text-xl">→</div>
 
-<div v-click="2" class="text-[0.4rem] leading-tight">
+<div v-click="2">
+<div class="text-xs font-bold mb-1 text-center">Parameterized SQL</div>
+<div class="text-[0.3rem] leading-tight text-left">
 
 ```sql
-SELECT u.name AS u_name
+SELECT 
+  u.name AS u_name,
+  u.id AS _gkg_u_id,
+  'User' AS _gkg_u_type
 FROM gl_user AS u
 WHERE u.id = {p0:Int64}
+  AND startsWith(
+    u.traversal_path, '1/2/')
 LIMIT 10
 ```
 
+</div>
 </div>
 
 </div>
