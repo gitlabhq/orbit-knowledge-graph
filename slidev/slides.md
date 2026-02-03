@@ -1112,7 +1112,45 @@ pub async fn execute(&self, result: QueryResult, ...) {
 
 # Performance
 
-<!-- Performance metrics and benchmarks to be added -->
+<style scoped>
+table { font-size: 0.7em; }
+th { font-weight: bold !important; }
+.highlight { background-color: rgba(34, 197, 94, 0.2); font-weight: bold; }
+</style>
+
+**Simulator Run** — 29 queries, 11M nodes + 100M edges, ~954 MiB memory limit
+
+<div class="grid grid-cols-2 gap-6">
+<div>
+
+| **Metric** | **Value** |
+|--------|-------|
+| Success rate | 89.7% (26/29) |
+| Total time | 4,614 ms |
+| <span class="highlight">Mean</span> | <span class="highlight">159 ms</span> |
+| <span class="highlight">Median</span> | <span class="highlight">26 ms</span> |
+| Min | 8 ms |
+| Max | 1,389 ms |
+
+</div>
+<div>
+
+| **Slowest Queries** | **Time** |
+|-----------------|------|
+| High weight work items | 1,389 ms |
+| Confidential work items | 84 ms |
+| Critical vulnerabilities | 66 ms |
+| Pipeline success rate | 61 ms |
+| MR reviewers per project | 53 ms |
+
+</div>
+</div>
+
+**3 failures** (MEMORY_LIMIT_EXCEEDED): Shortest path CTE, Vulnerabilities→MRs join, Long-running pipelines
+
+<!--
+These are results from the simulator running against a 100M edge synthetic graph. Memory limit failures indicate queries that need optimization or sampling strategies. The median of 26ms is encouraging for interactive use cases.
+-->
 
 ---
 
@@ -1178,5 +1216,106 @@ generation:
 </div>
 
 **Workflow**: `generate` → `load` → `evaluate` (100M edge scale test)
+
+---
+
+# Appendix: Probabilistic Aggregates
+
+**Problem**: Redaction filters rows *after* aggregation → leaks counts of inaccessible data
+
+**Solution**: Sample + redact *before* aggregation
+
+<div class="grid grid-cols-2 gap-4 mt-4">
+<div>
+
+**Current (leaky)**
+
+```sql
+SELECT u.id, COUNT(mr.id) as mr_count
+FROM users u
+JOIN edges e ON ...
+JOIN merge_requests mr ON ...
+GROUP BY u.id
+-- Redaction happens AFTER count
+```
+
+</div>
+<div>
+
+**Proposed (secure)**
+
+```sql
+SELECT u.id, 
+  COUNT(mr.id) * (1.0 / 0.1) as mr_count_approx
+FROM users u
+JOIN edges e ON ...
+JOIN merge_requests mr ON ...
+WHERE cityHash64(mr.id) % 100 < 10  -- 10% sample
+  AND mr.id IN (accessible_ids)      -- redact first
+GROUP BY u.id
+```
+
+</div>
+</div>
+
+<div class="mt-4 text-sm text-gray-500">
+
+- Bounded random sample (e.g., 10%) before redaction gives ~90% confidence interval
+- Statistical guarantees vs exact counts - acceptable for dashboards/analytics
+- ClickHouse `cityHash64` provides deterministic, uniform sampling
+
+</div>
+
+<!--
+The key insight is that we sample BEFORE redaction, not after. This means inaccessible rows are filtered out before they can contribute to aggregates. The tradeoff is approximate results, but for large datasets this is often acceptable.
+-->
+
+---
+
+# Appendix: JSON Schema Architecture
+
+**Goal**: Single source of truth schema that powers validation, agents, and documentation
+
+<div class="flex flex-col gap-4 mt-4">
+
+```mermaid
+graph TD
+    A[Super Schema] --> B[Ontology: Entities + Relationships]
+    A --> C[Validation: Semantic Rules]
+    A --> D[Security: Limits + Constraints]
+    
+    B --> E[Agent Subschema]
+    C --> E
+    D --> E
+    
+    E --> F[LLM Context Window]
+```
+
+</div>
+
+<div class="grid grid-cols-2 gap-4 mt-4 text-sm">
+<div>
+
+**Super Schema includes**
+- Entity types + properties (from ontology)
+- Relationship types + cardinality
+- Validation rules (required fields, node refs)
+- Security constraints (max_hops, limits)
+
+</div>
+<div>
+
+**Derived Subschemas**
+- Per-agent: only entities they can access
+- Per-query-type: traversal vs aggregation
+- Compact: fit in LLM context window
+- Versioned: track schema evolution
+
+</div>
+</div>
+
+<!--
+The super schema extends the current ontology/schema.json to include validation rules from validate.rs. From this, we can derive focused subschemas for specific agent use cases - smaller, targeted schemas that fit in context windows and only expose what the agent needs.
+-->
 
 ---

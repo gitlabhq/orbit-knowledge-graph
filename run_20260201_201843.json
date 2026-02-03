@@ -1,0 +1,2200 @@
+{
+  "run_id": "run_20260201_201843",
+  "started_at": "2026-02-01T20:18:43.834684Z",
+  "completed_at": "2026-02-01T20:18:49.859627Z",
+  "config": {
+    "clickhouse_url": "http://localhost:8123",
+    "iterations": 1,
+    "sample_size": 100
+  },
+  "queries": [
+    {
+      "query_name": "Pipeline success rate by project",
+      "executed_at": "2026-02-01T20:18:43.895255Z",
+      "original_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "pipe",
+            "entity": "Pipeline",
+            "filters": {
+              "status": {
+                "op": "in",
+                "value": [
+                  "success",
+                  "failed"
+                ]
+              }
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "pipe",
+            "to": "p"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "pipe",
+            "group_by": "p",
+            "alias": "total_pipelines"
+          }
+        ],
+        "limit": 20
+      },
+      "substituted_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "pipe",
+            "entity": "Pipeline",
+            "filters": {
+              "status": {
+                "op": "in",
+                "value": [
+                  "success",
+                  "failed"
+                ]
+              }
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "pipe",
+            "to": "p"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "pipe",
+            "group_by": "p",
+            "alias": "total_pipelines"
+          }
+        ],
+        "limit": 20
+      },
+      "sql": "SELECT p.id AS p_id, COUNT(pipe.id) AS total_pipelines, p.id AS _gkg_p_id, {p0:String} AS _gkg_p_type FROM gl_pipeline AS pipe INNER JOIN gl_edges AS e0 ON ((pipe.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(pipe.traversal_path, {p2:String}) AND startsWith(p.traversal_path, {p3:String})) AND pipe.status IN ({p4:String}, {p5:String})) GROUP BY p.id LIMIT 20",
+      "final_sql": "SELECT p.id AS p_id, COUNT(pipe.id) AS total_pipelines, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type FROM gl_pipeline AS pipe INNER JOIN gl_edges AS e0 ON ((pipe.id = e0.source_id) AND (e0.relationship_kind = 'IN_PROJECT')) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(pipe.traversal_path, '1/77/78/79/81/') AND startsWith(p.traversal_path, '1/77/78/79/81/')) AND pipe.status IN ('success', 'failed')) GROUP BY p.id LIMIT 20",
+      "params": {
+        "p3": "1/77/78/79/81/",
+        "p0": "Project",
+        "p5": "failed",
+        "p4": "success",
+        "type_e0": "IN_PROJECT",
+        "p2": "1/77/78/79/81/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 60.529334,
+        "success": true,
+        "row_count": 11
+      }
+    },
+    {
+      "query_name": "Bot accounts",
+      "executed_at": "2026-02-01T20:18:43.905255Z",
+      "original_query": {
+        "query_type": "search",
+        "node": {
+          "id": "u",
+          "entity": "User",
+          "filters": {
+            "user_type": {
+              "op": "in",
+              "value": [
+                "project_bot",
+                "service_account",
+                "automation_bot"
+              ]
+            }
+          }
+        },
+        "limit": 30,
+        "order_by": {
+          "node": "u",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "search",
+        "node": {
+          "id": "u",
+          "entity": "User",
+          "filters": {
+            "user_type": {
+              "op": "in",
+              "value": [
+                "project_bot",
+                "service_account",
+                "automation_bot"
+              ]
+            }
+          }
+        },
+        "limit": 30,
+        "order_by": {
+          "node": "u",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT u.id AS u_id, u.id AS _gkg_u_id, {p0:String} AS _gkg_u_type FROM gl_users AS u WHERE u.user_type IN ({p1:String}, {p2:String}, {p3:String}) ORDER BY u.created_at DESC LIMIT 30",
+      "final_sql": "SELECT u.id AS u_id, u.id AS _gkg_u_id, 'User' AS _gkg_u_type FROM gl_users AS u WHERE u.user_type IN ('project_bot', 'service_account', 'automation_bot') ORDER BY u.created_at DESC LIMIT 30",
+      "params": {
+        "p2": "service_account",
+        "p1": "project_bot",
+        "p3": "automation_bot",
+        "p0": "User"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 9.981125,
+        "success": true,
+        "row_count": 30
+      }
+    },
+    {
+      "query_name": "Shortest path between two projects",
+      "executed_at": "2026-02-01T20:18:44.170361Z",
+      "original_query": {
+        "query_type": "path_finding",
+        "nodes": [
+          {
+            "id": "start",
+            "entity": "Project",
+            "node_ids": "$sample"
+          },
+          {
+            "id": "end",
+            "entity": "Project",
+            "node_ids": "$sample"
+          }
+        ],
+        "path": {
+          "type": "shortest",
+          "from": "start",
+          "to": "end",
+          "max_depth": 3
+        }
+      },
+      "substituted_query": {
+        "query_type": "path_finding",
+        "nodes": [
+          {
+            "id": "start",
+            "entity": "Project",
+            "node_ids": [
+              12682
+            ]
+          },
+          {
+            "id": "end",
+            "entity": "Project",
+            "node_ids": [
+              12725
+            ]
+          }
+        ],
+        "path": {
+          "type": "shortest",
+          "from": "start",
+          "to": "end",
+          "max_depth": 3
+        }
+      },
+      "sql": "WITH RECURSIVE paths AS (SELECT start.id AS node_id, array(start.id) AS path_ids, array(tuple(start.id, {p0:String})) AS path, arrayResize(array(tuple({p1:String}, {p2:Int64}, {p3:String}, {p4:Int64}, {p5:String})), {p6:Int64}) AS edges, {p7:Int64} AS depth FROM gl_projects AS start WHERE (startsWith(start.traversal_path, {p8:String}) AND (start.id = {p9:Int64})) UNION ALL SELECT e.target_id AS node_id, arrayConcat(p.path_ids, array(e.target_id)) AS path_ids, arrayConcat(p.path, array(tuple(e.target_id, e.target_kind))) AS path, arrayConcat(p.edges, array(tuple(e.relationship_kind, e.source_id, e.source_kind, e.target_id, e.target_kind))) AS edges, (p.depth + {p10:Int64}) AS depth FROM paths AS p INNER JOIN gl_edges AS e ON (p.node_id = e.source_id) WHERE (((p.depth < {p11:Int64}) AND (NOT has(p.path_ids, e.target_id))) AND (NOT has(array({p12:Int64}), p.node_id))) UNION ALL SELECT e.source_id AS node_id, arrayConcat(p.path_ids, array(e.source_id)) AS path_ids, arrayConcat(p.path, array(tuple(e.source_id, e.source_kind))) AS path, arrayConcat(p.edges, array(tuple(e.relationship_kind, e.source_id, e.source_kind, e.target_id, e.target_kind))) AS edges, (p.depth + {p13:Int64}) AS depth FROM paths AS p INNER JOIN gl_edges AS e ON (p.node_id = e.target_id) WHERE (((p.depth < {p14:Int64}) AND (NOT has(p.path_ids, e.source_id))) AND (NOT has(array({p15:Int64}), p.node_id))) LIMIT 1000) SELECT paths.path AS _gkg_path, paths.edges AS _gkg_edges, paths.depth AS depth FROM paths AS paths INNER JOIN gl_projects AS end ON (paths.node_id = end.id) WHERE (startsWith(end.traversal_path, {p16:String}) AND (end.id = {p17:Int64})) ORDER BY paths.depth ASC LIMIT 30",
+      "final_sql": "WITH RECURSIVE paths AS (SELECT start.id AS node_id, array(start.id) AS path_ids, array(tuple(start.id, 'Project')) AS path, arrayResize(array(tuple('', 0, '', 0, '')), 0) AS edges, 0 AS depth FROM gl_projects AS start WHERE (startsWith(start.traversal_path, '1/272/') AND (start.id = 12682)) UNION ALL SELECT e.target_id AS node_id, arrayConcat(p.path_ids, array(e.target_id)) AS path_ids, arrayConcat(p.path, array(tuple(e.target_id, e.target_kind))) AS path, arrayConcat(p.edges, array(tuple(e.relationship_kind, e.source_id, e.source_kind, e.target_id, e.target_kind))) AS edges, (p.depth + 1) AS depth FROM paths AS p INNER JOIN gl_edges AS e ON (p.node_id = e.source_id) WHERE (((p.depth < 3) AND (NOT has(p.path_ids, e.target_id))) AND (NOT has(array(12725), p.node_id))) UNION ALL SELECT e.source_id AS node_id, arrayConcat(p.path_ids, array(e.source_id)) AS path_ids, arrayConcat(p.path, array(tuple(e.source_id, e.source_kind))) AS path, arrayConcat(p.edges, array(tuple(e.relationship_kind, e.source_id, e.source_kind, e.target_id, e.target_kind))) AS edges, (p.depth + 1) AS depth FROM paths AS p INNER JOIN gl_edges AS e ON (p.node_id = e.target_id) WHERE (((p.depth < 3) AND (NOT has(p.path_ids, e.source_id))) AND (NOT has(array(12725), p.node_id))) LIMIT 1000) SELECT paths.path AS _gkg_path, paths.edges AS _gkg_edges, paths.depth AS depth FROM paths AS paths INNER JOIN gl_projects AS end ON (paths.node_id = end.id) WHERE (startsWith(end.traversal_path, '1/272/') AND (end.id = 12725)) ORDER BY paths.depth ASC LIMIT 30",
+      "params": {
+        "p16": "1/272/",
+        "p12": 12725,
+        "p8": "1/272/",
+        "p9": 12682,
+        "p5": "",
+        "p4": 0,
+        "p7": 0,
+        "p1": "",
+        "p3": "",
+        "p14": 3,
+        "p13": 1,
+        "p6": 0,
+        "p0": "Project",
+        "p11": 3,
+        "p17": 12725,
+        "p15": 12725,
+        "p10": 1,
+        "p2": 0
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 265.098375,
+        "success": false
+      },
+      "error": {
+        "message": "Execution failed: bad response: Code: 241. DB::Exception: Query memory limit exceeded: would use 956.08 MiB (attempt to allocate chunk of 4.09 MiB), maximum: 953.67 MiB: While executing MergeTreeSelect(pool: ReadPool, algorithm: Thread): While executing RecursiveCTESource. (MEMORY_LIMIT_EXCEEDED) (version 25.12.4.35 (official build))",
+        "category": "MEMORY_LIMIT",
+        "code": 241
+      }
+    },
+    {
+      "query_name": "Projects in a group",
+      "executed_at": "2026-02-01T20:18:44.717492Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "p",
+            "entity": "Project",
+            "filters": {
+              "archived": false
+            }
+          },
+          {
+            "id": "g",
+            "entity": "Group",
+            "node_ids": "$sample"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_GROUP",
+            "from": "p",
+            "to": "g"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "p",
+          "property": "last_activity_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "p",
+            "entity": "Project",
+            "filters": {
+              "archived": false
+            }
+          },
+          {
+            "id": "g",
+            "entity": "Group",
+            "node_ids": [
+              279
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_GROUP",
+            "from": "p",
+            "to": "g"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "p",
+          "property": "last_activity_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT p.id AS p_id, g.id AS g_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, p.id AS _gkg_p_id, {p0:String} AS _gkg_p_type, g.id AS _gkg_g_id, {p1:String} AS _gkg_g_type FROM gl_projects AS p INNER JOIN gl_edges AS e0 ON ((p.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_groups AS g ON (e0.target_id = g.id) WHERE ((startsWith(p.traversal_path, {p3:String}) AND startsWith(g.traversal_path, {p4:String})) AND ((p.archived = {p5:Bool}) AND (g.id = {p6:Int64}))) ORDER BY p.last_activity_at DESC LIMIT 30",
+      "final_sql": "SELECT p.id AS p_id, g.id AS g_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type, g.id AS _gkg_g_id, 'Group' AS _gkg_g_type FROM gl_projects AS p INNER JOIN gl_edges AS e0 ON ((p.id = e0.source_id) AND (e0.relationship_kind = 'IN_GROUP')) INNER JOIN gl_groups AS g ON (e0.target_id = g.id) WHERE ((startsWith(p.traversal_path, '1/272/273/277/279/') AND startsWith(g.traversal_path, '1/272/273/277/279/')) AND ((p.archived = 0) AND (g.id = 279))) ORDER BY p.last_activity_at DESC LIMIT 30",
+      "params": {
+        "p3": "1/272/273/277/279/",
+        "p4": "1/272/273/277/279/",
+        "type_e0": "IN_GROUP",
+        "p6": 279,
+        "p5": false,
+        "p0": "Project",
+        "p1": "Group"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 45.98141699999999,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "Unresolved high-severity vulns by report type",
+      "executed_at": "2026-02-01T20:18:44.732033Z",
+      "original_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "v",
+            "entity": "Vulnerability",
+            "filters": {
+              "severity": {
+                "op": "in",
+                "value": [
+                  "high",
+                  "critical"
+                ]
+              },
+              "state": {
+                "op": "in",
+                "value": [
+                  "detected",
+                  "confirmed"
+                ]
+              }
+            }
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "v",
+            "alias": "vuln_count"
+          }
+        ],
+        "limit": 10
+      },
+      "substituted_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "v",
+            "entity": "Vulnerability",
+            "filters": {
+              "severity": {
+                "op": "in",
+                "value": [
+                  "high",
+                  "critical"
+                ]
+              },
+              "state": {
+                "op": "in",
+                "value": [
+                  "detected",
+                  "confirmed"
+                ]
+              }
+            }
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "v",
+            "alias": "vuln_count"
+          }
+        ],
+        "limit": 10
+      },
+      "sql": "SELECT COUNT(v.id) AS vuln_count FROM gl_vulnerability AS v WHERE (startsWith(v.traversal_path, {p0:String}) AND (v.severity IN ({p1:String}, {p2:String}) AND v.state IN ({p3:String}, {p4:String}))) LIMIT 10",
+      "final_sql": "SELECT COUNT(v.id) AS vuln_count FROM gl_vulnerability AS v WHERE (startsWith(v.traversal_path, '1/47/55/59/60/') AND (v.severity IN ('high', 'critical') AND v.state IN ('detected', 'confirmed'))) LIMIT 10",
+      "params": {
+        "p1": "high",
+        "p3": "detected",
+        "p0": "1/47/55/59/60/",
+        "p2": "critical",
+        "p4": "confirmed"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 14.520292000000001,
+        "success": true,
+        "row_count": 1
+      }
+    },
+    {
+      "query_name": "Failed pipelines recently",
+      "executed_at": "2026-02-01T20:18:44.815768Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "pipe",
+            "entity": "Pipeline",
+            "filters": {
+              "status": "failed"
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "pipe",
+            "to": "p"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "pipe",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "pipe",
+            "entity": "Pipeline",
+            "filters": {
+              "status": "failed"
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "pipe",
+            "to": "p"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "pipe",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT pipe.id AS pipe_id, p.id AS p_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, pipe.id AS _gkg_pipe_id, {p0:String} AS _gkg_pipe_type, p.id AS _gkg_p_id, {p1:String} AS _gkg_p_type FROM gl_pipeline AS pipe INNER JOIN gl_edges AS e0 ON ((pipe.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(pipe.traversal_path, {p3:String}) AND startsWith(p.traversal_path, {p4:String})) AND (pipe.status = {p5:String})) ORDER BY pipe.created_at DESC LIMIT 30",
+      "final_sql": "SELECT pipe.id AS pipe_id, p.id AS p_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, pipe.id AS _gkg_pipe_id, 'Pipeline' AS _gkg_pipe_type, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type FROM gl_pipeline AS pipe INNER JOIN gl_edges AS e0 ON ((pipe.id = e0.source_id) AND (e0.relationship_kind = 'IN_PROJECT')) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(pipe.traversal_path, '1/122/123/') AND startsWith(p.traversal_path, '1/122/123/')) AND (pipe.status = 'failed')) ORDER BY pipe.created_at DESC LIMIT 30",
+      "params": {
+        "p1": "Project",
+        "p5": "failed",
+        "p0": "Pipeline",
+        "p4": "1/122/123/",
+        "type_e0": "IN_PROJECT",
+        "p3": "1/122/123/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 83.719083,
+        "success": true,
+        "row_count": 30
+      }
+    },
+    {
+      "query_name": "Confidential work items",
+      "executed_at": "2026-02-01T20:18:44.882093Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "confidential": true,
+              "state": "opened"
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "wi",
+            "to": "p"
+          }
+        ],
+        "limit": 20
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "confidential": true,
+              "state": "opened"
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "wi",
+            "to": "p"
+          }
+        ],
+        "limit": 20
+      },
+      "sql": "SELECT wi.id AS wi_id, p.id AS p_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, wi.id AS _gkg_wi_id, {p0:String} AS _gkg_wi_type, p.id AS _gkg_p_id, {p1:String} AS _gkg_p_type FROM gl_work_items AS wi INNER JOIN gl_edges AS e0 ON ((wi.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(wi.traversal_path, {p3:String}) AND startsWith(p.traversal_path, {p4:String})) AND ((wi.state = {p5:String}) AND (wi.confidential = {p6:Bool}))) LIMIT 20",
+      "final_sql": "SELECT wi.id AS wi_id, p.id AS p_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, wi.id AS _gkg_wi_id, 'WorkItem' AS _gkg_wi_type, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type FROM gl_work_items AS wi INNER JOIN gl_edges AS e0 ON ((wi.id = e0.source_id) AND (e0.relationship_kind = 'IN_PROJECT')) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(wi.traversal_path, '1/197/205/206/208/') AND startsWith(p.traversal_path, '1/197/205/206/208/')) AND ((wi.state = 'opened') AND (wi.confidential = 1))) LIMIT 20",
+      "params": {
+        "p5": "opened",
+        "p1": "Project",
+        "p3": "1/197/205/206/208/",
+        "p4": "1/197/205/206/208/",
+        "type_e0": "IN_PROJECT",
+        "p6": true,
+        "p0": "WorkItem"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 66.30883399999999,
+        "success": true,
+        "row_count": 20
+      }
+    },
+    {
+      "query_name": "Critical vulnerabilities detected",
+      "executed_at": "2026-02-01T20:18:44.920800Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "v",
+            "entity": "Vulnerability",
+            "filters": {
+              "severity": "critical",
+              "state": "detected"
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "v",
+            "to": "p"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "v",
+          "property": "detected_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "v",
+            "entity": "Vulnerability",
+            "filters": {
+              "severity": "critical",
+              "state": "detected"
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "v",
+            "to": "p"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "v",
+          "property": "detected_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT v.id AS v_id, p.id AS p_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, v.id AS _gkg_v_id, {p0:String} AS _gkg_v_type, p.id AS _gkg_p_id, {p1:String} AS _gkg_p_type FROM gl_vulnerability AS v INNER JOIN gl_edges AS e0 ON ((v.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(v.traversal_path, {p3:String}) AND startsWith(p.traversal_path, {p4:String})) AND ((v.state = {p5:String}) AND (v.severity = {p6:String}))) ORDER BY v.detected_at DESC LIMIT 30",
+      "final_sql": "SELECT v.id AS v_id, p.id AS p_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, v.id AS _gkg_v_id, 'Vulnerability' AS _gkg_v_type, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type FROM gl_vulnerability AS v INNER JOIN gl_edges AS e0 ON ((v.id = e0.source_id) AND (e0.relationship_kind = 'IN_PROJECT')) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(v.traversal_path, '1/2/10/11/12/') AND startsWith(p.traversal_path, '1/2/10/11/12/')) AND ((v.state = 'detected') AND (v.severity = 'critical'))) ORDER BY v.detected_at DESC LIMIT 30",
+      "params": {
+        "p1": "Project",
+        "p4": "1/2/10/11/12/",
+        "p3": "1/2/10/11/12/",
+        "p5": "detected",
+        "type_e0": "IN_PROJECT",
+        "p0": "Vulnerability",
+        "p6": "critical"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 38.692041,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "Notes (comments) on MRs by user",
+      "executed_at": "2026-02-01T20:18:44.946910Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "note",
+            "entity": "Note",
+            "filters": {
+              "system": false,
+              "noteable_type": "MergeRequest"
+            }
+          },
+          {
+            "id": "author",
+            "entity": "User",
+            "node_ids": "$sample"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "AUTHORED",
+            "from": "author",
+            "to": "note"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "note",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "note",
+            "entity": "Note",
+            "filters": {
+              "system": false,
+              "noteable_type": "MergeRequest"
+            }
+          },
+          {
+            "id": "author",
+            "entity": "User",
+            "node_ids": [
+              654
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "type": "AUTHORED",
+            "from": "author",
+            "to": "note"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "note",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT note.id AS note_id, author.id AS author_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, note.id AS _gkg_note_id, {p0:String} AS _gkg_note_type, author.id AS _gkg_author_id, {p1:String} AS _gkg_author_type FROM gl_users AS author INNER JOIN gl_edges AS e0 ON ((author.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_notes AS note ON (e0.target_id = note.id) WHERE (startsWith(note.traversal_path, {p3:String}) AND (((note.system = {p4:Bool}) AND (note.noteable_type = {p5:String})) AND (author.id = {p6:Int64}))) ORDER BY note.created_at DESC LIMIT 30",
+      "final_sql": "SELECT note.id AS note_id, author.id AS author_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, note.id AS _gkg_note_id, 'Note' AS _gkg_note_type, author.id AS _gkg_author_id, 'User' AS _gkg_author_type FROM gl_users AS author INNER JOIN gl_edges AS e0 ON ((author.id = e0.source_id) AND (e0.relationship_kind = 'AUTHORED')) INNER JOIN gl_notes AS note ON (e0.target_id = note.id) WHERE (startsWith(note.traversal_path, '1/32/33/34/35/') AND (((note.system = 0) AND (note.noteable_type = 'MergeRequest')) AND (author.id = 654))) ORDER BY note.created_at DESC LIMIT 30",
+      "params": {
+        "p6": 654,
+        "p0": "Note",
+        "p5": "MergeRequest",
+        "p1": "User",
+        "p3": "1/32/33/34/35/",
+        "p4": false,
+        "type_e0": "AUTHORED"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 26.094459,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "Public projects",
+      "executed_at": "2026-02-01T20:18:44.956178Z",
+      "original_query": {
+        "query_type": "search",
+        "node": {
+          "id": "p",
+          "entity": "Project",
+          "filters": {
+            "visibility_level": "public",
+            "archived": false
+          }
+        },
+        "limit": 20,
+        "order_by": {
+          "node": "p",
+          "property": "star_count",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "search",
+        "node": {
+          "id": "p",
+          "entity": "Project",
+          "filters": {
+            "visibility_level": "public",
+            "archived": false
+          }
+        },
+        "limit": 20,
+        "order_by": {
+          "node": "p",
+          "property": "star_count",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT p.id AS p_id, p.id AS _gkg_p_id, {p0:String} AS _gkg_p_type FROM gl_projects AS p WHERE (startsWith(p.traversal_path, {p1:String}) AND ((p.archived = {p2:Bool}) AND (p.visibility_level = {p3:String}))) ORDER BY p.star_count DESC LIMIT 20",
+      "final_sql": "SELECT p.id AS p_id, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type FROM gl_projects AS p WHERE (startsWith(p.traversal_path, '1/77/85/86/87/') AND ((p.archived = 0) AND (p.visibility_level = 'public'))) ORDER BY p.star_count DESC LIMIT 20",
+      "params": {
+        "p0": "Project",
+        "p2": false,
+        "p3": "public",
+        "p1": "1/77/85/86/87/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 9.249208,
+        "success": true,
+        "row_count": 6
+      }
+    },
+    {
+      "query_name": "Pipeline triggered by MR",
+      "executed_at": "2026-02-01T20:18:44.970713Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "pipe",
+            "entity": "Pipeline",
+            "filters": {
+              "source": "merge_request_event"
+            }
+          },
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "node_ids": "$sample"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "TRIGGERED",
+            "from": "mr",
+            "to": "pipe"
+          }
+        ],
+        "limit": 10,
+        "order_by": {
+          "node": "pipe",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "pipe",
+            "entity": "Pipeline",
+            "filters": {
+              "source": "merge_request_event"
+            }
+          },
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "node_ids": [
+              497602
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "type": "TRIGGERED",
+            "from": "mr",
+            "to": "pipe"
+          }
+        ],
+        "limit": 10,
+        "order_by": {
+          "node": "pipe",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT pipe.id AS pipe_id, mr.id AS mr_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, pipe.id AS _gkg_pipe_id, {p0:String} AS _gkg_pipe_type, mr.id AS _gkg_mr_id, {p1:String} AS _gkg_mr_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_pipeline AS pipe ON (e0.target_id = pipe.id) WHERE ((startsWith(mr.traversal_path, {p3:String}) AND startsWith(pipe.traversal_path, {p4:String})) AND ((pipe.source = {p5:String}) AND (mr.id = {p6:Int64}))) ORDER BY pipe.created_at DESC LIMIT 10",
+      "final_sql": "SELECT pipe.id AS pipe_id, mr.id AS mr_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, pipe.id AS _gkg_pipe_id, 'Pipeline' AS _gkg_pipe_type, mr.id AS _gkg_mr_id, 'MergeRequest' AS _gkg_mr_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = 'TRIGGERED')) INNER JOIN gl_pipeline AS pipe ON (e0.target_id = pipe.id) WHERE ((startsWith(mr.traversal_path, '1/152/160/161/163/') AND startsWith(pipe.traversal_path, '1/152/160/161/163/')) AND ((pipe.source = 'merge_request_event') AND (mr.id = 497602))) ORDER BY pipe.created_at DESC LIMIT 10",
+      "params": {
+        "p0": "Pipeline",
+        "p5": "merge_request_event",
+        "p3": "1/152/160/161/163/",
+        "p1": "MergeRequest",
+        "p6": 497602,
+        "type_e0": "TRIGGERED",
+        "p4": "1/152/160/161/163/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 14.527584,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "Open merge requests in a project",
+      "executed_at": "2026-02-01T20:18:44.986128Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "opened"
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project",
+            "node_ids": "$sample"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "mr",
+            "to": "p"
+          }
+        ],
+        "limit": 25,
+        "order_by": {
+          "node": "mr",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "opened"
+            }
+          },
+          {
+            "id": "p",
+            "entity": "Project",
+            "node_ids": [
+              11166
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "mr",
+            "to": "p"
+          }
+        ],
+        "limit": 25,
+        "order_by": {
+          "node": "mr",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT mr.id AS mr_id, p.id AS p_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, mr.id AS _gkg_mr_id, {p0:String} AS _gkg_mr_type, p.id AS _gkg_p_id, {p1:String} AS _gkg_p_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(mr.traversal_path, {p3:String}) AND startsWith(p.traversal_path, {p4:String})) AND ((mr.state = {p5:String}) AND (p.id = {p6:Int64}))) ORDER BY mr.created_at DESC LIMIT 25",
+      "final_sql": "SELECT mr.id AS mr_id, p.id AS p_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, mr.id AS _gkg_mr_id, 'MergeRequest' AS _gkg_mr_type, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = 'IN_PROJECT')) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE ((startsWith(mr.traversal_path, '1/122/123/') AND startsWith(p.traversal_path, '1/122/123/')) AND ((mr.state = 'opened') AND (p.id = 11166))) ORDER BY mr.created_at DESC LIMIT 25",
+      "params": {
+        "p5": "opened",
+        "p6": 11166,
+        "type_e0": "IN_PROJECT",
+        "p0": "MergeRequest",
+        "p1": "Project",
+        "p4": "1/122/123/",
+        "p3": "1/122/123/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 15.401583,
+        "success": true,
+        "row_count": 25
+      }
+    },
+    {
+      "query_name": "Overdue work items",
+      "executed_at": "2026-02-01T20:18:44.995207Z",
+      "original_query": {
+        "query_type": "search",
+        "node": {
+          "id": "wi",
+          "entity": "WorkItem",
+          "filters": {
+            "state": "opened"
+          }
+        },
+        "limit": 30,
+        "order_by": {
+          "node": "wi",
+          "property": "due_date",
+          "direction": "ASC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "search",
+        "node": {
+          "id": "wi",
+          "entity": "WorkItem",
+          "filters": {
+            "state": "opened"
+          }
+        },
+        "limit": 30,
+        "order_by": {
+          "node": "wi",
+          "property": "due_date",
+          "direction": "ASC"
+        }
+      },
+      "sql": "SELECT wi.id AS wi_id, wi.id AS _gkg_wi_id, {p0:String} AS _gkg_wi_type FROM gl_work_items AS wi WHERE (startsWith(wi.traversal_path, {p1:String}) AND (wi.state = {p2:String})) ORDER BY wi.due_date ASC LIMIT 30",
+      "final_sql": "SELECT wi.id AS wi_id, wi.id AS _gkg_wi_id, 'WorkItem' AS _gkg_wi_type FROM gl_work_items AS wi WHERE (startsWith(wi.traversal_path, '1/62/63/64/65/') AND (wi.state = 'opened')) ORDER BY wi.due_date ASC LIMIT 30",
+      "params": {
+        "p0": "WorkItem",
+        "p1": "1/62/63/64/65/",
+        "p2": "opened"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 9.067791,
+        "success": true,
+        "row_count": 30
+      }
+    },
+    {
+      "query_name": "Work items in milestone",
+      "executed_at": "2026-02-01T20:18:45.010446Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "state": "opened"
+            }
+          },
+          {
+            "id": "m",
+            "entity": "Milestone",
+            "node_ids": "$sample"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_MILESTONE",
+            "from": "wi",
+            "to": "m"
+          }
+        ],
+        "limit": 30
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "state": "opened"
+            }
+          },
+          {
+            "id": "m",
+            "entity": "Milestone",
+            "node_ids": [
+              640958
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_MILESTONE",
+            "from": "wi",
+            "to": "m"
+          }
+        ],
+        "limit": 30
+      },
+      "sql": "SELECT wi.id AS wi_id, m.id AS m_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, wi.id AS _gkg_wi_id, {p0:String} AS _gkg_wi_type, m.id AS _gkg_m_id, {p1:String} AS _gkg_m_type FROM gl_work_items AS wi INNER JOIN gl_edges AS e0 ON ((wi.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_milestones AS m ON (e0.target_id = m.id) WHERE ((startsWith(wi.traversal_path, {p3:String}) AND startsWith(m.traversal_path, {p4:String})) AND ((wi.state = {p5:String}) AND (m.id = {p6:Int64}))) LIMIT 30",
+      "final_sql": "SELECT wi.id AS wi_id, m.id AS m_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, wi.id AS _gkg_wi_id, 'WorkItem' AS _gkg_wi_type, m.id AS _gkg_m_id, 'Milestone' AS _gkg_m_type FROM gl_work_items AS wi INNER JOIN gl_edges AS e0 ON ((wi.id = e0.source_id) AND (e0.relationship_kind = 'IN_MILESTONE')) INNER JOIN gl_milestones AS m ON (e0.target_id = m.id) WHERE ((startsWith(wi.traversal_path, '1/17/25/29/') AND startsWith(m.traversal_path, '1/17/25/29/')) AND ((wi.state = 'opened') AND (m.id = 640958))) LIMIT 30",
+      "params": {
+        "type_e0": "IN_MILESTONE",
+        "p3": "1/17/25/29/",
+        "p5": "opened",
+        "p0": "WorkItem",
+        "p1": "Milestone",
+        "p6": 640958,
+        "p4": "1/17/25/29/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 15.234208,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "MRs merged by a specific user",
+      "executed_at": "2026-02-01T20:18:45.027768Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "merged"
+            }
+          },
+          {
+            "id": "merger",
+            "entity": "User",
+            "node_ids": "$sample"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "MERGED_BY",
+            "from": "mr",
+            "to": "merger"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "mr",
+          "property": "updated_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "merged"
+            }
+          },
+          {
+            "id": "merger",
+            "entity": "User",
+            "node_ids": [
+              4848
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "type": "MERGED_BY",
+            "from": "mr",
+            "to": "merger"
+          }
+        ],
+        "limit": 30,
+        "order_by": {
+          "node": "mr",
+          "property": "updated_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT mr.id AS mr_id, merger.id AS merger_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, mr.id AS _gkg_mr_id, {p0:String} AS _gkg_mr_type, merger.id AS _gkg_merger_id, {p1:String} AS _gkg_merger_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_users AS merger ON (e0.target_id = merger.id) WHERE (startsWith(mr.traversal_path, {p3:String}) AND ((mr.state = {p4:String}) AND (merger.id = {p5:Int64}))) ORDER BY mr.updated_at DESC LIMIT 30",
+      "final_sql": "SELECT mr.id AS mr_id, merger.id AS merger_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, mr.id AS _gkg_mr_id, 'MergeRequest' AS _gkg_mr_type, merger.id AS _gkg_merger_id, 'User' AS _gkg_merger_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = 'MERGED_BY')) INNER JOIN gl_users AS merger ON (e0.target_id = merger.id) WHERE (startsWith(mr.traversal_path, '1/2/10/11/12/') AND ((mr.state = 'merged') AND (merger.id = 4848))) ORDER BY mr.updated_at DESC LIMIT 30",
+      "params": {
+        "p5": 4848,
+        "p4": "merged",
+        "p1": "User",
+        "type_e0": "MERGED_BY",
+        "p0": "MergeRequest",
+        "p3": "1/2/10/11/12/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 17.312917000000002,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "Users by state",
+      "executed_at": "2026-02-01T20:18:45.035956Z",
+      "original_query": {
+        "query_type": "search",
+        "node": {
+          "id": "u",
+          "entity": "User",
+          "filters": {
+            "state": "active"
+          }
+        },
+        "limit": 20
+      },
+      "substituted_query": {
+        "query_type": "search",
+        "node": {
+          "id": "u",
+          "entity": "User",
+          "filters": {
+            "state": "active"
+          }
+        },
+        "limit": 20
+      },
+      "sql": "SELECT u.id AS u_id, u.id AS _gkg_u_id, {p0:String} AS _gkg_u_type FROM gl_users AS u WHERE (u.state = {p1:String}) LIMIT 20",
+      "final_sql": "SELECT u.id AS u_id, u.id AS _gkg_u_id, 'User' AS _gkg_u_type FROM gl_users AS u WHERE (u.state = 'active') LIMIT 20",
+      "params": {
+        "p1": "active",
+        "p0": "User"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 8.177667,
+        "success": true,
+        "row_count": 20
+      }
+    },
+    {
+      "query_name": "Count MRs per project",
+      "executed_at": "2026-02-01T20:18:45.088698Z",
+      "original_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest"
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "mr",
+            "to": "p"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "mr",
+            "group_by": "p",
+            "alias": "mr_count"
+          }
+        ],
+        "limit": 10,
+        "aggregation_sort": {
+          "agg_index": 0,
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest"
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "IN_PROJECT",
+            "from": "mr",
+            "to": "p"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "mr",
+            "group_by": "p",
+            "alias": "mr_count"
+          }
+        ],
+        "limit": 10,
+        "aggregation_sort": {
+          "agg_index": 0,
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT p.id AS p_id, COUNT(mr.id) AS mr_count, p.id AS _gkg_p_id, {p0:String} AS _gkg_p_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE (startsWith(mr.traversal_path, {p2:String}) AND startsWith(p.traversal_path, {p3:String})) GROUP BY p.id ORDER BY COUNT(mr.id) DESC LIMIT 10",
+      "final_sql": "SELECT p.id AS p_id, COUNT(mr.id) AS mr_count, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = 'IN_PROJECT')) INNER JOIN gl_projects AS p ON (e0.target_id = p.id) WHERE (startsWith(mr.traversal_path, '1/227/228/229/231/') AND startsWith(p.traversal_path, '1/227/228/229/231/')) GROUP BY p.id ORDER BY COUNT(mr.id) DESC LIMIT 10",
+      "params": {
+        "p3": "1/227/228/229/231/",
+        "p0": "Project",
+        "type_e0": "IN_PROJECT",
+        "p2": "1/227/228/229/231/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 52.737375,
+        "success": true,
+        "row_count": 8
+      }
+    },
+    {
+      "query_name": "MR reviewers per project",
+      "executed_at": "2026-02-01T20:18:45.170243Z",
+      "original_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest"
+          },
+          {
+            "id": "reviewer",
+            "entity": "User"
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "REVIEWER",
+            "from": "mr",
+            "to": "reviewer"
+          },
+          {
+            "type": "IN_PROJECT",
+            "from": "mr",
+            "to": "p"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "reviewer",
+            "group_by": "p",
+            "alias": "reviewer_count"
+          }
+        ],
+        "limit": 15
+      },
+      "substituted_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest"
+          },
+          {
+            "id": "reviewer",
+            "entity": "User"
+          },
+          {
+            "id": "p",
+            "entity": "Project"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "REVIEWER",
+            "from": "mr",
+            "to": "reviewer"
+          },
+          {
+            "type": "IN_PROJECT",
+            "from": "mr",
+            "to": "p"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "reviewer",
+            "group_by": "p",
+            "alias": "reviewer_count"
+          }
+        ],
+        "limit": 15
+      },
+      "sql": "SELECT p.id AS p_id, COUNT(reviewer.id) AS reviewer_count, p.id AS _gkg_p_id, {p0:String} AS _gkg_p_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_users AS reviewer ON (e0.target_id = reviewer.id) INNER JOIN gl_edges AS e1 ON ((mr.id = e1.source_id) AND (e1.relationship_kind = {type_e1:String})) INNER JOIN gl_projects AS p ON (e1.target_id = p.id) WHERE (startsWith(mr.traversal_path, {p3:String}) AND startsWith(p.traversal_path, {p4:String})) GROUP BY p.id LIMIT 15",
+      "final_sql": "SELECT p.id AS p_id, COUNT(reviewer.id) AS reviewer_count, p.id AS _gkg_p_id, 'Project' AS _gkg_p_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = 'REVIEWER')) INNER JOIN gl_users AS reviewer ON (e0.target_id = reviewer.id) INNER JOIN gl_edges AS e1 ON ((mr.id = e1.source_id) AND (e1.relationship_kind = 'IN_PROJECT')) INNER JOIN gl_projects AS p ON (e1.target_id = p.id) WHERE (startsWith(mr.traversal_path, '1/167/175/') AND startsWith(p.traversal_path, '1/167/175/')) GROUP BY p.id LIMIT 15",
+      "params": {
+        "p4": "1/167/175/",
+        "p0": "Project",
+        "type_e0": "REVIEWER",
+        "p3": "1/167/175/",
+        "type_e1": "IN_PROJECT"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 81.532125,
+        "success": true,
+        "row_count": 15
+      }
+    },
+    {
+      "query_name": "Work items with specific label",
+      "executed_at": "2026-02-01T20:18:45.188721Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "state": "opened"
+            }
+          },
+          {
+            "id": "lbl",
+            "entity": "Label",
+            "node_ids": "$sample"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "HAS_LABEL",
+            "from": "wi",
+            "to": "lbl"
+          }
+        ],
+        "limit": 30
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "state": "opened"
+            }
+          },
+          {
+            "id": "lbl",
+            "entity": "Label",
+            "node_ids": [
+              21411
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "type": "HAS_LABEL",
+            "from": "wi",
+            "to": "lbl"
+          }
+        ],
+        "limit": 30
+      },
+      "sql": "SELECT wi.id AS wi_id, lbl.id AS lbl_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, wi.id AS _gkg_wi_id, {p0:String} AS _gkg_wi_type, lbl.id AS _gkg_lbl_id, {p1:String} AS _gkg_lbl_type FROM gl_work_items AS wi INNER JOIN gl_edges AS e0 ON ((wi.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_labels AS lbl ON (e0.target_id = lbl.id) WHERE ((startsWith(wi.traversal_path, {p3:String}) AND startsWith(lbl.traversal_path, {p4:String})) AND ((wi.state = {p5:String}) AND (lbl.id = {p6:Int64}))) LIMIT 30",
+      "final_sql": "SELECT wi.id AS wi_id, lbl.id AS lbl_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, wi.id AS _gkg_wi_id, 'WorkItem' AS _gkg_wi_type, lbl.id AS _gkg_lbl_id, 'Label' AS _gkg_lbl_type FROM gl_work_items AS wi INNER JOIN gl_edges AS e0 ON ((wi.id = e0.source_id) AND (e0.relationship_kind = 'HAS_LABEL')) INNER JOIN gl_labels AS lbl ON (e0.target_id = lbl.id) WHERE ((startsWith(wi.traversal_path, '1/152/160/') AND startsWith(lbl.traversal_path, '1/152/160/')) AND ((wi.state = 'opened') AND (lbl.id = 21411))) LIMIT 30",
+      "params": {
+        "type_e0": "HAS_LABEL",
+        "p0": "WorkItem",
+        "p1": "Label",
+        "p4": "1/152/160/",
+        "p6": 21411,
+        "p5": "opened",
+        "p3": "1/152/160/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 18.453542,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "Draft MRs awaiting review",
+      "executed_at": "2026-02-01T20:18:46.577590Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "opened",
+              "draft": true
+            }
+          },
+          {
+            "id": "author",
+            "entity": "User"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "AUTHORED",
+            "from": "author",
+            "to": "mr"
+          }
+        ],
+        "limit": 20
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "opened",
+              "draft": true
+            }
+          },
+          {
+            "id": "author",
+            "entity": "User"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "AUTHORED",
+            "from": "author",
+            "to": "mr"
+          }
+        ],
+        "limit": 20
+      },
+      "sql": "SELECT mr.id AS mr_id, author.id AS author_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, mr.id AS _gkg_mr_id, {p0:String} AS _gkg_mr_type, author.id AS _gkg_author_id, {p1:String} AS _gkg_author_type FROM gl_users AS author INNER JOIN gl_edges AS e0 ON ((author.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_merge_requests AS mr ON (e0.target_id = mr.id) WHERE (startsWith(mr.traversal_path, {p3:String}) AND ((mr.state = {p4:String}) AND (mr.draft = {p5:Bool}))) LIMIT 20",
+      "final_sql": "SELECT mr.id AS mr_id, author.id AS author_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, mr.id AS _gkg_mr_id, 'MergeRequest' AS _gkg_mr_type, author.id AS _gkg_author_id, 'User' AS _gkg_author_type FROM gl_users AS author INNER JOIN gl_edges AS e0 ON ((author.id = e0.source_id) AND (e0.relationship_kind = 'AUTHORED')) INNER JOIN gl_merge_requests AS mr ON (e0.target_id = mr.id) WHERE (startsWith(mr.traversal_path, '1/257/258/262/') AND ((mr.state = 'opened') AND (mr.draft = 1))) LIMIT 20",
+      "params": {
+        "p5": true,
+        "p4": "opened",
+        "p0": "MergeRequest",
+        "p3": "1/257/258/262/",
+        "p1": "User",
+        "type_e0": "AUTHORED"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 1388.8490419999998,
+        "success": true,
+        "row_count": 20
+      }
+    },
+    {
+      "query_name": "High weight work items assigned to user",
+      "executed_at": "2026-02-01T20:18:46.596131Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "state": "opened",
+              "weight": {
+                "op": "gte",
+                "value": 1
+              }
+            }
+          },
+          {
+            "id": "assignee",
+            "entity": "User",
+            "node_ids": "$sample"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "ASSIGNED",
+            "from": "wi",
+            "to": "assignee"
+          }
+        ],
+        "limit": 20
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "state": "opened",
+              "weight": {
+                "op": "gte",
+                "value": 1
+              }
+            }
+          },
+          {
+            "id": "assignee",
+            "entity": "User",
+            "node_ids": [
+              9597
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "type": "ASSIGNED",
+            "from": "wi",
+            "to": "assignee"
+          }
+        ],
+        "limit": 20
+      },
+      "sql": "SELECT wi.id AS wi_id, assignee.id AS assignee_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, wi.id AS _gkg_wi_id, {p0:String} AS _gkg_wi_type, assignee.id AS _gkg_assignee_id, {p1:String} AS _gkg_assignee_type FROM gl_work_items AS wi INNER JOIN gl_edges AS e0 ON ((wi.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_users AS assignee ON (e0.target_id = assignee.id) WHERE (startsWith(wi.traversal_path, {p3:String}) AND (((wi.weight >= {p4:Int64}) AND (wi.state = {p5:String})) AND (assignee.id = {p6:Int64}))) LIMIT 20",
+      "final_sql": "SELECT wi.id AS wi_id, assignee.id AS assignee_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, wi.id AS _gkg_wi_id, 'WorkItem' AS _gkg_wi_type, assignee.id AS _gkg_assignee_id, 'User' AS _gkg_assignee_type FROM gl_work_items AS wi INNER JOIN gl_edges AS e0 ON ((wi.id = e0.source_id) AND (e0.relationship_kind = 'ASSIGNED')) INNER JOIN gl_users AS assignee ON (e0.target_id = assignee.id) WHERE (startsWith(wi.traversal_path, '1/152/153/157/159/') AND (((wi.weight >= 1) AND (wi.state = 'opened')) AND (assignee.id = 9597))) LIMIT 20",
+      "params": {
+        "p4": 1,
+        "p1": "User",
+        "type_e0": "ASSIGNED",
+        "p3": "1/152/153/157/159/",
+        "p6": 9597,
+        "p0": "WorkItem",
+        "p5": "opened"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 18.534041000000002,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "User contributions - authored MRs",
+      "executed_at": "2026-02-01T20:18:47.660815Z",
+      "original_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest"
+          },
+          {
+            "id": "author",
+            "entity": "User"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "AUTHORED",
+            "from": "author",
+            "to": "mr"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "mr",
+            "group_by": "author",
+            "alias": "mr_count"
+          }
+        ],
+        "limit": 20,
+        "aggregation_sort": {
+          "agg_index": 0,
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest"
+          },
+          {
+            "id": "author",
+            "entity": "User"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "AUTHORED",
+            "from": "author",
+            "to": "mr"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "mr",
+            "group_by": "author",
+            "alias": "mr_count"
+          }
+        ],
+        "limit": 20,
+        "aggregation_sort": {
+          "agg_index": 0,
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT author.id AS author_id, COUNT(mr.id) AS mr_count, author.id AS _gkg_author_id, {p0:String} AS _gkg_author_type FROM gl_users AS author INNER JOIN gl_edges AS e0 ON ((author.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_merge_requests AS mr ON (e0.target_id = mr.id) WHERE startsWith(mr.traversal_path, {p2:String}) GROUP BY author.id ORDER BY COUNT(mr.id) DESC LIMIT 20",
+      "final_sql": "SELECT author.id AS author_id, COUNT(mr.id) AS mr_count, author.id AS _gkg_author_id, 'User' AS _gkg_author_type FROM gl_users AS author INNER JOIN gl_edges AS e0 ON ((author.id = e0.source_id) AND (e0.relationship_kind = 'AUTHORED')) INNER JOIN gl_merge_requests AS mr ON (e0.target_id = mr.id) WHERE startsWith(mr.traversal_path, '1/152/153/154/') GROUP BY author.id ORDER BY COUNT(mr.id) DESC LIMIT 20",
+      "params": {
+        "type_e0": "AUTHORED",
+        "p0": "User",
+        "p2": "1/152/153/154/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 1064.669083,
+        "success": false
+      },
+      "error": {
+        "message": "Execution failed: bad response: Code: 241. DB::Exception: Query memory limit exceeded: would use 956.66 MiB (attempt to allocate chunk of 4.13 MiB), maximum: 953.67 MiB: While executing FillingRightJoinSide. (MEMORY_LIMIT_EXCEEDED) (version 25.12.4.35 (official build))",
+        "category": "MEMORY_LIMIT",
+        "code": 241
+      }
+    },
+    {
+      "query_name": "Vulnerabilities fixed by MRs",
+      "executed_at": "2026-02-01T20:18:48.194484Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "v",
+            "entity": "Vulnerability",
+            "filters": {
+              "state": "resolved"
+            }
+          },
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "merged"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "type": "FIXES",
+            "from": "mr",
+            "to": "v"
+          }
+        ],
+        "limit": 25
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "v",
+            "entity": "Vulnerability",
+            "filters": {
+              "state": "resolved"
+            }
+          },
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "merged"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "type": "FIXES",
+            "from": "mr",
+            "to": "v"
+          }
+        ],
+        "limit": 25
+      },
+      "sql": "SELECT v.id AS v_id, mr.id AS mr_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, v.id AS _gkg_v_id, {p0:String} AS _gkg_v_type, mr.id AS _gkg_mr_id, {p1:String} AS _gkg_mr_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_vulnerability AS v ON (e0.target_id = v.id) WHERE ((startsWith(mr.traversal_path, {p3:String}) AND startsWith(v.traversal_path, {p4:String})) AND ((v.state = {p5:String}) AND (mr.state = {p6:String}))) LIMIT 25",
+      "final_sql": "SELECT v.id AS v_id, mr.id AS mr_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, v.id AS _gkg_v_id, 'Vulnerability' AS _gkg_v_type, mr.id AS _gkg_mr_id, 'MergeRequest' AS _gkg_mr_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = 'FIXES')) INNER JOIN gl_vulnerability AS v ON (e0.target_id = v.id) WHERE ((startsWith(mr.traversal_path, '1/17/18/22/') AND startsWith(v.traversal_path, '1/17/18/22/')) AND ((v.state = 'resolved') AND (mr.state = 'merged'))) LIMIT 25",
+      "params": {
+        "p5": "resolved",
+        "p6": "merged",
+        "type_e0": "FIXES",
+        "p0": "Vulnerability",
+        "p1": "MergeRequest",
+        "p4": "1/17/18/22/",
+        "p3": "1/17/18/22/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 31.588541999999997,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "List active users",
+      "executed_at": "2026-02-01T20:18:48.203578Z",
+      "original_query": {
+        "query_type": "search",
+        "node": {
+          "id": "u",
+          "entity": "User",
+          "filters": {
+            "state": "active"
+          }
+        },
+        "limit": 30,
+        "order_by": {
+          "node": "u",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "search",
+        "node": {
+          "id": "u",
+          "entity": "User",
+          "filters": {
+            "state": "active"
+          }
+        },
+        "limit": 30,
+        "order_by": {
+          "node": "u",
+          "property": "created_at",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT u.id AS u_id, u.id AS _gkg_u_id, {p0:String} AS _gkg_u_type FROM gl_users AS u WHERE (u.state = {p1:String}) ORDER BY u.created_at DESC LIMIT 30",
+      "final_sql": "SELECT u.id AS u_id, u.id AS _gkg_u_id, 'User' AS _gkg_u_type FROM gl_users AS u WHERE (u.state = 'active') ORDER BY u.created_at DESC LIMIT 30",
+      "params": {
+        "p1": "active",
+        "p0": "User"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 9.087917,
+        "success": true,
+        "row_count": 30
+      }
+    },
+    {
+      "query_name": "Open work items (issues) by type",
+      "executed_at": "2026-02-01T20:18:48.211920Z",
+      "original_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "state": "opened"
+            }
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "wi",
+            "alias": "count"
+          }
+        ],
+        "limit": 10
+      },
+      "substituted_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "wi",
+            "entity": "WorkItem",
+            "filters": {
+              "state": "opened"
+            }
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "wi",
+            "alias": "count"
+          }
+        ],
+        "limit": 10
+      },
+      "sql": "SELECT COUNT(wi.id) AS count FROM gl_work_items AS wi WHERE (startsWith(wi.traversal_path, {p0:String}) AND (wi.state = {p1:String})) LIMIT 10",
+      "final_sql": "SELECT COUNT(wi.id) AS count FROM gl_work_items AS wi WHERE (startsWith(wi.traversal_path, '1/2/10/14/16/') AND (wi.state = 'opened')) LIMIT 10",
+      "params": {
+        "p0": "1/2/10/14/16/",
+        "p1": "opened"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 8.338042,
+        "success": true,
+        "row_count": 1
+      }
+    },
+    {
+      "query_name": "Comment activity per user",
+      "executed_at": "2026-02-01T20:18:49.266501Z",
+      "original_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "note",
+            "entity": "Note",
+            "filters": {
+              "system": false
+            }
+          },
+          {
+            "id": "author",
+            "entity": "User"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "AUTHORED",
+            "from": "author",
+            "to": "note"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "note",
+            "group_by": "author",
+            "alias": "note_count"
+          }
+        ],
+        "limit": 20,
+        "aggregation_sort": {
+          "agg_index": 0,
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "note",
+            "entity": "Note",
+            "filters": {
+              "system": false
+            }
+          },
+          {
+            "id": "author",
+            "entity": "User"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "AUTHORED",
+            "from": "author",
+            "to": "note"
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "note",
+            "group_by": "author",
+            "alias": "note_count"
+          }
+        ],
+        "limit": 20,
+        "aggregation_sort": {
+          "agg_index": 0,
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT author.id AS author_id, COUNT(note.id) AS note_count, author.id AS _gkg_author_id, {p0:String} AS _gkg_author_type FROM gl_users AS author INNER JOIN gl_edges AS e0 ON ((author.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_notes AS note ON (e0.target_id = note.id) WHERE (startsWith(note.traversal_path, {p2:String}) AND (note.system = {p3:Bool})) GROUP BY author.id ORDER BY COUNT(note.id) DESC LIMIT 20",
+      "final_sql": "SELECT author.id AS author_id, COUNT(note.id) AS note_count, author.id AS _gkg_author_id, 'User' AS _gkg_author_type FROM gl_users AS author INNER JOIN gl_edges AS e0 ON ((author.id = e0.source_id) AND (e0.relationship_kind = 'AUTHORED')) INNER JOIN gl_notes AS note ON (e0.target_id = note.id) WHERE (startsWith(note.traversal_path, '1/122/123/127/') AND (note.system = 0)) GROUP BY author.id ORDER BY COUNT(note.id) DESC LIMIT 20",
+      "params": {
+        "p2": "1/122/123/127/",
+        "p3": false,
+        "type_e0": "AUTHORED",
+        "p0": "User"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 1054.5830839999999,
+        "success": false
+      },
+      "error": {
+        "message": "Execution failed: bad response: Code: 241. DB::Exception: Query memory limit exceeded: would use 956.07 MiB (attempt to allocate chunk of 4.13 MiB), maximum: 953.67 MiB: While executing MergeTreeSelect(pool: ReadPool, algorithm: Thread). (MEMORY_LIMIT_EXCEEDED) (version 25.12.4.35 (official build))",
+        "category": "MEMORY_LIMIT",
+        "code": 241
+      }
+    },
+    {
+      "query_name": "Long-running pipelines",
+      "executed_at": "2026-02-01T20:18:49.804153Z",
+      "original_query": {
+        "query_type": "search",
+        "node": {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": "success",
+            "duration": {
+              "op": "gt",
+              "value": 60
+            }
+          }
+        },
+        "limit": 20,
+        "order_by": {
+          "node": "pipe",
+          "property": "duration",
+          "direction": "DESC"
+        }
+      },
+      "substituted_query": {
+        "query_type": "search",
+        "node": {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": "success",
+            "duration": {
+              "op": "gt",
+              "value": 60
+            }
+          }
+        },
+        "limit": 20,
+        "order_by": {
+          "node": "pipe",
+          "property": "duration",
+          "direction": "DESC"
+        }
+      },
+      "sql": "SELECT pipe.id AS pipe_id, pipe.id AS _gkg_pipe_id, {p0:String} AS _gkg_pipe_type FROM gl_pipeline AS pipe WHERE (startsWith(pipe.traversal_path, {p1:String}) AND ((pipe.status = {p2:String}) AND (pipe.duration > {p3:Int64}))) ORDER BY pipe.duration DESC LIMIT 20",
+      "final_sql": "SELECT pipe.id AS pipe_id, pipe.id AS _gkg_pipe_id, 'Pipeline' AS _gkg_pipe_type FROM gl_pipeline AS pipe WHERE (startsWith(pipe.traversal_path, '1/62/63/64/65/') AND ((pipe.status = 'success') AND (pipe.duration > 60))) ORDER BY pipe.duration DESC LIMIT 20",
+      "params": {
+        "p3": 60,
+        "p1": "1/62/63/64/65/",
+        "p2": "success",
+        "p0": "Pipeline"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 35.031,
+        "success": true,
+        "row_count": 20
+      }
+    },
+    {
+      "query_name": "Work items closing MRs",
+      "executed_at": "2026-02-01T20:18:49.846814Z",
+      "original_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "merged"
+            }
+          },
+          {
+            "id": "wi",
+            "entity": "WorkItem"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "CLOSES",
+            "from": "mr",
+            "to": "wi"
+          }
+        ],
+        "limit": 30
+      },
+      "substituted_query": {
+        "query_type": "traversal",
+        "nodes": [
+          {
+            "id": "mr",
+            "entity": "MergeRequest",
+            "filters": {
+              "state": "merged"
+            }
+          },
+          {
+            "id": "wi",
+            "entity": "WorkItem"
+          }
+        ],
+        "relationships": [
+          {
+            "type": "CLOSES",
+            "from": "mr",
+            "to": "wi"
+          }
+        ],
+        "limit": 30
+      },
+      "sql": "SELECT mr.id AS mr_id, wi.id AS wi_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, mr.id AS _gkg_mr_id, {p0:String} AS _gkg_mr_type, wi.id AS _gkg_wi_id, {p1:String} AS _gkg_wi_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = {type_e0:String})) INNER JOIN gl_work_items AS wi ON (e0.target_id = wi.id) WHERE ((startsWith(mr.traversal_path, {p3:String}) AND startsWith(wi.traversal_path, {p4:String})) AND (mr.state = {p5:String})) LIMIT 30",
+      "final_sql": "SELECT mr.id AS mr_id, wi.id AS wi_id, e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, mr.id AS _gkg_mr_id, 'MergeRequest' AS _gkg_mr_type, wi.id AS _gkg_wi_id, 'WorkItem' AS _gkg_wi_type FROM gl_merge_requests AS mr INNER JOIN gl_edges AS e0 ON ((mr.id = e0.source_id) AND (e0.relationship_kind = 'CLOSES')) INNER JOIN gl_work_items AS wi ON (e0.target_id = wi.id) WHERE ((startsWith(mr.traversal_path, '1/137/138/142/143/') AND startsWith(wi.traversal_path, '1/137/138/142/143/')) AND (mr.state = 'merged')) LIMIT 30",
+      "params": {
+        "type_e0": "CLOSES",
+        "p0": "MergeRequest",
+        "p1": "WorkItem",
+        "p4": "1/137/138/142/143/",
+        "p5": "merged",
+        "p3": "1/137/138/142/143/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 42.645625,
+        "success": true,
+        "row_count": 0
+      }
+    },
+    {
+      "query_name": "SAST vulnerabilities by severity",
+      "executed_at": "2026-02-01T20:18:49.859427Z",
+      "original_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "v",
+            "entity": "Vulnerability",
+            "filters": {
+              "report_type": "sast"
+            }
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "v",
+            "alias": "total"
+          }
+        ],
+        "limit": 10
+      },
+      "substituted_query": {
+        "query_type": "aggregation",
+        "nodes": [
+          {
+            "id": "v",
+            "entity": "Vulnerability",
+            "filters": {
+              "report_type": "sast"
+            }
+          }
+        ],
+        "aggregations": [
+          {
+            "function": "count",
+            "target": "v",
+            "alias": "total"
+          }
+        ],
+        "limit": 10
+      },
+      "sql": "SELECT COUNT(v.id) AS total FROM gl_vulnerability AS v WHERE (startsWith(v.traversal_path, {p0:String}) AND (v.report_type = {p1:String})) LIMIT 10",
+      "final_sql": "SELECT COUNT(v.id) AS total FROM gl_vulnerability AS v WHERE (startsWith(v.traversal_path, '1/122/130/') AND (v.report_type = 'sast')) LIMIT 10",
+      "params": {
+        "p1": "sast",
+        "p0": "1/122/130/"
+      },
+      "query_plan": {
+        "explain_text": ""
+      },
+      "runtime": {
+        "execution_time_ms": 12.598583,
+        "success": true,
+        "row_count": 1
+      }
+    }
+  ]
+}
