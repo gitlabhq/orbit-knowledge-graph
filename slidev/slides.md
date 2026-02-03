@@ -586,9 +586,10 @@ fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL
 
 <v-clicks>
 
-- Walk the AST, find all SELECT clauses
-- For each node in the query, inject `_gkg_{node}_id` and `_gkg_{node}_type`
-- Server extracts a list of tuples like `[(102, "User"), (103, "Project")]` to check permissions
+- For each entity alias (u, mr, p), inject hidden columns: `_gkg_u_id`, `_gkg_u_type`, etc.
+- Type column is a literal: `'User' AS _gkg_u_type`, id is the actual value from the database
+- Server extracts a list of tuples like `[(102, "User"), (103, "Project")]` to perform redaction against
+- Special code path in the server for `neighbors`/`path_finding` to perform redaction against the dynamic nodes
 - **This works because the query is an AST - we can manipulate it with code!**
 
 </v-clicks>
@@ -618,7 +619,7 @@ fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL
 <v-clicks>
 
 - Walk AST, find all table scans (skip edge table, skip `gl_users`)
-- Inject `WHERE startsWith(traversal_path, $MY_TRAVERSAL_PATH)` for each table
+- Inject `startsWith(traversal_path, $MY_TRAVERSAL_PATH)` into WHERE clause for each table
 - Multiple paths? Use `startsWith(LOWEST_COMMON_PREFIX) AND (p1 OR p2 OR ...)`
 
 </v-clicks>
@@ -789,10 +790,10 @@ Codegen is just string formatting. Walk each part of the Query struct, emit the 
 <div class="mt-4 text-sm">
 <v-clicks>
 
-- Validate early, fail fast - bad queries never touch the database
-- After `validate()`, success is guaranteed
-- Security policies injected via AST manipulation
-- Parameterized SQL output - no injection possible
+- Validate early, fail fast - bad queries should never touch the database
+- Strong separation of concerns - lowering should never involve validation, etc.
+- Security policies + redaction context injected via AST manipulation
+- Parameterized SQL output - hardened
 
 </v-clicks>
 </div>
