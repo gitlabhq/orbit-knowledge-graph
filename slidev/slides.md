@@ -847,3 +847,50 @@ The funnel: untrusted JSON enters at top, validation gates reject bad queries, a
 <!--
 The compiler and AST are the stable core. Today we parse JSON and emit ClickHouse SQL. Tomorrow we could add Cypher parsing, GraphQL, or target Postgres, MySQL, whatever. The AST is the abstraction layer.
 -->
+
+---
+
+# Readiness Questions
+
+- **Secure Aggregates**:
+  - Do we need row-level redaction for aggregated entities? Or are Reporter+/Planner+ roles sufficient?
+- **Approximate Aggregates**: Could bounded random sampling (e.g., sample for AVG) solve redaction limitations?
+  - For large datasets? 
+- **Security Threshold**: What threat modeling is sufficient for launch?
+  - Beyond Sec reviews, what tools are used to validate ~similar~ access patterns to GKG like GraphQL? Fuzzing?
+- **Performance**: Defining acceptable performance standards for GKG queries
+  - What is acceptable latency, memory utilization per query for .com, self-managed?
+- **Entity Rollout**: 6 domains (core, code_review, ci, security, plan, source_code) with 25+ entity types.
+  - Phased rollout strategy? More rigorous integration testing per entity?
+- **SSOT**: Ontology-driven schema validation. Interlock w/ Jean-Gabriel
+  - How do we keep ontology in sync with Rails models? 
+
+<!--
+These are the key questions we need to answer before launch. Secure aggregates are the biggest concern - we rely on traversal_path filtering at query time, not row-level redaction of aggregated entities.
+-->
+
+---
+layout: center
+class: text-center
+---
+
+# Thank You!
+
+<!--
+Thank you for your time.
+-->
+
+---
+
+<!-- Blank slide for Q&A -->
+
+---
+layout: center
+class: text-center
+---
+
+# Appendix
+
+<!--
+Additional reference material follows.
+-->
