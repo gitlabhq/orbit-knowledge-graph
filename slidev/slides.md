@@ -14,9 +14,9 @@ mdc: true
 }
 </style>
 
-# Query Engine Compiler
+# GKGaaS Graph Engine
 
-JSON → SQL compilation pipeline
+JSON DSL → SQL compiler
 
 <div class="abs-br m-6 text-sm opacity-50">
   GitLab Knowledge Graph
