@@ -861,7 +861,7 @@ The compiler and AST are the stable core. Today we parse JSON and emit ClickHous
 - **Performance**: Defining acceptable performance standards for GKG queries
   - What is acceptable latency, memory utilization per query for .com, self-managed?
 - **Entity Rollout**: 6 domains (core, code_review, ci, security, plan, source_code) with 25+ entity types.
-  - Phased rollout strategy? More rigorous integration testing per entity?
+  - More rigorous integration testing per entity?
 - **SSOT**: Ontology-driven schema validation. Interlock w/ Jean-Gabriel
   - How do we keep ontology in sync with Rails models? 
 
@@ -894,3 +894,238 @@ class: text-center
 <!--
 Additional reference material follows.
 -->
+
+---
+
+# Redaction Flow
+
+Query Engine provides metadata for post-query redaction validation.
+
+<div class="grid grid-cols-2 gap-4">
+<div>
+
+**Query Engine (`crates/query-engine`)**
+
+```rust
+// result_context.rs - Metadata for redaction
+pub struct RedactionNode {
+    pub alias: String,
+    pub entity_type: String,
+    pub id_column: String,   // _gkg_{alias}_id
+    pub type_column: String, // _gkg_{alias}_type
+}
+
+// return.rs - Inject columns into SELECT
+fn enforce_return_columns(q: &mut Query, ...) {
+    for node in &input.nodes {
+        ctx.add_node(&node.id, entity);
+        q.select.push(SelectExpr {
+            expr: Expr::col(&node.id, "id"),
+            alias: Some(id_column(&node.id)),
+        });
+    }
+}
+```
+
+</div>
+<div>
+
+**Query Pipeline (`crates/gkg-server`)**
+
+```rust
+// service.rs - Pipeline orchestration
+let compiled = compile(query_json, &ontology, &ctx)?;
+let batches = self.execute_query(&compiled).await?;
+
+let extracted = self.extraction.execute(batches);
+let authorized = AuthorizationStage::execute(extracted).await?;
+let redacted = RedactionStage::execute(authorized);
+
+// redaction.rs - Apply authorizations
+input.query_result.apply_authorizations(
+    &input.authorizations,
+    &entity_map
+);
+```
+
+</div>
+</div>
+
+---
+
+# Redaction Flow - Schema Introspection
+
+For `path_finding` and `neighbors` queries, entity types are unknown at compile time.
+
+<div class="grid grid-cols-2 gap-4">
+<div>
+
+**Dynamic Node Discovery**
+
+```rust
+// query_result.rs - Extract from Arrow columns
+fn extract_path_nodes(batch, row_idx) -> Vec<NodeRef> {
+    // _gkg_path: Array(Tuple(Int64, String))
+    let col = batch.column(PATH_COLUMN);
+    // Returns [(node_id, entity_type), ...]
+}
+
+fn extract_neighbor_node(batch, row_idx) -> Option<NodeRef> {
+    // _gkg_neighbor_id: Int64
+    // _gkg_neighbor_type: String (runtime value!)
+    let id = batch.column(NEIGHBOR_ID_COLUMN);
+    let entity = batch.column(NEIGHBOR_TYPE_COLUMN);
+    Some(NodeRef::new(id, entity))
+}
+```
+
+</div>
+<div>
+
+**Why Not ResultContext?**
+
+```rust
+// ResultContext works for known entities:
+ctx.add_node("u", "User");  // User is known
+ctx.add_node("p", "Project"); // Project is known
+
+// But path_finding/neighbors discover types at runtime:
+// - Path: User -> Project -> Group -> ???
+// - Neighbors: User's neighbors could be ANY type
+
+// Solution: store dynamic_nodes per row
+struct QueryResultRow {
+    columns: HashMap<String, ColumnValue>,
+    dynamic_nodes: Vec<NodeRef>, // runtime discovery
+    authorized: bool,
+}
+```
+
+</div>
+</div>
+
+---
+
+# General Hydration Model
+
+Move from query-specific hydration to a unified post-redaction enrichment pattern.
+
+<div class="grid grid-cols-2 gap-4">
+<div>
+
+**Current: Neighbors-only Hydration**
+
+```rust
+// hydration.rs - Only for neighbors queries
+pub async fn execute(&self, mut result: QueryResult, ...) {
+    if !matches!(result_context.query_type, 
+                 Some(QueryType::Neighbors)) {
+        return Ok(result);  // Skip non-neighbors
+    }
+    
+    let refs = self.extract_entity_refs(&result);
+    let props = self.fetch_all_properties(&refs).await?;
+    self.merge_properties(&mut result, &props);
+    Ok(result)
+}
+```
+
+</div>
+<div>
+
+**Future: Universal Hydration**
+
+```rust
+// Generalized pattern for all query types
+pub async fn execute(&self, result: QueryResult, ...) {
+    // 1. Get authorized entity refs (already redacted)
+    let refs = result.authorized_rows()
+        .flat_map(|r| r.all_node_refs())
+        .collect();
+    
+    // 2. Batch fetch properties by type
+    let props = self.fetch_properties_batch(&refs).await?;
+    
+    // 3. Hydrate (works for any query type)
+    self.merge_properties(&mut result, &props);
+    Ok(result)
+}
+```
+
+</div>
+</div>
+
+**Benefits**: Decouple query execution from property fetching. Query returns IDs + edges, hydration fetches full entities. Enables caching, batching, and field selection.
+
+---
+
+# Performance
+
+<!-- Performance metrics and benchmarks to be added -->
+
+---
+
+# Simulator
+
+<style scoped>
+pre { font-size: 0.55em !important; line-height: 1.3 !important; }
+</style>
+
+Generate synthetic graphs and evaluate query performance at scale.
+
+<div class="grid grid-cols-2 gap-4">
+<div>
+
+**ClickHouse Configuration**
+
+```yaml
+# simulator.yaml
+clickhouse:
+  url: http://localhost:8123
+  database: default
+  
+  schema:
+    engine: MergeTree
+    index_granularity: 8192
+    node_primary_key: [traversal_path, id]
+    edge_order_by: [source_id, source_kind, 
+                    relationship_kind]
+    
+    projections:
+      - name: by_target
+        table: edges
+        order_by: [target_id, target_kind]
+```
+
+</div>
+<div>
+
+**Graph Generation Config**
+
+```yaml
+generation:
+  seed: 42
+  organizations: 1
+  
+  roots:
+    User: 10000    # 10k users
+    Group: 20      # 20 top-level groups
+  
+  relationships:
+    CONTAINS:
+      "Group -> Project": 10
+    IN_PROJECT:
+      "MergeRequest -> Project": 100
+      "Pipeline -> Project": 100
+  
+  associations:
+    AUTHORED:
+      "User -> MergeRequest": 100  # 30M edges
+```
+
+</div>
+</div>
+
+**Workflow**: `generate` → `load` → `evaluate` (100M edge scale test)
+
+---
