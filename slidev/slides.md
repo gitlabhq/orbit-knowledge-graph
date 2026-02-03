@@ -855,6 +855,52 @@ The compiler and AST are the stable core. Today we parse JSON and emit ClickHous
 
 ---
 
+# Vision (cont.)
+
+<div class="flex flex-col items-center gap-4 h-[85%] justify-center">
+
+<!-- Inputs row -->
+<div class="flex gap-6 items-center justify-center">
+  <div v-click="2" class="border-2 border-purple-500 bg-purple-50 dark:bg-purple-900/20 rounded px-4 py-2 font-bold text-lg min-w-28 text-center">ETL</div>
+  <div class="border-2 border-green-500 bg-green-50 dark:bg-green-900/20 rounded px-4 py-2 font-bold text-lg min-w-28 text-center">GKG Query</div>
+  <div v-click="2" class="border-2 border-purple-500 bg-purple-50 dark:bg-purple-900/20 rounded px-4 py-2 font-bold text-lg min-w-28 text-center">Mailbox</div>
+</div>
+
+<!-- Arrows down -->
+<div class="flex gap-6 items-center justify-center">
+  <span v-click="2" class="text-xl min-w-28 text-center">↘</span>
+  <span class="text-2xl min-w-28 text-center">↓</span>
+  <span v-click="2" class="text-xl min-w-28 text-center">↙</span>
+</div>
+
+<!-- Compiler box -->
+<div class="border-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 rounded-xl px-8 py-4 text-center">
+  <div class="font-bold text-xl">Compiler</div>
+  <div class="text-sm text-gray-600 dark:text-gray-400">Parse → Normalize → Lower → Codegen</div>
+</div>
+
+<!-- Arrows down -->
+<div class="flex gap-6 items-center justify-center">
+  <span v-click="2" class="text-xl min-w-28 text-center">↙</span>
+  <span class="text-2xl min-w-28 text-center">↓</span>
+  <span v-click="2" class="text-xl min-w-28 text-center">↘</span>
+</div>
+
+<!-- Outputs row -->
+<div class="flex gap-6 items-center justify-center">
+  <div v-click="2" class="border-2 border-purple-500 bg-purple-50 dark:bg-purple-900/20 rounded px-4 py-2 font-bold text-lg min-w-28 text-center">DataFusion</div>
+  <div class="border-2 border-green-500 bg-green-50 dark:bg-green-900/20 rounded px-4 py-2 font-bold text-lg min-w-28 text-center">ClickHouse</div>
+  <div v-click="2" class="border-2 border-dashed border-gray-400 rounded px-4 py-2 text-gray-500 min-w-28 text-center">...</div>
+</div>
+
+</div>
+
+<!--
+First we show what exists today: GKG Query → Compiler → ClickHouse. Then we expand the vision: ETL and Mailbox can also use the compiler internals, targeting multiple backends.
+-->
+
+---
+
 # Readiness Questions
 
 - **Secure Aggregates**:
