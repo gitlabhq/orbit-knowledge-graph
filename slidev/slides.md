@@ -36,8 +36,8 @@ layoutClass: gap-8
 <v-clicks>
 
 - **Agent Friendly** - LLMs generate structured JSON reliably
-- **Security** - No string concatenation, no injection
-- **Portability** - Backend can change without breaking clients
+- **Security** - Easier to manage injection risk, DoS risk, AuthZ risk
+- **Portability** - Expanding beyond Clickhouse SQL
 - **Easy to Sync** - Schema derived from ontology
 
 </v-clicks>
@@ -147,6 +147,72 @@ This is the transformation we're building. JSON query on the left, SQL on the ri
 
 ---
 transition: fade-out
+
+---
+
+# Summary
+
+<div class="flex flex-col items-center gap-1">
+
+<div class="border-2 border-red-400 bg-red-50 dark:bg-red-900/20 rounded px-6 py-1 text-sm">
+  🔓 JSON Input (untrusted)
+</div>
+
+<div class="text-lg">↓</div>
+
+<div class="flex gap-2 items-center text-xs">
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">schema</div>
+  <span>→</span>
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">ontology</div>
+  <span>→</span>
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">parse</div>
+  <span>→</span>
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">validate</div>
+  <span class="text-red-500 ml-2">→ ❌</span>
+</div>
+
+<div class="text-lg">↓</div>
+
+<div class="border-2 border-green-400 bg-green-50 dark:bg-green-900/20 rounded px-4 py-2">
+  <div class="text-xs text-center mb-1 font-bold">🔒 Trusted Zone</div>
+  <div class="flex gap-2 items-center text-xs">
+    <div class="border rounded px-2 py-1">normalize</div>
+    <span>→</span>
+    <div class="border rounded px-2 py-1">lower</div>
+    <span>→</span>
+    <div class="border-2 border-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded px-2 py-1 font-bold">AST</div>
+    <span>→</span>
+    <div class="border-2 border-purple-400 bg-purple-50 dark:bg-purple-900/20 rounded px-2 py-1 font-bold">AuthZ</div>
+    <span>→</span>
+    <div class="border rounded px-2 py-1">codegen</div>
+  </div>
+</div>
+
+<div class="text-lg">↓</div>
+
+<div class="border-2 border-green-500 bg-green-100 dark:bg-green-900/30 rounded px-6 py-1 text-sm font-bold">
+  Parameterized SQL ✓
+</div>
+
+</div>
+
+<div class="mt-4 text-sm">
+<v-clicks>
+
+- Validate early, fail fast - bad queries should never touch the database
+- Strong separation of concerns - lowering should never involve validation, etc.
+- AuthZ: redaction context + traversal path checks injected via AST manipulation
+- Parameterized SQL output - hardened
+
+</v-clicks>
+</div>
+
+<!--
+The funnel: untrusted JSON enters at top, validation gates reject bad queries, and only valid queries cross into the trusted zone where we build and manipulate the AST. Output is always safe parameterized SQL.
+-->
+
+---
+
 ---
 
 # The Compiler
@@ -301,10 +367,10 @@ Now we validate that the entities and relationships in the query actually exist 
   <div class="text-[0.5rem] leading-tight">
 
 ```yaml
-node_type: Project
+node_type: MergeRequest
 properties:
   id: { type: int64 }
-  name: { type: string }
+  description: { type: string }
 ```
 
   </div>
@@ -362,9 +428,8 @@ fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL
 <v-clicks>
 
 - Nodes exist and have entity types
-- Relationship endpoints point to declared nodes
 - Column names match the entity's schema
-- Aggregation targets are real nodes
+- Aggregation targets are real entities
 - Order by references valid node + property
 - <span class="text-red-500">Goal: fold this into jsonschema so we have one validation pass</span>
 
@@ -396,8 +461,8 @@ pub fn compile(json_input: &str, ontology: &Ontology, ctx: &SecurityContext) -> 
 
 **Transforms:**
 - `"entity": "User"` → `"table": "gl_user"`
-- `"columns": "*"` → `["id", "username", "email", ...]`
-- Enum integers → string labels
+- Enum integers → string labels (`0` -> `"closed"`)
+- More to come...
 
 </v-click>
 
@@ -504,7 +569,7 @@ prisma.user.findMany({
 </div>
 
 <div v-click="2" class="text-center">
-<div class="text-sm font-bold mb-2">Drizzle</div>
+<div class="text-sm font-bold mb-2">Drizzle ORM</div>
 <div class="text-[0.4rem] leading-tight">
 
 ```typescript
@@ -560,7 +625,8 @@ pub fn lower(input: &Input) -> Result<Node> {
 <v-click>
 
 Each query type has its own lowering strategy:
-- **Traversal/Search** - JOIN chain
+- **Search** - Select + Where
+- **Traversal** - JOIN chain
 - **Aggregation** - GROUP BY
 - **PathFinding** - Recursive CTE
 - **Neighbors** - Edge table scan
@@ -626,6 +692,7 @@ fn compile(json: &str, ontology: &Ontology, ctx: &SecurityContext) -> Result<SQL
 - Walk AST, find all table scans (skip edge table, skip `gl_users`)
 - Inject `startsWith(traversal_path, $MY_TRAVERSAL_PATH)` into WHERE clause for each table
 - Multiple paths? Use `startsWith(LOWEST_COMMON_PREFIX) AND (p1 OR p2 OR ...)`
+- <span class="text-red-500">**Goal: Zero hardcoding, table skips are defined by the ontology**</span>
 
 </v-clicks>
 
@@ -756,12 +823,12 @@ Codegen is just string formatting. Walk each part of the Query struct, emit the 
 
 <div class="flex gap-2 items-center text-xs">
   <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">schema</div>
-  <span>→</span>
+  <span>+</span>
   <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">ontology</div>
   <span>→</span>
-  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">parse</div>
-  <span>→</span>
   <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">validate</div>
+  <span>→</span>
+  <div class="border rounded px-2 py-1 bg-yellow-50 dark:bg-yellow-900/20">parse</div>
   <span class="text-red-500 ml-2">→ ❌</span>
 </div>
 
@@ -776,9 +843,7 @@ Codegen is just string formatting. Walk each part of the Query struct, emit the 
     <span>→</span>
     <div class="border-2 border-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded px-2 py-1 font-bold">AST</div>
     <span>→</span>
-    <div class="border rounded px-2 py-1">+return</div>
-    <span>→</span>
-    <div class="border rounded px-2 py-1">+security</div>
+    <div class="border-2 border-purple-400 bg-purple-50 dark:bg-purple-900/20 rounded px-2 py-1 font-bold">AuthZ</div>
     <span>→</span>
     <div class="border rounded px-2 py-1">codegen</div>
   </div>
@@ -797,7 +862,7 @@ Codegen is just string formatting. Walk each part of the Query struct, emit the 
 
 - Validate early, fail fast - bad queries should never touch the database
 - Strong separation of concerns - lowering should never involve validation, etc.
-- Security policies + redaction context injected via AST manipulation
+- AuthZ: redaction context + traversal path checks injected via AST manipulation
 - Parameterized SQL output - hardened
 
 </v-clicks>
