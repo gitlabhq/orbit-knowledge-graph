@@ -21,7 +21,7 @@ members = [
 arrow = "57.2.0"
 datafusion = { version = "52.1.0", default-features = false, features = ["sql", "nested_expressions"] }
 ulid = "1.1"
-clap = { version = "4.5.54", features = ["derive", "env"] }
+clap = { version = "4.5.57", features = ["derive", "env"] }
 dunce = "1.0.5"
 async-trait = "0.1.89"
 bytes = "1.11.0"
