@@ -74,7 +74,7 @@ testcontainers-modules = { version = "0.14.0", features = ["nats", "clickhouse"]
 serial_test = "3.3.1"
 
 # Query engine dependencies
-jsonschema = "0.40.0"
+jsonschema = "0.41.0"
 
 # Gitaly client dependencies
 regex = "1.12.2"
