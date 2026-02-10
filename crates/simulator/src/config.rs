@@ -600,6 +600,9 @@ pub struct EvaluationConfig {
     /// Output settings.
     #[serde(default)]
     pub output: OutputConfig,
+    /// Directory to save run metadata (query plans, params, sample data).
+    #[serde(default)]
+    pub metadata_dir: Option<String>,
 }
 
 fn default_queries_path() -> String {
@@ -623,6 +626,7 @@ impl Default for EvaluationConfig {
             skip_cache_warm: false,
             filter: None,
             output: OutputConfig::default(),
+            metadata_dir: None,
         }
     }
 }
