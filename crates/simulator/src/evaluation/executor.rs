@@ -1,6 +1,7 @@
 //! Query execution and statistics collection.
 
 use super::error::{ErrorCategory, ParsedError};
+use super::metadata::{ErrorInfo, QueryMetadata, QueryMetadataBuilder, QueryPlan, SampleData};
 use super::{ParameterSampler, QueryDefinition};
 use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
@@ -21,6 +22,10 @@ const SAFE_QUERY_SETTINGS: &str = "\
     max_bytes_before_external_group_by = 100000000, \
     max_bytes_before_external_sort = 100000000, \
     join_algorithm = 'partial_merge'";
+
+/// Maximum bytes to collect for metadata sample data.
+/// Prevents memory exhaustion when queries return rows with large column values.
+const METADATA_SAMPLE_MAX_BYTES: usize = 1024 * 1024; // 1 MB
 
 /// Sample row from query results for peeking.
 pub type SampleRow = Vec<String>;
@@ -566,6 +571,310 @@ impl QueryExecutor {
     /// Get sampler cache statistics.
     pub fn cache_stats(&self) -> std::collections::HashMap<String, usize> {
         self.sampler.cache_stats()
+    }
+
+    /// Execute a query and capture full metadata for debugging/analysis.
+    pub async fn execute_query_with_metadata(
+        &mut self,
+        name: &str,
+        query: &QueryDefinition,
+    ) -> (ExecutionResult, QueryMetadata) {
+        let start = Instant::now();
+        let original_query = serde_json::to_value(query).unwrap_or_default();
+        let mut builder = QueryMetadataBuilder::new(name).original_query(original_query.clone());
+
+        let security_ctx = match self.random_security_context() {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                let error_msg = format!("Security context error: {}", e);
+                let result =
+                    ExecutionResult::failure(name.to_string(), error_msg.clone(), start.elapsed());
+                let metadata = builder
+                    .execution_time(start.elapsed())
+                    .failure(ErrorInfo {
+                        message: error_msg,
+                        category: "SECURITY_CONTEXT".to_string(),
+                        code: None,
+                    })
+                    .build();
+                return (result, metadata);
+            }
+        };
+
+        let (substituted, sampling_info) = match self
+            .substitute_parameters(query, &security_ctx)
+            .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                let error_msg = format!("Parameter substitution failed: {}", e);
+                let result =
+                    ExecutionResult::failure(name.to_string(), error_msg.clone(), start.elapsed());
+                let metadata = builder
+                    .execution_time(start.elapsed())
+                    .failure(ErrorInfo {
+                        message: error_msg,
+                        category: "PARAMETER_ERROR".to_string(),
+                        code: None,
+                    })
+                    .build();
+                return (result, metadata);
+            }
+        };
+
+        builder = builder.substituted_query(substituted.clone());
+
+        let json_str = match serde_json::to_string(&substituted) {
+            Ok(s) => s,
+            Err(e) => {
+                let error_msg = format!("JSON serialization failed: {}", e);
+                let result =
+                    ExecutionResult::failure(name.to_string(), error_msg.clone(), start.elapsed());
+                let metadata = builder
+                    .execution_time(start.elapsed())
+                    .failure(ErrorInfo {
+                        message: error_msg,
+                        category: "SERIALIZATION_ERROR".to_string(),
+                        code: None,
+                    })
+                    .build();
+                return (result, metadata);
+            }
+        };
+
+        let compiled = match compile(&json_str, &self.ontology, &security_ctx) {
+            Ok(c) => c,
+            Err(e) => {
+                let error_msg = format!("Query compilation failed: {}", e);
+                let result =
+                    ExecutionResult::failure(name.to_string(), error_msg.clone(), start.elapsed());
+                let metadata = builder
+                    .execution_time(start.elapsed())
+                    .failure(ErrorInfo {
+                        message: error_msg,
+                        category: "COMPILATION_ERROR".to_string(),
+                        code: None,
+                    })
+                    .build();
+                return (result, metadata);
+            }
+        };
+
+        let final_sql = substitute_params_in_sql(&compiled.sql, &compiled.params);
+
+        builder = builder
+            .sql(compiled.sql.clone())
+            .final_sql(final_sql.clone())
+            .params(
+                compiled
+                    .params
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            );
+
+        if let Ok(plan) = self.get_query_plan(&final_sql).await {
+            builder = builder.query_plan(plan);
+        }
+
+        match self.execute_sql_with_sample(&final_sql).await {
+            Ok((row_count, sample_rows, column_names)) => {
+                let sample_data = self.fetch_sample_for_metadata(&final_sql).await;
+
+                let result = ExecutionResult::success(
+                    name.to_string(),
+                    row_count,
+                    sample_rows,
+                    column_names,
+                    start.elapsed(),
+                    compiled.sql,
+                    serde_json::to_value(&compiled.params).unwrap_or_default(),
+                    Some(sampling_info),
+                );
+
+                let mut metadata_builder =
+                    builder.execution_time(start.elapsed()).success(row_count);
+                if let Some(data) = sample_data {
+                    metadata_builder = metadata_builder.sample_data(data);
+                }
+                let metadata = metadata_builder.build();
+
+                (result, metadata)
+            }
+            Err(e) => {
+                let error_msg = format!("Execution failed: {}", e);
+                let parsed = ParsedError::parse(&error_msg);
+                let result = ExecutionResult::failure_with_sql(
+                    name.to_string(),
+                    error_msg.clone(),
+                    start.elapsed(),
+                    Some(final_sql),
+                );
+                let metadata = builder
+                    .execution_time(start.elapsed())
+                    .failure(ErrorInfo {
+                        message: error_msg,
+                        category: parsed.category.to_string(),
+                        code: parsed.code,
+                    })
+                    .build();
+                (result, metadata)
+            }
+        }
+    }
+
+    /// Execute all queries and return results with metadata.
+    pub async fn execute_all_with_metadata(
+        &mut self,
+        queries: &std::collections::HashMap<String, QueryDefinition>,
+    ) -> Vec<(ExecutionResult, QueryMetadata)> {
+        let mut results = Vec::with_capacity(queries.len());
+
+        for (name, query) in queries {
+            let (result, metadata) = self.execute_query_with_metadata(name, query).await;
+
+            if !result.success
+                && let Some(ref err) = result.error
+                && (err.contains("MEMORY_LIMIT") || err.contains("network error"))
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+
+            results.push((result, metadata));
+        }
+
+        results
+    }
+
+    /// Get query plan using EXPLAIN.
+    async fn get_query_plan(&self, sql: &str) -> Result<QueryPlan> {
+        let explain_text = self.fetch_raw_text(&format!("EXPLAIN {}", sql)).await;
+        let pipeline = self
+            .fetch_raw_text(&format!("EXPLAIN PIPELINE {}", sql))
+            .await;
+
+        Ok(QueryPlan {
+            explain_text,
+            pipeline: if pipeline.is_empty() {
+                None
+            } else {
+                Some(pipeline)
+            },
+            estimated_rows: None,
+        })
+    }
+
+    /// Fetch raw text output from a query using fetch_bytes.
+    async fn fetch_raw_text(&self, sql: &str) -> String {
+        let result = self.client.inner().query(sql).fetch_bytes("TabSeparated");
+
+        let mut cursor = match result {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::debug!("fetch_bytes failed: {}", e);
+                return String::new();
+            }
+        };
+
+        let mut buffer = Vec::new();
+        loop {
+            match cursor.next().await {
+                Ok(Some(chunk)) => buffer.extend(chunk),
+                Ok(None) => break,
+                Err(e) => {
+                    tracing::debug!("fetch_bytes cursor error: {}", e);
+                    return String::new();
+                }
+            }
+        }
+
+        String::from_utf8_lossy(&buffer).to_string()
+    }
+
+    /// Fetch sample rows for metadata.
+    ///
+    /// Limits memory usage by:
+    /// - Restricting to 5 rows
+    /// - Capping response size to 1MB to handle queries with large column values
+    async fn fetch_sample_for_metadata(&self, sql: &str) -> Option<SampleData> {
+        let settings = format!("SETTINGS {}", SAFE_QUERY_SETTINGS);
+        let sample_sql = format!(
+            "SELECT * FROM ({}) AS _sample LIMIT 5 {} FORMAT JSONEachRow",
+            sql, settings
+        );
+
+        let raw = self
+            .fetch_raw_text_limited(&sample_sql, METADATA_SAMPLE_MAX_BYTES)
+            .await;
+
+        if raw.is_empty() {
+            return None;
+        }
+
+        let mut columns: Vec<String> = vec![];
+        let mut rows: Vec<Vec<serde_json::Value>> = vec![];
+
+        for line in raw.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(obj) =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(line)
+            {
+                if columns.is_empty() {
+                    columns = obj.keys().cloned().collect();
+                }
+                let row: Vec<serde_json::Value> = columns
+                    .iter()
+                    .map(|k| obj.get(k).cloned().unwrap_or(serde_json::Value::Null))
+                    .collect();
+                rows.push(row);
+            }
+        }
+
+        if rows.is_empty() {
+            None
+        } else {
+            Some(SampleData { columns, rows })
+        }
+    }
+
+    /// Fetch raw text output with a byte limit to prevent memory exhaustion.
+    async fn fetch_raw_text_limited(&self, sql: &str, max_bytes: usize) -> String {
+        let result = self.client.inner().query(sql).fetch_bytes("TabSeparated");
+
+        let mut cursor = match result {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::debug!("fetch_bytes failed: {}", e);
+                return String::new();
+            }
+        };
+
+        let mut buffer = Vec::new();
+        loop {
+            match cursor.next().await {
+                Ok(Some(chunk)) => {
+                    buffer.extend(&chunk);
+                    if buffer.len() > max_bytes {
+                        tracing::debug!(
+                            "Truncating metadata sample at {} bytes (limit: {})",
+                            buffer.len(),
+                            max_bytes
+                        );
+                        buffer.truncate(max_bytes);
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    tracing::debug!("fetch_bytes cursor error: {}", e);
+                    return String::new();
+                }
+            }
+        }
+
+        String::from_utf8_lossy(&buffer).to_string()
     }
 }
 

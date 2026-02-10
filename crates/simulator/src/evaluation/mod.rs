@@ -5,11 +5,16 @@
 
 mod error;
 mod executor;
+mod metadata;
 mod report;
 mod sampler;
 
 pub use error::{ErrorCategory, ParsedError};
 pub use executor::{ExecutionResult, QueryExecutor, SampleRow, SamplingInfo};
+pub use metadata::{
+    ErrorInfo, QueryMetadata, QueryMetadataBuilder, QueryPlan, RunConfig, RunMetadata,
+    RuntimeStats, SampleData,
+};
 pub use report::{Report, ReportFormat};
 pub use sampler::ParameterSampler;
 

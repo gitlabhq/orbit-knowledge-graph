@@ -5,8 +5,10 @@ use clap::Parser;
 use ontology::Ontology;
 use simulator::Config;
 use simulator::clickhouse::check_clickhouse_health;
-use simulator::evaluation::{QueryExecutor, Report, ReportFormat, load_queries};
-use std::path::PathBuf;
+use simulator::evaluation::{
+    QueryExecutor, Report, ReportFormat, RunConfig, RunMetadata, load_queries,
+};
+use std::path::{Path, PathBuf};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Parser)]
@@ -94,6 +96,18 @@ async fn main() -> Result<()> {
         config.evaluation.iterations
     );
 
+    let capture_metadata = config.evaluation.metadata_dir.is_some();
+    let mut run_metadata = if capture_metadata {
+        Some(RunMetadata::new(RunConfig {
+            clickhouse_url: config.clickhouse.url.clone(),
+            iterations: config.evaluation.iterations,
+            sample_size: config.evaluation.sample_size,
+            filter: config.evaluation.filter.clone(),
+        }))
+    } else {
+        None
+    };
+
     let mut all_results = Vec::new();
 
     for iteration in 0..config.evaluation.iterations {
@@ -105,26 +119,59 @@ async fn main() -> Result<()> {
             );
         }
 
-        let results = executor.execute_all(&queries).await;
+        if capture_metadata {
+            let results_with_metadata = executor.execute_all_with_metadata(&queries).await;
 
-        for result in &results {
-            if result.success {
-                tracing::debug!(
-                    "✓ {} - {} rows in {:.2}ms",
-                    result.query_name,
-                    result.row_count.unwrap_or(0),
-                    result.execution_time.as_secs_f64() * 1000.0
-                );
-            } else {
-                tracing::warn!(
-                    "✗ {} - {}",
-                    result.query_name,
-                    result.error.as_deref().unwrap_or("unknown error")
-                );
+            for (result, metadata) in results_with_metadata {
+                if result.success {
+                    tracing::debug!(
+                        "✓ {} - {} rows in {:.2}ms",
+                        result.query_name,
+                        result.row_count.unwrap_or(0),
+                        result.execution_time.as_secs_f64() * 1000.0
+                    );
+                } else {
+                    tracing::warn!(
+                        "✗ {} - {}",
+                        result.query_name,
+                        result.error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+
+                if let Some(ref mut run) = run_metadata {
+                    run.add_query(metadata);
+                }
+                all_results.push(result);
             }
-        }
+        } else {
+            let results = executor.execute_all(&queries).await;
 
-        all_results.extend(results);
+            for result in &results {
+                if result.success {
+                    tracing::debug!(
+                        "✓ {} - {} rows in {:.2}ms",
+                        result.query_name,
+                        result.row_count.unwrap_or(0),
+                        result.execution_time.as_secs_f64() * 1000.0
+                    );
+                } else {
+                    tracing::warn!(
+                        "✗ {} - {}",
+                        result.query_name,
+                        result.error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+            }
+
+            all_results.extend(results);
+        }
+    }
+
+    if let Some(ref mut run) = run_metadata {
+        run.complete();
+        if let Some(ref dir) = config.evaluation.metadata_dir {
+            run.save_to_dir(Path::new(dir))?;
+        }
     }
 
     let report = Report::new(all_results);
