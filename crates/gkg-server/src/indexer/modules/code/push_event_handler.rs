@@ -23,6 +23,7 @@ use super::gitaly::RepositoryService;
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use super::watermark_store::{CodeIndexingWatermark, CodeWatermarkStore};
+use crate::indexer::modules::sdlc::locking::{INDEXING_LOCKS_BUCKET, project_lock_key};
 
 pub struct PushEventHandler {
     repository_service: Arc<dyn RepositoryService>,
@@ -370,12 +371,12 @@ impl PushEventHandler {
         project_id: i64,
         branch: &str,
     ) -> Result<bool, HandlerError> {
-        let key = Self::make_lock_key(project_id, branch);
+        let key = project_lock_key(project_id, branch);
         let options = KvPutOptions::create_with_ttl(LOCK_TTL);
 
         match ctx
             .nats
-            .kv_put(buckets::INDEXING_LOCKS, &key, Bytes::new(), options)
+            .kv_put(INDEXING_LOCKS_BUCKET, &key, Bytes::new(), options)
             .await
         {
             Ok(KvPutResult::Success(_)) => Ok(true),
@@ -392,17 +393,11 @@ impl PushEventHandler {
         project_id: i64,
         branch: &str,
     ) -> Result<(), HandlerError> {
-        let key = Self::make_lock_key(project_id, branch);
+        let key = project_lock_key(project_id, branch);
         ctx.nats
-            .kv_delete(buckets::INDEXING_LOCKS, &key)
+            .kv_delete(INDEXING_LOCKS_BUCKET, &key)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock release failed: {e}")))
-    }
-
-    fn make_lock_key(project_id: i64, branch: &str) -> String {
-        use base64::Engine;
-        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch);
-        format!("{project_id}/{encoded}")
     }
 }
 
@@ -580,16 +575,14 @@ mod tests {
         }
 
         fn set_lock(&self, project_id: i64, branch: &str) {
-            let key = PushEventHandler::make_lock_key(project_id, branch);
+            let key = project_lock_key(project_id, branch);
             self.mock_nats
-                .set_kv(buckets::INDEXING_LOCKS, &key, Bytes::new());
+                .set_kv(INDEXING_LOCKS_BUCKET, &key, Bytes::new());
         }
 
         fn lock_exists(&self, project_id: i64, branch: &str) -> bool {
-            let key = PushEventHandler::make_lock_key(project_id, branch);
-            self.mock_nats
-                .get_kv(buckets::INDEXING_LOCKS, &key)
-                .is_some()
+            let key = project_lock_key(project_id, branch);
+            self.mock_nats.get_kv(INDEXING_LOCKS_BUCKET, &key).is_some()
         }
     }
 

@@ -5,7 +5,6 @@ use std::time::Duration;
 
 /// NATS KV bucket names used by the code indexing module.
 pub mod buckets {
-    pub const INDEXING_LOCKS: &str = "kg_code_index_locks";
     pub const EVENTS_CACHE: &str = "kg_code_index_events_cache";
 }
 

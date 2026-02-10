@@ -5,7 +5,7 @@
 //! writes the resulting graph data to ClickHouse.
 
 mod arrow_converter;
-mod config;
+pub(crate) mod config;
 mod event_cache_handler;
 mod gitaly;
 mod project_store;

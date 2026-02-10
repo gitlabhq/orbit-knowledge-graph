@@ -6,7 +6,7 @@ use std::sync::Arc;
 use etl_engine::clickhouse::ClickHouseDestination;
 use etl_engine::engine::EngineBuilder;
 use etl_engine::module::{ModuleInitError, ModuleRegistry};
-use etl_engine::nats::NatsBroker;
+use etl_engine::nats::{KvBucketConfig, NatsBroker};
 use gitaly_client::GitalyError;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -15,6 +15,8 @@ use tracing::info;
 use crate::config::AppConfig;
 use crate::indexer::modules::code::GitalyConfiguration;
 
+use self::modules::code::config::buckets::EVENTS_CACHE;
+use self::modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
 use self::modules::{CodeModule, SdlcModule};
 
 #[derive(Debug, Error)]
@@ -39,6 +41,14 @@ pub enum IndexerError {
 pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), IndexerError> {
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
+
+    let per_message_ttl = KvBucketConfig::with_per_message_ttl();
+    broker
+        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl.clone())
+        .await?;
+    broker
+        .ensure_kv_bucket_exists(EVENTS_CACHE, per_message_ttl)
+        .await?;
 
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
     let destination = Arc::new(ClickHouseDestination::new(config.graph.clone())?);

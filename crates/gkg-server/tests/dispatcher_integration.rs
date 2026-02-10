@@ -138,6 +138,7 @@ impl TestContext {
     async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
         let container = Nats::default()
             .with_cmd(&NatsServerCmd::default().with_jetstream())
+            .with_tag("2.11-alpine")
             .start()
             .await
             .unwrap();

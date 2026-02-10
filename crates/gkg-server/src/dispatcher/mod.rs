@@ -5,9 +5,11 @@ use std::sync::Arc;
 use bytes::Bytes;
 use chrono::Utc;
 use etl_engine::clickhouse::ClickHouseError;
-use etl_engine::nats::{KvPutOptions, KvPutResult, NatsBroker, NatsServices, NatsServicesImpl};
+use etl_engine::nats::{
+    KvBucketConfig, KvPutOptions, KvPutResult, NatsBroker, NatsServices, NatsServicesImpl,
+};
 use etl_engine::types::{Envelope, Event};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::config::AppConfig;
 use crate::indexer::modules::sdlc::locking::{
@@ -89,6 +91,13 @@ impl Dispatcher {
 
 pub async fn run(config: &AppConfig) -> Result<(), DispatcherError> {
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
+    broker
+        .ensure_kv_bucket_exists(
+            INDEXING_LOCKS_BUCKET,
+            KvBucketConfig::with_per_message_ttl(),
+        )
+        .await?;
+
     let dispatcher = Dispatcher::new(broker);
     let datalake = config.datalake.build_client();
 
@@ -107,24 +116,28 @@ pub async fn run(config: &AppConfig) -> Result<(), DispatcherError> {
         "Found enabled namespaces to dispatch indexing requests for"
     );
 
-    match dispatcher.try_acquire_lock(global_lock_key()).await? {
-        LockResult::Acquired => {
+    match dispatcher.try_acquire_lock(global_lock_key()).await {
+        Ok(LockResult::Acquired) => {
             dispatcher
                 .publish(&GlobalIndexingRequest { watermark })
                 .await?;
             info!("Dispatched global indexing request");
         }
-        LockResult::AlreadyHeld => {
+        Ok(LockResult::AlreadyHeld) => {
             info!("Skipping global indexing request, lock already held");
+        }
+        Err(error) => {
+            warn!(%error, "Failed to acquire global lock, skipping global indexing request");
         }
     }
 
     let mut dispatched_count = 0;
     let mut skipped_count = 0;
+    let mut failed_count = 0;
     for (namespace_id, organization_id) in namespace_ids.iter().zip(organization_ids.iter()) {
         let lock_key = namespace_lock_key(*namespace_id);
-        match dispatcher.try_acquire_lock(&lock_key).await? {
-            LockResult::Acquired => {
+        match dispatcher.try_acquire_lock(&lock_key).await {
+            Ok(LockResult::Acquired) => {
                 dispatcher
                     .publish(&NamespaceIndexingRequest {
                         organization: *organization_id,
@@ -139,7 +152,7 @@ pub async fn run(config: &AppConfig) -> Result<(), DispatcherError> {
                     "Dispatched namespace indexing request"
                 );
             }
-            LockResult::AlreadyHeld => {
+            Ok(LockResult::AlreadyHeld) => {
                 skipped_count += 1;
                 debug!(
                     namespace_id = *namespace_id,
@@ -147,11 +160,21 @@ pub async fn run(config: &AppConfig) -> Result<(), DispatcherError> {
                     "Skipped namespace indexing request, lock already held"
                 );
             }
+            Err(error) => {
+                failed_count += 1;
+                warn!(
+                    namespace_id = *namespace_id,
+                    organization_id = *organization_id,
+                    %error,
+                    "Failed to acquire lock for namespace, skipping"
+                );
+            }
         }
     }
     info!(
         dispatched = dispatched_count,
         skipped = skipped_count,
+        failed = failed_count,
         "Dispatched namespace indexing requests"
     );
 
