@@ -14,6 +14,9 @@ stages:
   tags:
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
+  retry:
+    max: 2
+    when: script_failure
   before_script:
     - mise install
 
@@ -23,6 +26,9 @@ stages:
     SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
     SCCACHE_GCS_KEY_PATH: "${SCCACHE_GCS_KEY}"
     SCCACHE_GCS_RW_MODE: "READ_WRITE"
+  retry:
+    max: 2
+    when: script_failure
   before_script:
     - mise install
     - |
