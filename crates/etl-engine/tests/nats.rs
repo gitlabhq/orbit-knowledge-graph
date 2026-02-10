@@ -30,6 +30,7 @@ async fn start_nats_container() -> (testcontainers::ContainerAsync<Nats>, String
     let nats_cmd = NatsServerCmd::default().with_jetstream();
     let container = Nats::default()
         .with_cmd(&nats_cmd)
+        .with_tag("2.11-alpine")
         .start()
         .await
         .expect("failed to start NATS container");

@@ -9,7 +9,7 @@ const FETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
 use async_nats::jetstream::Context;
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
-use async_nats::jetstream::kv::Store as KvStore;
+use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
 use async_nats::jetstream::stream::Stream;
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
@@ -23,7 +23,7 @@ use crate::types::{Envelope, MessageId, Topic};
 
 use super::configuration::NatsConfiguration;
 use super::error::{NatsError, map_connect_error, map_subscribe_error};
-use super::kv_types::{KvEntry, KvPutOptions, KvPutResult};
+use super::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
 use super::message::{NatsMessage, NatsSubscription};
 
 /// NATS JetStream message broker.
@@ -98,6 +98,31 @@ impl NatsBroker {
             self.get_or_create_stream(stream_name, subjects).await?;
         }
 
+        Ok(())
+    }
+
+    pub async fn ensure_kv_bucket_exists(
+        &self,
+        bucket: &str,
+        config: KvBucketConfig,
+    ) -> Result<(), NatsError> {
+        let kv_config = async_nats::jetstream::kv::Config {
+            bucket: bucket.to_string(),
+            limit_markers: config.limit_markers,
+            ..Default::default()
+        };
+
+        let store = self
+            .jetstream
+            .create_key_value(kv_config)
+            .await
+            .map_err(|e| NatsError::KvBucket {
+                bucket: bucket.to_string(),
+                message: e.to_string(),
+            })?;
+
+        let mut cache = self.kv_stores.write().await;
+        cache.insert(bucket.to_string(), store);
         Ok(())
     }
 
@@ -360,24 +385,17 @@ impl NatsBroker {
             } else {
                 store.create(key, value).await
             };
+
             return match result {
                 Ok(revision) => Ok(KvPutResult::Success(revision)),
-                // NOTE: async_nats doesn't expose typed errors for KV conflict conditions.
-                // See: https://github.com/nats-io/nats.rs/issues/1200
-                Err(e) => {
-                    let error_string = e.to_string();
-                    if error_string.contains("wrong last sequence")
-                        || error_string.contains("key exists")
-                    {
-                        Ok(KvPutResult::AlreadyExists)
-                    } else {
-                        Err(NatsError::KvPut {
-                            bucket: bucket.to_string(),
-                            key: key.to_string(),
-                            message: error_string,
-                        })
-                    }
+                Err(e) if e.kind() == CreateErrorKind::AlreadyExists => {
+                    Ok(KvPutResult::AlreadyExists)
                 }
+                Err(e) => Err(NatsError::KvPut {
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    message: e.to_string(),
+                }),
             };
         }
 
@@ -386,18 +404,14 @@ impl NatsBroker {
             let result = store.update(key, value, rev).await;
             return match result {
                 Ok(revision) => Ok(KvPutResult::Success(revision)),
-                Err(e) => {
-                    let error_string = e.to_string();
-                    if error_string.contains("wrong last sequence") {
-                        Ok(KvPutResult::RevisionMismatch)
-                    } else {
-                        Err(NatsError::KvPut {
-                            bucket: bucket.to_string(),
-                            key: key.to_string(),
-                            message: error_string,
-                        })
-                    }
+                Err(e) if e.kind() == UpdateErrorKind::WrongLastRevision => {
+                    Ok(KvPutResult::RevisionMismatch)
                 }
+                Err(e) => Err(NatsError::KvPut {
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    message: e.to_string(),
+                }),
             };
         }
         let result = store.put(key, value).await;

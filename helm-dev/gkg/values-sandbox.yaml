@@ -81,7 +81,7 @@ nats:
   container:
     image:
       repository: nats
-      tag: "2.10-alpine"
+      tag: "2.11-alpine"
     resources:
       requests:
         cpu: 250m
