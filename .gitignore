@@ -17,6 +17,7 @@ git_diff_full.txt
 gl_synthetic_data/
 gkg_simulator_manifest.json
 crates/simulator/profiles
+evaluation_results/
 
 # Tilt secrets (contains passwords)
 .tilt-secrets

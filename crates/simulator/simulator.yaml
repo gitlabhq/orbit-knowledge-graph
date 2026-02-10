@@ -163,6 +163,7 @@ generation:
 
 evaluation:
   queries_path: fixtures/queries/sdlc_queries.json
+  metadata_dir: ./evaluation_results
   sample_size: 100
   iterations: 1
   skip_cache_warm: false
