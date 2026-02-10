@@ -14,9 +14,6 @@ stages:
   tags:
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
-  retry:
-    max: 2
-    when: script_failure
   before_script:
     - mise install
 
@@ -26,9 +23,6 @@ stages:
     SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
     SCCACHE_GCS_KEY_PATH: "${SCCACHE_GCS_KEY}"
     SCCACHE_GCS_RW_MODE: "READ_WRITE"
-  retry:
-    max: 2
-    when: script_failure
   before_script:
     - mise install
     - |
@@ -195,7 +189,18 @@ integration-test:
     TESTCONTAINERS_HOST_OVERRIDE: docker
   needs: []
   before_script:
-    - !reference [.sccache-template, before_script]
+    - |
+      for i in 1 2 3; do
+        mise install && break
+        [ $i -eq 3 ] && exit 1
+        echo "mise install failed (attempt $i/3), retrying in 15s..."
+        sleep 15
+      done
+    - |
+      if [ -n "${SCCACHE_GCS_KEY}" ]; then
+        export RUSTC_WRAPPER="sccache"
+        sccache --start-server || true
+      fi
   script:
     - cargo nextest run --profile ci --all-features --test '*' -j 12 --ignore-default-filter -E 'not package(gitaly-client)'
     - sccache --show-stats || true
