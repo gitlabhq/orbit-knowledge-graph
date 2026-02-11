@@ -4,9 +4,10 @@
 //! After normalization:
 //! - Entity names are resolved to table names
 //! - Filter values are coerced to match ontology types
+//! - Wildcard column selections are expanded to explicit column lists
 
-use crate::input::Input;
-use ontology::{EnumType, Ontology};
+use crate::input::{ColumnSelection, Input};
+use ontology::{EnumType, Ontology, NODE_RESERVED_COLUMNS};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -15,6 +16,7 @@ use std::collections::BTreeMap;
 /// Performs the following transformations:
 /// - Resolves entity names to ClickHouse table names
 /// - Coerces filter values to match ontology field types (e.g., enum int → string)
+/// - Expands wildcard column selections ("*") to explicit column lists
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -26,11 +28,38 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
             node.table = Some(table);
         }
 
-        // Coerce filter values to match ontology field types (e.g., enum int → string)
         let Some(node_entity) = ontology.get_node(entity) else {
             continue;
         };
 
+        // "id" must always be retained, for a list, wildcard, and empty selection.
+        match &mut node.columns {
+            Some(ColumnSelection::All) => {
+                let mut columns: Vec<String> = NODE_RESERVED_COLUMNS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                columns.extend(node_entity.fields.iter().map(|f| f.name.clone()));
+                node.columns = Some(ColumnSelection::List(columns));
+            }
+            Some(ColumnSelection::List(cols)) => {
+                for reserved in NODE_RESERVED_COLUMNS {
+                    if !cols.contains(&reserved.to_string()) {
+                        cols.push(reserved.to_string());
+                    }
+                }
+            }
+            None => {
+                node.columns = Some(ColumnSelection::List(
+                    NODE_RESERVED_COLUMNS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                ));
+            }
+        }
+
+        // Coerce filter values to match ontology field types (e.g., enum int → string)
         for (column, filter) in &mut node.filters {
             let Some(value) = &filter.value else {
                 continue;

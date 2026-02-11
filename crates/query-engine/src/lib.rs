@@ -123,7 +123,7 @@ pub fn compile(
     let input: Input = serde_json::from_value(value)?;
     validate::validate(&input, ontology)?;
     let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input, ontology)?;
+    let mut node = lower::lower(&input)?;
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx)?;
     codegen(&node, result_context)
@@ -187,7 +187,7 @@ mod tests {
         let input: Input = serde_json::from_value(value)?;
         validate::validate(&input, ontology)?;
         let input = normalize::normalize(input, ontology);
-        let node = lower::lower(&input, ontology)?;
+        let node = lower::lower(&input)?;
         Ok(node)
     }
 
