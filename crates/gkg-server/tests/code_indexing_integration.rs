@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use etl_engine::module::{Handler, HandlerContext};
-use etl_engine::testkit::{MockMetricCollector, MockNatsServices, TestEnvelopeFactory};
+use etl_engine::testkit::{MockNatsServices, TestEnvelopeFactory};
 use gitaly_client::{GitalyClient, GitalyRepositoryConfig, RepositorySource};
 use gkg_server::indexer::modules::code::{
     ClickHouseCodeWatermarkStore, ClickHouseProjectStore, CodeIndexingConfig, GitalyConfiguration,
@@ -61,7 +61,6 @@ async fn indexes_repository_from_gitaly() {
 
     let context = HandlerContext::new(
         Arc::new(clickhouse.create_destination()),
-        Arc::new(MockMetricCollector::new()),
         Arc::new(MockNatsServices::new()),
     );
     let envelope = TestEnvelopeFactory::with_bytes(push_event_payload(project_id, &commit_sha));

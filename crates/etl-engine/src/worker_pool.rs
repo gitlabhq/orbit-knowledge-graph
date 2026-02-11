@@ -19,10 +19,13 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
+use opentelemetry::KeyValue;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::configuration::EngineConfiguration;
+use crate::metrics::EngineMetrics;
 
 /// A permit that reserves worker capacity.
 ///
@@ -34,6 +37,18 @@ use crate::configuration::EngineConfiguration;
 pub struct WorkerPermit {
     _global_permit: OwnedSemaphorePermit,
     _module_permit: Option<OwnedSemaphorePermit>,
+    metrics: Arc<EngineMetrics>,
+    attributes: Vec<KeyValue>,
+}
+
+impl Drop for WorkerPermit {
+    fn drop(&mut self) {
+        for attr in &self.attributes {
+            self.metrics
+                .active_permits
+                .add(-1, std::slice::from_ref(attr));
+        }
+    }
 }
 
 /// A pool that controls concurrent message processing.
@@ -44,6 +59,7 @@ pub struct WorkerPermit {
 pub struct WorkerPool {
     global_semaphore: Arc<Semaphore>,
     module_semaphores: HashMap<String, Arc<Semaphore>>,
+    metrics: Arc<EngineMetrics>,
 }
 
 impl WorkerPool {
@@ -52,7 +68,7 @@ impl WorkerPool {
     /// The global semaphore is sized according to `max_concurrent_workers`.
     /// Module semaphores are created only for modules that have
     /// `max_concurrency` configured.
-    pub fn new(configuration: &EngineConfiguration) -> Self {
+    pub fn new(configuration: &EngineConfiguration, metrics: Arc<EngineMetrics>) -> Self {
         let global_semaphore = Arc::new(Semaphore::new(configuration.max_concurrent_workers));
 
         let module_semaphores = configuration
@@ -68,6 +84,7 @@ impl WorkerPool {
         WorkerPool {
             global_semaphore,
             module_semaphores,
+            metrics,
         }
     }
 
@@ -83,10 +100,36 @@ impl WorkerPool {
     ///
     /// * `module_name` - The name of the module requesting capacity
     pub async fn acquire(&self, module_name: &str) -> Option<WorkerPermit> {
+        let global_start = Instant::now();
         let global_permit = self.global_semaphore.clone().acquire_owned().await.ok()?;
+        self.metrics.permit_wait_duration.record(
+            global_start.elapsed().as_secs_f64(),
+            &[
+                KeyValue::new("scope", "global"),
+                KeyValue::new("module", module_name.to_owned()),
+            ],
+        );
+
+        let mut attributes = vec![KeyValue::new("scope", "global")];
+        self.metrics
+            .active_permits
+            .add(1, &[KeyValue::new("scope", "global")]);
 
         let module_permit = if let Some(semaphore) = self.module_semaphores.get(module_name) {
-            Some(semaphore.clone().acquire_owned().await.ok()?)
+            let module_start = Instant::now();
+            let permit = semaphore.clone().acquire_owned().await.ok()?;
+            self.metrics.permit_wait_duration.record(
+                module_start.elapsed().as_secs_f64(),
+                &[
+                    KeyValue::new("scope", "module"),
+                    KeyValue::new("module", module_name.to_owned()),
+                ],
+            );
+            self.metrics
+                .active_permits
+                .add(1, &[KeyValue::new("scope", module_name.to_owned())]);
+            attributes.push(KeyValue::new("scope", module_name.to_owned()));
+            Some(permit)
         } else {
             None
         };
@@ -94,6 +137,8 @@ impl WorkerPool {
         Some(WorkerPermit {
             _global_permit: global_permit,
             _module_permit: module_permit,
+            metrics: self.metrics.clone(),
+            attributes,
         })
     }
 }
@@ -104,6 +149,10 @@ mod tests {
     use crate::configuration::ModuleConfiguration;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
+
+    fn test_metrics() -> Arc<EngineMetrics> {
+        Arc::new(EngineMetrics::new())
+    }
 
     async fn measure_max_concurrency(
         pool: Arc<WorkerPool>,
@@ -137,7 +186,12 @@ mod tests {
             ..Default::default()
         };
 
-        let max = measure_max_concurrency(Arc::new(WorkerPool::new(&config)), "any", 10).await;
+        let max = measure_max_concurrency(
+            Arc::new(WorkerPool::new(&config, test_metrics())),
+            "any",
+            10,
+        )
+        .await;
 
         assert!(
             max <= 2,
@@ -159,7 +213,12 @@ mod tests {
             },
         );
 
-        let max = measure_max_concurrency(Arc::new(WorkerPool::new(&config)), "limited", 10).await;
+        let max = measure_max_concurrency(
+            Arc::new(WorkerPool::new(&config, test_metrics())),
+            "limited",
+            10,
+        )
+        .await;
 
         assert!(
             max <= 2,
@@ -170,10 +229,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_permit_drop_releases_capacity() {
-        let pool = Arc::new(WorkerPool::new(&EngineConfiguration {
-            max_concurrent_workers: 1,
-            ..Default::default()
-        }));
+        let pool = Arc::new(WorkerPool::new(
+            &EngineConfiguration {
+                max_concurrent_workers: 1,
+                ..Default::default()
+            },
+            test_metrics(),
+        ));
 
         {
             let _permit = pool.acquire("test").await;
@@ -199,7 +261,7 @@ mod tests {
                 max_concurrency: Some(2),
             },
         );
-        let pool = Arc::new(WorkerPool::new(&config));
+        let pool = Arc::new(WorkerPool::new(&config, test_metrics()));
 
         let module_a_active = Arc::new(AtomicUsize::new(0));
         let module_a_max = Arc::new(AtomicUsize::new(0));
@@ -274,7 +336,12 @@ mod tests {
             },
         );
 
-        let max = measure_max_concurrency(Arc::new(WorkerPool::new(&config)), "unknown", 5).await;
+        let max = measure_max_concurrency(
+            Arc::new(WorkerPool::new(&config, test_metrics())),
+            "unknown",
+            5,
+        )
+        .await;
 
         assert!(
             max <= 2,
@@ -285,10 +352,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_permit_released_when_worker_panics() {
-        let pool = Arc::new(WorkerPool::new(&EngineConfiguration {
-            max_concurrent_workers: 1,
-            ..Default::default()
-        }));
+        let pool = Arc::new(WorkerPool::new(
+            &EngineConfiguration {
+                max_concurrent_workers: 1,
+                ..Default::default()
+            },
+            test_metrics(),
+        ));
 
         let pool_clone = pool.clone();
         let panicking_task = tokio::spawn(async move {

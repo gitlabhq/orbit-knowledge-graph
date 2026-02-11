@@ -130,18 +130,12 @@ mod tests {
     use crate::indexer::modules::code::test_helpers::{
         EventBuilder, build_replication_events, push_event_columns,
     };
-    use etl_engine::testkit::{
-        MockDestination, MockMetricCollector, MockNatsServices, TestEnvelopeFactory,
-    };
+    use etl_engine::testkit::{MockDestination, MockNatsServices, TestEnvelopeFactory};
     use std::sync::Arc;
 
     fn create_test_context() -> (HandlerContext, Arc<MockNatsServices>) {
         let mock_nats = Arc::new(MockNatsServices::new());
-        let ctx = HandlerContext::new(
-            Arc::new(MockDestination::new()),
-            Arc::new(MockMetricCollector::new()),
-            mock_nats.clone(),
-        );
+        let ctx = HandlerContext::new(Arc::new(MockDestination::new()), mock_nats.clone());
         (ctx, mock_nats)
     }
 

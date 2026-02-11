@@ -1,73 +1,93 @@
-//! Metrics collection for engine observability.
+//! OpenTelemetry metrics for engine observability.
 //!
-//! Implement [`MetricCollector`] for your metrics backend (Prometheus, StatsD, etc.).
+//! [`EngineMetrics`] holds pre-built OTel instruments for tracking throughput,
+//! handler latency, worker pool utilization, and destination write performance.
 //!
-//! # Example
-//!
-//! ```ignore
-//! use etl_engine::metrics::{MetricCollector, NoopMetricCollector};
-//! use std::sync::Arc;
-//!
-//! // Use NoopMetricCollector when metrics are disabled
-//! let metrics: Arc<dyn MetricCollector> = Arc::new(NoopMetricCollector);
-//!
-//! // Or implement MetricCollector for your backend
-//! struct MyMetrics { /* ... */ }
-//!
-//! impl MetricCollector for MyMetrics {
-//!     fn increment(&self, name: &str, tags: &[(&str, &str)]) {
-//!         // Send to your metrics backend
-//!     }
-//!
-//!     fn gauge(&self, name: &str, value: f64, tags: &[(&str, &str)]) {
-//!         // Send to your metrics backend
-//!     }
-//!
-//!     fn histogram(&self, name: &str, value: f64, tags: &[(&str, &str)]) {
-//!         // Send to your metrics backend
-//!     }
-//! }
-//! ```
+//! When no `MeterProvider` is configured (the default), all instruments are
+//! no-ops — zero overhead in production until you opt in via
+//! `opentelemetry::global::set_meter_provider()`.
 
-/// A trait for collecting metrics.
-///
-/// Implement this trait to integrate with your metrics backend (Prometheus,
-/// StatsD, OpenTelemetry, etc.). Handlers receive the collector via
-/// [`HandlerContext`](crate::module::HandlerContext) and can call these methods.
-///
-/// # Thread safety
-///
-/// Implementations must be `Send + Sync` because multiple handlers may record
-/// metrics concurrently.
-pub trait MetricCollector: Send + Sync {
-    /// Increments a counter by 1.
-    ///
-    /// Use for counting events like messages received, errors, etc.
-    fn increment(&self, name: &str, tags: &[(&str, &str)]);
+use opentelemetry::global;
+use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 
-    /// Sets a gauge to a specific value.
-    ///
-    /// Use for values that go up and down, like active handlers or queue depth.
-    fn gauge(&self, name: &str, value: f64, tags: &[(&str, &str)]);
+/// OTel-recommended histogram buckets for duration in seconds.
+const DURATION_BUCKETS: &[f64] = &[
+    0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+];
 
-    /// Records a value in a histogram.
-    ///
-    /// Use for distributions like latencies, message sizes, etc.
-    fn histogram(&self, name: &str, value: f64, tags: &[(&str, &str)]);
+/// Pre-built OpenTelemetry instruments for the ETL engine.
+///
+/// Created once and cloned where needed. All instruments are derived from
+/// `global::meter("etl_engine")`, so they follow whatever `MeterProvider`
+/// is installed at startup.
+#[derive(Clone)]
+pub struct EngineMetrics {
+    pub(crate) messages_processed: Counter<u64>,
+    pub(crate) message_duration: Histogram<f64>,
+    pub(crate) handler_duration: Histogram<f64>,
+    pub(crate) permit_wait_duration: Histogram<f64>,
+    pub(crate) active_permits: UpDownCounter<i64>,
+    pub(crate) nats_fetch_duration: Histogram<f64>,
 }
 
-/// A no-op metric collector that discards all metrics.
-///
-/// Used as the default when no metrics backend is configured.
-pub struct NoopMetricCollector;
+impl EngineMetrics {
+    pub fn new() -> Self {
+        let meter = global::meter("etl_engine");
+        Self::with_meter(&meter)
+    }
 
-impl MetricCollector for NoopMetricCollector {
-    #[inline]
-    fn increment(&self, _name: &str, _tags: &[(&str, &str)]) {}
+    pub fn with_meter(meter: &Meter) -> Self {
+        let messages_processed = meter
+            .u64_counter("etl.messages.processed")
+            .with_description("Total messages processed")
+            .build();
 
-    #[inline]
-    fn gauge(&self, _name: &str, _value: f64, _tags: &[(&str, &str)]) {}
+        let message_duration = meter
+            .f64_histogram("etl.message.duration")
+            .with_unit("s")
+            .with_description("End-to-end time per message through dispatch")
+            .with_boundaries(DURATION_BUCKETS.to_vec())
+            .build();
 
-    #[inline]
-    fn histogram(&self, _name: &str, _value: f64, _tags: &[(&str, &str)]) {}
+        let handler_duration = meter
+            .f64_histogram("etl.handler.duration")
+            .with_unit("s")
+            .with_description("Time inside each handler's handle() call")
+            .with_boundaries(DURATION_BUCKETS.to_vec())
+            .build();
+
+        let permit_wait_duration = meter
+            .f64_histogram("etl.permit.wait.duration")
+            .with_unit("s")
+            .with_description("Time waiting for a worker pool permit")
+            .with_boundaries(DURATION_BUCKETS.to_vec())
+            .build();
+
+        let active_permits = meter
+            .i64_up_down_counter("etl.permits.active")
+            .with_description("Number of worker permits currently held")
+            .build();
+
+        let nats_fetch_duration = meter
+            .f64_histogram("etl.nats.fetch.duration")
+            .with_unit("s")
+            .with_description("Time to fetch a batch of messages from NATS")
+            .with_boundaries(DURATION_BUCKETS.to_vec())
+            .build();
+
+        Self {
+            messages_processed,
+            message_duration,
+            handler_duration,
+            permit_wait_duration,
+            active_permits,
+            nats_fetch_duration,
+        }
+    }
+}
+
+impl Default for EngineMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
 }

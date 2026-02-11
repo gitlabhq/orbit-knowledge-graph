@@ -250,9 +250,7 @@ mod tests {
     use crate::indexer::modules::sdlc::datalake::{
         DatalakeError, DatalakeQuery, RecordBatchStream,
     };
-    use etl_engine::testkit::{
-        MockDestination, MockMetricCollector, MockNatsServices, TestEnvelopeFactory,
-    };
+    use etl_engine::testkit::{MockDestination, MockNatsServices, TestEnvelopeFactory};
     use futures::stream;
     use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
     use std::collections::BTreeMap;
@@ -346,11 +344,7 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(
-            destination,
-            Arc::new(MockMetricCollector::new()),
-            Arc::new(MockNatsServices::new()),
-        );
+        let context = HandlerContext::new(destination, Arc::new(MockNatsServices::new()));
 
         let result = handler.handle(context, envelope).await;
 
@@ -382,11 +376,7 @@ mod tests {
         mock_nats.set_kv(INDEXING_LOCKS_BUCKET, &lock_key, bytes::Bytes::new());
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(
-            destination,
-            Arc::new(MockMetricCollector::new()),
-            Arc::new(mock_nats.clone()),
-        );
+        let context = HandlerContext::new(destination, Arc::new(mock_nats.clone()));
 
         let result = handler.handle(context, envelope).await;
 

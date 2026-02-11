@@ -495,9 +495,7 @@ mod tests {
     };
     use crate::indexer::modules::code::watermark_store::test_utils::MockCodeWatermarkStore;
     use etl_engine::module::Handler;
-    use etl_engine::testkit::{
-        MockDestination, MockMetricCollector, MockNatsServices, TestEnvelopeFactory,
-    };
+    use etl_engine::testkit::{MockDestination, MockNatsServices, TestEnvelopeFactory};
 
     struct TestContext {
         handler: PushEventHandler,
@@ -532,11 +530,7 @@ mod tests {
         }
 
         fn handler_context(&self) -> HandlerContext {
-            HandlerContext::new(
-                Arc::new(MockDestination::new()),
-                Arc::new(MockMetricCollector::new()),
-                self.mock_nats.clone(),
-            )
+            HandlerContext::new(Arc::new(MockDestination::new()), self.mock_nats.clone())
         }
 
         fn add_project(&self, project_id: i64) {

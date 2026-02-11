@@ -2226,6 +2226,7 @@ dependencies = [
  "chrono",
  "clickhouse-client",
  "futures",
+ "opentelemetry",
  "parking_lot",
  "serde",
  "serde_json",

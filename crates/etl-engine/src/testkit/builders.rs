@@ -5,7 +5,6 @@ use std::sync::Arc;
 use crate::configuration::{EngineConfiguration, ModuleConfiguration};
 use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
-use crate::metrics::MetricCollector;
 use crate::module::{Module, ModuleRegistry};
 use crate::nats::{NatsBroker, NatsServices};
 
@@ -29,7 +28,6 @@ use super::mocks::{MockDestination, MockNatsServices};
 pub struct TestEngineBuilder {
     broker: Arc<NatsBroker>,
     destination: Option<Arc<dyn Destination>>,
-    metrics: Option<Arc<dyn MetricCollector>>,
     nats_services: Option<Arc<dyn NatsServices>>,
     registry: Arc<ModuleRegistry>,
     configuration: EngineConfiguration,
@@ -40,7 +38,6 @@ impl TestEngineBuilder {
         Self {
             broker,
             destination: None,
-            metrics: None,
             nats_services: None,
             registry: Arc::new(ModuleRegistry::default()),
             configuration: EngineConfiguration::default(),
@@ -54,11 +51,6 @@ impl TestEngineBuilder {
 
     pub fn with_destination(mut self, destination: Arc<dyn Destination>) -> Self {
         self.destination = Some(destination);
-        self
-    }
-
-    pub fn with_metrics<M: MetricCollector + 'static>(mut self, metrics: M) -> Self {
-        self.metrics = Some(Arc::new(metrics));
         self
     }
 
@@ -91,12 +83,8 @@ impl TestEngineBuilder {
             .nats_services
             .unwrap_or_else(|| Arc::new(MockNatsServices::new()));
 
-        let mut engine_builder = EngineBuilder::new(self.broker, self.registry, destination)
+        let engine_builder = EngineBuilder::new(self.broker, self.registry, destination)
             .nats_services(nats_services);
-
-        if let Some(metrics) = self.metrics {
-            engine_builder = engine_builder.metrics(metrics);
-        }
 
         let engine = Arc::new(engine_builder.build());
         (engine, self.configuration)
