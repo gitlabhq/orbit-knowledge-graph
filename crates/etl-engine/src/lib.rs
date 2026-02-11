@@ -39,16 +39,12 @@
 //!
 //! ## Metrics
 //!
-//! Handlers receive a [`MetricCollector`](metrics::MetricCollector) via
-//! [`HandlerContext`](module::HandlerContext):
+//! The engine automatically collects OpenTelemetry metrics (handler duration,
+//! worker pool utilization, write performance, etc). Install a `MeterProvider`
+//! via `opentelemetry::global::set_meter_provider()` at startup to export them.
+//! When no provider is set, all instruments are no-ops.
 //!
-//! ```ignore
-//! let engine = EngineBuilder::new(broker, registry, destination)
-//!     .metrics(Arc::new(my_prometheus_backend))
-//!     .build();
-//! ```
-//!
-//! See [`metrics`] for implementing backends.
+//! See [`metrics`] for the full list of instruments.
 //!
 //! ## Modules
 //!
@@ -56,7 +52,7 @@
 //! - [`nats`] - NATS broker and services
 //! - [`types`] - core message types (Envelope, Event)
 //! - [`destination`] - batch and stream writers
-//! - [`metrics`] - metric collection
+//! - [`metrics`] - OpenTelemetry instruments
 //! - [`configuration`] - concurrency limits
 //!
 pub mod clickhouse;

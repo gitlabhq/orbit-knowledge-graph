@@ -12,7 +12,7 @@ use etl_engine::clickhouse::{
     ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination,
 };
 use etl_engine::module::{Handler, HandlerContext, Module};
-use etl_engine::testkit::{MockMetricCollector, MockNatsServices};
+use etl_engine::testkit::MockNatsServices;
 use gkg_server::indexer::modules::SdlcModule;
 use query_engine::ParameterizedQuery;
 use serde_json::Value;
@@ -69,7 +69,6 @@ impl TestContext {
     pub fn create_handler_context(&self) -> HandlerContext {
         HandlerContext::new(
             Arc::new(self.create_destination()),
-            Arc::new(MockMetricCollector::new()),
             Arc::new(MockNatsServices::new()),
         )
     }

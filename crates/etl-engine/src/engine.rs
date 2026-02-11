@@ -25,28 +25,18 @@
 //! // From another task:
 //! engine.stop();
 //! ```
-//!
-//! # Metrics
-//!
-//! To collect metrics, pass a [`MetricCollector`](crate::metrics::MetricCollector) to the builder:
-//!
-//! ```ignore
-//! let engine = EngineBuilder::new(broker, registry, destination)
-//!     .metrics(Arc::new(my_metrics_backend))
-//!     .build();
-//! ```
-//!
-//! Handlers receive the collector via [`HandlerContext`](crate::module::HandlerContext).
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::StreamExt;
+use opentelemetry::KeyValue;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
-use crate::metrics::{MetricCollector, NoopMetricCollector};
+use crate::metrics::EngineMetrics;
 use crate::module::{Handler, HandlerContext, HandlerError, ModuleRegistry};
 use crate::nats::{NatsBroker, NatsError, NatsServices, NatsServicesImpl};
 use crate::types::{Envelope, Topic};
@@ -75,15 +65,12 @@ pub enum EngineError {
 /// use etl_engine::engine::EngineBuilder;
 /// use std::sync::Arc;
 ///
-/// let engine = EngineBuilder::new(broker, registry, destination)
-///     .metrics(Arc::new(my_metrics))  // optional
-///     .build();
+/// let engine = EngineBuilder::new(broker, registry, destination).build();
 /// ```
 pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
     registry: Arc<ModuleRegistry>,
     destination: Arc<dyn Destination>,
-    metrics: Arc<dyn MetricCollector>,
     nats_services: Option<Arc<dyn NatsServices>>,
 }
 
@@ -98,17 +85,8 @@ impl EngineBuilder {
             broker,
             registry,
             destination,
-            metrics: Arc::new(NoopMetricCollector),
             nats_services: None,
         }
-    }
-
-    /// Sets the metric collector.
-    ///
-    /// If not called, metrics are discarded.
-    pub fn metrics(mut self, metrics: Arc<dyn MetricCollector>) -> Self {
-        self.metrics = metrics;
-        self
     }
 
     /// Sets the NATS services for handlers.
@@ -121,15 +99,17 @@ impl EngineBuilder {
 
     /// Builds the engine.
     pub fn build(self) -> Engine {
-        let nats_services = self
+        let nats_services: Arc<dyn NatsServices> = self
             .nats_services
             .unwrap_or_else(|| Arc::new(NatsServicesImpl::new(self.broker.clone())));
+
+        let metrics = Arc::new(EngineMetrics::new());
 
         Engine {
             broker: self.broker,
             registry: self.registry,
             destination: self.destination,
-            metrics: self.metrics,
+            metrics,
             nats_services,
             cancel: CancellationToken::new(),
         }
@@ -159,7 +139,7 @@ pub struct Engine {
     broker: Arc<NatsBroker>,
     registry: Arc<ModuleRegistry>,
     destination: Arc<dyn Destination>,
-    metrics: Arc<dyn MetricCollector>,
+    metrics: Arc<EngineMetrics>,
     nats_services: Arc<dyn NatsServices>,
     cancel: CancellationToken,
 }
@@ -176,7 +156,7 @@ impl Engine {
 
         self.broker.ensure_streams(&topics).await?;
 
-        let worker_pool = Arc::new(WorkerPool::new(configuration));
+        let worker_pool = Arc::new(WorkerPool::new(configuration, self.metrics.clone()));
         let tasks: Vec<_> = topics
             .into_iter()
             .map(|topic| self.listen(topic, worker_pool.clone()))
@@ -187,7 +167,7 @@ impl Engine {
     }
 
     async fn listen(&self, topic: Topic, worker_pool: Arc<WorkerPool>) -> Result<(), EngineError> {
-        let mut subscription = self.broker.subscribe(&topic).await?;
+        let mut subscription = self.broker.subscribe(&topic, self.metrics.clone()).await?;
 
         loop {
             tokio::select! {
@@ -197,14 +177,32 @@ impl Engine {
                     let handlers = self.registry.handlers_for(&topic);
                     let context = HandlerContext::new(
                         self.destination.clone(),
-                        self.metrics.clone(),
                         self.nats_services.clone(),
                     );
 
-                    match dispatch(&handlers, context, msg.envelope.clone(), &worker_pool).await {
-                        Ok(_)  => msg.ack().await?,
-                        Err(_) => msg.nack().await?,
-                    }
+                    let message_start = Instant::now();
+                    let topic_attribute = KeyValue::new("topic", format!("{}.{}", topic.stream, topic.subject));
+
+                    let outcome = match dispatch(&handlers, context, msg.envelope.clone(), &worker_pool, &self.metrics).await {
+                        Ok(_)  => {
+                            msg.ack().await?;
+                            "ack"
+                        }
+                        Err(_) => {
+                            msg.nack().await?;
+                            "nack"
+                        }
+                    };
+
+                    self.metrics.messages_processed.add(
+                        1,
+                        &[topic_attribute.clone(), KeyValue::new("outcome", outcome)],
+                    );
+
+                    self.metrics.message_duration.record(
+                        message_start.elapsed().as_secs_f64(),
+                        &[topic_attribute],
+                    );
                 }
             }
         }
@@ -223,13 +221,26 @@ async fn dispatch(
     context: HandlerContext,
     envelope: Envelope,
     worker_pool: &WorkerPool,
+    metrics: &Arc<EngineMetrics>,
 ) -> Result<(), HandlerError> {
     for (handler, module_name) in handlers {
         let _permit = worker_pool
             .acquire(module_name)
             .await
             .expect("worker pool semaphore closed unexpectedly");
-        handler.handle(context.clone(), envelope.clone()).await?;
+
+        let handler_start = Instant::now();
+        let result = handler.handle(context.clone(), envelope.clone()).await;
+
+        let attributes = [
+            KeyValue::new("handler", handler.name().to_owned()),
+            KeyValue::new("module", module_name.to_string()),
+        ];
+        metrics
+            .handler_duration
+            .record(handler_start.elapsed().as_secs_f64(), &attributes);
+
+        result?;
     }
 
     Ok(())

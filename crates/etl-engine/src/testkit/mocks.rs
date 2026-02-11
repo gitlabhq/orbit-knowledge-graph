@@ -14,7 +14,6 @@ use uuid::Uuid;
 
 use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::entities::Entity;
-use crate::metrics::MetricCollector;
 use crate::module::{Handler, HandlerContext, HandlerError, Module};
 use crate::nats::{KvEntry, KvPutOptions, KvPutResult, NatsError, NatsServices};
 use crate::types::{Envelope, MessageId, Topic};
@@ -28,7 +27,7 @@ use crate::types::{Envelope, MessageId, Topic};
 ///
 /// ```ignore
 /// let mock_nats = MockNatsServices::new();
-/// let context = HandlerContext::new(destination, metrics, Arc::new(mock_nats.clone()));
+/// let context = HandlerContext::new(destination, Arc::new(mock_nats.clone()));
 ///
 /// handler.handle(context, envelope).await?;
 ///
@@ -352,88 +351,5 @@ impl TestEnvelopeFactory {
             timestamp: Utc::now(),
             attempt: 1,
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum RecordedMetric {
-    Increment {
-        name: String,
-        tags: Vec<(String, String)>,
-    },
-    Gauge {
-        name: String,
-        value: f64,
-        tags: Vec<(String, String)>,
-    },
-    Histogram {
-        name: String,
-        value: f64,
-        tags: Vec<(String, String)>,
-    },
-}
-
-#[derive(Default)]
-pub struct MockMetricCollector {
-    metrics: Mutex<Vec<RecordedMetric>>,
-}
-
-impl MockMetricCollector {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn get_metrics(&self) -> Vec<RecordedMetric> {
-        self.metrics.lock().clone()
-    }
-
-    pub fn count(&self, name: &str) -> usize {
-        self.metrics
-            .lock()
-            .iter()
-            .filter(|m| match m {
-                RecordedMetric::Increment { name: n, .. } => n == name,
-                RecordedMetric::Gauge { name: n, .. } => n == name,
-                RecordedMetric::Histogram { name: n, .. } => n == name,
-            })
-            .count()
-    }
-
-    pub fn clear(&self) {
-        self.metrics.lock().clear();
-    }
-}
-
-impl MetricCollector for MockMetricCollector {
-    fn increment(&self, name: &str, tags: &[(&str, &str)]) {
-        self.metrics.lock().push(RecordedMetric::Increment {
-            name: name.to_string(),
-            tags: tags
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        });
-    }
-
-    fn gauge(&self, name: &str, value: f64, tags: &[(&str, &str)]) {
-        self.metrics.lock().push(RecordedMetric::Gauge {
-            name: name.to_string(),
-            value,
-            tags: tags
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        });
-    }
-
-    fn histogram(&self, name: &str, value: f64, tags: &[(&str, &str)]) {
-        self.metrics.lock().push(RecordedMetric::Histogram {
-            name: name.to_string(),
-            value,
-            tags: tags
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        });
     }
 }

@@ -14,7 +14,6 @@
 //!
 //!     async fn handle(&self, ctx: HandlerContext, msg: Envelope) -> Result<(), HandlerError> {
 //!         // ctx.destination has your writers
-//!         // ctx.metrics has the metric collector
 //!         // ctx.nats has NATS services for publishing
 //!         Ok(())
 //!     }
@@ -39,7 +38,6 @@ use thiserror::Error;
 use crate::{
     destination::Destination,
     entities::Entity,
-    metrics::MetricCollector,
     nats::NatsServices,
     types::{Envelope, Topic},
 };
@@ -84,25 +82,14 @@ pub struct HandlerContext {
     /// The destination where processed data should be written.
     pub destination: Arc<dyn Destination>,
 
-    /// The metric collector for recording metrics.
-    pub metrics: Arc<dyn MetricCollector>,
-
     /// NATS services for publishing messages and other NATS operations.
     pub nats: Arc<dyn NatsServices>,
 }
 
 impl HandlerContext {
     /// Creates a new handler context with the given resources.
-    pub fn new(
-        destination: Arc<dyn Destination>,
-        metrics: Arc<dyn MetricCollector>,
-        nats: Arc<dyn NatsServices>,
-    ) -> Self {
-        HandlerContext {
-            destination,
-            metrics,
-            nats,
-        }
+    pub fn new(destination: Arc<dyn Destination>, nats: Arc<dyn NatsServices>) -> Self {
+        HandlerContext { destination, nats }
     }
 }
 
@@ -152,7 +139,7 @@ pub trait Handler: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `context` - Shared resources for processing (e.g., destination writers, metrics)
+    /// * `context` - Shared resources for processing (e.g., destination writers, NATS services)
     /// * `message` - The message envelope containing the payload
     ///
     /// # Errors

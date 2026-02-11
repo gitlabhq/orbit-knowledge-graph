@@ -64,6 +64,7 @@ gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag =
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 toml = "0.9.8"
+opentelemetry = { version = "0.31", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = { version = "0.46.0", features = ["server_2_11"] }

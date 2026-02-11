@@ -2,6 +2,9 @@
 //!
 //! These tests require a Docker-compatible runtime (Docker, Colima, etc).
 
+use std::sync::Arc;
+
+use etl_engine::metrics::EngineMetrics;
 use etl_engine::nats::{NatsBroker, NatsConfiguration};
 use etl_engine::types::{Envelope, Event, Topic};
 use futures::StreamExt;
@@ -97,7 +100,10 @@ async fn publish_and_subscribe() {
 
     let topic = Topic::new(TEST_STREAM, TEST_SUBJECT);
 
-    let mut subscription = broker.subscribe(&topic).await.expect("failed to subscribe");
+    let mut subscription = broker
+        .subscribe(&topic, Arc::new(EngineMetrics::new()))
+        .await
+        .expect("failed to subscribe");
 
     let event = TestEvent {
         id: "test-1".to_string(),
@@ -141,7 +147,10 @@ async fn nack_redelivers_message() {
 
     let topic = Topic::new(TEST_STREAM, TEST_SUBJECT);
 
-    let mut subscription = broker.subscribe(&topic).await.expect("failed to subscribe");
+    let mut subscription = broker
+        .subscribe(&topic, Arc::new(EngineMetrics::new()))
+        .await
+        .expect("failed to subscribe");
 
     let event = TestEvent {
         id: "nack-test".to_string(),
@@ -188,7 +197,9 @@ async fn nonexistent_stream() {
         .expect("failed to connect");
 
     let topic = Topic::new("nonexistent", "subject");
-    let result = broker.subscribe(&topic).await;
+    let result = broker
+        .subscribe(&topic, Arc::new(EngineMetrics::new()))
+        .await;
     assert!(result.is_err());
 }
 
@@ -230,8 +241,14 @@ async fn multiple_streams() {
     let topic_a = Topic::new("stream_a", "a.events");
     let topic_b = Topic::new("stream_b", "b.events");
 
-    let mut sub_a = broker.subscribe(&topic_a).await.expect("sub a");
-    let mut sub_b = broker.subscribe(&topic_b).await.expect("sub b");
+    let mut sub_a = broker
+        .subscribe(&topic_a, Arc::new(EngineMetrics::new()))
+        .await
+        .expect("sub a");
+    let mut sub_b = broker
+        .subscribe(&topic_b, Arc::new(EngineMetrics::new()))
+        .await
+        .expect("sub b");
 
     let event_a = TestEvent {
         id: "from-a".to_string(),

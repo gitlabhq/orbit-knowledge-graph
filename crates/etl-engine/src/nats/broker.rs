@@ -19,6 +19,7 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
+use crate::metrics::EngineMetrics;
 use crate::types::{Envelope, MessageId, Topic};
 
 use super::configuration::NatsConfiguration;
@@ -268,7 +269,11 @@ impl NatsBroker {
         Ok(())
     }
 
-    pub async fn subscribe(&self, topic: &Topic) -> Result<NatsSubscription, NatsError> {
+    pub async fn subscribe(
+        &self,
+        topic: &Topic,
+        metrics: Arc<EngineMetrics>,
+    ) -> Result<NatsSubscription, NatsError> {
         let stream = self.get_stream(&topic.stream).await?;
         let consumer = self.get_or_create_consumer(&stream, &topic.subject).await?;
 
@@ -283,14 +288,23 @@ impl NatsBroker {
                     break;
                 }
 
+                let fetch_start = std::time::Instant::now();
                 let batch = match consumer.fetch().max_messages(batch_size).messages().await {
                     Ok(batch) => batch,
                     Err(e) => {
+                        metrics.nats_fetch_duration.record(
+                            fetch_start.elapsed().as_secs_f64(),
+                            &[opentelemetry::KeyValue::new("outcome", "error")],
+                        );
                         let _ = sender.send(Err(map_subscribe_error(e))).await;
                         tokio::time::sleep(FETCH_RETRY_DELAY).await;
                         continue;
                     }
                 };
+                metrics.nats_fetch_duration.record(
+                    fetch_start.elapsed().as_secs_f64(),
+                    &[opentelemetry::KeyValue::new("outcome", "success")],
+                );
 
                 tokio::pin!(batch);
 
