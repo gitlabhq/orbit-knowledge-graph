@@ -84,6 +84,16 @@
     {
       "if": {
         "properties": {
+          "query_type": { "const": "neighbors" }
+        }
+      },
+      "then": {
+        "required": ["neighbors"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "query_type": { "const": "aggregation" }
         }
       },
@@ -130,19 +140,6 @@
           }
         }
       }
-    },
-    {
-      "if": {
-        "properties": {
-          "query_type": { "const": "neighbors" }
-        }
-      },
-      "then": {
-        "required": ["node", "neighbors"],
-        "not": {
-          "required": ["nodes"]
-        }
-      }
     }
   ],
   "$defs": {
@@ -165,7 +162,7 @@
     },
     "NodeProperties": {
       "type": "object",
-      "description": "Property definitions per node label. Populated dynamically from ontology.",
+      "description": "Property definitions per node label. Populated dynamically from ontology. Keys are entity names, values describe available properties.",
       "additionalProperties": {
         "type": "object",
         "description": "Properties available for a specific node label. Keys are property names, values are property schemas.",
@@ -197,7 +194,7 @@
     "NodeSelector": {
       "type": "object",
       "description": "Selector for matching nodes in the graph",
-      "required": ["id"],
+      "required": ["id", "entity"],
       "properties": {
         "id": {
           "$ref": "#/$defs/Identifier",
@@ -205,7 +202,7 @@
         },
         "entity": {
           "$ref": "#/$defs/EntityType",
-          "description": "Entity type (e.g., User, Project, MergeRequest). Determines which table to query. Required for most queries."
+          "description": "Entity type (e.g., User, Project, MergeRequest). Determines which table to query."
         },
         "columns": {
           "$ref": "#/$defs/ColumnSelection",
@@ -245,7 +242,6 @@
       "description": "Column selection for a node. Use '*' for all columns or an array of specific column names.",
       "oneOf": [
         {
-          "type": "string",
           "const": "*",
           "description": "Select all columns for this entity"
         },
@@ -315,85 +311,37 @@
       "type": "object",
       "description": "Advanced filter with operator",
       "required": ["op"],
-      "oneOf": [
+      "properties": {
+        "op": {
+          "type": "string",
+          "description": "Filter operator. is_null and is_not_null do not require a value; all others do.",
+          "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null"]
+        },
+        "value": {
+          "description": "Filter value. Required for all operators except is_null and is_not_null. Type depends on operator: array for 'in', string for contains/starts_with/ends_with, FilterValue for comparison operators."
+        }
+      },
+      "allOf": [
         {
-          "properties": {
-            "op": { "const": "eq" },
-            "value": { "$ref": "#/$defs/FilterValue" }
-          },
-          "required": ["op", "value"]
+          "if": { "properties": { "op": { "enum": ["eq", "gt", "lt", "gte", "lte"] } } },
+          "then": { "required": ["value"], "properties": { "value": { "$ref": "#/$defs/FilterValue" } } }
         },
         {
-          "properties": {
-            "op": { "const": "gt" },
-            "value": { "$ref": "#/$defs/FilterValue" }
-          },
-          "required": ["op", "value"]
-        },
-        {
-          "properties": {
-            "op": { "const": "lt" },
-            "value": { "$ref": "#/$defs/FilterValue" }
-          },
-          "required": ["op", "value"]
-        },
-        {
-          "properties": {
-            "op": { "const": "gte" },
-            "value": { "$ref": "#/$defs/FilterValue" }
-          },
-          "required": ["op", "value"]
-        },
-        {
-          "properties": {
-            "op": { "const": "lte" },
-            "value": { "$ref": "#/$defs/FilterValue" }
-          },
-          "required": ["op", "value"]
-        },
-        {
-          "properties": {
-            "op": { "const": "in" },
-            "value": {
-              "type": "array",
-              "items": { "$ref": "#/$defs/FilterValue" },
-              "minItems": 1
+          "if": { "properties": { "op": { "const": "in" } } },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/FilterValue" },
+                "minItems": 1
+              }
             }
-          },
-          "required": ["op", "value"]
+          }
         },
         {
-          "properties": {
-            "op": { "const": "contains" },
-            "value": { "type": "string" }
-          },
-          "required": ["op", "value"]
-        },
-        {
-          "properties": {
-            "op": { "const": "starts_with" },
-            "value": { "type": "string" }
-          },
-          "required": ["op", "value"]
-        },
-        {
-          "properties": {
-            "op": { "const": "ends_with" },
-            "value": { "type": "string" }
-          },
-          "required": ["op", "value"]
-        },
-        {
-          "properties": {
-            "op": { "const": "is_null" }
-          },
-          "required": ["op"]
-        },
-        {
-          "properties": {
-            "op": { "const": "is_not_null" }
-          },
-          "required": ["op"]
+          "if": { "properties": { "op": { "enum": ["contains", "starts_with", "ends_with"] } } },
+          "then": { "required": ["value"], "properties": { "value": { "type": "string" } } }
         }
       ]
     },
@@ -444,15 +392,25 @@
           },
           "default": {}
         }
-      }
+      },
+      "allOf": [
+        {
+          "description": "max_hops must be >= min_hops",
+          "if": { "required": ["min_hops"], "properties": { "min_hops": { "minimum": 2 } } },
+          "then": { "properties": { "max_hops": { "minimum": 2 } } }
+        },
+        {
+          "if": { "required": ["min_hops"], "properties": { "min_hops": { "minimum": 3 } } },
+          "then": { "properties": { "max_hops": { "minimum": 3 } } }
+        }
+      ]
     },
     "RelationshipType": {
       "description": "Relationship type specification - single, multiple, or wildcard",
       "oneOf": [
         {
-          "type": "string",
-          "description": "Single relationship type",
-          "$ref": "#/$defs/RelationshipTypeName"
+          "$ref": "#/$defs/RelationshipTypeName",
+          "description": "Single relationship type"
         },
         {
           "type": "array",
@@ -501,18 +459,14 @@
           "description": "Output column alias for the aggregation result"
         }
       },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "function": { "enum": ["sum", "avg", "min", "max"] }
-            }
-          },
-          "then": {
-            "required": ["property"]
-          }
+      "if": {
+        "properties": {
+          "function": { "enum": ["sum", "avg", "min", "max"] }
         }
-      ]
+      },
+      "then": {
+        "required": ["property"]
+      }
     },
     "AggFunction": {
       "type": "string",

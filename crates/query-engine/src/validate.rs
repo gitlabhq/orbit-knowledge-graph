@@ -1,323 +1,227 @@
-//! Input validation against ontology.
+//! Query validation.
 //!
-//! Validates semantic correctness of parsed input before lowering.
-//! After validation, the input is guaranteed to be correct and lowering cannot fail.
+//! Two-phase validation via [`Validator`]:
+//! 1. **Schema validation** — structural correctness via JSON Schema (base + ontology-derived).
+//!    Entity types, columns, filters, relationship types, and hop ranges are all enforced here.
+//! 2. **Cross-reference validation** — node ID references that JSON Schema cannot express
+//!    (e.g. relationship from/to must reference a declared node ID).
+
+use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Input, InputNode, QueryType};
+use crate::input::{Input, QueryType};
 use ontology::Ontology;
 
-/// Validate parsed input against the ontology.
-///
-/// Checks:
-/// - At least one node is defined
-/// - All nodes have entity types
-/// - All entity types exist in the ontology
-/// - All relationship node references are valid
-/// - All relationship types exist in the ontology
-/// - All filter properties exist on their entities
-/// - Path config references valid nodes (for path_finding)
-/// - Aggregation targets reference valid nodes
-/// - Order by references valid nodes and properties
-pub fn validate(input: &Input, ontology: &Ontology) -> Result<()> {
-    validate_nodes(&input.nodes, ontology)?;
-    validate_relationships(input, ontology)?;
-    validate_filters(input, ontology)?;
-    validate_columns(input, ontology)?;
-    validate_aggregations(input, ontology)?;
-    validate_order_by(input, ontology)?;
-    validate_path(input, ontology)?;
-    validate_neighbors(input, ontology)?;
-    Ok(())
+pub(crate) const BASE_SCHEMA_JSON: &str = include_str!("../../ontology/schema.json");
+
+static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
+
+fn base_validator() -> &'static jsonschema::Validator {
+    BASE_SCHEMA_VALIDATOR.get_or_init(|| {
+        let schema: serde_json::Value =
+            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
+        jsonschema::validator_for(&schema).expect("schema.json must be a valid JSON Schema")
+    })
+}
+
+fn collect_schema_errors(
+    validator: &jsonschema::Validator,
+    value: &serde_json::Value,
+) -> Result<()> {
+    let errors: Vec<_> = validator
+        .iter_errors(value)
+        .map(|e| format!("{} at {}", e, e.instance_path()))
+        .collect();
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(QueryError::Validation(errors.join("; ")))
+    }
+}
+
+fn err(msg: impl Into<String>) -> QueryError {
+    QueryError::Validation(msg.into())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Node validation
+// Validator
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn validate_nodes(nodes: &[InputNode], ontology: &Ontology) -> Result<()> {
-    if nodes.is_empty() {
-        return Err(err("at least one node is required"));
-    }
-
-    for node in nodes {
-        let entity = node.entity.as_ref().ok_or_else(|| {
-            err(format!(
-                "node \"{}\" requires an entity type to determine which table to query",
-                node.id
-            ))
-        })?;
-
-        // Validate entity exists in ontology
-        if !ontology.has_node(entity) {
-            return Err(err(format!(
-                "unknown entity type \"{}\" for node \"{}\"",
-                entity, node.id
-            )));
-        }
-    }
-
-    Ok(())
+pub struct Validator<'a> {
+    ontology: &'a Ontology,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Relationship validation
-// ─────────────────────────────────────────────────────────────────────────────
+impl<'a> Validator<'a> {
+    pub fn new(ontology: &'a Ontology) -> Self {
+        Self { ontology }
+    }
 
-fn validate_relationships(input: &Input, ontology: &Ontology) -> Result<()> {
-    let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
+    /// Parse JSON and validate against the base schema (structure, identifiers, security).
+    pub fn check_json(&self, json: &str) -> Result<serde_json::Value> {
+        let value: serde_json::Value = serde_json::from_str(json)?;
+        collect_schema_errors(base_validator(), &value)?;
+        Ok(value)
+    }
 
-    for (i, rel) in input.relationships.iter().enumerate() {
-        // Validate "from" node reference
-        if !node_ids.contains(&rel.from.as_str()) {
-            return Err(err(format!(
-                "relationship[{}] references undefined node \"{}\" in 'from'",
-                i, rel.from
-            )));
-        }
+    /// Validate against the ontology-derived schema (entity types, columns, relationship types).
+    pub fn check_ontology(&self, value: &serde_json::Value) -> Result<()> {
+        let schema = self
+            .ontology
+            .derive_json_schema(BASE_SCHEMA_JSON)
+            .map_err(|e| QueryError::Validation(format!("failed to derive schema: {e}")))?;
 
-        // Validate "to" node reference
-        if !node_ids.contains(&rel.to.as_str()) {
-            return Err(err(format!(
-                "relationship[{}] references undefined node \"{}\" in 'to'",
-                i, rel.to
-            )));
-        }
+        let validator = jsonschema::validator_for(&schema)
+            .map_err(|e| QueryError::Validation(format!("invalid derived schema: {e}")))?;
 
-        // Validate relationship types
-        for rel_type in &rel.types {
-            if rel_type != "*" && !ontology.has_edge(rel_type) {
+        collect_schema_errors(&validator, value)
+    }
+
+    /// Validate cross-node references that JSON Schema cannot express.
+    pub fn check_references(&self, input: &Input) -> Result<()> {
+        self.check_relationships(input)?;
+        self.check_aggregations(input)?;
+        self.check_order_by(input)?;
+        self.check_path(input)?;
+        self.check_neighbors(input)?;
+        Ok(())
+    }
+
+    fn check_relationships(&self, input: &Input) -> Result<()> {
+        let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
+
+        for (i, rel) in input.relationships.iter().enumerate() {
+            if !node_ids.contains(&rel.from.as_str()) {
                 return Err(err(format!(
-                    "unknown relationship type \"{}\" in relationship[{}]",
-                    rel_type, i
+                    "relationship[{}] references undefined node \"{}\" in 'from'",
+                    i, rel.from
+                )));
+            }
+
+            if !node_ids.contains(&rel.to.as_str()) {
+                return Err(err(format!(
+                    "relationship[{}] references undefined node \"{}\" in 'to'",
+                    i, rel.to
                 )));
             }
         }
 
-        // Validate hop constraints
-        if rel.min_hops > rel.max_hops {
-            return Err(err(format!(
-                "relationship[{}] has min_hops ({}) > max_hops ({})",
-                i, rel.min_hops, rel.max_hops
-            )));
-        }
+        Ok(())
     }
 
-    Ok(())
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Filter validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn validate_filters(input: &Input, ontology: &Ontology) -> Result<()> {
-    for node in &input.nodes {
-        let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
-        for prop in node.filters.keys() {
-            ontology
-                .validate_field(entity, prop)
-                .map_err(|e| err(format!("invalid filter on node \"{}\": {}", node.id, e)))?;
+    fn check_aggregations(&self, input: &Input) -> Result<()> {
+        if input.query_type != QueryType::Aggregation {
+            return Ok(());
         }
-    }
 
-    // Edge filters don't need ontology validation (dynamic properties)
-    Ok(())
-}
+        let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Column validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn validate_columns(input: &Input, ontology: &Ontology) -> Result<()> {
-    for node in &input.nodes {
-        let Some(columns) = &node.columns else {
-            continue;
-        };
-
-        let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
-
-        match columns {
-            ColumnSelection::All => {
-                // Wildcard is always valid if entity exists (already validated)
+        for (i, agg) in input.aggregations.iter().enumerate() {
+            if let Some(target) = &agg.target {
+                if !node_ids.contains(&target.as_str()) {
+                    return Err(err(format!(
+                        "aggregation[{}] references undefined node \"{}\" in 'target'",
+                        i, target
+                    )));
+                }
             }
-            ColumnSelection::List(cols) => {
-                for col in cols {
-                    ontology.validate_field(entity, col).map_err(|e| {
-                        err(format!(
-                            "invalid column \"{}\" on node \"{}\": {}",
-                            col, node.id, e
-                        ))
+
+            if let Some(group_by) = &agg.group_by {
+                if !node_ids.contains(&group_by.as_str()) {
+                    return Err(err(format!(
+                        "aggregation[{}] references undefined node \"{}\" in 'group_by'",
+                        i, group_by
+                    )));
+                }
+            }
+
+            if let (Some(prop), Some(target)) = (&agg.property, &agg.target) {
+                if let Some(node) = input.nodes.iter().find(|n| n.id == *target) {
+                    let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
+                    self.ontology.validate_field(entity, prop).map_err(|e| {
+                        err(format!("invalid property in aggregation[{}]: {}", i, e))
                     })?;
                 }
             }
         }
+
+        Ok(())
     }
 
-    Ok(())
-}
+    fn check_order_by(&self, input: &Input) -> Result<()> {
+        let Some(order_by) = &input.order_by else {
+            return Ok(());
+        };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregation validation
-// ─────────────────────────────────────────────────────────────────────────────
+        let node = input
+            .nodes
+            .iter()
+            .find(|n| n.id == order_by.node)
+            .ok_or_else(|| {
+                err(format!(
+                    "order_by references undefined node \"{}\"",
+                    order_by.node
+                ))
+            })?;
 
-fn validate_aggregations(input: &Input, ontology: &Ontology) -> Result<()> {
-    if input.query_type != QueryType::Aggregation {
-        return Ok(());
+        let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
+        self.ontology
+            .validate_field(entity, &order_by.property)
+            .map_err(|e| err(format!("invalid order_by property: {}", e)))?;
+
+        Ok(())
     }
 
-    let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
-
-    for (i, agg) in input.aggregations.iter().enumerate() {
-        // Validate target node reference
-        if let Some(target) = &agg.target {
-            if !node_ids.contains(&target.as_str()) {
-                return Err(err(format!(
-                    "aggregation[{}] references undefined node \"{}\" in 'target'",
-                    i, target
-                )));
-            }
+    fn check_path(&self, input: &Input) -> Result<()> {
+        if input.query_type != QueryType::PathFinding {
+            return Ok(());
         }
 
-        // Validate group_by node reference
-        if let Some(group_by) = &agg.group_by {
-            if !node_ids.contains(&group_by.as_str()) {
-                return Err(err(format!(
-                    "aggregation[{}] references undefined node \"{}\" in 'group_by'",
-                    i, group_by
-                )));
-            }
-        }
+        let path = input
+            .path
+            .as_ref()
+            .ok_or_else(|| err("path_finding query requires a 'path' configuration"))?;
 
-        // Validate property exists on target entity
-        if let (Some(prop), Some(target)) = (&agg.property, &agg.target) {
-            if let Some(node) = input.nodes.iter().find(|n| n.id == *target) {
-                let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
-                ontology
-                    .validate_field(entity, prop)
-                    .map_err(|e| err(format!("invalid property in aggregation[{}]: {}", i, e)))?;
-            }
-        }
-    }
+        let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
-    Ok(())
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Order by validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn validate_order_by(input: &Input, ontology: &Ontology) -> Result<()> {
-    let Some(order_by) = &input.order_by else {
-        return Ok(());
-    };
-
-    // Validate node reference
-    let node = input
-        .nodes
-        .iter()
-        .find(|n| n.id == order_by.node)
-        .ok_or_else(|| {
-            err(format!(
-                "order_by references undefined node \"{}\"",
-                order_by.node
-            ))
-        })?;
-
-    // Validate property exists on entity
-    let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
-    ontology
-        .validate_field(entity, &order_by.property)
-        .map_err(|e| err(format!("invalid order_by property: {}", e)))?;
-
-    Ok(())
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Path finding validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn validate_path(input: &Input, ontology: &Ontology) -> Result<()> {
-    if input.query_type != QueryType::PathFinding {
-        return Ok(());
-    }
-
-    let path = input
-        .path
-        .as_ref()
-        .ok_or_else(|| err("path_finding query requires a 'path' configuration"))?;
-
-    let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
-
-    // Validate "from" node reference
-    if !node_ids.contains(&path.from.as_str()) {
-        return Err(err(format!(
-            "path 'from' references undefined node \"{}\"",
-            path.from
-        )));
-    }
-
-    // Validate "to" node reference
-    if !node_ids.contains(&path.to.as_str()) {
-        return Err(err(format!(
-            "path 'to' references undefined node \"{}\"",
-            path.to
-        )));
-    }
-
-    // Validate relationship types in path
-    for rel_type in &path.rel_types {
-        if rel_type != "*" && !ontology.has_edge(rel_type) {
+        if !node_ids.contains(&path.from.as_str()) {
             return Err(err(format!(
-                "unknown relationship type \"{}\" in path configuration",
-                rel_type
+                "path 'from' references undefined node \"{}\"",
+                path.from
             )));
         }
-    }
 
-    Ok(())
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Neighbors validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn validate_neighbors(input: &Input, ontology: &Ontology) -> Result<()> {
-    if input.query_type != QueryType::Neighbors {
-        return Ok(());
-    }
-
-    let neighbors = input
-        .neighbors
-        .as_ref()
-        .ok_or_else(|| err("neighbors query requires a 'neighbors' configuration"))?;
-
-    let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
-
-    if !node_ids.contains(&neighbors.node.as_str()) {
-        return Err(err(format!(
-            "neighbors 'node' references undefined node \"{}\"",
-            neighbors.node
-        )));
-    }
-
-    for rel_type in &neighbors.rel_types {
-        if rel_type != "*" && !ontology.has_edge(rel_type) {
+        if !node_ids.contains(&path.to.as_str()) {
             return Err(err(format!(
-                "unknown relationship type \"{}\" in neighbors configuration",
-                rel_type
+                "path 'to' references undefined node \"{}\"",
+                path.to
             )));
         }
+
+        Ok(())
     }
 
-    Ok(())
-}
+    fn check_neighbors(&self, input: &Input) -> Result<()> {
+        if input.query_type != QueryType::Neighbors {
+            return Ok(());
+        }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+        let neighbors = input
+            .neighbors
+            .as_ref()
+            .ok_or_else(|| err("neighbors query requires a 'neighbors' configuration"))?;
 
-fn err(msg: impl Into<String>) -> QueryError {
-    QueryError::Validation(msg.into())
+        let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
+
+        if !node_ids.contains(&neighbors.node.as_str()) {
+            return Err(err(format!(
+                "neighbors 'node' references undefined node \"{}\"",
+                neighbors.node
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -342,243 +246,210 @@ mod tests {
                 ],
             )
             .with_fields("Note", [("confidential", DataType::Bool)])
+            .with_fields("Project", [("name", DataType::String)])
+    }
+
+    fn assert_ok(json: &str) {
+        let input = parse_input(json).unwrap();
+        let ontology = test_ontology();
+        Validator::new(&ontology).check_references(&input).unwrap();
+    }
+
+    fn assert_rejects(json: &str, expected: &str) {
+        let input = parse_input(json).unwrap();
+        let ontology = test_ontology();
+        let err = Validator::new(&ontology)
+            .check_references(&input)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains(expected),
+            "expected error containing \"{expected}\", got: {err}"
+        );
     }
 
     #[test]
-    fn valid_traversal() {
-        let input = parse_input(
+    fn cross_reference_validation() {
+        // ── Happy paths ─────────────────────────────────────────────
+
+        // Valid traversal with relationship
+        assert_ok(
             r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"}
-            ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}]
+            }"#,
+        );
 
-        assert!(validate(&input, &test_ontology()).is_ok());
-    }
-
-    #[test]
-    fn empty_nodes_rejected() {
-        let input = parse_input(
+        // Valid aggregation with target and group_by
+        assert_ok(
             r#"{
-            "query_type": "traversal",
-            "nodes": []
-        }"#,
-        )
-        .unwrap();
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User", "columns": ["username"]},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+                "aggregations": [{
+                    "function": "count",
+                    "target": "n",
+                    "group_by": "u",
+                    "alias": "note_count"
+                }]
+            }"#,
+        );
 
-        let err = validate(&input, &test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("at least one node"));
-    }
-
-    #[test]
-    fn missing_entity_rejected() {
-        let input = parse_input(
+        // Valid order_by referencing declared node
+        assert_ok(
             r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u"}]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "columns": ["username"]},
+                "order_by": {"node": "u", "property": "username", "direction": "ASC"}
+            }"#,
+        );
 
-        let err = validate(&input, &test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("requires an entity type"));
-    }
-
-    #[test]
-    fn unknown_entity_rejected() {
-        let input = parse_input(
+        // Valid path_finding
+        assert_ok(
             r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "NonExistent"}]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "node_ids": [1]},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+        );
 
-        let err = validate(&input, &test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("unknown entity type"));
-    }
-
-    #[test]
-    fn undefined_relationship_from_rejected() {
-        let input = parse_input(
+        // Valid neighbors
+        assert_ok(
             r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "relationships": [{"type": "AUTHORED", "from": "undefined", "to": "u"}]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "neighbors",
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "neighbors": {"node": "u", "direction": "both"}
+            }"#,
+        );
 
-        let err = validate(&input, &test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("undefined node"));
-    }
+        // ── Relationship from/to ────────────────────────────────────
 
-    #[test]
-    fn unknown_relationship_type_rejected() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"}
-            ],
-            "relationships": [{"type": "INVALID_TYPE", "from": "u", "to": "n"}]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "traversal",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "relationships": [{"type": "AUTHORED", "from": "ghost", "to": "u"}]
+            }"#,
+            "undefined node \"ghost\"",
+        );
 
-        let err = validate(&input, &test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("unknown relationship type"));
-    }
-
-    #[test]
-    fn invalid_filter_property_rejected() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "filters": {"nonexistent": "value"}}]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "traversal",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "ghost"}]
+            }"#,
+            "undefined node \"ghost\"",
+        );
 
-        let err = validate(&input, &test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("invalid filter"));
-    }
+        // ── Aggregation references ──────────────────────────────────
 
-    #[test]
-    fn valid_filter_property_accepted() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "filters": {"username": "admin"}}]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "aggregations": [{
+                    "function": "count",
+                    "target": "missing",
+                    "alias": "c"
+                }]
+            }"#,
+            "undefined node \"missing\"",
+        );
 
-        assert!(validate(&input, &test_ontology()).is_ok());
-    }
-
-    #[test]
-    fn wildcard_relationship_type_accepted() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"}
-            ],
-            "relationships": [{"type": "*", "from": "u", "to": "n"}]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "aggregations": [{
+                    "function": "count",
+                    "target": "u",
+                    "group_by": "missing",
+                    "alias": "c"
+                }]
+            }"#,
+            "undefined node \"missing\"",
+        );
 
-        assert!(validate(&input, &test_ontology()).is_ok());
-    }
-
-    #[test]
-    fn invalid_hop_range_rejected() {
-        let input = parse_input(
+        // Aggregation property that doesn't exist on the target entity
+        assert_rejects(
             r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"}
-            ],
-            "relationships": [{
-                "type": "AUTHORED",
-                "from": "u",
-                "to": "n",
-                "min_hops": 5,
-                "max_hops": 2
-            }]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "aggregations": [{
+                    "function": "sum",
+                    "target": "u",
+                    "property": "nonexistent",
+                    "alias": "total"
+                }]
+            }"#,
+            "invalid property",
+        );
 
-        let err = validate(&input, &test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("min_hops"));
-        assert!(err.to_string().contains("max_hops"));
-    }
+        // ── Order by references ─────────────────────────────────────
 
-    #[test]
-    fn valid_hop_range_accepted() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"}
-            ],
-            "relationships": [{
-                "type": "AUTHORED",
-                "from": "u",
-                "to": "n",
-                "min_hops": 1,
-                "max_hops": 3
-            }]
-        }"#,
-        )
-        .unwrap();
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User"},
+                "order_by": {"node": "missing", "property": "username", "direction": "ASC"}
+            }"#,
+            "undefined node \"missing\"",
+        );
 
-        assert!(validate(&input, &test_ontology()).is_ok());
-    }
-
-    #[test]
-    fn valid_columns_accepted() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "created_at"]}
-        }"#,
-        )
-        .unwrap();
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User"},
+                "order_by": {"node": "u", "property": "nonexistent", "direction": "ASC"}
+            }"#,
+            "does not exist",
+        );
 
-        assert!(validate(&input, &test_ontology()).is_ok());
-    }
+        // ── Path from/to ────────────────────────────────────────────
 
-    #[test]
-    fn wildcard_columns_accepted() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": "*"}
-        }"#,
-        )
-        .unwrap();
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "node_ids": [1]},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "ghost", "to": "b", "max_depth": 2}
+            }"#,
+            "undefined node \"ghost\"",
+        );
 
-        assert!(validate(&input, &test_ontology()).is_ok());
-    }
-
-    #[test]
-    fn invalid_column_rejected() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "nonexistent_column"]}
-        }"#,
-        )
-        .unwrap();
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "node_ids": [1]},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "ghost", "max_depth": 2}
+            }"#,
+            "undefined node \"ghost\"",
+        );
 
-        let err = validate(&input, &test_ontology()).unwrap_err();
-        assert!(err.to_string().contains("invalid column"));
-        assert!(err.to_string().contains("nonexistent_column"));
-    }
+        // ── Neighbors node ──────────────────────────────────────────
 
-    #[test]
-    fn id_column_always_valid() {
-        let input = parse_input(
+        assert_rejects(
             r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["id", "username"]}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(validate(&input, &test_ontology()).is_ok());
+                "query_type": "neighbors",
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "neighbors": {"node": "ghost", "direction": "both"}
+            }"#,
+            "undefined node \"ghost\"",
+        );
     }
 }

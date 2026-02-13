@@ -795,7 +795,9 @@ mod tests {
     fn validated_input(json: &str) -> Input {
         let ontology = test_ontology();
         let input = parse_input(json).unwrap();
-        validate::validate(&input, &ontology).unwrap();
+        validate::Validator::new(&ontology)
+            .check_references(&input)
+            .unwrap();
         normalize::normalize(input, &ontology)
     }
 
