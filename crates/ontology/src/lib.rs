@@ -568,8 +568,9 @@ impl Ontology {
     ///
     /// Given a base schema template, this populates:
     /// - `$defs.EntityType.enum` with valid entity types
-    /// - `$defs.RelationshipTypeName.enum` with valid relationship types
+    /// - `$defs.RelationshipTypeName.enum` with valid relationship types (including wildcard `*`)
     /// - `$defs.NodeProperties` with property definitions per node type
+    /// - `$defs.NodeSelector.allOf` with per-entity column and filter validation
     ///
     /// # Errors
     ///
@@ -592,7 +593,7 @@ impl Ontology {
             entity_type.insert("enum".to_string(), Value::Array(types));
         }
 
-        // Populate RelationshipTypeName enum
+        // Populate RelationshipTypeName enum (including wildcard)
         if let Some(rel_type) = defs
             .get_mut("RelationshipTypeName")
             .and_then(Value::as_object_mut)
@@ -600,6 +601,7 @@ impl Ontology {
             let types: Vec<Value> = self
                 .edge_names()
                 .map(|s| Value::String(s.to_string()))
+                .chain(std::iter::once(Value::String("*".to_string())))
                 .collect();
             rel_type.insert("enum".to_string(), Value::Array(types));
         }
@@ -607,6 +609,12 @@ impl Ontology {
         // Populate NodeProperties with property definitions per node type
         let node_props = self.build_node_properties_schema();
         defs.insert("NodeProperties".to_string(), node_props);
+
+        // Wire entity-correlated column/filter validation into NodeSelector
+        let entity_conditions = self.build_node_selector_validation();
+        if let Some(node_selector) = defs.get_mut("NodeSelector").and_then(Value::as_object_mut) {
+            node_selector.insert("allOf".to_string(), Value::Array(entity_conditions));
+        }
 
         Ok(schema)
     }
@@ -640,6 +648,41 @@ impl Ontology {
         }
 
         Value::Object(node_props)
+    }
+
+    /// Build per-entity `if/then` validation rules for `NodeSelector`.
+    ///
+    /// For each entity type, constrains `columns` and `filters.propertyNames`
+    /// to valid field names (entity fields + reserved columns) when `entity` matches.
+    fn build_node_selector_validation(&self) -> Vec<Value> {
+        self.nodes()
+            .map(|node| {
+                let valid_fields: Vec<Value> = NODE_RESERVED_COLUMNS
+                    .iter()
+                    .map(|s| Value::String((*s).to_string()))
+                    .chain(node.fields.iter().map(|f| Value::String(f.name.clone())))
+                    .collect();
+
+                let columns_enum = valid_fields.clone();
+
+                serde_json::json!({
+                    "if": { "properties": { "entity": { "const": node.name } } },
+                    "then": {
+                        "properties": {
+                            "columns": {
+                                "oneOf": [
+                                    { "const": "*" },
+                                    { "type": "array", "items": { "enum": columns_enum }, "minItems": 1 }
+                                ]
+                            },
+                            "filters": {
+                                "propertyNames": { "enum": valid_fields }
+                            }
+                        }
+                    }
+                })
+            })
+            .collect()
     }
 }
 

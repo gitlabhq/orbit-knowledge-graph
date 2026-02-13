@@ -124,6 +124,15 @@ mod tests {
     }
 
     #[test]
+    fn print_condensed_schema() {
+        let toon = condensed_query_schema().expect("Should condense");
+        eprintln!(
+            "\n--- condensed schema ({} bytes) ---\n{toon}\n--- end ---\n",
+            toon.len()
+        );
+    }
+
+    #[test]
     fn condensed_schema_excludes_ontology_specific_data() {
         let toon = condensed_query_schema().expect("Should condense");
 

@@ -42,12 +42,12 @@ pub mod r#return;
 pub mod security;
 pub mod validate;
 
-use std::sync::OnceLock;
-
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use codegen::{codegen, ParameterizedQuery};
 pub use error::{QueryError, Result};
 pub use input::{parse_input, Input, QueryType};
+pub use lower::lower;
+pub use normalize::normalize;
 pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
 pub use r#return::enforce_return;
 pub use result_context::{
@@ -55,55 +55,7 @@ pub use result_context::{
     PATH_COLUMN,
 };
 pub use security::{apply_security_context, SecurityContext};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Schema validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-const BASE_SCHEMA_JSON: &str = include_str!("../../ontology/schema.json");
-
-static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
-
-fn base_validator() -> &'static jsonschema::Validator {
-    BASE_SCHEMA_VALIDATOR.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        jsonschema::validator_for(&schema).expect("schema.json must be a valid JSON Schema")
-    })
-}
-
-fn validate_json(json: &str) -> Result<serde_json::Value> {
-    let value: serde_json::Value = serde_json::from_str(json)?;
-    collect_schema_errors(base_validator(), &value)?;
-    Ok(value)
-}
-
-fn validate_ontology(value: &serde_json::Value, ontology: &Ontology) -> Result<()> {
-    let schema = ontology
-        .derive_json_schema(BASE_SCHEMA_JSON)
-        .map_err(|e| QueryError::Validation(format!("failed to derive schema: {e}")))?;
-
-    let validator = jsonschema::validator_for(&schema)
-        .map_err(|e| QueryError::Validation(format!("invalid derived schema: {e}")))?;
-
-    collect_schema_errors(&validator, value)
-}
-
-fn collect_schema_errors(
-    validator: &jsonschema::Validator,
-    value: &serde_json::Value,
-) -> Result<()> {
-    let errors: Vec<_> = validator
-        .iter_errors(value)
-        .map(|e| format!("{} at {}", e, e.instance_path()))
-        .collect();
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(QueryError::Validation(errors.join("; ")))
-    }
-}
+pub use validate::Validator;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -118,28 +70,19 @@ pub fn compile(
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<ParameterizedQuery> {
-    let value = validate_json(json_input)?;
-    validate_ontology(&value, ontology)?;
+    // Make sure the raw JSON input is valid and normalized.
+    let v = Validator::new(ontology);
+    let value = v.check_json(json_input)?;
+    v.check_ontology(&value)?;
     let input: Input = serde_json::from_value(value)?;
-    validate::validate(&input, ontology)?;
-    let input = normalize::normalize(input, ontology);
-    let mut node = lower::lower(&input)?;
+    v.check_references(&input)?;
+    let input = normalize(input, ontology);
+
+    // Turn the normalized input into valid, secure, and parameterized SQL.
+    let mut node = lower(&input)?;
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx)?;
     codegen(&node, result_context)
-}
-
-/// Get the base JSON schema template (without ontology values).
-#[must_use]
-pub fn base_schema() -> &'static str {
-    BASE_SCHEMA_JSON
-}
-
-/// Derive a JSON schema with ontology values populated (node labels, relationship types).
-pub fn derive_schema(ontology: &Ontology) -> Result<serde_json::Value> {
-    ontology
-        .derive_json_schema(BASE_SCHEMA_JSON)
-        .map_err(QueryError::Ontology)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,10 +125,11 @@ mod tests {
     /// Compile JSON and return the AST without generating SQL.
     #[must_use = "the compiled AST should be used"]
     pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> Result<Node> {
-        let value = validate_json(json_input)?;
-        validate_ontology(&value, ontology)?;
+        let v = validate::Validator::new(ontology);
+        let value = v.check_json(json_input)?;
+        v.check_ontology(&value)?;
         let input: Input = serde_json::from_value(value)?;
-        validate::validate(&input, ontology)?;
+        v.check_references(&input)?;
         let input = normalize::normalize(input, ontology);
         let node = lower::lower(&input)?;
         Ok(node)
@@ -534,7 +478,10 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
-        assert!(err.to_string().contains("does not exist"));
+        assert!(
+            err.to_string().contains("nonexistent_column"),
+            "expected error mentioning invalid column name, got: {err}"
+        );
     }
 
     #[test]
