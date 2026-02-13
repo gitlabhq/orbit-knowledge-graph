@@ -33,13 +33,14 @@ use futures::StreamExt;
 use opentelemetry::KeyValue;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
 use crate::metrics::EngineMetrics;
 use crate::module::{Handler, HandlerContext, HandlerError, ModuleRegistry};
-use crate::nats::{NatsBroker, NatsError, NatsServices, NatsServicesImpl};
-use crate::types::{Envelope, Topic};
+use crate::nats::{NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
+use crate::types::Topic;
 use crate::worker_pool::WorkerPool;
 
 /// Errors that can occur during engine operation.
@@ -168,44 +169,33 @@ impl Engine {
 
     async fn listen(&self, topic: Topic, worker_pool: Arc<WorkerPool>) -> Result<(), EngineError> {
         let mut subscription = self.broker.subscribe(&topic, self.metrics.clone()).await?;
+        let mut inflight = tokio::task::JoinSet::new();
+        let topic_label = KeyValue::new("topic", format!("{}.{}", topic.stream, topic.subject));
 
         loop {
             tokio::select! {
-                _ = self.cancel.cancelled() => break Ok(()),
-                Some(msg) = subscription.next() => {
-                    let msg = msg?;
-                    let handlers = self.registry.handlers_for(&topic);
-                    let context = HandlerContext::new(
-                        self.destination.clone(),
-                        self.nats_services.clone(),
-                    );
-
-                    let message_start = Instant::now();
-                    let topic_attribute = KeyValue::new("topic", format!("{}.{}", topic.stream, topic.subject));
-
-                    let outcome = match dispatch(&handlers, context, msg.envelope.clone(), &worker_pool, &self.metrics).await {
-                        Ok(_)  => {
-                            msg.ack().await?;
-                            "ack"
-                        }
-                        Err(_) => {
-                            msg.nack().await?;
-                            "nack"
-                        }
-                    };
-
-                    self.metrics.messages_processed.add(
-                        1,
-                        &[topic_attribute.clone(), KeyValue::new("outcome", outcome)],
-                    );
-
-                    self.metrics.message_duration.record(
-                        message_start.elapsed().as_secs_f64(),
-                        &[topic_attribute],
-                    );
+                _ = self.cancel.cancelled() => break,
+                Some(message) = subscription.next() => {
+                    let message = message?;
+                    inflight.spawn(process_message(
+                        message,
+                        self.registry.handlers_for(&topic),
+                        HandlerContext::new(self.destination.clone(), self.nats_services.clone()),
+                        worker_pool.clone(),
+                        self.metrics.clone(),
+                        topic_label.clone(),
+                    ));
                 }
             }
         }
+
+        while let Some(result) = inflight.join_next().await {
+            if let Err(error) = result {
+                warn!(%error, "message processing task panicked");
+            }
+        }
+
+        Ok(())
     }
 
     /// Signals the engine to stop processing.
@@ -216,32 +206,67 @@ impl Engine {
     }
 }
 
-async fn dispatch(
-    handlers: &[(Arc<dyn Handler>, Arc<str>)],
+async fn process_message(
+    message: NatsMessage,
+    handlers: Vec<(Arc<dyn Handler>, Arc<str>)>,
     context: HandlerContext,
-    envelope: Envelope,
+    worker_pool: Arc<WorkerPool>,
+    metrics: Arc<EngineMetrics>,
+    topic_label: KeyValue,
+) {
+    let message_start = Instant::now();
+
+    let result = run_handlers(&handlers, &context, &message, &worker_pool, &metrics).await;
+
+    let outcome = match result {
+        Ok(()) => {
+            if let Err(error) = message.ack().await {
+                warn!(%error, "failed to ack message");
+            }
+            "ack"
+        }
+        Err(_) => {
+            if let Err(error) = message.nack().await {
+                warn!(%error, "failed to nack message");
+            }
+            "nack"
+        }
+    };
+
+    metrics
+        .messages_processed
+        .add(1, &[topic_label.clone(), KeyValue::new("outcome", outcome)]);
+    metrics.message_duration.record(
+        message_start.elapsed().as_secs_f64(),
+        std::slice::from_ref(&topic_label),
+    );
+}
+
+async fn run_handlers(
+    handlers: &[(Arc<dyn Handler>, Arc<str>)],
+    context: &HandlerContext,
+    msg: &NatsMessage,
     worker_pool: &WorkerPool,
-    metrics: &Arc<EngineMetrics>,
+    metrics: &EngineMetrics,
 ) -> Result<(), HandlerError> {
     for (handler, module_name) in handlers {
         let _permit = worker_pool
-            .acquire(module_name)
+            .acquire_handler_slot(module_name)
             .await
             .expect("worker pool semaphore closed unexpectedly");
 
         let handler_start = Instant::now();
-        let result = handler.handle(context.clone(), envelope.clone()).await;
+        handler
+            .handle(context.clone(), msg.envelope.clone())
+            .await?;
 
-        let attributes = [
-            KeyValue::new("handler", handler.name().to_owned()),
-            KeyValue::new("module", module_name.to_string()),
-        ];
-        metrics
-            .handler_duration
-            .record(handler_start.elapsed().as_secs_f64(), &attributes);
-
-        result?;
+        metrics.handler_duration.record(
+            handler_start.elapsed().as_secs_f64(),
+            &[
+                KeyValue::new("handler", handler.name().to_owned()),
+                KeyValue::new("module", module_name.to_string()),
+            ],
+        );
     }
-
     Ok(())
 }

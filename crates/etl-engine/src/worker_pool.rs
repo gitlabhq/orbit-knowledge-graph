@@ -1,4 +1,4 @@
-//! Semaphore-based concurrency control. Acquire a [`WorkerPermit`] before processing;
+//! Semaphore-based concurrency control. Acquire a [`HandlerSlot`] before processing;
 //! it releases automatically when dropped.
 //!
 //! # Why two semaphores?
@@ -27,21 +27,21 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::configuration::EngineConfiguration;
 use crate::metrics::EngineMetrics;
 
-/// A permit that reserves worker capacity.
+/// A permit that reserves capacity for one handler execution.
 ///
-/// Holding a permit allows processing a message. The permit is automatically
+/// Holding a permit allows processing one handler execution. The permit is automatically
 /// released when dropped, freeing capacity for other handlers.
 ///
 /// The permit may include both a global permit (always) and a module-specific
 /// permit (when the module has a configured concurrency limit).
-pub struct WorkerPermit {
+pub struct HandlerSlot {
     _global_permit: OwnedSemaphorePermit,
     _module_permit: Option<OwnedSemaphorePermit>,
     metrics: Arc<EngineMetrics>,
     attributes: Vec<KeyValue>,
 }
 
-impl Drop for WorkerPermit {
+impl Drop for HandlerSlot {
     fn drop(&mut self) {
         for attr in &self.attributes {
             self.metrics
@@ -88,10 +88,10 @@ impl WorkerPool {
         }
     }
 
-    /// Acquires a permit for processing a message from the given module.
+    /// Acquires capacity for one handler execution in the given module.
     ///
-    /// This method blocks until capacity is available. It acquires the global
-    /// permit first, then the module-specific permit if configured.
+    /// This method blocks until capacity is available. It acquires the
+    /// module-specific permit first (when configured), then the global permit.
     ///
     /// Returns `None` if the semaphore is closed (which should not happen
     /// during normal operation).
@@ -99,7 +99,23 @@ impl WorkerPool {
     /// # Arguments
     ///
     /// * `module_name` - The name of the module requesting capacity
-    pub async fn acquire(&self, module_name: &str) -> Option<WorkerPermit> {
+    pub async fn acquire_handler_slot(&self, module_name: &str) -> Option<HandlerSlot> {
+        let mut module_permit = None;
+        let mut attributes = vec![KeyValue::new("scope", "global")];
+
+        if let Some(semaphore) = self.module_semaphores.get(module_name) {
+            let module_start = Instant::now();
+            module_permit = Some(semaphore.clone().acquire_owned().await.ok()?);
+            self.metrics.permit_wait_duration.record(
+                module_start.elapsed().as_secs_f64(),
+                &[
+                    KeyValue::new("scope", "module"),
+                    KeyValue::new("module", module_name.to_owned()),
+                ],
+            );
+            attributes.push(KeyValue::new("scope", module_name.to_owned()));
+        }
+
         let global_start = Instant::now();
         let global_permit = self.global_semaphore.clone().acquire_owned().await.ok()?;
         self.metrics.permit_wait_duration.record(
@@ -109,32 +125,16 @@ impl WorkerPool {
                 KeyValue::new("module", module_name.to_owned()),
             ],
         );
-
-        let mut attributes = vec![KeyValue::new("scope", "global")];
         self.metrics
             .active_permits
             .add(1, &[KeyValue::new("scope", "global")]);
-
-        let module_permit = if let Some(semaphore) = self.module_semaphores.get(module_name) {
-            let module_start = Instant::now();
-            let permit = semaphore.clone().acquire_owned().await.ok()?;
-            self.metrics.permit_wait_duration.record(
-                module_start.elapsed().as_secs_f64(),
-                &[
-                    KeyValue::new("scope", "module"),
-                    KeyValue::new("module", module_name.to_owned()),
-                ],
-            );
+        if module_permit.is_some() {
             self.metrics
                 .active_permits
                 .add(1, &[KeyValue::new("scope", module_name.to_owned())]);
-            attributes.push(KeyValue::new("scope", module_name.to_owned()));
-            Some(permit)
-        } else {
-            None
-        };
+        }
 
-        Some(WorkerPermit {
+        Some(HandlerSlot {
             _global_permit: global_permit,
             _module_permit: module_permit,
             metrics: self.metrics.clone(),
@@ -166,7 +166,7 @@ mod tests {
             .map(|_| {
                 let (pool, active, max_obs) = (pool.clone(), active.clone(), max_observed.clone());
                 tokio::spawn(async move {
-                    let _permit = pool.acquire(module).await;
+                    let _permit = pool.acquire_handler_slot(module).await;
                     let current = active.fetch_add(1, Ordering::SeqCst) + 1;
                     max_obs.fetch_max(current, Ordering::SeqCst);
                     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -238,13 +238,16 @@ mod tests {
         ));
 
         {
-            let _permit = pool.acquire("test").await;
+            let _permit = pool.acquire_handler_slot("test").await;
         }
 
         assert!(
-            tokio::time::timeout(Duration::from_millis(100), pool.acquire("test"))
-                .await
-                .is_ok()
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                pool.acquire_handler_slot("test")
+            )
+            .await
+            .is_ok()
         );
     }
 
@@ -279,7 +282,7 @@ mod tests {
             let global_max = global_max.clone();
 
             handles.push(tokio::spawn(async move {
-                let _permit = pool.acquire("module-a").await;
+                let _permit = pool.acquire_handler_slot("module-a").await;
 
                 let current = module_active.fetch_add(1, Ordering::SeqCst) + 1;
                 module_max.fetch_max(current, Ordering::SeqCst);
@@ -300,7 +303,7 @@ mod tests {
             let global_max = global_max.clone();
 
             handles.push(tokio::spawn(async move {
-                let _permit = pool.acquire("module-b").await;
+                let _permit = pool.acquire_handler_slot("module-b").await;
 
                 let current = global_active.fetch_add(1, Ordering::SeqCst) + 1;
                 global_max.fetch_max(current, Ordering::SeqCst);
@@ -321,6 +324,49 @@ mod tests {
             global_max.load(Ordering::SeqCst) <= 3,
             "Global limit should be respected"
         );
+    }
+
+    #[tokio::test]
+    async fn test_module_waiters_do_not_reserve_global_capacity() {
+        let mut config = EngineConfiguration {
+            max_concurrent_workers: 2,
+            ..Default::default()
+        };
+        config.modules.insert(
+            "module-a".into(),
+            ModuleConfiguration {
+                max_concurrency: Some(1),
+            },
+        );
+        let pool = Arc::new(WorkerPool::new(&config, test_metrics()));
+
+        let first_module_a = pool
+            .acquire_handler_slot("module-a")
+            .await
+            .expect("first module-a slot should acquire");
+
+        let pool_for_waiter = pool.clone();
+        let module_a_waiter = tokio::spawn(async move {
+            let _second_module_a = pool_for_waiter
+                .acquire_handler_slot("module-a")
+                .await
+                .expect("second module-a slot should eventually acquire");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let module_b_slot = tokio::time::timeout(
+            Duration::from_millis(100),
+            pool.acquire_handler_slot("module-b"),
+        )
+        .await
+        .expect("module-b should not be blocked by module-a waiter")
+        .expect("module-b should receive a global slot");
+
+        drop(module_b_slot);
+        drop(first_module_a);
+        module_a_waiter.await.expect("waiter task should complete");
     }
 
     #[tokio::test]
@@ -362,7 +408,7 @@ mod tests {
 
         let pool_clone = pool.clone();
         let panicking_task = tokio::spawn(async move {
-            let _permit = pool_clone.acquire("test").await;
+            let _permit = pool_clone.acquire_handler_slot("test").await;
             panic!("simulated worker failure");
         });
 
@@ -370,7 +416,11 @@ mod tests {
         let _ = panicking_task.await;
 
         // The permit should be released despite the panic, so we can acquire again
-        let result = tokio::time::timeout(Duration::from_millis(100), pool.acquire("test")).await;
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            pool.acquire_handler_slot("test"),
+        )
+        .await;
 
         assert!(
             result.is_ok(),
