@@ -18,7 +18,9 @@ impl ClusterHealthChecker {
         let health_client = health_check_url.map(InfrastructureHealthClient::new);
 
         Self {
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: option_env!("GKG_VERSION")
+                .unwrap_or(env!("CARGO_PKG_VERSION"))
+                .to_string(),
             health_client,
         }
     }

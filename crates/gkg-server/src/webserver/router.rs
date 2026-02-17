@@ -46,7 +46,7 @@ struct ReplicaStatusResponse {
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
-        version: env!("CARGO_PKG_VERSION"),
+        version: option_env!("GKG_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
     })
 }
 

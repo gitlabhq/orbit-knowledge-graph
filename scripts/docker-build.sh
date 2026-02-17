@@ -20,6 +20,11 @@ fi
 
 docker buildx create --use 2>/dev/null || true
 
+BUILD_ARGS=""
+if [ -n "$GKG_VERSION" ]; then
+  BUILD_ARGS="--build-arg GKG_VERSION=$GKG_VERSION"
+fi
+
 echo "Building and pushing:$TAGS"
 
 docker buildx build \
@@ -30,5 +35,6 @@ docker buildx build \
   --label "com.gitlab/ci-job-url=${CI_JOB_URL}" \
   --label "com.gitlab/commit-sha=${CI_COMMIT_SHA}" \
   --provenance=true \
+  $BUILD_ARGS \
   $TAGS \
   .
