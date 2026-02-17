@@ -1,6 +1,6 @@
 [package]
 name = "parser-core"
-version = "0.21.1"
+version.workspace = true
 edition = "2024"
 license = "MIT"
 

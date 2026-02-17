@@ -1,6 +1,6 @@
 [package]
 name = "treesitter-visit"
-version = "0.21.1"
+version.workspace = true
 edition = "2024"
 description = "Minimal tree-sitter wrapper for AST parsing and traversal"
 license = "MIT"

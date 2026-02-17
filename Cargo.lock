@@ -2588,7 +2588,7 @@ dependencies = [
 
 [[package]]
 name = "gkg"
-version = "0.24.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3185,7 +3185,7 @@ dependencies = [
 
 [[package]]
 name = "indexer"
-version = "0.24.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4345,7 +4345,7 @@ dependencies = [
 
 [[package]]
 name = "parser-core"
-version = "0.21.1"
+version = "0.1.0"
 dependencies = [
  "internment",
  "mimalloc",
@@ -7023,7 +7023,7 @@ dependencies = [
 
 [[package]]
 name = "treesitter-visit"
-version = "0.21.1"
+version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.18",

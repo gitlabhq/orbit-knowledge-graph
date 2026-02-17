@@ -1,6 +1,6 @@
 [package]
 name = "gkg"
-version = "0.24.0"
+version.workspace = true
 edition = "2024"
 
 [[bin]]
