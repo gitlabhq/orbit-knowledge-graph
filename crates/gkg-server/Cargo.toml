@@ -28,6 +28,7 @@ health-check = { path = "../health-check" }
 siphon-proto = { path = "../siphon-proto" }
 ontology = { path = "../ontology" }
 reqwest = { workspace = true }
+rustls = { workspace = true }
 parking_lot = { workspace = true }
 query-engine = { path = "../query-engine" }
 jsonwebtoken = { workspace = true }

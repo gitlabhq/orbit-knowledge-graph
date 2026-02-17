@@ -2638,6 +2638,7 @@ dependencies = [
  "regex",
  "reqwest 0.13.2",
  "rustc-hash",
+ "rustls",
  "serde",
  "serde_json",
  "serial_test",
