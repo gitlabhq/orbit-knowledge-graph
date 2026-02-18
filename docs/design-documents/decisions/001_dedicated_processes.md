@@ -12,7 +12,7 @@ service. This approach was chosen to simplify deployment within Omnibus and redu
 operational complexity. Exposing knowledge graph for querying was planned to be done
 directly from `gitlab-zoekt` service (not through FFI).
 
-However, after committing to the [segmentation strategy](../../selfmanaged_segmentation/_index.md),
+However, after committing to the [segmentation strategy](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/selfmanaged_segmentation/),
 the Omnibus constraints no longer apply to the Knowledge Graph service.
 
 ## Problem
@@ -80,5 +80,5 @@ This decision was made based on discussion in [issue #168](https://gitlab.com/gi
 
 - [Knowledge Graph Server Epic](https://gitlab.com/groups/gitlab-org/-/epics/17518)
 - [FFI vs Dedicated Process Discussion](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/168)
-- [Segmentation Strategy](../../selfmanaged_segmentation/_index.md)
+- [Segmentation Strategy](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/selfmanaged_segmentation/)
 - [Knowledge Graph First iteration](https://gitlab.com/groups/gitlab-org/-/epics/17514) - a top-level epic for all Knowledge Graph work
