@@ -20,10 +20,11 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to install rustls CryptoProvider");
 
     labkit_rs::logging::init();
-    let _metrics = labkit_rs::metrics::try_init().ok();
 
     let args = Args::parse();
-    let config = AppConfig::from_env()?;
+    let config = AppConfig::load()?;
+
+    let _metrics = labkit_rs::metrics::try_init_with_config(config.metrics.clone()).ok();
 
     info!(mode = ?args.mode, "starting");
 

@@ -46,6 +46,7 @@ tempfile = "3.24.0"
 
 # Indexer dependencies
 anyhow = "1.0.100"
+config = { version = "0.15", default-features = false, features = ["yaml-rust2"] }
 log = "0.4.29"
 num_cpus = "1.17.0"
 parquet = { version = "57.2.0", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }

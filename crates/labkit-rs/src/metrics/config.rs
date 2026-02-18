@@ -1,26 +1,41 @@
-use std::env;
 use std::time::Duration;
 
-const DEFAULT_EXPORT_INTERVAL: Duration = Duration::from_secs(60);
-const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
+use serde::{Deserialize, Serialize};
 
-/// Configuration for the metrics system.
-#[derive(Debug, Clone)]
+const DEFAULT_EXPORT_INTERVAL_SECS: u64 = 60;
+const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
+const DEFAULT_SERVICE_NAME: &str = "unknown-service";
+
+fn default_otlp_endpoint() -> String {
+    DEFAULT_OTLP_ENDPOINT.to_string()
+}
+
+fn default_service_name() -> String {
+    DEFAULT_SERVICE_NAME.to_string()
+}
+
+fn default_export_interval_secs() -> u64 {
+    DEFAULT_EXPORT_INTERVAL_SECS
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricsConfig {
+    #[serde(default = "default_otlp_endpoint")]
     pub otlp_endpoint: String,
+    #[serde(default = "default_service_name")]
     pub service_name: String,
-    pub export_interval: Duration,
+    #[serde(default = "default_export_interval_secs")]
+    pub export_interval_secs: u64,
+    #[serde(default)]
     pub record_body_size: bool,
 }
 
 impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
-            otlp_endpoint: env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-                .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string()),
-            service_name: env::var("OTEL_SERVICE_NAME")
-                .unwrap_or_else(|_| "unknown-service".to_string()),
-            export_interval: DEFAULT_EXPORT_INTERVAL,
+            otlp_endpoint: DEFAULT_OTLP_ENDPOINT.to_string(),
+            service_name: DEFAULT_SERVICE_NAME.to_string(),
+            export_interval_secs: DEFAULT_EXPORT_INTERVAL_SECS,
             record_body_size: false,
         }
     }
@@ -30,6 +45,10 @@ impl MetricsConfig {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn export_interval(&self) -> Duration {
+        Duration::from_secs(self.export_interval_secs)
     }
 
     #[must_use]
@@ -46,7 +65,7 @@ impl MetricsConfig {
 
     #[must_use]
     pub fn with_export_interval(mut self, interval: Duration) -> Self {
-        self.export_interval = interval;
+        self.export_interval_secs = interval.as_secs();
         self
     }
 
@@ -71,7 +90,7 @@ mod tests {
 
         assert_eq!(config.otlp_endpoint, "http://otel:4317");
         assert_eq!(config.service_name, "test-service");
-        assert_eq!(config.export_interval, Duration::from_secs(30));
+        assert_eq!(config.export_interval_secs, 30);
         assert!(config.record_body_size);
     }
 }

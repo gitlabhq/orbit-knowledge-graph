@@ -13,7 +13,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::config::AppConfig;
-use crate::indexer::modules::code::GitalyConfiguration;
 
 use self::modules::code::config::buckets::EVENTS_CACHE;
 use self::modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
@@ -59,12 +58,11 @@ pub async fn run(config: &AppConfig, shutdown: CancellationToken) -> Result<(), 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);
 
-    if std::env::var("GITALY_ADDRESS").is_ok() {
+    if let Some(gitaly_config) = &config.gitaly {
         info!("initializing Code module");
-        let gitaly_config =
-            GitalyConfiguration::from_env().map_err(IndexerError::GitalyConfiguration)?;
         let code_module =
-            CodeModule::new(&config.graph, &gitaly_config).map_err(IndexerError::ModuleInit)?;
+            CodeModule::new(&config.graph, gitaly_config, config.code_indexing.clone())
+                .map_err(IndexerError::ModuleInit)?;
         registry.register_module(&code_module);
     } else {
         info!("Code module disabled (GITALY_ADDRESS not set)");

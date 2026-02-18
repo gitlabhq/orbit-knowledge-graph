@@ -39,6 +39,7 @@ impl CodeModule {
     pub fn new(
         clickhouse_config: &ClickHouseConfiguration,
         gitaly_config: &GitalyConfiguration,
+        config: CodeIndexingConfig,
     ) -> Result<Self, ModuleInitError> {
         let client = Arc::new(clickhouse_config.build_client());
 
@@ -46,7 +47,7 @@ impl CodeModule {
             repository_service: GitalyRepositoryService::create(gitaly_config.clone()),
             watermark_store: Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(&client))),
             project_store: Arc::new(ClickHouseProjectStore::new(client)),
-            config: CodeIndexingConfig::from_env(),
+            config,
         })
     }
 }

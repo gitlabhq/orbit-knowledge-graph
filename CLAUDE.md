@@ -18,6 +18,10 @@ Don't add comments that narrate what code already says. Remove:
 
 Keep comments that explain *why*—business logic, gotchas, or links to specs. Use `/remove-llm-comments` to clean up existing code.
 
+### Dependencies
+
+- Always check crates.io for the latest version before adding a new dependency.
+
 ## Related repositories
 
 The `/related-repositories` skill lists dependent systems and their local paths:

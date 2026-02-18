@@ -1,4 +1,4 @@
-use health_check::{HealthCheckConfig, HealthChecker, run_server};
+use health_check::{HealthChecker, run_server};
 
 use crate::config::AppConfig;
 
@@ -9,12 +9,10 @@ pub enum Error {
 }
 
 pub async fn run(config: &AppConfig) -> Result<(), Error> {
-    let health_config = HealthCheckConfig::from_env();
     let clickhouse_client = config.graph.build_client();
+    let checker = HealthChecker::new(&config.health_check, clickhouse_client).await?;
 
-    let checker = HealthChecker::new(&health_config, clickhouse_client).await?;
-
-    run_server(health_config.bind_address, checker).await?;
+    run_server(config.health_check.bind_address, checker).await?;
 
     Ok(())
 }

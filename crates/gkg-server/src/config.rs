@@ -1,19 +1,39 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use etl_engine::clickhouse::ClickHouseConfiguration;
 use etl_engine::configuration::EngineConfiguration;
 use etl_engine::nats::NatsConfiguration;
+use health_check::HealthCheckConfig;
+use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
+
+use crate::indexer::modules::code::GitalyConfiguration;
+use crate::indexer::modules::code::config::CodeIndexingConfig;
+
+fn default_bind_address() -> SocketAddr {
+    "127.0.0.1:4200".parse().unwrap()
+}
+
+fn default_grpc_bind_address() -> SocketAddr {
+    "127.0.0.1:50051".parse().unwrap()
+}
+
+fn default_jwt_clock_skew_secs() -> u64 {
+    60
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
-    /// HTTP bind address for health checks and metrics
+    #[serde(default = "default_bind_address")]
     pub bind_address: SocketAddr,
-    /// gRPC bind address for Knowledge Graph service
+    #[serde(default = "default_grpc_bind_address")]
     pub grpc_bind_address: SocketAddr,
+    #[serde(default)]
     pub jwt_secret: Option<String>,
+    #[serde(default = "default_jwt_clock_skew_secs")]
     pub jwt_clock_skew_secs: u64,
-    /// URL of the health-check service (for webserver mode)
+    #[serde(default)]
     pub health_check_url: Option<String>,
     #[serde(default)]
     pub nats: NatsConfiguration,
@@ -23,40 +43,29 @@ pub struct AppConfig {
     pub graph: ClickHouseConfiguration,
     #[serde(default)]
     pub engine: EngineConfiguration,
+    #[serde(default)]
+    pub gitaly: Option<GitalyConfiguration>,
+    #[serde(default)]
+    pub code_indexing: CodeIndexingConfig,
+    #[serde(default)]
+    pub health_check: HealthCheckConfig,
+    #[serde(default)]
+    pub metrics: MetricsConfig,
 }
 
 impl AppConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
-        let bind_address = std::env::var("GKG_BIND_ADDRESS")
-            .unwrap_or_else(|_| "127.0.0.1:4200".into())
-            .parse()
-            .map_err(|_| ConfigError::InvalidBindAddress)?;
+    pub fn load() -> Result<Self, ConfigError> {
+        let config = config::Config::builder()
+            .add_source(config::File::with_name("config/default").required(false))
+            .add_source(
+                config::Environment::with_prefix("GKG")
+                    .separator("__")
+                    .list_separator(","),
+            )
+            .build()
+            .map_err(ConfigError::Config)?;
 
-        let grpc_bind_address = std::env::var("GKG_GRPC_BIND_ADDRESS")
-            .unwrap_or_else(|_| "127.0.0.1:50051".into())
-            .parse()
-            .map_err(|_| ConfigError::InvalidGrpcBindAddress)?;
-
-        let jwt_secret = std::env::var("GKG_JWT_SECRET").ok();
-
-        let jwt_clock_skew_secs = std::env::var("GKG_JWT_CLOCK_SKEW_SECS")
-            .unwrap_or_else(|_| "60".into())
-            .parse()
-            .unwrap_or(60);
-
-        let health_check_url = std::env::var("GKG_HEALTH_CHECK_URL").ok();
-
-        Ok(Self {
-            bind_address,
-            grpc_bind_address,
-            jwt_secret,
-            jwt_clock_skew_secs,
-            health_check_url,
-            nats: NatsConfiguration::from_env(),
-            datalake: ClickHouseConfiguration::from_env_with_prefix("DATALAKE"),
-            graph: ClickHouseConfiguration::from_env_with_prefix("GRAPH"),
-            engine: EngineConfiguration::default(),
-        })
+        config.try_deserialize().map_err(ConfigError::Config)
     }
 
     pub fn jwt_secret(&self) -> Result<&str, ConfigError> {
@@ -64,14 +73,18 @@ impl AppConfig {
             .as_deref()
             .ok_or(ConfigError::MissingJwtSecret)
     }
+
+    pub fn into_shared(self) -> SharedAppConfig {
+        Arc::new(self)
+    }
 }
+
+pub type SharedAppConfig = Arc<AppConfig>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("invalid HTTP bind address")]
-    InvalidBindAddress,
-    #[error("invalid gRPC bind address")]
-    InvalidGrpcBindAddress,
-    #[error("GKG_JWT_SECRET environment variable is required")]
+    #[error("configuration error: {0}")]
+    Config(#[from] config::ConfigError),
+    #[error("GKG_JWT_SECRET is required")]
     MissingJwtSecret,
 }

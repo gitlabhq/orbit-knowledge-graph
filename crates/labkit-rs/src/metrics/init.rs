@@ -88,6 +88,8 @@ pub fn try_init() -> Result<MetricsGuard, InitError> {
 ///
 /// Returns an error if the OTLP exporter cannot be created.
 pub fn try_init_with_config(config: MetricsConfig) -> Result<MetricsGuard, InitError> {
+    let interval = config.export_interval();
+
     let resource = Resource::builder()
         .with_detector(Box::new(SdkProvidedResourceDetector))
         .with_detector(Box::new(EnvResourceDetector::default()))
@@ -101,7 +103,7 @@ pub fn try_init_with_config(config: MetricsConfig) -> Result<MetricsGuard, InitE
         .build()?;
 
     let reader = PeriodicReader::builder(exporter)
-        .with_interval(config.export_interval)
+        .with_interval(interval)
         .build();
 
     let provider = SdkMeterProvider::builder()
