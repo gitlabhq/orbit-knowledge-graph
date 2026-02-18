@@ -56,7 +56,7 @@ pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
 ];
 
 /// Edge table name in ClickHouse.
-pub const EDGE_TABLE: &str = "gl_edges";
+pub const EDGE_TABLE: &str = "gl_edge";
 
 /// Errors that can occur when loading or validating an ontology.
 #[derive(Debug)]

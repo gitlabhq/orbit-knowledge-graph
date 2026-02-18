@@ -4,7 +4,7 @@ node_type: User
 domain: core
 description: A GitLab user account
 label: username
-destination_table: gl_users
+destination_table: gl_user
 
 style:
   size: 32

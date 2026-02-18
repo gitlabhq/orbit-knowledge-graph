@@ -553,7 +553,7 @@ mod tests {
                 from: TableRef::join(
                     JoinType::Inner,
                     TableRef::scan("gl_user", "u"),
-                    TableRef::scan_with_filter("gl_edges", "e", types),
+                    TableRef::scan_with_filter("gl_edge", "e", types),
                     Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
                 ),
                 ..Default::default()

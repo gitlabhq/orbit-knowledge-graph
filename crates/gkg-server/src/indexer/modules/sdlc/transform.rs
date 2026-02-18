@@ -177,7 +177,7 @@ mod tests {
                 },
             ],
             primary_keys: vec!["id".to_string()],
-            destination_table: "gl_users".to_string(),
+            destination_table: "gl_user".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Global,
                 source: "siphon_users".to_string(),
@@ -239,7 +239,7 @@ mod tests {
             label: String::new(),
             fields: vec![],
             primary_keys: vec!["id".to_string()],
-            destination_table: "gl_groups".to_string(),
+            destination_table: "gl_group".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
                 source: "siphon_groups".to_string(),

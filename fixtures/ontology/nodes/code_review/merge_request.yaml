@@ -4,7 +4,7 @@ node_type: MergeRequest
 domain: code_review
 description: A merge request for code review and merging changes into a target branch
 label: title
-destination_table: gl_merge_requests
+destination_table: gl_merge_request
 
 style:
   size: 28

@@ -46,7 +46,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, title, state, merge_status, draft, squash FROM gl_merge_requests ORDER BY id")
+        .query("SELECT id, title, state, merge_status, draft, squash FROM gl_merge_request ORDER BY id")
         .await;
     assert!(!result.is_empty(), "merge requests should exist");
 
@@ -63,7 +63,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
 
     let in_project_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'IN_PROJECT' AND source_kind = 'MergeRequest'",
         )
         .await;
@@ -75,7 +75,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
 
     let authored_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'AUTHORED' AND target_kind = 'MergeRequest'
              ORDER BY target_id",
         )
@@ -88,7 +88,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
 
     let assigned_edges = context
         .query(
-            "SELECT target_id FROM gl_edges
+            "SELECT target_id FROM gl_edge
              WHERE relationship_kind = 'ASSIGNED' AND target_kind = 'MergeRequest'",
         )
         .await;
@@ -100,7 +100,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
 
     let merged_by_edges = context
         .query(
-            "SELECT target_id FROM gl_edges
+            "SELECT target_id FROM gl_edge
              WHERE relationship_kind = 'MERGED_BY' AND target_kind = 'MergeRequest'",
         )
         .await;
@@ -108,7 +108,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
 
     let in_milestone_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'IN_MILESTONE' AND source_kind = 'MergeRequest' AND target_kind = 'Milestone'",
         )
         .await;

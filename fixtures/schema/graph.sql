@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS namespace_indexing_watermark (
 
 -- Graph node tables
 
-CREATE TABLE IF NOT EXISTS gl_users (
+CREATE TABLE IF NOT EXISTS gl_user (
     id Int64,
     username String DEFAULT '',
     email String DEFAULT '',
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS gl_users (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id);
 
-CREATE TABLE IF NOT EXISTS gl_groups (
+CREATE TABLE IF NOT EXISTS gl_group (
     id Int64,
     name Nullable(String),
     description Nullable(String),
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS gl_groups (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_projects (
+CREATE TABLE IF NOT EXISTS gl_project (
     id Int64,
     name Nullable(String),
     description Nullable(String),
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS gl_projects (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_notes (
+CREATE TABLE IF NOT EXISTS gl_note (
     id Int64,
     note Nullable(String),
     noteable_type String DEFAULT '',
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS gl_notes (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_merge_requests (
+CREATE TABLE IF NOT EXISTS gl_merge_request (
     id Int64,
     iid Nullable(Int64),
     title String DEFAULT '',
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_requests (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_merge_request_diffs (
+CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     id Int64,
     merge_request_id Int64,
     state Nullable(String),
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diffs (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_merge_request_diff_files (
+CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     id Int64,
     merge_request_id Int64,
     merge_request_diff_id Int64,
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_files (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_milestones (
+CREATE TABLE IF NOT EXISTS gl_milestone (
     id Int64,
     iid Nullable(Int64),
     title String DEFAULT '',
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS gl_milestones (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_labels (
+CREATE TABLE IF NOT EXISTS gl_label (
     id Int64,
     title Nullable(String),
     description Nullable(String),
@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS gl_labels (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_work_items (
+CREATE TABLE IF NOT EXISTS gl_work_item (
     id Int64,
     iid Nullable(Int64),
     title String DEFAULT '',
@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS gl_work_items (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
 
-CREATE TABLE IF NOT EXISTS gl_edges (
+CREATE TABLE IF NOT EXISTS gl_edge (
     source_id Int64,
     source_kind String,
     relationship_kind String,

@@ -61,7 +61,7 @@ async fn namespace_handler_processes_projects() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_projects ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_project ORDER BY id").await;
     assert!(!result.is_empty(), "projects result should not be empty");
 
     let batch = &result[0];
@@ -73,14 +73,14 @@ async fn namespace_handler_processes_projects() {
     assert_eq!(visibility_column.value(1), "public");
 
     let creator_edges = context
-        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'CREATOR' AND source_kind = 'User' AND target_kind = 'Project' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'CREATOR' AND source_kind = 'User' AND target_kind = 'Project' ORDER BY target_id")
         .await;
 
     assert!(!creator_edges.is_empty(), "creator edges should exist");
     assert_eq!(creator_edges[0].num_rows(), 2);
 
     let contains_edges = context
-        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Group' AND target_kind = 'Project'")
+        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Group' AND target_kind = 'Project'")
         .await;
 
     assert!(!contains_edges.is_empty(), "contains edges should exist");
@@ -153,7 +153,7 @@ async fn namespace_handler_creates_member_of_edges_for_projects() {
         .expect("handler should succeed");
 
     let member_edges = context
-        .query("SELECT source_id, target_id, source_kind, target_kind FROM gl_edges WHERE relationship_kind = 'MEMBER_OF' AND target_kind = 'Project'")
+        .query("SELECT source_id, target_id, source_kind, target_kind FROM gl_edge WHERE relationship_kind = 'MEMBER_OF' AND target_kind = 'Project'")
         .await;
 
     assert!(!member_edges.is_empty(), "member_of edges should exist");

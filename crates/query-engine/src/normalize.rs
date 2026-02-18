@@ -185,7 +185,7 @@ mod tests {
         );
 
         // User: table resolved, non-enum filters unchanged
-        assert_eq!(result.nodes[0].table, Some("gl_users".into()));
+        assert_eq!(result.nodes[0].table, Some("gl_user".into()));
         assert_eq!(
             result.nodes[0].filters.get("username").unwrap().value,
             Some(json!("admin"))
@@ -196,7 +196,7 @@ mod tests {
         );
 
         // MergeRequest: table + enum coercion + non-enum passthrough
-        assert_eq!(result.nodes[1].table, Some("gl_merge_requests".into()));
+        assert_eq!(result.nodes[1].table, Some("gl_merge_request".into()));
         assert_eq!(
             result.nodes[1].filters.get("state").unwrap().value,
             Some(json!("merged"))
@@ -222,7 +222,7 @@ mod tests {
         );
 
         // WorkItem: different entity with same enum field name (state) + work_item_type
-        assert_eq!(result.nodes[3].table, Some("gl_work_items".into()));
+        assert_eq!(result.nodes[3].table, Some("gl_work_item".into()));
         assert_eq!(
             result.nodes[3].filters.get("state").unwrap().value,
             Some(json!("closed"))

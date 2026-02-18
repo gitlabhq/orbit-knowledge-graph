@@ -91,7 +91,7 @@ impl ProjectStore for ClickHouseProjectStore {
                 id,
                 argMax(traversal_path, _version) as traversal_path,
                 argMax(full_path, _version) as full_path
-            FROM gl_projects
+            FROM gl_project
             WHERE id = {project_id:Int64}
             GROUP BY id
         "#;

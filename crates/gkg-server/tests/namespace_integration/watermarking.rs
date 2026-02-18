@@ -55,7 +55,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT count() as cnt FROM gl_groups").await;
+    let result = context.query("SELECT count() as cnt FROM gl_group").await;
     let count_array = result[0]
         .column(0)
         .as_any()
@@ -68,7 +68,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         "should only process new-team, not org1"
     );
 
-    let names = context.query("SELECT name FROM gl_groups").await;
+    let names = context.query("SELECT name FROM gl_group").await;
     let name_array = get_string_column(&names[0], "name");
 
     assert_eq!(name_array.value(0), "new-team");

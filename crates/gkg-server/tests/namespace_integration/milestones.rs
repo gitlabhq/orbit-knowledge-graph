@@ -65,7 +65,7 @@ async fn namespace_handler_processes_milestones_with_edges() {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, title, state, due_date FROM gl_milestones ORDER BY id")
+        .query("SELECT id, title, state, due_date FROM gl_milestone ORDER BY id")
         .await;
     assert!(!result.is_empty(), "milestones should exist");
 
@@ -83,7 +83,7 @@ async fn namespace_handler_processes_milestones_with_edges() {
 
     let in_project_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'IN_PROJECT' AND source_kind = 'Milestone' AND target_kind = 'Project'",
         )
         .await;
@@ -95,7 +95,7 @@ async fn namespace_handler_processes_milestones_with_edges() {
 
     let in_group_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'IN_GROUP' AND source_kind = 'Milestone' AND target_kind = 'Group'",
         )
         .await;

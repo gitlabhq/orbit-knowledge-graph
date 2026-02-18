@@ -166,7 +166,7 @@ mod tests {
                 },
             ],
             primary_keys: vec!["id".to_string()],
-            destination_table: "gl_users".to_string(),
+            destination_table: "gl_user".to_string(),
             style: Default::default(),
             etl: None,
             redaction: None,
@@ -207,12 +207,12 @@ mod tests {
     fn test_to_clickhouse_ddl() {
         let schema = edge_schema();
         let ddl = to_clickhouse_ddl(
-            "gl_edges",
+            "gl_edge",
             &schema,
             &["relationship_kind", "source_kind", "source_id"],
         );
 
-        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS gl_edges"));
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS gl_edge"));
         assert!(ddl.contains("relationship_kind String"));
         assert!(ddl.contains("ORDER BY (relationship_kind, source_kind, source_id)"));
     }
