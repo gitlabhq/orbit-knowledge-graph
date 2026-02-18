@@ -25,7 +25,7 @@ The storage model aims to replicate the CSR (Compressed Sparse Row) adjacency li
 
 - `traversal_id`: SDLC entities (issues, merge requests, pipelines, etc.) are enriched with a `traversal_id` column during indexing. This array represents the full ancestor hierarchy of the entity's parent namespace (e.g., `[100, 200, 300]` for a project inside a subgroup inside a top-level group). The query engine uses `traversal_id` for prefix-based permission filtering, enabling efficient authorization checks without joining back to the namespace hierarchy. See [Security Architecture](../security.md) for details on how `traversal_id` filters are injected.
 
-- `branch`: Code node types (`files`, `symbols`, `definitions`) include a `branch` column to track which Git branch the indexed code belongs to. SDLC entities do not use this column as it is not relevant to their current state. **Note**: we intend to only index the **current** state of a particular branch in the initial iteration, not the historical state. See [Code Indexing](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/indexing/code_indexing.md) for more details.
+- `branch`: Code node types (`files`, `symbols`, `definitions`) include a `branch` column to track which Git branch the indexed code belongs to. SDLC entities do not use this column as it is not relevant to their current state. **Note**: we intend to only index the **current** state of a particular branch in the initial iteration, not the historical state. See [Code Indexing](../indexing/code_indexing.md) for more details.
 
 - Multi‑tenancy and authorization are enforced in every query by prefix filtering on `organization_id` and `traversal_id` to keep scans local and permission-scoped.
 

@@ -87,7 +87,7 @@ repository statistics or showing related files when browsing through repository.
 
 ## Design and implementation details
 
-Because there is already [Exact Code Search (Zoekt)](/handbook/engineering/architecture/design-documents/code_search_with_zoekt)
+Because there is already [Exact Code Search (Zoekt)](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/code_search_with_zoekt)
 which uses similar architecture as knowledge graph, it would be best to make the
 existing Zoekt infrastructure more generic so it will support both Zoekt
 searching and providing access to knowledge graph. The major benefit is that we can
@@ -276,7 +276,7 @@ service, but we should make sure that:
   graph service will keep open DB connections for recently used DBs
 
 Because of similarities between knowledge graph and Zoekt searching, we will
-extend existing [Zoekt infrastructure](/handbook/engineering/architecture/design-documents/code_search_with_zoekt)
+extend existing [Zoekt infrastructure](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/code_search_with_zoekt)
 to serve also graph databases:
 
 - on the server side, Zoekt search models and services will be separate from graph
@@ -592,7 +592,7 @@ The services will integrate with existing GitLab monitoring infrastructure:
 
 This design document includes the following architecture decisions:
 
-- [ADR-001: FFI vs Dedicated Process Integration](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/decisions/001_dedicated_processes.md) - Decision to move from FFI-based integration to dedicated process model
+- [ADR-001: FFI vs Dedicated Process Integration](../decisions/001_dedicated_processes.md) - Decision to move from FFI-based integration to dedicated process model
 
 ## Alternative Solutions
 

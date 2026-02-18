@@ -63,7 +63,7 @@ Move away from FFI-based integration and adopt a dedicated process model where:
 - Unlike Zoekt code search, this feature will not be available in Omnibus and
   will require advanced components or use of CNG. Dependence on these components
   may delay the dedicated release as we work on tooling as part of
-  https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/selfmanaged_segmentation/
+  https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/selfmanaged_segmentation
 - Usage of a separate GKG service is a blocker for including Knowledge Graph in
   Omnibus in future if needed
 - More complex deployment - instead of deploying single Zoekt service, two

@@ -22,7 +22,7 @@ Registry of related repositories. If a repository is not cloned locally, clone i
 - **local_path:** ~/gitlab/handbook
 - **description:** Repository containing architectural design documents
 - **key_paths:**
-  - `content/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph` - GitLab Knowledge Graph (orbit) design documents
+  - `content/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph` - GitLab Knowledge Graph (orbit) design documents (canonical copy now in `docs/design-documents/` in the knowledge-graph repo)
   - `content/handbook/engineering/architecture/design-documents/data_insights_platform` - Data Insights Platform design document
 
 ### gitlab-zoekt-indexer

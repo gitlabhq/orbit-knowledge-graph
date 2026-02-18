@@ -188,7 +188,7 @@ The Knowledge Graph is an **OLAP application** over an OLTP one. The service is 
 
 ## Knowledge Graph Architecture High-Level Overview
 
-Building a Knowledge Graph is a ***data engineering problem***. The Knowledge Graph service will build off of the **Data Insights Platform** to power both indexing code and SDLC metadata as a distributed system. For an end-to-end overview of the Data Insights Platform (logical replication, NATS JetStream, ClickHouse), see the [Data Insights Platform design doc](/handbook/engineering/architecture/design-documents/data_insights_platform/).
+Building a Knowledge Graph is a ***data engineering problem***. The Knowledge Graph service will build off of the **Data Insights Platform** to power both indexing code and SDLC metadata as a distributed system. For an end-to-end overview of the Data Insights Platform (logical replication, NATS JetStream, ClickHouse), see the [Data Insights Platform design doc](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/).
 
 We will then build a secure query layer on top of the Data Insights Platform to allow developers and AI agents to query the graph for various product use cases. The Knowledge Graph tech stack will look like the following:
 
@@ -313,7 +313,7 @@ flowchart TD
 
 ### Database & Database Ops
 
-As a first iteration, the team aims to build **a [Graph Query Engine](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/querying/graph_engine/) on ClickHouse** that translates basic Cypher (aka GQL) queries into SQL-compatible multi-hop graph traversals.
+As a first iteration, the team aims to build **a [Graph Query Engine](querying/graph_engine.md) on ClickHouse** that translates basic Cypher (aka GQL) queries into SQL-compatible multi-hop graph traversals.
 
 In October 2025, KuzuDB [was archived](https://www.theregister.com/2025/10/14/kuzudb_abandoned/) by maintainers. The Knowledge Graph Team spent time validating various database options against both Code Indexing and SDLC indexing, using the SLDC [dataset generator](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/292) and pre-existing Code Index parquet files ([Database Selection Epic](https://gitlab.com/groups/gitlab-org/rust/-/epics/31)). We explored both new databases (Neo4J, FalkorBD, Memgraph, etc.) and already-deployed, approved GitLab databases (PostgreSQL and ClickHouse).
 
@@ -331,7 +331,7 @@ Kùzu is a columnar system similar to modern read-optimized analytical DBMSs, li
 - **Two-Way Door**: If we find that the Database does not suit our needs, we can still leverage the components we deploy (Siphon, NATS, ClickHouse) as the foundation for the data pipeline to a new graph database (e.g., Neo4j, Falkor, Memgraph)
 - **Legal and Procurement Barriers**: Because of the unfriendly licenses, any new database will have to go through both legal and ZIP. See the legal section.
 
-View the [Graph Query Engine](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/querying/graph_engine/) design document for more details.
+View the [Graph Query Engine](querying/graph_engine.md) design document for more details.
 
 ### Legal and Procurement Barriers with Graph Native Databases
 
@@ -360,7 +360,7 @@ We aim to build the Knowledge Graph service with the following goals in mind:
 - Implement a **thorough review process** and **security tests** for SDLC metadata indexing algorithms to ensure customer data is not indexed incorrectly.
 - **Sanitization, redaction, and validation** of all input queries to prevent injection and DDoS attacks.
 
-Please see the [Security Design Document](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/security/) for more details.
+Please see the [Security Design Document](security.md) for more details.
 
 ### Operational Observability
 
@@ -368,7 +368,7 @@ Please see the [Security Design Document](/handbook/engineering/architecture/des
 - Add **logging** and **tracing** best practices (LabKit integration) to the service.
 - Provide observability to both **self-managed** and **.com** customers.
 
-Please see the [Observability Design Document](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/observability/) for more details.
+Please see the [Observability Design Document](observability.md) for more details.
 
 ### Distributed Scalability & Reliability
 
@@ -377,8 +377,8 @@ Please see the [Observability Design Document](/handbook/engineering/architectur
 
 For how we will achieve this, please see the following design documents:
 
-- See the [Indexing Service Design Document](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/indexing/) for how the indexing service will index SDLC metadata and code.
-- See the [Web Service Design Document](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/querying/) for how the web service will serve queries.
+- See the [Indexing Service Design Document](indexing/) for how the indexing service will index SDLC metadata and code.
+- See the [Web Service Design Document](querying/) for how the web service will serve queries.
 - (Follow up MR) ClickHouse Cloud Clustering for scalability and reliability.
 
 ### FinOps & Maintainability
@@ -389,14 +389,14 @@ For how we will achieve this, please see the following design documents:
   - Handling Rails database migrations and schema changes.
   - Adding new data source entities to the graph.
 
-Please see the [Knowledge Graph Data Model](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/data_model/) design document for more details on the data model.
+Please see the [Knowledge Graph Data Model](data_model.md) design document for more details on the data model.
 
 Follow up MR: New section/page on deployment resource requirements, and plan for operations past day 30.
 
 ### Maintainability & Delivery
 
 - Aim for independent upgrade & security patching without Rails as a dependency to enable continuous delivery for both .com and self-managed customers.
-- The design of the service should incorporate [Cells](/handbook/engineering/infrastructure-platforms/tenant-scale/cells_and_organizations/) architectural implications where applicable.
+- The design of the service should incorporate [Cells](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/tenant-scale/cells_and_organizations/) architectural implications where applicable.
 - Build a **data model configuration layer** for SDLC metadata sources to support Rails database migrations and schema changes, and to add new data source entities.
 - Avoid requiring customers to run any scripts (rake tasks) to fix data state issues.
 
@@ -422,7 +422,7 @@ Here are the differences and similarities between the two:
 
 - **What they share**:
   - Both indexing pipelines and query services can reuse the **same** architecture and codebase, as they can share the same graph technology, indexing patterns, and architectural components. Because we are leveraging the Data Insights Platform, we will be able to share the same ingesters, NATS JetStream, and database (ClickHouse). This allows us to have an event-driven platform for both Code Indexing and SDLC Metadata Indexing.
-  - They will share all technology choices outlined in [ADR-001: FFI vs Dedicated Process Integration](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/decisions/001_dedicated_processes.md), including the same codebase, [observability patterns](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/observability/), and [security patterns](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/security/).
+  - They will share all technology choices outlined in [ADR-001: FFI vs Dedicated Process Integration](decisions/001_dedicated_processes.md), including the same codebase, [observability patterns](observability.md), and [security patterns](security.md).
 
 ## Iteration Plan
 

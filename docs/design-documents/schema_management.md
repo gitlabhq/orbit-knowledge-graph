@@ -73,9 +73,9 @@ Given this, our strategy is as follows:
 The process for a breaking change (e.g., changing a property's data type) will follow the GitLab [zero-downtime migration process](https://docs.gitlab.com/ee/development/database/avoiding_downtime_in_migrations.html):
 
 1. **Create Shadow Column**: Add a new column with the desired schema (e.g., `priority_v2 Int32`) alongside the original column. This avoids locking or rewriting the table.
-1. **Backfill Historical Data**: Copy existing data from the original column to the shadow column. For large tables, perform this in batches to avoid impacting production query performance.
-1. **Dual-write on insert**: On next indexing use either the lowest date between the migration start and the last indexing date as the date of the new data to ensure no data is lost.
-1. **Atomic Column Swap**: Once the shadow column is fully backfilled and in sync, rename the original column (e.g., `priority_old`) and rename the shadow column to the original name. Use a single `ALTER TABLE` with multiple `RENAME COLUMN` clauses for atomicity.
-1. **Clean Up**: After verifying the migration succeeded, drop the old column in a subsequent deployment.
+2. **Backfill Historical Data**: Copy existing data from the original column to the shadow column. For large tables, perform this in batches to avoid impacting production query performance.
+3. **Dual-write on insert**: On next indexing use either the lowest date between the migration start and the last indexing date as the date of the new data to ensure no data is lost.
+4. **Atomic Column Swap**: Once the shadow column is fully backfilled and in sync, rename the original column (e.g., `priority_old`) and rename the shadow column to the original name. Use a single `ALTER TABLE` with multiple `RENAME COLUMN` clauses for atomicity.
+5. **Clean Up**: After verifying the migration succeeded, drop the old column in a subsequent deployment.
 
 After every schema migration, the migration tool is responsible for updating the latest schema definition in the NATS KV store. This ensures that all `gkg-webserver` instances rapidly receive the new schema and use it for query planning, maintaining strong consistency between the data layer and the API without manual intervention.

@@ -20,7 +20,7 @@ The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agent
 
 ### Graph Query Engine
 
-View the [Graph Query Engine](/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/querying/graph_engine/) design document for more details on the graph query engine.
+View the [Graph Query Engine](graph_engine.md) design document for more details on the graph query engine.
 
 ### Intermediate Query Language
 
