@@ -11,7 +11,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-code-indexer = { path = "../code-indexer" }
+code-graph = { path = "../code-graph" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 clap = { workspace = true }

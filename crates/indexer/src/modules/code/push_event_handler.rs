@@ -6,8 +6,8 @@ use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Topic};
 use async_trait::async_trait;
 use chrono::Utc;
-use code_indexer::indexer::{IndexingConfig, RepositoryIndexer};
-use code_indexer::loading::DirectoryFileSource;
+use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
+use code_graph::loading::DirectoryFileSource;
 use ontology::EDGE_TABLE;
 use tempfile::TempDir;
 use tracing::{debug, info, warn};
@@ -398,7 +398,7 @@ impl PushEventHandler {
         project_id: i64,
         branch: &str,
         traversal_path: &str,
-        graph_data: &code_indexer::analysis::types::GraphData,
+        graph_data: &code_graph::analysis::types::GraphData,
     ) -> Result<(), HandlerError> {
         let converter =
             ArrowConverter::new(traversal_path.to_string(), project_id, branch.to_string());

@@ -6,7 +6,7 @@ resolver = "2"
 members = [
   "crates/treesitter-visit",
   "crates/code-parser",
-  "crates/code-indexer",
+  "crates/code-graph",
   "crates/labkit-rs",
   "crates/clickhouse-client",
   "crates/indexer",
