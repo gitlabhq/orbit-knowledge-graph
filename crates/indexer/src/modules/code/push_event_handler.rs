@@ -3,10 +3,8 @@
 use std::sync::Arc;
 
 use crate::module::{Handler, HandlerContext, HandlerError};
-use crate::nats::{KvPutOptions, KvPutResult};
 use crate::types::{Envelope, Topic};
 use async_trait::async_trait;
-use bytes::Bytes;
 use chrono::Utc;
 use code_indexer::indexer::{IndexingConfig, RepositoryIndexer};
 use code_indexer::loading::DirectoryFileSource;
@@ -15,15 +13,16 @@ use tempfile::TempDir;
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::ArrowConverter;
+use super::config::LOCK_TTL;
 use super::config::{
-    CodeIndexingConfig, LOCK_TTL, buckets, siphon_actions, siphon_ref_types, subjects, tables,
+    CodeIndexingConfig, buckets, siphon_actions, siphon_ref_types, subjects, tables,
 };
 use super::event_cache_handler::CachedEventInfo;
 use super::gitaly::RepositoryService;
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use super::watermark_store::{CodeIndexingWatermark, CodeWatermarkStore};
-use crate::modules::sdlc::locking::{INDEXING_LOCKS_BUCKET, project_lock_key};
+use crate::modules::sdlc::locking::project_lock_key;
 
 pub struct PushEventHandler {
     repository_service: Arc<dyn RepositoryService>,
@@ -372,19 +371,10 @@ impl PushEventHandler {
         branch: &str,
     ) -> Result<bool, HandlerError> {
         let key = project_lock_key(project_id, branch);
-        let options = KvPutOptions::create_with_ttl(LOCK_TTL);
-
-        match ctx
-            .nats
-            .kv_put(INDEXING_LOCKS_BUCKET, &key, Bytes::new(), options)
+        ctx.lock_service
+            .try_acquire(&key, LOCK_TTL)
             .await
-        {
-            Ok(KvPutResult::Success(_)) => Ok(true),
-            Ok(KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch) => Ok(false),
-            Err(e) => Err(HandlerError::Processing(format!(
-                "lock acquire failed: {e}"
-            ))),
-        }
+            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))
     }
 
     async fn release_lock(
@@ -394,8 +384,8 @@ impl PushEventHandler {
         branch: &str,
     ) -> Result<(), HandlerError> {
         let key = project_lock_key(project_id, branch);
-        ctx.nats
-            .kv_delete(INDEXING_LOCKS_BUCKET, &key)
+        ctx.lock_service
+            .release(&key)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock release failed: {e}")))
     }
@@ -493,11 +483,13 @@ mod tests {
     use crate::modules::code::project_store::test_utils::MockProjectStore;
     use crate::modules::code::test_helpers::{build_replication_events, push_payload_columns};
     use crate::modules::code::watermark_store::test_utils::MockCodeWatermarkStore;
-    use crate::testkit::{MockDestination, MockNatsServices, TestEnvelopeFactory};
+    use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
+    use bytes::Bytes;
 
     struct TestContext {
         handler: PushEventHandler,
         mock_nats: Arc<MockNatsServices>,
+        mock_locks: Arc<MockLockService>,
         watermark_store: Arc<MockCodeWatermarkStore>,
         project_store: Arc<MockProjectStore>,
     }
@@ -509,6 +501,7 @@ mod tests {
 
         fn with_repository_service(repository_service: Arc<dyn RepositoryService>) -> Self {
             let mock_nats = Arc::new(MockNatsServices::new());
+            let mock_locks = Arc::new(MockLockService::new());
             let watermark_store = Arc::new(MockCodeWatermarkStore::new());
             let project_store = Arc::new(MockProjectStore::new());
 
@@ -522,13 +515,18 @@ mod tests {
             Self {
                 handler,
                 mock_nats,
+                mock_locks,
                 watermark_store,
                 project_store,
             }
         }
 
         fn handler_context(&self) -> HandlerContext {
-            HandlerContext::new(Arc::new(MockDestination::new()), self.mock_nats.clone())
+            HandlerContext::new(
+                Arc::new(MockDestination::new()),
+                self.mock_nats.clone(),
+                self.mock_locks.clone(),
+            )
         }
 
         fn add_project(&self, project_id: i64) {
@@ -568,13 +566,12 @@ mod tests {
 
         fn set_lock(&self, project_id: i64, branch: &str) {
             let key = project_lock_key(project_id, branch);
-            self.mock_nats
-                .set_kv(INDEXING_LOCKS_BUCKET, &key, Bytes::new());
+            self.mock_locks.set_lock(&key);
         }
 
         fn lock_exists(&self, project_id: i64, branch: &str) -> bool {
             let key = project_lock_key(project_id, branch);
-            self.mock_nats.get_kv(INDEXING_LOCKS_BUCKET, &key).is_some()
+            self.mock_locks.is_held(&key)
         }
     }
 

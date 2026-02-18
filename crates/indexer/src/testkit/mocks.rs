@@ -1,6 +1,6 @@
 //! Mock implementations for testing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::entities::Entity;
+use crate::locking::{LockError, LockService};
 use crate::module::{Handler, HandlerContext, HandlerError, Module};
 use crate::nats::{KvEntry, KvPutOptions, KvPutResult, NatsError, NatsServices};
 use crate::types::{Envelope, MessageId, Topic};
@@ -314,6 +315,43 @@ impl Handler for HandlerWrapper {
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         self.0.handle(context, message).await
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct MockLockService {
+    held: Arc<Mutex<HashSet<String>>>,
+}
+
+impl MockLockService {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_lock(&self, key: &str) {
+        self.held.lock().insert(key.to_string());
+    }
+
+    pub fn is_held(&self, key: &str) -> bool {
+        self.held.lock().contains(key)
+    }
+}
+
+#[async_trait]
+impl LockService for MockLockService {
+    async fn try_acquire(&self, key: &str, _ttl: Duration) -> Result<bool, LockError> {
+        let mut held = self.held.lock();
+        if held.contains(key) {
+            Ok(false)
+        } else {
+            held.insert(key.to_string());
+            Ok(true)
+        }
+    }
+
+    async fn release(&self, key: &str) -> Result<(), LockError> {
+        self.held.lock().remove(key);
+        Ok(())
     }
 }
 

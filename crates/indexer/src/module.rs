@@ -38,6 +38,7 @@ use thiserror::Error;
 use crate::{
     destination::Destination,
     entities::Entity,
+    locking::LockService,
     nats::NatsServices,
     types::{Envelope, Topic},
 };
@@ -84,12 +85,23 @@ pub struct HandlerContext {
 
     /// NATS services for publishing messages and other NATS operations.
     pub nats: Arc<dyn NatsServices>,
+
+    /// Distributed lock service for coordinating concurrent processing.
+    pub lock_service: Arc<dyn LockService>,
 }
 
 impl HandlerContext {
     /// Creates a new handler context with the given resources.
-    pub fn new(destination: Arc<dyn Destination>, nats: Arc<dyn NatsServices>) -> Self {
-        HandlerContext { destination, nats }
+    pub fn new(
+        destination: Arc<dyn Destination>,
+        nats: Arc<dyn NatsServices>,
+        lock_service: Arc<dyn LockService>,
+    ) -> Self {
+        HandlerContext {
+            destination,
+            nats,
+            lock_service,
+        }
     }
 }
 

@@ -2,15 +2,13 @@ mod extract;
 
 use std::sync::Arc;
 
-use bytes::Bytes;
 use chrono::Utc;
 use indexer::clickhouse::ClickHouseError;
+use indexer::locking::{LockError, LockService, NatsLockService};
 use indexer::modules::sdlc::locking::{
     INDEXING_LOCKS_BUCKET, LOCK_TTL, global_lock_key, namespace_lock_key,
 };
-use indexer::nats::{
-    KvBucketConfig, KvPutOptions, KvPutResult, NatsBroker, NatsServices, NatsServicesImpl,
-};
+use indexer::nats::{KvBucketConfig, NatsBroker, NatsServicesImpl};
 use indexer::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use indexer::types::{Envelope, Event};
 use tracing::{debug, info, warn};
@@ -43,12 +41,12 @@ pub enum DispatcherError {
     Publish(indexer::nats::NatsError),
 
     #[error("Failed to acquire lock: {0}")]
-    LockAcquisition(indexer::nats::NatsError),
+    LockAcquisition(LockError),
 }
 
 struct Dispatcher {
     broker: Arc<NatsBroker>,
-    nats_services: NatsServicesImpl,
+    lock_service: NatsLockService,
 }
 
 enum LockResult {
@@ -58,25 +56,23 @@ enum LockResult {
 
 impl Dispatcher {
     fn new(broker: Arc<NatsBroker>) -> Self {
-        let nats_services = NatsServicesImpl::new(Arc::clone(&broker));
+        let nats_services = Arc::new(NatsServicesImpl::new(Arc::clone(&broker)));
+        let lock_service = NatsLockService::new(nats_services);
         Self {
             broker,
-            nats_services,
+            lock_service,
         }
     }
 
     async fn try_acquire_lock(&self, key: &str) -> Result<LockResult, DispatcherError> {
-        let options = KvPutOptions::create_with_ttl(LOCK_TTL);
-        let result = self
-            .nats_services
-            .kv_put(INDEXING_LOCKS_BUCKET, key, Bytes::new(), options)
+        match self
+            .lock_service
+            .try_acquire(key, LOCK_TTL)
             .await
-            .map_err(DispatcherError::LockAcquisition)?;
-
-        match result {
-            KvPutResult::Success(_) => Ok(LockResult::Acquired),
-            KvPutResult::AlreadyExists => Ok(LockResult::AlreadyHeld),
-            KvPutResult::RevisionMismatch => Ok(LockResult::AlreadyHeld),
+            .map_err(DispatcherError::LockAcquisition)?
+        {
+            true => Ok(LockResult::Acquired),
+            false => Ok(LockResult::AlreadyHeld),
         }
     }
 

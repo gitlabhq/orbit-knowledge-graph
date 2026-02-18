@@ -130,12 +130,16 @@ mod tests {
     use crate::modules::code::test_helpers::{
         EventBuilder, build_replication_events, push_event_columns,
     };
-    use crate::testkit::{MockDestination, MockNatsServices, TestEnvelopeFactory};
+    use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use std::sync::Arc;
 
     fn create_test_context() -> (HandlerContext, Arc<MockNatsServices>) {
         let mock_nats = Arc::new(MockNatsServices::new());
-        let ctx = HandlerContext::new(Arc::new(MockDestination::new()), mock_nats.clone());
+        let ctx = HandlerContext::new(
+            Arc::new(MockDestination::new()),
+            mock_nats.clone(),
+            Arc::new(MockLockService::new()),
+        );
         (ctx, mock_nats)
     }
 
