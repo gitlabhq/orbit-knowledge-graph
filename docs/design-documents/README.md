@@ -428,7 +428,7 @@ Here are the differences and similarities between the two:
 
 While the topics of Code Indexing and SDLC Indexing differ in how they index, the architecture above provides a platform for both Code Indexing and SDLC data.
 
-Please see the [Code Indexing](./indexing/code_indexing) and [SDLC Metadata Indexing](./indexing/sdlc_indexing) design documents for more details.
+Please see the [Code Indexing](./indexing/code_indexing.md) and [SDLC Metadata Indexing](./indexing/sdlc_indexing.md) design documents for more details.
 
 ### Phase 1 - SDLC Metadata Indexing and Project Level Code Graph Indexing
 
