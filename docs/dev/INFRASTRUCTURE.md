@@ -51,14 +51,16 @@ DNS for `gkg.dev` is managed externally.
 
 ## Firewall Rules
 
+<!-- vale gitlab_base.Substitutions = NO -->
 | Rule | Source | Ports | Target |
 |------|--------|-------|--------|
 | allow-gke-pods-to-postgres | 10.83.0.0/17 | tcp:5432 | gitlab-omnibus-vm |
+<!-- vale gitlab_base.Substitutions = YES -->
 | allow-gke-pods-to-clickhouse | 10.83.0.0/17 | tcp:8123,8443,9000 | clickhouse-vm |
 | allow-gke-pods-to-gitaly | 10.83.0.0/17 | tcp:8075 | gitlab-omnibus-vm |
 | default-allow-internal | 10.128.0.0/9 | all | all instances |
 
-## PostgreSQL (GitLab Omnibus)
+## PostgreSQL (Linux package)
 
 - User `gitlab` has `REPLICATION` privilege
 - `pg_hba.conf` allows replication from GKE pod CIDR (10.83.0.0/17)
@@ -80,6 +82,7 @@ DNS for `gkg.dev` is managed externally.
 | grafana_reader | (none) | Read-only (readonly=2), used by Grafana |
 
 **Grafana user setup (sandbox):**
+
 ```sql
 CREATE USER grafana_reader IDENTIFIED WITH no_password SETTINGS readonly = 2;
 GRANT SELECT ON gitlab_clickhouse_main_production.* TO grafana_reader;

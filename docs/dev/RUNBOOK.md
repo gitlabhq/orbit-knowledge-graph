@@ -8,7 +8,7 @@ Operations guide for the GKG sandbox environment on GKE.
 - `kubectl` configured for the cluster
 - `helm` v3+
 
-```bash
+```shell
 # Get cluster credentials
 gcloud container clusters get-credentials knowledge-graph-test \
   --region=us-central1 \
@@ -21,7 +21,7 @@ gcloud container clusters get-credentials knowledge-graph-test \
 
 Required for TLS certificate management.
 
-```bash
+```shell
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.19.2/cert-manager.yaml
 
 # Wait for cert-manager to be ready
@@ -32,7 +32,7 @@ kubectl -n cert-manager wait --for=condition=Ready pods --all --timeout=120s
 
 Required for syncing secrets from GCP Secret Manager to Kubernetes.
 
-```bash
+```shell
 # Add helm repo
 helm repo add external-secrets https://charts.external-secrets.io
 helm repo update external-secrets
@@ -46,6 +46,7 @@ helm install external-secrets external-secrets/external-secrets \
 ```
 
 **CRDs installed:**
+
 - `externalsecrets.external-secrets.io`
 - `secretstores.external-secrets.io`
 - `clustersecretstores.external-secrets.io`
@@ -54,7 +55,7 @@ helm install external-secrets external-secrets/external-secrets \
 
 Required for kube-prometheus-stack. Install before deploying the Helm chart:
 
-```bash
+```shell
 PROMETHEUS_OPERATOR_VERSION=v0.88.1
 
 for crd in alertmanagerconfigs alertmanagers podmonitors probes \
@@ -69,7 +70,7 @@ For local development with Tilt, this is handled automatically in the Tiltfile.
 
 ### GCP Service Account for Workload Identity
 
-```bash
+```shell
 # Create GCP service account
 gcloud iam service-accounts create gkg-secrets-sa \
   --display-name="GKG Secrets Service Account" \
@@ -134,7 +135,7 @@ The following secrets must exist in GCP Secret Manager with `secretAccessor` rol
 
 DNS for `gkg.dev` is managed externally. Ensure an A record for `grafana.gkg.dev` points to the GKE Ingress load balancer IP:
 
-```bash
+```shell
 # Get the load balancer IP after deploying the Helm chart
 kubectl get ingress grafana -n gkg -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
@@ -144,12 +145,13 @@ The GCP ManagedCertificate will automatically provision a TLS certificate once D
 ## Deploy Helm Charts
 
 The deployment consists of two charts:
+
 - `helm-dev/observability` - Prometheus, Grafana, Loki, Alloy (release name: `gkg-obs`)
 - `helm-dev/gkg` - GKG indexer, webserver, siphon, NATS (release name: `gkg`)
 
 ### Install
 
-```bash
+```shell
 # Build dependencies
 helm dependency build ./helm-dev/observability
 helm dependency build ./helm-dev/gkg
@@ -172,7 +174,7 @@ helm install gkg ./helm-dev/gkg \
 
 ### Upgrade
 
-```bash
+```shell
 helm upgrade gkg-obs ./helm-dev/observability \
   -f ./helm-dev/observability/values-sandbox.yaml \
   --namespace gkg \
@@ -186,7 +188,7 @@ helm upgrade gkg ./helm-dev/gkg \
 
 ### Check Status
 
-```bash
+```shell
 # Pods
 kubectl get pods -n gkg
 
@@ -199,7 +201,7 @@ helm list -n gkg
 
 ### View Logs
 
-```bash
+```shell
 # Producer
 kubectl logs -n gkg deployment/siphon-producer -f
 
@@ -221,17 +223,18 @@ The Helm chart deploys Grafana, Prometheus, Loki, and Alertmanager.
 
 URL: https://grafana.gkg.dev
 
-Authentication is via Google or GitLab OAuth. Users with `@gitlab.com` emails who are members of `gitlab-com` group get access. Admin users are configured in `values-sandbox.yaml`.
+Authentication is via Google or GitLab OAuth. Users with `@gitlab.com` emails who are members of `gitlab-com` group get access. Administrators are configured in `values-sandbox.yaml`.
 
 ### Check Observability Pods
 
-```bash
+```shell
 kubectl get pods -n gkg -l "app.kubernetes.io/name in (grafana,prometheus,loki,alertmanager)"
 ```
 
 ### Data Sources
 
 Grafana has two pre-configured data sources:
+
 - **Prometheus**: Metrics at `http://gkg-obs-kube-prometheus-st-prometheus:9090`
 - **Loki**: Logs at `http://gkg-obs-loki:3100`
 
@@ -239,7 +242,7 @@ Grafana has two pre-configured data sources:
 
 The Grafana ingress uses a GCP ManagedCertificate for TLS:
 
-```bash
+```shell
 kubectl get managedcertificate grafana-cert -n gkg -o yaml
 ```
 
@@ -255,10 +258,12 @@ The Helm chart includes a GitLab Runner (via subchart) for running CI jobs on gi
 2. Enable "Run untagged jobs"
 3. Click "Create runner" and copy the `glrt-` token
 4. Store in GCP Secret Manager:
-   ```bash
+
+   ```shell
    echo -n "glrt-YOUR_TOKEN" | gcloud secrets versions add runner_authentication_token \
      --project=gl-knowledgegraph-prj-f2eec59d --data-file=-
    ```
+
 5. Deploy/upgrade the Helm chart
 
 ### Rotate Runner Token
@@ -268,19 +273,22 @@ If the runner becomes unhealthy or is removed from GitLab:
 1. Delete the old runner in GitLab Admin → CI/CD → Runners
 2. Create a new instance runner and get the new token
 3. Update the secret:
-   ```bash
+
+   ```shell
    echo -n "glrt-NEW_TOKEN" | gcloud secrets versions add runner_authentication_token \
      --project=gl-knowledgegraph-prj-f2eec59d --data-file=-
    ```
+
 4. Force sync and restart:
-   ```bash
+
+   ```shell
    kubectl annotate externalsecret gitlab-runner-token -n gkg force-sync=$(date +%s) --overwrite
    kubectl rollout restart deployment/gkg-gitlab-runner -n gkg
    ```
 
 ### Check Runner Status
 
-```bash
+```shell
 # Runner pod
 kubectl get pods -n gkg -l app=gitlab-runner
 
@@ -316,7 +324,7 @@ kubectl get pods -n gkg | grep runner-
 
 ### Update a Secret
 
-```bash
+```shell
 # Update in GCP Secret Manager
 echo -n "new-password" | gcloud secrets versions add postgres-password --data-file=-
 
@@ -328,27 +336,27 @@ kubectl annotate externalsecret postgres-credentials -n gkg force-sync=$(date +%
 
 ### Remove Helm Release
 
-```bash
+```shell
 helm uninstall gkg --namespace gkg
 helm uninstall gkg-obs --namespace gkg
 ```
 
 ### Remove Namespace (including PVCs)
 
-```bash
+```shell
 kubectl delete namespace gkg
 ```
 
 ### Remove External Secrets Operator
 
-```bash
+```shell
 helm uninstall external-secrets --namespace external-secrets
 kubectl delete namespace external-secrets
 ```
 
 ### Remove GCP Service Account
 
-```bash
+```shell
 gcloud iam service-accounts delete \
   gkg-secrets-sa@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com \
   --project=gl-knowledgegraph-prj-f2eec59d
@@ -360,7 +368,7 @@ Full re-snapshot of all PostgreSQL tables. Deletes existing ClickHouse siphon da
 
 ### 1. Scale down siphon
 
-```bash
+```shell
 kubectl -n gkg scale deployment siphon-producer --replicas=0
 kubectl -n gkg scale deployment siphon-consumer --replicas=0
 ```
@@ -376,7 +384,7 @@ DROP PUBLICATION IF EXISTS gkg_publication;
 
 ### 3. Reset NATS stream
 
-```bash
+```shell
 kubectl -n gkg delete pod gkg-nats-0
 kubectl -n gkg delete pvc gkg-nats-js-gkg-nats-0
 kubectl -n gkg wait --for=condition=ready pod/gkg-nats-0 --timeout=120s
@@ -406,13 +414,13 @@ Run the generated statements, or use `--multiquery` to pipe them back.
 
 ### 5. Redeploy
 
-```bash
+```shell
 helm upgrade gkg ./helm-dev/gkg -n gkg -f ./helm-dev/gkg/values-sandbox.yaml
 ```
 
 ### 6. Verify snapshots
 
-```bash
+```shell
 kubectl -n gkg logs deployment/siphon-producer --tail=50 | grep "snapshot complete"
 ```
 
@@ -422,7 +430,7 @@ Producer recreates the slot, publication, and snapshots all configured tables.
 
 Run the dispatcher to dispatch indexing requests to the indexer. The dispatcher CronJob is disabled by default in sandbox.
 
-```bash
+```shell
 # Delete previous job if exists
 kubectl -n gkg delete job gkg-dispatcher-manual 2>/dev/null
 

@@ -4,7 +4,7 @@ An async Rust library for building ETL pipelines into Graph. You give it a messa
 
 ## How it works
 
-```
+```plaintext
 MessageBroker → Engine → Handlers → Destination
 ```
 

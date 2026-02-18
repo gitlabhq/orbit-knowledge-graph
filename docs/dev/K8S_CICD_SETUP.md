@@ -18,6 +18,7 @@ The CI pipeline uses a GCP service account to authenticate with GKE. The service
 > The approach documented here uses static service account keys created via `gcloud` commands. This is intended for development, testing, and reference purposes only.
 >
 > For production environments, consider more secure alternatives:
+>
 > - **GCP Workload Identity Federation with GitLab OIDC**: Eliminates static credentials entirely by allowing GitLab CI to authenticate using short-lived OIDC tokens. See [GitLab documentation](https://docs.gitlab.com/ee/ci/cloud_services/google_cloud/).
 > - **GitLab Agent for Kubernetes**: Installs an agent in your cluster that establishes a secure tunnel to GitLab, avoiding the need for cluster credentials in CI variables.
 > - **Terraform/Infrastructure as Code**: Manage service accounts, IAM bindings, and secrets through version-controlled infrastructure code with proper state management and audit trails.
@@ -26,7 +27,7 @@ The CI pipeline uses a GCP service account to authenticate with GKE. The service
 
 ## Step 1: Create GCP Service Account
 
-```bash
+```shell
 PROJECT_ID="gl-knowledgegraph-prj-f2eec59d"
 SA_NAME="gitlab-ci-deployer"
 
@@ -39,7 +40,7 @@ gcloud iam service-accounts create ${SA_NAME} \
 
 The service account needs permissions to deploy workloads and manage the namespace:
 
-```bash
+```shell
 PROJECT_ID="gl-knowledgegraph-prj-f2eec59d"
 SA_EMAIL="gitlab-ci-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
 
@@ -64,7 +65,7 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
 
 ## Step 3: Create Service Account Key
 
-```bash
+```shell
 PROJECT_ID="gl-knowledgegraph-prj-f2eec59d"
 SA_EMAIL="gitlab-ci-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
 
@@ -88,9 +89,10 @@ gcloud iam service-accounts keys create gke-sa-key.json \
 | Protected | Yes |
 | Masked | No (file variables cannot be masked) |
 
-5. Click **Add variable**
-6. Delete the local key file:
-   ```bash
+1. Click **Add variable**
+2. Delete the local key file:
+
+   ```shell
    rm gke-sa-key.json
    ```
 
@@ -118,7 +120,8 @@ To rotate the key:
 1. Create a new key (Step 3)
 2. Update the GitLab CI variable (Step 4)
 3. Delete the old key:
-   ```bash
+
+   ```shell
    # List keys
    gcloud iam service-accounts keys list \
      --iam-account=gitlab-ci-deployer@gl-knowledgegraph-prj-f2eec59d.iam.gserviceaccount.com

@@ -1,4 +1,4 @@
-# GitLab Omnibus Instance
+# Linux package Instance
 
 VM: `vm-gitlab-omnibus` (10.128.0.4)
 
@@ -36,6 +36,7 @@ gitlab_rails['knowledge_graph_base_url'] = 'http://<GKG_WEBSERVER_INTERNAL_IP>:8
 Static internal IP: `10.128.0.51` (reserved as `gkg-webserver-ip` in GCP, persists across redeployments).
 
 **Ports:**
+
 - HTTP API: `8080`
 - gRPC: `50051`
 
@@ -51,14 +52,14 @@ gitlab_rails['env'] = {
 
 Then reconfigure:
 
-```bash
+```shell
 sudo gitlab-ctl reconfigure
 ```
 
 Verify connectivity:
 
-```bash
-curl http://10.128.0.51:8080/health
+```shell
+curl "http://10.128.0.51:8080/health"
 ```
 
 ## AI Gateway / Duo (Staging)
@@ -78,7 +79,7 @@ gitlab_rails['env'] = {
 
 Then reconfigure and restart:
 
-```bash
+```shell
 sudo gitlab-ctl reconfigure
 sudo gitlab-ctl restart
 ```
@@ -88,12 +89,14 @@ Verify in **Admin > GitLab Duo** health check.
 ## PostgreSQL Password
 
 **Configuration:**
+
 - Do NOT set `postgresql['sql_user_password']` in gitlab.rb
 - PostgreSQL uses `password_encryption = md5` (set via `ALTER SYSTEM`, persists in postgresql.auto.conf)
 - Password is set once manually and persists across reconfigures
 
 **Initial setup (already done):**
-```bash
+
+```shell
 # Set MD5 password encryption
 sudo gitlab-psql -c "ALTER SYSTEM SET password_encryption = 'md5'"
 sudo gitlab-ctl restart postgresql
@@ -103,7 +106,8 @@ sudo gitlab-psql -c "ALTER USER gitlab WITH PASSWORD '<password>'"
 ```
 
 **If password breaks after upgrade:**
-```bash
+
+```shell
 # Get password from GCP Secret Manager
 gcloud secrets versions access latest --secret=postgres-password --project=gl-knowledgegraph-prj-f2eec59d
 

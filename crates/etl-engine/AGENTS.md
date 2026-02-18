@@ -4,7 +4,7 @@ Message processing framework for the GitLab Knowledge Graph. Consumes events fro
 
 ## Architecture
 
-```
+```plaintext
 NATS JetStream → Engine → Handler Registry → Destination
                     ↓
               Worker Pool
@@ -32,7 +32,7 @@ NATS JetStream → Engine → Handler Registry → Destination
 
 ### Running tests
 
-```bash
+```shell
 # Unit tests
 cargo test --lib
 
@@ -43,6 +43,7 @@ cargo test --test '*'
 ### Test utilities
 
 Located in `testkit/`:
+
 - `MockNatsServices`, `MockDestination`, `MockHandler`
 - `TestEngineBuilder` for integration tests
 - `TestEnvelopeFactory` for message creation

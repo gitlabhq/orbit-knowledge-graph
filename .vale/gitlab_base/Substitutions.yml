@@ -1,0 +1,72 @@
+---
+name: gitlab_base.Substitutions
+description: |
+  Checks for misused terms that should never be used at GitLab.
+  SubstitutionWarning.yml also exists.
+extends: substitution
+message: "Use '%s' instead of '%s'."
+link: https://handbook.gitlab.com/handbook/communication/top-misused-terms/
+vocab: false
+level: error
+action:
+  name: replace
+ignorecase: true
+swap:
+  admin user: administrator
+  admin users: administrators
+  administrator permission: administrator access
+  administrator permissions: administrator access
+  administrator role: administrator access
+  at least the Owner role: the Owner role
+  can login: can log in
+  can log-in: can log in
+  can setup: can set up
+  can signin: can sign in
+  can sign-in: can sign in
+  codequality: code quality
+  Customer [Pp]ortal: Customers Portal
+  developer access: the Developer role
+  developer permission: the Developer role
+  developer permissions: the Developer role
+  disallow: prevent
+  frontmatter: front matter
+  GitLab self hosted: GitLab Self-Managed # https://docs.gitlab.com/development/documentation/styleguide/word_list/#gitlab-self-managed
+  GitLab self-hosted: GitLab Self-Managed # https://docs.gitlab.com/development/documentation/styleguide/word_list/#gitlab-self-managed
+  GitLabber: GitLab team member
+  GitLabbers: GitLab team members
+  GitLab-shell: GitLab Shell
+  gitlab omnibus(?! builder): "Linux package"
+  golang: Go
+  guest access: the Guest role
+  guest permission: the Guest role
+  guest permissions: the Guest role
+  life cycle: "lifecycle"
+  life-cycle: "lifecycle"
+  maintainer access: the Maintainer role
+  maintainer permission: the Maintainer role
+  maintainer permissions: the Maintainer role
+  owner access: the Owner role
+  owner permission: the Owner role
+  owner permissions: the Owner role
+  param: parameter
+  params: parameters
+  pg: PostgreSQL
+  'postgres$': PostgreSQL
+  raketask: Rake task
+  raketasks: Rake tasks
+  rspec: RSpec
+  reporter access: the Reporter role
+  reporter permission: the Reporter role
+  reporter permissions: the Reporter role
+  rubocop: RuboCop
+  self hosted GitLab: GitLab Self-Managed # https://docs.gitlab.com/development/documentation/styleguide/word_list/#gitlab-self-managed
+  self-hosted GitLab: GitLab Self-Managed # https://docs.gitlab.com/development/documentation/styleguide/word_list/#gitlab-self-managed
+  styleguide: style guide
+  the administrator access level: administrator access
+  to login: to log in
+  to log-in: to log in
+  to setup: to set up
+  to signin: to sign in
+  to sign-in: to sign in
+  x509: X.509
+  yml: YAML

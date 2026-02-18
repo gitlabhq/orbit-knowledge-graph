@@ -1,0 +1,22 @@
+---
+name: gitlab_base.InclusiveLanguage
+description: |
+  Suggests alternatives for non-inclusive language.
+extends: substitution
+message: "Use inclusive language. Consider '%s' instead of '%s'."
+link: https://docs.gitlab.com/development/documentation/styleguide/word_list/
+vocab: false
+level: warning
+ignorecase: true
+swap:
+  blacklist(?:ed|ing|s)?: denylist
+  dummy: placeholder, sample, fake
+  (?:he|she): they
+  hers: their
+  his: their
+  mankind: humanity, people
+  manpower: GitLab team members
+  master: primary, main, controller, active, parent, hub
+  sanity (?:check|test): check for completeness
+  slave: secondary, agent, standby, child, spoke
+  whitelist(?:ed|ing|s)?: allowlist

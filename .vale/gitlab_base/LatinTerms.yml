@@ -1,0 +1,17 @@
+---
+name: gitlab_base.LatinTerms
+description: |
+  Checks for use of Latin terms.
+  Uses https://github.com/errata-ai/Google/blob/master/Google/Latin.yml
+  for ideas.
+extends: substitution
+message: "Use '%s' instead of '%s', but consider rewriting the sentence."
+link: https://docs.gitlab.com/development/documentation/styleguide/word_list/
+vocab: false
+level: warning
+nonword: true
+ignorecase: true
+swap:
+  '\b(?:e\.?g[\s.,;:])': for example
+  '\b(?:i\.?e[\s.,;:])': that is
+  '\bvia\b': "with', 'through', or 'by using"

@@ -1,0 +1,17 @@
+---
+name: gitlab_base.Simplicity
+description: |
+  Checks for words implying ease of use, to avoid cognitive dissonance for frustrated users.
+extends: existence
+message: "Remove '%s'. Be precise instead of subjective."
+vocab: false
+level: warning
+ignorecase: true
+link: https://docs.gitlab.com/development/documentation/styleguide/word_list/
+tokens:
+  - easy
+  - easily
+  - handy
+  - simple
+  - simply
+  - useful

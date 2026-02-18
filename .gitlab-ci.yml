@@ -89,6 +89,19 @@ ontology-schema-validate:
   script:
     - find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile fixtures/ontology/ontology.schema.json
 
+check-docs:
+  stage: lint
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0
+  tags:
+    - saas-linux-small-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - markdownlint-cli2 '**/*.md'
+    - vale --minAlertLevel error .
+    - lychee --offline --include-fragments '**/*.md'
+
 fmt-check:
   stage: lint
   extends:
