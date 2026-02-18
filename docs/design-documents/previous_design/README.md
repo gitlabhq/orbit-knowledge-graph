@@ -577,10 +577,6 @@ The services will integrate with existing GitLab monitoring infrastructure:
 
 ## Architecture Decision Records
 
-This design document includes the following architecture decisions:
-
-- [ADR-001: FFI vs Dedicated Process Integration](../decisions/001_dedicated_processes.md) - Decision to move from FFI-based integration to dedicated process model
-
 ## Alternative Solutions
 
 ### Use one graph database per root namespace

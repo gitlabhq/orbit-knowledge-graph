@@ -411,7 +411,7 @@ Here are the differences and similarities between the two:
 
 - **What they share**:
   - Both indexing pipelines and query services can reuse the **same** architecture and codebase, as they can share the same graph technology, indexing patterns, and architectural components. Because we are leveraging the Data Insights Platform, we will be able to share the same ingesters, NATS JetStream, and database (ClickHouse). This allows us to have an event-driven platform for both Code Indexing and SDLC Metadata Indexing.
-  - They will share all technology choices outlined in [ADR-001: FFI vs Dedicated Process Integration](decisions/001_dedicated_processes.md), including the same codebase, [observability patterns](observability.md), and [security patterns](security.md).
+  - They will share the same codebase, [observability patterns](observability.md), and [security patterns](security.md).
 
 ## Iteration Plan
 
