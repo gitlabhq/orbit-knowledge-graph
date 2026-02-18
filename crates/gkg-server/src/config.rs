@@ -1,15 +1,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use etl_engine::clickhouse::ClickHouseConfiguration;
-use etl_engine::configuration::EngineConfiguration;
-use etl_engine::nats::NatsConfiguration;
 use health_check::HealthCheckConfig;
+use indexer::clickhouse::ClickHouseConfiguration;
+use indexer::configuration::EngineConfiguration;
+use indexer::modules::code::GitalyConfiguration;
+use indexer::modules::code::config::CodeIndexingConfig;
+use indexer::nats::NatsConfiguration;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
-
-use crate::indexer::modules::code::GitalyConfiguration;
-use crate::indexer::modules::code::config::CodeIndexingConfig;
 
 fn default_bind_address() -> SocketAddr {
     "127.0.0.1:4200".parse().unwrap()

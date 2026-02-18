@@ -1,5 +1,5 @@
 [package]
-name = "indexer"
+name = "code-indexer"
 version.workspace = true
 edition = "2024"
 

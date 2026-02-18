@@ -58,12 +58,12 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "etl-engine"
+name = "indexer"
 expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "indexer"
+name = "code-indexer"
 expression = "LicenseRef-EE"
 license-files = []
 

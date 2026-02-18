@@ -9,7 +9,7 @@ members = [
   "crates/code-indexer",
   "crates/labkit-rs",
   "crates/clickhouse-client",
-  "crates/etl-engine",
+  "crates/indexer",
   "crates/query-engine",
   "crates/cli",
   "crates/gitaly-client",

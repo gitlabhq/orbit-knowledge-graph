@@ -7,13 +7,11 @@ use std::net::SocketAddr;
 
 use chrono::{DateTime, Utc};
 use common::TestContext as ClickHouseContext;
-use etl_engine::nats::NatsConfiguration;
 use futures::StreamExt;
 use gkg_server::config::AppConfig;
 use gkg_server::dispatcher;
-use gkg_server::indexer::topic::{
-    GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT,
-};
+use indexer::nats::NatsConfiguration;
+use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT};
 use serde::Deserialize;
 use serial_test::serial;
 use testcontainers::ImageExt;

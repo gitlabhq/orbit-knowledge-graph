@@ -5,7 +5,6 @@ pub mod config;
 pub mod dispatcher;
 pub mod grpc;
 pub mod health_check;
-pub mod indexer;
 pub mod proto;
 pub mod query_pipeline;
 pub mod redaction;
