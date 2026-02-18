@@ -4,18 +4,18 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::Utc;
-use etl_engine::clickhouse::ClickHouseError;
-use etl_engine::nats::{
+use indexer::clickhouse::ClickHouseError;
+use indexer::modules::sdlc::locking::{
+    INDEXING_LOCKS_BUCKET, LOCK_TTL, global_lock_key, namespace_lock_key,
+};
+use indexer::nats::{
     KvBucketConfig, KvPutOptions, KvPutResult, NatsBroker, NatsServices, NatsServicesImpl,
 };
-use etl_engine::types::{Envelope, Event};
+use indexer::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
+use indexer::types::{Envelope, Event};
 use tracing::{debug, info, warn};
 
 use crate::config::AppConfig;
-use crate::indexer::modules::sdlc::locking::{
-    INDEXING_LOCKS_BUCKET, LOCK_TTL, global_lock_key, namespace_lock_key,
-};
-use crate::indexer::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use extract::FromArrowColumn;
 
 const ENABLED_NAMESPACE_QUERY: &str = r#"
@@ -28,7 +28,7 @@ WHERE _siphon_deleted = false
 #[derive(Debug, thiserror::Error)]
 pub enum DispatcherError {
     #[error("NATS connection failed: {0}")]
-    NatsConnection(#[from] etl_engine::nats::NatsError),
+    NatsConnection(#[from] indexer::nats::NatsError),
 
     #[error("ClickHouse query error: {0}")]
     ClickHouseQueryError(ClickHouseError),
@@ -37,13 +37,13 @@ pub enum DispatcherError {
     InvalidColumnType { expected: &'static str },
 
     #[error("Failed to serialize message: {0}")]
-    Serialization(#[from] etl_engine::types::SerializationError),
+    Serialization(#[from] indexer::types::SerializationError),
 
     #[error("Failed to publish message: {0}")]
-    Publish(etl_engine::nats::NatsError),
+    Publish(indexer::nats::NatsError),
 
     #[error("Failed to acquire lock: {0}")]
-    LockAcquisition(etl_engine::nats::NatsError),
+    LockAcquisition(indexer::nats::NatsError),
 }
 
 struct Dispatcher {

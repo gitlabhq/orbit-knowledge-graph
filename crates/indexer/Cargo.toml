@@ -1,0 +1,51 @@
+[package]
+name = "indexer"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[features]
+default = []
+testkit = []
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+arrow = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+clickhouse = { workspace = true }
+clickhouse-client = { workspace = true }
+code-indexer = { path = "../code-indexer" }
+datafusion = { workspace = true }
+futures = { workspace = true }
+gitaly-client = { path = "../gitaly-client" }
+ontology = { path = "../ontology" }
+opentelemetry = { workspace = true }
+parking_lot = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+siphon-proto = { path = "../siphon-proto" }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+zstd = "0.13.3"
+
+[dev-dependencies]
+internment = { workspace = true }
+parser-core = { workspace = true }
+query-engine = { path = "../query-engine" }
+smallvec = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
+tokio-stream = { workspace = true }
+testcontainers = { workspace = true }
+testcontainers-modules = { workspace = true }
+serial_test = { workspace = true }
