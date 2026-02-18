@@ -20,10 +20,11 @@ Registry of related repositories. If a repository is not cloned locally, clone i
 - **git_url:** git@gitlab.com:gitlab-com/content-sites/handbook.git
 - **project_url:** https://gitlab.com/gitlab-com/content-sites/handbook
 - **local_path:** ~/gitlab/handbook
-- **description:** Repository containing architectural design documents
+- **description:** General GitLab handbook repository (engineering processes, architecture, team pages)
 - **key_paths:**
-  - `content/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph` - GitLab Knowledge Graph (orbit) design documents (canonical copy now in `docs/design-documents/` in the knowledge-graph repo)
   - `content/handbook/engineering/architecture/design-documents/data_insights_platform` - Data Insights Platform design document
+
+> For GKG design documents, use `docs/design-documents/` and `README.md` in the knowledge-graph repo instead of the handbook.
 
 ### gitlab-zoekt-indexer
 - **git_url:** git@gitlab.com:gitlab-org/gitlab-zoekt-indexer.git
