@@ -17,13 +17,13 @@ participating-stages: ["~devops::analytics"]
 
 Modern software development operates across a complex web of repositories, issues, merge requests, CI/CD pipelines, deployment environments, infrastructure, and assets. Both code data and SDLC platform metadata are inherently interconnected network graphs. While GitLab is a single vehicle to deliver these collective features, our ability to consume and analyze this data is fragmented, forcing developers and AI agents to piece together context through dozens of API, GraphQL, and Agent-tool calls.
 
-GitLab has hundreds of REST APIs and GraphQL Schema Elements. AI agents and data products need to be able to reason about GitLab's data in a way that is impractical with traditional data-fetching techniques.
+GitLab has hundreds of REST APIs and GraphQL Schema Elements. AI agents and data products need to be able to reason about GitLab data in a way that is impractical with traditional data-fetching techniques.
 
 ### Solution
 
 We aim to build the ***"Knowledge Graph as a service"***, which will be a separate service outside of GitLab Rails to index and query metadata. This service will expose a **unified** **data** **API layer** that enables developers and AI agents to query across the entire software development lifecycle.
 
-What underlying technology will power this unified data layer? Graph technology empowers analytics, users, and AI agents to reason across a **wide range of data types**. We will model GitLab's data in a [**Property Graph**](https://pg-format.github.io/) format, which will be queried via a high-performance Graph Query Engine built on ClickHouse that we are calling **GitLab GraphHouse**.
+What underlying technology will power this unified data layer? Graph technology empowers analytics, users, and AI agents to reason across a **wide range of data types**. We will model GitLab data in a [**Property Graph**](https://pg-format.github.io/) format, which will be queried via a high-performance Graph Query Engine built on ClickHouse that we are calling **GitLab GraphHouse**.
 
 The service will index three types of conceptual data in Property Graph Format:
 
@@ -139,7 +139,7 @@ For example, “find all issues closed by merge requests authored by @user withi
 By contrast:
 
 - GraphQL and REST require schema introspection and nested field expansion.
-    LLMs struggle to reason about variable-depth recursion or dynamic joins inside those structures.
+  LLMs struggle to reason about variable-depth recursion or dynamic joins inside those structures.
 - Cypher exposes explicit graph patterns and bounded hop limits (*1..3) that match the mental model of “neighbor exploration.”
 
 #### 2. We Need Arbitrary Neighbor Exploration and Path Finding (N-Hop Queries)

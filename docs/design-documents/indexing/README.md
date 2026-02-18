@@ -12,7 +12,7 @@ participating-stages: ["~devops::analytics"]
 
 ## Overview
 
-The Knowledge Graph indexing architecture transforms GitLab's SDLC metadata and code repositories into a queryable property graph. The indexing service operates as a distributed ETL (Extract, Transform, Load) pipeline that leverages the Data Insights Platform to process both SDLC events and code changes.
+The Knowledge Graph indexing architecture transforms GitLab SDLC metadata and code repositories into a queryable property graph. The indexing service operates as a distributed ETL (Extract, Transform, Load) pipeline that leverages the Data Insights Platform to process both SDLC events and code changes.
 
 This document outlines the general architecture, shared patterns, and components across both indexing domains. For detailed implementation specifics, see:
 

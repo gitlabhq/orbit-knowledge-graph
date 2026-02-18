@@ -88,7 +88,7 @@ graph LR
 
 ### Core components
 
-- `gkg-indexer`: The ETL pipeline for GitLab's code.
+- `gkg-indexer`: The ETL pipeline for GitLab code.
 - `gkg-webserver`: The REST + MCP interface to query the Knowledge Graph.
 - `NATS JetStream`: The message broker for the Knowledge Graph.
 - `NATS KV`: The key-value store for the Knowledge Graph.
@@ -132,7 +132,7 @@ Let's first focus on indexing the main branch for every repository. This should 
 
 The extract phase involves listening to events from NATS and leveraging ClickHouse as both the data store and the mechanism for deriving project hierarchies and full paths.
 
-Push events from GitLab's PostgreSQL database are published to NATS JetStream subjects like:
+Push events from the GitLab PostgreSQL database are published to NATS JetStream subjects like:
 
 - `gkg_siphon_stream.events`
 - `gkg_siphon_stream.push_event_payloads`

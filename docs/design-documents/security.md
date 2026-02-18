@@ -1,6 +1,6 @@
 ---
 title: Security Architecture
-description: How the Knowledge Graph enforces GitLab's permission model through a multi-layered security design.
+description: How the Knowledge Graph enforces the GitLab permission model through a multi-layered security design.
 ---
 
 ## Overview
@@ -11,15 +11,15 @@ The Knowledge Graph unlocks querying capabilities across an entire GitLab namesp
 - Query-time filtering using traversal IDs.
 - Final redaction at the application layer via Rails authorization checks.
 
-All access to the Knowledge Graph is proxied through GitLab Rails, which acts as the primary authentication and authorization gateway. This ensures no user or agent can bypass GitLab's existing permission model. As part of the broader Auth Architecture program, these controls will evolve to integrate with GitLab's future auth services. Until we have a finalized auth service, Rails remains the enforcement point and source of truth.
+All access to the Knowledge Graph is proxied through GitLab Rails, which acts as the primary authentication and authorization gateway. This ensures no user or agent can bypass the existing GitLab permission model. As part of the broader Auth Architecture program, these controls will evolve to integrate with future GitLab auth services. Until we have a finalized auth service, Rails remains the enforcement point and source of truth.
 
 ## Initial Access Model: Reporter+ at Group Level
 
 For the initial release, the Knowledge Graph enforces a simplified permission model to ensure security while enabling rapid delivery:
 
 - **Group-level Reporter+ access required**: Users must have at least Reporter role on a group to query any data within that group's hierarchy.
-- **Hierarchical access**: GitLab's permission model is hierarchical. If you have Reporter+ access to a group, you automatically have access to all subgroups and projects beneath it in the namespace tree. The Knowledge Graph honors this hierarchy.
-- **No sparse permissions in V1**: The first iteration does not support individual project-level access or item-level permissions (e.g., access to a single project without group access). This simplification aligns with GitLab's existing Analytics products, which require the same Reporter+ group-level access.
+- **Hierarchical access**: The GitLab permission model is hierarchical. If you have Reporter+ access to a group, you automatically have access to all subgroups and projects beneath it in the namespace tree. The Knowledge Graph honors this hierarchy.
+- **No sparse permissions in V1**: The first iteration does not support individual project-level access or item-level permissions (e.g., access to a single project without group access). This simplification aligns with the existing GitLab Analytics products, which require the same Reporter+ group-level access.
 - **Incremental filtering still applies**: Even with Reporter+ access, the system still filters results based on traversal IDs and performs final redaction checks to handle edge cases like confidential issues and runtime checks (like SAML/IP).
 
 ### Request Flow
@@ -106,13 +106,13 @@ graph TD
 
 ## Layer 2: Query-Time Filtering with Traversal IDs
 
-While Layer 1 isolates top-level namespaces, Layer 2 provides fine-grained filtering within a namespace based on the user's group memberships. We leverage GitLab's hierarchical permission model using `traversal_ids`.
+While Layer 1 isolates top-level namespaces, Layer 2 provides fine-grained filtering within a namespace based on the user's group memberships. We leverage the GitLab hierarchical permission model using `traversal_ids`.
 
 ### Understanding Traversal IDs and Hierarchical Access
 
 As documented in the [GitLab Namespace documentation](https://docs.gitlab.com/development/namespaces/#querying-namespaces), the `traversal_ids` array represents the full ancestor hierarchy for any given namespace. For example, a project namespace with ID `300` inside a subgroup with ID `200` under a top-level group with ID `100` would have `traversal_ids` of `[100, 200, 300]`.
 
-**Hierarchical Access Model**: GitLab's permission system is hierarchical. If a user has Reporter+ access to a group, they automatically have access to all resources in that group and all nested subgroups and projects beneath it. The Knowledge Graph respects this hierarchy through traversal ID prefix matching.
+**Hierarchical Access Model**: The GitLab permission system is hierarchical. If a user has Reporter+ access to a group, they automatically have access to all resources in that group and all nested subgroups and projects beneath it. The Knowledge Graph respects this hierarchy through traversal ID prefix matching.
 
 For example:
 
@@ -214,7 +214,7 @@ Layer 3 closes these gaps by consulting Rails' authoritative permission model fo
 
 ### How It Works
 
-The Knowledge Graph service uses the same permission check mechanism as GitLab's Search Service. GitLab's [SearchService](https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/services/search_service.rb) implements a `redact_unauthorized_results` method that filters search results based on user permissions:
+The Knowledge Graph service uses the same permission check mechanism as the GitLab Search Service. The GitLab [SearchService](https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/services/search_service.rb) implements a `redact_unauthorized_results` method that filters search results based on user permissions:
 
 ```ruby
 def visible_result?(object)
@@ -313,7 +313,7 @@ JSON Web Tokens (JWTs) are used to authenticate requests from Rails to the Knowl
 **Component**: GitLab Rails + Knowledge Graph Service (both)
 
 - **Infrastructure**: Kubernetes service mesh (Istio/Linkerd) or manual TLS configuration.
-- **Configuration**: Certificate management via cert-manager or GitLab's existing certificate infrastructure.
+- **Configuration**: Certificate management via cert-manager or the existing GitLab certificate infrastructure.
 
 In addition to JWT authentication, the system will use Mutual TLS (MTLS) to establish cryptographically verified connections between services:
 
@@ -342,4 +342,4 @@ For aggregation queries (counts, averages, etc.), the Reporter+ group-level acce
 - **No Item-Level Redaction**: We do not perform post-aggregation filtering, as this would be ineffective (e.g., you cannot "redact" a count after it's been computed).
 - **Query Shape Restrictions**: The query planner may restrict certain aggregation patterns to prevent information leakage through timing attacks or result patterns.
 
-This approach aligns with GitLab's existing Analytics products, which use the same Reporter+ group-level access model for aggregations.
+This approach aligns with the existing GitLab Analytics products, which use the same Reporter+ group-level access model for aggregations.

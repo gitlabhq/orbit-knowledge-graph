@@ -5,13 +5,13 @@ description: A high-level guide to how GitLab SDLC events are indexed into a que
 
 ## Overview
 
-The SDLC (Software Development Life Cycle) Graph, also known as the Namespace Graph, provides a queryable view of the interconnected entities and events within a GitLab namespace. It captures the relationships between projects, issues, merge requests, CI/CD pipelines, vulnerabilities, and more.
+The SDLC (Software Development Lifecycle) Graph, also known as the Namespace Graph, provides a queryable view of the interconnected entities and events within a GitLab namespace. It captures the relationships between projects, issues, merge requests, CI/CD pipelines, vulnerabilities, and more.
 
-This document outlines the architecture of the indexing process, which functions as a large-scale ETL (Extract, Transform, Load) pipeline. This pipeline is designed to process a continuous stream of events from GitLab's production environment and transform them into a graph structure that can be efficiently queried by AI agents and other services.
+This document outlines the architecture of the indexing process, which functions as a large-scale ETL (Extract, Transform, Load) pipeline. This pipeline is designed to process a continuous stream of events from the GitLab production environment and transform them into a graph structure that can be efficiently queried by AI agents and other services.
 
 ## The SDLC Indexing Service ETL Pipeline
 
-The indexing process is fundamentally an ETL pipeline that takes data from GitLab's primary PostgreSQL database and loads it into our OLAP database (like ClickHouse) after processing and transformation in a data lake.
+The indexing process is fundamentally an ETL pipeline that takes data from the GitLab primary PostgreSQL database and loads it into our OLAP database (like ClickHouse) after processing and transformation in a data lake.
 
 ```mermaid
 flowchart TD
@@ -37,7 +37,7 @@ flowchart TD
 
 ### 1. Extract: Capturing Change Data with Siphon
 
-The pipeline begins with **Siphon**, GitLab's in-house Change Data Capture (CDC) service written in Go. Its sole responsibility is to reliably replicate data from a PostgreSQL database to a NATS JetStream topic.
+The pipeline begins with **Siphon**, the GitLab in-house Change Data Capture (CDC) service written in Go. Its sole responsibility is to reliably replicate data from a PostgreSQL database to a NATS JetStream topic.
 
 #### Siphon's Architecture
 
@@ -76,15 +76,15 @@ flowchart LR
 
 - **Configuration-driven**: Siphon is configured via a YAML file that specifies the database connections, replication slot names, and, most importantly, a `table_mapping`. This mapping defines which tables to watch and which NATS subject to publish their changes to. This allows for precise control over what data enters the pipeline.
 
-    ```yaml
-    table_mapping:
-      - table: issues
-        schema: public
-        subject: issues
-      - table: merge_requests
-        schema: public
-        subject: merge_requests
-    ```
+  ```yaml
+  table_mapping:
+    - table: issues
+      schema: public
+      subject: issues
+    - table: merge_requests
+      schema: public
+      subject: merge_requests
+  ```
 
 By using Siphon, the Knowledge Graph's indexing pipeline is cleanly decoupled from the production PostgreSQL database. It receives a reliable, real-time stream of data changes without imposing a significant load on the source system.
 
@@ -94,7 +94,7 @@ The CDC events from NATS are consumed and written into ClickHouse, which allows 
 
 #### ClickHouse as the Data Lake
 
-**ClickHouse** is GitLab's standard OLAP (Online Analytical Processing) database, chosen for its high performance on large-scale analytical queries.
+**ClickHouse** is the GitLab standard OLAP (Online Analytical Processing) database, chosen for its high performance on large-scale analytical queries.
 
 - **Ingestion**: A dedicated consumer reads the NATS streams and writes the data into corresponding tables in ClickHouse. To handle the high volume of writes, events are batched before being inserted. This is crucial for ClickHouse's `MergeTree` engine family, which performs best with fewer, larger inserts rather than many small ones.
 - **Streaming Data Handling**: The batching mechanism is key to handling the stream of events without overwhelming memory or the database. Data is accumulated in memory or a local buffer by the consumer, and flushed to ClickHouse periodically or when a certain batch size is reached.
@@ -122,7 +122,7 @@ The transformation from CDC data to the graph schema will be handled by the ETL 
 
 ##### Core components
 
-- `gkg-indexer`: The ETL pipeline for GitLab's SDLC data.
+- `gkg-indexer`: The ETL pipeline for GitLab SDLC data.
 - `gkg-webserver`: The REST + MCP interface to query the Knowledge Graph.
 - `NATS JetStream`: The message broker for the Knowledge Graph.
 - `NATS KV`: The key-value store for the Knowledge Graph.

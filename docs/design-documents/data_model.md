@@ -30,7 +30,7 @@ The Knowledge Graph data will be stored in tables that are separate from the exi
 
 ## The Namespace Graph Data Model
 
-The Namespace Graph represents the Software Development Life Cycle (SDLC) entities and their interactions within GitLab. It models how users, projects, issues, merge requests, and CI/CD components relate to one another.
+The Namespace Graph represents the software development lifecycle (SDLC) entities and their interactions within GitLab. It models how users, projects, issues, merge requests, and CI/CD components relate to one another.
 
 ### Example Node Types
 
