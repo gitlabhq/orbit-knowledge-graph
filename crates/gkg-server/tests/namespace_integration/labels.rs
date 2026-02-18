@@ -64,7 +64,7 @@ async fn namespace_handler_processes_labels_with_edges() {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, title, color, description FROM gl_labels ORDER BY id")
+        .query("SELECT id, title, color, description FROM gl_label ORDER BY id")
         .await;
     assert!(!result.is_empty(), "labels should exist");
 

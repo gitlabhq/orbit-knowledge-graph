@@ -54,7 +54,7 @@ async fn namespace_handler_processes_and_transforms_groups() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_groups ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_group ORDER BY id").await;
     assert!(!result.is_empty(), "groups result should not be empty");
 
     let batch = &result[0];
@@ -107,7 +107,7 @@ async fn namespace_handler_creates_group_edges() {
         .expect("handler should succeed");
 
     let owner_edges = context
-        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'OWNER' ORDER BY target_id")
+        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'OWNER' ORDER BY target_id")
         .await;
 
     assert!(!owner_edges.is_empty(), "owner edges should exist");
@@ -115,7 +115,7 @@ async fn namespace_handler_creates_group_edges() {
     assert_eq!(batch.num_rows(), 2, "should have 2 owner edges");
 
     let parent_edges = context
-        .query("SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Group' AND target_kind = 'Group'")
+        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Group' AND target_kind = 'Group'")
         .await;
 
     assert!(!parent_edges.is_empty(), "parent edges should exist");
@@ -183,7 +183,7 @@ async fn namespace_handler_creates_member_of_edges_for_groups() {
         .expect("handler should succeed");
 
     let member_edges = context
-        .query("SELECT source_id, target_id, source_kind, target_kind FROM gl_edges WHERE relationship_kind = 'MEMBER_OF' AND target_kind = 'Group' ORDER BY source_id")
+        .query("SELECT source_id, target_id, source_kind, target_kind FROM gl_edge WHERE relationship_kind = 'MEMBER_OF' AND target_kind = 'Group' ORDER BY source_id")
         .await;
 
     assert!(!member_edges.is_empty(), "member_of edges should exist");

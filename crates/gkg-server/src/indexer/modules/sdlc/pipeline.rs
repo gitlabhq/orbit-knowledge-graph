@@ -460,7 +460,7 @@ mod tests {
                 },
             ],
             primary_keys: vec!["id".to_string()],
-            destination_table: "gl_users".to_string(),
+            destination_table: "gl_user".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Global,
                 source: "siphon_users".to_string(),

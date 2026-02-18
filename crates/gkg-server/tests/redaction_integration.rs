@@ -81,11 +81,11 @@ impl MockRedactionService {
     }
 }
 
-const TABLE_USERS: &str = "gl_users";
-const TABLE_GROUPS: &str = "gl_groups";
-const TABLE_PROJECTS: &str = "gl_projects";
-const TABLE_MERGE_REQUESTS: &str = "gl_merge_requests";
-const TABLE_EDGES: &str = "gl_edges";
+const TABLE_USERS: &str = "gl_user";
+const TABLE_GROUPS: &str = "gl_group";
+const TABLE_PROJECTS: &str = "gl_project";
+const TABLE_MERGE_REQUESTS: &str = "gl_merge_request";
+const TABLE_EDGES: &str = "gl_edge";
 
 const ALL_USER_IDS: &[i64] = &[1, 2, 3, 4, 5];
 const ALL_GROUP_IDS: &[i64] = &[100, 101, 102];
@@ -2021,7 +2021,7 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Use Group entity - all its ontology columns exist in gl_groups
+    // Use Group entity - all its ontology columns exist in gl_group
     let json = r#"{
         "query_type": "search",
         "node": {
@@ -2481,7 +2481,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
 
     // Insert some additional data for aggregation
     ctx.execute(
-        "INSERT INTO gl_merge_requests (id, iid, title, state, traversal_path) VALUES
+        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path) VALUES
          (10001, 1, 'MR 1', 'merged', '1/100/1000/'),
          (10002, 2, 'MR 2', 'merged', '1/100/1000/'),
          (10003, 3, 'MR 3', 'open', '1/100/1000/')",
@@ -2578,7 +2578,7 @@ async fn column_selection_aggregation_with_wildcard_columns() {
 
     // Insert MRs for aggregation
     ctx.execute(
-        "INSERT INTO gl_merge_requests (id, iid, title, state, traversal_path) VALUES
+        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path) VALUES
          (10001, 1, 'MR 1', 'merged', '1/100/1000/'),
          (10002, 2, 'MR 2', 'merged', '1/100/1000/'),
          (10003, 3, 'MR 3', 'open', '1/100/1000/')",

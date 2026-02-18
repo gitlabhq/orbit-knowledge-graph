@@ -4,7 +4,7 @@ node_type: MergeRequestDiff
 domain: code_review
 description: A snapshot of changes (commits and file diffs) associated with a merge request at a point in time
 label: id
-destination_table: gl_merge_request_diffs
+destination_table: gl_merge_request_diff
 
 style:
   size: 22

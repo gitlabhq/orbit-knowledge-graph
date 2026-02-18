@@ -272,7 +272,7 @@ pub async fn assert_edge_count(
     expected_count: usize,
 ) {
     let query = format!(
-        "SELECT source_id, target_id FROM gl_edges WHERE relationship_kind = '{relationship_kind}' \
+        "SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = '{relationship_kind}' \
          AND source_kind = '{source_kind}' AND target_kind = '{target_kind}'"
     );
     let result = context.query(&query).await;

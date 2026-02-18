@@ -59,7 +59,7 @@ async fn global_handler_processes_and_transforms_users() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_users ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_user ORDER BY id").await;
 
     assert!(!result.is_empty(), "result should not be empty");
 
@@ -136,7 +136,7 @@ async fn global_handler_uses_watermark_for_incremental_processing() {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT count() as cnt FROM gl_users").await;
+    let result = context.query("SELECT count() as cnt FROM gl_user").await;
     let count_array = result[0]
         .column(0)
         .as_any()
@@ -149,7 +149,7 @@ async fn global_handler_uses_watermark_for_incremental_processing() {
         "should only process new_user, not old_user"
     );
 
-    let usernames = context.query("SELECT username FROM gl_users").await;
+    let usernames = context.query("SELECT username FROM gl_user").await;
 
     let username_array = usernames[0]
         .column(0)

@@ -434,8 +434,8 @@ mod tests {
     async fn handle_processes_pipelines() {
         let datalake = Arc::new(MockDatalake);
         let ontology = Ontology::new();
-        let group_node = create_test_node("Group", "gl_groups", "groups");
-        let issue_node = create_test_node("Issue", "gl_issues", "issues");
+        let group_node = create_test_node("Group", "gl_group", "groups");
+        let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(&group_node, &ontology, datalake.clone()).unwrap(),
@@ -465,7 +465,7 @@ mod tests {
     async fn handler_releases_lock_on_success() {
         let datalake = Arc::new(MockDatalake);
         let ontology = Ontology::new();
-        let group_node = create_test_node("Group", "gl_groups", "groups");
+        let group_node = create_test_node("Group", "gl_group", "groups");
 
         let pipelines =
             vec![OntologyEntityPipeline::from_node(&group_node, &ontology, datalake).unwrap()];
@@ -502,8 +502,8 @@ mod tests {
     async fn watermark_updated_per_entity_on_success() {
         let datalake = Arc::new(MockDatalake);
         let ontology = Ontology::new();
-        let group_node = create_test_node("Group", "gl_groups", "groups");
-        let issue_node = create_test_node("Issue", "gl_issues", "issues");
+        let group_node = create_test_node("Group", "gl_group", "groups");
+        let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(&group_node, &ontology, datalake.clone()).unwrap(),
@@ -556,8 +556,8 @@ mod tests {
         let failing_datalake: Arc<dyn DatalakeQuery> = Arc::new(FailingDatalake);
         let ontology = Ontology::new();
 
-        let group_node = create_test_node("Group", "gl_groups", "groups");
-        let issue_node = create_test_node("Issue", "gl_issues", "issues");
+        let group_node = create_test_node("Group", "gl_group", "groups");
+        let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         let group_pipeline =
             OntologyEntityPipeline::from_node(&group_node, &ontology, ok_datalake).unwrap();
@@ -614,8 +614,8 @@ mod tests {
         let failing_datalake: Arc<dyn DatalakeQuery> = Arc::new(FailingDatalake);
         let ontology = Ontology::new();
 
-        let group_node = create_test_node("Group", "gl_groups", "groups");
-        let issue_node = create_test_node("Issue", "gl_issues", "issues");
+        let group_node = create_test_node("Group", "gl_group", "groups");
+        let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         // Group (first) fails, Issue (second) succeeds
         let group_pipeline =
@@ -666,8 +666,8 @@ mod tests {
     async fn each_entity_resolves_its_own_watermark() {
         let datalake = Arc::new(MockDatalake);
         let ontology = Ontology::new();
-        let group_node = create_test_node("Group", "gl_groups", "groups");
-        let issue_node = create_test_node("Issue", "gl_issues", "issues");
+        let group_node = create_test_node("Group", "gl_group", "groups");
+        let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(&group_node, &ontology, datalake.clone()).unwrap(),
@@ -712,7 +712,7 @@ mod tests {
     async fn watermark_set_failure_returns_handler_error() {
         let datalake = Arc::new(MockDatalake);
         let ontology = Ontology::new();
-        let group_node = create_test_node("Group", "gl_groups", "groups");
+        let group_node = create_test_node("Group", "gl_group", "groups");
 
         let pipelines =
             vec![OntologyEntityPipeline::from_node(&group_node, &ontology, datalake).unwrap()];
@@ -748,7 +748,7 @@ mod tests {
     async fn lock_not_released_when_pipeline_fails() {
         let failing_datalake: Arc<dyn DatalakeQuery> = Arc::new(FailingDatalake);
         let ontology = Ontology::new();
-        let group_node = create_test_node("Group", "gl_groups", "groups");
+        let group_node = create_test_node("Group", "gl_group", "groups");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(&group_node, &ontology, failing_datalake).unwrap(),

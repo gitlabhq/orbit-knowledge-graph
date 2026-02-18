@@ -47,7 +47,7 @@ async fn namespace_handler_processes_merge_request_diffs_with_edges() {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, merge_request_id, state, commits_count, files_count FROM gl_merge_request_diffs ORDER BY id")
+        .query("SELECT id, merge_request_id, state, commits_count, files_count FROM gl_merge_request_diff ORDER BY id")
         .await;
     assert!(!result.is_empty(), "merge request diffs should exist");
 
@@ -60,7 +60,7 @@ async fn namespace_handler_processes_merge_request_diffs_with_edges() {
 
     let has_diff_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'HAS_DIFF' AND source_kind = 'MergeRequest' AND target_kind = 'MergeRequestDiff'
              ORDER BY target_id",
         )
@@ -121,7 +121,7 @@ async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT merge_request_id, merge_request_diff_id, old_path, new_path, new_file, deleted_file FROM gl_merge_request_diff_files ORDER BY old_path")
+        .query("SELECT merge_request_id, merge_request_diff_id, old_path, new_path, new_file, deleted_file FROM gl_merge_request_diff_file ORDER BY old_path")
         .await;
     assert!(!result.is_empty(), "merge request diff files should exist");
 
@@ -144,7 +144,7 @@ async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
 
     let has_file_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'HAS_FILE' AND source_kind = 'MergeRequestDiff' AND target_kind = 'MergeRequestDiffFile'",
         )
         .await;

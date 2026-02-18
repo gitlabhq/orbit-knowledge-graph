@@ -460,7 +460,7 @@ mod tests {
                             expr: Expr::col("start", "id"),
                             alias: Some("node_id".into()),
                         }],
-                        from: TableRef::scan("gl_projects", "start"),
+                        from: TableRef::scan("gl_project", "start"),
                         ..Default::default()
                     },
                 ),
@@ -476,7 +476,7 @@ mod tests {
                 expr: Expr::col("all_paths", "path"),
                 alias: Some("_gkg_path".into()),
             }],
-            from: TableRef::scan("gl_projects", "end"),
+            from: TableRef::scan("gl_project", "end"),
             limit: Some(30),
             ..Default::default()
         }));

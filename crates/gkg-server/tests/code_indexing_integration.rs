@@ -37,7 +37,7 @@ async fn indexes_repository_from_gitaly() {
     // Seed project in ClickHouse (handler looks up project info before indexing)
     clickhouse
         .execute(&format!(
-            "INSERT INTO gl_projects (id, traversal_path, full_path, _version) \
+            "INSERT INTO gl_project (id, traversal_path, full_path, _version) \
              VALUES ({}, '/test', 'test/repo', 1)",
             project_id
         ))
@@ -92,7 +92,7 @@ async fn indexes_repository_from_gitaly() {
 
     let file_defines_edges = clickhouse
         .query(
-            "SELECT source_id, target_id, relationship_kind FROM gl_edges \
+            "SELECT source_id, target_id, relationship_kind FROM gl_edge \
              WHERE source_kind = 'File' AND target_kind = 'Definition' \
              AND relationship_kind = 'FILE_DEFINES'",
         )
@@ -126,7 +126,7 @@ async fn indexes_repository_from_gitaly() {
 
     let class_to_method_edges = clickhouse
         .query(
-            "SELECT source_id, target_id, relationship_kind FROM gl_edges \
+            "SELECT source_id, target_id, relationship_kind FROM gl_edge \
              WHERE source_kind = 'Definition' AND target_kind = 'Definition' \
              AND relationship_kind = 'CLASS_TO_METHOD'",
         )

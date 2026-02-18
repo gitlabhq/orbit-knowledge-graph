@@ -54,7 +54,7 @@ async fn namespace_handler_processes_work_items_with_edges() {
 
     let result = context
         .query(
-            "SELECT id, title, state, work_item_type, confidential FROM gl_work_items ORDER BY id",
+            "SELECT id, title, state, work_item_type, confidential FROM gl_work_item ORDER BY id",
         )
         .await;
     assert!(!result.is_empty(), "work items should exist");
@@ -123,7 +123,7 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
 
     let authored_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'AUTHORED' AND target_kind = 'WorkItem'",
         )
         .await;
@@ -135,7 +135,7 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
 
     let in_milestone_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'IN_MILESTONE' AND source_kind = 'WorkItem'",
         )
         .await;
@@ -147,7 +147,7 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
 
     let in_group_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'IN_GROUP' AND source_kind = 'WorkItem'",
         )
         .await;
@@ -192,7 +192,7 @@ async fn namespace_handler_processes_work_item_multi_target_edges() {
 
     let assigned_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'ASSIGNED' AND target_kind = 'WorkItem'
              ORDER BY source_id",
         )
@@ -205,7 +205,7 @@ async fn namespace_handler_processes_work_item_multi_target_edges() {
 
     let has_label_edges = context
         .query(
-            "SELECT source_id, target_id FROM gl_edges
+            "SELECT source_id, target_id FROM gl_edge
              WHERE relationship_kind = 'HAS_LABEL' AND source_kind = 'WorkItem'
              ORDER BY target_id",
         )

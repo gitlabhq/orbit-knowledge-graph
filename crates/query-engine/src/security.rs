@@ -23,7 +23,7 @@ static TRAVERSAL_PATH_REGEX: Lazy<Regex> =
 /// These are entities whose visibility is determined through relationships
 /// (e.g., MEMBER_OF) rather than direct path hierarchy.
 /// TODO!!! : This table name needs to be derived directly from the ontology.
-const SKIP_SECURITY_FILTER_TABLES: &[&str] = &["gl_users"];
+const SKIP_SECURITY_FILTER_TABLES: &[&str] = &["gl_user"];
 
 /// Security context for request-level isolation.
 #[derive(Debug, Clone)]
@@ -301,22 +301,22 @@ mod tests {
         // User visibility is determined through MEMBER_OF, not traversal path
         let from = TableRef::join(
             JoinType::Inner,
-            TableRef::scan("gl_users", "u"),
-            TableRef::scan("gl_merge_requests", "mr"),
+            TableRef::scan("gl_user", "u"),
+            TableRef::scan("gl_merge_request", "mr"),
             Expr::lit(true),
         );
 
         let aliases = collect_node_aliases(&from);
-        // Should only include mr, not u (gl_users is skipped)
+        // Should only include mr, not u (gl_user is skipped)
         assert_eq!(aliases, vec!["mr"]);
     }
 
     #[test]
     fn should_apply_security_filter_skips_user() {
-        assert!(!should_apply_security_filter("gl_users"));
+        assert!(!should_apply_security_filter("gl_user"));
         assert!(!should_apply_security_filter(EDGE_TABLE));
-        assert!(should_apply_security_filter("gl_projects"));
-        assert!(should_apply_security_filter("gl_merge_requests"));
+        assert!(should_apply_security_filter("gl_project"));
+        assert!(should_apply_security_filter("gl_merge_request"));
     }
 
     #[test]

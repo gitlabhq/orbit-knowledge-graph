@@ -25,7 +25,7 @@ DESCRIBE TABLE gl_<entity>
 SELECT <field>, count(*) FROM gl_<entity> GROUP BY <field>
 
 -- What edge types were generated?
-SELECT relationship_kind, count(*) FROM gl_edges 
+SELECT relationship_kind, count(*) FROM gl_edge 
 GROUP BY relationship_kind ORDER BY count(*) DESC
 
 -- Sample some traversal paths
@@ -152,7 +152,7 @@ Check which edge variants are configured:
 ```sql
 -- What edges were actually generated?
 SELECT relationship_kind, source_kind, target_kind, count(*) 
-FROM gl_edges 
+FROM gl_edge 
 GROUP BY relationship_kind, source_kind, target_kind 
 ORDER BY count(*) DESC
 ```

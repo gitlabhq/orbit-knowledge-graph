@@ -95,7 +95,7 @@ For each node type in the ontology, a table `gl_{node_name}` is created with:
 - `traversal_path` - Hierarchical authorization path (e.g., "1/2/3")
 - All fields from the ontology definition
 
-A unified `gl_edges` table stores all relationships:
+A unified `gl_edge` table stores all relationships:
 - `relationship_kind` - Edge type (e.g., "AUTHORED", "CONTAINS")
 - `source` - Source node ID
 - `source_kind` - Source node type
@@ -180,14 +180,14 @@ SELECT 'projects', count() FROM gl_project;
 
 -- Count edges by relationship type
 SELECT relationship_kind, count() 
-FROM gl_edges 
+FROM gl_edge 
 GROUP BY relationship_kind 
 ORDER BY count() DESC;
 
 -- Find all projects in a group
 SELECT p.* 
 FROM gl_project p
-JOIN gl_edges e ON e.target = p.id AND e.target_kind = 'Project'
+JOIN gl_edge e ON e.target = p.id AND e.target_kind = 'Project'
 WHERE e.source_kind = 'Group' 
   AND e.relationship_kind = 'CONTAINS'
   AND e.source = 123;

@@ -4,7 +4,7 @@ node_type: Label
 domain: plan
 description: A label for categorizing and filtering work items
 label: title
-destination_table: gl_labels
+destination_table: gl_label
 
 style:
   size: 22

@@ -248,8 +248,8 @@ mod tests {
     async fn handle_processes_pipelines() {
         let datalake = Arc::new(MockDatalake);
         let ontology = Ontology::new();
-        let user_node = create_test_node("User", "gl_users", "siphon_users");
-        let project_node = create_test_node("Project", "gl_projects", "siphon_projects");
+        let user_node = create_test_node("User", "gl_user", "siphon_users");
+        let project_node = create_test_node("Project", "gl_project", "siphon_projects");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(&user_node, &ontology, datalake.clone()).unwrap(),
@@ -276,7 +276,7 @@ mod tests {
     async fn handler_releases_lock_on_success() {
         let datalake = Arc::new(MockDatalake);
         let ontology = Ontology::new();
-        let user_node = create_test_node("User", "gl_users", "siphon_users");
+        let user_node = create_test_node("User", "gl_user", "siphon_users");
 
         let pipelines =
             vec![OntologyEntityPipeline::from_node(&user_node, &ontology, datalake).unwrap()];
