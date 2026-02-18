@@ -34,9 +34,14 @@ pub mod tables {
     pub const GL_IMPORTED_SYMBOL: &str = "gl_imported_symbol";
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct CodeIndexingConfig {
+    #[serde(default = "default_events_stream_name")]
     pub events_stream_name: String,
+}
+
+fn default_events_stream_name() -> String {
+    "siphon_stream_main_db".to_string()
 }
 
 impl Default for CodeIndexingConfig {

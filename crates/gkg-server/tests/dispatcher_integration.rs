@@ -71,6 +71,10 @@ impl TestContext {
             datalake: self.clickhouse.config.clone(),
             graph: self.clickhouse.config.clone(),
             engine: Default::default(),
+            gitaly: None,
+            code_indexing: Default::default(),
+            health_check: Default::default(),
+            metrics: Default::default(),
         }
     }
 

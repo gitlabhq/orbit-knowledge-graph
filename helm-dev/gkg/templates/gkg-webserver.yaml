@@ -81,9 +81,9 @@ spec:
               value: "http://gkg-health-check:4201"
             {{- end }}
             {{- if .Values.otel.enabled }}
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: GKG_METRICS__OTLP_ENDPOINT
               value: {{ .Values.otel.endpoint | quote }}
-            - name: OTEL_SERVICE_NAME
+            - name: GKG_METRICS__SERVICE_NAME
               value: "gkg-webserver"
             {{- end }}
           securityContext:

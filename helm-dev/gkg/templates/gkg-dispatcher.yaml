@@ -33,13 +33,13 @@ spec:
                   value: "json"
                 - name: RUST_LOG
                   value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
-                - name: NATS_URL
+                - name: GKG_NATS__URL
                   value: {{ include "gkg.natsUrl" . | quote }}
                 {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 16 }}
                 {{- if .Values.otel.enabled }}
-                - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                - name: GKG_METRICS__OTLP_ENDPOINT
                   value: {{ .Values.otel.endpoint | quote }}
-                - name: OTEL_SERVICE_NAME
+                - name: GKG_METRICS__SERVICE_NAME
                   value: "gkg-dispatcher"
                 {{- end }}
               securityContext:

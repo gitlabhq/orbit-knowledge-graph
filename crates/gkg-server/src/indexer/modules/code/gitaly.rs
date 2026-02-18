@@ -45,7 +45,7 @@ impl RepositoryService for GitalyRepositoryService {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct GitalyConfiguration {
     pub address: String,
     pub storage: String,

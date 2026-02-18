@@ -1,0 +1,42 @@
+bind_address: "127.0.0.1:4200"
+grpc_bind_address: "127.0.0.1:50051"
+# jwt_secret: ""
+jwt_clock_skew_secs: 60
+
+nats:
+  url: "localhost:4222"
+  # username: ""
+  # password: ""
+
+datalake:
+  url: "http://127.0.0.1:8123"
+  database: default
+  username: default
+  # password: ""
+
+graph:
+  url: "http://127.0.0.1:8123"
+  database: default
+  username: default
+  # password: ""
+
+# gitaly:
+#   address: "tcp://localhost:8075"
+#   storage: default
+#   token: ""
+
+code_indexing:
+  events_stream_name: siphon_stream_main_db
+
+health_check:
+  bind_address: "0.0.0.0:4201"
+  namespace: default
+  services:
+    - siphon-consumer
+    - siphon-producer
+    - gkg-indexer
+    - nats
+
+metrics:
+  otlp_endpoint: "http://localhost:4317"
+  service_name: gkg-server

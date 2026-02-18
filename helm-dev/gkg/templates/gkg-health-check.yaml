@@ -71,17 +71,17 @@ spec:
               value: "json"
             - name: RUST_LOG
               value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
-            - name: GKG_HEALTH_CHECK_BIND_ADDRESS
+            - name: GKG_HEALTH_CHECK__BIND_ADDRESS
               value: "0.0.0.0:4201"
-            - name: GKG_HEALTH_CHECK_NAMESPACE
+            - name: GKG_HEALTH_CHECK__NAMESPACE
               value: {{ .Values.gkgServer.healthCheck.namespace | default .Release.Namespace | quote }}
-            - name: GKG_HEALTH_CHECK_SERVICES
+            - name: GKG_HEALTH_CHECK__SERVICES
               value: {{ .Values.gkgServer.healthCheck.services | default (list "siphon-consumer" "siphon-producer" "gkg-indexer" "nats") | join "," | quote }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
             {{- if .Values.otel.enabled }}
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: GKG_METRICS__OTLP_ENDPOINT
               value: {{ .Values.otel.endpoint | quote }}
-            - name: OTEL_SERVICE_NAME
+            - name: GKG_METRICS__SERVICE_NAME
               value: "gkg-health-check"
             {{- end }}
           livenessProbe:
