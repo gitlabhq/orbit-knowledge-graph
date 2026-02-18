@@ -1,3 +1,5 @@
+# Intermediary LLM query language
+
 ## Overview
 
 The Knowledge Graph uses a JSON query DSL that compiles to ClickHouse SQL. Rather than exposing multiple specialized tools, we provide a single query schema that supports entity search, traversal, aggregation, path finding, and neighborhood exploration. The graph ontology validates all queries at runtime.

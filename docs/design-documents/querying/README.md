@@ -1,3 +1,5 @@
+# Querying
+
 ## Overview
 
 The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agents can run graph queries without having to write Cypher or SQL directly. This server adds three major capabilities:

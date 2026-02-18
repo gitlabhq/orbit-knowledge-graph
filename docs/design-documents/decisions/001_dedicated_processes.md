@@ -1,3 +1,5 @@
+# ADR-001: Dedicated processes
+
 ## Context
 
 The initial implementation used Foreign Function Interface (FFI) to integrate the

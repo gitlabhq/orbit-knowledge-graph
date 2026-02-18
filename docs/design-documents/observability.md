@@ -1,3 +1,5 @@
+# Observability
+
 ## Summary
 
 This document details the observability strategy for Knowledge Graph services (Indexer and Web Service). It outlines the current architecture, plans for self-managed instances, deployment considerations and logging standards. The goal is to ensure robust and actionable monitoring across all deployment environments.

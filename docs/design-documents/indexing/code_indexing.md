@@ -1,3 +1,5 @@
+# Code indexing
+
 ## Code Indexing ETL
 
 This document outlines the approach of building the ETL pipeline for the Code Indexing in the `gkg-indexer`. The difference between code and SDLC entities is that we have to take into account that code versions can exist in parallel to each other via different branches.

@@ -1,3 +1,5 @@
+# GitLab Knowledge Graph
+
 ## Motivation
 
 ### Problem Statement

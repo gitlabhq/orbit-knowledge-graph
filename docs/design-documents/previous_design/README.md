@@ -1,3 +1,5 @@
+# Previous design
+
 ## Summary
 
 This document proposes a new service that enhances repository insights by
