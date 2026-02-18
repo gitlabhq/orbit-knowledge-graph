@@ -27,7 +27,7 @@ Keep comments that explain *why*—business logic, gotchas, or links to specs. U
 
 The `/related-repositories` skill lists dependent systems and their local paths:
 
-- GitLab Handbook - design documents at `content/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph`
+- Design documents at [`docs/design-documents/`](docs/design-documents/)
 - Siphon - CDC stream project for PostgreSQL logical replication
 - Gitaly - Git RPC service
 - GitLab - main GitLab project

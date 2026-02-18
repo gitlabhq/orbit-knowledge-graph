@@ -16,7 +16,7 @@ The GitLab Knowledge Graph (GKG), product name **Orbit**, is a backend service t
 
 ## 1. Project Architecture
 
-The architecture is documented in the [handbook design documents](https://gitlab.com/gitlab-com/content-sites/handbook/blob/main/content/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/_index.md) and implemented in the [knowledge-graph repository](https://gitlab.com/gitlab-org/orbit/knowledge-graph).
+The architecture is documented in the [design documents](docs/design-documents/) and implemented in the [knowledge-graph repository](https://gitlab.com/gitlab-org/orbit/knowledge-graph).
 
 ```mermaid
 flowchart LR
@@ -39,7 +39,7 @@ flowchart LR
 
 | Resource | Location |
 |---|---|
-| Design documents | [handbook](https://gitlab.com/gitlab-com/content-sites/handbook/blob/main/content/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/_index.md) |
+| Design documents | [`docs/design-documents/`](docs/design-documents/) |
 | Crate source | [`crates/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/crates) |
 | Ontology definitions | [`fixtures/ontology/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/fixtures/ontology) |
 | Dev documentation | [`docs/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs) |
@@ -127,7 +127,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | Location | Purpose |
 |---|---|
 | [Readiness (current)](https://gitlab.com/gitlab-org/architecture/readiness) | New official PREP readiness process. GKG assessment [MR !64](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64). |
-| [GKG design documents](https://gitlab.com/gitlab-com/content-sites/handbook/blob/main/content/handbook/engineering/architecture/design-documents/gitlab_knowledge_graph/_index.md) | Architectural design documents for GKG in the GitLab handbook |
+| [GKG design documents](docs/design-documents/) | Architectural design documents for GKG |
 | [Data Insights Platform design doc](https://gitlab.com/gitlab-com/content-sites/handbook/blob/main/content/handbook/engineering/architecture/design-documents/data_insights_platform) | DIP design document (Siphon's parent platform) |
 | [Internal program page](https://internal.gitlab.com/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/) | R&D PMO program landing page ([source](https://gitlab.com/gitlab-com/content-sites/internal-handbook/blob/main/content/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/_index.md)) |
 | [orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and summary (Feb 3-5, 2026): architecture, indexing, query engine, infra, DIP, deployment, billing |
