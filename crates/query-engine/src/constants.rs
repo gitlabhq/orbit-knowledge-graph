@@ -1,0 +1,33 @@
+// ENFORCEMENT CONSTANTS
+
+use const_format::concatcp;
+
+pub const GKG_COLUMN_PREFIX: &str = "_gkg_";
+pub const GL_TABLE_PREFIX: &str = "gl_";
+pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
+
+/// Column name for the typed path array in path finding queries.
+/// Contains Array(Tuple(Int64, String)) with (node_id, entity_type) for each step.
+pub const PATH_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "path");
+
+/// Column names for neighbor queries. The neighbor's ID and type are dynamic
+/// (could be any entity type), similar to path finding nodes.
+pub const NEIGHBOR_ID_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_id");
+pub const NEIGHBOR_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_type");
+pub const RELATIONSHIP_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "relationship_type");
+
+/// Tables that should NOT have traversal path security filters applied.
+/// These are entities whose visibility is determined through relationships
+/// (e.g., MEMBER_OF) rather than direct path hierarchy.
+/// TODO!!! : This table name needs to be derived directly from the ontology.
+pub const SKIP_SECURITY_FILTER_TABLES: &[&str] = &[concatcp!(GL_TABLE_PREFIX, "user")];
+
+// _gkg_{alias}_id
+pub fn redaction_id_column(alias: &str) -> String {
+    format!("{GKG_COLUMN_PREFIX}{alias}_id")
+}
+
+// _gkg_{alias}_type
+pub fn redaction_type_column(alias: &str) -> String {
+    format!("{GKG_COLUMN_PREFIX}{alias}_type")
+}

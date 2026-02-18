@@ -33,28 +33,27 @@
 
 pub mod ast;
 pub mod codegen;
+pub mod constants;
+pub mod enforce;
 pub mod error;
 pub mod input;
 pub mod lower;
 pub mod normalize;
-pub mod result_context;
-pub mod r#return;
 pub mod security;
 pub mod validate;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
-pub use codegen::{codegen, ParameterizedQuery};
+pub use codegen::{ParameterizedQuery, codegen};
+pub use constants::{
+    NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+};
+pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
-pub use input::{parse_input, Input, QueryType};
+pub use input::{Input, QueryType, parse_input};
 pub use lower::lower;
 pub use normalize::normalize;
-pub use ontology::{Ontology, OntologyError, EDGE_TABLE, NODE_RESERVED_COLUMNS};
-pub use r#return::enforce_return;
-pub use result_context::{
-    id_column, type_column, RedactionNode, ResultContext, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN,
-    PATH_COLUMN,
-};
-pub use security::{apply_security_context, SecurityContext};
+pub use ontology::{EDGE_TABLE, NODE_RESERVED_COLUMNS, Ontology, OntologyError};
+pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
 
 // ─────────────────────────────────────────────────────────────────────────────

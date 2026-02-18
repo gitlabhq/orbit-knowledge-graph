@@ -117,31 +117,31 @@ impl<'a> Validator<'a> {
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
         for (i, agg) in input.aggregations.iter().enumerate() {
-            if let Some(target) = &agg.target {
-                if !node_ids.contains(&target.as_str()) {
-                    return Err(err(format!(
-                        "aggregation[{}] references undefined node \"{}\" in 'target'",
-                        i, target
-                    )));
-                }
+            if let Some(target) = &agg.target
+                && !node_ids.contains(&target.as_str())
+            {
+                return Err(err(format!(
+                    "aggregation[{}] references undefined node \"{}\" in 'target'",
+                    i, target
+                )));
             }
 
-            if let Some(group_by) = &agg.group_by {
-                if !node_ids.contains(&group_by.as_str()) {
-                    return Err(err(format!(
-                        "aggregation[{}] references undefined node \"{}\" in 'group_by'",
-                        i, group_by
-                    )));
-                }
+            if let Some(group_by) = &agg.group_by
+                && !node_ids.contains(&group_by.as_str())
+            {
+                return Err(err(format!(
+                    "aggregation[{}] references undefined node \"{}\" in 'group_by'",
+                    i, group_by
+                )));
             }
 
-            if let (Some(prop), Some(target)) = (&agg.property, &agg.target) {
-                if let Some(node) = input.nodes.iter().find(|n| n.id == *target) {
-                    let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
-                    self.ontology.validate_field(entity, prop).map_err(|e| {
-                        err(format!("invalid property in aggregation[{}]: {}", i, e))
-                    })?;
-                }
+            if let (Some(prop), Some(target)) = (&agg.property, &agg.target)
+                && let Some(node) = input.nodes.iter().find(|n| n.id == *target)
+            {
+                let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
+                self.ontology
+                    .validate_field(entity, prop)
+                    .map_err(|e| err(format!("invalid property in aggregation[{}]: {}", i, e)))?;
             }
         }
 

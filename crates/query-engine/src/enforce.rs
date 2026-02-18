@@ -10,10 +10,63 @@
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, Node, Query, SelectExpr};
+use crate::constants::{redaction_id_column, redaction_type_column};
 use crate::error::Result;
 use crate::input::{Input, QueryType};
-use crate::result_context::{id_column, type_column, ResultContext};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedactionNode {
+    pub alias: String,
+    pub entity_type: String,
+    pub id_column: String,
+    pub type_column: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ResultContext {
+    pub query_type: Option<QueryType>,
+    nodes: HashMap<String, RedactionNode>,
+}
+
+impl ResultContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_query_type(mut self, query_type: QueryType) -> Self {
+        self.query_type = Some(query_type);
+        self
+    }
+
+    pub fn add_node(&mut self, alias: &str, entity_type: &str) {
+        self.nodes.insert(
+            alias.to_string(),
+            RedactionNode {
+                alias: alias.to_string(),
+                entity_type: entity_type.to_string(),
+                id_column: redaction_id_column(alias),
+                type_column: redaction_type_column(alias),
+            },
+        );
+    }
+
+    pub fn nodes(&self) -> impl Iterator<Item = &RedactionNode> {
+        self.nodes.values()
+    }
+
+    pub fn get(&self, alias: &str) -> Option<&RedactionNode> {
+        self.nodes.get(alias)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+}
 
 pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
@@ -58,34 +111,36 @@ fn enforce_return_columns(
 
         ctx.add_node(&node.id, entity);
 
-        let id_col = id_column(&node.id);
-        let type_col = type_column(&node.id);
+        if let Some(redaction_node) = ctx.get(&node.id) {
+            let id_col = redaction_node.id_column.clone();
+            let type_col = redaction_node.type_column.clone();
 
-        let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
-        let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+            let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+            let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
 
-        if !has_id {
-            q.select.push(SelectExpr {
-                expr: Expr::col(&node.id, "id"),
-                alias: Some(id_col.clone()),
-            });
-        }
+            if !has_id {
+                q.select.push(SelectExpr {
+                    expr: Expr::col(&node.id, "id"),
+                    alias: Some(id_col.clone()),
+                });
+            }
 
-        if !has_type {
-            let insert_pos = q
-                .select
-                .iter()
-                .position(|s| s.alias.as_ref() == Some(&id_col))
-                .map(|i| i + 1)
-                .unwrap_or(q.select.len());
+            if !has_type {
+                let insert_pos = q
+                    .select
+                    .iter()
+                    .position(|s| s.alias.as_ref() == Some(&id_col))
+                    .map(|i| i + 1)
+                    .unwrap_or(q.select.len());
 
-            q.select.insert(
-                insert_pos,
-                SelectExpr {
-                    expr: Expr::lit(entity.as_str()),
-                    alias: Some(type_col),
-                },
-            );
+                q.select.insert(
+                    insert_pos,
+                    SelectExpr {
+                        expr: Expr::lit(entity.as_str()),
+                        alias: Some(type_col),
+                    },
+                );
+            }
         }
     }
     Ok(())
@@ -383,22 +438,26 @@ mod tests {
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
         assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string())));
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string())));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string())));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string())));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
+        );
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
+        );
 
         // Context should only have the group_by node
         assert_eq!(ctx.len(), 1);

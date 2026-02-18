@@ -7,10 +7,8 @@ use arrow::array::{
     TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt64Array,
 };
 use arrow::record_batch::RecordBatch;
-use query_engine::{
-    NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, QueryType, ResultContext, id_column,
-    type_column,
-};
+use query_engine::constants::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN};
+use query_engine::{QueryType, RedactionNode, ResultContext};
 
 use super::ResourceAuthorization;
 
@@ -115,19 +113,16 @@ impl QueryResultRow {
         self.columns.iter()
     }
 
-    pub fn get_id(&self, node_alias: &str) -> Option<i64> {
-        self.columns.get(&id_column(node_alias))?.as_i64()
+    pub fn get_id(&self, node: &RedactionNode) -> Option<i64> {
+        self.columns.get(&node.id_column)?.as_i64()
     }
 
-    pub fn get_type(&self, node_alias: &str) -> Option<&str> {
-        self.columns.get(&type_column(node_alias))?.as_str()
+    pub fn get_type(&self, node: &RedactionNode) -> Option<&str> {
+        self.columns.get(&node.type_column)?.as_str()
     }
 
-    pub fn node_ref(&self, node_alias: &str) -> Option<NodeRef> {
-        Some(NodeRef::new(
-            self.get_id(node_alias)?,
-            self.get_type(node_alias)?,
-        ))
+    pub fn node_ref(&self, node: &RedactionNode) -> Option<NodeRef> {
+        Some(NodeRef::new(self.get_id(node)?, self.get_type(node)?))
     }
 
     /// For path finding queries, returns all nodes in the path.
@@ -166,12 +161,11 @@ impl QueryResultRow {
 #[derive(Debug)]
 pub struct QueryResult {
     rows: Vec<QueryResultRow>,
-    node_aliases: Vec<String>,
+    ctx: ResultContext,
 }
 
 impl QueryResult {
     pub fn from_batches(batches: &[RecordBatch], ctx: &ResultContext) -> Self {
-        let node_aliases: Vec<String> = ctx.nodes().map(|n| n.alias.clone()).collect();
         let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
         let is_neighbors = ctx.query_type == Some(QueryType::Neighbors);
 
@@ -187,9 +181,9 @@ impl QueryResult {
                     );
                 }
 
-                // Extract dynamic nodes that need redaction checks.
-                // For path finding: nodes from the _gkg_path column.
-                // For neighbors: the neighbor node from neighbor_id/neighbor_type columns.
+                // Extract dynamic nodes (path finding nodes, neighbor nodes)
+                // Path finding nodes are extracted from _gkg_path column
+                // Neighbor nodes are extracted from _gkg_neighbor_id/_gkg_neighbor_type cols
                 let dynamic_nodes = if is_path_finding {
                     extract_path_nodes(batch, row_idx)
                 } else if is_neighbors {
@@ -202,7 +196,10 @@ impl QueryResult {
             }
         }
 
-        Self { rows, node_aliases }
+        Self {
+            rows,
+            ctx: ctx.clone(),
+        }
     }
 
     pub fn rows(&self) -> &[QueryResultRow] {
@@ -213,8 +210,12 @@ impl QueryResult {
         &mut self.rows
     }
 
-    pub fn node_aliases(&self) -> &[String] {
-        &self.node_aliases
+    pub fn ctx(&self) -> &ResultContext {
+        &self.ctx
+    }
+
+    pub fn node_aliases(&self) -> Vec<String> {
+        self.ctx.nodes().map(|n| n.alias.clone()).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -233,13 +234,12 @@ impl QueryResult {
         let mut nodes = RedactableNodes::new();
         for row in &self.rows {
             // Extract nodes from _gkg_* columns
-            for alias in &self.node_aliases {
-                if let Some(node_ref) = row.node_ref(alias) {
+            for redaction_node in self.ctx.nodes() {
+                if let Some(node_ref) = row.node_ref(redaction_node) {
                     nodes.add(node_ref.id, node_ref.entity_type);
                 }
             }
-            // Extract dynamic nodes (path finding: intermediate path nodes,
-            // neighbors: the neighbor nodes)
+            // Extract nodes from dynamic nodes (path finding nodes, neighbor nodes)
             for node_ref in &row.dynamic_nodes {
                 nodes.add(node_ref.id, &node_ref.entity_type);
             }
@@ -263,16 +263,16 @@ impl QueryResult {
         entity_to_resource: &HashMap<&str, &str>,
     ) -> usize {
         let mut redacted_count = 0;
-        let aliases = self.node_aliases.clone();
+        let redaction_nodes: Vec<_> = self.ctx.nodes().cloned().collect();
 
         for row in &mut self.rows {
             if !row.authorized {
                 continue;
             }
 
-            // Check nodes from _gkg_* columns
-            for alias in &aliases {
-                let Some(node_ref) = row.node_ref(alias) else {
+            // Check redaction nodes (from _gkg_* columns)
+            for redaction_node in &redaction_nodes {
+                let Some(node_ref) = row.node_ref(redaction_node) else {
                     // Fail closed: NULL IDs cannot be verified, so deny the row
                     row.set_unauthorized();
                     redacted_count += 1;
@@ -656,36 +656,56 @@ mod tests {
         fn get_id_extracts_node_id() {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             let row = &result.rows()[0];
+            let u = result.ctx().get("u").unwrap();
+            let p = result.ctx().get("p").unwrap();
 
-            assert_eq!(row.get_id("u"), Some(1));
-            assert_eq!(row.get_id("p"), Some(100));
-            assert_eq!(row.get_id("nonexistent"), None);
+            assert_eq!(row.get_id(u), Some(1));
+            assert_eq!(row.get_id(p), Some(100));
         }
 
         #[test]
         fn get_type_extracts_node_type() {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             let row = &result.rows()[0];
+            let u = result.ctx().get("u").unwrap();
+            let p = result.ctx().get("p").unwrap();
 
-            assert_eq!(row.get_type("u"), Some("User"));
-            assert_eq!(row.get_type("p"), Some("Project"));
-            assert_eq!(row.get_type("nonexistent"), None);
+            assert_eq!(row.get_type(u), Some("User"));
+            assert_eq!(row.get_type(p), Some("Project"));
         }
 
         #[test]
         fn node_ref_combines_id_and_type() {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             let row = &result.rows()[0];
+            let u = result.ctx().get("u").unwrap();
+            let p = result.ctx().get("p").unwrap();
 
-            let user_ref = row.node_ref("u").unwrap();
+            let user_ref = row.node_ref(u).unwrap();
             assert_eq!(user_ref.id, 1);
             assert_eq!(user_ref.entity_type, "User");
 
-            let project_ref = row.node_ref("p").unwrap();
+            let project_ref = row.node_ref(p).unwrap();
             assert_eq!(project_ref.id, 100);
             assert_eq!(project_ref.entity_type, "Project");
+        }
 
-            assert!(row.node_ref("nonexistent").is_none());
+        #[test]
+        fn unknown_alias_returns_none() {
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let row = &result.rows()[0];
+
+            assert!(result.ctx().get("nonexistent").is_none());
+
+            let ghost = RedactionNode {
+                alias: "ghost".to_string(),
+                entity_type: "Ghost".to_string(),
+                id_column: "_gkg_ghost_id".to_string(),
+                type_column: "_gkg_ghost_type".to_string(),
+            };
+            assert_eq!(row.get_id(&ghost), None);
+            assert_eq!(row.get_type(&ghost), None);
+            assert!(row.node_ref(&ghost).is_none());
         }
 
         #[test]
@@ -751,11 +771,11 @@ mod tests {
         #[test]
         fn from_batches_uses_context_aliases() {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let aliases: HashSet<_> = result.node_aliases().iter().collect();
+            let aliases: HashSet<String> = result.node_aliases().into_iter().collect();
 
             assert_eq!(aliases.len(), 2);
-            assert!(aliases.contains(&"u".to_string()));
-            assert!(aliases.contains(&"p".to_string()));
+            assert!(aliases.contains("u"));
+            assert!(aliases.contains("p"));
         }
 
         #[test]
@@ -781,7 +801,8 @@ mod tests {
             let result = QueryResult::from_batches(&[batch1, batch2], &ctx);
             assert_eq!(result.len(), 4);
 
-            let ids: Vec<i64> = result.iter().filter_map(|r| r.get_id("u")).collect();
+            let u = result.ctx().get("u").unwrap();
+            let ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(u)).collect();
             assert_eq!(ids, vec![1, 2, 3, 4]);
         }
 
@@ -795,7 +816,8 @@ mod tests {
         #[test]
         fn iter_returns_all_rows() {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let ids: Vec<i64> = result.iter().filter_map(|r| r.get_id("u")).collect();
+            let u = result.ctx().get("u").unwrap();
+            let ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(u)).collect();
             assert_eq!(ids, vec![1, 2, 3]);
         }
 
@@ -816,10 +838,11 @@ mod tests {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             result.rows_mut()[1].set_unauthorized();
 
+            let u = result.ctx().get("u").unwrap();
             let authorized: Vec<_> = result.authorized_rows().collect();
             assert_eq!(authorized.len(), 2);
 
-            let ids: Vec<i64> = authorized.iter().filter_map(|r| r.get_id("u")).collect();
+            let ids: Vec<i64> = authorized.iter().filter_map(|r| r.get_id(u)).collect();
             assert_eq!(ids, vec![1, 3]);
         }
 
@@ -1046,9 +1069,10 @@ mod tests {
             ]);
 
             let result = QueryResult::from_batches(&[batch], &user_ctx());
+            let u = result.ctx().get("u").unwrap();
 
-            assert_eq!(result.rows()[0].get_id("u"), Some(1));
-            assert_eq!(result.rows()[1].get_id("u"), None);
+            assert_eq!(result.rows()[0].get_id(u), Some(1));
+            assert_eq!(result.rows()[1].get_id(u), None);
         }
 
         #[test]
@@ -1062,9 +1086,10 @@ mod tests {
             ]);
 
             let result = QueryResult::from_batches(&[batch], &user_ctx());
+            let u = result.ctx().get("u").unwrap();
 
-            assert_eq!(result.rows()[0].get_type("u"), Some("User"));
-            assert_eq!(result.rows()[1].get_type("u"), None);
+            assert_eq!(result.rows()[0].get_type(u), Some("User"));
+            assert_eq!(result.rows()[1].get_type(u), None);
         }
 
         #[test]
@@ -1075,7 +1100,8 @@ mod tests {
             ]);
 
             let result = QueryResult::from_batches(&[batch], &user_ctx());
-            assert!(result.rows()[0].node_ref("u").is_none());
+            let u = result.ctx().get("u").unwrap();
+            assert!(result.rows()[0].node_ref(u).is_none());
         }
 
         #[test]
@@ -1089,7 +1115,8 @@ mod tests {
             ]);
 
             let result = QueryResult::from_batches(&[batch], &user_ctx());
-            assert!(result.rows()[0].node_ref("u").is_none());
+            let u = result.ctx().get("u").unwrap();
+            assert!(result.rows()[0].node_ref(u).is_none());
         }
     }
 
@@ -1224,9 +1251,10 @@ mod tests {
 
             let result = QueryResult::from_batches(&[batch], &ctx);
             let row = &result.rows()[0];
+            let u = result.ctx().get("u").unwrap();
 
-            assert_eq!(row.get_id("u"), Some(1));
-            assert_eq!(row.get_type("u"), Some("User"));
+            assert_eq!(row.get_id(u), Some(1));
+            assert_eq!(row.get_type(u), Some("User"));
             assert_eq!(row.get("view_count"), Some(&ColumnValue::Int64(1000)));
             assert_eq!(
                 row.get("created_at"),
