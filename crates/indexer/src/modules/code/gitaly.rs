@@ -126,12 +126,6 @@ pub mod test_utils {
     }
 
     impl MockRepositoryService {
-        pub fn create() -> Arc<dyn RepositoryService> {
-            Arc::new(Self {
-                default_branches: Mutex::new(HashMap::new()),
-            })
-        }
-
         pub fn with_default_branch(project_id: i64, branch: &str) -> Arc<Self> {
             let service = Self {
                 default_branches: Mutex::new(HashMap::new()),

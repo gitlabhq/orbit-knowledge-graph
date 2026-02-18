@@ -5,8 +5,6 @@ use prost::Message;
 use siphon_proto::replication_event::Column;
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 
-use super::config::siphon_actions;
-
 pub struct EventBuilder {
     columns: Vec<(&'static str, Value)>,
 }
@@ -85,33 +83,19 @@ pub fn build_replication_events(events: Vec<(Vec<String>, ReplicationEvent)>) ->
     Bytes::from(compressed)
 }
 
-pub fn push_event_columns(id: i64, project_id: i64, author_id: i64) -> EventBuilder {
-    EventBuilder::new()
-        .with_i64("id", id)
-        .with_i32("action", siphon_actions::PUSH_EVENT)
-        .with_i64("project_id", project_id)
-        .with_i64("author_id", author_id)
-        .with_string("created_at", "2024-01-15T10:00:00Z")
-}
-
 pub fn push_payload_columns(
     event_id: i64,
-    project_id: Option<i64>,
+    project_id: i64,
     ref_name: &str,
     commit: &str,
 ) -> EventBuilder {
     use super::config::{siphon_actions, siphon_ref_types};
 
-    let mut builder = EventBuilder::new()
+    EventBuilder::new()
         .with_i64("event_id", event_id)
+        .with_i64("project_id", project_id)
         .with_i32("ref_type", siphon_ref_types::BRANCH)
         .with_i32("action", siphon_actions::PUSHED)
         .with_string("ref", ref_name)
-        .with_string("commit_to", commit);
-
-    if let Some(id) = project_id {
-        builder = builder.with_i64("project_id", id);
-    }
-
-    builder
+        .with_string("commit_to", commit)
 }

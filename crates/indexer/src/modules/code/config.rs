@@ -3,18 +3,10 @@
 use std::env;
 use std::time::Duration;
 
-/// NATS KV bucket names used by the code indexing module.
-pub mod buckets {
-    pub const EVENTS_CACHE: &str = "kg_code_index_events_cache";
-}
-
 pub const LOCK_TTL: Duration = Duration::from_secs(60);
-
-pub const EVENTS_CACHE_TTL: Duration = Duration::from_secs(300);
 
 pub mod siphon_actions {
     pub const PUSHED: i32 = 2;
-    pub const PUSH_EVENT: i32 = 5;
 }
 
 pub mod siphon_ref_types {
@@ -23,7 +15,6 @@ pub mod siphon_ref_types {
 
 pub mod subjects {
     pub const PUSH_EVENT_PAYLOADS: &str = "push_event_payloads";
-    pub const EVENTS: &str = "events";
 }
 
 // TODO: Should be derived from the ontology

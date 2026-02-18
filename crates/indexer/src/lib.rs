@@ -56,7 +56,6 @@ use gitaly_client::GitalyError;
 use module::{ModuleInitError, ModuleRegistry};
 use modules::code::GitalyConfiguration;
 use modules::code::config::CodeIndexingConfig;
-use modules::code::config::buckets::EVENTS_CACHE;
 use modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
 use modules::{CodeModule, SdlcModule};
 use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
@@ -105,10 +104,7 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
 
     let per_message_ttl = KvBucketConfig::with_per_message_ttl();
     broker
-        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl.clone())
-        .await?;
-    broker
-        .ensure_kv_bucket_exists(EVENTS_CACHE, per_message_ttl)
+        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
         .await?;
 
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
