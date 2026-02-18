@@ -181,8 +181,9 @@ async fn fail_closed_no_authorization_returns_nothing() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("u")).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
     assert_eq!(
         raw_ids,
         ALL_USER_IDS.iter().copied().collect::<HashSet<_>>(),
@@ -214,6 +215,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5);
 
@@ -230,7 +232,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
@@ -257,6 +259,7 @@ async fn fail_closed_explicit_deny_filters_row() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1, 2, 3, 4]);
@@ -269,7 +272,7 @@ async fn fail_closed_explicit_deny_filters_row() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1, 2, 3, 4]));
@@ -298,10 +301,12 @@ async fn single_hop_user_group_verifies_both_nodes() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     let raw_pairs: HashSet<(i64, i64)> = result
         .iter()
-        .filter_map(|r| Some((r.get_id("u")?, r.get_id("g")?)))
+        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?)))
         .collect();
 
     let expected_raw = HashSet::from([
@@ -326,7 +331,7 @@ async fn single_hop_user_group_verifies_both_nodes() {
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id("u")?, r.get_id("g")?)))
+        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?)))
         .collect();
 
     let expected_authorized = HashSet::from([(1, 100), (2, 100)]);
@@ -367,6 +372,8 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", ALL_USER_IDS);
@@ -377,7 +384,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it() {
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id("u")?, r.get_id("g")?)))
+        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?)))
         .collect();
 
     assert_eq!(
@@ -387,7 +394,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it() {
     );
 
     for row in result.authorized_rows() {
-        let group_id = row.get_id("g").unwrap();
+        let group_id = row.get_id(&g).unwrap();
         assert_eq!(group_id, 100, "no denied groups should appear");
     }
 }
@@ -418,10 +425,13 @@ async fn three_hop_user_group_project_verifies_all_paths() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     let raw_paths: HashSet<(i64, i64, i64)> = result
         .iter()
-        .filter_map(|r| Some((r.get_id("u")?, r.get_id("g")?, r.get_id("p")?)))
+        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?, r.get_id(&p)?)))
         .collect();
 
     let expected_raw = HashSet::from([
@@ -452,7 +462,7 @@ async fn three_hop_user_group_project_verifies_all_paths() {
 
     let authorized_paths: HashSet<(i64, i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id("u")?, r.get_id("g")?, r.get_id("p")?)))
+        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?, r.get_id(&p)?)))
         .collect();
 
     assert_eq!(
@@ -488,6 +498,9 @@ async fn three_hop_denying_one_project_removes_only_those_paths() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", ALL_USER_IDS);
@@ -499,7 +512,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths() {
 
     let authorized_paths: HashSet<(i64, i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id("u")?, r.get_id("g")?, r.get_id("p")?)))
+        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?, r.get_id(&p)?)))
         .collect();
 
     let expected = HashSet::from([
@@ -513,7 +526,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths() {
     assert_eq!(authorized_paths, expected);
 
     for row in result.authorized_rows() {
-        let project_id = row.get_id("p").unwrap();
+        let project_id = row.get_id(&p).unwrap();
         assert!(
             project_id != 1001 && project_id != 1003,
             "denied projects 1001, 1003 must not appear"
@@ -550,10 +563,12 @@ async fn group_project_two_hop_verifies_exact_pairs() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
 
     let raw_pairs: HashSet<(i64, i64)> = result
         .iter()
-        .filter_map(|r| Some((r.get_id("g")?, r.get_id("p")?)))
+        .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
         .collect();
 
     let expected_raw = HashSet::from([
@@ -575,7 +590,7 @@ async fn group_project_two_hop_verifies_exact_pairs() {
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id("g")?, r.get_id("p")?)))
+        .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
         .collect();
 
     let expected_authorized = HashSet::from([(100, 1000), (100, 1002), (102, 1004)]);
@@ -607,8 +622,9 @@ async fn single_node_project_query_verifies_all_projects() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let p = result.ctx().get("p").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("p")).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
     assert_eq!(
         raw_ids,
         ALL_PROJECT_IDS.iter().copied().collect::<HashSet<_>>()
@@ -621,7 +637,7 @@ async fn single_node_project_query_verifies_all_projects() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("p"))
+        .filter_map(|r| r.get_id(&p))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1000, 1004]));
@@ -671,14 +687,17 @@ async fn all_nodes_have_required_type_columns() {
 
     let batches = ctx.query_parameterized(&query).await;
     let result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     for row in result.iter() {
-        assert_eq!(row.get_type("u"), Some("User"));
-        assert_eq!(row.get_type("g"), Some("Group"));
-        assert_eq!(row.get_type("p"), Some("Project"));
-        assert!(row.get_id("u").is_some());
-        assert!(row.get_id("g").is_some());
-        assert!(row.get_id("p").is_some());
+        assert_eq!(row.get_type(&u), Some("User"));
+        assert_eq!(row.get_type(&g), Some("Group"));
+        assert_eq!(row.get_type(&p), Some("Project"));
+        assert!(row.get_id(&u).is_some());
+        assert!(row.get_id(&g).is_some());
+        assert!(row.get_id(&p).is_some());
     }
 }
 
@@ -772,6 +791,8 @@ async fn all_columns_preserved_after_redaction() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
 
     let columns_before: HashSet<String> = result
         .rows()
@@ -839,19 +860,19 @@ async fn all_columns_preserved_after_redaction() {
 
     let row_1000 = authorized
         .iter()
-        .find(|r| r.get_id("p") == Some(1000))
+        .find(|r| r.get_id(&p) == Some(1000))
         .unwrap();
-    assert_eq!(row_1000.get_id("g"), Some(100));
-    assert_eq!(row_1000.get_type("g"), Some("Group"));
-    assert_eq!(row_1000.get_type("p"), Some("Project"));
+    assert_eq!(row_1000.get_id(&g), Some(100));
+    assert_eq!(row_1000.get_type(&g), Some("Group"));
+    assert_eq!(row_1000.get_type(&p), Some("Project"));
 
     let row_1002 = authorized
         .iter()
-        .find(|r| r.get_id("p") == Some(1002))
+        .find(|r| r.get_id(&p) == Some(1002))
         .unwrap();
-    assert_eq!(row_1002.get_id("g"), Some(100));
-    assert_eq!(row_1002.get_type("g"), Some("Group"));
-    assert_eq!(row_1002.get_type("p"), Some("Project"));
+    assert_eq!(row_1002.get_id(&g), Some(100));
+    assert_eq!(row_1002.get_type(&g), Some("Group"));
+    assert_eq!(row_1002.get_type(&p), Some("Project"));
 }
 
 #[tokio::test]
@@ -880,6 +901,9 @@ async fn all_columns_preserved_on_three_hop_traversal() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1]);
@@ -891,13 +915,13 @@ async fn all_columns_preserved_on_three_hop_traversal() {
     assert!(result.authorized_count() > 0);
 
     for row in result.authorized_rows() {
-        assert_eq!(row.get_id("u"), Some(1));
-        assert_eq!(row.get_id("g"), Some(100));
-        assert_eq!(row.get_id("p"), Some(1000));
+        assert_eq!(row.get_id(&u), Some(1));
+        assert_eq!(row.get_id(&g), Some(100));
+        assert_eq!(row.get_id(&p), Some(1000));
 
-        assert_eq!(row.get_type("u"), Some("User"));
-        assert_eq!(row.get_type("g"), Some("Group"));
-        assert_eq!(row.get_type("p"), Some("Project"));
+        assert_eq!(row.get_type(&u), Some("User"));
+        assert_eq!(row.get_type(&g), Some("Group"));
+        assert_eq!(row.get_type(&p), Some("Project"));
     }
 }
 
@@ -919,8 +943,9 @@ async fn redacted_rows_filtered_from_authorized_iterator() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
-    let all_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("u")).collect();
+    let all_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
     assert_eq!(
         all_ids,
         ALL_USER_IDS.iter().copied().collect::<HashSet<_>>()
@@ -933,7 +958,7 @@ async fn redacted_rows_filtered_from_authorized_iterator() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
@@ -945,7 +970,7 @@ async fn redacted_rows_filtered_from_authorized_iterator() {
         .rows()
         .iter()
         .filter(|r| !r.is_authorized())
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
     assert_eq!(unauthorized_ids, HashSet::from([3, 4, 5]));
 }
@@ -1530,10 +1555,11 @@ async fn search_with_complex_filters_and_redaction() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     // Should find alice, bob, charlie, diana (all active and in the username list)
     // eve is blocked so filtered out by the state filter
-    let raw_usernames: Vec<i64> = result.iter().filter_map(|r| r.get_id("u")).collect();
+    let raw_usernames: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
     assert_eq!(
         raw_usernames.len(),
         4,
@@ -1552,7 +1578,7 @@ async fn search_with_complex_filters_and_redaction() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
@@ -1584,10 +1610,11 @@ async fn search_projects_with_visibility_and_path_filters() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let p = result.ctx().get("p").unwrap().clone();
 
     // Should find: 1000 (public), 1002 (internal), 1004 (public)
     // Not: 1001, 1003 (private)
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("p")).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
     assert_eq!(
         raw_ids,
         HashSet::from([1000, 1002, 1004]),
@@ -1603,7 +1630,7 @@ async fn search_projects_with_visibility_and_path_filters() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("p"))
+        .filter_map(|r| r.get_id(&p))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1000]));
@@ -1634,9 +1661,10 @@ async fn search_groups_with_traversal_path_starts_with() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
 
     // All our test groups have paths starting with "1/"
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("g")).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&g)).collect();
     assert_eq!(
         raw_ids,
         HashSet::from([100, 101, 102]),
@@ -1652,7 +1680,7 @@ async fn search_groups_with_traversal_path_starts_with() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("g"))
+        .filter_map(|r| r.get_id(&g))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([100, 102]));
@@ -1681,8 +1709,9 @@ async fn search_with_id_range_filter() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("u")).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
     assert_eq!(
         raw_ids,
         HashSet::from([2, 3, 4]),
@@ -1721,8 +1750,9 @@ async fn search_with_specific_node_ids() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let p = result.ctx().get("p").unwrap().clone();
 
-    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id("p")).collect();
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
     assert_eq!(
         raw_ids,
         HashSet::from([1000, 1003]),
@@ -1738,7 +1768,7 @@ async fn search_with_specific_node_ids() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("p"))
+        .filter_map(|r| r.get_id(&p))
         .collect();
 
     assert_eq!(authorized_ids, HashSet::from([1000]));
@@ -1852,14 +1882,12 @@ async fn search_preserves_metadata_columns_after_redaction() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     // Check columns exist before redaction
     for row in result.iter() {
-        assert!(
-            row.get_id("u").is_some(),
-            "ID should exist before redaction"
-        );
-        assert_eq!(row.get_type("u"), Some("User"), "type should be User");
+        assert!(row.get_id(&u).is_some(), "ID should exist before redaction");
+        assert_eq!(row.get_type(&u), Some("User"), "type should be User");
     }
 
     let mut mock_service = MockRedactionService::new();
@@ -1869,8 +1897,8 @@ async fn search_preserves_metadata_columns_after_redaction() {
 
     // Check columns still exist after redaction
     for row in result.authorized_rows() {
-        assert_eq!(row.get_id("u"), Some(1));
-        assert_eq!(row.get_type("u"), Some("User"));
+        assert_eq!(row.get_id(&u), Some(1));
+        assert_eq!(row.get_type(&u), Some("User"));
     }
 }
 
@@ -1984,6 +2012,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 users before redaction");
 
@@ -2000,12 +2029,12 @@ async fn column_selection_specific_columns_includes_mandatory_columns() {
     // Verify authorized rows have correct IDs and types
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
     assert_eq!(authorized_ids, HashSet::from([1, 2, 3]));
 
     for row in result.authorized_rows() {
-        assert_eq!(row.get_type("u"), Some("User"));
+        assert_eq!(row.get_type(&u), Some("User"));
     }
 }
 
@@ -2064,6 +2093,7 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
 
     assert_eq!(result.len(), 3, "should have all 3 groups before redaction");
 
@@ -2080,8 +2110,8 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
     // Verify the authorized row is group 100
     let authorized: Vec<_> = result.authorized_rows().collect();
     assert_eq!(authorized.len(), 1);
-    assert_eq!(authorized[0].get_id("g"), Some(100));
-    assert_eq!(authorized[0].get_type("g"), Some("Group"));
+    assert_eq!(authorized[0].get_id(&g), Some(100));
+    assert_eq!(authorized[0].get_type(&g), Some("Group"));
 }
 
 /// Verify omitting `columns` entirely still includes mandatory columns
@@ -2116,6 +2146,7 @@ async fn column_selection_omitted_includes_mandatory_columns() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 users");
 
@@ -2131,12 +2162,12 @@ async fn column_selection_omitted_includes_mandatory_columns() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
 
     for row in result.authorized_rows() {
-        assert_eq!(row.get_type("u"), Some("User"));
+        assert_eq!(row.get_type(&u), Some("User"));
     }
 }
 
@@ -2205,6 +2236,9 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns()
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     let raw_count = result.len();
     assert!(raw_count > 0, "should have traversal results");
@@ -2230,12 +2264,12 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns()
     );
 
     let authorized: Vec<_> = result.authorized_rows().collect();
-    assert_eq!(authorized[0].get_id("u"), Some(1));
-    assert_eq!(authorized[0].get_id("g"), Some(100));
-    assert_eq!(authorized[0].get_id("p"), Some(1000));
-    assert_eq!(authorized[0].get_type("u"), Some("User"));
-    assert_eq!(authorized[0].get_type("g"), Some("Group"));
-    assert_eq!(authorized[0].get_type("p"), Some("Project"));
+    assert_eq!(authorized[0].get_id(&u), Some(1));
+    assert_eq!(authorized[0].get_id(&g), Some(100));
+    assert_eq!(authorized[0].get_id(&p), Some(1000));
+    assert_eq!(authorized[0].get_type(&u), Some("User"));
+    assert_eq!(authorized[0].get_type(&g), Some("Group"));
+    assert_eq!(authorized[0].get_type(&p), Some("Project"));
 }
 
 /// Deep test: Verify redaction works correctly when using specific column selection.
@@ -2263,6 +2297,8 @@ async fn column_selection_redaction_works_with_specific_columns() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     let raw_count = result.len();
     assert!(raw_count > 0, "should have raw results");
@@ -2285,17 +2321,15 @@ async fn column_selection_redaction_works_with_specific_columns() {
 
     // Verify only authorized combinations remain
     for row in result.authorized_rows() {
-        let user_id = row.get_id("u").expect("user ID must exist after redaction");
-        let group_id = row
-            .get_id("g")
-            .expect("group ID must exist after redaction");
+        let user_id = row.get_id(&u).expect("user ID must exist after redaction");
+        let group_id = row.get_id(&g).expect("group ID must exist after redaction");
 
         assert_eq!(user_id, 1, "only user 1 should be authorized");
         assert_eq!(group_id, 100, "only group 100 should be authorized");
 
         // Verify types are correct (used for redaction lookup)
-        assert_eq!(row.get_type("u"), Some("User"));
-        assert_eq!(row.get_type("g"), Some("Group"));
+        assert_eq!(row.get_type(&u), Some("User"));
+        assert_eq!(row.get_type(&g), Some("Group"));
     }
 }
 
@@ -2377,6 +2411,7 @@ async fn column_selection_data_values_preserved_through_redaction() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     // Before redaction, verify we have data
     assert_eq!(result.len(), 2, "should find alice and bob");
@@ -2393,20 +2428,14 @@ async fn column_selection_data_values_preserved_through_redaction() {
     let authorized: Vec<_> = result.authorized_rows().collect();
 
     // Find alice (user 1) and verify her data
-    let alice = authorized
-        .iter()
-        .find(|r| r.get_id("u") == Some(1))
-        .unwrap();
-    assert_eq!(alice.get_id("u"), Some(1));
-    assert_eq!(alice.get_type("u"), Some("User"));
+    let alice = authorized.iter().find(|r| r.get_id(&u) == Some(1)).unwrap();
+    assert_eq!(alice.get_id(&u), Some(1));
+    assert_eq!(alice.get_type(&u), Some("User"));
 
     // Find bob (user 2) and verify his data
-    let bob = authorized
-        .iter()
-        .find(|r| r.get_id("u") == Some(2))
-        .unwrap();
-    assert_eq!(bob.get_id("u"), Some(2));
-    assert_eq!(bob.get_type("u"), Some("User"));
+    let bob = authorized.iter().find(|r| r.get_id(&u) == Some(2)).unwrap();
+    assert_eq!(bob.get_id(&u), Some(2));
+    assert_eq!(bob.get_type(&u), Some("User"));
 }
 
 /// Deep test: Verify that requesting the same column as a mandatory column
@@ -2446,6 +2475,7 @@ async fn column_selection_id_in_list_no_duplication() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let p = result.ctx().get("p").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 projects");
 
@@ -2461,12 +2491,12 @@ async fn column_selection_id_in_list_no_duplication() {
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("p"))
+        .filter_map(|r| r.get_id(&p))
         .collect();
     assert_eq!(authorized_ids, HashSet::from([1000, 1004]));
 
     for row in result.authorized_rows() {
-        assert_eq!(row.get_type("p"), Some("Project"));
+        assert_eq!(row.get_type(&p), Some("Project"));
     }
 }
 
@@ -2549,6 +2579,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
     assert_eq!(result.len(), 2, "should have 2 aggregation rows");
@@ -2564,8 +2595,8 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
     assert_eq!(result.authorized_count(), 1);
 
     let authorized: Vec<_> = result.authorized_rows().collect();
-    assert_eq!(authorized[0].get_id("u"), Some(1));
-    assert_eq!(authorized[0].get_type("u"), Some("User"));
+    assert_eq!(authorized[0].get_id(&u), Some(1));
+    assert_eq!(authorized[0].get_type(&u), Some("User"));
 }
 
 /// Deep test: Verify aggregation with wildcard columns returns all entity fields
@@ -2638,6 +2669,7 @@ async fn column_selection_aggregation_with_wildcard_columns() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
     assert_eq!(result.len(), 2, "should have 2 aggregation rows");
@@ -2653,8 +2685,8 @@ async fn column_selection_aggregation_with_wildcard_columns() {
     assert_eq!(result.authorized_count(), 1);
 
     let authorized: Vec<_> = result.authorized_rows().collect();
-    assert_eq!(authorized[0].get_id("u"), Some(1));
-    assert_eq!(authorized[0].get_type("u"), Some("User"));
+    assert_eq!(authorized[0].get_id(&u), Some(1));
+    assert_eq!(authorized[0].get_type(&u), Some("User"));
 }
 
 /// Deep test: Verify that column selection with traversal maintains proper
@@ -2682,11 +2714,13 @@ async fn column_selection_traversal_join_semantics_preserved() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
 
     // Verify raw data matches expected relationships
     let raw_pairs: HashSet<(i64, i64)> = result
         .iter()
-        .filter_map(|r| Some((r.get_id("g")?, r.get_id("p")?)))
+        .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
         .collect();
 
     let expected_pairs = HashSet::from([
@@ -2711,7 +2745,7 @@ async fn column_selection_traversal_join_semantics_preserved() {
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
-        .filter_map(|r| Some((r.get_id("g")?, r.get_id("p")?)))
+        .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
         .collect();
 
     assert_eq!(
@@ -2760,6 +2794,7 @@ async fn column_selection_filters_work_with_columns() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     // Should find 4 active users (eve is blocked)
     assert_eq!(result.len(), 4, "should find 4 active users");
@@ -2772,8 +2807,8 @@ async fn column_selection_filters_work_with_columns() {
 
     assert_eq!(result.authorized_count(), 4);
     for row in result.authorized_rows() {
-        assert!(row.get_id("u").is_some());
-        assert_eq!(row.get_type("u"), Some("User"));
+        assert!(row.get_id(&u).is_some());
+        assert_eq!(row.get_type(&u), Some("User"));
     }
 }
 
@@ -2874,6 +2909,7 @@ async fn neighbors_query_comprehensive() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     // User 1 is member of groups 100 and 102
     assert_eq!(
@@ -2884,8 +2920,8 @@ async fn neighbors_query_comprehensive() {
 
     // Verify center node metadata
     for row in result.iter() {
-        assert_eq!(row.get_id("u"), Some(1));
-        assert_eq!(row.get_type("u"), Some("User"));
+        assert_eq!(row.get_id(&u), Some(1));
+        assert_eq!(row.get_type(&u), Some("User"));
         assert!(
             row.neighbor_node().is_some(),
             "neighbor node should be extracted"
@@ -3021,6 +3057,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
 
     let raw_count = result.len();
     assert_eq!(
@@ -3043,7 +3080,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization() {
     // Verify only user 1's neighbors remain
     let authorized_center_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
     assert_eq!(authorized_center_ids, HashSet::from([1]));
 }
@@ -3149,14 +3186,16 @@ async fn traversal_edge_columns_preserved_through_redaction() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     // We have 7 MEMBER_OF edges in test data
     assert_eq!(result.len(), 7, "should have 7 user-group memberships");
 
     // Verify edge columns are present and correct BEFORE redaction
     for row in result.iter() {
-        let user_id = row.get_id("u").expect("user id should be present");
-        let group_id = row.get_id("g").expect("group id should be present");
+        let user_id = row.get_id(&u).expect("user id should be present");
+        let group_id = row.get_id(&g).expect("group id should be present");
 
         assert_eq!(
             row.get("e0_type").and_then(|v| v.as_str()),
@@ -3199,11 +3238,11 @@ async fn traversal_edge_columns_preserved_through_redaction() {
     // Verify unauthorized data is NOT present in authorized results
     let authorized_user_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("u"))
+        .filter_map(|r| r.get_id(&u))
         .collect();
     let authorized_group_ids: HashSet<i64> = result
         .authorized_rows()
-        .filter_map(|r| r.get_id("g"))
+        .filter_map(|r| r.get_id(&g))
         .collect();
 
     // Unauthorized users (2, 3, 4, 5) must NOT appear
@@ -3226,8 +3265,8 @@ async fn traversal_edge_columns_preserved_through_redaction() {
 
     // Verify edge columns are preserved in the authorized row
     let authorized_row = result.authorized_rows().next().expect("should have 1 row");
-    assert_eq!(authorized_row.get_id("u"), Some(1));
-    assert_eq!(authorized_row.get_id("g"), Some(100));
+    assert_eq!(authorized_row.get_id(&u), Some(1));
+    assert_eq!(authorized_row.get_id(&g), Some(100));
     assert_eq!(
         authorized_row.get("e0_type").and_then(|v| v.as_str()),
         Some("MEMBER_OF"),
@@ -3304,6 +3343,9 @@ async fn multi_hop_edge_columns_survive_redaction() {
 
     let batches = ctx.query_parameterized(&query).await;
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+    let u = result.ctx().get("u").unwrap().clone();
 
     // Should have 12 paths total (see three_hop test for breakdown)
     assert_eq!(
@@ -3327,9 +3369,9 @@ async fn multi_hop_edge_columns_survive_redaction() {
     let row = result.authorized_rows().next().expect("should have 1 row");
 
     // Verify node IDs
-    assert_eq!(row.get_id("u"), Some(1), "user should be 1");
-    assert_eq!(row.get_id("g"), Some(100), "group should be 100");
-    assert_eq!(row.get_id("p"), Some(1000), "project should be 1000");
+    assert_eq!(row.get_id(&u), Some(1), "user should be 1");
+    assert_eq!(row.get_id(&g), Some(100), "group should be 100");
+    assert_eq!(row.get_id(&p), Some(1000), "project should be 1000");
 
     // First edge: User 1 -> Group 100 (MEMBER_OF)
     assert_eq!(

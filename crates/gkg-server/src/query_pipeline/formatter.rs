@@ -57,10 +57,10 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
     }
 
     for node in ctx.nodes() {
-        if let Some(id) = row.get_id(&node.alias) {
+        if let Some(id) = row.get_id(node) {
             obj.insert(format!("{}_id", node.alias), json!(id));
         }
-        if let Some(entity_type) = row.get_type(&node.alias) {
+        if let Some(entity_type) = row.get_type(node) {
             obj.insert(format!("{}_type", node.alias), json!(entity_type));
         }
     }

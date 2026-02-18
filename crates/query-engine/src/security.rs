@@ -8,22 +8,15 @@
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
 use crate::ast::{Expr, Node, Op, Query, TableRef};
+use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
 use once_cell::sync::Lazy;
 use ontology::EDGE_TABLE;
 use regex::Regex;
 
-static TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
-
 /// Matches paths like "1/", "1/2/", "123/456/789/"
 static TRAVERSAL_PATH_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
-
-/// Tables that should NOT have traversal path security filters applied.
-/// These are entities whose visibility is determined through relationships
-/// (e.g., MEMBER_OF) rather than direct path hierarchy.
-/// TODO!!! : This table name needs to be derived directly from the ontology.
-const SKIP_SECURITY_FILTER_TABLES: &[&str] = &["gl_user"];
 
 /// Security context for request-level isolation.
 #[derive(Debug, Clone)]
@@ -175,7 +168,7 @@ fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
 fn should_apply_security_filter(table: &str) -> bool {
     // Only apply to actual node tables (gl_ prefix)
     // This excludes CTEs like "path_cte" which don't have traversal_path
-    if !table.starts_with("gl_") {
+    if !table.starts_with(GL_TABLE_PREFIX) {
         return false;
     }
     // Skip edge table

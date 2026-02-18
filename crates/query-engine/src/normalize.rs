@@ -7,7 +7,7 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::input::{ColumnSelection, Input};
-use ontology::{EnumType, Ontology, NODE_RESERVED_COLUMNS};
+use ontology::{EnumType, NODE_RESERVED_COLUMNS, Ontology};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -83,10 +83,10 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
 fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {
     match value {
         Value::Number(n) => {
-            if let Some(key) = n.as_i64() {
-                if let Some(label) = enum_values.get(&key) {
-                    return Value::String(label.clone());
-                }
+            if let Some(key) = n.as_i64()
+                && let Some(label) = enum_values.get(&key)
+            {
+                return Value::String(label.clone());
             }
             value.clone()
         }

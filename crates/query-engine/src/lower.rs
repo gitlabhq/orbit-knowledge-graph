@@ -3,12 +3,12 @@
 //! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+use crate::constants::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN};
 use crate::error::{QueryError, Result};
 use crate::input::{
     ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
     InputRelationship, OrderDirection, QueryType,
 };
-use crate::result_context::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN};
 use ontology::{EDGE_RESERVED_COLUMNS, EDGE_TABLE};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -841,10 +841,11 @@ mod tests {
         };
         println!("{:?}", q);
         assert!(!q.group_by.is_empty());
-        assert!(q
-            .select
-            .iter()
-            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"))
+        );
     }
 
     #[test]

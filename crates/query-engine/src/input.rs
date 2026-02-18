@@ -173,15 +173,14 @@ where
 }
 
 fn parse_filter(value: Value) -> InputFilter {
-    if let Value::Object(ref obj) = value {
-        if let Some(op_val) = obj.get("op") {
-            if let Ok(op) = serde_json::from_value::<FilterOp>(op_val.clone()) {
-                return InputFilter {
-                    op: Some(op),
-                    value: obj.get("value").cloned(),
-                };
-            }
-        }
+    if let Value::Object(ref obj) = value
+        && let Some(op_val) = obj.get("op")
+        && let Ok(op) = serde_json::from_value::<FilterOp>(op_val.clone())
+    {
+        return InputFilter {
+            op: Some(op),
+            value: obj.get("value").cloned(),
+        };
     }
     InputFilter {
         op: None,

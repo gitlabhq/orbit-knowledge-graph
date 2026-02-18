@@ -3,8 +3,8 @@
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
 use crate::ast::{Cte, Expr, Node, Op, Query, TableRef};
+use crate::enforce::ResultContext;
 use crate::error::Result;
-use crate::result_context::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -581,9 +581,10 @@ mod tests {
             empty_ctx(),
         )
         .unwrap();
-        assert!(r
-            .sql
-            .contains("relationship_kind IN {type_e:Array(String)})"));
+        assert!(
+            r.sql
+                .contains("relationship_kind IN {type_e:Array(String)})")
+        );
         assert_eq!(
             r.params.get("type_e"),
             Some(&Value::Array(vec![
