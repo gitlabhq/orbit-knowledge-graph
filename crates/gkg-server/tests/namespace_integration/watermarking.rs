@@ -16,8 +16,8 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
 
     context
         .execute(
-            "INSERT INTO namespace_indexing_watermark (namespace, watermark)
-            VALUES (100, '2024-01-19 00:00:00')",
+            "INSERT INTO namespace_indexing_watermark (namespace, entity, watermark)
+            VALUES (100, 'Group', '2024-01-19 00:00:00')",
         )
         .await;
 

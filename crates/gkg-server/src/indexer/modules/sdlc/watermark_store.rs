@@ -32,11 +32,13 @@ pub(crate) trait WatermarkStore: Send + Sync {
     async fn get_namespace_watermark(
         &self,
         namespace_id: i64,
+        entity: &str,
     ) -> Result<DateTime<Utc>, WatermarkError>;
 
     async fn set_namespace_watermark(
         &self,
         namespace_id: i64,
+        entity: &str,
         watermark: &DateTime<Utc>,
     ) -> Result<(), WatermarkError>;
 }
@@ -106,13 +108,15 @@ impl WatermarkStore for ClickHouseWatermarkStore {
     async fn get_namespace_watermark(
         &self,
         namespace_id: i64,
+        entity: &str,
     ) -> Result<DateTime<Utc>, WatermarkError> {
-        let query = "SELECT argMax(watermark, _version) as watermark FROM namespace_indexing_watermark WHERE namespace = {namespace:Int64}";
+        let query = "SELECT argMax(watermark, _version) as watermark FROM namespace_indexing_watermark WHERE namespace = {namespace:Int64} AND entity = {entity:String}";
 
         let batches = self
             .client
             .query(query)
             .param("namespace", namespace_id)
+            .param("entity", entity)
             .fetch_arrow()
             .await
             .map_err(|e| WatermarkError::Query(e.to_string()))?;
@@ -123,13 +127,15 @@ impl WatermarkStore for ClickHouseWatermarkStore {
     async fn set_namespace_watermark(
         &self,
         namespace_id: i64,
+        entity: &str,
         watermark: &DateTime<Utc>,
     ) -> Result<(), WatermarkError> {
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
 
         self.client
-            .query("INSERT INTO namespace_indexing_watermark (namespace, watermark) VALUES ({namespace:Int64}, {watermark:String})")
+            .query("INSERT INTO namespace_indexing_watermark (namespace, entity, watermark) VALUES ({namespace:Int64}, {entity:String}, {watermark:String})")
             .param("namespace", namespace_id)
+            .param("entity", entity)
             .param("watermark", formatted_watermark)
             .execute()
             .await
