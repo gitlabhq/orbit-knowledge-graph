@@ -3,9 +3,9 @@ title: GitLab Knowledge Graph Web Server Architecture
 status: ongoing
 description: How the Knowledge Graph web server architecture is designed to serve queries across MCP and deployed services.
 creation-date: "2025-10-12"
-authors: ["@michaelangelo", "@michaelusa", "jgdoyon1", "bohdanpk", "@dgruzd", "@OmarQunsulGitlab"]
+authors: ["@michaelangelo", "@michaelusa", "jgdoyon1", "bohdanpk", "@dgruzd"]
 coaches: [ "@ahegyi", "@shekharpatnaik", "@andrewn" ]
-dris: [ "@michaelangelo", "@mnohr" ]
+dris: [ "@michaelangelo" ]
 owning-stage: "~devops::create"
 participating-stages: ["~devops::analytics"]
 ---

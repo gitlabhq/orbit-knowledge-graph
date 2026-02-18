@@ -2,9 +2,9 @@
 title: Server-side Knowledge Graph
 status: proposed
 creation-date: "2025-04-14"
-authors: [ "@jprovaznik", "@dgruzd", "@michaelangeloio", "@OmarQunsulGitlab" ]
+authors: [ "@jprovaznik", "@dgruzd", "@michaelangeloio" ]
 coaches: [ "@shekharpatnaik" ]
-dris: [ "@jordanjanes", "@mnohr" ]
+dris: [ "@jordanjanes" ]
 owning-stage: "~devops::create"
 participating-stages: []
 # Hides this page in the left sidebar. Recommended so we don't pollute it.

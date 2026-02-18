@@ -3,9 +3,9 @@ title: GitLab Knowledge Graph Indexing Architecture
 status: ongoing
 description: How the Knowledge Graph indexing service is designed to index SDLC metadata and code.
 creation-date: "2025-10-12"
-authors: ["@michaelangelo", "@michaelusa", "@jgdoyon1", "@bohdanpk", "@dgruzd", "@OmarQunsulGitlab"]
+authors: ["@michaelangelo", "@michaelusa", "@jgdoyon1", "@bohdanpk", "@dgruzd"]
 coaches: [ "@ahegyi", "@shekharpatnaik", "@andrewn" ]
-dris: [ "@michaelangelo", "@mnohr" ]
+dris: [ "@michaelangelo" ]
 owning-stage: "~devops::create"
 participating-stages: ["~devops::analytics"]
 ---
