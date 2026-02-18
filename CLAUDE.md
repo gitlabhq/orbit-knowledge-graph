@@ -5,6 +5,7 @@ Main repository for the GitLab Knowledge Graph (aka "gitlab orbit").
 ## Development
 
 - Run tasks with mise.
+- Use [conventional commits](https://www.conventionalcommits.org/) for all commit messages.
 
 ## Code Quality
 
