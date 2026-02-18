@@ -1,4 +1,4 @@
-# Orbit - GitLab's Knowledge Graph
+# Orbit - the GitLab Knowledge Graph
 
 This document is the single source of truth for the GitLab Knowledge Graph (Orbit) project.
 
@@ -13,7 +13,6 @@ The GitLab Knowledge Graph (GKG), product name **Orbit**, is a backend service t
 **Program Landing Page**: [internal handbook](https://internal.gitlab.com/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/) ([source](https://gitlab.com/gitlab-com/content-sites/internal-handbook/blob/main/content/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/_index.md))
 
 ---
-
 
 ## 1. Project Architecture
 
@@ -46,7 +45,6 @@ flowchart LR
 | Dev documentation | [`docs/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs) |
 
 > Note: [gitlab-org/rust/knowledge-graph](https://gitlab.com/gitlab-org/rust/knowledge-graph) is the old repository for the local client-side knowledge graph, which will be archived. The code indexer was taken from that repo and moved into `orbit/knowledge-graph`.
-
 
 ## 2. Epic Tracker
 
@@ -102,7 +100,7 @@ Filtered by `knowledge graph` label:
 
 | Repository | Purpose |
 |---|---|
-| [gitlab-org/analytics-section/siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) | CDC pipeline (Go): PG logical replication -> NATS -> ClickHouse. Helm chart at `helm/siphon/` (v0.0.1, standalone). |
+| [gitlab-org/analytics-section/siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) | CDC pipeline (Go): PostgreSQL logical replication -> NATS -> ClickHouse. Helm chart at `helm/siphon/` (v0.0.1, standalone). |
 | [gitlab-org/analytics-section/platform-insights/siphon-helm-charts](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts) | Production Siphon Helm chart (v1.0.1), deployed via gitlab-helmfiles on ops.gitlab.net |
 
 ### Related GitLab Projects
@@ -115,7 +113,7 @@ Filtered by `knowledge graph` label:
 
 ### Infrastructure (ops.gitlab.net)
 
-These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubernetes infrastructure and deployment configs for GitLab's production and staging environments. GKG/Siphon staging infrastructure is configured here.
+These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubernetes infrastructure and deployment configs for the GitLab production and staging environments. GKG/Siphon staging infrastructure is configured here.
 
 | Repository | Purpose |
 |---|---|
@@ -135,7 +133,6 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | [orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and summary (Feb 3-5, 2026): architecture, indexing, query engine, infra, DIP, deployment, billing |
 | [Readiness reviews (old)](https://gitlab.com/gitlab-com/gl-infra/readiness) | Legacy readiness repo. Siphon review [MR !231](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/231) (open, 78 comments), NATS review [MR !240](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/240) (merged). |
 | In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) and [RUNBOOK.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/RUNBOOK.md) -- GCP sandbox environment details and operational runbook (dev/sandbox only) |
-
 
 ---
 
@@ -160,7 +157,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | GCP Project | `gl-knowledgegraph-prj-f2eec59d` |
 | GKE Cluster | `knowledge-graph-test` (us-central1) |
 | ClickHouse VM | `vm-clickhouse` (n4-standard-16) |
-| GitLab VM | `vm-gitlab-omnibus` (n4-standard-8, includes Gitaly + PG) |
+| GitLab VM | `vm-gitlab-omnibus` (n4-standard-8, includes Gitaly + PostgreSQL) |
 | Domain | `gitlab.gkg.dev` |
 | Secrets | GCP Secret Manager -> External Secrets Operator |
 
@@ -179,7 +176,7 @@ Staging is deployed to the `analytics-eventsdot-stg` environment. All configs li
 | NATS staging values | [`releases/nats/analytics-eventsdot-stg.yaml.gotmpl`](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/releases/nats/analytics-eventsdot-stg.yaml.gotmpl) |
 | NATS base + network policy | [`releases/nats/values.yaml.gotmpl`](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/releases/nats/values.yaml.gotmpl) |
 | NATS production values | [`releases/nats/analytics-eventsdot-prod.yaml.gotmpl`](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/releases/nats/analytics-eventsdot-prod.yaml.gotmpl) |
-| Vault secrets | ESO pulls PG credentials from `{cluster}/siphon/postgresql` |
+| Vault secrets | ESO pulls PostgreSQL credentials from `{cluster}/siphon/postgresql` |
 | PSC | Primary + replica connections to gstg Patroni via Backend Service + ILB + PSC (managed in [config-mgmt](https://ops.gitlab.net/gitlab-com/gl-infra/config-mgmt)) |
 
 ### Siphon Staging
@@ -251,9 +248,9 @@ Architecture and implementation details are **TODO** -- to be filled out as this
 | [SOX ITGC controls](https://docs.google.com/spreadsheets/d/1BGTZAriUYIubEJcVHoYqmXm7FLoqQcNiPJkylZidkeY/edit?gid=121873557#gid=121873557) | SOX audit requirements for billing code paths |
 | [Credits dashboard](https://docs.gitlab.com/subscriptions/gitlab_credits/#gitlab-credits-dashboard) | End-user credits dashboard documentation |
 
-### Key Contacts
+### Contacts
 
-Jerome Ng (@jng, usage billing system architect), Sunny Mittal (@smittal-admin, SOX compliance).
+Jerome Ng (@jeromezng, usage billing system architect).
 
 ---
 
@@ -276,7 +273,7 @@ Jerome Ng (@jng, usage billing system architect), Sunny Mittal (@smittal-admin, 
 | Production Grafana dashboards | TODO |
 | Alerting rules | TODO |
 | SLIs / SLOs | TODO -- to be defined as part of [PREP](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64) |
-| Key metrics | TODO -- gRPC latency, indexing throughput, query latency, redaction exchange timing, ClickHouse query performance |
+| Metrics | TODO -- gRPC latency, indexing throughput, query latency, redaction exchange timing, ClickHouse query performance |
 
 ---
 

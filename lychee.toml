@@ -1,0 +1,24 @@
+# Offline link checking for markdown files
+# For all options, see https://lychee.cli.rs/usage/config/
+
+accept = ["200", "403"]
+
+exclude = [
+  'https://ops.gitlab.net',
+  'https://dashboards.gitlab.net',
+  'https://docs.google.com',
+  'https://drive.google.com',
+  'https://internal.gitlab.com',
+  'https://gitlab.com',
+  'https://www.youtube.com',
+  'https://youtu.be',
+]
+
+exclude_path = [
+  "target",
+  "node_modules",
+]
+
+exclude_all_private = true
+max_concurrency = 4
+max_redirects = 0

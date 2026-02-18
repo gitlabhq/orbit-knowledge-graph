@@ -1,0 +1,18 @@
+---
+name: gitlab_base.HeadingContent
+description: |
+  Checks for generic, unhelpful subheadings.
+extends: existence
+message: "Rename the heading '%s', or re-purpose the content elsewhere."
+vocab: false
+level: warning
+link: https://docs.gitlab.com/development/documentation/topic_types/concept/#concept-topic-titles
+ignorecase: true
+nonword: true
+scope: heading
+tokens:
+  - 'How it works'
+  - 'Limitations'
+  - 'Overview'
+  - 'Use cases?'
+  - 'Important notes?'

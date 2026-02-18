@@ -1,0 +1,14 @@
+---
+name: gitlab_base.Zip
+description: |
+  Recommends all instances of something.zip be wrapped in backticks
+  due to the .zip top-level domain
+extends: existence
+message: "Wrap '%s' in backticks to prevent unintentional links to .zip domain names."
+link: 'https://docs.gitlab.com/development/documentation/styleguide/#inline-code'
+vocab: false
+nonword: true
+level: error
+ignorecase: true
+tokens:
+  - '\b\w*\.zip'

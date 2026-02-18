@@ -34,7 +34,7 @@ fn decode_events(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 
 The crate includes vendored proto-generated code, so it builds out of the box:
 
-```bash
+```shell
 cargo build -p siphon-proto
 ```
 
@@ -42,7 +42,7 @@ cargo build -p siphon-proto
 
 To update the proto-generated code when Siphon APIs change:
 
-```bash
+```shell
 # Uses mise.toml config for SIPHON_PROTO_ROOT
 mise exec -- cargo build -p siphon-proto --features regenerate-protos
 

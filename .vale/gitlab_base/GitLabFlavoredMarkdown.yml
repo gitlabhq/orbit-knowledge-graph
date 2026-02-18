@@ -1,0 +1,14 @@
+---
+name: gitlab_base.GitLabFlavoredMarkdown
+description: |
+  Checks for unclear use of GLFM or GLM, instead of
+  GitLab/GitHub Flavored Markdown.
+extends: substitution
+message: "Use '%s' instead of '%s' when possible."
+link: https://docs.gitlab.com/development/documentation/styleguide/word_list/
+vocab: false
+level: warning
+ignorecase: true
+swap:
+  GLFM: "GitLab Flavored Markdown"
+  GFM: "GitLab Flavored Markdown' or 'GitHub Flavored Markdown"

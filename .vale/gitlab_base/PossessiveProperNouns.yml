@@ -1,0 +1,30 @@
+---
+name: gitlab_base.PossessiveProperNouns
+description: |
+  Try to avoid using possessives ('s) for proper nouns, like organization or
+  product names.
+extends: existence
+message: "Remove 's from %s."
+level: warning
+ignorecase: true
+link: https://docs.gitlab.com/development/documentation/styleguide/#possessives
+vocab: false
+tokens:
+  - Amazon's
+  - Apple's
+  - Atlassian's
+  - AWS's
+  - Azure's
+  - Bundler's
+  - Capybara's
+  - Docker's
+  - Gitaly's
+  - GitHub's
+  - Google Cloud's
+  - Google's
+  - Microsoft's
+  - Nvidia's
+  - Oracle's
+  - Red Hat's
+  - RSpec's
+  - Salesforce's

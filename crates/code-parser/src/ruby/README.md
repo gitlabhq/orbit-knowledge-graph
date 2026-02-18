@@ -1,3 +1,3 @@
-# Ruby Parser Documentation
+# Ruby parser
 
-See [Ruby Parser](../../../../docs/ruby_parser_docs/ruby_parser_overview.md) for more details.
+Tree-sitter based parser for Ruby source files. Extracts definitions, references, and call graphs for the code indexer.

@@ -21,6 +21,8 @@ SIPHON_PROTO_ROOT = "~/gitlab/gdk/siphon"
 "zig" = "0.15.2"
 clickhouse = "25.12"
 uv = "0.9.28"
+vale = "3.13.0"
+lychee = "0.21.0"
 
 [tasks.build]
 run = "cargo build --release"
@@ -42,11 +44,11 @@ run = [
 ]
 description = "Clean the crates"
 
-[tasks.lint]
+[tasks."lint:code"]
 run = "cargo clippy --all-targets --all-features -- -D warnings"
 description = "Run clippy lint checks"
 
-[tasks."lint:fix"]
+[tasks."lint:code:fix"]
 run = ["cargo fmt", "cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings", "cargo fmt"]
 description = "Run clippy lint checks and fix applicable issues"
 
@@ -89,4 +91,21 @@ description = "Start the GKG server (webserver mode)"
 [tasks."ontology:validate"]
 run = "find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile fixtures/ontology/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
+
+[tasks."lint:markdown"]
+run = "npx markdownlint-cli2@0.19.0 '**/*.md'"
+description = "Run markdownlint on all markdown files"
+
+[tasks."lint:vale"]
+run = "vale ."
+description = "Run Vale prose linting on markdown files"
+
+[tasks."lint:links"]
+run = "lychee --offline --include-fragments '**/*.md'"
+description = "Check for broken links in markdown files"
+
+[tasks."lint:docs"]
+depends = ["lint:markdown", "lint:vale", "lint:links"]
+run = "echo 'All doc linters passed'"
+description = "Run all documentation linters"
 

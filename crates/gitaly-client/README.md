@@ -1,6 +1,6 @@
 # gitaly-client
 
-Rust gRPC client for [Gitaly](https://gitlab.com/gitlab-org/gitaly), GitLab's Git RPC service.
+Rust gRPC client for [Gitaly](https://gitlab.com/gitlab-org/gitaly), the GitLab Git RPC service.
 
 ## Features
 
@@ -54,13 +54,13 @@ The client handles three token formats:
 
 1. **Raw secret**: Generates HMAC-SHA256 v2 token automatically
 2. **Pre-computed v2**: Tokens starting with `v2.` are wrapped with `Bearer`
-3. **Bearer token**: Tokens starting with `Bearer ` are used as-is
+3. **Bearer token**: Tokens starting with `Bearer` are used as-is
 
 ## Building
 
 The crate includes vendored proto-generated code, so it builds out of the box:
 
-```bash
+```shell
 cargo build -p gitaly-client
 ```
 
@@ -68,7 +68,7 @@ cargo build -p gitaly-client
 
 To update the proto-generated code when Gitaly APIs change:
 
-```bash
+```shell
 # Uses mise.toml config for GITALY_PROTO_ROOT
 mise exec -- cargo build -p gitaly-client --features regenerate-protos
 
@@ -84,7 +84,7 @@ Integration tests require a running Gitaly instance.
 
 ### Local (GDK)
 
-```bash
+```shell
 export GITALY_CONNECTION_INFO='{"address":"unix:/path/to/gdk/gitaly.socket","storage":"default","token":"secret"}'
 cargo nextest run -p gitaly-client --features integration
 ```

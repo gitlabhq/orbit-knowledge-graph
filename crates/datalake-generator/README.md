@@ -5,23 +5,25 @@
 High-throughput seeding harness for ClickHouse tables used by the Knowledge Graph.
 
 The generator has a single seeding architecture with:
+
 - deterministic foundation generation (users, groups, projects),
 - staged table writes with dependency ordering,
 - optional continuous mode for ongoing insert/update/delete traffic.
 
 ## Quick start
 
-```bash
+```shell
 cargo run --bin datalake-generate -- -c crates/datalake-generator/datalake-generator.yaml
 ```
 
 ## CLI
 
-```bash
+```shell
 cargo run --bin datalake-generate -- [OPTIONS]
 ```
 
 Options:
+
 - `-c, --config <PATH>`: YAML config path (default `datalake-generator.yaml`)
 - `--skip-seeding`: skip the initial seed and run from saved state
 
@@ -36,7 +38,7 @@ Options:
 
 ## Data generation pipeline
 
-```
+```plaintext
  OS threads (std::thread::scope)
 ┌──────────────────────────────────────────┐
 │                                          │
@@ -77,7 +79,7 @@ data. The graph has three layers, each depending on the one above.
 Built first, deterministically from config. These entities form the skeleton
 that all project-scoped data hangs off of.
 
-```
+```plaintext
 Organization (implicit, always id=1)
 ├── Users (flat list)
 └── Groups (hierarchical)
@@ -120,7 +122,7 @@ parents: `parent_index = (child_index * parent_count) / child_count`.
 
 Relationships expressed:
 
-```
+```plaintext
 MergeRequest ──────── Project (target_project_id, source_project_id)
 MergeRequest ──────── User (author_id)
 WorkItem ──────────── User (author_id)
@@ -150,7 +152,7 @@ to their respective counts. Work item parent links form a flat hierarchy
 IDs are computed arithmetically so that every row across every table gets a
 globally unique, deterministic ID with no coordination or sequence counters.
 
-```
+```plaintext
 table_id_base = next_entity_id + (table_position * block_size)
 block_size    = project_count * max_rows_per_project + 1
 
@@ -271,6 +273,7 @@ would destroy it.
 Use `crates/datalake-generator/datalake-generator.yaml` as the baseline.
 
 Key sections:
+
 - `datalake`: ClickHouse connection and database
 - `generation`: batch size, root counts, per-project counts, field overrides
 - `continuous`: continuous mode controls
@@ -280,5 +283,6 @@ Key sections:
 ## Metrics output
 
 When metrics are enabled, the generator writes:
+
 - JSON report at `metrics.output_path`
 - stdout summary with duration, table row counts, and resource usage

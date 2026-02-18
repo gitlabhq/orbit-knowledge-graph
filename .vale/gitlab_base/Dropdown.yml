@@ -1,0 +1,13 @@
+---
+name: gitlab_base.Dropdown
+description: |
+  Catches many ways the phrase 'dropdown list' can be fumbled.
+extends: existence
+message: "Use 'dropdown list'."
+link: https://docs.gitlab.com/development/documentation/styleguide/word_list/#dropdown-list
+vocab: false
+level: warning
+ignorecase: true
+tokens:
+  - drop-down( [\w]*)?
+  - dropdown(?! list)

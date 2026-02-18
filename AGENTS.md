@@ -11,6 +11,7 @@ Main repository for the GitLab Knowledge Graph (aka "gitlab orbit").
 ### Minimal Comments
 
 Don't add comments that narrate what code already says. Remove:
+
 - Obvious narration (`// Create a new vector`)
 - Changelog-style comments (`// Fixed bug where X`)
 - Section markers (`// === HELPERS ===`)
@@ -86,6 +87,7 @@ Integration tests require a running Gitaly instance. Set `GITALY_CONNECTION_INFO
 See [docs/dev/INFRASTRUCTURE.md](docs/dev/INFRASTRUCTURE.md) for sandbox environment details (GCP project, VMs, networking).
 
 Kubernetes deployments are managed via Helm charts in `./helm-dev/`. The charts are the source of truth for:
+
 - Component configuration (NATS, siphon-producer, siphon-consumer)
 - Secret management (External Secrets Operator integration)
 - Service connectivity

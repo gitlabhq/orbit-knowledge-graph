@@ -4,7 +4,7 @@ Streaming data generator and query evaluator for the GitLab Knowledge Graph. Gen
 
 ## Quick Start
 
-```bash
+```shell
 # Start ClickHouse and populate with fake data
 ./scripts/run.sh populate
 
@@ -20,7 +20,7 @@ Streaming data generator and query evaluator for the GitLab Knowledge Graph. Gen
 - [Colima](https://github.com/abiosoft/colima) - Docker runtime for macOS
 - Docker CLI
 
-```bash
+```shell
 brew install colima docker
 ```
 
@@ -28,7 +28,7 @@ brew install colima docker
 
 ### Script Commands
 
-```bash
+```shell
 ./scripts/run.sh start       # Start ClickHouse
 ./scripts/run.sh stop        # Stop ClickHouse
 ./scripts/run.sh clean       # Remove container and all data
@@ -40,7 +40,7 @@ brew install colima docker
 
 ### Populate Options
 
-```bash
+```shell
 ./scripts/run.sh populate --organizations 5              # 5 organizations
 ./scripts/run.sh populate --nodes-per-type 500           # 500 nodes per type
 ./scripts/run.sh populate --node-count User=1000         # Override specific types
@@ -51,7 +51,7 @@ brew install colima docker
 
 ### Direct Binary
 
-```bash
+```shell
 cargo run --bin simulate -- \
     --ontology-path fixtures/ontology \
     --clickhouse-url http://localhost:8123 \
@@ -91,11 +91,13 @@ No hardcoded entity names - all node types, fields, and edge types come from the
 ### Generated Tables
 
 For each node type in the ontology, a table `gl_{node_name}` is created with:
+
 - `organization_id` - Organization identifier
 - `traversal_path` - Hierarchical authorization path (e.g., "1/2/3")
 - All fields from the ontology definition
 
 A unified `gl_edge` table stores all relationships:
+
 - `relationship_kind` - Edge type (e.g., "AUTHORED", "CONTAINS")
 - `source` - Source node ID
 - `source_kind` - Source node type
@@ -104,7 +106,8 @@ A unified `gl_edge` table stores all relationships:
 
 ### Traversal IDs
 
-Traversal IDs enable efficient row-level authorization using GitLab's namespace hierarchy:
+Traversal IDs enable efficient row-level authorization using the GitLab namespace hierarchy:
+
 - Format: `org_id/group1/group2/...` (e.g., `1/42/100`)
 - Tables are ordered by `(organization_id, traversal_path, id)` for efficient range queries
 - Query pattern: `WHERE traversal_path LIKE '1/42/%'` to get all entities in a subtree
@@ -115,7 +118,7 @@ The `evaluate` command runs SDLC queries against the database and collects stati
 
 ### Basic Usage
 
-```bash
+```shell
 # Run all SDLC queries
 ./scripts/run.sh evaluate
 
@@ -131,7 +134,7 @@ The `evaluate` command runs SDLC queries against the database and collects stati
 
 ### Direct Binary
 
-```bash
+```shell
 cargo run --bin evaluate -- \
     --queries fixtures/queries/sdlc_queries.json \
     --ontology fixtures/ontology \

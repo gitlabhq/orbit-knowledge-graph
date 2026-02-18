@@ -1,0 +1,13 @@
+---
+name: gitlab_base.CommandStringsQuoted
+description: |
+  Ensures all code blocks wrap URL strings in quotation marks.
+extends: existence
+message: "For the command example, use double quotes around the URL: %s"
+link: https://docs.gitlab.com/development/documentation/restful_api_styleguide/#curl-commands
+vocab: false
+level: error
+scope: raw
+nonword: true
+tokens:
+  - '(curl|--url)[^"\]\n]+?https?:\/\/[^ \n]*'

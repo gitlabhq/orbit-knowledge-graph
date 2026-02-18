@@ -1,0 +1,13 @@
+---
+name: gitlab_base.OutdatedVersions
+description: |
+  Checks for references to versions of GitLab that are no longer supported.
+extends: existence
+message: "If possible, remove the reference to '%s'."
+link: https://docs.gitlab.com/development/documentation/styleguide/availability_details/#removing-versions
+vocab: false
+level: suggestion
+nonword: true
+ignorecase: true
+tokens:
+  - "GitLab v?(2[^0-9]|[4-9]|1[0-5])"
