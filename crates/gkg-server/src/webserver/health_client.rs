@@ -50,3 +50,44 @@ impl InfrastructureHealthClient {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn install_crypto_provider() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    #[test]
+    fn client_construction_does_not_panic() {
+        install_crypto_provider();
+        let client = InfrastructureHealthClient::new("http://localhost:9999".to_string());
+        assert_eq!(client.url, "http://localhost:9999");
+    }
+
+    #[tokio::test]
+    async fn check_or_unavailable_returns_unhealthy_for_unreachable_service() {
+        install_crypto_provider();
+        let client = InfrastructureHealthClient::new("http://127.0.0.1:1".to_string());
+        let status = client.check_or_unavailable().await;
+
+        assert_eq!(status.status, health_check::Status::Unhealthy);
+        assert!(status.clickhouse.error.is_some());
+        assert!(
+            status
+                .clickhouse
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("unreachable")
+        );
+    }
+
+    #[tokio::test]
+    async fn check_returns_error_for_unreachable_service() {
+        install_crypto_provider();
+        let client = InfrastructureHealthClient::new("http://127.0.0.1:1".to_string());
+        assert!(client.check().await.is_err());
+    }
+}
