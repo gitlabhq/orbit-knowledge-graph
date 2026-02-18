@@ -15,6 +15,10 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls CryptoProvider");
+
     labkit_rs::logging::init();
     let _metrics = labkit_rs::metrics::try_init().ok();
 
