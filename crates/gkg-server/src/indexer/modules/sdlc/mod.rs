@@ -231,13 +231,18 @@ mod tests {
             Ok(())
         }
 
-        async fn get_namespace_watermark(&self, _: i64) -> Result<DateTime<Utc>, WatermarkError> {
+        async fn get_namespace_watermark(
+            &self,
+            _: i64,
+            _: &str,
+        ) -> Result<DateTime<Utc>, WatermarkError> {
             Ok(DateTime::<Utc>::UNIX_EPOCH)
         }
 
         async fn set_namespace_watermark(
             &self,
             _: i64,
+            _: &str,
             _: &DateTime<Utc>,
         ) -> Result<(), WatermarkError> {
             Ok(())
