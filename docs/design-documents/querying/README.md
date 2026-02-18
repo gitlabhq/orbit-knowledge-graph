@@ -1,15 +1,3 @@
----
-title: GitLab Knowledge Graph Web Server Architecture
-status: ongoing
-description: How the Knowledge Graph web server architecture is designed to serve queries across MCP and deployed services.
-creation-date: "2025-10-12"
-authors: ["@michaelangelo", "@michaelusa", "jgdoyon1", "bohdanpk", "@dgruzd"]
-coaches: [ "@ahegyi", "@shekharpatnaik", "@andrewn" ]
-dris: [ "@michaelangelo" ]
-owning-stage: "~devops::create"
-participating-stages: ["~devops::analytics"]
----
-
 ## Overview
 
 The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agents can run graph queries without having to write Cypher or SQL directly. This server adds three major capabilities:

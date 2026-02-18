@@ -1,16 +1,3 @@
----
-title: GitLab Knowledge Graph
-status: ongoing
-creation-date: "2025-10-12"
-authors: ["@michaelangelo", "@michaelusa", "jgdoyon1", "bohdanpk", "@dgruzd"]
-coaches: [ "@ahegyi", "@shekharpatnaik", "@andrewn" ]
-dris: [ "@michaelangelo" ]
-owning-stage: "~devops::create"
-participating-stages: ["~devops::analytics"]
----
-
-{{< engineering/design-document-header >}}
-
 ## Motivation
 
 ### Problem Statement

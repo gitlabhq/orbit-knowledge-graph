@@ -1,18 +1,3 @@
----
-title: Server-side Knowledge Graph
-status: proposed
-creation-date: "2025-04-14"
-authors: [ "@jprovaznik", "@dgruzd", "@michaelangeloio" ]
-coaches: [ "@shekharpatnaik" ]
-dris: [ "@jordanjanes" ]
-owning-stage: "~devops::create"
-participating-stages: []
-# Hides this page in the left sidebar. Recommended so we don't pollute it.
-toc_hide: true
----
-
-{{< engineering/design-document-header >}}
-
 ## Summary
 
 This document proposes a new service that enhances repository insights by

@@ -1,8 +1,3 @@
----
-title: Security Architecture
-description: How the Knowledge Graph enforces the GitLab permission model through a multi-layered security design.
----
-
 ## Overview
 
 The Knowledge Graph unlocks querying capabilities across an entire GitLab namespace. To ensure data is never exposed to unauthorized users, the architecture implements a multi-layered security model that is enforced on every query. This document outlines the three layers of defense that work together to protect user data:

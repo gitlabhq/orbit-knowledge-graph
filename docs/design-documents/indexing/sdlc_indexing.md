@@ -1,8 +1,3 @@
----
-title: SDLC Graph Indexing Architecture
-description: A high-level guide to how GitLab SDLC events are indexed into a queryable knowledge graph.
----
-
 ## Overview
 
 The SDLC (Software Development Lifecycle) Graph, also known as the Namespace Graph, provides a queryable view of the interconnected entities and events within a GitLab namespace. It captures the relationships between projects, issues, merge requests, CI/CD pipelines, vulnerabilities, and more.

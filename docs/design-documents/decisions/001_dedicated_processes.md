@@ -1,9 +1,3 @@
----
-title: "ADR-001: FFI vs Dedicated Process Integration"
-owning-stage: "~devops::create"
-toc_hide: true
----
-
 ## Context
 
 The initial implementation used Foreign Function Interface (FFI) to integrate the

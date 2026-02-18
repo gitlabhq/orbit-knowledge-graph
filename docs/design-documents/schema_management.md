@@ -1,8 +1,3 @@
----
-title: Schema Management
-description: A guide to managing the schema of the GitLab Knowledge Graph.
----
-
 ## Overview
 
 The GitLab Knowledge Graph schema will evolve over time as we add new entities and relationships. This document will outline the process for managing the schema ranging from initial schema design to schema evolution in ClickHouse. A robust schema management strategy is critical for ensuring the long-term maintainability, scalability and reliability of the service.

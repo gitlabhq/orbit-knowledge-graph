@@ -1,8 +1,3 @@
----
-title: Knowledge Graph Data Model
-description: An overview of the nodes and relationships in the GitLab Knowledge Graph, focusing on the Namespace and Code graphs.
----
-
 ## Overview
 
 The GitLab Knowledge Graph is composed of two primary sub-graphs that share a common schema foundation: the **Namespace (SDLC) Graph** and the **Code Graph**. This document details the data model for each, covering the nodes and relationships that constitute them.
