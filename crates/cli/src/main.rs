@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use code_indexer::indexer::{IndexingConfig, RepositoryIndexer};
-use code_indexer::loading::DirectoryFileSource;
+use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
+use code_graph::loading::DirectoryFileSource;
 use ontology::Ontology;
 use query_engine::SecurityContext;
 use serde::Serialize;

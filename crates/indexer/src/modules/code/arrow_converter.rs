@@ -1,4 +1,4 @@
-//! Arrow conversion for code indexer graph data.
+//! Arrow conversion for code graph data.
 
 use std::sync::Arc;
 
@@ -6,10 +6,10 @@ use arrow::array::{ArrayRef, Int64Builder, StringBuilder};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
-use code_indexer::analysis::types::{
+use code_graph::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode,
 };
-use code_indexer::graph::RelationshipKind;
+use code_graph::graph::RelationshipKind;
 
 pub struct ArrowConverter {
     traversal_path: String,
@@ -454,7 +454,7 @@ fn relationship_kind_to_strings(kind: &RelationshipKind) -> (&'static str, &'sta
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_indexer::analysis::types::{DefinitionType, FqnType};
+    use code_graph::analysis::types::{DefinitionType, FqnType};
     use internment::ArcIntern;
     use parser_core::ruby::types::{RubyDefinitionType, RubyFqn, RubyFqnPart, RubyFqnPartType};
     use parser_core::utils::{Position, Range};

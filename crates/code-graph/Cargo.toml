@@ -1,5 +1,5 @@
 [package]
-name = "code-indexer"
+name = "code-graph"
 version.workspace = true
 edition = "2024"
 

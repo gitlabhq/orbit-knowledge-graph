@@ -17,7 +17,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
-code-indexer = { path = "../code-indexer" }
+code-graph = { path = "../code-graph" }
 datafusion = { workspace = true }
 futures = { workspace = true }
 gitaly-client = { path = "../gitaly-client" }

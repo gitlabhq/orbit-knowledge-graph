@@ -1,7 +1,7 @@
 //! Code Indexing Module
 //!
 //! This module processes git push events from the Siphon CDC stream,
-//! fetches repository code from Gitaly, runs the code-indexer, and
+//! fetches repository code from Gitaly, runs the code-graph, and
 //! writes the resulting graph data to ClickHouse.
 
 mod arrow_converter;

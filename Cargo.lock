@@ -1077,7 +1077,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "code-indexer"
+name = "code-graph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2703,7 +2703,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "code-indexer",
+ "code-graph",
  "dunce",
  "ontology",
  "query-engine",
@@ -3310,7 +3310,7 @@ dependencies = [
  "chrono",
  "clickhouse",
  "clickhouse-client",
- "code-indexer",
+ "code-graph",
  "datafusion",
  "futures",
  "gitaly-client",
