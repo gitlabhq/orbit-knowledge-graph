@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
 use indexer::module::{Handler, HandlerContext, Module};
 use indexer::modules::SdlcModule;
-use indexer::testkit::MockNatsServices;
+use indexer::testkit::{MockLockService, MockNatsServices};
 use query_engine::ParameterizedQuery;
 use serde_json::Value;
 use testcontainers::core::{ContainerPort, ImageExt};
@@ -68,6 +68,7 @@ impl TestContext {
         HandlerContext::new(
             Arc::new(self.create_destination()),
             Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
         )
     }
 

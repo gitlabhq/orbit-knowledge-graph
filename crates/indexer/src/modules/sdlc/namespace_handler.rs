@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tracing::{debug, info, warn};
 
-use super::locking::{INDEXING_LOCKS_BUCKET, namespace_lock_key};
+use super::locking::namespace_lock_key;
 use super::pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
 use crate::topic::NamespaceIndexingRequest;
@@ -232,11 +232,7 @@ impl Handler for NamespaceHandler {
 
         if errors.is_empty() {
             let lock_key = namespace_lock_key(payload.namespace);
-            if let Err(error) = context
-                .nats
-                .kv_delete(INDEXING_LOCKS_BUCKET, &lock_key)
-                .await
-            {
+            if let Err(error) = context.lock_service.release(&lock_key).await {
                 warn!(
                     namespace_id = payload.namespace,
                     %error,
@@ -277,7 +273,7 @@ impl Handler for NamespaceHandler {
 mod tests {
     use super::*;
     use crate::modules::sdlc::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
-    use crate::testkit::{MockDestination, MockNatsServices, TestEnvelopeFactory};
+    use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use futures::stream;
     use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
     use std::collections::{BTreeMap, HashMap};
@@ -452,7 +448,11 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(MockNatsServices::new()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
 
         let result = handler.handle(context, envelope).await;
 
@@ -480,18 +480,22 @@ mod tests {
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
 
-        let mock_nats = MockNatsServices::new();
+        let mock_locks = Arc::new(MockLockService::new());
         let lock_key = namespace_lock_key(namespace_id);
-        mock_nats.set_kv(INDEXING_LOCKS_BUCKET, &lock_key, bytes::Bytes::new());
+        mock_locks.set_lock(&lock_key);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(mock_nats.clone()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            mock_locks.clone(),
+        );
 
         let result = handler.handle(context, envelope).await;
 
         assert!(result.is_ok());
         assert!(
-            mock_nats.get_kv(INDEXING_LOCKS_BUCKET, &lock_key).is_none(),
+            !mock_locks.is_held(&lock_key),
             "namespace lock should be released after successful processing"
         );
     }
@@ -520,7 +524,11 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(MockNatsServices::new()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
 
         handler.handle(context, envelope).await.unwrap();
 
@@ -577,7 +585,11 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(MockNatsServices::new()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
 
         let result = handler.handle(context, envelope).await;
         assert!(
@@ -634,7 +646,11 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(MockNatsServices::new()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
 
         let result = handler.handle(context, envelope).await;
         assert!(result.is_err());
@@ -692,7 +708,11 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(MockNatsServices::new()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
 
         // The handler should resolve different watermarks per entity.
         // Both succeed, so both get the new watermark stored.
@@ -727,7 +747,11 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(MockNatsServices::new()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
 
         let result = handler.handle(context, envelope).await;
         assert!(
@@ -764,18 +788,22 @@ mod tests {
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
 
-        let mock_nats = MockNatsServices::new();
+        let mock_locks = Arc::new(MockLockService::new());
         let lock_key = namespace_lock_key(namespace_id);
-        mock_nats.set_kv(INDEXING_LOCKS_BUCKET, &lock_key, bytes::Bytes::new());
+        mock_locks.set_lock(&lock_key);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(mock_nats.clone()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            mock_locks.clone(),
+        );
 
         let result = handler.handle(context, envelope).await;
         assert!(result.is_err());
 
         assert!(
-            mock_nats.get_kv(INDEXING_LOCKS_BUCKET, &lock_key).is_some(),
+            mock_locks.is_held(&lock_key),
             "namespace lock should NOT be released when processing fails"
         );
     }

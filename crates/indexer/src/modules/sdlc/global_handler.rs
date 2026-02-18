@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tracing::{debug, info, warn};
 
-use super::locking::{INDEXING_LOCKS_BUCKET, global_lock_key};
+use super::locking::global_lock_key;
 use super::pipeline::OntologyEntityPipeline;
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
 use crate::topic::GlobalIndexingRequest;
@@ -133,11 +133,7 @@ impl Handler for GlobalHandler {
                 "global watermark updated"
             );
 
-            if let Err(error) = context
-                .nats
-                .kv_delete(INDEXING_LOCKS_BUCKET, global_lock_key())
-                .await
-            {
+            if let Err(error) = context.lock_service.release(global_lock_key()).await {
                 warn!(%error, "failed to release global lock, will expire via TTL");
             } else {
                 debug!("global indexing lock released");
@@ -166,7 +162,7 @@ impl Handler for GlobalHandler {
 mod tests {
     use super::*;
     use crate::modules::sdlc::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
-    use crate::testkit::{MockDestination, MockNatsServices, TestEnvelopeFactory};
+    use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use futures::stream;
     use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
     use std::collections::BTreeMap;
@@ -263,7 +259,11 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(MockNatsServices::new()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
 
         let result = handler.handle(context, envelope).await;
 
@@ -287,23 +287,21 @@ mod tests {
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
 
-        let mock_nats = MockNatsServices::new();
-        mock_nats.set_kv(
-            INDEXING_LOCKS_BUCKET,
-            global_lock_key(),
-            bytes::Bytes::new(),
-        );
+        let mock_locks = Arc::new(MockLockService::new());
+        mock_locks.set_lock(global_lock_key());
 
         let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(destination, Arc::new(mock_nats.clone()));
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            mock_locks.clone(),
+        );
 
         let result = handler.handle(context, envelope).await;
 
         assert!(result.is_ok());
         assert!(
-            mock_nats
-                .get_kv(INDEXING_LOCKS_BUCKET, global_lock_key())
-                .is_none(),
+            !mock_locks.is_held(global_lock_key()),
             "global lock should be released after successful processing"
         );
     }

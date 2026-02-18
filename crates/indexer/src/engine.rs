@@ -37,6 +37,7 @@ use tracing::warn;
 
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
+use crate::locking::{LockService, NatsLockService};
 use crate::metrics::EngineMetrics;
 use crate::module::{Handler, HandlerContext, HandlerError, ModuleRegistry};
 use crate::nats::{NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
@@ -73,6 +74,7 @@ pub struct EngineBuilder {
     registry: Arc<ModuleRegistry>,
     destination: Arc<dyn Destination>,
     nats_services: Option<Arc<dyn NatsServices>>,
+    lock_service: Option<Arc<dyn LockService>>,
 }
 
 impl EngineBuilder {
@@ -87,6 +89,7 @@ impl EngineBuilder {
             registry,
             destination,
             nats_services: None,
+            lock_service: None,
         }
     }
 
@@ -98,11 +101,23 @@ impl EngineBuilder {
         self
     }
 
+    /// Sets the lock service for handlers.
+    ///
+    /// If not called, a default `NatsLockService` wrapping the NATS services is used.
+    pub fn lock_service(mut self, lock_service: Arc<dyn LockService>) -> Self {
+        self.lock_service = Some(lock_service);
+        self
+    }
+
     /// Builds the engine.
     pub fn build(self) -> Engine {
         let nats_services: Arc<dyn NatsServices> = self
             .nats_services
             .unwrap_or_else(|| Arc::new(NatsServicesImpl::new(self.broker.clone())));
+
+        let lock_service: Arc<dyn LockService> = self
+            .lock_service
+            .unwrap_or_else(|| Arc::new(NatsLockService::new(nats_services.clone())));
 
         let metrics = Arc::new(EngineMetrics::new());
 
@@ -112,6 +127,7 @@ impl EngineBuilder {
             destination: self.destination,
             metrics,
             nats_services,
+            lock_service,
             cancel: CancellationToken::new(),
         }
     }
@@ -142,6 +158,7 @@ pub struct Engine {
     destination: Arc<dyn Destination>,
     metrics: Arc<EngineMetrics>,
     nats_services: Arc<dyn NatsServices>,
+    lock_service: Arc<dyn LockService>,
     cancel: CancellationToken,
 }
 
@@ -180,7 +197,7 @@ impl Engine {
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&topic),
-                        HandlerContext::new(self.destination.clone(), self.nats_services.clone()),
+                        HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone()),
                         worker_pool.clone(),
                         self.metrics.clone(),
                         topic_label.clone(),

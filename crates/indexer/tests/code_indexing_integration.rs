@@ -9,7 +9,7 @@ use indexer::modules::code::{
     ClickHouseCodeWatermarkStore, ClickHouseProjectStore, CodeIndexingConfig, GitalyConfiguration,
     GitalyRepositoryService, PushEventHandler,
 };
-use indexer::testkit::{MockNatsServices, TestEnvelopeFactory};
+use indexer::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
 use prost::Message;
 use sha2::{Digest, Sha256};
 use siphon_proto::replication_event::Column;
@@ -62,6 +62,7 @@ async fn indexes_repository_from_gitaly() {
     let context = HandlerContext::new(
         Arc::new(clickhouse.create_destination()),
         Arc::new(MockNatsServices::new()),
+        Arc::new(MockLockService::new()),
     );
     let envelope = TestEnvelopeFactory::with_bytes(push_event_payload(project_id, &commit_sha));
 
