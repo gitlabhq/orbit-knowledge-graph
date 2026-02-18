@@ -14,10 +14,7 @@ use tracing::{debug, info, warn};
 
 use super::arrow_converter::ArrowConverter;
 use super::config::LOCK_TTL;
-use super::config::{
-    CodeIndexingConfig, buckets, siphon_actions, siphon_ref_types, subjects, tables,
-};
-use super::event_cache_handler::CachedEventInfo;
+use super::config::{CodeIndexingConfig, siphon_actions, siphon_ref_types, subjects, tables};
 use super::gitaly::RepositoryService;
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
@@ -108,11 +105,7 @@ impl PushEventHandler {
             return Ok(());
         };
 
-        let Some(project_id) = self.resolve_project_id(context, event).await? else {
-            return Err(HandlerError::Processing(
-                "no project_id in payload and not in cache".into(),
-            ));
-        };
+        let project_id = event.project_id;
 
         if !self.is_default_branch(project_id, &branch).await {
             debug!(
@@ -300,35 +293,6 @@ impl PushEventHandler {
 }
 
 impl PushEventHandler {
-    async fn resolve_project_id(
-        &self,
-        ctx: &HandlerContext,
-        event: &PushEventPayload,
-    ) -> Result<Option<i64>, HandlerError> {
-        if let Some(id) = event.project_id {
-            return Ok(Some(id));
-        }
-
-        let key = event.event_id.to_string();
-        match ctx.nats.kv_get(buckets::EVENTS_CACHE, &key).await {
-            Ok(Some(entry)) => {
-                let info: CachedEventInfo = serde_json::from_slice(&entry.value)
-                    .map_err(|e| HandlerError::Processing(format!("failed to parse cache: {e}")))?;
-                Ok(Some(info.project_id))
-            }
-            Ok(None) => {
-                warn!(
-                    event_id = event.event_id,
-                    "project_id not in payload or cache"
-                );
-                Ok(None)
-            }
-            Err(e) => Err(HandlerError::Processing(format!(
-                "cache lookup failed: {e}"
-            ))),
-        }
-    }
-
     async fn lookup_project(
         &self,
         event_id: i64,
@@ -446,7 +410,7 @@ impl PushEventHandler {
 #[derive(Debug, Clone)]
 struct PushEventPayload {
     event_id: i64,
-    project_id: Option<i64>,
+    project_id: i64,
     ref_type: i32,
     action: i32,
     ref_name: String,
@@ -460,7 +424,7 @@ impl PushEventPayload {
     ) -> Option<Self> {
         Some(Self {
             event_id: extractor.get_i64(event, "event_id")?,
-            project_id: extractor.get_i64(event, "project_id"),
+            project_id: extractor.get_i64(event, "project_id")?,
             ref_type: extractor.get_i32(event, "ref_type")?,
             action: extractor.get_i32(event, "action")?,
             ref_name: extractor.get_string(event, "ref")?.to_string(),
@@ -477,15 +441,12 @@ impl PushEventPayload {
 mod tests {
     use super::*;
     use crate::module::Handler;
-    use crate::modules::code::event_cache_handler::CachedEventInfo;
     use crate::modules::code::gitaly::test_utils::MockRepositoryService;
     use crate::modules::code::project_store::ProjectInfo;
     use crate::modules::code::project_store::test_utils::MockProjectStore;
     use crate::modules::code::test_helpers::{build_replication_events, push_payload_columns};
     use crate::modules::code::watermark_store::test_utils::MockCodeWatermarkStore;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
-    use bytes::Bytes;
-
     struct TestContext {
         handler: PushEventHandler,
         mock_nats: Arc<MockNatsServices>,
@@ -495,10 +456,6 @@ mod tests {
     }
 
     impl TestContext {
-        fn new() -> Self {
-            Self::with_repository_service(MockRepositoryService::create())
-        }
-
         fn with_repository_service(repository_service: Arc<dyn RepositoryService>) -> Self {
             let mock_nats = Arc::new(MockNatsServices::new());
             let mock_locks = Arc::new(MockLockService::new());
@@ -540,17 +497,6 @@ mod tests {
             );
         }
 
-        fn cache_event(&self, event_id: i64, project_id: i64) {
-            let info = CachedEventInfo {
-                project_id,
-                author_id: 1,
-                created_at: "2024-01-01T00:00:00Z".to_string(),
-            };
-            let bytes = Bytes::from(serde_json::to_vec(&info).unwrap());
-            self.mock_nats
-                .set_kv(buckets::EVENTS_CACHE, &event_id.to_string(), bytes);
-        }
-
         async fn set_watermark(&self, project_id: i64, branch: &str, last_event_id: i64) {
             self.watermark_store
                 .set_watermark(&CodeIndexingWatermark {
@@ -582,7 +528,7 @@ mod tests {
         ctx.add_project(123);
 
         let payload = build_replication_events(vec![
-            push_payload_columns(1, Some(123), "refs/heads/feature/new-thing", "abc123").build(),
+            push_payload_columns(1, 123, "refs/heads/feature/new-thing", "abc123").build(),
         ]);
         let envelope = TestEnvelopeFactory::with_bytes(payload);
 
@@ -600,7 +546,7 @@ mod tests {
         ctx.set_watermark(123, "main", 100).await;
 
         let payload = build_replication_events(vec![
-            push_payload_columns(50, Some(123), "refs/heads/main", "abc123").build(),
+            push_payload_columns(50, 123, "refs/heads/main", "abc123").build(),
         ]);
         let envelope = TestEnvelopeFactory::with_bytes(payload);
 
@@ -611,48 +557,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn does_not_acquire_lock_when_project_id_missing_and_not_cached() {
-        let ctx = TestContext::new();
-
-        let payload = build_replication_events(vec![
-            push_payload_columns(100, None, "refs/heads/main", "abc123").build(),
-        ]);
-        let envelope = TestEnvelopeFactory::with_bytes(payload);
-
-        ctx.handler
-            .handle(ctx.handler_context(), envelope)
-            .await
-            .unwrap();
-
-        assert!(!ctx.lock_exists(100, "main"));
-    }
-
-    #[tokio::test]
-    async fn resolves_project_id_from_cache_but_skips_when_not_default_branch() {
-        let mock_repo = MockRepositoryService::with_default_branch(456, "refs/heads/main");
-        let ctx = TestContext::with_repository_service(mock_repo);
-        ctx.cache_event(100, 456);
-
-        let payload = build_replication_events(vec![
-            push_payload_columns(100, None, "refs/heads/develop", "abc123").build(),
-        ]);
-        let envelope = TestEnvelopeFactory::with_bytes(payload);
-
-        ctx.handler
-            .handle(ctx.handler_context(), envelope)
-            .await
-            .unwrap();
-
-        assert!(!ctx.lock_exists(456, "develop"));
-    }
-
-    #[tokio::test]
     async fn does_not_acquire_lock_when_project_not_in_knowledge_graph() {
         let mock_repo = MockRepositoryService::with_default_branch(999, "refs/heads/main");
         let ctx = TestContext::with_repository_service(mock_repo);
 
         let payload = build_replication_events(vec![
-            push_payload_columns(100, Some(999), "refs/heads/main", "abc123").build(),
+            push_payload_columns(100, 999, "refs/heads/main", "abc123").build(),
         ]);
         let envelope = TestEnvelopeFactory::with_bytes(payload);
 
@@ -672,7 +582,7 @@ mod tests {
         ctx.set_lock(123, "main");
 
         let payload = build_replication_events(vec![
-            push_payload_columns(100, Some(123), "refs/heads/main", "abc123").build(),
+            push_payload_columns(100, 123, "refs/heads/main", "abc123").build(),
         ]);
         let envelope = TestEnvelopeFactory::with_bytes(payload);
 

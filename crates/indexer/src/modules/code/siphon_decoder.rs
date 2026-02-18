@@ -42,17 +42,6 @@ pub fn extract_i32(value: &Value) -> Option<i32> {
     }
 }
 
-pub fn extract_timestamp_string(value: &Value) -> Option<String> {
-    match &value.value {
-        Some(value::Value::TimestampValue(ts)) => {
-            let datetime = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)?;
-            Some(datetime.to_rfc3339())
-        }
-        Some(value::Value::StringValue(s)) => Some(s.clone()),
-        _ => None,
-    }
-}
-
 pub struct ColumnExtractor<'a> {
     events: &'a LogicalReplicationEvents,
 }
@@ -81,16 +70,6 @@ impl<'a> ColumnExtractor<'a> {
             Some(value::Value::StringValue(s)) => Some(s.as_str()),
             _ => None,
         }
-    }
-
-    pub fn get_timestamp_string(
-        &self,
-        event: &ReplicationEvent,
-        column_name: &str,
-    ) -> Option<String> {
-        let index = get_column_index(self.events, column_name)?;
-        let value = get_column_value(event, index)?;
-        extract_timestamp_string(value)
     }
 }
 

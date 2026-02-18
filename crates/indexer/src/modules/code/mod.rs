@@ -6,7 +6,6 @@
 
 mod arrow_converter;
 pub mod config;
-mod event_cache_handler;
 mod gitaly;
 mod project_store;
 mod push_event_handler;
@@ -25,8 +24,6 @@ pub use gitaly::{GitalyConfiguration, GitalyRepositoryService, RepositoryService
 pub use project_store::ClickHouseProjectStore;
 pub use push_event_handler::PushEventHandler;
 pub use watermark_store::ClickHouseCodeWatermarkStore;
-
-use event_cache_handler::EventCacheHandler;
 
 pub struct CodeModule {
     repository_service: Arc<dyn RepositoryService>,
@@ -58,15 +55,12 @@ impl Module for CodeModule {
     }
 
     fn handlers(&self) -> Vec<Box<dyn Handler>> {
-        vec![
-            Box::new(EventCacheHandler::new(self.config.clone())),
-            Box::new(PushEventHandler::new(
-                Arc::clone(&self.repository_service),
-                Arc::clone(&self.watermark_store),
-                Arc::clone(&self.project_store),
-                self.config.clone(),
-            )),
-        ]
+        vec![Box::new(PushEventHandler::new(
+            Arc::clone(&self.repository_service),
+            Arc::clone(&self.watermark_store),
+            Arc::clone(&self.project_store),
+            self.config.clone(),
+        ))]
     }
 
     fn entities(&self) -> Vec<crate::entities::Entity> {
