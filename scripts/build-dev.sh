@@ -74,7 +74,7 @@ else
 fi
 
 docker build --platform "$DOCKER_PLATFORM" -t "$IMAGE_TAG" -f - "$CONTEXT_DIR" <<'EOF'
-FROM debian:bookworm-slim
+FROM registry.access.redhat.com/ubi9/ubi-micro:latest
 COPY gkg-server /usr/local/bin/gkg-server
 ENTRYPOINT ["gkg-server"]
 EOF
