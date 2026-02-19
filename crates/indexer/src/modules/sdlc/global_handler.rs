@@ -3,13 +3,14 @@
 //! Processes entities with `EtlScope::Global` using ontology-driven pipelines.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info};
 
 use super::locking::global_lock_key;
 use super::pipeline::OntologyEntityPipeline;
@@ -80,15 +81,16 @@ impl Handler for GlobalHandler {
                 w
             }
             Err(WatermarkError::NoData) => {
-                debug!("no global watermark found, starting from epoch");
+                info!("no global watermark found, starting from epoch");
                 DateTime::<Utc>::UNIX_EPOCH
             }
             Err(error) => {
-                warn!(%error, "failed to fetch global watermark, using epoch");
+                error!(%error, "global watermark fetch failed, reprocessing from epoch");
                 DateTime::<Utc>::UNIX_EPOCH
             }
         };
 
+        let started_at = Instant::now();
         let params = GlobalQueryParams::new(&last_watermark, &payload.watermark);
 
         info!(
@@ -101,21 +103,13 @@ impl Handler for GlobalHandler {
         let mut errors = Vec::new();
         let mut successful_pipelines = 0;
         for pipeline in &self.pipelines {
-            debug!(
-                entity = pipeline.entity_name(),
-                "processing global entity pipeline"
-            );
             if let Err(error) = pipeline
                 .process(params.to_json(), context.destination.as_ref())
                 .await
             {
-                warn!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
+                error!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
                 errors.push((pipeline.entity_name().to_string(), error));
             } else {
-                debug!(
-                    entity = pipeline.entity_name(),
-                    "global entity pipeline completed"
-                );
                 successful_pipelines += 1;
             }
         }
@@ -134,16 +128,25 @@ impl Handler for GlobalHandler {
             );
 
             if let Err(error) = context.lock_service.release(global_lock_key()).await {
-                warn!(%error, "failed to release global lock, will expire via TTL");
-            } else {
-                debug!("global indexing lock released");
+                error!(%error, "failed to release global lock, will expire via TTL");
             }
 
-            info!(successful_pipelines, "global indexing completed");
+            info!(
+                successful_pipelines,
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                "global indexing completed"
+            );
         }
 
-        // TODO: We should store per entity watermarks so we can resume for a specific entity and not the whole thing.
         if !errors.is_empty() {
+            let failed_count = errors.len();
+            error!(
+                failed_count,
+                successful_pipelines,
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                "global indexing finished with failures"
+            );
+
             let error_details: Vec<_> = errors
                 .iter()
                 .map(|(name, err)| format!("{name}: {err}"))

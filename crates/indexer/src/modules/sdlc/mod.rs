@@ -16,7 +16,7 @@ use global_handler::GlobalHandler;
 use namespace_handler::NamespaceHandler;
 use ontology::{EtlScope, NodeEntity, Ontology};
 use pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info};
 use watermark_store::{ClickHouseWatermarkStore, WatermarkStore};
 
 pub struct SdlcModule {
@@ -82,7 +82,7 @@ impl SdlcModule {
         let pipeline =
             OntologyEntityPipeline::from_node(node, &self.ontology, Arc::clone(&self.datalake));
         if pipeline.is_none() {
-            warn!(
+            error!(
                 entity = node.name,
                 "failed to create pipeline for entity, skipping"
             );
