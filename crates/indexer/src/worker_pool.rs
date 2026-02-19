@@ -23,6 +23,7 @@ use std::time::Instant;
 
 use opentelemetry::KeyValue;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tracing::{debug, info};
 
 use crate::configuration::EngineConfiguration;
 use crate::metrics::EngineMetrics;
@@ -71,7 +72,7 @@ impl WorkerPool {
     pub fn new(configuration: &EngineConfiguration, metrics: Arc<EngineMetrics>) -> Self {
         let global_semaphore = Arc::new(Semaphore::new(configuration.max_concurrent_workers));
 
-        let module_semaphores = configuration
+        let module_semaphores: HashMap<String, Arc<Semaphore>> = configuration
             .modules
             .iter()
             .filter_map(|(name, config)| {
@@ -80,6 +81,12 @@ impl WorkerPool {
                     .map(|max| (name.clone(), Arc::new(Semaphore::new(max))))
             })
             .collect();
+
+        info!(
+            global_limit = configuration.max_concurrent_workers,
+            module_limits = ?module_semaphores.keys().collect::<Vec<_>>(),
+            "worker pool created"
+        );
 
         WorkerPool {
             global_semaphore,
@@ -106,12 +113,18 @@ impl WorkerPool {
         if let Some(semaphore) = self.module_semaphores.get(module_name) {
             let module_start = Instant::now();
             module_permit = Some(semaphore.clone().acquire_owned().await.ok()?);
+            let wait_duration = module_start.elapsed();
             self.metrics.permit_wait_duration.record(
-                module_start.elapsed().as_secs_f64(),
+                wait_duration.as_secs_f64(),
                 &[
                     KeyValue::new("scope", "module"),
                     KeyValue::new("module", module_name.to_owned()),
                 ],
+            );
+            debug!(
+                module = module_name,
+                wait_ms = wait_duration.as_millis() as u64,
+                "module permit acquired"
             );
             attributes.push(KeyValue::new("scope", module_name.to_owned()));
         }
