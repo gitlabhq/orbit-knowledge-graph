@@ -3,13 +3,14 @@
 //! Processes entities with `EtlScope::Namespaced` using ontology-driven pipelines.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info};
 
 use super::locking::namespace_lock_key;
 use super::pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
@@ -81,19 +82,14 @@ impl NamespaceHandler {
                 watermark
             }
             Err(WatermarkError::NoData) => {
-                debug!(
+                info!(
                     namespace_id,
                     entity, "no namespace entity watermark found, starting from epoch"
                 );
                 DateTime::<Utc>::UNIX_EPOCH
             }
             Err(error) => {
-                warn!(
-                    namespace_id,
-                    entity,
-                    %error,
-                    "failed to fetch namespace entity watermark, using epoch"
-                );
+                error!(namespace_id, entity, %error, "watermark fetch failed, reprocessing from epoch");
                 DateTime::<Utc>::UNIX_EPOCH
             }
         }
@@ -115,6 +111,8 @@ impl Handler for NamespaceHandler {
             message.to_event().map_err(|error| match error {
                 SerializationError::Json(e) => HandlerError::Deserialization(e),
             })?;
+
+        let started_at = Instant::now();
 
         info!(
             namespace_id = payload.namespace,
@@ -141,42 +139,24 @@ impl Handler for NamespaceHandler {
                 &payload.watermark,
             );
 
-            debug!(
-                namespace_id = payload.namespace,
-                entity,
-                from_watermark = %params.last_watermark,
-                to_watermark = %params.watermark,
-                "processing namespace entity pipeline"
-            );
             if let Err(error) = pipeline
                 .process(params.to_json(), context.destination.as_ref())
                 .await
             {
-                warn!(
-                    namespace_id = payload.namespace,
-                    entity,
-                    %error,
-                    "pipeline processing failed"
-                );
+                error!(namespace_id = payload.namespace, entity, %error, "entity pipeline failed");
                 errors.push((entity.to_string(), error));
-            } else {
-                self.watermark_store
-                    .set_namespace_watermark(payload.namespace, entity, &payload.watermark)
-                    .await
-                    .map_err(|e| {
-                        HandlerError::Processing(format!(
-                            "failed to update namespace watermark for {entity}: {e}"
-                        ))
-                    })?;
-
-                debug!(
-                    namespace_id = payload.namespace,
-                    entity,
-                    watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
-                    "namespace entity pipeline completed, watermark updated"
-                );
-                successful_entity_pipelines += 1;
+                continue;
             }
+
+            self.watermark_store
+                .set_namespace_watermark(payload.namespace, entity, &payload.watermark)
+                .await
+                .map_err(|error| {
+                    error!(namespace_id = payload.namespace, entity, %error, "failed to update namespace watermark");
+                    HandlerError::Processing(format!("failed to update namespace watermark for {entity}: {error}"))
+                })?;
+
+            successful_entity_pipelines += 1;
         }
 
         for edge_pipeline in &self.edge_pipelines {
@@ -192,56 +172,33 @@ impl Handler for NamespaceHandler {
                 &payload.watermark,
             );
 
-            debug!(
-                namespace_id = payload.namespace,
-                edge = entity,
-                from_watermark = %params.last_watermark,
-                to_watermark = %params.watermark,
-                "processing namespace edge pipeline"
-            );
             if let Err(error) = edge_pipeline
                 .process(params.to_json(), context.destination.as_ref())
                 .await
             {
-                warn!(
-                    namespace_id = payload.namespace,
-                    edge = entity,
-                    %error,
-                    "edge pipeline processing failed"
-                );
+                error!(namespace_id = payload.namespace, edge = entity, %error, "edge pipeline failed");
                 errors.push((entity.to_string(), error));
-            } else {
-                self.watermark_store
-                    .set_namespace_watermark(payload.namespace, entity, &payload.watermark)
-                    .await
-                    .map_err(|e| {
-                        HandlerError::Processing(format!(
-                            "failed to update namespace watermark for {entity}: {e}"
-                        ))
-                    })?;
-
-                debug!(
-                    namespace_id = payload.namespace,
-                    edge = entity,
-                    watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
-                    "namespace edge pipeline completed, watermark updated"
-                );
-                successful_edge_pipelines += 1;
+                continue;
             }
+
+            self.watermark_store
+                .set_namespace_watermark(payload.namespace, entity, &payload.watermark)
+                .await
+                .map_err(|error| {
+                    error!(namespace_id = payload.namespace, edge = entity, %error, "failed to update namespace edge watermark");
+                    HandlerError::Processing(format!("failed to update namespace watermark for {entity}: {error}"))
+                })?;
+
+            successful_edge_pipelines += 1;
         }
 
         if errors.is_empty() {
             let lock_key = namespace_lock_key(payload.namespace);
             if let Err(error) = context.lock_service.release(&lock_key).await {
-                warn!(
+                error!(
                     namespace_id = payload.namespace,
                     %error,
                     "failed to release namespace lock, will expire via TTL"
-                );
-            } else {
-                debug!(
-                    namespace_id = payload.namespace,
-                    "namespace indexing lock released"
                 );
             }
 
@@ -250,11 +207,22 @@ impl Handler for NamespaceHandler {
                 organization_id = payload.organization,
                 successful_entity_pipelines,
                 successful_edge_pipelines,
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
                 "namespace indexing completed"
             );
         }
 
         if !errors.is_empty() {
+            let failed_count = errors.len();
+            error!(
+                namespace_id = payload.namespace,
+                failed_count,
+                successful_entity_pipelines,
+                successful_edge_pipelines,
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                "namespace indexing finished with failures"
+            );
+
             let error_details: Vec<_> = errors
                 .iter()
                 .map(|(name, err)| format!("{name}: {err}"))

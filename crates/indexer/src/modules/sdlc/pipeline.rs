@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::destination::{BatchWriter, Destination};
 use crate::module::HandlerError;
@@ -55,6 +56,8 @@ impl OntologyEntityPipeline {
         params: Value,
         destination: &dyn Destination,
     ) -> Result<(), HandlerError> {
+        let started_at = Instant::now();
+
         let entity_writer = destination
             .new_batch_writer(&self.destination_table)
             .await
@@ -77,7 +80,7 @@ impl OntologyEntityPipeline {
 
         debug!(
             entity = %self.entity_name,
-            query = %self.extract_query,
+            %params,
             "querying datalake for entity data"
         );
 
@@ -106,14 +109,6 @@ impl OntologyEntityPipeline {
             let batch_rows = source_batch.num_rows();
             total_rows += batch_rows;
 
-            debug!(
-                entity = %self.entity_name,
-                batch_number = batch_count,
-                batch_rows,
-                total_rows,
-                "processing entity batch"
-            );
-
             let edges_written = self
                 .transform_and_write_batch(
                     source_batch,
@@ -124,13 +119,24 @@ impl OntologyEntityPipeline {
             total_edges += edges_written;
         }
 
-        info!(
-            entity = %self.entity_name,
-            batches_processed = batch_count,
-            total_rows,
-            total_edges,
-            "entity pipeline processing complete"
-        );
+        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+
+        if total_rows == 0 {
+            debug!(
+                entity = %self.entity_name,
+                elapsed_ms,
+                "entity pipeline processing complete"
+            );
+        } else {
+            info!(
+                entity = %self.entity_name,
+                batches_processed = batch_count,
+                total_rows,
+                total_edges,
+                elapsed_ms,
+                "entity pipeline processing complete"
+            );
+        }
 
         Ok(())
     }
@@ -160,13 +166,19 @@ impl OntologyEntityPipeline {
             })?;
 
         let transformed = self.execute_query(&session, &self.transform_sql).await?;
-        let entity_rows = transformed.num_rows();
+        let rows_transformed = transformed.num_rows();
         entity_writer
             .write_batch(&[transformed])
             .await
             .map_err(|e| {
                 HandlerError::Processing(format!("failed to write {}: {e}", self.entity_name))
             })?;
+
+        debug!(
+            entity = %self.entity_name,
+            rows = rows_transformed,
+            "entity batch transform and write complete"
+        );
 
         let mut edges_written = 0;
         for edge_sql in &self.edge_transforms {
@@ -182,13 +194,6 @@ impl OntologyEntityPipeline {
                 edges_written += edge_count;
             }
         }
-
-        debug!(
-            entity = %self.entity_name,
-            entities_written = entity_rows,
-            edges_written,
-            "batch transform and write complete"
-        );
 
         Ok(edges_written)
     }
@@ -264,6 +269,8 @@ impl OntologyEdgePipeline {
         params: Value,
         destination: &dyn Destination,
     ) -> Result<(), HandlerError> {
+        let started_at = Instant::now();
+
         let edge_writer = destination
             .new_batch_writer(EDGE_TABLE)
             .await
@@ -276,7 +283,7 @@ impl OntologyEdgePipeline {
 
         debug!(
             edge = %self.relationship_kind,
-            query = %self.extract_query,
+            %params,
             "querying datalake for edge data"
         );
 
@@ -311,27 +318,30 @@ impl OntologyEdgePipeline {
             let batch_rows = source_batch.num_rows();
             total_rows += batch_rows;
 
-            debug!(
-                edge = %self.relationship_kind,
-                batch_number = batch_count,
-                batch_rows,
-                total_rows,
-                "processing edge batch"
-            );
-
             let edges_written = self
                 .transform_and_write_batch(source_batch, edge_writer.as_ref())
                 .await?;
             total_edges_written += edges_written;
         }
 
-        info!(
-            edge = %self.relationship_kind,
-            batches_processed = batch_count,
-            source_rows = total_rows,
-            edges_written = total_edges_written,
-            "edge pipeline processing complete"
-        );
+        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+
+        if total_rows == 0 {
+            debug!(
+                edge = %self.relationship_kind,
+                elapsed_ms,
+                "edge pipeline processing complete"
+            );
+        } else {
+            info!(
+                edge = %self.relationship_kind,
+                batches_processed = batch_count,
+                source_rows = total_rows,
+                edges_written = total_edges_written,
+                elapsed_ms,
+                "edge pipeline processing complete"
+            );
+        }
 
         Ok(())
     }
