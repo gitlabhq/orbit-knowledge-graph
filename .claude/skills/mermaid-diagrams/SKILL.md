@@ -15,7 +15,7 @@ Always pair a diagram with a short readout — one paragraph per major component
 |---|---|
 | Pipeline stages, data flow within a service | `flowchart TD` |
 | Request/response between services (client → server → DB) | `sequenceDiagram` |
-| Before/after a refactor or MR | Two `flowchart TD` blocks side by side |
+| Before/after a refactor or MR | `flowchart LR` with `subgraph` per state |
 | File/module structure | `flowchart TD` with `subgraph` per layer |
 
 ## Flowchart conventions
