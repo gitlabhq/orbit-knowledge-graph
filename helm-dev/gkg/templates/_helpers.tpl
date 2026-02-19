@@ -76,7 +76,7 @@ When nats.enabled is false, uses nats.url config value
 {{- end }}
 
 {{/*
-ClickHouse environment variables with GKG prefix for config crate.
+ClickHouse environment variables for config crate (GKG_ prefix, __ separator).
 prefix should be DATALAKE or GRAPH (maps to datalake.* or graph.* in AppConfig).
 */}}
 {{- define "gkg.clickhouseEnv" -}}

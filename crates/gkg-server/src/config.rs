@@ -58,8 +58,10 @@ impl AppConfig {
             .add_source(config::File::with_name("config/default").required(false))
             .add_source(
                 config::Environment::with_prefix("GKG")
+                    .prefix_separator("_")
                     .separator("__")
-                    .list_separator(","),
+                    .list_separator(",")
+                    .try_parsing(true),
             )
             .build()
             .map_err(ConfigError::Config)?;

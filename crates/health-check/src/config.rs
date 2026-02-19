@@ -5,9 +5,28 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HealthCheckConfig {
+    #[serde(default = "default_bind_address")]
     pub bind_address: SocketAddr,
+    #[serde(default = "default_namespace")]
     pub namespace: String,
+    #[serde(default = "default_services")]
     pub services: Vec<String>,
+}
+
+fn default_bind_address() -> SocketAddr {
+    SocketAddr::from(([0, 0, 0, 0], 4201))
+}
+
+fn default_namespace() -> String {
+    "default".to_string()
+}
+
+fn default_services() -> Vec<String> {
+    vec![
+        "siphon-consumer".to_string(),
+        "siphon-producer".to_string(),
+        "gkg-indexer".to_string(),
+    ]
 }
 
 impl Default for HealthCheckConfig {
