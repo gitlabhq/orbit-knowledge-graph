@@ -209,6 +209,27 @@ pub enum JavaExpression {
     Literal,
 }
 
+impl JavaExpression {
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            JavaExpression::ArrayAccess { .. } => "ArrayAccess",
+            JavaExpression::FieldAccess { .. } => "FieldAccess",
+            JavaExpression::MemberMethodCall { .. } => "MemberMethodCall",
+            JavaExpression::Identifier { .. } => "Identifier",
+            JavaExpression::MethodCall { .. } => "MethodCall",
+            JavaExpression::MethodReference { .. } => "MethodReference",
+            JavaExpression::Index { .. } => "Index",
+            JavaExpression::ObjectCreation { .. } => "ObjectCreation",
+            JavaExpression::ArrayCreation { .. } => "ArrayCreation",
+            JavaExpression::ArrayItem { .. } => "ArrayItem",
+            JavaExpression::Annotation { .. } => "Annotation",
+            JavaExpression::This => "This",
+            JavaExpression::Super => "Super",
+            JavaExpression::Literal => "Literal",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum JavaReferenceType {
     Call,

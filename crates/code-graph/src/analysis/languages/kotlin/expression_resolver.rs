@@ -1,5 +1,4 @@
 use crate::graph::RelationshipType;
-use log::debug;
 use parser_core::{
     Range,
     kotlin::{
@@ -13,6 +12,7 @@ use parser_core::{
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use tracing::{debug, error};
 
 use crate::{
     analysis::{
@@ -169,6 +169,21 @@ impl KotlinExpressionResolver {
         expression: &KotlinExpressionInfo,
         resolutions: &mut Resolutions,
     ) -> Option<ResolvedType> {
+        debug!(
+            expression_kind = expression.expression.variant_name(),
+            "resolving Kotlin expression"
+        );
+
+        let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+            error!(
+                remaining_stack,
+                expression_kind = expression.expression.variant_name(),
+                "stack limit reached, aborting Kotlin expression resolution"
+            );
+            return None;
+        }
+
         match &expression.expression {
             KotlinExpression::Identifier { name } => {
                 self.resolve_identifier_expression(file_path, expression.range, name, resolutions)
@@ -838,6 +853,15 @@ impl KotlinExpressionResolver {
         name: &str,
         resolutions: &mut Resolutions,
     ) -> Option<ResolvedType> {
+        let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+            error!(
+                remaining_stack,
+                "stack limit reached, aborting Kotlin function type resolution in class hierarchy"
+            );
+            return None;
+        }
+
         debug!("Resolving Kotlin method call {name} in target {class_fqn}.");
         let file_path = self.definition_nodes.get(class_fqn)?.file_path.clone();
         let file = self.files.get(file_path.as_ref())?;

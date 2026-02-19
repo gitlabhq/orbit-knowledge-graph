@@ -1,9 +1,9 @@
 use crate::graph::RelationshipType;
-use log::debug;
 use parser_core::java::{
     ast::java_fqn_to_string,
     types::{JavaDefinitionInfo, JavaDefinitionType, JavaExpression, JavaImportType},
 };
+use tracing::{debug, error};
 
 use crate::{
     analysis::{
@@ -152,6 +152,11 @@ impl ExpressionResolver {
         expression: &JavaExpression,
         resolutions: &mut Resolutions,
     ) -> Option<ResolvedType> {
+        debug!(
+            expression_kind = expression.variant_name(),
+            "resolving Java expression"
+        );
+
         let mut expression_stack = Vec::new();
         let mut current_expression = expression;
 
@@ -295,6 +300,15 @@ impl ExpressionResolver {
         file: &JavaFile,
         resolutions: &mut Resolutions,
     ) -> Option<ResolvedType> {
+        let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+            error!(
+                remaining_stack,
+                "stack limit reached, aborting Java method resolution in class hierarchy"
+            );
+            return None;
+        }
+
         debug!(
             "Resolving Java method call {member} in class hierarchy of {}.",
             class.fqn
@@ -449,6 +463,15 @@ impl ExpressionResolver {
         member: &str,
         file: &JavaFile,
     ) -> Option<ResolvedType> {
+        let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+            error!(
+                remaining_stack,
+                "stack limit reached, aborting Java field resolution in class hierarchy"
+            );
+            return None;
+        }
+
         debug!("Resolving Java field {member} in class hierarchy.");
 
         // Check in current class first

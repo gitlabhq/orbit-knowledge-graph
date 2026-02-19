@@ -324,6 +324,31 @@ pub enum KotlinExpression {
     Literal,
 }
 
+impl KotlinExpression {
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            KotlinExpression::Identifier { .. } => "Identifier",
+            KotlinExpression::Call { .. } => "Call",
+            KotlinExpression::Index { .. } => "Index",
+            KotlinExpression::FieldAccess { .. } => "FieldAccess",
+            KotlinExpression::MemberFunctionCall { .. } => "MemberFunctionCall",
+            KotlinExpression::MethodReference { .. } => "MethodReference",
+            KotlinExpression::Annotation { .. } => "Annotation",
+            KotlinExpression::This { .. } => "This",
+            KotlinExpression::Super => "Super",
+            KotlinExpression::Elvis { .. } => "Elvis",
+            KotlinExpression::When { .. } => "When",
+            KotlinExpression::If { .. } => "If",
+            KotlinExpression::Try { .. } => "Try",
+            KotlinExpression::Lambda { .. } => "Lambda",
+            KotlinExpression::Parenthesized { .. } => "Parenthesized",
+            KotlinExpression::Unary { .. } => "Unary",
+            KotlinExpression::Binary { .. } => "Binary",
+            KotlinExpression::Literal => "Literal",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum KotlinReferenceType {
     Call,

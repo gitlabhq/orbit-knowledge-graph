@@ -20,6 +20,7 @@ toml = { workspace = true }
 pastey = { workspace = true }
 rustc-hash = { workspace = true }
 smallvec = { workspace = true }
+stacker = { workspace = true }
 rust-lapper = { workspace = true }
 mimalloc = { workspace = true }
 internment = { workspace = true, features = ["arc"] }

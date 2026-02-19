@@ -3,6 +3,10 @@
 //! A foundational library for parsing and analyzing code across multiple programming languages
 //! using `ast-grep` and `tree-sitter` for pattern matching and AST analysis.
 
+/// Before each recursive call, we check `stacker::remaining_stack()` and bail out when
+/// less than this many bytes remain, trading completeness for crash safety.
+pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024; // 128 KiB
+
 pub mod analyzer;
 pub mod csharp;
 pub mod definitions;
