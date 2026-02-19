@@ -33,7 +33,7 @@ use futures::StreamExt;
 use opentelemetry::KeyValue;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
@@ -185,9 +185,12 @@ impl Engine {
     }
 
     async fn listen(&self, topic: Topic, worker_pool: Arc<WorkerPool>) -> Result<(), EngineError> {
+        let topic_name = format!("{}.{}", topic.stream, topic.subject);
+        info!(topic = %topic_name, "topic listener starting");
+
         let mut subscription = self.broker.subscribe(&topic, self.metrics.clone()).await?;
         let mut inflight = tokio::task::JoinSet::new();
-        let topic_label = KeyValue::new("topic", format!("{}.{}", topic.stream, topic.subject));
+        let topic_label = KeyValue::new("topic", topic_name.clone());
 
         loop {
             tokio::select! {
@@ -201,17 +204,20 @@ impl Engine {
                         worker_pool.clone(),
                         self.metrics.clone(),
                         topic_label.clone(),
+                        topic_name.clone(),
                     ));
                 }
             }
         }
 
+        let drained = inflight.len();
         while let Some(result) = inflight.join_next().await {
             if let Err(error) = result {
-                warn!(%error, "message processing task panicked");
+                warn!(%error, topic = %topic_name, "message processing task panicked");
             }
         }
 
+        info!(topic = %topic_name, drained, "topic listener stopped");
         Ok(())
     }
 
@@ -230,7 +236,17 @@ async fn process_message(
     worker_pool: Arc<WorkerPool>,
     metrics: Arc<EngineMetrics>,
     topic_label: KeyValue,
+    topic_name: String,
 ) {
+    let message_id = message.envelope.id.0.clone();
+    let attempt = message.envelope.attempt;
+
+    debug!(topic = %topic_name, %message_id, attempt, "message received");
+
+    if attempt > 1 {
+        info!(topic = %topic_name, %message_id, attempt, "message retry received");
+    }
+
     let message_start = Instant::now();
 
     let result = run_handlers(&handlers, &context, &message, &worker_pool, &metrics).await;
@@ -238,13 +254,14 @@ async fn process_message(
     let outcome = match result {
         Ok(()) => {
             if let Err(error) = message.ack().await {
-                warn!(%error, "failed to ack message");
+                warn!(%error, %message_id, "failed to ack message");
             }
             "ack"
         }
         Err(_) => {
+            info!(topic = %topic_name, %message_id, "message nacked, handler failure");
             if let Err(error) = message.nack().await {
-                warn!(%error, "failed to nack message");
+                warn!(%error, %message_id, "failed to nack message");
             }
             "nack"
         }

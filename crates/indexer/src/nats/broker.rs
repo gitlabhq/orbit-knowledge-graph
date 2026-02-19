@@ -19,6 +19,8 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
+use tracing::{debug, info, warn};
+
 use crate::metrics::EngineMetrics;
 use crate::types::{Envelope, MessageId, Topic};
 
@@ -63,6 +65,7 @@ impl NatsBroker {
     }
 
     pub async fn shutdown(self) {
+        info!("broker shutdown initiated");
         self.cancellation_token.cancel();
         let handles: Vec<_> = self.subscription_handles.lock().drain(..).collect();
         for handle in handles {
@@ -122,6 +125,8 @@ impl NatsBroker {
                 message: e.to_string(),
             })?;
 
+        info!(bucket, "KV bucket ready");
+
         let mut cache = self.kv_stores.write().await;
         cache.insert(bucket.to_string(), store);
         Ok(())
@@ -133,14 +138,17 @@ impl NatsBroker {
         subjects: Vec<String>,
     ) -> Result<Stream, NatsError> {
         match self.get_stream(stream_name).await {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => {
+                info!(stream = %stream_name, "stream found");
+                return Ok(stream);
+            }
             Err(NatsError::StreamNotFound { .. }) => {}
             Err(e) => return Err(e),
         }
 
         let stream_config = async_nats::jetstream::stream::Config {
             name: stream_name.to_string(),
-            subjects,
+            subjects: subjects.clone(),
             num_replicas: self.config.stream_replicas,
             max_age: self.config.stream_max_age().unwrap_or_default(),
             max_bytes: self.config.stream_max_bytes.unwrap_or(-1),
@@ -158,6 +166,8 @@ impl NatsBroker {
                 stream: stream_name.to_string(),
                 source: e,
             })?;
+
+        info!(stream = %stream_name, ?subjects, "stream created");
 
         let mut cache = self.streams.write().await;
         cache.insert(stream_name.clone(), stream.clone());
@@ -277,10 +287,21 @@ impl NatsBroker {
         let stream = self.get_stream(&topic.stream).await?;
         let consumer = self.get_or_create_consumer(&stream, &topic.subject).await?;
 
+        let consumer_type = match &self.config.consumer_name {
+            Some(name) => format!("durable({})", name),
+            None => "ephemeral".to_string(),
+        };
+        let batch_size = self.config.batch_size();
+        info!(
+            topic = %format!("{}.{}", topic.stream, topic.subject),
+            consumer_type,
+            batch_size,
+            "subscription started"
+        );
+
         let (sender, receiver) = tokio::sync::mpsc::channel(self.config.subscription_buffer_size());
 
         let cancel_token = self.cancellation_token.clone();
-        let batch_size = self.config.batch_size();
 
         let handle = tokio::spawn(async move {
             loop {
@@ -292,6 +313,7 @@ impl NatsBroker {
                 let batch = match consumer.fetch().max_messages(batch_size).messages().await {
                     Ok(batch) => batch,
                     Err(e) => {
+                        warn!(error = %e, "fetch batch error");
                         metrics.nats_fetch_duration.record(
                             fetch_start.elapsed().as_secs_f64(),
                             &[opentelemetry::KeyValue::new("outcome", "error")],
@@ -308,11 +330,13 @@ impl NatsBroker {
 
                 tokio::pin!(batch);
 
+                let mut batch_count: usize = 0;
                 while let Some(result) = batch.next().await {
                     if cancel_token.is_cancelled() {
                         break;
                     }
 
+                    batch_count += 1;
                     let converted = match result {
                         Ok(msg) => Self::convert_message(msg),
                         Err(e) => Err(map_subscribe_error(e)),
@@ -322,6 +346,7 @@ impl NatsBroker {
                         return;
                     }
                 }
+                debug!(count = batch_count, "batch fetched");
             }
         });
 

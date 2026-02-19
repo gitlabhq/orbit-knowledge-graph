@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tracing::debug;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LockError {
@@ -37,18 +38,30 @@ impl LockService for NatsLockService {
             .kv_put(INDEXING_LOCKS_BUCKET, key, Bytes::new(), options)
             .await
         {
-            Ok(KvPutResult::Success(_)) => Ok(true),
-            Ok(KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch) => Ok(false),
-            Err(e) => Err(LockError::Backend(e.to_string())),
+            Ok(KvPutResult::Success(_)) => {
+                debug!(key, "lock acquired");
+                Ok(true)
+            }
+            Ok(KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch) => {
+                debug!(key, "lock contention, already held");
+                Ok(false)
+            }
+            Err(e) => {
+                debug!(key, error = %e, "lock acquisition error");
+                Err(LockError::Backend(e.to_string()))
+            }
         }
     }
 
     async fn release(&self, key: &str) -> Result<(), LockError> {
         use crate::modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
 
-        self.nats
+        let result = self
+            .nats
             .kv_delete(INDEXING_LOCKS_BUCKET, key)
             .await
-            .map_err(|e| LockError::Backend(e.to_string()))
+            .map_err(|e| LockError::Backend(e.to_string()));
+        debug!(key, "lock released");
+        result
     }
 }
