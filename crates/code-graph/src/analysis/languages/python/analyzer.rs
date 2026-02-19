@@ -1,3 +1,5 @@
+use tracing::error;
+
 use crate::analysis::languages::python::interfile::get_possible_symbol_locations;
 use crate::analysis::types::{
     ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
@@ -793,6 +795,15 @@ impl PythonAnalyzer {
         results: &mut Vec<ResolvedTarget>,
         visited: &mut HashSet<ImportedSymbolLocation>,
     ) {
+        let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+            error!(
+                remaining_stack,
+                "stack limit reached, aborting Python imported symbol resolution"
+            );
+            return;
+        }
+
         // Prevent infinite recursion
         if visited.contains(&current_location) {
             return;

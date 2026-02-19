@@ -1,4 +1,5 @@
 use rustc_hash::FxHashMap as HashMap;
+use tracing::error;
 
 use crate::python::symbol_table::utils::*;
 use crate::python::types::{
@@ -134,6 +135,16 @@ fn visit_node<'a>(
     defs_table: &HashMap<Range, PythonDefinitionInfo>,
     imports_table: &HashMap<Range, PythonImportedSymbolInfo>,
 ) -> Vec<(SymbolChain, Binding)> {
+    let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+    if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        error!(
+            remaining_stack,
+            node_kind = node.kind().as_ref(),
+            "stack limit reached, aborting Python symbol table visitor"
+        );
+        return vec![];
+    }
+
     let node_kind = node.kind();
     let kind_str = node_kind.as_ref();
 

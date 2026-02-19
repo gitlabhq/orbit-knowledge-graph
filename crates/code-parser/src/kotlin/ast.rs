@@ -2,6 +2,8 @@ use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use tracing::error;
+
 use smallvec::{SmallVec, smallvec};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -868,6 +870,16 @@ fn parse_expression_node<'a>(
     node: &Node<'a, StrDoc<SupportLang>>,
     parse_result: &mut AstParseResult,
 ) -> Option<KotlinExpressionInfo> {
+    let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+    if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        error!(
+            remaining_stack,
+            node_kind = node.kind().as_ref(),
+            "stack limit reached, aborting Kotlin expression parsing"
+        );
+        return None;
+    }
+
     match node.kind().as_ref() {
         node_types::SIMPLE_IDENTIFIER => {
             parse_result.visited_nodes.insert(node.node_id());
@@ -1215,6 +1227,15 @@ fn parse_navigation_expression<'a>(
     node: &Node<'a, StrDoc<SupportLang>>,
     parse_result: &mut AstParseResult,
 ) -> Option<(KotlinExpressionInfo, String, String)> {
+    let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+    if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        error!(
+            remaining_stack,
+            "stack limit reached, aborting Kotlin navigation expression parsing"
+        );
+        return None;
+    }
+
     let mut target = None;
 
     for child in node.children() {
