@@ -1,5 +1,5 @@
 # Offline link checking for markdown files
-# For all options, see https://lychee.cli.rs/usage/config/
+# For all options, see https://lychee.cli.rs/guides/config/
 
 accept = ["200", "403"]
 
