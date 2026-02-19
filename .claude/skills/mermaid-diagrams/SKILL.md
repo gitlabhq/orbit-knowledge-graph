@@ -124,7 +124,7 @@ Keep each paragraph to 2–4 sentences. Do not restate what is already visible i
 
 ## Anti-patterns
 
-- Don't use `graph` — use `flowchart` instead (stricter syntax, better rendering).
+- Don't use `graph` — use `flowchart` instead (stricter syntax, better rendering behavior).
 - Don't put full struct definitions in node labels — show only the fields relevant to the diagram's argument.
 - Don't use `-->` for synchronous calls in sequence diagrams — use `->>`.
 - Don't skip the readout — diagrams without prose leave readers inferring intent.
