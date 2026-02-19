@@ -2730,7 +2730,6 @@ dependencies = [
  "clickhouse",
  "clickhouse-client",
  "config",
- "datafusion",
  "futures",
  "health-check",
  "indexer",

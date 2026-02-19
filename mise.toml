@@ -30,7 +30,11 @@ description = "Build the crates"
 
 [tasks.test]
 run = "cargo nextest run --lib --bins"
-description = "Run unit tests, requires nextest"
+description = "Run unit tests with full debug symbols"
+
+[tasks."test:fast"]
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins"
+description = "Run unit tests with reduced debug info for faster builds"
 
 [tasks."test:integration"]
 run = "cargo nextest run --all-features --test '*' -j 1"
@@ -60,6 +64,12 @@ description = "Fix newlines formatting in the codebase"
 run = 'cargo run --release --bin gkg -- index ${usage_repo_path?} --stats'
 description = "Index a local repository"
 usage = 'arg "<repo_path>"'
+
+[tasks."diff:branch"]
+run = "git diff --unified=0 origin/${usage_base:-main}...HEAD $(xargs < .gitdiffignore) > git_diff_full.txt"
+description = "Diff current branch against an origin branch (default: main)"
+usage = 'arg "[base]" default="main" help="Branch on origin to diff against"'
+
 
 [tasks."perf:gtime"]
 run = "./scripts/devtools/gtime.sh"

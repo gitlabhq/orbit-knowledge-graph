@@ -26,7 +26,6 @@ indexer = { path = "../indexer" }
 ontology = { path = "../ontology" }
 prost = { workspace = true }
 prost-types = { workspace = true }
-datafusion = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
 parking_lot = { workspace = true }
