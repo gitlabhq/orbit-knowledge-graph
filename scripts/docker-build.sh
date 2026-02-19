@@ -28,6 +28,7 @@ fi
 echo "Building and pushing:$TAGS"
 
 docker buildx build \
+  --platform linux/amd64,linux/arm64 \
   --push \
   --cache-from type=registry,ref=${CI_REGISTRY_IMAGE}/cache/${IMAGE_NAME}:develop \
   --cache-to   type=registry,mode=max,compression=zstd,oci-mediatypes=true,ref=${CI_REGISTRY_IMAGE}/cache/${IMAGE_NAME}:develop \
