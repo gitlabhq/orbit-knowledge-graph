@@ -289,7 +289,7 @@ tilt-ci:
 
 # Build Stage
 
-docker-build-push:
+.docker-build:
   stage: build
   image: docker:29
   needs: []
@@ -299,12 +299,44 @@ docker-build-push:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     IMAGE_NAME: gkg
-  tags:
-    - saas-linux-large-amd64
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
+    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-${ARCH}"
+
+docker-build-amd64:
+  extends: .docker-build
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: amd64
+
+docker-build-arm64:
+  extends: .docker-build
+  tags:
+    - saas-linux-large-arm64
+  variables:
+    ARCH: arm64
+
+docker-manifest:
+  stage: build
+  image: docker:29
+  tags:
+    - saas-linux-small-amd64
+  needs:
+    - docker-build-amd64
+    - docker-build-arm64
+  variables:
+    IMAGE_NAME: gkg
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - docker manifest create "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-amd64"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-arm64"
+    - docker manifest push "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
 
 # Deploy Stage - Helm Charts
 
@@ -413,27 +445,68 @@ semantic-release:
   stage: release
   image: node:lts
   tags:
-    - saas-linux-large-amd64
-  services:
-    - docker:29-dind
+    - saas-linux-small-amd64
   variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
     GIT_STRATEGY: clone
-    IMAGE_NAME: gkg
   needs: []
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
-    - npm install -g semantic-release @semantic-release/gitlab @semantic-release/exec @semantic-release/git @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog conventional-changelog-conventionalcommits semantic-release-slack-bot
-    - apt-get update
-    - apt-get install -y ca-certificates curl
-    - install -m 0755 -d /etc/apt/keyrings
-    - curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-    - chmod a+r /etc/apt/keyrings/docker.asc
-    - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
-    - apt-get update
-    - apt-get install -y docker-ce-cli
+    - npm install -g semantic-release @semantic-release/gitlab @semantic-release/git @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog conventional-changelog-conventionalcommits semantic-release-slack-bot
   script:
     - npx semantic-release
+
+.docker-release:
+  stage: build
+  image: docker:29
+  services:
+    - docker:29-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    IMAGE_NAME: gkg
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  script:
+    - export GKG_VERSION="${CI_COMMIT_TAG#v}"
+    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${GKG_VERSION}-${ARCH}"
+
+release-build-amd64:
+  extends: .docker-release
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: amd64
+
+release-build-arm64:
+  extends: .docker-release
+  tags:
+    - saas-linux-large-arm64
+  variables:
+    ARCH: arm64
+
+release-manifest:
+  stage: build
+  image: docker:29
+  tags:
+    - saas-linux-small-amd64
+  needs:
+    - release-build-amd64
+    - release-build-arm64
+  variables:
+    IMAGE_NAME: gkg
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - docker manifest create "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
+    - docker manifest push "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
+    - docker manifest create "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
+    - docker manifest push "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"

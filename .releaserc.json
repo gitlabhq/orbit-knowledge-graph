@@ -41,12 +41,6 @@
     "@semantic-release/changelog",
     "@semantic-release/gitlab",
     [
-      "@semantic-release/exec",
-      {
-        "publishCmd": "GKG_VERSION=${nextRelease.version} ./scripts/docker-build.sh ${process.env.CI_REGISTRY_IMAGE}/${process.env.IMAGE_NAME}:${nextRelease.version} ${process.env.CI_REGISTRY_IMAGE}/${process.env.IMAGE_NAME}:latest"
-      }
-    ],
-    [
       "@semantic-release/git",
       {
         "assets": [
