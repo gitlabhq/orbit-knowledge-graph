@@ -12,7 +12,7 @@
 use crate::ast::{Expr, Node, Query, SelectExpr};
 use crate::constants::{redaction_id_column, redaction_type_column};
 use crate::error::Result;
-use crate::input::{Input, QueryType};
+use crate::input::{EntityAuthConfig, Input, QueryType};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +27,10 @@ pub struct RedactionNode {
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
     nodes: HashMap<String, RedactionNode>,
+    /// Auth config for every entity type that requires redaction.
+    /// Covers all entities in the ontology, not just those in the current query,
+    /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
+    entity_auth: HashMap<String, EntityAuthConfig>,
 }
 
 impl ResultContext {
@@ -51,6 +55,18 @@ impl ResultContext {
         );
     }
 
+    pub fn add_entity_auth(&mut self, entity_type: impl Into<String>, config: EntityAuthConfig) {
+        self.entity_auth.insert(entity_type.into(), config);
+    }
+
+    pub fn get_entity_auth(&self, entity_type: &str) -> Option<&EntityAuthConfig> {
+        self.entity_auth.get(entity_type)
+    }
+
+    pub fn entity_auth(&self) -> impl Iterator<Item = (&str, &EntityAuthConfig)> {
+        self.entity_auth.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
     pub fn nodes(&self) -> impl Iterator<Item = &RedactionNode> {
         self.nodes.values()
     }
@@ -70,12 +86,8 @@ impl ResultContext {
 
 pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
+    ctx.entity_auth = input.entity_auth.clone();
 
-    // For aggregation queries, only nodes in GROUP BY can be selected.
-    // For traversal/pattern queries: all nodes are selectable.
-    // For aggregation queries: only nodes appearing in group_by are selectable.
-    // For path finding: handled separately in enforce_return.
-    // For neighbors queries: only the center node is selectable.
     let selectable_nodes = match input.query_type {
         QueryType::Aggregation => input
             .aggregations
@@ -120,7 +132,7 @@ fn enforce_return_columns(
 
             if !has_id {
                 q.select.push(SelectExpr {
-                    expr: Expr::col(&node.id, "id"),
+                    expr: Expr::col(&node.id, &node.redaction_id_column),
                     alias: Some(id_col.clone()),
                 });
             }
@@ -161,21 +173,13 @@ mod tests {
                     id: "u".to_string(),
                     entity: Some("User".to_string()),
                     table: Some("gl_user".to_string()),
-                    columns: None,
-                    filters: std::collections::HashMap::new(),
-                    node_ids: vec![],
-                    id_range: None,
-                    id_property: "id".to_string(),
+                    ..Default::default()
                 },
                 InputNode {
                     id: "p".to_string(),
                     entity: Some("Project".to_string()),
                     table: Some("gl_project".to_string()),
-                    columns: None,
-                    filters: std::collections::HashMap::new(),
-                    node_ids: vec![],
-                    id_range: None,
-                    id_property: "id".to_string(),
+                    ..Default::default()
                 },
             ],
             relationships: vec![],
@@ -185,6 +189,7 @@ mod tests {
             limit: 30,
             order_by: None,
             aggregation_sort: None,
+            entity_auth: Default::default(),
         }
     }
 
@@ -313,13 +318,7 @@ mod tests {
             query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "n".to_string(),
-                entity: None,
-                table: None,
-                columns: None,
-                filters: std::collections::HashMap::new(),
-                node_ids: vec![],
-                id_range: None,
-                id_property: "id".to_string(),
+                ..Default::default()
             }],
             relationships: vec![],
             aggregations: vec![],
@@ -328,6 +327,7 @@ mod tests {
             limit: 30,
             order_by: None,
             aggregation_sort: None,
+            entity_auth: Default::default(),
         };
 
         let query = Query {
@@ -386,21 +386,13 @@ mod tests {
                     id: "u".to_string(),
                     entity: Some("User".to_string()),
                     table: Some("gl_user".to_string()),
-                    columns: None,
-                    filters: std::collections::HashMap::new(),
-                    node_ids: vec![],
-                    id_range: None,
-                    id_property: "id".to_string(),
+                    ..Default::default()
                 },
                 InputNode {
                     id: "n".to_string(),
                     entity: Some("Note".to_string()),
                     table: Some("gl_note".to_string()),
-                    columns: None,
-                    filters: std::collections::HashMap::new(),
-                    node_ids: vec![],
-                    id_range: None,
-                    id_property: "id".to_string(),
+                    ..Default::default()
                 },
             ],
             relationships: vec![],
@@ -416,6 +408,7 @@ mod tests {
             limit: 10,
             order_by: None,
             aggregation_sort: None,
+            entity_auth: Default::default(),
         };
 
         let query = Query {
@@ -477,21 +470,15 @@ mod tests {
                     id: "start".to_string(),
                     entity: Some("Project".to_string()),
                     table: Some("gl_project".to_string()),
-                    columns: None,
-                    filters: std::collections::HashMap::new(),
                     node_ids: vec![100],
-                    id_range: None,
-                    id_property: "id".to_string(),
+                    ..Default::default()
                 },
                 InputNode {
                     id: "end".to_string(),
                     entity: Some("Project".to_string()),
                     table: Some("gl_project".to_string()),
-                    columns: None,
-                    filters: std::collections::HashMap::new(),
                     node_ids: vec![200],
-                    id_range: None,
-                    id_property: "id".to_string(),
+                    ..Default::default()
                 },
             ],
             relationships: vec![],
@@ -507,6 +494,7 @@ mod tests {
             limit: 30,
             order_by: None,
             aggregation_sort: None,
+            entity_auth: Default::default(),
         };
 
         // Path finding generates a Query with unrolled CTEs

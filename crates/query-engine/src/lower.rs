@@ -9,7 +9,7 @@ use crate::input::{
     ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
     InputRelationship, OrderDirection, QueryType,
 };
-use ontology::{EDGE_RESERVED_COLUMNS, EDGE_TABLE};
+use ontology::{DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, EDGE_TABLE};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -154,7 +154,7 @@ fn lower_aggregation(input: &Input) -> Result<Node> {
 fn agg_expr(agg: &InputAggregation) -> Expr {
     let arg = match (&agg.property, &agg.target) {
         (Some(prop), Some(target)) => Expr::col(target, prop),
-        (None, Some(target)) => Expr::col(target, "id"),
+        (None, Some(target)) => Expr::col(target, DEFAULT_PRIMARY_KEY),
         _ => Expr::lit(1),
     };
     Expr::func(agg.function.as_sql(), vec![arg])
@@ -201,9 +201,12 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             JoinType::Inner,
             TableRef::scan("paths", "paths"),
             TableRef::scan(&end_table, &end.id),
-            Expr::eq(Expr::col("paths", "node_id"), Expr::col(&end.id, "id")),
+            Expr::eq(
+                Expr::col("paths", "node_id"),
+                Expr::col(&end.id, DEFAULT_PRIMARY_KEY),
+            ),
         ),
-        where_clause: id_filter(&end.id, "id", &end.node_ids),
+        where_clause: id_filter(&end.id, DEFAULT_PRIMARY_KEY, &end.node_ids),
         order_by: vec![OrderExpr {
             expr: Expr::col("paths", "depth"),
             desc: false,
@@ -215,7 +218,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
 /// Base query for path finding with full materialization.
 fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_entity: &str) -> Query {
-    let start_id = Expr::col(start_alias, "id");
+    let start_id = Expr::col(start_alias, DEFAULT_PRIMARY_KEY);
     let start_tuple = Expr::func("tuple", vec![start_id.clone(), Expr::lit(start_entity)]);
 
     Query {
@@ -233,7 +236,7 @@ fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_enti
             SelectExpr::new(Expr::lit(0), "depth"),
         ],
         from: TableRef::scan(table, start_alias),
-        where_clause: id_filter(start_alias, "id", start_ids),
+        where_clause: id_filter(start_alias, DEFAULT_PRIMARY_KEY, start_ids),
         ..Default::default()
     }
 }
@@ -432,7 +435,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
             "if",
             vec![
                 Expr::eq(
-                    Expr::col(&center_node.id, "id"),
+                    Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
                     Expr::col(edge_alias, "source_id"),
                 ),
                 Expr::col(edge_alias, "target_id"),
@@ -448,7 +451,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
             "if",
             vec![
                 Expr::eq(
-                    Expr::col(&center_node.id, "id"),
+                    Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
                     Expr::col(edge_alias, "source_id"),
                 ),
                 Expr::col(edge_alias, "target_kind"),
@@ -467,7 +470,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
     ];
     select.extend(edge_select_exprs(edge_alias));
 
-    let where_clause = id_filter(&center_node.id, "id", &center_node.node_ids);
+    let where_clause = id_filter(&center_node.id, DEFAULT_PRIMARY_KEY, &center_node.node_ids);
 
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
@@ -575,13 +578,19 @@ fn build_joins(
                 JoinType::Inner,
                 result,
                 union,
-                Expr::eq(Expr::col(&rel.from, "id"), Expr::col(&alias, from_col)),
+                Expr::eq(
+                    Expr::col(&rel.from, DEFAULT_PRIMARY_KEY),
+                    Expr::col(&alias, from_col),
+                ),
             );
             result = TableRef::join(
                 JoinType::Inner,
                 result,
                 TableRef::scan(&target_table, &rel.to),
-                Expr::eq(Expr::col(&alias, to_col), Expr::col(&rel.to, "id")),
+                Expr::eq(
+                    Expr::col(&alias, to_col),
+                    Expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
+                ),
             );
         } else {
             // Single-hop: direct edge join
@@ -610,11 +619,23 @@ fn build_joins(
 /// Join from source node to edge table.
 fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
     match dir {
-        Direction::Outgoing => Expr::eq(Expr::col(node, "id"), Expr::col(edge, "source_id")),
-        Direction::Incoming => Expr::eq(Expr::col(node, "id"), Expr::col(edge, "target_id")),
+        Direction::Outgoing => Expr::eq(
+            Expr::col(node, DEFAULT_PRIMARY_KEY),
+            Expr::col(edge, "source_id"),
+        ),
+        Direction::Incoming => Expr::eq(
+            Expr::col(node, DEFAULT_PRIMARY_KEY),
+            Expr::col(edge, "target_id"),
+        ),
         Direction::Both => Expr::or(
-            Expr::eq(Expr::col(node, "id"), Expr::col(edge, "source_id")),
-            Expr::eq(Expr::col(node, "id"), Expr::col(edge, "target_id")),
+            Expr::eq(
+                Expr::col(node, DEFAULT_PRIMARY_KEY),
+                Expr::col(edge, "source_id"),
+            ),
+            Expr::eq(
+                Expr::col(node, DEFAULT_PRIMARY_KEY),
+                Expr::col(edge, "target_id"),
+            ),
         ),
     }
 }
@@ -626,7 +647,10 @@ fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Directi
     let id_and_kind = |id_col, kind_col| {
         Expr::binary(
             Op::And,
-            Expr::eq(Expr::col(node, "id"), Expr::col(edge, id_col)),
+            Expr::eq(
+                Expr::col(node, DEFAULT_PRIMARY_KEY),
+                Expr::col(edge, id_col),
+            ),
             Expr::eq(Expr::col(edge, kind_col), Expr::lit(entity)),
         )
     };
@@ -644,11 +668,23 @@ fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Directi
 /// Join from edge table to target node.
 fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
     match dir {
-        Direction::Outgoing => Expr::eq(Expr::col(edge, "target_id"), Expr::col(node, "id")),
-        Direction::Incoming => Expr::eq(Expr::col(edge, "source_id"), Expr::col(node, "id")),
+        Direction::Outgoing => Expr::eq(
+            Expr::col(edge, "target_id"),
+            Expr::col(node, DEFAULT_PRIMARY_KEY),
+        ),
+        Direction::Incoming => Expr::eq(
+            Expr::col(edge, "source_id"),
+            Expr::col(node, DEFAULT_PRIMARY_KEY),
+        ),
         Direction::Both => Expr::or(
-            Expr::eq(Expr::col(edge, "target_id"), Expr::col(node, "id")),
-            Expr::eq(Expr::col(edge, "source_id"), Expr::col(node, "id")),
+            Expr::eq(
+                Expr::col(edge, "target_id"),
+                Expr::col(node, DEFAULT_PRIMARY_KEY),
+            ),
+            Expr::eq(
+                Expr::col(edge, "source_id"),
+                Expr::col(node, DEFAULT_PRIMARY_KEY),
+            ),
         ),
     }
 }
@@ -666,16 +702,16 @@ fn build_full_where(
 
     // Node conditions: IDs, ranges, filters
     for node in nodes {
-        conds.extend(id_filter(&node.id, "id", &node.node_ids));
+        conds.extend(id_filter(&node.id, DEFAULT_PRIMARY_KEY, &node.node_ids));
         if let Some(r) = &node.id_range {
             conds.push(Expr::binary(
                 Op::Ge,
-                Expr::col(&node.id, "id"),
+                Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
                 Expr::lit(r.start),
             ));
             conds.push(Expr::binary(
                 Op::Le,
-                Expr::col(&node.id, "id"),
+                Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
                 Expr::lit(r.end),
             ));
         }
@@ -1405,11 +1441,8 @@ mod tests {
                 id: "u".to_string(),
                 entity: Some("User".to_string()),
                 table: Some("gl_user".to_string()),
-                columns: None,
-                filters: std::collections::HashMap::new(),
                 node_ids: vec![123],
-                id_range: None,
-                id_property: "id".to_string(),
+                ..Default::default()
             }],
             relationships: vec![],
             aggregations: vec![],
@@ -1422,6 +1455,7 @@ mod tests {
             limit: 10,
             order_by: None,
             aggregation_sort: None,
+            entity_auth: Default::default(),
         };
 
         let Node::Query(q) = lower(&input).unwrap() else {

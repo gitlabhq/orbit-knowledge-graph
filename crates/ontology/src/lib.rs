@@ -41,7 +41,7 @@ use std::path::Path;
 struct EmbeddedOntology;
 
 /// Primary key field name used by default.
-const DEFAULT_PRIMARY_KEY: &str = "id";
+pub const DEFAULT_PRIMARY_KEY: &str = "id";
 
 /// Reserved columns that exist on all nodes.
 pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];

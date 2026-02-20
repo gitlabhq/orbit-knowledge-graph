@@ -1,10 +1,8 @@
-mod extractor;
 mod query_result;
 mod stream;
 mod types;
 mod validator;
 
-pub use extractor::RedactionExtractor;
 pub use query_result::{ColumnValue, NodeRef, QueryResult, QueryResultRow, RedactableNodes};
 pub use stream::{
     RedactionExchangeError, RedactionExchangeResult, RedactionMessage, RedactionService,
