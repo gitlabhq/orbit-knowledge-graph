@@ -1,4 +1,34 @@
 {{- if and .Values.gkgServer .Values.gkgServer.indexer .Values.gkgServer.indexer.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gkg-indexer-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-indexer") | nindent 4 }}
+data:
+  default.yaml: |
+    nats:
+      url: {{ include "gkg.natsUrl" . | quote }}
+    datalake:
+      {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
+    graph:
+      {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.graph) | nindent 6 }}
+    {{- if .Values.gitaly.enabled }}
+    gitaly:
+      address: {{ .Values.gitaly.address | quote }}
+      storage: {{ .Values.gitaly.storage | quote }}
+    {{- end }}
+    {{- if .Values.otel.enabled }}
+    metrics:
+      otlp_endpoint: {{ .Values.otel.endpoint | quote }}
+      service_name: "gkg-indexer"
+    {{- end }}
+    {{- if .Values.nats.streamName }}
+    code_indexing:
+      events_stream_name: {{ .Values.nats.streamName | quote }}
+    {{- end }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,6 +45,8 @@ spec:
     metadata:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-indexer") | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitaly | sha256sum }}-{{ toJson .Values.otel | sha256sum }}
     spec:
       securityContext:
         {{- include "gkg.podSecurityContext" . | nindent 8 }}
@@ -29,41 +61,29 @@ spec:
               value: "json"
             - name: RUST_LOG
               value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
-            - name: GKG_NATS__URL
-              value: {{ include "gkg.natsUrl" . | quote }}
-            {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 12 }}
-            {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
-            {{- if .Values.gitaly.enabled }}
-            - name: GKG_GITALY__ADDRESS
-              value: {{ .Values.gitaly.address | quote }}
-            - name: GKG_GITALY__STORAGE
-              value: {{ .Values.gitaly.storage | quote }}
-            {{- if .Values.gitaly.tokenSecret.key }}
+            {{- include "gkg.clickhouseSecretEnv" (dict "prefix" "DATALAKE" "secretName" "clickhouse-credentials") | nindent 12 }}
+            {{- include "gkg.clickhouseSecretEnv" (dict "prefix" "GRAPH" "secretName" "clickhouse-credentials") | nindent 12 }}
+            {{- if and .Values.gitaly.enabled .Values.gitaly.tokenSecret.key }}
             - name: GKG_GITALY__TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.gitaly.tokenSecret.name }}
                   key: {{ .Values.gitaly.tokenSecret.key }}
             {{- end }}
-            {{- end }}
-            {{- if .Values.otel.enabled }}
-            - name: GKG_METRICS__OTLP_ENDPOINT
-              value: {{ .Values.otel.endpoint | quote }}
-            - name: GKG_METRICS__SERVICE_NAME
-              value: "gkg-indexer"
-            {{- end }}
-            {{- if .Values.nats.streamName }}
-            - name: GKG_CODE_INDEXING__EVENTS_STREAM_NAME
-              value: {{ .Values.nats.streamName | quote }}
-            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             {{- include "gkg.securityContext" . | nindent 12 }}
           resources:
             {{- toYaml .Values.gkgServer.indexer.resources | nindent 12 }}
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
       volumes:
+        - name: config
+          configMap:
+            name: gkg-indexer-config
         - name: tmp
           emptyDir: {}
 {{- end }}
