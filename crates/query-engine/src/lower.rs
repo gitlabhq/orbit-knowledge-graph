@@ -47,18 +47,10 @@ fn lower_traversal(input: &Input) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
-    let mut select = Vec::new();
-    for node in &input.nodes {
-        if let Some(ColumnSelection::List(cols)) = &node.columns {
-            for col in cols {
-                select.push(SelectExpr::new(
-                    Expr::col(&node.id, col),
-                    format!("{}_{col}", node.id),
-                ));
-            }
-        }
-    }
-    add_edge_columns(&mut select, &input.relationships, &edge_aliases);
+    // Structural query: SELECT is empty here. enforce_return adds _gkg_{alias}_id,
+    // _gkg_{alias}_type, and _gkg_{alias}_pk columns. Property columns are fetched
+    // via hydration after authorization and redaction.
+    let select = Vec::new();
 
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
@@ -75,19 +67,6 @@ fn lower_traversal(input: &Input) -> Result<Node> {
         limit: Some(input.limit),
         ..Default::default()
     })))
-}
-
-/// Add edge columns to SELECT for each relationship.
-fn add_edge_columns(
-    select: &mut Vec<SelectExpr>,
-    rels: &[InputRelationship],
-    edge_aliases: &HashMap<usize, String>,
-) {
-    for (i, _rel) in rels.iter().enumerate() {
-        if let Some(alias) = edge_aliases.get(&i) {
-            select.extend(edge_select_exprs(alias));
-        }
-    }
 }
 
 fn lower_aggregation(input: &Input) -> Result<Node> {
@@ -877,11 +856,10 @@ mod tests {
         };
         println!("{:?}", q);
         assert!(!q.group_by.is_empty());
-        assert!(
-            q.select
-                .iter()
-                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"))
-        );
+        assert!(q
+            .select
+            .iter()
+            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
     }
 
     #[test]
