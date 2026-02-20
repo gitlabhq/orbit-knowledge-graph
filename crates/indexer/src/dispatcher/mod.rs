@@ -3,17 +3,16 @@ mod extract;
 use std::sync::Arc;
 
 use chrono::Utc;
-use indexer::clickhouse::ClickHouseError;
-use indexer::locking::{LockError, LockService, NatsLockService};
-use indexer::modules::sdlc::locking::{
-    INDEXING_LOCKS_BUCKET, LOCK_TTL, global_lock_key, namespace_lock_key,
-};
-use indexer::nats::{KvBucketConfig, NatsBroker, NatsServicesImpl};
-use indexer::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
-use indexer::types::{Envelope, Event};
 use tracing::{debug, info, warn};
 
-use crate::config::AppConfig;
+use crate::clickhouse::{ClickHouseConfiguration, ClickHouseError};
+use crate::locking::{LockError, LockService, NatsLockService};
+use crate::modules::sdlc::locking::{
+    INDEXING_LOCKS_BUCKET, LOCK_TTL, global_lock_key, namespace_lock_key,
+};
+use crate::nats::{KvBucketConfig, NatsBroker, NatsConfiguration, NatsServicesImpl};
+use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
+use crate::types::{Envelope, Event};
 use extract::FromArrowColumn;
 
 const ENABLED_NAMESPACE_QUERY: &str = r#"
@@ -26,7 +25,7 @@ WHERE _siphon_deleted = false
 #[derive(Debug, thiserror::Error)]
 pub enum DispatcherError {
     #[error("NATS connection failed: {0}")]
-    NatsConnection(#[from] indexer::nats::NatsError),
+    NatsConnection(#[from] crate::nats::NatsError),
 
     #[error("ClickHouse query error: {0}")]
     ClickHouseQueryError(ClickHouseError),
@@ -35,10 +34,10 @@ pub enum DispatcherError {
     InvalidColumnType { expected: &'static str },
 
     #[error("Failed to serialize message: {0}")]
-    Serialization(#[from] indexer::types::SerializationError),
+    Serialization(#[from] crate::types::SerializationError),
 
     #[error("Failed to publish message: {0}")]
-    Publish(indexer::nats::NatsError),
+    Publish(crate::nats::NatsError),
 
     #[error("Failed to acquire lock: {0}")]
     LockAcquisition(LockError),
@@ -85,8 +84,11 @@ impl Dispatcher {
     }
 }
 
-pub async fn run(config: &AppConfig) -> Result<(), DispatcherError> {
-    let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
+pub async fn run(
+    nats_config: &NatsConfiguration,
+    datalake_config: &ClickHouseConfiguration,
+) -> Result<(), DispatcherError> {
+    let broker = Arc::new(NatsBroker::connect(nats_config).await?);
     broker
         .ensure_kv_bucket_exists(
             INDEXING_LOCKS_BUCKET,
@@ -95,7 +97,7 @@ pub async fn run(config: &AppConfig) -> Result<(), DispatcherError> {
         .await?;
 
     let dispatcher = Dispatcher::new(broker);
-    let datalake = config.datalake.build_client();
+    let datalake = datalake_config.build_client();
 
     let arrow_batches = datalake
         .query(ENABLED_NAMESPACE_QUERY)

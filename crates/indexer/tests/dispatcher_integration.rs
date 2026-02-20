@@ -3,13 +3,10 @@
 mod common;
 
 use std::collections::HashSet;
-use std::net::SocketAddr;
 
 use chrono::{DateTime, Utc};
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
-use gkg_server::config::AppConfig;
-use gkg_server::dispatcher;
 use indexer::nats::NatsConfiguration;
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT};
 use serde::Deserialize;
@@ -55,24 +52,10 @@ impl TestContext {
         }
     }
 
-    fn app_config(&self) -> AppConfig {
-        AppConfig {
-            bind_address: SocketAddr::from(([127, 0, 0, 1], 0)),
-            grpc_bind_address: SocketAddr::from(([127, 0, 0, 1], 0)),
-            jwt_secret: Some("test".into()),
-            jwt_clock_skew_secs: 0,
-            health_check_url: None,
-            nats: NatsConfiguration {
-                url: self.nats_url.clone(),
-                ..Default::default()
-            },
-            datalake: self.clickhouse.config.clone(),
-            graph: self.clickhouse.config.clone(),
-            engine: Default::default(),
-            gitaly: None,
-            code_indexing: Default::default(),
-            health_check: Default::default(),
-            metrics: Default::default(),
+    fn nats_config(&self) -> NatsConfiguration {
+        NatsConfiguration {
+            url: self.nats_url.clone(),
+            ..Default::default()
         }
     }
 
@@ -196,7 +179,9 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     context.given_enabled_namespaces([100, 200, 300]).await;
 
     let before = Utc::now();
-    dispatcher::run(&context.app_config()).await.unwrap();
+    indexer::dispatcher::run(&context.nats_config(), &context.clickhouse.config)
+        .await
+        .unwrap();
     let after = Utc::now();
 
     // Global indexing request

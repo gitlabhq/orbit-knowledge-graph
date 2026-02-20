@@ -26,4 +26,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 clickhouse-client = { path = "../clickhouse-client" }
+indexer = { path = "../indexer" }
 ontology = { path = "../ontology" }

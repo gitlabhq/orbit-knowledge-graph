@@ -8,6 +8,9 @@ datalake:
   database: gitlab_clickhouse_development
   username: default
 
+nats:
+  url: localhost:4222
+
 generation:
   seed: 42
   batch_size: 100000
@@ -69,6 +72,7 @@ continuous:
   enabled: false
   cycles: 10
   cycle_interval_secs: 5
+  dispatch_indexing: true
   inserts_per_cycle:
     MergeRequest: 20
     WorkItem: 10

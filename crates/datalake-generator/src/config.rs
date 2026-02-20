@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct SimulatorConfig {
     pub datalake: ClickHouseConfig,
+    #[serde(default)]
+    pub nats: NatsConfig,
     pub generation: GenerationConfig,
     #[serde(default)]
     pub continuous: ContinuousConfig,
@@ -15,6 +17,20 @@ pub struct SimulatorConfig {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub state: StateConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NatsConfig {
+    pub url: String,
+}
+
+impl Default for NatsConfig {
+    fn default() -> Self {
+        Self {
+            url: "localhost:4222".to_string(),
+        }
+    }
 }
 
 impl SimulatorConfig {
@@ -170,6 +186,7 @@ pub struct ContinuousConfig {
     pub inserts_per_cycle: HashMap<String, usize>,
     pub updates_per_cycle: HashMap<String, usize>,
     pub deletes_per_cycle: HashMap<String, usize>,
+    pub dispatch_indexing: bool,
 }
 
 impl Default for ContinuousConfig {
@@ -181,6 +198,7 @@ impl Default for ContinuousConfig {
             inserts_per_cycle: HashMap::new(),
             updates_per_cycle: HashMap::new(),
             deletes_per_cycle: HashMap::new(),
+            dispatch_indexing: false,
         }
     }
 }

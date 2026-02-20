@@ -4,7 +4,6 @@ use clap::Parser;
 use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::config::AppConfig;
-use gkg_server::dispatcher;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
@@ -32,7 +31,9 @@ async fn main() -> anyhow::Result<()> {
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));
 
     let result = match args.mode {
-        Mode::DispatchIndexing => dispatcher::run(&config).await.map_err(Into::into),
+        Mode::DispatchIndexing => indexer::dispatcher::run(&config.nats, &config.datalake)
+            .await
+            .map_err(Into::into),
         Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig {
