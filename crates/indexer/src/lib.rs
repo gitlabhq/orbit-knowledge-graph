@@ -31,6 +31,7 @@ pub mod clickhouse;
 pub mod configuration;
 pub mod constants;
 pub mod destination;
+pub mod dispatcher;
 pub mod engine;
 pub mod entities;
 pub(crate) mod env;
