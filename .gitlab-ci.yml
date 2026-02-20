@@ -330,13 +330,12 @@ docker-manifest:
     IMAGE_NAME: gkg
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
-    - docker manifest create "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker buildx imagetools create
+        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-arm64"
-    - docker manifest push "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
 
 # Deploy Stage - Helm Charts
 
@@ -498,15 +497,11 @@ release-manifest:
     IMAGE_NAME: gkg
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-  before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - VERSION="${CI_COMMIT_TAG#v}"
-    - docker manifest create "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
+    - docker buildx imagetools create
+        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
+        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
-    - docker manifest push "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
-    - docker manifest create "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
-    - docker manifest push "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
