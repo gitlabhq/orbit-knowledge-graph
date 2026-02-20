@@ -228,7 +228,17 @@ fn build_extract_query(node: &NodeEntity, etl: &EtlConfig) -> Option<String> {
             edges,
             ..
         } => {
-            let mut columns: Vec<String> = node.fields.iter().map(|f| f.source.clone()).collect();
+            let mut columns: Vec<String> = node
+                .fields
+                .iter()
+                .map(|f| {
+                    if f.data_type == DataType::Uuid {
+                        format!("toString({}) AS {}", f.source, f.source)
+                    } else {
+                        f.source.clone()
+                    }
+                })
+                .collect();
 
             for column in edges.keys() {
                 if !columns.contains(column) {
@@ -437,6 +447,34 @@ mod tests {
             resolved.expression,
             "CASE WHEN status = 0 THEN 'active' WHEN status = 1 THEN 'inactive' ELSE 'unknown' END AS status"
         );
+    }
+
+    #[test]
+    fn prepared_field_uuid() {
+        let field = Field {
+            name: "uuid".to_string(),
+            source: "uuid".to_string(),
+            data_type: DataType::Uuid,
+            nullable: false,
+            enum_values: None,
+            enum_type: EnumType::default(),
+        };
+        let resolved = PreparedField::from_field(&field);
+        assert_eq!(resolved.expression, "uuid");
+    }
+
+    #[test]
+    fn prepared_field_uuid_renamed() {
+        let field = Field {
+            name: "finding_uuid".to_string(),
+            source: "uuid".to_string(),
+            data_type: DataType::Uuid,
+            nullable: false,
+            enum_values: None,
+            enum_type: EnumType::default(),
+        };
+        let resolved = PreparedField::from_field(&field);
+        assert_eq!(resolved.expression, "uuid AS finding_uuid");
     }
 
     #[test]

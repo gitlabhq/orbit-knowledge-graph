@@ -145,7 +145,7 @@ impl ColumnValues {
             DataType::Int | DataType::DateTime => ColumnValues::Int64(Vec::new()),
             DataType::Float => ColumnValues::Float64(Vec::new()),
             DataType::Bool => ColumnValues::Bool(Vec::new()),
-            DataType::String | DataType::Enum => ColumnValues::String(Vec::new()),
+            DataType::String | DataType::Enum | DataType::Uuid => ColumnValues::String(Vec::new()),
             DataType::Date => ColumnValues::Date32(Vec::new()),
         }
     }

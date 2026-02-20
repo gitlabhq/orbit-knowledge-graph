@@ -296,8 +296,8 @@ async fn namespace_handler_processes_findings() {
             "INSERT INTO siphon_security_findings
                 (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
             VALUES
-                (1, 'finding-uuid-001', 100, 1, 5, true, '{\"name\": \"SQL Injection\", \"description\": \"A SQL injection vulnerability\", \"solution\": \"Use parameterized queries\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
-                (2, 'finding-uuid-002', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+                (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"SQL Injection\", \"description\": \"A SQL injection vulnerability\", \"solution\": \"Use parameterized queries\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
+                (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
         )
         .await;
 
@@ -321,8 +321,8 @@ async fn namespace_handler_processes_findings() {
     assert_eq!(batch.num_rows(), 2);
 
     let uuids = get_string_column(batch, "uuid");
-    assert_eq!(uuids.value(0), "finding-uuid-001");
-    assert_eq!(uuids.value(1), "finding-uuid-002");
+    assert_eq!(uuids.value(0), "00000000-0000-0000-0000-000000000f01");
+    assert_eq!(uuids.value(1), "00000000-0000-0000-0000-000000000f02");
 
     let names = get_string_column(batch, "name");
     assert_eq!(names.value(0), "SQL Injection");
@@ -467,7 +467,7 @@ async fn namespace_handler_processes_vulnerability_finding_edge() {
         .execute(
             "INSERT INTO siphon_security_findings
                 (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
-            VALUES (1, 'finding-uuid-001', 100, 1, 5, true, '{\"name\": \"Test Finding\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+            VALUES (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"Test Finding\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
         )
         .await;
 
@@ -550,7 +550,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
             "INSERT INTO siphon_vulnerabilities
                 (id, title, project_id, author_id, state, severity, report_type, uuid,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (1, 'Log4Shell Vulnerability', 1000, 1, 1, 7, 0, 'vuln-uuid-001',
+            VALUES (1, 'Log4Shell Vulnerability', 1000, 1, 1, 7, 0, '00000000-0000-0000-0000-000000000b01',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
         )
         .await;
@@ -563,11 +563,11 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
                  primary_identifier_id, vulnerability_id, metadata_version,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
             VALUES
-                (1, 'occurrence-uuid-001', 'SQL Injection', 'A SQL injection vulnerability', 'Use parameterized queries',
+                (1, '00000000-0000-0000-0000-0000000000a1', 'SQL Injection', 'A SQL injection vulnerability', 'Use parameterized queries',
                  'CVE-2021-44228', 'src/main.rs:42', 'fp-location-1',
                  7, 0, 0, 1000, 1, 1, 1, '1.0',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'occurrence-uuid-002', 'XSS Vulnerability', NULL, NULL,
+                (2, '00000000-0000-0000-0000-0000000000a2', 'XSS Vulnerability', NULL, NULL,
                  NULL, 'src/web.rs:100', 'fp-location-2',
                  5, 3, 1, 1000, 1, 1, NULL, '1.0',
                  '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
@@ -594,8 +594,8 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     assert_eq!(batch.num_rows(), 2);
 
     let uuids = get_string_column(batch, "uuid");
-    assert_eq!(uuids.value(0), "occurrence-uuid-001");
-    assert_eq!(uuids.value(1), "occurrence-uuid-002");
+    assert_eq!(uuids.value(0), "00000000-0000-0000-0000-0000000000a1");
+    assert_eq!(uuids.value(1), "00000000-0000-0000-0000-0000000000a2");
 
     let names = get_string_column(batch, "name");
     assert_eq!(names.value(0), "SQL Injection");
@@ -603,7 +603,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
 
     let descriptions = get_string_column(batch, "description");
     assert_eq!(descriptions.value(0), "A SQL injection vulnerability");
-    assert!(descriptions.is_null(1));
+    assert_eq!(descriptions.value(1), "");
 
     let severities = get_string_column(batch, "severity");
     assert_eq!(severities.value(0), "critical");
@@ -690,9 +690,9 @@ async fn namespace_handler_processes_vulnerability_merge_request_links() {
                 (id, title, project_id, author_id, state, severity, report_type, uuid,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
             VALUES
-                (1, 'SQL Injection', 1000, 1, 1, 7, 0, 'vuln-uuid-001',
+                (1, 'SQL Injection', 1000, 1, 1, 7, 0, '00000000-0000-0000-0000-000000000b01',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'XSS Vulnerability', 1000, 1, 1, 6, 0, 'vuln-uuid-002',
+                (2, 'XSS Vulnerability', 1000, 1, 1, 6, 0, '00000000-0000-0000-0000-000000000b02',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
         )
         .await;
@@ -794,9 +794,9 @@ async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
                  primary_identifier_id, metadata_version, location, location_fingerprint,
                  traversal_path, created_at, updated_at, _siphon_replicated_at)
             VALUES
-                (1, 'occurrence-uuid-001', 'SQL Injection', 7, 0, 0, 1000, 1, 1, '1.0', 'src/main.rs:42', 'fp-loc-1',
+                (1, '00000000-0000-0000-0000-0000000000a1', 'SQL Injection', 7, 0, 0, 1000, 1, 1, '1.0', 'src/main.rs:42', 'fp-loc-1',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'occurrence-uuid-002', 'XSS Vulnerability', 5, 0, 0, 1000, 1, 2, '1.0', 'src/web.rs:100', 'fp-loc-2',
+                (2, '00000000-0000-0000-0000-0000000000a2', 'XSS Vulnerability', 5, 0, 0, 1000, 1, 2, '1.0', 'src/web.rs:100', 'fp-loc-2',
                  '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
         )
         .await;
@@ -985,8 +985,8 @@ async fn namespace_handler_processes_security_scan_finding_edges() {
             "INSERT INTO siphon_security_findings
                 (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
             VALUES
-                (1, 'finding-uuid-001', 100, 1, 5, true, '{\"name\": \"SQL Injection\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
-                (2, 'finding-uuid-002', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+                (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"SQL Injection\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
+                (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
         )
         .await;
 

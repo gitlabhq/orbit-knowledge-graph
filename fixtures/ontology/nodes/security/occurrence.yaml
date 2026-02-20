@@ -23,7 +23,7 @@ properties:
     description: "Global identifier for the occurrence."
 
   uuid:
-    type: string
+    type: uuid
     source: uuid
     nullable: false
     description: "UUID uniquely identifying the occurrence."

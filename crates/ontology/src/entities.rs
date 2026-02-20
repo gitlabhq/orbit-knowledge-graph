@@ -174,6 +174,8 @@ pub enum DataType {
     DateTime,
     /// Enum
     Enum,
+    /// A UUID value.
+    Uuid,
 }
 
 /// Enum storage type - how the enum is stored in the source database.
@@ -196,6 +198,7 @@ impl fmt::Display for DataType {
             DataType::Date => write!(f, "Date"),
             DataType::DateTime => write!(f, "DateTime"),
             DataType::Enum => write!(f, "Enum"),
+            DataType::Uuid => write!(f, "Uuid"),
         }
     }
 }
@@ -205,7 +208,11 @@ impl DataType {
     #[must_use]
     pub fn to_json_schema_type(self) -> &'static str {
         match self {
-            DataType::String | DataType::Date | DataType::DateTime | DataType::Enum => "string",
+            DataType::String
+            | DataType::Date
+            | DataType::DateTime
+            | DataType::Enum
+            | DataType::Uuid => "string",
             DataType::Int => "integer",
             DataType::Float => "number",
             DataType::Bool => "boolean",
