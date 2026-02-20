@@ -1,93 +1,85 @@
 # AGENTS.md
 
-Main repository for the GitLab Knowledge Graph (aka "gitlab orbit").
+GitLab Knowledge Graph (Orbit). Rust service that builds a property graph from GitLab data and serves queries over gRPC/HTTP. 
 
-## Development
+## Quick start
 
-- Run tasks with mise.
+All tasks use mise. `mise build`, `mise test:fast`, `mise lint:code`, `mise server:start`.
+Fix linting issues: `mise lint:code:fix`. Validate docs: `mise lint:docs`. Validate ontology: `mise ontology:validate`.
+Integration tests need Docker: `mise test:integration`.
 
-## Code Quality
+## How the system works
 
-### Minimal Comments
+- **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). Code data via Gitaly `GetArchive` gRPC. GKG only writes to its own ClickHouse tables.
+- **Rails owns authorization.** GKG delegates all access decisions to Rails via gRPC (traversal IDs, resource permissions). See `docs/design-documents/security.md`.
+- **ClickHouse = datalake + graph.** Datalake DB holds raw Siphon rows; graph DB holds indexed property graph tables. The indexer transforms between them.
+- **Ontology-driven graph.** YAML in `fixtures/ontology/nodes/` drives ETL, query validation, and redaction. New entity types start there, not in Rust. Schema: `fixtures/ontology/ontology.schema.json`.
+- **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
+- **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
-Don't add comments that narrate what code already says. Remove:
+## What CI enforces
 
-- Obvious narration (`// Create a new vector`)
-- Changelog-style comments (`// Fixed bug where X`)
-- Section markers (`// === HELPERS ===`)
-- Signature restatements (`// Takes X and returns Y`)
+- `AGENTS.md` and `CLAUDE.md` must be identical (`agent-file-sync-check`)
+- Clippy with all features, warnings as errors (`lint-check`)
+- Ontology YAML validated against JSON schema (`ontology-schema-validate`)
+- `cargo fmt` (`fmt-check`)
+- `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
+- Unit tests via nextest (`unit-test`)
+- Integration tests with Docker testcontainers (`integration-test`)
+- Gitaly integration tests with real Gitaly container (`gitaly-integration-test`)
+- MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
+- Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
+- Helm chart linting and template validation (`helm-lint`)
 
-Keep comments that explain *why*—business logic, gotchas, or links to specs. Use `/remove-llm-comments` to clean up existing code.
+## Where to find things
 
-### Dependencies
+| What | Where |
+|---|---|
+| Architecture and data model | `docs/design-documents/data_model.md` |
+| Security / AuthZ design | `docs/design-documents/security.md` |
+| Query DSL spec | `docs/design-documents/querying/` |
+| SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |
+| Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
+| Schema migration strategy | `docs/design-documents/schema_management.md` |
+| Observability / SLOs | `docs/design-documents/observability.md` |
+| Ontology node definitions | `fixtures/ontology/nodes/` |
+| Ontology edge definitions | `fixtures/ontology/edges/` |
+| Ontology JSON schema | `fixtures/ontology/ontology.schema.json` |
+| Query test fixtures | `fixtures/queries/` |
+| Schema fixtures | `fixtures/schema/` |
+| gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
+| Server config structure | `crates/gkg-server/src/config.rs` |
+| Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
+| Local development guide | `docs/dev/local-development.md` |
+| GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
+| Operational runbook | `docs/dev/RUNBOOK.md` |
+| Helm charts (dev) | `helm-dev/gkg/`, `helm-dev/observability/` |
+| **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
+| Related repos and local paths | `/related-repositories` skill |
 
-- Always check crates.io for the latest version before adding a new dependency.
+## Crate map
 
-## Related repositories
+Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, HealthCheck via `--mode`).
 
-The `/related-repositories` skill lists dependent systems and their local paths:
+| Crate | Role |
+|---|---|
+| `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading |
+| `query-engine` | JSON DSL -> parameterized ClickHouse SQL, security context enforcement |
+| `indexer` | NATS consumer, SDLC + code handler modules, worker pools, `testkit/` |
+| `ontology` | Loads/validates YAML ontology, query validation helpers |
+| `code-parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
+| `code-graph` | Builds in-memory property graphs from parsed code |
+| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming |
+| `gitaly-client` | Gitaly gRPC client, HMAC auth, GetArchive RPC |
+| `siphon-proto` | Protobuf types for CDC replication events |
+| `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
+| `health-check` | K8s readiness/liveness probes |
+| `treesitter-visit` | Tree-sitter language bindings wrapper |
+| `cli` | Local `gkg index` and `gkg query` commands |
+| `simulator` | Fake data generation + query correctness evaluation |
+| `datalake-generator` | Synthetic GitLab data for load testing |
 
-- Design documents at [`docs/design-documents/`](docs/design-documents/)
-- Siphon - CDC stream project for PostgreSQL logical replication
-- Gitaly - Git RPC service
-- GitLab - main GitLab project
-- gitlab-zoekt-indexer - Zoekt code search indexer
+## Code quality
 
-## Architecture
-
-The Knowledge Graph builds a property graph from GitLab data and exposes it through a JSON-based Cypher-like DSL (full Cypher support planned).
-
-### Data flow
-
-1. PostgreSQL changes stream through Siphon (CDC) into NATS
-2. The indexer consumes NATS events and writes property graph tables to ClickHouse
-3. For code indexing, the indexer fetches repositories from Gitaly, parses them into call graphs, and stores them in ClickHouse
-4. The webserver translates the JSON DSL into ClickHouse SQL and returns results
-
-### What gets indexed
-
-- Code: call graphs, definitions, references, repository metadata
-- SDLC: MRs, CI pipelines, issues, work items, groups, projects
-- Custom entities (planned): user-defined nodes
-
-### Tech stack
-
-- Siphon streams PostgreSQL logical replication events into NATS
-- NATS JetStream brokers messages and handles distributed coordination
-- ClickHouse stores the property graph and runs queries via a custom graph engine
-
-## Crates
-
-### etl-engine
-
-Message processing framework for the Knowledge Graph. Consumes events from NATS JetStream, routes them through handlers, and writes to destinations:
-
-- Handler and Module traits for message processing
-- Two-level concurrency control (global + per-module)
-- BatchWriter and StreamWriter destination abstractions
-- Comprehensive test utilities in `testkit/`
-
-Integration tests require Docker for NATS testcontainers.
-
-### gitaly-client
-
-Rust gRPC client for Gitaly. Provides repository operations for the code indexer:
-
-- Unix socket and TCP connection support
-- HMAC-SHA256 v2 token authentication
-- Repository extraction via GetArchive RPC
-- `RepositorySource` trait for testing abstraction
-
-Build with: `GITALY_PROTO_ROOT=/path/to/gitaly cargo build -p gitaly-client`
-
-Integration tests require a running Gitaly instance. Set `GITALY_CONNECTION_INFO` JSON with address, storage, and token.
-
-## Infrastructure
-
-See [docs/dev/INFRASTRUCTURE.md](docs/dev/INFRASTRUCTURE.md) for sandbox environment details (GCP project, VMs, networking).
-
-Kubernetes deployments are managed via Helm charts in `./helm-dev/`. The charts are the source of truth for:
-
-- Component configuration (NATS, siphon-producer, siphon-consumer)
-- Secret management (External Secrets Operator integration)
-- Service connectivity
+- No narration comments. Keep only *why* comments. Use `/remove-llm-comments` to clean up.
+- Check crates.io for latest version before adding dependencies.
