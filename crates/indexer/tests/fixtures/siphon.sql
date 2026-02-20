@@ -84,10 +84,11 @@ CREATE TABLE IF NOT EXISTS siphon_namespaces
     `organization_id` Int64 DEFAULT 0,
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `_siphon_deleted` Bool DEFAULT false,
-    `state` Int8 DEFAULT 0
+    `state` Int8
 ) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY id
-ORDER BY id;
+ORDER BY id
+SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS siphon_namespace_details
 (
@@ -154,27 +155,40 @@ SETTINGS index_granularity = 512;
 -- Siphon source tables for notes
 CREATE TABLE IF NOT EXISTS siphon_notes
 (
-    `id` Int64,
-    `note` Nullable(String),
-    `noteable_type` Nullable(String),
-    `noteable_id` Nullable(Int64),
+    `note` String,
+    `noteable_type` LowCardinality(String),
     `author_id` Nullable(Int64),
-    `system` Bool DEFAULT false,
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `project_id` Nullable(Int64),
     `line_code` Nullable(String),
     `commit_id` Nullable(String),
-    `discussion_id` Nullable(String),
+    `noteable_id` Int64,
+    `system` Bool DEFAULT false,
+    `st_diff` Nullable(String),
+    `updated_by_id` Nullable(Int64),
+    `type` LowCardinality(String),
+    `position` Nullable(String),
+    `original_position` Nullable(String),
     `resolved_at` Nullable(DateTime64(6, 'UTC')),
     `resolved_by_id` Nullable(Int64),
+    `discussion_id` String,
+    `change_position` Nullable(String),
+    `resolved_by_push` Nullable(Bool),
+    `review_id` Nullable(Int64),
+    `confidential` Bool,
+    `last_edited_at` Nullable(DateTime64(6, 'UTC')),
     `internal` Bool DEFAULT false,
-    `confidential` Nullable(Bool),
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `id` Int64,
+    `namespace_id` Nullable(Int64),
+    `imported_from` Int8 DEFAULT 0,
+    `organization_id` Nullable(Int64),
     `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `_siphon_deleted` Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY (traversal_path, id)
-ORDER BY (traversal_path, id);
+PRIMARY KEY (traversal_path, noteable_type, noteable_id, id)
+ORDER BY (traversal_path, noteable_type, noteable_id, id);
 
 -- Siphon source tables for merge requests
 CREATE TABLE IF NOT EXISTS hierarchy_merge_requests
@@ -260,10 +274,10 @@ SETTINGS index_granularity = 8192;
 CREATE TABLE IF NOT EXISTS siphon_merge_request_diffs
 (
     `id` Int64,
-    `state` Nullable(String),
+    `state` LowCardinality(Nullable(String)),
     `merge_request_id` Int64,
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `base_commit_sha` Nullable(String),
     `real_size` Nullable(String),
     `head_commit_sha` Nullable(String),
@@ -271,19 +285,19 @@ CREATE TABLE IF NOT EXISTS siphon_merge_request_diffs
     `commits_count` Nullable(Int64),
     `external_diff` Nullable(String),
     `external_diff_store` Nullable(Int64) DEFAULT 1,
-    `stored_externally` Nullable(Bool),
-    `files_count` Nullable(Int8),
+    `stored_externally` Bool DEFAULT false,
+    `files_count` Nullable(Int16),
     `sorted` Bool DEFAULT false,
     `diff_type` Int8 DEFAULT 1,
     `patch_id_sha` Nullable(String),
-    `project_id` Nullable(Int64),
+    `project_id` Int64,
     `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `_siphon_deleted` Bool DEFAULT false
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY (traversal_path, id)
-ORDER BY (traversal_path, id);
+PRIMARY KEY (traversal_path, merge_request_id, id)
+ORDER BY (traversal_path, merge_request_id, id);
 
 -- Siphon source tables for merge request diff files
 CREATE TABLE IF NOT EXISTS siphon_merge_request_diff_files
@@ -305,12 +319,13 @@ CREATE TABLE IF NOT EXISTS siphon_merge_request_diff_files
     `generated` Nullable(Bool),
     `encoded_file_path` Bool DEFAULT false,
     `project_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `_siphon_deleted` Bool DEFAULT false
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY (merge_request_diff_id, relative_order)
-ORDER BY (merge_request_diff_id, relative_order);
+PRIMARY KEY (traversal_path, merge_request_diff_id, relative_order)
+ORDER BY (traversal_path, merge_request_diff_id, relative_order);
 
 -- Siphon source tables for milestones
 CREATE TABLE IF NOT EXISTS siphon_milestones
@@ -318,16 +333,13 @@ CREATE TABLE IF NOT EXISTS siphon_milestones
     `id` Int64,
     `title` String,
     `project_id` Nullable(Int64),
-    `description` Nullable(String),
+    `description` String,
     `due_date` Nullable(Date32),
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
-    `state` Nullable(String),
-    `iid` Nullable(Int64),
-    `title_html` Nullable(String),
-    `description_html` Nullable(String),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `state` LowCardinality(String),
+    `iid` Int64,
     `start_date` Nullable(Date32),
-    `cached_markdown_version` Nullable(Int64),
     `group_id` Nullable(Int64),
     `lock_version` Int64 DEFAULT 0,
     `traversal_path` String DEFAULT '0/',
@@ -342,17 +354,15 @@ ORDER BY (traversal_path, id);
 CREATE TABLE IF NOT EXISTS siphon_labels
 (
     `id` Int64,
-    `title` Nullable(String),
-    `color` Nullable(String),
+    `title` String,
+    `color` String,
     `project_id` Nullable(Int64),
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `template` Nullable(Bool) DEFAULT false,
-    `description` Nullable(String),
-    `description_html` Nullable(String),
-    `type` Nullable(String),
+    `description` String,
+    `type` LowCardinality(String),
     `group_id` Nullable(Int64),
-    `cached_markdown_version` Nullable(Int64),
     `lock_on_merge` Bool DEFAULT false,
     `archived` Bool DEFAULT false,
     `organization_id` Nullable(Int64),
@@ -486,38 +496,35 @@ SETTINGS index_granularity = 8192;
 -- Siphon source tables for security vulnerabilities
 CREATE TABLE IF NOT EXISTS siphon_vulnerabilities
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `id` Int64,
     `project_id` Int64,
     `author_id` Int64,
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
     `title` String,
-    `title_html` Nullable(String),
     `description` Nullable(String),
-    `description_html` Nullable(String),
-    `state` Int8 DEFAULT 1,
-    `severity` Int8,
-    `severity_overridden` Nullable(Bool) DEFAULT false CODEC(ZSTD(1)),
+    `state` Int16 DEFAULT 1,
+    `severity` Int16,
+    `severity_overridden` Nullable(Bool) DEFAULT false,
     `resolved_by_id` Nullable(Int64),
     `resolved_at` Nullable(DateTime64(6, 'UTC')),
-    `report_type` Int8,
-    `cached_markdown_version` Nullable(Int64),
+    `report_type` Int16,
     `confirmed_by_id` Nullable(Int64),
     `confirmed_at` Nullable(DateTime64(6, 'UTC')),
     `dismissed_at` Nullable(DateTime64(6, 'UTC')),
     `dismissed_by_id` Nullable(Int64),
-    `resolved_on_default_branch` Bool DEFAULT false CODEC(ZSTD(1)),
-    `present_on_default_branch` Bool DEFAULT true CODEC(ZSTD(1)),
+    `resolved_on_default_branch` Bool DEFAULT false,
+    `present_on_default_branch` Bool DEFAULT true,
     `detected_at` Nullable(DateTime64(6, 'UTC')) DEFAULT now(),
-    `finding_id` Nullable(Int64),
+    `finding_id` Int64,
     `cvss` Nullable(String) DEFAULT '[]',
-    `auto_resolved` Bool DEFAULT false CODEC(ZSTD(1)),
-    `uuid` String,
+    `auto_resolved` Bool DEFAULT false,
+    `uuid` Nullable(UUID),
     `solution` Nullable(String),
     `partition_id` Nullable(Int64) DEFAULT 1,
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
@@ -526,16 +533,16 @@ ORDER BY (traversal_path, id);
 -- Siphon source tables for vulnerability scanners
 CREATE TABLE IF NOT EXISTS siphon_vulnerability_scanners
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
     `project_id` Int64,
     `external_id` String,
-    `name` String,
-    `vendor` String DEFAULT 'GitLab',
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+    `name` LowCardinality(String),
+    `vendor` LowCardinality(String) DEFAULT 'GitLab',
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
@@ -544,19 +551,19 @@ ORDER BY (traversal_path, id);
 -- Siphon source tables for vulnerability identifiers
 CREATE TABLE IF NOT EXISTS siphon_vulnerability_identifiers
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
     `project_id` Int64,
     `fingerprint` String,
-    `external_type` String,
+    `external_type` LowCardinality(String),
     `external_id` String,
     `name` String,
     `url` Nullable(String),
     `partition_id` Nullable(Int64) DEFAULT 1,
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
@@ -565,19 +572,19 @@ ORDER BY (traversal_path, id);
 -- Siphon source tables for security findings
 CREATE TABLE IF NOT EXISTS siphon_security_findings
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `id` Int64,
     `scan_id` Int64,
     `scanner_id` Int64,
-    `severity` Int8,
-    `deduplicated` Bool DEFAULT false CODEC(ZSTD(1)),
-    `uuid` String,
-    `overridden_uuid` Nullable(String),
-    `partition_number` Int64 DEFAULT 1 CODEC(DoubleDelta, ZSTD),
+    `severity` Int16,
+    `deduplicated` Bool DEFAULT false,
+    `uuid` UUID,
+    `overridden_uuid` Nullable(UUID),
+    `partition_number` Int64 DEFAULT 1,
     `finding_data` String DEFAULT '{}',
     `project_id` Nullable(Int64),
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id, partition_number)
@@ -586,20 +593,20 @@ ORDER BY (traversal_path, id, partition_number);
 -- Siphon source tables for security scans
 CREATE TABLE IF NOT EXISTS siphon_security_scans
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
     `build_id` Int64,
-    `scan_type` Int8,
+    `scan_type` Int16,
     `info` String DEFAULT '{}',
-    `project_id` Nullable(Int64),
+    `project_id` Int64,
     `pipeline_id` Nullable(Int64),
-    `latest` Bool DEFAULT true CODEC(ZSTD(1)),
-    `status` Int8 DEFAULT 0,
+    `latest` Bool DEFAULT true,
+    `status` Int16 DEFAULT 0,
     `findings_partition_number` Int64 DEFAULT 1,
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
@@ -607,11 +614,11 @@ ORDER BY (traversal_path, id);
 
 CREATE TABLE IF NOT EXISTS siphon_vulnerability_occurrences
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `severity` Int8,
-    `report_type` Int8,
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `severity` Int16,
+    `report_type` Int16,
     `project_id` Int64,
     `scanner_id` Int64,
     `primary_identifier_id` Int64,
@@ -621,21 +628,21 @@ CREATE TABLE IF NOT EXISTS siphon_vulnerability_occurrences
     `raw_metadata` Nullable(String),
     `vulnerability_id` Nullable(Int64),
     `details` String DEFAULT '{}',
-    `description` Nullable(String),
-    `solution` Nullable(String),
+    `description` String DEFAULT '',
+    `solution` String DEFAULT '',
     `cve` Nullable(String),
     `location` Nullable(String),
-    `detection_method` Int8 DEFAULT 0,
-    `uuid` String,
+    `detection_method` Int16 DEFAULT 0,
+    `uuid` UUID DEFAULT '00000000-0000-0000-0000-000000000000',
     `initial_pipeline_id` Nullable(Int64),
     `latest_pipeline_id` Nullable(Int64),
     `security_project_tracked_context_id` Nullable(Int64),
-    `detected_at` Nullable(DateTime64(6, 'UTC')) DEFAULT now(),
-    `new_uuid` Nullable(String),
+    `detected_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `new_uuid` Nullable(UUID),
     `partition_id` Nullable(Int64) DEFAULT 1,
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1))
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
@@ -647,18 +654,18 @@ CREATE TABLE IF NOT EXISTS siphon_p_ci_pipelines
     `ref` Nullable(String),
     `sha` Nullable(String),
     `before_sha` Nullable(String),
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `tag` Nullable(Bool) DEFAULT false,
     `yaml_errors` Nullable(String),
     `committed_at` Nullable(DateTime64(6, 'UTC')),
     `project_id` Int64,
-    `status` Nullable(String),
+    `status` LowCardinality(String) DEFAULT '',
     `started_at` Nullable(DateTime64(6, 'UTC')),
     `finished_at` Nullable(DateTime64(6, 'UTC')),
     `duration` Nullable(Int64),
     `user_id` Nullable(Int64),
-    `lock_version` Nullable(Int64) DEFAULT 0,
+    `lock_version` Int64 DEFAULT 0,
     `pipeline_schedule_id` Nullable(Int64),
     `source` Nullable(Int64),
     `config_source` Nullable(Int64),
@@ -670,8 +677,8 @@ CREATE TABLE IF NOT EXISTS siphon_p_ci_pipelines
     `target_sha` Nullable(String),
     `external_pull_request_id` Nullable(Int64),
     `ci_ref_id` Nullable(Int64),
-    `locked` Int8 DEFAULT 1,
-    `partition_id` Int64 DEFAULT 1,
+    `locked` Int16 DEFAULT 1,
+    `partition_id` Int64,
     `id` Int64,
     `auto_canceled_by_id` Nullable(Int64),
     `auto_canceled_by_partition_id` Nullable(Int64),
@@ -688,14 +695,14 @@ ORDER BY (traversal_path, id, partition_id);
 CREATE TABLE IF NOT EXISTS siphon_p_ci_stages
 (
     `project_id` Int64,
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `name` Nullable(String),
     `status` Nullable(Int64),
-    `lock_version` Nullable(Int64) DEFAULT 0,
+    `lock_version` Int64 DEFAULT 0,
     `position` Nullable(Int64),
     `id` Int64,
-    `partition_id` Int64 DEFAULT 1,
+    `partition_id` Int64,
     `pipeline_id` Nullable(Int64),
     `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
@@ -708,10 +715,10 @@ ORDER BY (traversal_path, id, partition_id);
 -- Siphon source tables for CI builds (jobs)
 CREATE TABLE IF NOT EXISTS siphon_p_ci_builds
 (
-    `status` Nullable(String),
+    `status` LowCardinality(String) DEFAULT '',
     `finished_at` Nullable(DateTime64(6, 'UTC')),
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `started_at` Nullable(DateTime64(6, 'UTC')),
     `coverage` Nullable(Float64),
     `name` Nullable(String),
@@ -720,16 +727,16 @@ CREATE TABLE IF NOT EXISTS siphon_p_ci_builds
     `stage_idx` Nullable(Int64),
     `tag` Nullable(Bool),
     `ref` Nullable(String),
-    `type` Nullable(String),
+    `type` LowCardinality(String) DEFAULT '',
     `target_url` Nullable(String),
     `description` Nullable(String),
     `erased_at` Nullable(DateTime64(6, 'UTC')),
     `artifacts_expire_at` Nullable(DateTime64(6, 'UTC')),
-    `environment` Nullable(String),
-    `when` Nullable(String),
+    `environment` LowCardinality(String) DEFAULT '',
+    `when` LowCardinality(String) DEFAULT '',
     `yaml_variables` Nullable(String),
     `queued_at` Nullable(DateTime64(6, 'UTC')),
-    `lock_version` Nullable(Int64) DEFAULT 0,
+    `lock_version` Int64 DEFAULT 0,
     `coverage_regex` Nullable(String),
     `retried` Nullable(Bool),
     `protected` Nullable(Bool),
@@ -739,10 +746,10 @@ CREATE TABLE IF NOT EXISTS siphon_p_ci_builds
     `resource_group_id` Nullable(Int64),
     `waiting_for_resource_at` Nullable(DateTime64(6, 'UTC')),
     `processed` Nullable(Bool),
-    `scheduling_type` Nullable(Int8),
+    `scheduling_type` Nullable(Int16),
     `id` Int64,
     `stage_id` Nullable(Int64),
-    `partition_id` Int64 DEFAULT 1,
+    `partition_id` Int64,
     `auto_canceled_by_partition_id` Nullable(Int64),
     `auto_canceled_by_id` Nullable(Int64),
     `commit_id` Nullable(Int64),
@@ -755,8 +762,8 @@ CREATE TABLE IF NOT EXISTS siphon_p_ci_builds
     `upstream_pipeline_partition_id` Nullable(Int64),
     `scoped_user_id` Nullable(Int64),
     `timeout` Nullable(Int64),
-    `timeout_source` Nullable(Int8),
-    `exit_code` Nullable(Int8),
+    `timeout_source` Nullable(Int16),
+    `exit_code` Nullable(Int16),
     `debug_trace_enabled` Nullable(Bool),
     `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
@@ -769,17 +776,17 @@ ORDER BY (traversal_path, id, partition_id);
 -- Siphon source tables for vulnerability merge request links (join table)
 CREATE TABLE IF NOT EXISTS siphon_vulnerability_merge_request_links
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `id` Int64,
     `vulnerability_id` Int64,
     `merge_request_id` Int64,
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
     `project_id` Int64,
     `vulnerability_occurrence_id` Nullable(Int64),
     `readiness_score` Nullable(Float64),
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
     PROJECTION pg_pkey_ordered (
         SELECT *
         ORDER BY id
@@ -787,86 +794,90 @@ CREATE TABLE IF NOT EXISTS siphon_vulnerability_merge_request_links
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for merge requests closing issues (join table)
 CREATE TABLE IF NOT EXISTS siphon_merge_requests_closing_issues
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `id` Int64,
     `merge_request_id` Int64,
     `issue_id` Int64,
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `from_mr_description` Bool DEFAULT true CODEC(ZSTD(1)),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `from_mr_description` Bool DEFAULT true,
     `project_id` Int64,
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
     PROJECTION pg_pkey_ordered (
         SELECT *
         ORDER BY id
     )
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY (traversal_path, id)
+PRIMARY KEY (traversal_path, issue_id, id)
+ORDER BY (traversal_path, issue_id, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for work item parent links (join table)
 CREATE TABLE IF NOT EXISTS siphon_work_item_parent_links
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `id` Int64,
     `work_item_id` Int64,
     `work_item_parent_id` Int64,
     `relative_position` Nullable(Int64),
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
     `namespace_id` Int64,
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
     PROJECTION pg_pkey_ordered (
         SELECT *
         ORDER BY id
     )
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY (traversal_path, id)
+PRIMARY KEY (traversal_path, work_item_parent_id, id)
+ORDER BY (traversal_path, work_item_parent_id, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for issue links (join table)
 CREATE TABLE IF NOT EXISTS siphon_issue_links
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `id` Int64,
     `source_id` Int64,
     `target_id` Int64,
-    `created_at` Nullable(DateTime64(6, 'UTC')) CODEC(Delta, ZSTD(1)),
-    `updated_at` Nullable(DateTime64(6, 'UTC')) CODEC(Delta, ZSTD(1)),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `link_type` Int8 DEFAULT 0,
     `namespace_id` Int64,
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
     PROJECTION pg_pkey_ordered (
         SELECT *
         ORDER BY id
     )
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY (traversal_path, id)
+PRIMARY KEY (traversal_path, source_id, id)
+ORDER BY (traversal_path, source_id, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for vulnerability occurrence identifiers (join table)
 CREATE TABLE IF NOT EXISTS siphon_vulnerability_occurrence_identifiers
 (
-    `id` Int64 CODEC(DoubleDelta, ZSTD),
-    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
-    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
     `occurrence_id` Int64,
     `identifier_id` Int64,
     `project_id` Int64,
-    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now() CODEC(ZSTD(1)),
-    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
     PROJECTION pg_pkey_ordered (
         SELECT *
         ORDER BY id
@@ -874,6 +885,7 @@ CREATE TABLE IF NOT EXISTS siphon_vulnerability_occurrence_identifiers
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for members (join table for user membership)
@@ -884,10 +896,10 @@ CREATE TABLE IF NOT EXISTS siphon_members
     `source_id` Int64,
     `source_type` String,
     `user_id` Nullable(Int64),
-    `notification_level` Int64 DEFAULT 0,
-    `type` String DEFAULT '',
-    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
-    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `notification_level` Int64,
+    `type` String,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
     `created_by_id` Nullable(Int64),
     `invite_email` Nullable(String),
     `invite_token` Nullable(String),
@@ -913,4 +925,4 @@ CREATE TABLE IF NOT EXISTS siphon_members
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
-SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', index_granularity = 8192;

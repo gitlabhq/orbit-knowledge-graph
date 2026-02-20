@@ -750,6 +750,7 @@ fn parse_data_type(s: &str, field_name: &str) -> Result<DataType, OntologyError>
         "timestamp" | "datetime" => Ok(DataType::DateTime),
         "string" => Ok(DataType::String),
         "enum" => Ok(DataType::Enum),
+        "uuid" => Ok(DataType::Uuid),
         other => Err(OntologyError::Validation(format!(
             "unknown data type '{}' for field '{}'",
             other, field_name
@@ -1259,6 +1260,7 @@ mod tests {
         assert_eq!(format!("{}", DataType::Int), "Int");
         assert_eq!(format!("{}", DataType::Date), "Date");
         assert_eq!(format!("{}", DataType::DateTime), "DateTime");
+        assert_eq!(format!("{}", DataType::Uuid), "Uuid");
 
         // Field display
         let field = Field {
@@ -1428,6 +1430,7 @@ mod tests {
         assert_eq!(DataType::Date.to_json_schema_type(), "string");
         assert_eq!(DataType::DateTime.to_json_schema_type(), "string");
         assert_eq!(DataType::Enum.to_json_schema_type(), "string");
+        assert_eq!(DataType::Uuid.to_json_schema_type(), "string");
     }
 
     fn base_schema() -> &'static str {
