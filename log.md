@@ -159,7 +159,7 @@ cd ~/Desktop/Code/gkg
 # Run redaction tests
 cd ~/Desktop/Code/gdk/gitlab
 bundle exec rails runner \
-  ~/Desktop/Code/angelo-orbit-work-specs/specs/e2e-knowledge-graph-testing/tests/redaction_test.rb
+  ~/Desktop/Code/gkg/tests/e2e/redaction_test.rb
 
 # Tear down
 cd ~/Desktop/Code/gkg

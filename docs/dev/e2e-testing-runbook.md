@@ -50,7 +50,7 @@ curl http://localhost:4200/health
 ## Test Suite Location
 
 ```
-~/Desktop/Code/angelo-orbit-work-specs/specs/e2e-knowledge-graph-testing/
+~/Desktop/Code/gkg/tests/e2e/
 ```
 
 All tests run inside the GitLab Rails environment via `rails runner`:
@@ -198,7 +198,7 @@ If missing, create them:
 ```shell
 cd ~/Desktop/Code/gdk/gitlab
 bundle exec rails runner \
-  ~/Desktop/Code/angelo-orbit-work-specs/specs/e2e-knowledge-graph-testing/scripts/create_test_data.rb \
+  ~/Desktop/Code/gkg/tests/e2e/create_test_data.rb \
   2>/dev/null
 ```
 
@@ -242,7 +242,7 @@ instance. It verifies that every user sees exactly the entities their
 ```shell
 cd ~/Desktop/Code/gdk/gitlab
 bundle exec rails runner \
-  ~/Desktop/Code/angelo-orbit-work-specs/specs/e2e-knowledge-graph-testing/tests/redaction_test.rb \
+  ~/Desktop/Code/gkg/tests/e2e/redaction_test.rb \
   2>/dev/null
 ```
 
@@ -283,7 +283,7 @@ path-finding, ordering, and more. Less strict on exact counts.
 ```shell
 cd ~/Desktop/Code/gdk/gitlab
 bundle exec rails runner \
-  ~/Desktop/Code/angelo-orbit-work-specs/specs/e2e-knowledge-graph-testing/tests/mega_test.rb \
+  ~/Desktop/Code/gkg/tests/e2e/mega_test.rb \
   2>/dev/null
 ```
 
