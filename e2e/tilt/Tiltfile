@@ -163,10 +163,9 @@ spec:
             - name: CLICKHOUSE_USER
               value: default
             - name: CLICKHOUSE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: clickhouse-credentials
-                  key: password
+              value: ""
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
             - name: CLICKHOUSE_DB
               value: gitlab_clickhouse_development
           resources:
@@ -219,11 +218,27 @@ k8s_resource(
 
 # ── GKG schema migration job ──────────────────────────────────────────────────
 #
-# Runs after ClickHouse is ready. Applies the GKG graph schema
-# (gl_group, gl_project, etc.) to the gkg-development database,
-# and the datalake migrations to gitlab_clickhouse_development.
+# The gkg-server modes (indexer, webserver, etc.) assume ClickHouse tables
+# already exist. We apply the schema SQL files via clickhouse-client in a Job.
+#
+# Two schema files:
+#   - fixtures/schema/graph.sql          (graph tables: gl_user, gl_project, etc.)
+#   - crates/indexer/tests/fixtures/siphon.sql  (datalake tables: siphon_*)
+
+graph_sql = str(read_file('../../fixtures/schema/graph.sql'))
+siphon_sql = str(read_file('../../crates/indexer/tests/fixtures/siphon.sql'))
 
 k8s_yaml(blob('''
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gkg-e2e-schema
+data:
+  graph.sql: |
+''' + '\n'.join(['    ' + line for line in graph_sql.strip().split('\n')]) + '''
+  siphon.sql: |
+''' + '\n'.join(['    ' + line for line in siphon_sql.strip().split('\n')]) + '''
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -237,39 +252,22 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migrate
-          image: gkg-server
-          imagePullPolicy: Never
-          args: ["--mode=migrate"]
-          env:
-            - name: GKG__GRAPH__URL
-              value: "http://gkg-e2e-clickhouse:8123"
-            - name: GKG__GRAPH__DATABASE
-              value: "gkg-development"
-            - name: GKG__GRAPH__USERNAME
-              value: "default"
-            - name: GKG__GRAPH__PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: clickhouse-credentials
-                  key: password
-            - name: GKG__DATALAKE__URL
-              value: "http://gkg-e2e-clickhouse:8123"
-            - name: GKG__DATALAKE__DATABASE
-              value: "gitlab_clickhouse_development"
-            - name: GKG__DATALAKE__USERNAME
-              value: "default"
-            - name: GKG__DATALAKE__PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: clickhouse-credentials
-                  key: password
-            - name: GKG__JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: gkg-server-credentials
-                  key: jwt-secret
-            - name: GKG__NATS__URL
-              value: "gkg-nats:4222"
+          image: clickhouse/clickhouse-server:25.1-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Applying graph schema to gkg-development..."
+              clickhouse-client --host gkg-e2e-clickhouse --user default --database gkg-development --multiquery < /schema/graph.sql
+              echo "Applying siphon schema to gitlab_clickhouse_development..."
+              clickhouse-client --host gkg-e2e-clickhouse --user default --database gitlab_clickhouse_development --multiquery < /schema/siphon.sql
+              echo "Schema migration complete."
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+      volumes:
+        - name: schema
+          configMap:
+            name: gkg-e2e-schema
 '''))
 
 k8s_resource(

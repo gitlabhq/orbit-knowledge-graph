@@ -10,7 +10,7 @@
 # =============================================================================
 
 postgres:
-  host: gitlab-postgresql.gitlab.svc.cluster.local
+  host: postgresql.gitlab.svc.cluster.local
   port: 5432
   database: gitlabhq_production
   user: gitlab
