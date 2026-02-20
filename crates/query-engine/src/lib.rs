@@ -61,16 +61,17 @@ pub use validate::Validator;
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Compile a JSON query into parameterized SQL.
+/// Compile a JSON query into a structural query and hydration plan.
 ///
-/// Validates structure, identifiers, and ontology values before generating SQL.
+/// Returns a [`CompiledQuery`] containing the structural SQL (IDs/types only for
+/// traversal/search) plus a [`HydrationPlan`] describing how to fetch full entity
+/// properties after authorization and redaction.
 #[must_use = "the compiled query should be used"]
 pub fn compile(
     json_input: &str,
     ontology: &Ontology,
     ctx: &SecurityContext,
-) -> Result<ParameterizedQuery> {
-    // Make sure the raw JSON input is valid and normalized.
+) -> Result<CompiledQuery> {
     let v = Validator::new(ontology);
     let value = v.check_json(json_input)?;
     v.check_ontology(&value)?;
@@ -78,7 +79,82 @@ pub fn compile(
     v.check_references(&input)?;
     let input = normalize(input, ontology);
 
-    // Turn the normalized input into valid, secure, and parameterized SQL.
+    let mut node = lower(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    let structural = codegen(&node, result_context)?;
+
+    let hydration = build_hydration_plan(&input, ontology, ctx)?;
+
+    Ok(CompiledQuery {
+        structural,
+        hydration,
+    })
+}
+
+/// Build the hydration plan based on query type.
+///
+/// - Aggregation: no hydration (results are aggregate values, not entity rows).
+/// - Traversal/Search: static hydration — entity types are known at compile time,
+///   so we pre-compile one search query template per entity type.
+/// - PathFinding/Neighbors: dynamic hydration — entity types are discovered at
+///   runtime from edge data, so the server builds search queries on the fly.
+fn build_hydration_plan(
+    input: &Input,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<HydrationPlan> {
+    match input.query_type {
+        QueryType::Aggregation => Ok(HydrationPlan::None),
+        QueryType::PathFinding | QueryType::Neighbors => Ok(HydrationPlan::Dynamic),
+        QueryType::Traversal | QueryType::Search => {
+            let mut templates = Vec::new();
+
+            for node in &input.nodes {
+                let Some(entity) = &node.entity else {
+                    continue;
+                };
+
+                let hydration_json = serde_json::json!({
+                    "query_type": "search",
+                    "node": {
+                        "id": "n",
+                        "entity": entity,
+                        "columns": "*",
+                        "node_ids": []
+                    },
+                    "limit": 1000
+                })
+                .to_string();
+
+                let hydration_query = compile_raw(&hydration_json, ontology, ctx)?;
+
+                templates.push(HydrationTemplate {
+                    entity_type: entity.clone(),
+                    node_alias: node.id.clone(),
+                    query: hydration_query,
+                });
+            }
+
+            Ok(HydrationPlan::Static(templates))
+        }
+    }
+}
+
+/// Internal compile that returns a raw ParameterizedQuery (no hydration plan).
+/// Used for hydration template generation and backward-compat.
+fn compile_raw(
+    json_input: &str,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<ParameterizedQuery> {
+    let v = Validator::new(ontology);
+    let value = v.check_json(json_input)?;
+    v.check_ontology(&value)?;
+    let input: Input = serde_json::from_value(value)?;
+    v.check_references(&input)?;
+    let input = normalize(input, ontology);
+
     let mut node = lower(&input)?;
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx)?;

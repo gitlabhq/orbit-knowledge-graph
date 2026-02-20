@@ -120,7 +120,6 @@ fn enforce_return_columns(
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
 
-        // Only add columns for nodes that are valid to select in this query type.
         if !selectable_nodes.contains(&node.id) {
             continue;
         }
@@ -128,8 +127,24 @@ fn enforce_return_columns(
         ctx.add_node(&node.id, entity);
 
         if let Some(redaction_node) = ctx.get(&node.id) {
+            let pk_col = redaction_node.pk_column.clone();
             let id_col = redaction_node.id_column.clone();
             let type_col = redaction_node.type_column.clone();
+
+            // Always emit the primary key column for hydration lookups.
+            // For most entities pk == auth_id ("id"), but for indirect-auth
+            // entities (e.g., Definition) pk is "id" while auth_id is "project_id".
+            let needs_separate_pk = node.redaction_id_column != "id";
+
+            if needs_separate_pk {
+                let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+                if !has_pk {
+                    q.select.push(SelectExpr {
+                        expr: Expr::col(&node.id, "id"),
+                        alias: Some(pk_col),
+                    });
+                }
+            }
 
             let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
             let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
