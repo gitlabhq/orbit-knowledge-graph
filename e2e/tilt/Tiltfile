@@ -38,7 +38,7 @@
 update_settings(k8s_upsert_timeout_secs=600)
 ci_settings(readiness_timeout='10m')
 
-allow_k8s_contexts(['colima', 'docker-desktop', 'minikube', 'kind-kind', 'rancher-desktop'])
+allow_k8s_contexts(['colima', 'colima-caproni', 'docker-desktop', 'minikube', 'kind-kind', 'rancher-desktop'])
 
 # ── Secrets ───────────────────────────────────────────────────────────────────
 
@@ -284,7 +284,7 @@ k8s_resource(
 
 custom_build(
     'gkg-server',
-    '../../scripts/build-dev.sh $EXPECTED_REF',
+    'cd ../.. && scripts/build-dev.sh $EXPECTED_REF',
     deps=['../../crates/', '../../Cargo.toml', '../../Cargo.lock'],
 )
 
