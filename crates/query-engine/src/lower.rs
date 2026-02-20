@@ -14,8 +14,8 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// Maps edge column names to output alias suffixes.
-/// Uses EDGE_RESERVED_COLUMNS order: relationship_kind, source_id, source_kind, target_id, target_kind
-const EDGE_ALIAS_SUFFIXES: &[&str] = &["type", "src", "src_type", "dst", "dst_type"];
+/// Uses EDGE_RESERVED_COLUMNS order: traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind
+const EDGE_ALIAS_SUFFIXES: &[&str] = &["path", "type", "src", "src_type", "dst", "dst_type"];
 
 /// Generate SELECT expressions for all edge columns with the given table alias.
 fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
@@ -820,8 +820,8 @@ mod tests {
         };
         println!("{:?}", q);
         assert_eq!(q.limit, Some(25));
-        // 2 node columns + 5 edge columns (type, src, src_type, dst, dst_type)
-        assert_eq!(q.select.len(), 7);
+        // 2 node columns + 6 edge columns (path, type, src, src_type, dst, dst_type)
+        assert_eq!(q.select.len(), 8);
     }
 
     #[test]
@@ -1279,8 +1279,8 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Should have: u_id, u_username, n_id, n_confidential + 5 edge columns
-        assert_eq!(q.select.len(), 9);
+        // Should have: u_id, u_username, n_id, n_confidential + 6 edge columns
+        assert_eq!(q.select.len(), 10);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_id".to_string()));
@@ -1344,9 +1344,10 @@ mod tests {
     fn test_edge_select_exprs_generates_all_columns() {
         let exprs = edge_select_exprs("e0");
 
-        assert_eq!(exprs.len(), 5);
+        assert_eq!(exprs.len(), 6);
 
         let aliases: Vec<_> = exprs.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"e0_path".to_string()));
         assert!(aliases.contains(&&"e0_type".to_string()));
         assert!(aliases.contains(&&"e0_src".to_string()));
         assert!(aliases.contains(&&"e0_src_type".to_string()));
@@ -1436,6 +1437,7 @@ mod tests {
         assert!(aliases.contains(&&"_gkg_relationship_type".to_string()));
 
         // Should have edge columns from edge_select_exprs
+        assert!(aliases.contains(&&"e_path".to_string()));
         assert!(aliases.contains(&&"e_type".to_string()));
         assert!(aliases.contains(&&"e_src".to_string()));
         assert!(aliases.contains(&&"e_src_type".to_string()));

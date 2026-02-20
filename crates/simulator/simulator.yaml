@@ -21,8 +21,8 @@ clickhouse:
     node_primary_key: [traversal_path, id]
     node_order_by: [traversal_path, id]
 
-    edge_primary_key: [source_id]
-    edge_order_by: [source_id, source_kind, relationship_kind]
+    edge_primary_key: [traversal_path, source_id, source_kind, target_id, target_kind]
+    edge_order_by: [traversal_path, source_id, source_kind, target_id, target_kind]
 
     indexes:
       - name: idx_relationship

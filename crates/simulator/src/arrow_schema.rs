@@ -71,6 +71,7 @@ impl ToArrowType for DataType {
 /// - target_kind: Utf8 (e.g., "MergeRequest", "Project")
 pub fn edge_schema() -> Schema {
     Schema::new(vec![
+        ArrowField::new("traversal_path", ArrowDataType::Utf8, false),
         ArrowField::new("relationship_kind", ArrowDataType::Utf8, false),
         ArrowField::new("source_id", ArrowDataType::Int64, false),
         ArrowField::new("source_kind", ArrowDataType::Utf8, false),
@@ -188,12 +189,13 @@ mod tests {
     #[test]
     fn test_edge_schema() {
         let schema = edge_schema();
-        assert_eq!(schema.fields().len(), 5);
+        assert_eq!(schema.fields().len(), 6);
 
         let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert_eq!(
             field_names,
             vec![
+                "traversal_path",
                 "relationship_kind",
                 "source_id",
                 "source_kind",
