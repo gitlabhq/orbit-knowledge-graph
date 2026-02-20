@@ -228,20 +228,23 @@ end
 
 The `Ability.allowed?` method is the single source of truth for resource-level permissions in GitLab. It evaluates all declarative policies, custom roles, and special cases including runtime checks (such as SAML group links or IP restrictions).
 
-**Component**: Knowledge Graph Service (`gkg-webserver`) + GitLab Rails Authorization Endpoint
+**Component**: Knowledge Graph Service (`gkg-webserver`) + GitLab Rails via gRPC bidirectional streaming
 
-The flow is:
+See [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md) for full protocol details.
 
-1. **GKG holds pre-filtered results** from the ClickHouse query.
-2. **Batch permission checks**: GKG extracts tuples of `(resource_type, resource_id)` from the result set and makes batched RPC calls to Rails' authorization endpoint: `POST /api/internal/knowledge_graph/authorize` with payload `[{type: "issue", id: 123}, {type: "mr", id: 456}]`.
-3. **Rails evaluates**: For each resource, Rails runs `Ability.allowed?(user, :read_<resource_type>, resource)` and returns an array of boolean values: `[true, false, true, ...]`.
-4. **GKG sanitizes**: The Knowledge Graph service removes any denied resources from the result set.
-5. **Final response**: Only the sanitized results are returned to Rails for delivery to the client.
+Rather than a separate authorization endpoint, the redaction exchange occurs inside the same gRPC bidirectional stream that carries the query. The flow is:
+
+1. Rails sends the query to GKG over a gRPC bidirectional stream.
+2. GKG runs the query on ClickHouse and identifies redactable columns from the ontology.
+3. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceCheck[]` entries, grouped by entity type and ability (e.g., all issues that need `read_issue` checks).
+4. Rails calls `Ability.allowed?` for each resource and responds with `ResourceAuthorization[]` on the same stream.
+5. GKG applies those authorizations -- the query pipeline marks unauthorized rows and drops them from the result set.
+6. GKG returns the redacted results to Rails as a `ToolResult` or `QueryResult`.
 
 **Code Review Requirements**:
 
 - GKG redaction module must be called for all non-aggregation queries before returning results.
-- Rails authorization endpoint must use `Ability.allowed?`, not custom permission checks.
+- Rails redaction exchange handler must use `Ability.allowed?`, not custom permission checks.
 - Integration tests must verify confidential issues are filtered out.
 - Performance tests must verify batch sizes and latency for large result sets.
 
@@ -256,23 +259,34 @@ The flow is:
 
 ```mermaid
 sequenceDiagram
-    participant GKG as Knowledge Graph Service
-    participant Rails as GitLab Rails AuthZ Endpoint
+    actor Client
+    participant Rails
+    participant WebServer as GKG Web Server
+    participant AuthEngine as Query Pipeline
 
-    note over GKG: GKG holds pre-filtered results<br/>from ClickHouse query
+    Client->>Rails: Send Request
+    Rails->>WebServer: Query Knowledge Graph (gRPC bidi stream)
 
-    GKG->>GKG: Extract resource IDs and types
+    activate WebServer
+    WebServer->>WebServer: Compile Graph Query & Execute on ClickHouse
+    WebServer->>AuthEngine: Pass result set
+    activate AuthEngine
 
-    loop Batch authorization checks
-        GKG->>Rails: Check permissions for batch<br/>[(issue, 123), (mr, 456), ...]
-        Note over Rails: Ability.allowed?(user, :read_issue, issue)<br/>for each resource
-        Rails-->>GKG: [ALLOW, DENY, ALLOW, ...]
-    end
+    AuthEngine->>AuthEngine: Identify redactable columns from ontology
+    AuthEngine->>AuthEngine: Group rows by entity type + permission + resource IDs
 
-    GKG->>GKG: Remove denied resources from results
+    Note over AuthEngine, Rails: gRPC Bidirectional Streaming RedactionExchange
+    AuthEngine->>Rails: RedactionExchange.required (ResourceCheck[])
+    Rails->>Rails: Ability.allowed? per resource
+    Rails-->>AuthEngine: RedactionExchange.response (ResourceAuthorization[])
 
-    GKG-->>Rails: Return sanitized, authorized payload
-    Note over Rails: Client receives only authorized data
+    AuthEngine->>AuthEngine: apply_authorizations() - mark unauthorized rows
+    AuthEngine->>WebServer: Redacted result set
+    deactivate AuthEngine
+    deactivate WebServer
+
+    WebServer-->>Rails: ToolResult/QueryResult with redacted payload
+    Rails-->>Client: Final redacted data
 ```
 
 This final check guarantees that:
@@ -281,6 +295,12 @@ This final check guarantees that:
 - Any bugs or gaps in traversal ID filtering are caught before data is exposed.
 - Future permission model changes in Rails automatically apply to Knowledge Graph queries without service changes.
 - Rails remains the single source of truth for all authorization decisions.
+
+### Thread and connection model
+
+The redaction exchange runs on the same Puma thread that initiated the request. The bidi stream blocks this thread for the full round-trip: query execution, redaction exchange (including `Ability.allowed?` DB lookups), and result delivery. This is one thread per query -- an improvement over the REST callback alternative, which would have consumed two threads (one blocked waiting, one handling the callback).
+
+Explicit gRPC deadlines must be configured on both the Rails client and the GKG server before production rollout to prevent indefinite thread blocking on stalled streams. See [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md) for details on known gaps.
 
 ## Service-to-Service Authentication and Authorization
 
