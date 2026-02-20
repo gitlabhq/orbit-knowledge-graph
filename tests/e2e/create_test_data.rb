@@ -125,7 +125,16 @@ def find_or_create_group(name, path, admin, org, parent: nil, visibility: 20)
   params[:parent_id] = parent.id if parent
 
   result = Groups::CreateService.new(admin, params).execute
-  group = result.is_a?(Hash) ? (result[:group] || result) : result
+  # ServiceResponse wraps the group in :group payload or responds to []
+  group = if result.respond_to?(:payload) && result.payload.is_a?(Hash)
+            result.payload[:group]
+          elsif result.is_a?(Hash)
+            result[:group] || result
+          elsif result.is_a?(Group)
+            result
+          else
+            result
+          end
   raise "Failed to create group '#{name}': #{result.inspect}" unless group.is_a?(Group) && group.persisted?
 
   puts "  Created group '#{name}' (id: #{group.id}, traversal: #{group.traversal_ids.join('/')}/) #{visibility == 0 ? '[PRIVATE]' : '[PUBLIC]'}"
