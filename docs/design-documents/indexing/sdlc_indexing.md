@@ -120,7 +120,7 @@ The transformation from CDC data to the graph schema will be handled by the ETL 
 ##### Core components
 
 - `gkg-indexer`: The ETL pipeline for GitLab SDLC data.
-- `gkg-webserver`: The REST + MCP interface to query the Knowledge Graph.
+- `gkg-webserver`: The gRPC and HTTP interface to query the Knowledge Graph.
 - `NATS JetStream`: The message broker for the Knowledge Graph.
 - `NATS KV`: The key-value store for the Knowledge Graph.
 - `ClickHouse`: The OLAP database for GitLab and the Knowledge Graph.

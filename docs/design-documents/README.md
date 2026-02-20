@@ -233,6 +233,7 @@ Please see the following design documents for more details on the Knowledge Grap
 - [Knowledge Graph Schema Management](schema_management.md)
 - [Knowledge Graph Security](security.md)
 - [Knowledge Graph Observability](observability.md)
+- [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md)
 
 ## Binary Breakdown
 
