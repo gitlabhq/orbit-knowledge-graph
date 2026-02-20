@@ -74,7 +74,7 @@ else
 fi
 
 docker build --platform "$DOCKER_PLATFORM" -t "$IMAGE_TAG" -f - "$CONTEXT_DIR" <<'EOF'
-FROM registry.access.redhat.com/ubi9/ubi-micro:latest
+FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
 COPY gkg-server /usr/local/bin/gkg-server
 ENTRYPOINT ["gkg-server"]
 EOF
