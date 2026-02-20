@@ -4,7 +4,7 @@ use crate::auth::Claims;
 use crate::redaction::RedactionMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
-use query_engine::compile;
+use query_engine::{CompiledQuery, ParameterizedQuery, compile};
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
@@ -47,13 +47,14 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
     ) -> Result<PipelineOutput, PipelineError> {
         let security_context = SecurityStage::execute(claims)?;
 
-        let compiled = compile(query_json, &self.ontology, &security_context)
+        let compiled: CompiledQuery = compile(query_json, &self.ontology, &security_context)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
-        let batches = self.execute_query(&compiled).await?;
+        let structural_sql = compiled.structural.sql.clone();
+        let batches = self.execute_query(&compiled.structural).await?;
 
         let execution_output = ExecutionOutput {
             batches,
-            result_context: compiled.result_context,
+            result_context: compiled.structural.result_context,
         };
 
         let query_result = ExtractionStage::execute(execution_output);
@@ -65,17 +66,22 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
         let result_context = query_result.ctx().clone();
         let hydrated = self
             .hydration
-            .execute(query_result, &result_context, &security_context)
+            .execute(
+                query_result,
+                &result_context,
+                &security_context,
+                &compiled.hydration,
+            )
             .await?;
 
         let formatting_stage =
             FormattingStage::new(self.formatter.clone(), Arc::clone(&self.ontology));
-        Ok(formatting_stage.execute(hydrated, result_context, redacted_count, compiled.sql))
+        Ok(formatting_stage.execute(hydrated, result_context, redacted_count, structural_sql))
     }
 
     async fn execute_query(
         &self,
-        compiled: &query_engine::ParameterizedQuery,
+        compiled: &ParameterizedQuery,
     ) -> Result<Vec<arrow::record_batch::RecordBatch>, PipelineError> {
         let mut query = self.client.query(&compiled.sql);
         for (key, value) in &compiled.params {

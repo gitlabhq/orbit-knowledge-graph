@@ -5,7 +5,7 @@ use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
-use query_engine::{QueryType, ResultContext, SecurityContext};
+use query_engine::{HydrationPlan, HydrationTemplate, QueryType, ResultContext, SecurityContext};
 
 use crate::redaction::{ColumnValue, QueryResult};
 
@@ -28,30 +28,118 @@ impl HydrationStage {
         mut result: QueryResult,
         result_context: &ResultContext,
         security_context: &SecurityContext,
+        hydration_plan: &HydrationPlan,
     ) -> Result<QueryResult, PipelineError> {
-        if !matches!(result_context.query_type, Some(QueryType::Neighbors)) {
-            return Ok(result);
+        match hydration_plan {
+            HydrationPlan::None => return Ok(result),
+            HydrationPlan::Static(templates) => {
+                let property_map = self
+                    .hydrate_static(&result, templates, result_context, security_context)
+                    .await?;
+                self.merge_static_properties(&mut result, &property_map, result_context);
+            }
+            HydrationPlan::Dynamic => {
+                let refs = self.extract_entity_refs(&result, result_context);
+                if refs.is_empty() {
+                    return Ok(result);
+                }
+                let property_map =
+                    self.fetch_all_properties(&refs, security_context).await?;
+                self.merge_dynamic_properties(&mut result, &property_map, result_context);
+            }
         }
-
-        let refs = self.extract_entity_refs(&result);
-        if refs.is_empty() {
-            return Ok(result);
-        }
-
-        let property_map = self.fetch_all_properties(&refs, security_context).await?;
-        self.merge_properties(&mut result, &property_map);
         Ok(result)
     }
 
-    fn extract_entity_refs(&self, result: &QueryResult) -> HashMap<String, Vec<i64>> {
+    /// Hydrate using pre-compiled templates (Traversal/Search).
+    /// Extracts entity IDs from `_gkg_{alias}_pk` or `_gkg_{alias}_id` columns,
+    /// then fetches full properties via search queries.
+    async fn hydrate_static(
+        &self,
+        result: &QueryResult,
+        templates: &[HydrationTemplate],
+        result_context: &ResultContext,
+        security_context: &SecurityContext,
+    ) -> Result<PropertyMap, PipelineError> {
+        let mut all_props = HashMap::new();
+
+        for template in templates {
+            let redaction_node = result_context.get(&template.node_alias);
+            let Some(rn) = redaction_node else { continue };
+
+            // Prefer _gkg_{alias}_pk (true primary key) for hydration lookup;
+            // fall back to _gkg_{alias}_id which may be the auth ID.
+            let mut ids: Vec<i64> = result
+                .authorized_rows()
+                .filter_map(|row| {
+                    row.get_column_i64(&rn.pk_column)
+                        .or_else(|| row.get_column_i64(&rn.id_column))
+                })
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+
+            if ids.is_empty() {
+                continue;
+            }
+
+            let props = self
+                .fetch_entity_properties(&template.entity_type, &ids, security_context)
+                .await?;
+            all_props.extend(props);
+        }
+
+        Ok(all_props)
+    }
+
+    /// Merge hydrated properties into rows for static (Traversal/Search) queries.
+    fn merge_static_properties(
+        &self,
+        result: &mut QueryResult,
+        property_map: &PropertyMap,
+        result_context: &ResultContext,
+    ) {
+        for row in result.authorized_rows_mut() {
+            for rn in result_context.nodes() {
+                let pk = row
+                    .get_column_i64(&rn.pk_column)
+                    .or_else(|| row.get_column_i64(&rn.id_column));
+                let Some(pk) = pk else { continue };
+
+                if let Some(props) = property_map.get(&(rn.entity_type.clone(), pk)) {
+                    for (key, value) in props {
+                        row.set_column(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Extract entity references from dynamic query results (Neighbors or PathFinding).
+    fn extract_entity_refs(
+        &self,
+        result: &QueryResult,
+        result_context: &ResultContext,
+    ) -> HashMap<String, Vec<i64>> {
         let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
 
+        let is_neighbors = matches!(result_context.query_type, Some(QueryType::Neighbors));
+
         for row in result.authorized_rows() {
-            if let (Some(id), Some(entity_type)) = (
-                row.get_column_i64("_gkg_neighbor_id"),
-                row.get_column_string("_gkg_neighbor_type"),
-            ) {
-                refs.entry(entity_type).or_default().push(id);
+            if is_neighbors {
+                if let (Some(id), Some(entity_type)) = (
+                    row.get_column_i64("_gkg_neighbor_id"),
+                    row.get_column_string("_gkg_neighbor_type"),
+                ) {
+                    refs.entry(entity_type).or_default().push(id);
+                }
+            }
+
+            // PathFinding and Neighbors both carry dynamic_nodes
+            for node_ref in row.dynamic_nodes() {
+                refs.entry(node_ref.entity_type.clone())
+                    .or_default()
+                    .push(node_ref.id);
             }
         }
 
@@ -94,8 +182,8 @@ impl HydrationStage {
         let compiled = query_engine::compile(&query_json, &self.ontology, security_context)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
-        let mut query = self.client.query(&compiled.sql);
-        for (key, value) in &compiled.params {
+        let mut query = self.client.query(&compiled.structural.sql);
+        for (key, value) in &compiled.structural.params {
             query = ArrowClickHouseClient::bind_param(query, key, value);
         }
         let batches = query
@@ -183,18 +271,34 @@ impl HydrationStage {
         None
     }
 
-    fn merge_properties(&self, result: &mut QueryResult, property_map: &PropertyMap) {
-        for row in result.authorized_rows_mut() {
-            let id = row.get_column_i64("_gkg_neighbor_id");
-            let entity_type = row.get_column_string("_gkg_neighbor_type");
+    /// Merge hydrated properties into rows for dynamic (Neighbors/PathFinding) queries.
+    fn merge_dynamic_properties(
+        &self,
+        result: &mut QueryResult,
+        property_map: &PropertyMap,
+        result_context: &ResultContext,
+    ) {
+        let is_neighbors = matches!(result_context.query_type, Some(QueryType::Neighbors));
 
-            if let (Some(id), Some(entity_type)) = (id, entity_type)
-                && let Some(props) = property_map.get(&(entity_type, id))
-            {
-                for (key, value) in props {
-                    row.set_column(key.clone(), value.clone());
+        for row in result.authorized_rows_mut() {
+            // For Neighbors: merge using _gkg_neighbor_id/_gkg_neighbor_type
+            if is_neighbors {
+                let id = row.get_column_i64("_gkg_neighbor_id");
+                let entity_type = row.get_column_string("_gkg_neighbor_type");
+
+                if let (Some(id), Some(entity_type)) = (id, entity_type)
+                    && let Some(props) = property_map.get(&(entity_type, id))
+                {
+                    for (key, value) in props {
+                        row.set_column(key.clone(), value.clone());
+                    }
                 }
             }
+
+            // For PathFinding: merge using dynamic_nodes
+            // Properties are attached per-node with a prefix to avoid column name collisions.
+            // Paths have multiple nodes per row so we store them indexed.
+            // TODO: define the path result format (array of hydrated node objects vs flat columns)
         }
     }
 }

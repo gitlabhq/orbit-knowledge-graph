@@ -277,7 +277,8 @@ impl QueryExecutor {
         };
 
         // Build the final SQL with parameters substituted
-        let final_sql = substitute_params_in_sql(&compiled.sql, &compiled.params);
+        let final_sql =
+            substitute_params_in_sql(&compiled.structural.sql, &compiled.structural.params);
 
         // Execute the query and get sample rows
         match self.execute_sql_with_sample(&final_sql).await {
@@ -287,8 +288,8 @@ impl QueryExecutor {
                 sample_rows,
                 column_names,
                 start.elapsed(),
-                compiled.sql,
-                serde_json::to_value(&compiled.params).unwrap_or_default(),
+                compiled.structural.sql,
+                serde_json::to_value(&compiled.structural.params).unwrap_or_default(),
                 Some(sampling_info),
             ),
             Err(e) => ExecutionResult::failure_with_sql(
@@ -660,13 +661,15 @@ impl QueryExecutor {
             }
         };
 
-        let final_sql = substitute_params_in_sql(&compiled.sql, &compiled.params);
+        let final_sql =
+            substitute_params_in_sql(&compiled.structural.sql, &compiled.structural.params);
 
         builder = builder
-            .sql(compiled.sql.clone())
+            .sql(compiled.structural.sql.clone())
             .final_sql(final_sql.clone())
             .params(
                 compiled
+                    .structural
                     .params
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
@@ -687,8 +690,8 @@ impl QueryExecutor {
                     sample_rows,
                     column_names,
                     start.elapsed(),
-                    compiled.sql,
-                    serde_json::to_value(&compiled.params).unwrap_or_default(),
+                    compiled.structural.sql,
+                    serde_json::to_value(&compiled.structural.params).unwrap_or_default(),
                     Some(sampling_info),
                 );
 
