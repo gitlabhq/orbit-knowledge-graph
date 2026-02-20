@@ -10,7 +10,7 @@ ENV GKG_VERSION=$GKG_VERSION
 RUN cargo build --release --package gkg-server && \
     cp target/release/gkg-server /gkg-server
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:latest
+FROM registry.access.redhat.com/ubi10/ubi-micro:10.1
 
 COPY --from=builder /gkg-server /usr/local/bin/gkg-server
 
