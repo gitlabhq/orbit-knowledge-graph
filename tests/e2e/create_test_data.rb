@@ -395,7 +395,6 @@ end
 puts "\n--- 8. Creating merge requests ---"
 
 mr_count = 0
-authors = [admin, lois, franklyn]
 
 all_public_projects.each do |proj|
   6.times do |i|
@@ -410,12 +409,12 @@ all_public_projects.each do |proj|
       # Branch may already exist
     end
 
-    author = authors[i % authors.size]
+    # Always use admin as author (other users may not have project access yet)
     state = i < 4 ? 'merged' : 'opened'
 
     result = MergeRequests::CreateService.new(
       project: proj,
-      current_user: author,
+      current_user: admin,
       params: {
         title: title,
         description: "Test MR #{i + 1} for #{proj.name}",
@@ -434,7 +433,14 @@ all_public_projects.each do |proj|
          end
 
     if mr.is_a?(MergeRequest) && mr.persisted? && state == 'merged'
-      mr.update_columns(state: 'merged', merged_at: Time.current - (6 - i).days)
+      # MergeRequest uses state_id: 1=opened, 2=closed, 3=merged, 4=locked
+      mr.update_columns(state_id: 3)
+      # Update merged_at in metrics if the table exists
+      begin
+        mr.metrics&.update_columns(merged_at: Time.current - (6 - i).days)
+      rescue StandardError
+        nil
+      end
     end
 
     mr_count += 1 if mr.is_a?(MergeRequest) && mr.persisted?
@@ -445,8 +451,10 @@ puts "  Created #{mr_count} new MRs (#{all_projects.sum { |p| p.merge_requests.c
 
 manifest[:merge_requests] = all_projects.each_with_object({}) do |proj, h|
   key = manifest[:projects].find { |_k, v| v[:id] == proj.id }&.first
-  mrs = proj.merge_requests.pluck(:id, :iid, :title, :state)
-  h[key] = mrs.map { |id, iid, title, state| { id: id, iid: iid, title: title, state: state } }
+  # state_id: 1=opened, 2=closed, 3=merged, 4=locked
+  state_map = { 1 => 'opened', 2 => 'closed', 3 => 'merged', 4 => 'locked' }
+  mrs = proj.merge_requests.pluck(:id, :iid, :title, :state_id)
+  h[key] = mrs.map { |id, iid, title, sid| { id: id, iid: iid, title: title, state: state_map[sid] || 'unknown' } }
 end
 
 # =============================================================================
