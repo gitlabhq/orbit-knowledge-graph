@@ -23,6 +23,9 @@ datalake-generator-state/
 # Tilt secrets (contains passwords)
 .tilt-secrets
 
+# Local dev runtime state (pids, logs from bootstrap-dev.sh)
+.dev/
+
 # Helm chart dependencies (downloaded by helm dependency build)
 helm-dev/charts/
 helm-dev/tmpcharts*/

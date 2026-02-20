@@ -6,6 +6,27 @@ troubleshooting.
 
 ---
 
+## Starting and stopping the environment
+
+Use the bootstrap and teardown scripts to manage the full local stack:
+
+```shell
+# Start everything (Colima, GDK, Tilt, port-forwards)
+cd ~/Desktop/Code/gkg
+./scripts/bootstrap-dev.sh
+
+# Stop everything (including Colima)
+./scripts/teardown-dev.sh
+
+# Stop everything except Colima (faster next bootstrap — skips VM boot)
+./scripts/teardown-dev.sh --keep-colima
+```
+
+The bootstrap script is idempotent — safe to run if services are partially up.
+It skips any step that is already running.
+
+---
+
 ## Prerequisites
 
 A working local environment as described in `local-setup-runbook.md`:
