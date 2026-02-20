@@ -4,8 +4,8 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, create_namespace_payload, default_test_watermark, get_namespace_handler,
-    get_string_column,
+    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
+    default_test_watermark, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -40,12 +40,7 @@ async fn namespace_handler_processes_notes_with_edges() {
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 3);
 
-    let author_edges = context
-        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'AUTHORED' AND source_kind = 'User' AND target_kind = 'Note' ORDER BY target_id")
-        .await;
-
-    assert!(!author_edges.is_empty(), "author edges should exist");
-    assert_eq!(author_edges[0].num_rows(), 3, "should have 3 author edges");
+    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "Note", "1/100/", 3).await;
 
     let has_note_edges = context
         .query("SELECT source_id, source_kind, target_id FROM gl_edge WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")
@@ -97,16 +92,7 @@ async fn namespace_handler_filters_out_system_notes() {
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 2, "should only have 2 non-system notes");
 
-    let author_edges = context
-        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'AUTHORED' AND source_kind = 'User' AND target_kind = 'Note' ORDER BY target_id")
-        .await;
-
-    assert!(!author_edges.is_empty(), "author edges should exist");
-    assert_eq!(
-        author_edges[0].num_rows(),
-        2,
-        "should have 2 author edges for non-system notes"
-    );
+    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "Note", "1/100/", 2).await;
 
     let has_note_edges = context
         .query("SELECT source_id, source_kind, target_id FROM gl_edge WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")

@@ -4,8 +4,8 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, assert_edge_count, create_namespace_payload, default_test_watermark,
-    get_namespace_handler, get_string_column,
+    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
+    default_test_watermark, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -81,6 +81,6 @@ async fn namespace_handler_processes_labels_with_edges() {
     assert_eq!(colors.value(1), "#00ff00");
     assert_eq!(colors.value(2), "#0000ff");
 
-    assert_edge_count(&context, "IN_PROJECT", "Label", "Project", 2).await;
-    assert_edge_count(&context, "IN_GROUP", "Label", "Group", 1).await;
+    assert_edges_have_traversal_path(&context, "IN_PROJECT", "Label", "Project", "1/100/", 2).await;
+    assert_edges_have_traversal_path(&context, "IN_GROUP", "Label", "Group", "1/100/", 1).await;
 }

@@ -4,8 +4,8 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, create_namespace_payload, default_test_watermark, get_namespace_handler,
-    get_string_column,
+    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
+    default_test_watermark, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -81,27 +81,8 @@ async fn namespace_handler_processes_milestones_with_edges() {
     assert_eq!(states.value(0), "active");
     assert_eq!(states.value(1), "closed");
 
-    let in_project_edges = context
-        .query(
-            "SELECT source_id, target_id FROM gl_edge
-             WHERE relationship_kind = 'IN_PROJECT' AND source_kind = 'Milestone' AND target_kind = 'Project'",
-        )
+    assert_edges_have_traversal_path(&context, "IN_PROJECT", "Milestone", "Project", "1/100/", 2)
         .await;
-    assert_eq!(
-        in_project_edges[0].num_rows(),
-        2,
-        "project milestones should have in_project edges"
-    );
 
-    let in_group_edges = context
-        .query(
-            "SELECT source_id, target_id FROM gl_edge
-             WHERE relationship_kind = 'IN_GROUP' AND source_kind = 'Milestone' AND target_kind = 'Group'",
-        )
-        .await;
-    assert_eq!(
-        in_group_edges[0].num_rows(),
-        1,
-        "group milestone should have in_group edge"
-    );
+    assert_edges_have_traversal_path(&context, "IN_GROUP", "Milestone", "Group", "1/100/", 1).await;
 }
