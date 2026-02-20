@@ -187,6 +187,7 @@ fn default_node_order_by() -> Vec<String> {
 
 fn default_edge_order_by() -> Vec<String> {
     vec![
+        "traversal_path".to_string(),
         "source_id".to_string(),
         "source_kind".to_string(),
         "relationship_kind".to_string(),

@@ -138,6 +138,26 @@ async fn indexes_repository_from_gitaly() {
             .is_some_and(|b| b.num_rows() > 0),
         "no CLASS_TO_METHOD edges indexed"
     );
+
+    // Code edges should carry the project's traversal_path
+    let edge_paths = clickhouse
+        .query("SELECT DISTINCT traversal_path FROM gl_edge")
+        .await;
+    assert!(
+        edge_paths.first().is_some_and(|b| b.num_rows() > 0),
+        "edges should have traversal_path"
+    );
+    let paths = edge_paths[0]
+        .column_by_name("traversal_path")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<arrow::array::StringArray>()
+        .unwrap();
+    assert_eq!(
+        paths.value(0),
+        "/test",
+        "code edge traversal_path should match the project's traversal_path"
+    );
 }
 
 /// GitLab's hashed storage path: @hashed/xx/yy/sha256(project_id).git

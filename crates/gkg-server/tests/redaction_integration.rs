@@ -134,19 +134,19 @@ async fn setup_test_data(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         (1, 'User', 'MEMBER_OF', 100, 'Group'),
-         (1, 'User', 'MEMBER_OF', 102, 'Group'),
-         (2, 'User', 'MEMBER_OF', 100, 'Group'),
-         (3, 'User', 'MEMBER_OF', 101, 'Group'),
-         (4, 'User', 'MEMBER_OF', 101, 'Group'),
-         (4, 'User', 'MEMBER_OF', 102, 'Group'),
-         (5, 'User', 'MEMBER_OF', 101, 'Group'),
-         (100, 'Group', 'CONTAINS', 1000, 'Project'),
-         (100, 'Group', 'CONTAINS', 1002, 'Project'),
-         (101, 'Group', 'CONTAINS', 1001, 'Project'),
-         (101, 'Group', 'CONTAINS', 1003, 'Project'),
-         (102, 'Group', 'CONTAINS', 1004, 'Project')"
+        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
+         ('1/102/', 1, 'User', 'MEMBER_OF', 102, 'Group'),
+         ('1/100/', 2, 'User', 'MEMBER_OF', 100, 'Group'),
+         ('1/101/', 3, 'User', 'MEMBER_OF', 101, 'Group'),
+         ('1/101/', 4, 'User', 'MEMBER_OF', 101, 'Group'),
+         ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group'),
+         ('1/101/', 5, 'User', 'MEMBER_OF', 101, 'Group'),
+         ('1/100/', 100, 'Group', 'CONTAINS', 1000, 'Project'),
+         ('1/100/', 100, 'Group', 'CONTAINS', 1002, 'Project'),
+         ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
+         ('1/101/', 101, 'Group', 'CONTAINS', 1003, 'Project'),
+         ('1/102/', 102, 'Group', 'CONTAINS', 1004, 'Project')"
     ))
     .await;
 }
@@ -2519,10 +2519,10 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         (1, 'User', 'AUTHORED', 10001, 'MergeRequest'),
-         (1, 'User', 'AUTHORED', 10002, 'MergeRequest'),
-         (2, 'User', 'AUTHORED', 10003, 'MergeRequest')"
+        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 10001, 'MergeRequest'),
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 10002, 'MergeRequest'),
+         ('1/100/1000/', 2, 'User', 'AUTHORED', 10003, 'MergeRequest')"
     ))
     .await;
 
@@ -2617,10 +2617,10 @@ async fn column_selection_aggregation_with_wildcard_columns() {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         (1, 'User', 'AUTHORED', 10001, 'MergeRequest'),
-         (1, 'User', 'AUTHORED', 10002, 'MergeRequest'),
-         (2, 'User', 'AUTHORED', 10003, 'MergeRequest')"
+        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 10001, 'MergeRequest'),
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 10002, 'MergeRequest'),
+         ('1/100/1000/', 2, 'User', 'AUTHORED', 10003, 'MergeRequest')"
     ))
     .await;
 
@@ -3444,8 +3444,8 @@ async fn neighbors_query_filters_by_entity_type() {
     // This simulates a Group with ID=1 having an edge, which should NOT
     // appear when querying User 1's neighbors.
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         (1, 'Group', 'CONTAINS', 9999, 'Project')"
+        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/', 1, 'Group', 'CONTAINS', 9999, 'Project')"
     ))
     .await;
 

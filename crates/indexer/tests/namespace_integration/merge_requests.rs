@@ -4,8 +4,8 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, assert_edge_count, create_namespace_payload, default_test_watermark,
-    get_namespace_handler, get_string_column,
+    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
+    default_test_watermark, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -61,62 +61,30 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
     assert_eq!(states.value(0), "opened");
     assert_eq!(states.value(1), "merged");
 
-    let in_project_edges = context
-        .query(
-            "SELECT source_id, target_id FROM gl_edge
-             WHERE relationship_kind = 'IN_PROJECT' AND source_kind = 'MergeRequest'",
-        )
-        .await;
-    assert_eq!(
-        in_project_edges[0].num_rows(),
+    assert_edges_have_traversal_path(
+        &context,
+        "IN_PROJECT",
+        "MergeRequest",
+        "Project",
+        "1/100/",
         2,
-        "both MRs should have in_project edges"
-    );
-
-    let authored_edges = context
-        .query(
-            "SELECT source_id, target_id FROM gl_edge
-             WHERE relationship_kind = 'AUTHORED' AND target_kind = 'MergeRequest'
-             ORDER BY target_id",
-        )
+    )
+    .await;
+    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "MergeRequest", "1/100/", 2)
         .await;
-    assert_eq!(
-        authored_edges[0].num_rows(),
-        2,
-        "both MRs should have author edges"
-    );
-
-    let assigned_edges = context
-        .query(
-            "SELECT target_id FROM gl_edge
-             WHERE relationship_kind = 'ASSIGNED' AND target_kind = 'MergeRequest'",
-        )
+    assert_edges_have_traversal_path(&context, "ASSIGNED", "User", "MergeRequest", "1/100/", 2)
         .await;
-    assert_eq!(
-        assigned_edges[0].num_rows(),
-        2,
-        "MR 1 has two assignees (multi-value)"
-    );
-
-    let merged_by_edges = context
-        .query(
-            "SELECT target_id FROM gl_edge
-             WHERE relationship_kind = 'MERGED_BY' AND target_kind = 'MergeRequest'",
-        )
+    assert_edges_have_traversal_path(&context, "MERGED_BY", "User", "MergeRequest", "1/100/", 1)
         .await;
-    assert_eq!(merged_by_edges[0].num_rows(), 1, "only MR 2 was merged");
-
-    let in_milestone_edges = context
-        .query(
-            "SELECT source_id, target_id FROM gl_edge
-             WHERE relationship_kind = 'IN_MILESTONE' AND source_kind = 'MergeRequest' AND target_kind = 'Milestone'",
-        )
-        .await;
-    assert_eq!(
-        in_milestone_edges[0].num_rows(),
+    assert_edges_have_traversal_path(
+        &context,
+        "IN_MILESTONE",
+        "MergeRequest",
+        "Milestone",
+        "1/100/",
         1,
-        "only MR 1 has a milestone"
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -193,5 +161,6 @@ async fn namespace_handler_processes_merge_requests_closing_issues() {
         .await
         .expect("handler should succeed");
 
-    assert_edge_count(&context, "CLOSES", "MergeRequest", "WorkItem", 2).await;
+    assert_edges_have_traversal_path(&context, "CLOSES", "MergeRequest", "WorkItem", "1/100/", 2)
+        .await;
 }

@@ -4,8 +4,8 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, create_namespace_payload, default_test_watermark, get_namespace_handler,
-    get_string_column,
+    TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
+    create_namespace_payload, default_test_watermark, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -72,19 +72,30 @@ async fn namespace_handler_processes_projects() {
     assert_eq!(visibility_column.value(0), "private");
     assert_eq!(visibility_column.value(1), "public");
 
-    let creator_edges = context
-        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'CREATOR' AND source_kind = 'User' AND target_kind = 'Project' ORDER BY target_id")
+    // Each project edge carries the project's own traversal_path
+    assert_edge_count_for_traversal_path(&context, "CREATOR", "User", "Project", "1/100/1000/", 1)
+        .await;
+    assert_edge_count_for_traversal_path(&context, "CREATOR", "User", "Project", "1/100/1001/", 1)
         .await;
 
-    assert!(!creator_edges.is_empty(), "creator edges should exist");
-    assert_eq!(creator_edges[0].num_rows(), 2);
-
-    let contains_edges = context
-        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Group' AND target_kind = 'Project'")
-        .await;
-
-    assert!(!contains_edges.is_empty(), "contains edges should exist");
-    assert_eq!(contains_edges[0].num_rows(), 2);
+    assert_edge_count_for_traversal_path(
+        &context,
+        "CONTAINS",
+        "Group",
+        "Project",
+        "1/100/1000/",
+        1,
+    )
+    .await;
+    assert_edge_count_for_traversal_path(
+        &context,
+        "CONTAINS",
+        "Group",
+        "Project",
+        "1/100/1001/",
+        1,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -152,20 +163,5 @@ async fn namespace_handler_creates_member_of_edges_for_projects() {
         .await
         .expect("handler should succeed");
 
-    let member_edges = context
-        .query("SELECT source_id, target_id, source_kind, target_kind FROM gl_edge WHERE relationship_kind = 'MEMBER_OF' AND target_kind = 'Project'")
-        .await;
-
-    assert!(!member_edges.is_empty(), "member_of edges should exist");
-    let batch = &member_edges[0];
-    assert_eq!(
-        batch.num_rows(),
-        1,
-        "should have 1 member_of edge for project"
-    );
-
-    let source_kind = get_string_column(batch, "source_kind");
-    let target_kind = get_string_column(batch, "target_kind");
-    assert_eq!(source_kind.value(0), "User");
-    assert_eq!(target_kind.value(0), "Project");
+    assert_edges_have_traversal_path(&context, "MEMBER_OF", "User", "Project", "1/100/", 1).await;
 }

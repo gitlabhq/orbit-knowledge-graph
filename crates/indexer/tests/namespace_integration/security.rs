@@ -5,8 +5,8 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, assert_edge_count, create_namespace_payload, default_test_watermark,
-    get_boolean_column, get_namespace_handler, get_string_column,
+    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
+    default_test_watermark, get_boolean_column, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -89,8 +89,17 @@ async fn namespace_handler_processes_vulnerabilities() {
     assert_eq!(severities.value(0), "critical");
     assert_eq!(severities.value(1), "medium");
 
-    assert_edge_count(&context, "IN_PROJECT", "Vulnerability", "Project", 2).await;
-    assert_edge_count(&context, "AUTHORED", "User", "Vulnerability", 2).await;
+    assert_edges_have_traversal_path(
+        &context,
+        "IN_PROJECT",
+        "Vulnerability",
+        "Project",
+        "1/100/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "Vulnerability", "1/100/", 2)
+        .await;
 }
 
 #[tokio::test]
@@ -163,7 +172,15 @@ async fn namespace_handler_processes_scanners() {
     assert_eq!(external_ids.value(0), "gemnasium");
     assert_eq!(external_ids.value(1), "bandit");
 
-    assert_edge_count(&context, "SCANS", "VulnerabilityScanner", "Project", 2).await;
+    assert_edges_have_traversal_path(
+        &context,
+        "SCANS",
+        "VulnerabilityScanner",
+        "Project",
+        "1/100/",
+        2,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -240,11 +257,12 @@ async fn namespace_handler_processes_vulnerability_identifiers() {
     assert_eq!(external_ids.value(0), "CVE-2021-44228");
     assert_eq!(external_ids.value(1), "CWE-89");
 
-    assert_edge_count(
+    assert_edges_have_traversal_path(
         &context,
         "IN_PROJECT",
         "VulnerabilityIdentifier",
         "Project",
+        "1/100/",
         2,
     )
     .await;
@@ -344,12 +362,14 @@ async fn namespace_handler_processes_findings() {
     assert!(deduplicated.value(0));
     assert!(!deduplicated.value(1));
 
-    assert_edge_count(&context, "IN_PROJECT", "Finding", "Project", 2).await;
-    assert_edge_count(
+    assert_edges_have_traversal_path(&context, "IN_PROJECT", "Finding", "Project", "1/100/", 2)
+        .await;
+    assert_edges_have_traversal_path(
         &context,
         "DETECTED_BY",
         "Finding",
         "VulnerabilityScanner",
+        "1/100/",
         2,
     )
     .await;
@@ -424,10 +444,35 @@ async fn namespace_handler_processes_vulnerability_with_user_edges() {
     assert!(!result.is_empty(), "vulnerabilities should exist");
     assert_eq!(result[0].num_rows(), 3);
 
-    assert_edge_count(&context, "AUTHORED", "User", "Vulnerability", 3).await;
-    assert_edge_count(&context, "CONFIRMED_BY", "User", "Vulnerability", 1).await;
-    assert_edge_count(&context, "RESOLVED_BY", "User", "Vulnerability", 1).await;
-    assert_edge_count(&context, "DISMISSED_BY", "User", "Vulnerability", 1).await;
+    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "Vulnerability", "1/100/", 3)
+        .await;
+    assert_edges_have_traversal_path(
+        &context,
+        "CONFIRMED_BY",
+        "User",
+        "Vulnerability",
+        "1/100/",
+        1,
+    )
+    .await;
+    assert_edges_have_traversal_path(
+        &context,
+        "RESOLVED_BY",
+        "User",
+        "Vulnerability",
+        "1/100/",
+        1,
+    )
+    .await;
+    assert_edges_have_traversal_path(
+        &context,
+        "DISMISSED_BY",
+        "User",
+        "Vulnerability",
+        "1/100/",
+        1,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -493,7 +538,15 @@ async fn namespace_handler_processes_vulnerability_finding_edge() {
         .await
         .expect("handler should succeed");
 
-    assert_edge_count(&context, "HAS_FINDING", "Vulnerability", "Finding", 1).await;
+    assert_edges_have_traversal_path(
+        &context,
+        "HAS_FINDING",
+        "Vulnerability",
+        "Finding",
+        "1/100/",
+        1,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -617,35 +670,39 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     assert_eq!(detection_methods.value(0), "gitlab_security_report");
     assert_eq!(detection_methods.value(1), "external_security_report");
 
-    assert_edge_count(
+    assert_edges_have_traversal_path(
         &context,
         "IN_PROJECT",
         "VulnerabilityOccurrence",
         "Project",
+        "1/100/",
         2,
     )
     .await;
-    assert_edge_count(
+    assert_edges_have_traversal_path(
         &context,
         "DETECTED_BY",
         "VulnerabilityOccurrence",
         "VulnerabilityScanner",
+        "1/100/",
         2,
     )
     .await;
-    assert_edge_count(
+    assert_edges_have_traversal_path(
         &context,
         "HAS_IDENTIFIER",
         "VulnerabilityOccurrence",
         "VulnerabilityIdentifier",
+        "1/100/",
         2,
     )
     .await;
-    assert_edge_count(
+    assert_edges_have_traversal_path(
         &context,
         "OCCURRENCE_OF",
         "VulnerabilityOccurrence",
         "Vulnerability",
+        "1/100/",
         1,
     )
     .await;
@@ -732,7 +789,15 @@ async fn namespace_handler_processes_vulnerability_merge_request_links() {
         .await
         .expect("handler should succeed");
 
-    assert_edge_count(&context, "FIXES", "MergeRequest", "Vulnerability", 2).await;
+    assert_edges_have_traversal_path(
+        &context,
+        "FIXES",
+        "MergeRequest",
+        "Vulnerability",
+        "1/100/",
+        2,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -824,11 +889,12 @@ async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
         .await
         .expect("handler should succeed");
 
-    assert_edge_count(
+    assert_edges_have_traversal_path(
         &context,
         "HAS_IDENTIFIER",
         "VulnerabilityOccurrence",
         "VulnerabilityIdentifier",
+        "1/100/",
         3,
     )
     .await;
@@ -925,9 +991,25 @@ async fn namespace_handler_processes_security_scans() {
     assert!(latest_values.value(0));
     assert!(latest_values.value(1));
 
-    assert_edge_count(&context, "IN_PROJECT", "SecurityScan", "Project", 2).await;
-    assert_edge_count(&context, "IN_PIPELINE", "SecurityScan", "Pipeline", 2).await;
-    assert_edge_count(&context, "RAN_BY", "SecurityScan", "Job", 2).await;
+    assert_edges_have_traversal_path(
+        &context,
+        "IN_PROJECT",
+        "SecurityScan",
+        "Project",
+        "1/100/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(
+        &context,
+        "IN_PIPELINE",
+        "SecurityScan",
+        "Pipeline",
+        "1/100/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(&context, "RAN_BY", "SecurityScan", "Job", "1/100/", 2).await;
 }
 
 #[tokio::test]
@@ -1001,5 +1083,13 @@ async fn namespace_handler_processes_security_scan_finding_edges() {
         .await
         .expect("handler should succeed");
 
-    assert_edge_count(&context, "HAS_FINDING", "SecurityScan", "Finding", 2).await;
+    assert_edges_have_traversal_path(
+        &context,
+        "HAS_FINDING",
+        "SecurityScan",
+        "Finding",
+        "1/100/",
+        2,
+    )
+    .await;
 }
