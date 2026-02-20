@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://gitlab.com/schemas/caproni-config.v2.schema.json
+#
+# Caproni configuration for GKG E2E testing
+#
+# Deploys a minimal GitLab instance in-cluster using custom CNG images built
+# from the feature branch. GKG infrastructure (ClickHouse, NATS, Siphon, GKG
+# server) is managed separately by e2e/tilt/Tiltfile.
+#
+# Usage:
+#   cd ~/Desktop/Code/gkg/e2e/caproni
+#   ./build-images.sh ~/Desktop/Code/gdk/gitlab   # build custom CNG images
+#   caproni up                                      # create cluster + deploy
+#   ./post-deploy.sh                                # migrations, test data
+#
+# Then:
+#   cd ~/Desktop/Code/gkg
+#   GKG_E2E_CAPRONI=1 mise exec -- tilt up --file e2e/tilt/Tiltfile
+
+version: 2
+
+cluster:
+  driver: colima
+  network:
+    hostname: gitlab.test
+  colima:
+    memory: 12GiB
+    cores: 4
+
+repositories:
+  gitlab-chart:
+    repository: https://gitlab.com/gitlab-org/charts/gitlab.git
+    directory: ./gitlab-chart/
+  gitlab:
+    repository: https://gitlab.com/gitlab-org/gitlab.git
+    directory: ./gitlab/
+
+deployers:
+  traefik:
+    type: helm
+    helm:
+      namespace: kube-system
+      values_file: ./traefik-values.yaml
+      repository:
+        name: traefik
+        url: https://traefik.github.io/charts
+      release:
+        name: traefik
+        chart: traefik/traefik
+
+  gitlab:
+    type: helm
+    repository: gitlab-chart
+    helm:
+      namespace: gitlab
+      values_file: ./gitlab-values.yaml
+      repository:
+        name: gitlab
+        url: https://charts.gitlab.io
+      release:
+        name: gitlab
+        chart: gitlab/gitlab

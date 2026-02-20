@@ -1,0 +1,55 @@
+# =============================================================================
+# Dockerfile.rails -- Overlay feature branch Rails code onto stock CNG image
+#
+# Usage:
+#   docker build \
+#     --build-arg BASE_IMAGE=registry.gitlab.com/gitlab-org/build/CNG-mirror/gitlab-webservice-ee \
+#     --build-arg BASE_TAG=v18.8.1 \
+#     -f Dockerfile.rails \
+#     -t gkg-e2e/gitlab-webservice-ee:local \
+#     /path/to/gitlab-source
+#
+# The build context should be the root of the GitLab Rails source tree
+# (the feature branch checkout).
+#
+# This works for all three CNG components since they all inherit from
+# gitlab-rails-ee and keep Rails code at /srv/gitlab/:
+#   - gitlab-webservice-ee
+#   - gitlab-sidekiq-ee
+#   - gitlab-toolbox-ee
+# =============================================================================
+
+ARG BASE_IMAGE=registry.gitlab.com/gitlab-org/build/cng/gitlab-webservice-ee
+ARG BASE_TAG=v18.8.1
+
+FROM ${BASE_IMAGE}:${BASE_TAG}
+
+USER root
+
+# Copy feature branch Rails code over the stock release.
+# We copy specific directories to avoid overwriting CNG-specific configs
+# and scripts that live outside the Rails tree.
+COPY app/       /srv/gitlab/app/
+COPY config/    /srv/gitlab/config/
+COPY db/        /srv/gitlab/db/
+COPY ee/        /srv/gitlab/ee/
+COPY lib/       /srv/gitlab/lib/
+COPY locale/    /srv/gitlab/locale/
+COPY Gemfile    /srv/gitlab/Gemfile
+COPY Gemfile.lock /srv/gitlab/Gemfile.lock
+
+# Reconcile gems -- the feature branch may have different gem versions.
+# Install build deps if needed (they may have been cleaned from the base image).
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends build-essential libpq-dev && \
+    cd /srv/gitlab && \
+    bundle config set --local deployment true && \
+    bundle config set --local without 'development test' && \
+    bundle install --jobs "$(nproc)" --quiet && \
+    apt-get purge -y --auto-remove build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+# Fix ownership back to git user
+RUN chown -R git:git /srv/gitlab/
+
+USER git

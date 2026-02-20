@@ -1,0 +1,16 @@
+# =============================================================================
+# values-caproni.yaml -- Override for caproni mode
+#
+# When GKG_E2E_CAPRONI=1 is set, the Tiltfile loads this overlay on top of
+# values.yaml. It redirects Siphon to read from the in-cluster PostgreSQL
+# (deployed by caproni's GitLab Helm chart) instead of host.docker.internal.
+#
+# The GitLab Helm chart uses 'gitlabhq_production' as the database name,
+# not 'gitlabhq_development' like GDK.
+# =============================================================================
+
+postgres:
+  host: gitlab-postgresql.gitlab.svc.cluster.local
+  port: 5432
+  database: gitlabhq_production
+  user: gitlab

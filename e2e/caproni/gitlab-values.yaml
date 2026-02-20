@@ -1,0 +1,247 @@
+# =============================================================================
+# gitlab-values.yaml -- Minimal GitLab Helm chart for GKG E2E testing
+#
+# Target: ~4GB RAM. Single replica everything. No registry, pages, KAS, runner,
+# prometheus, cert-manager. PostgreSQL with logical replication for Siphon.
+#
+# Custom CNG images built from the feature branch are referenced here with
+# imagePullPolicy: Never (loaded into colima's docker daemon).
+# =============================================================================
+
+global:
+  hosts:
+    domain: gitlab.test
+    https: false
+    gitlab:
+      name: gitlab.gitlab.test
+
+  ingress:
+    configureCertmanager: false
+    class: traefik
+    tls:
+      enabled: false
+
+  shell:
+    port: 22
+
+  time_zone: UTC
+
+  kas:
+    enabled: false
+
+  # PostgreSQL connection -- uses the bundled Bitnami subchart
+  psql:
+    serviceName: postgresql
+    password:
+      secret: gitlab-postgresql-password
+      key: postgresql-password
+
+  gitaly:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 200Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+
+  minio:
+    enabled: true
+
+  appConfig:
+    enableUsagePing: false
+    enableSeatLink: false
+    lfs:
+      enabled: true
+      bucket: gitlab-lfs
+    artifacts:
+      enabled: true
+      bucket: gitlab-artifacts
+    uploads:
+      enabled: true
+      bucket: gitlab-uploads
+    packages:
+      enabled: false
+    terraformState:
+      enabled: false
+    dependencyProxy:
+      enabled: false
+    gitlab_kas:
+      enabled: false
+
+# ---- Ingress ----------------------------------------------------------------
+
+nginx-ingress:
+  enabled: false   # we use traefik, not nginx
+
+# ---- Disable non-essential services ----------------------------------------
+
+prometheus:
+  install: false
+
+gitlab-runner:
+  install: false
+
+registry:
+  enabled: false
+
+installCertmanager: false
+
+# ---- GitLab components ------------------------------------------------------
+
+gitlab:
+  gitlab-pages:
+    enabled: false
+
+  webservice:
+    replicaCount: 1
+    minReplicas: 1
+    maxReplicas: 1
+    workerProcesses: 2
+    image:
+      repository: gkg-e2e/gitlab-webservice-ee
+      tag: local
+      pullPolicy: Never
+    resources:
+      requests:
+        cpu: 100m
+        memory: 768Mi
+      limits:
+        cpu: 750m
+        memory: 2.5Gi
+
+  sidekiq:
+    replicaCount: 1
+    minReplicas: 1
+    maxReplicas: 1
+    image:
+      repository: gkg-e2e/gitlab-sidekiq-ee
+      tag: local
+      pullPolicy: Never
+    resources:
+      requests:
+        cpu: 50m
+        memory: 384Mi
+      limits:
+        cpu: 300m
+        memory: 2Gi
+
+  gitlab-shell:
+    replicaCount: 1
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 96Mi
+
+  gitaly:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 200Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+    persistence:
+      size: 5Gi
+
+  gitlab-exporter:
+    enabled: false
+
+  toolbox:
+    enabled: true
+    image:
+      repository: gkg-e2e/gitlab-toolbox-ee
+      tag: local
+      pullPolicy: Never
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 256Mi
+
+  migrations:
+    image:
+      repository: gkg-e2e/gitlab-toolbox-ee
+      tag: local
+      pullPolicy: Never
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1536Mi
+
+# ---- PostgreSQL (Bitnami subchart) ------------------------------------------
+#
+# Logical replication is required for Siphon. The gitlab user needs REPLICATION
+# privilege to create replication slots.
+
+postgresql:
+  install: true
+  auth:
+    username: gitlab
+    database: gitlabhq_production
+  primary:
+    extendedConfiguration: |
+      wal_level = logical
+      max_replication_slots = 4
+      max_wal_senders = 4
+    persistence:
+      size: 2Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 512Mi
+      limits:
+        cpu: 250m
+        memory: 1024Mi
+    initdb:
+      scripts:
+        init-extensions.sql: |
+          CREATE EXTENSION IF NOT EXISTS pg_trgm;
+          CREATE EXTENSION IF NOT EXISTS btree_gist;
+          CREATE EXTENSION IF NOT EXISTS plpgsql;
+        init-replication.sql: |
+          -- Grant REPLICATION to the gitlab user so Siphon can create
+          -- replication slots. This runs as the postgres superuser.
+          ALTER USER gitlab REPLICATION;
+  metrics:
+    enabled: false
+
+# ---- Redis -------------------------------------------------------------------
+
+redis:
+  install: true
+  master:
+    persistence:
+      size: 1Gi
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  metrics:
+    enabled: false
+
+# ---- MinIO (object storage) -------------------------------------------------
+
+minio:
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 256Mi

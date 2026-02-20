@@ -1,27 +1,38 @@
 # =============================================================================
 # Tiltfile — E2E self-contained environment
 #
-# Spins up a fully self-contained GKG stack inside k8s:
+# Spins up the GKG infrastructure stack inside k8s:
 #   - ClickHouse (both datalake + graph databases)
 #   - NATS
-#   - Siphon producer (reads from host Postgres / GDK)
+#   - Siphon producer (reads from Postgres)
 #   - Siphon consumer (writes to in-cluster ClickHouse)
 #   - GKG indexer + webserver
 #
-# GitLab Rails continues to run on the host via GDK. It points at GKG via the
-# port-forwards established here (localhost:4200 / localhost:50051).
+# Two modes:
+#
+#   GDK mode (default):
+#     GitLab Rails runs on the host via GDK. Siphon reads from GDK's Postgres
+#     at host.docker.internal. Tests run via `bundle exec rails runner` on host.
+#
+#   Caproni mode (GKG_E2E_CAPRONI=1):
+#     GitLab Rails runs in-cluster (deployed by caproni). Siphon reads from the
+#     in-cluster Postgres at gitlab-postgresql.gitlab.svc.cluster.local.
+#     Tests run via `kubectl exec` into the toolbox pod.
 #
 # Usage:
+#   # GDK mode:
 #   cd ~/Desktop/Code/gkg
 #   mise exec -- tilt up --file e2e/tilt/Tiltfile
 #
+#   # Caproni mode:
+#   cd ~/Desktop/Code/gkg
+#   GKG_E2E_CAPRONI=1 mise exec -- tilt up --file e2e/tilt/Tiltfile
+#
 # Prerequisites:
 #   - Colima running with Kubernetes: colima start --kubernetes
-#   - GDK running with PostgreSQL + logical replication configured
 #   - e2e/tilt/.secrets file exists (cp e2e/tilt/.secrets.example e2e/tilt/.secrets)
-#   - Siphon publication exists in Postgres:
-#       psql -h ~/Desktop/Code/gdk/postgresql -d gitlabhq_development \
-#         -c "SELECT * FROM pg_publication WHERE pubname = 'siphon_publication_main_db'"
+#   - GDK mode: GDK running with PostgreSQL + logical replication
+#   - Caproni mode: `caproni up` + `post-deploy.sh` already completed
 # =============================================================================
 
 update_settings(k8s_upsert_timeout_secs=600)
@@ -32,7 +43,7 @@ allow_k8s_contexts(['colima', 'docker-desktop', 'minikube', 'kind-kind', 'ranche
 # ── Secrets ───────────────────────────────────────────────────────────────────
 
 def load_secrets():
-    secrets_file = 'e2e/tilt/.secrets'
+    secrets_file = '.secrets'
     if not os.path.exists(secrets_file):
         fail('''
 Missing e2e/tilt/.secrets file. Create it with:
@@ -44,7 +55,7 @@ Then fill in GKG_JWT_SECRET from GDK:
   cat ~/Desktop/Code/gdk/gitlab/.gitlab_shell_secret
 ''')
     secrets = {}
-    content = str(read_file(secrets_file))
+    content = str(read_file('.secrets'))
     for line in content.strip().split('\n'):
         line = line.strip()
         if not line or line.startswith('#'):
@@ -273,29 +284,38 @@ k8s_resource(
 
 custom_build(
     'gkg-server',
-    './scripts/build-dev.sh $EXPECTED_REF',
-    deps=['crates/', 'Cargo.toml', 'Cargo.lock'],
+    '../../scripts/build-dev.sh $EXPECTED_REF',
+    deps=['../../crates/', '../../Cargo.toml', '../../Cargo.lock'],
 )
 
 # ── Helm dependencies ─────────────────────────────────────────────────────────
 
 local('helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true', quiet=True)
-local('helm dependency build ./helm-dev/gkg 2>/dev/null', quiet=True)
+local('helm dependency build ../../helm-dev/gkg 2>/dev/null', quiet=True)
 
 # ── GKG chart (NATS + Siphon + GKG) ──────────────────────────────────────────
 
+# Detect caproni mode: if set, overlay values-caproni.yaml to redirect
+# Siphon to the in-cluster PostgreSQL instead of host.docker.internal.
+caproni_mode = os.environ.get('GKG_E2E_CAPRONI', '') == '1'
+
+values_files = ['./values.yaml']
+if caproni_mode:
+    values_files.append('./values-caproni.yaml')
+    print('  Caproni mode: Siphon will read from in-cluster PostgreSQL')
+
 k8s_yaml(helm(
-    './helm-dev/gkg',
+    '../../helm-dev/gkg',
     name='gkg-e2e',
     namespace='default',
-    values=['./e2e/tilt/values.yaml'],
+    values=values_files,
 ))
 
-k8s_resource('gkg-e2e-indexer',    labels=['gkg'], resource_deps=['gkg-e2e-migrate'], pod_readiness='ignore')
-k8s_resource('gkg-e2e-webserver',  labels=['gkg'], resource_deps=['gkg-e2e-migrate'], pod_readiness='ignore',
+k8s_resource('gkg-indexer',    labels=['gkg'], resource_deps=['gkg-e2e-migrate'], pod_readiness='ignore')
+k8s_resource('gkg-webserver',  labels=['gkg'], resource_deps=['gkg-e2e-migrate'], pod_readiness='ignore',
              port_forwards=['4200:8080', '50051:50051'])
-k8s_resource('gkg-e2e-health-check', labels=['gkg'], pod_readiness='ignore',
+k8s_resource('gkg-health-check', labels=['gkg'], pod_readiness='ignore',
              port_forwards=['4201:4201'])
-k8s_resource('gkg-nats',           labels=['infrastructure'])
-k8s_resource('siphon-producer',    labels=['siphon'], resource_deps=['gkg-nats'])
-k8s_resource('siphon-consumer',    labels=['siphon'], resource_deps=['gkg-nats', 'gkg-e2e-clickhouse'])
+k8s_resource('gkg-e2e-nats',      labels=['infrastructure'])
+k8s_resource('siphon-producer',   labels=['siphon'], resource_deps=['gkg-e2e-nats'])
+k8s_resource('siphon-consumer',   labels=['siphon'], resource_deps=['gkg-e2e-nats', 'gkg-e2e-clickhouse'])
