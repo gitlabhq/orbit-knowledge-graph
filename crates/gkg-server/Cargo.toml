@@ -69,5 +69,6 @@ parser-core = { workspace = true }
 internment = { workspace = true }
 smallvec = { workspace = true }
 
-[lints]
-workspace = true
+[lints.rust]
+# workspace uses `forbid`, downgraded to `deny` so tests can manipulate env vars
+unsafe_code = "deny"
