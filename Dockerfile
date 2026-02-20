@@ -12,6 +12,8 @@ RUN cargo build --release --package gkg-server && \
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal:10.1
 
+WORKDIR /app
+
 COPY --from=builder /gkg-server /usr/local/bin/gkg-server
 
 ENTRYPOINT ["gkg-server"]

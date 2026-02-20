@@ -1,4 +1,23 @@
 {{- if and .Values.gkgServer .Values.gkgServer.dispatcher .Values.gkgServer.dispatcher.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gkg-dispatcher-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-dispatcher") | nindent 4 }}
+data:
+  default.yaml: |
+    nats:
+      url: {{ include "gkg.natsUrl" . | quote }}
+    datalake:
+      {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
+    {{- if .Values.otel.enabled }}
+    metrics:
+      otlp_endpoint: {{ .Values.otel.endpoint | quote }}
+      service_name: "gkg-dispatcher"
+    {{- end }}
+---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -18,6 +37,8 @@ spec:
         metadata:
           labels:
             {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-dispatcher") | nindent 12 }}
+          annotations:
+            checksum/config: {{ toJson .Values.clickhouse.datalake | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.otel | sha256sum }}
         spec:
           restartPolicy: Never
           securityContext:
@@ -33,17 +54,17 @@ spec:
                   value: "json"
                 - name: RUST_LOG
                   value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
-                - name: GKG_NATS__URL
-                  value: {{ include "gkg.natsUrl" . | quote }}
-                {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 16 }}
-                {{- if .Values.otel.enabled }}
-                - name: GKG_METRICS__OTLP_ENDPOINT
-                  value: {{ .Values.otel.endpoint | quote }}
-                - name: GKG_METRICS__SERVICE_NAME
-                  value: "gkg-dispatcher"
-                {{- end }}
+                {{- include "gkg.clickhouseSecretEnv" (dict "prefix" "DATALAKE" "secretName" "clickhouse-credentials") | nindent 16 }}
+              volumeMounts:
+                - name: config
+                  mountPath: /app/config
+                  readOnly: true
               securityContext:
                 {{- include "gkg.securityContext" . | nindent 16 }}
               resources:
                 {{- toYaml .Values.gkgServer.dispatcher.resources | nindent 16 }}
+          volumes:
+            - name: config
+              configMap:
+                name: gkg-dispatcher-config
 {{- end }}

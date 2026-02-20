@@ -1,6 +1,30 @@
 {{- if and .Values.gkgServer .Values.gkgServer.healthCheck .Values.gkgServer.healthCheck.enabled }}
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gkg-health-check-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "gkg-health-check") | nindent 4 }}
+data:
+  default.yaml: |
+    health_check:
+      bind_address: "0.0.0.0:4201"
+      namespace: {{ .Values.gkgServer.healthCheck.namespace | default .Release.Namespace | quote }}
+      services:
+        {{- range (.Values.gkgServer.healthCheck.services | default (list "siphon-consumer" "siphon-producer" "gkg-indexer" "nats")) }}
+        - {{ . | quote }}
+        {{- end }}
+    graph:
+      {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.graph) | nindent 6 }}
+    {{- if .Values.otel.enabled }}
+    metrics:
+      otlp_endpoint: {{ .Values.otel.endpoint | quote }}
+      service_name: "gkg-health-check"
+    {{- end }}
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: gkg-health-check
@@ -52,6 +76,8 @@ spec:
     metadata:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-health-check") | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.clickhouse.graph | sha256sum }}-{{ toJson .Values.gkgServer.healthCheck | sha256sum }}-{{ toJson .Values.otel | sha256sum }}
     spec:
       serviceAccountName: gkg-health-check
       securityContext:
@@ -71,19 +97,11 @@ spec:
               value: "json"
             - name: RUST_LOG
               value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
-            - name: GKG_HEALTH_CHECK__BIND_ADDRESS
-              value: "0.0.0.0:4201"
-            - name: GKG_HEALTH_CHECK__NAMESPACE
-              value: {{ .Values.gkgServer.healthCheck.namespace | default .Release.Namespace | quote }}
-            - name: GKG_HEALTH_CHECK__SERVICES
-              value: {{ .Values.gkgServer.healthCheck.services | default (list "siphon-consumer" "siphon-producer" "gkg-indexer" "nats") | join "," | quote }}
-            {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
-            {{- if .Values.otel.enabled }}
-            - name: GKG_METRICS__OTLP_ENDPOINT
-              value: {{ .Values.otel.endpoint | quote }}
-            - name: GKG_METRICS__SERVICE_NAME
-              value: "gkg-health-check"
-            {{- end }}
+            {{- include "gkg.clickhouseSecretEnv" (dict "prefix" "GRAPH" "secretName" "clickhouse-credentials") | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /health
@@ -100,6 +118,10 @@ spec:
             {{- include "gkg.securityContext" . | nindent 12 }}
           resources:
             {{- toYaml .Values.gkgServer.healthCheck.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: gkg-health-check-config
 ---
 apiVersion: v1
 kind: Service
