@@ -20,4 +20,15 @@ metadata:
 data:
   etl-engine.json: |-
 {{ .Files.Get "dashboards/etl-engine.json" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gkg-sdlc-indexing-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+data:
+  sdlc-indexing.json: |-
+{{ .Files.Get "dashboards/sdlc-indexing.json" | indent 4 }}
 {{- end }}

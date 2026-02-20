@@ -19,6 +19,7 @@ gkg_simulator_manifest.json
 crates/simulator/profiles
 evaluation_results/
 datalake-generator-state/
+datalake-generator-report.json
 
 # Tilt secrets (contains passwords)
 .tilt-secrets
@@ -26,3 +27,6 @@ datalake-generator-state/
 # Helm chart dependencies (downloaded by helm dependency build)
 helm-dev/charts/
 helm-dev/tmpcharts*/
+
+# Git worktrees
+.worktrees/
