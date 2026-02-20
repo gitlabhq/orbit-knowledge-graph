@@ -285,3 +285,64 @@ pub async fn assert_edge_count(
         "expected {expected_count} {relationship_kind} edges from {source_kind} to {target_kind}"
     );
 }
+
+/// Assert that edges matching a traversal_path filter have the expected count.
+///
+/// Unlike `assert_edges_have_traversal_path` which checks that *all* edges of a type share
+/// one path, this filters by traversal_path and checks the count — useful when edges of the
+/// same type have different paths (e.g., entities in different namespaces).
+pub async fn assert_edge_count_for_traversal_path(
+    context: &TestContext,
+    relationship_kind: &str,
+    source_kind: &str,
+    target_kind: &str,
+    traversal_path: &str,
+    expected_count: usize,
+) {
+    let query = format!(
+        "SELECT 1 FROM gl_edge WHERE relationship_kind = '{relationship_kind}' \
+         AND source_kind = '{source_kind}' AND target_kind = '{target_kind}' \
+         AND traversal_path = '{traversal_path}'"
+    );
+    let result = context.query(&query).await;
+    let actual_count = result.first().map_or(0, |b| b.num_rows());
+    assert_eq!(
+        actual_count, expected_count,
+        "expected {expected_count} {relationship_kind} edges ({source_kind} → {target_kind}) \
+         with traversal_path '{traversal_path}', got {actual_count}"
+    );
+}
+
+/// Assert that edges of a given type exist with the expected count and traversal_path.
+pub async fn assert_edges_have_traversal_path(
+    context: &TestContext,
+    relationship_kind: &str,
+    source_kind: &str,
+    target_kind: &str,
+    expected_traversal_path: &str,
+    expected_count: usize,
+) {
+    let query = format!(
+        "SELECT traversal_path FROM gl_edge WHERE relationship_kind = '{relationship_kind}' \
+         AND source_kind = '{source_kind}' AND target_kind = '{target_kind}'"
+    );
+    let result = context.query(&query).await;
+    assert!(
+        !result.is_empty(),
+        "{relationship_kind} edges from {source_kind} to {target_kind} should exist"
+    );
+    let batch = &result[0];
+    assert_eq!(
+        batch.num_rows(),
+        expected_count,
+        "expected {expected_count} {relationship_kind} edges from {source_kind} to {target_kind}"
+    );
+    let paths = get_string_column(batch, "traversal_path");
+    for i in 0..batch.num_rows() {
+        assert_eq!(
+            paths.value(i),
+            expected_traversal_path,
+            "{relationship_kind} edge row {i} should have traversal_path '{expected_traversal_path}'"
+        );
+    }
+}

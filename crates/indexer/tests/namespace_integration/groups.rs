@@ -4,8 +4,8 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, create_namespace_payload, default_test_watermark, get_namespace_handler,
-    get_string_column,
+    TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
+    create_namespace_payload, default_test_watermark, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -106,25 +106,14 @@ async fn namespace_handler_creates_group_edges() {
         .await
         .expect("handler should succeed");
 
-    let owner_edges = context
-        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'OWNER' ORDER BY target_id")
-        .await;
+    // Group 100 (path 1/100/) has owner_id=1, group 101 (path 1/100/101/) has owner_id=2.
+    // Each OWNER edge carries the owning group's traversal_path.
+    assert_edge_count_for_traversal_path(&context, "OWNER", "User", "Group", "1/100/", 1).await;
+    assert_edge_count_for_traversal_path(&context, "OWNER", "User", "Group", "1/100/101/", 1).await;
 
-    assert!(!owner_edges.is_empty(), "owner edges should exist");
-    let batch = &owner_edges[0];
-    assert_eq!(batch.num_rows(), 2, "should have 2 owner edges");
-
-    let parent_edges = context
-        .query("SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Group' AND target_kind = 'Group'")
-        .await;
-
-    assert!(!parent_edges.is_empty(), "parent edges should exist");
-    let batch = &parent_edges[0];
-    assert_eq!(
-        batch.num_rows(),
-        1,
-        "should have 1 parent-child edge (100 contains 101)"
-    );
+    // CONTAINS edge: sourced from the child group's row (which has parent_id),
+    // so it carries the child's traversal_path.
+    assert_edges_have_traversal_path(&context, "CONTAINS", "Group", "Group", "1/100/101/", 1).await;
 }
 
 #[tokio::test]
@@ -182,20 +171,5 @@ async fn namespace_handler_creates_member_of_edges_for_groups() {
         .await
         .expect("handler should succeed");
 
-    let member_edges = context
-        .query("SELECT source_id, target_id, source_kind, target_kind FROM gl_edge WHERE relationship_kind = 'MEMBER_OF' AND target_kind = 'Group' ORDER BY source_id")
-        .await;
-
-    assert!(!member_edges.is_empty(), "member_of edges should exist");
-    let batch = &member_edges[0];
-    assert_eq!(
-        batch.num_rows(),
-        2,
-        "should have 2 member_of edges for group"
-    );
-
-    let source_kind = get_string_column(batch, "source_kind");
-    let target_kind = get_string_column(batch, "target_kind");
-    assert_eq!(source_kind.value(0), "User");
-    assert_eq!(target_kind.value(0), "Group");
+    assert_edges_have_traversal_path(&context, "MEMBER_OF", "User", "Group", "1/100/", 2).await;
 }
