@@ -49,10 +49,15 @@ STAGING_DIR=$(mktemp -d)
 trap 'rm -rf "${STAGING_DIR}"' EXIT
 
 echo "--- Staging Rails code to ${STAGING_DIR} ---"
-for dir in app config db ee lib locale; do
+for dir in app config db ee lib locale gems; do
   echo "    Copying ${dir}/"
   cp -a "${GITLAB_SRC}/${dir}" "${STAGING_DIR}/${dir}"
 done
+# vendor/gems/ contains source-tracked vendored gems referenced by Gemfile.
+# We copy it as vendor_gems/ to the staging dir and use a separate COPY in the
+# Dockerfile (to avoid the large vendor/bundle/ directory).
+echo "    Copying vendor/gems/ -> vendor_gems/"
+cp -a "${GITLAB_SRC}/vendor/gems" "${STAGING_DIR}/vendor_gems"
 echo "    Copying Gemfile, Gemfile.lock"
 cp "${GITLAB_SRC}/Gemfile" "${STAGING_DIR}/Gemfile"
 cp "${GITLAB_SRC}/Gemfile.lock" "${STAGING_DIR}/Gemfile.lock"
@@ -68,6 +73,7 @@ for component in "${COMPONENTS[@]}"; do
   echo "    Base: ${REGISTRY}/${component}:${BASE_TAG}"
 
   docker build \
+    ${NO_CACHE:+--no-cache} \
     --build-arg "BASE_IMAGE=${REGISTRY}/${component}" \
     --build-arg "BASE_TAG=${BASE_TAG}" \
     -f "${SCRIPT_DIR}/Dockerfile.rails" \

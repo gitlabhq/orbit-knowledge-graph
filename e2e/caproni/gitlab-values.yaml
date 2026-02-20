@@ -48,6 +48,12 @@ global:
   minio:
     enabled: true
 
+  # Skip the ClickHouse schema version check in init containers.
+  # Without this, the rails-dependencies script crashes on a nil ClickHouse
+  # config and prevents pods from starting.
+  extraEnv:
+    SKIP_CLICKHOUSE_SCHEMA_VERSION_CHECK: "YesReally"
+
   appConfig:
     enableUsagePing: false
     enableSeatLink: false
@@ -102,6 +108,10 @@ gitlab:
       repository: gkg-e2e/gitlab-webservice-ee
       tag: local
       pullPolicy: Never
+    workhorse:
+      image: registry.gitlab.com/gitlab-org/build/cng/gitlab-workhorse-ee
+      tag: v18.8.1
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: 100m
@@ -160,11 +170,11 @@ gitlab:
       pullPolicy: Never
     resources:
       requests:
-        cpu: 25m
-        memory: 64Mi
+        cpu: 50m
+        memory: 512Mi
       limits:
-        cpu: 100m
-        memory: 256Mi
+        cpu: 500m
+        memory: 2Gi
 
   migrations:
     image:
@@ -173,11 +183,11 @@ gitlab:
       pullPolicy: Never
     resources:
       requests:
-        cpu: 50m
-        memory: 256Mi
+        cpu: 100m
+        memory: 1Gi
       limits:
-        cpu: 500m
-        memory: 1536Mi
+        cpu: 1
+        memory: 3Gi
 
 # ---- PostgreSQL (Bitnami subchart) ------------------------------------------
 #

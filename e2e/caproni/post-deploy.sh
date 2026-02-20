@@ -80,7 +80,7 @@ TOOLBOX_POD=$(kubectl get pod -n "${GITLAB_NS}" -l app=toolbox \
   -o jsonpath='{.items[0].metadata.name}')
 
 JWT_SECRET=$(kubectl exec -n "${GITLAB_NS}" "${TOOLBOX_POD}" -- \
-  cat /srv/gitlab/.gitlab_shell_secret 2>/dev/null || echo "")
+  cat /etc/gitlab/shell/.gitlab_shell_secret 2>/dev/null || echo "")
 
 if [ -z "${JWT_SECRET}" ]; then
   echo "WARNING: Could not extract .gitlab_shell_secret from toolbox pod."
@@ -126,7 +126,10 @@ echo ""
 echo "--- Copying test scripts to toolbox pod ---"
 
 kubectl exec -n "${GITLAB_NS}" "${TOOLBOX_POD}" -- mkdir -p /tmp/e2e
-kubectl cp "${GKG_ROOT}/tests/e2e/" "${GITLAB_NS}/${TOOLBOX_POD}:/tmp/e2e/"
+# Copy individual test files (kubectl cp of directories creates nested dirs)
+for f in "${GKG_ROOT}"/tests/e2e/*.rb; do
+  kubectl cp "${f}" "${GITLAB_NS}/${TOOLBOX_POD}:/tmp/e2e/$(basename "${f}")"
+done
 
 echo "    Test scripts copied to /tmp/e2e/ in toolbox pod"
 
