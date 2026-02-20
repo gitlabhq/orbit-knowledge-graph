@@ -372,8 +372,14 @@ all_projects.each do |proj|
       current_user: admin,
       params: params
     ).execute
-    issue = result.is_a?(Hash) ? result[:issue] : result
-    work_item_count += 1 if issue&.persisted?
+    issue = if result.respond_to?(:payload) && result.payload.is_a?(Hash)
+              result.payload[:issue]
+            elsif result.is_a?(Hash)
+              result[:issue]
+            else
+              result
+            end
+    work_item_count += 1 if issue.is_a?(Issue) && issue.persisted?
   end
 end
 puts "  Created #{work_item_count} new work items (#{all_projects.sum { |p| p.issues.count }} total)"
@@ -417,14 +423,21 @@ all_public_projects.each do |proj|
         target_branch: proj.default_branch || 'main'
       }
     ).execute
-    mr = result.is_a?(Hash) ? (result[:merge_request] || result) : result
+    mr = if result.respond_to?(:payload) && result.payload.is_a?(Hash)
+           result.payload[:merge_request] || result.payload
+         elsif result.is_a?(Hash)
+           result[:merge_request] || result
+         elsif result.is_a?(MergeRequest)
+           result
+         else
+           result
+         end
 
-    if mr&.persisted? && state == 'merged'
-      # Mark as merged by updating state directly (no actual git merge needed for test data)
+    if mr.is_a?(MergeRequest) && mr.persisted? && state == 'merged'
       mr.update_columns(state: 'merged', merged_at: Time.current - (6 - i).days)
     end
 
-    mr_count += 1 if mr&.persisted?
+    mr_count += 1 if mr.is_a?(MergeRequest) && mr.persisted?
   end
 end
 
@@ -449,11 +462,16 @@ all_public_projects.each do |proj|
       body = "Review comment #{i + 1} on #{mr.title}"
       next if Note.find_by(noteable: mr, note: body)
 
-      note = Notes::CreateService.new(proj, admin, {
-                                        noteable: mr,
-                                        note: body
-                                      }).execute
-      note_count += 1 if note&.persisted?
+      result = Notes::CreateService.new(proj, admin, {
+                                          noteable: mr,
+                                          note: body
+                                        }).execute
+      note = if result.is_a?(Note)
+               result
+             else
+               (result.respond_to?(:payload) ? result.payload[:note] : result)
+             end
+      note_count += 1 if note.is_a?(Note) && note.persisted?
     end
   end
 
@@ -463,11 +481,16 @@ all_public_projects.each do |proj|
       body = "Discussion comment #{i + 1} on #{issue.title}"
       next if Note.find_by(noteable: issue, note: body)
 
-      note = Notes::CreateService.new(proj, admin, {
-                                        noteable: issue,
-                                        note: body
-                                      }).execute
-      note_count += 1 if note&.persisted?
+      result = Notes::CreateService.new(proj, admin, {
+                                          noteable: issue,
+                                          note: body
+                                        }).execute
+      note = if result.is_a?(Note)
+               result
+             else
+               (result.respond_to?(:payload) ? result.payload[:note] : result)
+             end
+      note_count += 1 if note.is_a?(Note) && note.persisted?
     end
   end
 end
