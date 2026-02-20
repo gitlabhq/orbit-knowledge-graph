@@ -55,6 +55,15 @@ pub enum HandlerError {
     Deserialization(#[from] serde_json::Error),
 }
 
+impl HandlerError {
+    pub fn error_kind(&self) -> &'static str {
+        match self {
+            HandlerError::Processing(_) => "processing",
+            HandlerError::Deserialization(_) => "deserialization",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Error)]
 #[error("failed to create handler '{handler_name}': {reason}")]
 pub struct HandlerCreationError {

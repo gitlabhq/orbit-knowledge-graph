@@ -1,6 +1,7 @@
 mod datalake;
 mod global_handler;
 pub mod locking;
+mod metrics;
 mod namespace_handler;
 mod pipeline;
 mod prepare;
@@ -13,6 +14,7 @@ use crate::clickhouse::ClickHouseConfiguration;
 use crate::module::{Handler, Module, ModuleInitError};
 use datalake::{Datalake, DatalakeQuery};
 use global_handler::GlobalHandler;
+use metrics::SdlcMetrics;
 use namespace_handler::NamespaceHandler;
 use ontology::{EtlScope, NodeEntity, Ontology};
 use pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
@@ -23,6 +25,7 @@ pub struct SdlcModule {
     datalake: Arc<dyn DatalakeQuery>,
     watermark_store: Arc<dyn WatermarkStore>,
     ontology: Arc<Ontology>,
+    metrics: SdlcMetrics,
 }
 
 impl SdlcModule {
@@ -38,6 +41,7 @@ impl SdlcModule {
             datalake: Arc::new(Datalake::new(datalake_client)),
             watermark_store: Arc::new(ClickHouseWatermarkStore::new(graph_client)),
             ontology: Arc::new(ontology),
+            metrics: SdlcMetrics::new(),
         })
     }
 
@@ -51,6 +55,7 @@ impl SdlcModule {
             datalake,
             watermark_store,
             ontology: Arc::new(ontology),
+            metrics: SdlcMetrics::new(),
         }
     }
 
@@ -79,8 +84,12 @@ impl SdlcModule {
     }
 
     fn try_create_pipeline(&self, node: &NodeEntity) -> Option<OntologyEntityPipeline> {
-        let pipeline =
-            OntologyEntityPipeline::from_node(node, &self.ontology, Arc::clone(&self.datalake));
+        let pipeline = OntologyEntityPipeline::from_node(
+            node,
+            &self.ontology,
+            Arc::clone(&self.datalake),
+            self.metrics.clone(),
+        );
         if pipeline.is_none() {
             error!(
                 entity = node.name,
@@ -100,6 +109,7 @@ impl SdlcModule {
                     config,
                     &self.ontology,
                     Arc::clone(&self.datalake),
+                    self.metrics.clone(),
                 )
             })
             .collect()
@@ -133,6 +143,7 @@ impl Module for SdlcModule {
             handlers.push(Box::new(GlobalHandler::new(
                 Arc::clone(&self.watermark_store),
                 global_pipelines,
+                self.metrics.clone(),
             )));
         }
 
@@ -141,6 +152,7 @@ impl Module for SdlcModule {
                 Arc::clone(&self.watermark_store),
                 namespace_pipelines,
                 namespace_edge_pipelines,
+                self.metrics.clone(),
             )));
         }
 

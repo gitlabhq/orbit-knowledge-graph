@@ -9,10 +9,12 @@ use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use opentelemetry::KeyValue;
 use serde::Serialize;
 use tracing::{debug, error, info};
 
 use super::locking::namespace_lock_key;
+use super::metrics::SdlcMetrics;
 use super::pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
 use crate::topic::NamespaceIndexingRequest;
@@ -51,6 +53,7 @@ pub struct NamespaceHandler {
     watermark_store: Arc<dyn WatermarkStore>,
     pipelines: Vec<OntologyEntityPipeline>,
     edge_pipelines: Vec<OntologyEdgePipeline>,
+    metrics: SdlcMetrics,
 }
 
 impl NamespaceHandler {
@@ -58,11 +61,13 @@ impl NamespaceHandler {
         watermark_store: Arc<dyn WatermarkStore>,
         pipelines: Vec<OntologyEntityPipeline>,
         edge_pipelines: Vec<OntologyEdgePipeline>,
+        metrics: SdlcMetrics,
     ) -> Self {
         Self {
             watermark_store,
             pipelines,
             edge_pipelines,
+            metrics,
         }
     }
 
@@ -140,10 +145,18 @@ impl Handler for NamespaceHandler {
             );
 
             if let Err(error) = pipeline
-                .process(params.to_json(), context.destination.as_ref())
+                .process(params.to_json(), context.destination.as_ref(), "namespace")
                 .await
             {
                 error!(namespace_id = payload.namespace, entity, %error, "entity pipeline failed");
+                self.metrics.pipeline_errors.add(
+                    1,
+                    &[
+                        KeyValue::new("entity", entity.to_owned()),
+                        KeyValue::new("scope", "namespace"),
+                        KeyValue::new("error_kind", error.error_kind()),
+                    ],
+                );
                 errors.push((entity.to_string(), error));
                 continue;
             }
@@ -155,6 +168,19 @@ impl Handler for NamespaceHandler {
                     error!(namespace_id = payload.namespace, entity, %error, "failed to update namespace watermark");
                     HandlerError::Processing(format!("failed to update namespace watermark for {entity}: {error}"))
                 })?;
+
+            let lag = Utc::now()
+                .signed_duration_since(payload.watermark)
+                .num_milliseconds()
+                .max(0) as f64
+                / 1000.0;
+            self.metrics.watermark_lag.record(
+                lag,
+                &[
+                    KeyValue::new("entity", entity.to_owned()),
+                    KeyValue::new("scope", "namespace"),
+                ],
+            );
 
             successful_entity_pipelines += 1;
         }
@@ -173,10 +199,18 @@ impl Handler for NamespaceHandler {
             );
 
             if let Err(error) = edge_pipeline
-                .process(params.to_json(), context.destination.as_ref())
+                .process(params.to_json(), context.destination.as_ref(), "namespace")
                 .await
             {
                 error!(namespace_id = payload.namespace, edge = entity, %error, "edge pipeline failed");
+                self.metrics.pipeline_errors.add(
+                    1,
+                    &[
+                        KeyValue::new("entity", entity.to_owned()),
+                        KeyValue::new("scope", "namespace"),
+                        KeyValue::new("error_kind", error.error_kind()),
+                    ],
+                );
                 errors.push((entity.to_string(), error));
                 continue;
             }
@@ -189,8 +223,24 @@ impl Handler for NamespaceHandler {
                     HandlerError::Processing(format!("failed to update namespace watermark for {entity}: {error}"))
                 })?;
 
+            let lag = Utc::now()
+                .signed_duration_since(payload.watermark)
+                .num_milliseconds()
+                .max(0) as f64
+                / 1000.0;
+            self.metrics.watermark_lag.record(
+                lag,
+                &[
+                    KeyValue::new("entity", entity.to_owned()),
+                    KeyValue::new("scope", "namespace"),
+                ],
+            );
+
             successful_edge_pipelines += 1;
         }
+
+        let elapsed = started_at.elapsed();
+        let handler_labels = [KeyValue::new("handler", "namespace-handler")];
 
         if errors.is_empty() {
             let lock_key = namespace_lock_key(payload.namespace);
@@ -207,10 +257,14 @@ impl Handler for NamespaceHandler {
                 organization_id = payload.organization,
                 successful_entity_pipelines,
                 successful_edge_pipelines,
-                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                elapsed_ms = elapsed.as_millis() as u64,
                 "namespace indexing completed"
             );
         }
+
+        self.metrics
+            .handler_duration
+            .record(elapsed.as_secs_f64(), &handler_labels);
 
         if !errors.is_empty() {
             let failed_count = errors.len();
@@ -219,7 +273,7 @@ impl Handler for NamespaceHandler {
                 failed_count,
                 successful_entity_pipelines,
                 successful_edge_pipelines,
-                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                elapsed_ms = elapsed.as_millis() as u64,
                 "namespace indexing finished with failures"
             );
 
@@ -246,6 +300,12 @@ mod tests {
     use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
     use std::collections::{BTreeMap, HashMap};
     use std::sync::Mutex;
+
+    fn test_metrics() -> SdlcMetrics {
+        let provider = opentelemetry::global::meter_provider();
+        let meter = provider.meter("test");
+        SdlcMetrics::with_meter(&meter)
+    }
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     struct WatermarkKey {
@@ -400,12 +460,23 @@ mod tests {
         let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         let pipelines = vec![
-            OntologyEntityPipeline::from_node(&group_node, &ontology, datalake.clone()).unwrap(),
-            OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake).unwrap(),
+            OntologyEntityPipeline::from_node(
+                &group_node,
+                &ontology,
+                datalake.clone(),
+                test_metrics(),
+            )
+            .unwrap(),
+            OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake, test_metrics())
+                .unwrap(),
         ];
 
-        let handler =
-            NamespaceHandler::new(Arc::new(RecordingWatermarkStore::new()), pipelines, vec![]);
+        let handler = NamespaceHandler::new(
+            Arc::new(RecordingWatermarkStore::new()),
+            pipelines,
+            vec![],
+            test_metrics(),
+        );
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -433,11 +504,17 @@ mod tests {
         let ontology = Ontology::new();
         let group_node = create_test_node("Group", "gl_group", "groups");
 
-        let pipelines =
-            vec![OntologyEntityPipeline::from_node(&group_node, &ontology, datalake).unwrap()];
+        let pipelines = vec![
+            OntologyEntityPipeline::from_node(&group_node, &ontology, datalake, test_metrics())
+                .unwrap(),
+        ];
 
-        let handler =
-            NamespaceHandler::new(Arc::new(RecordingWatermarkStore::new()), pipelines, vec![]);
+        let handler = NamespaceHandler::new(
+            Arc::new(RecordingWatermarkStore::new()),
+            pipelines,
+            vec![],
+            test_metrics(),
+        );
 
         let namespace_id = 42i64;
         let payload = serde_json::json!({
@@ -476,12 +553,19 @@ mod tests {
         let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         let pipelines = vec![
-            OntologyEntityPipeline::from_node(&group_node, &ontology, datalake.clone()).unwrap(),
-            OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake).unwrap(),
+            OntologyEntityPipeline::from_node(
+                &group_node,
+                &ontology,
+                datalake.clone(),
+                test_metrics(),
+            )
+            .unwrap(),
+            OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake, test_metrics())
+                .unwrap(),
         ];
 
         let store = Arc::new(RecordingWatermarkStore::new());
-        let handler = NamespaceHandler::new(store.clone(), pipelines, vec![]);
+        let handler = NamespaceHandler::new(store.clone(), pipelines, vec![], test_metrics());
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -534,15 +618,25 @@ mod tests {
         let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         let group_pipeline =
-            OntologyEntityPipeline::from_node(&group_node, &ontology, ok_datalake).unwrap();
+            OntologyEntityPipeline::from_node(&group_node, &ontology, ok_datalake, test_metrics())
+                .unwrap();
 
         // Build Issue pipeline with a datalake that always errors
-        let issue_pipeline =
-            OntologyEntityPipeline::from_node(&issue_node, &ontology, failing_datalake).unwrap();
+        let issue_pipeline = OntologyEntityPipeline::from_node(
+            &issue_node,
+            &ontology,
+            failing_datalake,
+            test_metrics(),
+        )
+        .unwrap();
 
         let store = Arc::new(RecordingWatermarkStore::new());
-        let handler =
-            NamespaceHandler::new(store.clone(), vec![group_pipeline, issue_pipeline], vec![]);
+        let handler = NamespaceHandler::new(
+            store.clone(),
+            vec![group_pipeline, issue_pipeline],
+            vec![],
+            test_metrics(),
+        );
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -596,14 +690,24 @@ mod tests {
         let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         // Group (first) fails, Issue (second) succeeds
-        let group_pipeline =
-            OntologyEntityPipeline::from_node(&group_node, &ontology, failing_datalake).unwrap();
+        let group_pipeline = OntologyEntityPipeline::from_node(
+            &group_node,
+            &ontology,
+            failing_datalake,
+            test_metrics(),
+        )
+        .unwrap();
         let issue_pipeline =
-            OntologyEntityPipeline::from_node(&issue_node, &ontology, ok_datalake).unwrap();
+            OntologyEntityPipeline::from_node(&issue_node, &ontology, ok_datalake, test_metrics())
+                .unwrap();
 
         let store = Arc::new(RecordingWatermarkStore::new());
-        let handler =
-            NamespaceHandler::new(store.clone(), vec![group_pipeline, issue_pipeline], vec![]);
+        let handler = NamespaceHandler::new(
+            store.clone(),
+            vec![group_pipeline, issue_pipeline],
+            vec![],
+            test_metrics(),
+        );
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -652,8 +756,15 @@ mod tests {
         let issue_node = create_test_node("Issue", "gl_issue", "issues");
 
         let pipelines = vec![
-            OntologyEntityPipeline::from_node(&group_node, &ontology, datalake.clone()).unwrap(),
-            OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake).unwrap(),
+            OntologyEntityPipeline::from_node(
+                &group_node,
+                &ontology,
+                datalake.clone(),
+                test_metrics(),
+            )
+            .unwrap(),
+            OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake, test_metrics())
+                .unwrap(),
         ];
 
         let group_watermark = "2024-03-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
@@ -665,7 +776,7 @@ mod tests {
                 .with_watermark(100, "Issue", issue_watermark),
         );
 
-        let handler = NamespaceHandler::new(store.clone(), pipelines, vec![]);
+        let handler = NamespaceHandler::new(store.clone(), pipelines, vec![], test_metrics());
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -700,11 +811,13 @@ mod tests {
         let ontology = Ontology::new();
         let group_node = create_test_node("Group", "gl_group", "groups");
 
-        let pipelines =
-            vec![OntologyEntityPipeline::from_node(&group_node, &ontology, datalake).unwrap()];
+        let pipelines = vec![
+            OntologyEntityPipeline::from_node(&group_node, &ontology, datalake, test_metrics())
+                .unwrap(),
+        ];
 
         let store = Arc::new(RecordingWatermarkStore::new().with_set_failure(100, "Group"));
-        let handler = NamespaceHandler::new(store, pipelines, vec![]);
+        let handler = NamespaceHandler::new(store, pipelines, vec![], test_metrics());
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -741,11 +854,21 @@ mod tests {
         let group_node = create_test_node("Group", "gl_group", "groups");
 
         let pipelines = vec![
-            OntologyEntityPipeline::from_node(&group_node, &ontology, failing_datalake).unwrap(),
+            OntologyEntityPipeline::from_node(
+                &group_node,
+                &ontology,
+                failing_datalake,
+                test_metrics(),
+            )
+            .unwrap(),
         ];
 
-        let handler =
-            NamespaceHandler::new(Arc::new(RecordingWatermarkStore::new()), pipelines, vec![]);
+        let handler = NamespaceHandler::new(
+            Arc::new(RecordingWatermarkStore::new()),
+            pipelines,
+            vec![],
+            test_metrics(),
+        );
 
         let namespace_id = 42i64;
         let payload = serde_json::json!({

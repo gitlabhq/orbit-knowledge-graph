@@ -9,10 +9,12 @@ use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use opentelemetry::KeyValue;
 use serde::Serialize;
 use tracing::{debug, error, info};
 
 use super::locking::global_lock_key;
+use super::metrics::SdlcMetrics;
 use super::pipeline::OntologyEntityPipeline;
 use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
 use crate::topic::GlobalIndexingRequest;
@@ -43,16 +45,19 @@ impl GlobalQueryParams {
 pub struct GlobalHandler {
     watermark_store: Arc<dyn WatermarkStore>,
     pipelines: Vec<OntologyEntityPipeline>,
+    metrics: SdlcMetrics,
 }
 
 impl GlobalHandler {
     pub fn new(
         watermark_store: Arc<dyn WatermarkStore>,
         pipelines: Vec<OntologyEntityPipeline>,
+        metrics: SdlcMetrics,
     ) -> Self {
         Self {
             watermark_store,
             pipelines,
+            metrics,
         }
     }
 }
@@ -104,15 +109,26 @@ impl Handler for GlobalHandler {
         let mut successful_pipelines = 0;
         for pipeline in &self.pipelines {
             if let Err(error) = pipeline
-                .process(params.to_json(), context.destination.as_ref())
+                .process(params.to_json(), context.destination.as_ref(), "global")
                 .await
             {
                 error!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
+                self.metrics.pipeline_errors.add(
+                    1,
+                    &[
+                        KeyValue::new("entity", pipeline.entity_name().to_owned()),
+                        KeyValue::new("scope", "global"),
+                        KeyValue::new("error_kind", error.error_kind()),
+                    ],
+                );
                 errors.push((pipeline.entity_name().to_string(), error));
             } else {
                 successful_pipelines += 1;
             }
         }
+
+        let elapsed = started_at.elapsed();
+        let handler_labels = [KeyValue::new("handler", "global-handler")];
 
         if errors.is_empty() {
             self.watermark_store
@@ -121,6 +137,19 @@ impl Handler for GlobalHandler {
                 .map_err(|e| {
                     HandlerError::Processing(format!("failed to update global watermark: {e}"))
                 })?;
+
+            let lag = Utc::now()
+                .signed_duration_since(payload.watermark)
+                .num_milliseconds()
+                .max(0) as f64
+                / 1000.0;
+            self.metrics.watermark_lag.record(
+                lag,
+                &[
+                    KeyValue::new("entity", "global"),
+                    KeyValue::new("scope", "global"),
+                ],
+            );
 
             info!(
                 watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
@@ -133,17 +162,21 @@ impl Handler for GlobalHandler {
 
             info!(
                 successful_pipelines,
-                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                elapsed_ms = elapsed.as_millis() as u64,
                 "global indexing completed"
             );
         }
+
+        self.metrics
+            .handler_duration
+            .record(elapsed.as_secs_f64(), &handler_labels);
 
         if !errors.is_empty() {
             let failed_count = errors.len();
             error!(
                 failed_count,
                 successful_pipelines,
-                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                elapsed_ms = elapsed.as_millis() as u64,
                 "global indexing finished with failures"
             );
 
@@ -169,6 +202,12 @@ mod tests {
     use futures::stream;
     use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
     use std::collections::BTreeMap;
+
+    fn test_metrics() -> SdlcMetrics {
+        let provider = opentelemetry::global::meter_provider();
+        let meter = provider.meter("test");
+        SdlcMetrics::with_meter(&meter)
+    }
 
     struct MockWatermarkStore;
 
@@ -249,11 +288,18 @@ mod tests {
         let project_node = create_test_node("Project", "gl_project", "siphon_projects");
 
         let pipelines = vec![
-            OntologyEntityPipeline::from_node(&user_node, &ontology, datalake.clone()).unwrap(),
-            OntologyEntityPipeline::from_node(&project_node, &ontology, datalake).unwrap(),
+            OntologyEntityPipeline::from_node(
+                &user_node,
+                &ontology,
+                datalake.clone(),
+                test_metrics(),
+            )
+            .unwrap(),
+            OntologyEntityPipeline::from_node(&project_node, &ontology, datalake, test_metrics())
+                .unwrap(),
         ];
 
-        let handler = GlobalHandler::new(Arc::new(MockWatermarkStore), pipelines);
+        let handler = GlobalHandler::new(Arc::new(MockWatermarkStore), pipelines, test_metrics());
 
         let payload = serde_json::json!({
             "watermark": "2024-01-21T00:00:00Z"
@@ -279,10 +325,12 @@ mod tests {
         let ontology = Ontology::new();
         let user_node = create_test_node("User", "gl_user", "siphon_users");
 
-        let pipelines =
-            vec![OntologyEntityPipeline::from_node(&user_node, &ontology, datalake).unwrap()];
+        let pipelines = vec![
+            OntologyEntityPipeline::from_node(&user_node, &ontology, datalake, test_metrics())
+                .unwrap(),
+        ];
 
-        let handler = GlobalHandler::new(Arc::new(MockWatermarkStore), pipelines);
+        let handler = GlobalHandler::new(Arc::new(MockWatermarkStore), pipelines, test_metrics());
 
         let payload = serde_json::json!({
             "watermark": "2024-01-21T00:00:00Z"
