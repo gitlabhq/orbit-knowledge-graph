@@ -47,6 +47,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-webserver") | nindent 8 }}
     spec:
+      enableServiceLinks: false
       securityContext:
         {{- include "gkg.podSecurityContext" . | nindent 8 }}
       containers:
@@ -67,23 +68,23 @@ spec:
               value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "DATALAKE" "config" .Values.clickhouse.datalake "secretName" "clickhouse-credentials") | nindent 12 }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
-            - name: GKG_JWT_SECRET
+            - name: GKG__JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: gkg-server-credentials
                   key: jwt-secret
-            - name: GKG_BIND_ADDRESS
+            - name: GKG__BIND_ADDRESS
               value: "0.0.0.0:8080"
-            - name: GKG_GRPC_BIND_ADDRESS
+            - name: GKG__GRPC_BIND_ADDRESS
               value: "0.0.0.0:50051"
             {{- if and .Values.gkgServer.healthCheck .Values.gkgServer.healthCheck.enabled }}
-            - name: GKG_HEALTH_CHECK_URL
+            - name: GKG__HEALTH_CHECK_URL
               value: "http://gkg-health-check:4201"
             {{- end }}
             {{- if .Values.otel.enabled }}
-            - name: GKG_METRICS__OTLP_ENDPOINT
+            - name: GKG__METRICS__OTLP_ENDPOINT
               value: {{ .Values.otel.endpoint | quote }}
-            - name: GKG_METRICS__SERVICE_NAME
+            - name: GKG__METRICS__SERVICE_NAME
               value: "gkg-webserver"
             {{- end }}
           securityContext:

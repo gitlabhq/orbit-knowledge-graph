@@ -4,8 +4,8 @@ use std::sync::Arc;
 use health_check::HealthCheckConfig;
 use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
-use indexer::modules::code::GitalyConfiguration;
 use indexer::modules::code::config::CodeIndexingConfig;
+use indexer::modules::code::GitalyConfiguration;
 use indexer::nats::NatsConfiguration;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
@@ -58,15 +58,24 @@ impl AppConfig {
             .add_source(config::File::with_name("config/default").required(false))
             .add_source(
                 config::Environment::with_prefix("GKG")
-                    .prefix_separator("_")
-                    .separator("__")
-                    .list_separator(",")
-                    .try_parsing(true),
+                    .prefix_separator("__")
+                    .separator("__"),
             )
             .build()
             .map_err(ConfigError::Config)?;
 
-        config.try_deserialize().map_err(ConfigError::Config)
+        let app_config: Self = config.try_deserialize().map_err(ConfigError::Config)?;
+
+        tracing::info!(
+            graph_url = %app_config.graph.url,
+            graph_database = %app_config.graph.database,
+            graph_username = %app_config.graph.username,
+            datalake_url = %app_config.datalake.url,
+            datalake_database = %app_config.datalake.database,
+            "parsed ClickHouse config"
+        );
+
+        Ok(app_config)
     }
 
     pub fn jwt_secret(&self) -> Result<&str, ConfigError> {

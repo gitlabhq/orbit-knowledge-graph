@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Increase file descriptor limit to avoid ProcessFdQuotaExceeded during linking.
+# The cross-compiled binary links ~250 rlib files which can exhaust the default limit.
+ulimit -n 65536 2>/dev/null || true
+
 IMAGE_TAG="${1:-gkg-server:dev}"
 
 HOST_OS="$(uname -s)"
@@ -74,7 +78,7 @@ else
 fi
 
 docker build --platform "$DOCKER_PLATFORM" -t "$IMAGE_TAG" -f - "$CONTEXT_DIR" <<'EOF'
-FROM registry.access.redhat.com/ubi9/ubi-micro:latest
+FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
 COPY gkg-server /usr/local/bin/gkg-server
 ENTRYPOINT ["gkg-server"]
 EOF

@@ -53,6 +53,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-health-check") | nindent 8 }}
     spec:
+      enableServiceLinks: false
       serviceAccountName: gkg-health-check
       securityContext:
         {{- include "gkg.podSecurityContext" . | nindent 8 }}
@@ -71,17 +72,17 @@ spec:
               value: "json"
             - name: RUST_LOG
               value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
-            - name: GKG_HEALTH_CHECK__BIND_ADDRESS
+            - name: GKG__HEALTH_CHECK__BIND_ADDRESS
               value: "0.0.0.0:4201"
-            - name: GKG_HEALTH_CHECK__NAMESPACE
+            - name: GKG__HEALTH_CHECK__NAMESPACE
               value: {{ .Values.gkgServer.healthCheck.namespace | default .Release.Namespace | quote }}
-            - name: GKG_HEALTH_CHECK__SERVICES
+            - name: GKG__HEALTH_CHECK__SERVICES
               value: {{ .Values.gkgServer.healthCheck.services | default (list "siphon-consumer" "siphon-producer" "gkg-indexer" "nats") | join "," | quote }}
             {{- include "gkg.clickhouseEnv" (dict "prefix" "GRAPH" "config" .Values.clickhouse.graph "secretName" "clickhouse-credentials") | nindent 12 }}
             {{- if .Values.otel.enabled }}
-            - name: GKG_METRICS__OTLP_ENDPOINT
+            - name: GKG__METRICS__OTLP_ENDPOINT
               value: {{ .Values.otel.endpoint | quote }}
-            - name: GKG_METRICS__SERVICE_NAME
+            - name: GKG__METRICS__SERVICE_NAME
               value: "gkg-health-check"
             {{- end }}
           livenessProbe:

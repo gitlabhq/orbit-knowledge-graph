@@ -1,0 +1,5 @@
+[profile.dev]
+# Reduce object file count during cross-compilation to avoid
+# ProcessFdQuotaExceeded on macOS when linking with cargo-zigbuild.
+# See: docs/dev/tilt-k8s-service-links-bug.md
+codegen-units = 16
