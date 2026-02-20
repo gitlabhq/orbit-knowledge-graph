@@ -49,9 +49,10 @@ pub use constants::{
 };
 pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
+pub use input::EntityAuthConfig;
 pub use input::{Input, QueryType, parse_input};
 pub use lower::lower;
-pub use normalize::normalize;
+pub use normalize::{build_entity_auth, normalize};
 pub use ontology::{EDGE_TABLE, NODE_RESERVED_COLUMNS, Ontology, OntologyError};
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
@@ -906,6 +907,41 @@ mod ontology_integration_tests {
         assert!(
             result.sql.contains("COUNT"),
             "expected COUNT in query: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn definition_uses_project_id_for_redaction() {
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "d", "entity": "Definition", "columns": ["name", "project_id"]},
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+
+        assert!(
+            result.sql.contains("d.project_id AS _gkg_d_id"),
+            "Definition should use project_id for redaction ID: {}",
+            result.sql
+        );
+        assert!(result.sql.contains("_gkg_d_type"));
+    }
+
+    #[test]
+    fn project_still_uses_id_for_redaction() {
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+            "limit": 10
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+
+        assert!(
+            result.sql.contains("p.id AS _gkg_p_id"),
+            "Project should use id for redaction ID: {}",
             result.sql
         );
     }

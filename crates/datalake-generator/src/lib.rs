@@ -2,6 +2,7 @@ mod clickhouse;
 pub mod config;
 mod continuous;
 mod data_generation;
+mod dispatch;
 mod domain;
 mod report;
 mod seeding;

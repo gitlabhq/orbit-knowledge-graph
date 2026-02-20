@@ -4,6 +4,8 @@ use ontology::Ontology;
 
 use super::super::formatter::ResultFormatter;
 use super::super::types::PipelineOutput;
+use crate::redaction::QueryResult;
+use query_engine::ResultContext;
 
 pub struct FormattingStage<F: ResultFormatter> {
     formatter: F,
@@ -20,8 +22,8 @@ impl<F: ResultFormatter> FormattingStage<F> {
 
     pub fn execute(
         &self,
-        query_result: crate::redaction::QueryResult,
-        result_context: query_engine::ResultContext,
+        query_result: QueryResult,
+        result_context: ResultContext,
         redacted_count: usize,
         generated_sql: String,
     ) -> PipelineOutput {

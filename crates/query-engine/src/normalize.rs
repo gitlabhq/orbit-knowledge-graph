@@ -6,10 +6,51 @@
 //! - Filter values are coerced to match ontology types
 //! - Wildcard column selections are expanded to explicit column lists
 
-use crate::input::{ColumnSelection, Input};
-use ontology::{EnumType, NODE_RESERVED_COLUMNS, Ontology};
+use crate::input::{ColumnSelection, EntityAuthConfig, Input};
+use ontology::{DEFAULT_PRIMARY_KEY, EnumType, NODE_RESERVED_COLUMNS, Ontology};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+
+/// Build the entity auth map for every entity type in the ontology that has a
+/// redaction config. This is the single source of truth consumed by both the
+/// compilation pipeline (via `normalize`) and tests that construct `ResultContext`
+/// directly without going through `compile()`.
+pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfig> {
+    let owners: std::collections::HashMap<&str, &str> = ontology
+        .nodes()
+        .filter_map(|n| {
+            n.redaction.as_ref().and_then(|r| {
+                if r.id_column == DEFAULT_PRIMARY_KEY {
+                    Some((r.resource_type.as_str(), n.name.as_str()))
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+
+    ontology
+        .nodes()
+        .filter_map(|n| {
+            n.redaction.as_ref().map(|r| {
+                let owner_entity = if r.id_column != DEFAULT_PRIMARY_KEY {
+                    owners.get(r.resource_type.as_str()).map(|&s| s.to_string())
+                } else {
+                    None
+                };
+                (
+                    n.name.clone(),
+                    EntityAuthConfig {
+                        resource_type: r.resource_type.clone(),
+                        ability: r.ability.clone(),
+                        auth_id_column: r.id_column.clone(),
+                        owner_entity,
+                    },
+                )
+            })
+        })
+        .collect()
+}
 
 /// Normalize validated input.
 ///
@@ -17,7 +58,10 @@ use std::collections::BTreeMap;
 /// - Resolves entity names to ClickHouse table names
 /// - Coerces filter values to match ontology field types (e.g., enum int → string)
 /// - Expands wildcard column selections ("*") to explicit column lists
+/// - Adds required columns for redaction (id/type) to all nodes
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
+    input.entity_auth = build_entity_auth(ontology);
+
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
             continue;
@@ -31,6 +75,12 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
         let Some(node_entity) = ontology.get_node(entity) else {
             continue;
         };
+
+        node.redaction_id_column = node_entity
+            .redaction
+            .as_ref()
+            .map(|r| r.id_column.clone())
+            .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
 
         // "id" must always be retained, for a list, wildcard, and empty selection.
         match &mut node.columns {

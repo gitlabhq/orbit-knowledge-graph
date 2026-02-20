@@ -6,13 +6,14 @@ use chrono::{DateTime, Utc};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::clickhouse::ClickHouseWriter;
 use crate::config::SimulatorConfig;
 use crate::data_generation::SchemaRegistry;
 use crate::data_generation::fake_values::SiphonFakeValueGenerator;
 use crate::data_generation::row_builder::DirectBatchBuilder;
+use crate::dispatch::run_dispatch_indexing;
 use crate::seeding::catalog;
 use crate::state::HierarchyState;
 
@@ -112,6 +113,12 @@ impl ContinuousGenerator {
             result.cycles_completed += 1;
 
             info!(cycle, inserts, updates, deletes, "cycle complete");
+
+            if self.config.continuous.dispatch_indexing
+                && let Err(error) = run_dispatch_indexing(&self.config).await
+            {
+                warn!(cycle, %error, "dispatch indexing failed, continuing");
+            }
 
             tokio::time::sleep(std::time::Duration::from_secs(
                 self.config.continuous.cycle_interval_secs,
