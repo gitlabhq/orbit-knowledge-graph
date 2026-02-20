@@ -43,7 +43,7 @@ pub mod security;
 pub mod validate;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
-pub use codegen::{ParameterizedQuery, codegen};
+pub use codegen::{CompiledQuery, HydrationPlan, HydrationTemplate, ParameterizedQuery, codegen};
 pub use constants::{
     NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
 };

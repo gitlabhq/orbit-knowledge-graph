@@ -15,6 +15,30 @@ pub struct ParameterizedQuery {
     pub result_context: ResultContext,
 }
 
+#[derive(Debug, Clone)]
+pub struct CompiledQuery {
+    pub structural: ParameterizedQuery,
+    pub hydration: HydrationPlan,
+}
+
+#[derive(Debug, Clone)]
+pub enum HydrationPlan {
+    /// No hydration needed (e.g., Aggregation).
+    None,
+    /// Entity types known at compile time (Traversal, Search).
+    /// One template per entity type, with IDs to be filled at runtime.
+    Static(Vec<HydrationTemplate>),
+    /// Entity types discovered at runtime (PathFinding, Neighbors).
+    Dynamic,
+}
+
+#[derive(Debug, Clone)]
+pub struct HydrationTemplate {
+    pub entity_type: String,
+    pub node_alias: String,
+    pub query: ParameterizedQuery,
+}
+
 /// Display inlines parameters into SQL for debugging/testing.
 ///
 /// Replaces `{name:Type}` placeholders with literal values.
@@ -581,10 +605,9 @@ mod tests {
             empty_ctx(),
         )
         .unwrap();
-        assert!(
-            r.sql
-                .contains("relationship_kind IN {type_e:Array(String)})")
-        );
+        assert!(r
+            .sql
+            .contains("relationship_kind IN {type_e:Array(String)})"));
         assert_eq!(
             r.params.get("type_e"),
             Some(&Value::Array(vec![

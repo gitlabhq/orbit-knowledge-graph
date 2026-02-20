@@ -10,7 +10,7 @@
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, Node, Query, SelectExpr};
-use crate::constants::{redaction_id_column, redaction_type_column};
+use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::Result;
 use crate::input::{EntityAuthConfig, Input, QueryType};
 use std::collections::{HashMap, HashSet};
@@ -19,6 +19,9 @@ use std::collections::{HashMap, HashSet};
 pub struct RedactionNode {
     pub alias: String,
     pub entity_type: String,
+    /// Column holding the entity's primary key (always "id"). Used for hydration lookups.
+    pub pk_column: String,
+    /// Column holding the authorization ID (may be "project_id" for indirect-auth entities).
     pub id_column: String,
     pub type_column: String,
 }
@@ -49,6 +52,7 @@ impl ResultContext {
             RedactionNode {
                 alias: alias.to_string(),
                 entity_type: entity_type.to_string(),
+                pk_column: primary_key_column(alias),
                 id_column: redaction_id_column(alias),
                 type_column: redaction_type_column(alias),
             },
@@ -431,26 +435,22 @@ mod tests {
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
         assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
-        );
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
-        );
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string())));
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string())));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string())));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string())));
 
         // Context should only have the group_by node
         assert_eq!(ctx.len(), 1);
