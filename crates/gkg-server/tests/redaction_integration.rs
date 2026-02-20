@@ -8,11 +8,9 @@ mod common;
 use std::collections::{HashMap, HashSet};
 
 use common::TestContext;
-use gkg_server::redaction::{
-    QueryResult, RedactionExtractor, ResourceAuthorization, ResourceCheck,
-};
+use gkg_server::redaction::{QueryResult, ResourceAuthorization, ResourceCheck};
 use ontology::Ontology;
-use query_engine::{SecurityContext, compile};
+use query_engine::{SecurityContext, build_entity_auth, compile};
 use serial_test::serial;
 
 fn load_ontology() -> Ontology {
@@ -151,16 +149,10 @@ async fn setup_test_data(ctx: &TestContext) {
     .await;
 }
 
-fn run_redaction(
-    result: &mut QueryResult,
-    ontology: &Ontology,
-    mock_service: &MockRedactionService,
-) -> usize {
-    let extractor = RedactionExtractor::new(ontology);
-    let (_nodes, checks) = extractor.extract(result);
+fn run_redaction(result: &mut QueryResult, mock_service: &MockRedactionService) -> usize {
+    let checks = result.resource_checks();
     let authorizations = mock_service.check(&checks);
-    let entity_map = extractor.entity_to_resource_map();
-    result.apply_authorizations(&authorizations, &entity_map)
+    result.apply_authorizations(&authorizations)
 }
 
 #[tokio::test]
@@ -191,7 +183,7 @@ async fn fail_closed_no_authorization_returns_nothing() {
     );
 
     let mock_service = MockRedactionService::new();
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 5, "all 5 rows must be redacted");
     assert_eq!(result.authorized_count(), 0, "no rows should be authorized");
@@ -222,7 +214,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1, 2]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         redacted, 3,
@@ -265,7 +257,7 @@ async fn fail_closed_explicit_deny_filters_row() {
     mock_service.allow("users", &[1, 2, 3, 4]);
     mock_service.deny("users", &[5]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 1, "only user 5 should be redacted");
     assert_eq!(result.authorized_count(), 4);
@@ -327,7 +319,7 @@ async fn single_hop_user_group_verifies_both_nodes() {
     mock_service.allow("users", &[1, 2]);
     mock_service.allow("groups", &[100]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
@@ -380,7 +372,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it() {
     mock_service.allow("groups", &[100]);
     mock_service.deny("groups", &[101, 102]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
@@ -458,7 +450,7 @@ async fn three_hop_user_group_project_verifies_all_paths() {
     mock_service.allow("groups", &[100]);
     mock_service.allow("projects", &[1000]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_paths: HashSet<(i64, i64, i64)> = result
         .authorized_rows()
@@ -508,7 +500,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths() {
     mock_service.allow("projects", &[1000, 1002, 1004]);
     mock_service.deny("projects", &[1001, 1003]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_paths: HashSet<(i64, i64, i64)> = result
         .authorized_rows()
@@ -586,7 +578,7 @@ async fn group_project_two_hop_verifies_exact_pairs() {
     mock_service.allow("projects", &[1000, 1002, 1004]);
     mock_service.deny("projects", &[1001, 1003]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
@@ -633,7 +625,7 @@ async fn single_node_project_query_verifies_all_projects() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("projects", &[1000, 1004]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
@@ -725,7 +717,7 @@ async fn empty_query_result_stays_empty() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", ALL_USER_IDS);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 0);
     assert_eq!(result.authorized_count(), 0);
@@ -760,7 +752,7 @@ async fn all_authorized_preserves_all_data() {
     mock_service.allow("groups", ALL_GROUP_IDS);
     mock_service.allow("projects", ALL_PROJECT_IDS);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         redacted, 0,
@@ -829,7 +821,7 @@ async fn all_columns_preserved_after_redaction() {
     mock_service.allow("projects", &[1000, 1002]);
     mock_service.deny("projects", &[1001, 1003, 1004]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         result.authorized_count(),
@@ -910,7 +902,7 @@ async fn all_columns_preserved_on_three_hop_traversal() {
     mock_service.allow("groups", &[100]);
     mock_service.allow("projects", &[1000]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     assert!(result.authorized_count() > 0);
 
@@ -954,7 +946,7 @@ async fn redacted_rows_filtered_from_authorized_iterator() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1, 2]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
@@ -1021,6 +1013,9 @@ fn fail_closed_null_id_denies_row() {
     let mut ctx = ResultContext::new();
     ctx.add_node("u", "User");
     ctx.add_node("p", "Project");
+    for (entity, config) in build_entity_auth(&ontology) {
+        ctx.add_entity_auth(entity, config);
+    }
 
     let mut result = QueryResult::from_batches(&[batch], &ctx);
 
@@ -1028,7 +1023,7 @@ fn fail_closed_null_id_denies_row() {
     mock_service.allow("users", &[1, 3]);
     mock_service.allow("projects", &[100, 200, 300]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 1, "row with NULL user ID must be redacted");
     assert_eq!(result.authorized_count(), 2);
@@ -1120,7 +1115,7 @@ async fn path_finding_no_authorization_returns_nothing() {
     assert!(raw_count > 0, "should find paths before redaction");
 
     let mock_service = MockRedactionService::new();
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, raw_count, "all paths should be redacted");
     assert_eq!(result.authorized_count(), 0);
@@ -1158,7 +1153,7 @@ async fn path_finding_denying_intermediate_node_filters_path() {
     mock_service.deny("groups", &[102]);
     mock_service.allow("projects", &[1000, 1002, 1004]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     // Only paths through group 100 should remain
     for row in result.authorized_rows() {
@@ -1217,7 +1212,7 @@ async fn path_finding_all_nodes_authorized_preserves_paths() {
     mock_service.allow("groups", ALL_GROUP_IDS);
     mock_service.allow("projects", ALL_PROJECT_IDS);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         redacted, 0,
@@ -1255,7 +1250,7 @@ async fn path_finding_denying_start_node_filters_all_paths() {
     mock_service.allow("groups", ALL_GROUP_IDS);
     mock_service.allow("projects", ALL_PROJECT_IDS);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, result.len(), "all paths should be redacted");
     assert_eq!(result.authorized_count(), 0);
@@ -1292,7 +1287,7 @@ async fn path_finding_denying_end_node_filters_those_paths() {
     mock_service.allow("projects", &[1000]);
     mock_service.deny("projects", &[1002]); // Deny one end node
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     // Only paths to project 1000 should remain
     let authorized_ends: HashSet<i64> = result
@@ -1342,7 +1337,7 @@ async fn path_finding_multiple_paths_independent_authorization() {
     mock_service.allow("projects", &[1000]);
     mock_service.deny("projects", &[1002]); // Deny one destination
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     // Only paths ending at 1000 should remain
     let authorized_ends: HashSet<i64> = result
@@ -1395,7 +1390,7 @@ async fn path_finding_shared_intermediate_node_authorization() {
     mock_service.allow("groups", &[100]);
     mock_service.allow("projects", &[1000]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     // Only user 1's path should remain
     let authorized_starts: HashSet<i64> = result
@@ -1445,7 +1440,7 @@ async fn path_finding_deep_traversal_all_nodes_verified() {
     mock_service.deny("groups", &[102]); // Deny group 102
     mock_service.allow("projects", ALL_PROJECT_IDS);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     // Verify no paths go through group 102
     for row in result.authorized_rows() {
@@ -1506,7 +1501,7 @@ async fn path_finding_all_paths_denied_returns_empty() {
     mock_service.deny("groups", ALL_GROUP_IDS); // Deny all groups
     mock_service.allow("projects", &[1000]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         result.authorized_count(),
@@ -1571,7 +1566,7 @@ async fn search_with_complex_filters_and_redaction() {
     mock_service.allow("users", &[1, 2]);
     mock_service.deny("users", &[3, 4]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 2, "charlie and diana should be redacted");
     assert_eq!(result.authorized_count(), 2);
@@ -1626,7 +1621,7 @@ async fn search_projects_with_visibility_and_path_filters() {
     mock_service.allow("projects", &[1000]);
     mock_service.deny("projects", &[1002, 1004]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
@@ -1676,7 +1671,7 @@ async fn search_groups_with_traversal_path_starts_with() {
     mock_service.allow("groups", &[100, 102]);
     mock_service.deny("groups", &[101]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
@@ -1722,7 +1717,7 @@ async fn search_with_id_range_filter() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[2, 3, 4]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
     assert_eq!(redacted, 0);
     assert_eq!(result.authorized_count(), 3);
 }
@@ -1764,7 +1759,7 @@ async fn search_with_specific_node_ids() {
     mock_service.allow("projects", &[1000]);
     mock_service.deny("projects", &[1003]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
@@ -1805,7 +1800,7 @@ async fn search_no_results_with_impossible_filter() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", ALL_USER_IDS);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
     assert_eq!(redacted, 0);
     assert_eq!(result.authorized_count(), 0);
 }
@@ -1837,7 +1832,7 @@ async fn search_fail_closed_no_authorization() {
 
     // No authorizations at all - fail closed
     let mock_service = MockRedactionService::new();
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 3, "all groups should be redacted");
     assert_eq!(
@@ -1893,7 +1888,7 @@ async fn search_preserves_metadata_columns_after_redaction() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     // Check columns still exist after redaction
     for row in result.authorized_rows() {
@@ -1936,13 +1931,16 @@ fn fail_closed_null_type_denies_row() {
 
     let mut ctx = ResultContext::new();
     ctx.add_node("u", "User");
+    for (entity, config) in build_entity_auth(&ontology) {
+        ctx.add_entity_auth(entity, config);
+    }
 
     let mut result = QueryResult::from_batches(&[batch], &ctx);
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1, 2]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 1, "row with NULL type must be redacted");
     assert!(result.rows()[0].is_authorized());
@@ -2021,7 +2019,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns() {
     mock_service.allow("users", &[1, 2, 3]);
     mock_service.deny("users", &[4, 5]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 2, "users 4 and 5 should be redacted");
     assert_eq!(result.authorized_count(), 3);
@@ -2102,7 +2100,7 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
     mock_service.allow("groups", &[100]);
     mock_service.deny("groups", &[101, 102]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 2, "groups 101 and 102 should be redacted");
     assert_eq!(result.authorized_count(), 1);
@@ -2155,7 +2153,7 @@ async fn column_selection_omitted_includes_mandatory_columns() {
     mock_service.allow("users", &[1, 2]);
     mock_service.deny("users", &[3, 4, 5]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 3, "users 3, 4, 5 should be redacted");
     assert_eq!(result.authorized_count(), 2);
@@ -2252,7 +2250,7 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns()
     mock_service.allow("projects", &[1000]);
     mock_service.deny("projects", &[1001, 1002, 1003, 1004]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert!(redacted > 0, "some paths should be redacted");
 
@@ -2310,7 +2308,7 @@ async fn column_selection_redaction_works_with_specific_columns() {
     mock_service.deny("users", &[2, 3, 4, 5]);
     mock_service.deny("groups", &[101, 102]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     // Should have filtered out unauthorized rows
     assert!(redacted > 0, "some rows should be redacted");
@@ -2370,7 +2368,7 @@ async fn column_selection_fail_closed_on_any_unauthorized_node() {
     mock_service.allow("groups", ALL_GROUP_IDS);
     mock_service.deny("projects", ALL_PROJECT_IDS); // Deny all projects
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     // All rows should be filtered because projects are denied
     assert_eq!(
@@ -2420,7 +2418,7 @@ async fn column_selection_data_values_preserved_through_redaction() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1, 2]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(result.authorized_count(), 2);
 
@@ -2484,7 +2482,7 @@ async fn column_selection_id_in_list_no_duplication() {
     mock_service.allow("projects", &[1000, 1004]);
     mock_service.deny("projects", &[1001, 1002, 1003]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 3, "3 projects should be redacted");
     assert_eq!(result.authorized_count(), 2);
@@ -2589,7 +2587,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
     mock_service.allow("users", &[1]);
     mock_service.deny("users", &[2]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 1, "user 2's row should be redacted");
     assert_eq!(result.authorized_count(), 1);
@@ -2679,7 +2677,7 @@ async fn column_selection_aggregation_with_wildcard_columns() {
     mock_service.allow("users", &[1]);
     mock_service.deny("users", &[2]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 1, "user 2's row should be redacted");
     assert_eq!(result.authorized_count(), 1);
@@ -2741,7 +2739,7 @@ async fn column_selection_traversal_join_semantics_preserved() {
     mock_service.allow("groups", &[100]);
     mock_service.allow("projects", &[1000, 1002]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     let authorized_pairs: HashSet<(i64, i64)> = result
         .authorized_rows()
@@ -2803,7 +2801,7 @@ async fn column_selection_filters_work_with_columns() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1, 2, 3, 4]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(result.authorized_count(), 4);
     for row in result.authorized_rows() {
@@ -2842,7 +2840,7 @@ async fn column_selection_fail_closed_no_authorization() {
 
     // No authorizations - fail closed
     let mock_service = MockRedactionService::new();
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 5, "all users should be redacted (fail-closed)");
     assert_eq!(result.authorized_count(), 0, "nothing should be authorized");
@@ -2930,7 +2928,7 @@ async fn neighbors_query_comprehensive() {
 
     // --- Test 2: Fail-closed when NO authorization provided ---
     let mock_service = MockRedactionService::new();
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         result.authorized_count(),
@@ -2946,7 +2944,7 @@ async fn neighbors_query_comprehensive() {
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1]); // Only authorize center node
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     // Neighbors (groups 100, 102) are NOT authorized, so rows should be redacted
     assert_eq!(
@@ -2964,7 +2962,7 @@ async fn neighbors_query_comprehensive() {
     mock_service.allow("users", &[1]);
     mock_service.allow("groups", &[100, 102]); // Authorize both neighbor groups
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 0, "nothing redacted when all nodes authorized");
     assert_eq!(result.authorized_count(), 2);
@@ -2985,7 +2983,7 @@ async fn neighbors_query_comprehensive() {
     mock_service.allow("groups", &[100]); // Only authorize group 100
     mock_service.deny("groups", &[102]); // Deny group 102
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         result.authorized_count(),
@@ -3029,7 +3027,7 @@ async fn neighbors_query_center_node_denied_filters_all() {
     mock_service.deny("users", &[1]);
     mock_service.allow("groups", ALL_GROUP_IDS);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 2, "all rows redacted when center node denied");
     assert_eq!(result.authorized_count(), 0);
@@ -3072,7 +3070,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization() {
     mock_service.allow("groups", &[100, 102]); // User 1's neighbors
     mock_service.deny("groups", &[101]); // User 3's neighbor
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 1, "user 3's neighbor row should be redacted");
     assert_eq!(result.authorized_count(), 2);
@@ -3115,7 +3113,7 @@ async fn neighbors_query_incoming_with_redaction() {
     mock_service.allow("users", &[1]);
     mock_service.deny("users", &[2]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         result.authorized_count(),
@@ -3229,7 +3227,7 @@ async fn traversal_edge_columns_preserved_through_redaction() {
     mock_service.allow("users", &[1]);
     mock_service.allow("groups", &[100]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     // User 1 is member of groups 100 and 102, but only 100 is allowed
     assert_eq!(redacted, 6, "6 rows should be redacted");
@@ -3360,7 +3358,7 @@ async fn multi_hop_edge_columns_survive_redaction() {
     mock_service.allow("groups", &[100]);
     mock_service.allow("projects", &[1000]);
 
-    let redacted = run_redaction(&mut result, &ontology, &mock_service);
+    let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 11, "11 rows should be redacted");
     assert_eq!(result.authorized_count(), 1, "only 1 path should pass");
@@ -3498,7 +3496,7 @@ async fn neighbors_query_filters_by_entity_type() {
     mock_service.allow("groups", &[100]);
     mock_service.deny("groups", &[102]);
 
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(
         result.authorized_count(),
@@ -3559,7 +3557,7 @@ async fn enum_filter_normalization_int_vs_string_enums() {
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", ALL_USER_IDS);
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     // Verify the user_type values are the string labels
     for row in result.authorized_rows() {
@@ -3612,7 +3610,7 @@ async fn enum_filter_normalization_int_vs_string_enums() {
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("merge_requests", ALL_MR_IDS);
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     for row in result.authorized_rows() {
         let state = row.get("mr_state").and_then(|v| v.as_str());
@@ -3676,7 +3674,7 @@ async fn enum_filter_normalization_int_vs_string_enums() {
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", ALL_USER_IDS);
-    run_redaction(&mut result, &ontology, &mock_service);
+    run_redaction(&mut result, &mock_service);
 
     for row in result.authorized_rows() {
         let state = row.get("u_state").and_then(|v| v.as_str());

@@ -1,6 +1,6 @@
 //! Type-safe result schema for redaction processing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use arrow::array::{
     Array, Int64Array, ListArray, StringArray, StructArray, TimestampMicrosecondArray,
@@ -10,7 +10,7 @@ use arrow::record_batch::RecordBatch;
 use query_engine::constants::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN};
 use query_engine::{QueryType, RedactionNode, ResultContext};
 
-use super::ResourceAuthorization;
+use super::{ResourceAuthorization, ResourceCheck};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeRef {
@@ -136,6 +136,10 @@ impl QueryResultRow {
         self.dynamic_nodes.first()
     }
 
+    pub fn dynamic_nodes(&self) -> &[NodeRef] {
+        &self.dynamic_nodes
+    }
+
     pub fn is_authorized(&self) -> bool {
         self.authorized
     }
@@ -247,6 +251,49 @@ impl QueryResult {
         nodes
     }
 
+    /// Collect all resource IDs that need authorization, grouped by (resource_type, ability).
+    /// Static node IDs come from `_gkg_{alias}_id` (enforce.rs selects the configured
+    /// auth column there). Dynamic node IDs may need owner resolution from edge columns.
+    pub fn resource_checks(&self) -> Vec<ResourceCheck> {
+        let mut ids: HashMap<(&str, &str), HashSet<i64>> = HashMap::new();
+
+        for row in &self.rows {
+            for redaction_node in self.ctx.nodes() {
+                let Some(node_ref) = row.node_ref(redaction_node) else {
+                    continue;
+                };
+                let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
+                    continue;
+                };
+                ids.entry((auth.resource_type.as_str(), auth.ability.as_str()))
+                    .or_default()
+                    .insert(node_ref.id);
+            }
+
+            for node_ref in &row.dynamic_nodes {
+                let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
+                    continue;
+                };
+                let auth_id = if let Some(ref owner) = auth.owner_entity {
+                    get_edge_id_for_entity(row, owner).unwrap_or(node_ref.id)
+                } else {
+                    node_ref.id
+                };
+                ids.entry((auth.resource_type.as_str(), auth.ability.as_str()))
+                    .or_default()
+                    .insert(auth_id);
+            }
+        }
+
+        ids.into_iter()
+            .map(|((resource_type, ability), ids)| ResourceCheck {
+                resource_type: resource_type.to_string(),
+                ids: ids.into_iter().collect(),
+                ability: ability.to_string(),
+            })
+            .collect()
+    }
+
     /// Apply authorization results to rows. Fails closed: any row containing a node
     /// that cannot be verified as authorized is marked unauthorized.
     ///
@@ -257,11 +304,7 @@ impl QueryResult {
     ///
     /// For path finding queries, all nodes in the path are checked.
     /// For neighbors queries, the neighbor node is checked.
-    pub fn apply_authorizations(
-        &mut self,
-        authorizations: &[ResourceAuthorization],
-        entity_to_resource: &HashMap<&str, &str>,
-    ) -> usize {
+    pub fn apply_authorizations(&mut self, authorizations: &[ResourceAuthorization]) -> usize {
         let mut redacted_count = 0;
         let redaction_nodes: Vec<_> = self.ctx.nodes().cloned().collect();
 
@@ -278,18 +321,20 @@ impl QueryResult {
                     redacted_count += 1;
                     break;
                 };
-
-                if !is_node_authorized(&node_ref, authorizations, entity_to_resource) {
+                if !is_authorized(&node_ref, authorizations, &self.ctx) {
                     row.set_unauthorized();
                     redacted_count += 1;
                     break;
                 }
             }
 
-            // Check dynamic nodes (path finding nodes, neighbor nodes)
+            // Dynamic nodes (path finding, neighbors): entity type discovered at runtime,
+            // so auth ID may need resolution from edge columns
             if row.authorized {
                 for node_ref in &row.dynamic_nodes {
-                    if !is_node_authorized(node_ref, authorizations, entity_to_resource) {
+                    let mut node_ref = node_ref.clone();
+                    resolve_dynamic_auth_id(row, &mut node_ref, &self.ctx);
+                    if !is_authorized(&node_ref, authorizations, &self.ctx) {
                         row.set_unauthorized();
                         redacted_count += 1;
                         break;
@@ -314,23 +359,49 @@ impl QueryResult {
     }
 }
 
-fn is_node_authorized(
+fn is_authorized(
     node_ref: &NodeRef,
     authorizations: &[ResourceAuthorization],
-    entity_to_resource: &HashMap<&str, &str>,
+    ctx: &ResultContext,
 ) -> bool {
-    let Some(&resource_type) = entity_to_resource.get(node_ref.entity_type.as_str()) else {
+    let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
         return false;
     };
-
     let Some(auth) = authorizations
         .iter()
-        .find(|a| a.resource_type == resource_type)
+        .find(|a| a.resource_type == auth_config.resource_type)
     else {
         return false;
     };
-
     auth.authorized.get(&node_ref.id).copied().unwrap_or(false)
+}
+
+/// For indirect-auth entities (owner_entity is set in EntityAuthConfig), rewrite
+/// node_ref.id to the owner entity's ID from edge columns so is_authorized can use it directly.
+fn resolve_dynamic_auth_id(row: &QueryResultRow, node_ref: &mut NodeRef, ctx: &ResultContext) {
+    let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
+        return;
+    };
+    let Some(ref owner) = auth_config.owner_entity else {
+        return;
+    };
+    if let Some(owner_id) = get_edge_id_for_entity(row, owner) {
+        node_ref.id = owner_id;
+    }
+}
+
+fn get_edge_id_for_entity(row: &QueryResultRow, entity_type: &str) -> Option<i64> {
+    if let Some(src_type) = row.get("e_src_type").and_then(|v| v.as_str())
+        && src_type == entity_type
+    {
+        return row.get("e_src").and_then(|v| v.as_i64());
+    }
+    if let Some(dst_type) = row.get("e_dst_type").and_then(|v| v.as_str())
+        && dst_type == entity_type
+    {
+        return row.get("e_dst").and_then(|v| v.as_i64());
+    }
+    None
 }
 
 fn extract_value(array: &dyn Array, idx: usize) -> ColumnValue {
@@ -435,6 +506,7 @@ fn extract_neighbor_node(batch: &RecordBatch, row_idx: usize) -> Option<NodeRef>
 mod tests {
     use super::*;
     use arrow::datatypes::{Field, Schema};
+    use query_engine::EntityAuthConfig;
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -467,6 +539,24 @@ mod tests {
         let mut ctx = ResultContext::new();
         ctx.add_node("u", "User");
         ctx.add_node("p", "Project");
+        ctx.add_entity_auth(
+            "User",
+            EntityAuthConfig {
+                resource_type: "users".to_string(),
+                ability: "read_user".to_string(),
+                auth_id_column: "id".to_string(),
+                owner_entity: None,
+            },
+        );
+        ctx.add_entity_auth(
+            "Project",
+            EntityAuthConfig {
+                resource_type: "projects".to_string(),
+                ability: "read".to_string(),
+                auth_id_column: "id".to_string(),
+                owner_entity: None,
+            },
+        );
         ctx
     }
 
@@ -483,12 +573,6 @@ mod tests {
                     .collect(),
             },
         ]
-    }
-
-    fn entity_map() -> HashMap<&'static str, &'static str> {
-        [("User", "users"), ("Project", "projects")]
-            .into_iter()
-            .collect()
     }
 
     mod node_ref_tests {
@@ -866,9 +950,7 @@ mod tests {
         #[test]
         fn all_authorized_returns_zero_redacted() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-
-            let redacted = result.apply_authorizations(&full_auth(), &entity_map());
-
+            let redacted = result.apply_authorizations(&full_auth());
             assert_eq!(redacted, 0);
             assert_eq!(result.authorized_count(), 3);
         }
@@ -876,9 +958,6 @@ mod tests {
         #[test]
         fn single_deny_redacts_one_row() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let entity_map: HashMap<&str, &str> = [("User", "users"), ("Project", "projects")]
-                .into_iter()
-                .collect();
 
             let authorizations = vec![
                 ResourceAuthorization {
@@ -893,7 +972,7 @@ mod tests {
                 },
             ];
 
-            let redacted = result.apply_authorizations(&authorizations, &entity_map);
+            let redacted = result.apply_authorizations(&authorizations);
 
             assert_eq!(redacted, 1);
             assert_eq!(result.authorized_count(), 2);
@@ -905,9 +984,6 @@ mod tests {
         #[test]
         fn multiple_denies_redact_multiple_rows() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let entity_map: HashMap<&str, &str> = [("User", "users"), ("Project", "projects")]
-                .into_iter()
-                .collect();
 
             let authorizations = vec![
                 ResourceAuthorization {
@@ -922,7 +998,7 @@ mod tests {
                 },
             ];
 
-            let redacted = result.apply_authorizations(&authorizations, &entity_map);
+            let redacted = result.apply_authorizations(&authorizations);
 
             assert_eq!(redacted, 2);
             assert_eq!(result.authorized_count(), 1);
@@ -933,11 +1009,12 @@ mod tests {
 
         #[test]
         fn fail_closed_unknown_entity_type() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let entity_map: HashMap<&str, &str> = HashMap::new();
-
-            let redacted = result.apply_authorizations(&[], &entity_map);
-
+            // ctx with no entity_auth → every node is unknown → all rows denied
+            let mut ctx = ResultContext::new();
+            ctx.add_node("u", "User");
+            ctx.add_node("p", "Project");
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &ctx);
+            let redacted = result.apply_authorizations(&[]);
             assert_eq!(redacted, 3);
             assert_eq!(result.authorized_count(), 0);
         }
@@ -945,12 +1022,7 @@ mod tests {
         #[test]
         fn fail_closed_missing_resource_authorization() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let entity_map: HashMap<&str, &str> = [("User", "users"), ("Project", "projects")]
-                .into_iter()
-                .collect();
-
-            let redacted = result.apply_authorizations(&[], &entity_map);
-
+            let redacted = result.apply_authorizations(&[]);
             assert_eq!(redacted, 3);
             assert_eq!(result.authorized_count(), 0);
         }
@@ -958,16 +1030,13 @@ mod tests {
         #[test]
         fn fail_closed_partial_resource_authorization() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let entity_map: HashMap<&str, &str> = [("User", "users"), ("Project", "projects")]
-                .into_iter()
-                .collect();
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "users".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             }];
 
-            let redacted = result.apply_authorizations(&authorizations, &entity_map);
+            let redacted = result.apply_authorizations(&authorizations);
 
             assert_eq!(redacted, 3);
             assert_eq!(result.authorized_count(), 0);
@@ -976,9 +1045,6 @@ mod tests {
         #[test]
         fn fail_closed_missing_id_in_authorization() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let entity_map: HashMap<&str, &str> = [("User", "users"), ("Project", "projects")]
-                .into_iter()
-                .collect();
 
             let authorizations = vec![
                 ResourceAuthorization {
@@ -993,7 +1059,7 @@ mod tests {
                 },
             ];
 
-            let redacted = result.apply_authorizations(&authorizations, &entity_map);
+            let redacted = result.apply_authorizations(&authorizations);
 
             assert_eq!(redacted, 2);
             assert_eq!(result.authorized_count(), 1);
@@ -1004,9 +1070,7 @@ mod tests {
         fn already_unauthorized_rows_not_double_counted() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             result.rows_mut()[0].set_unauthorized();
-
-            let redacted = result.apply_authorizations(&full_auth(), &entity_map());
-
+            let redacted = result.apply_authorizations(&full_auth());
             assert_eq!(redacted, 0);
             assert_eq!(result.authorized_count(), 2);
         }
@@ -1014,10 +1078,7 @@ mod tests {
         #[test]
         fn empty_result_returns_zero() {
             let mut result = QueryResult::from_batches(&[], &ResultContext::new());
-            let entity_map: HashMap<&str, &str> = [("User", "users")].into_iter().collect();
-
-            let redacted = result.apply_authorizations(&[], &entity_map);
-
+            let redacted = result.apply_authorizations(&[]);
             assert_eq!(redacted, 0);
             assert_eq!(result.authorized_count(), 0);
         }

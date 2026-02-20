@@ -2,6 +2,7 @@
 //!
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
+use ontology::DEFAULT_PRIMARY_KEY;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -9,6 +10,24 @@ use std::collections::HashMap;
 // ─────────────────────────────────────────────────────────────────────────────
 // Top-level input
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Authorization config for an entity type, derived from the ontology and carried
+/// through the compilation pipeline so the server never re-consults the ontology at
+/// request time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityAuthConfig {
+    /// Rails resource type sent to the authorization service (e.g. "projects").
+    pub resource_type: String,
+    /// Ability to check (e.g. "read_code").
+    pub ability: String,
+    /// DB column whose value is used as the authorization ID.
+    /// "id" for most entities; e.g. "project_id" for Definition/File/Branch.
+    pub auth_id_column: String,
+    /// For indirect-auth entities (auth_id_column != "id"): the entity type that
+    /// owns this resource, used to resolve the auth ID from edge columns for
+    /// dynamic (path/neighbor) nodes.
+    pub owner_entity: Option<String>,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
@@ -25,6 +44,11 @@ pub struct Input {
     pub limit: u32,
     pub order_by: Option<InputOrderBy>,
     pub aggregation_sort: Option<InputAggSort>,
+    /// Auth config for every entity type with redaction configured. Populated by
+    /// normalization; covers all ontology entities (not just those in this query)
+    /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
+    #[serde(skip)]
+    pub entity_auth: HashMap<String, EntityAuthConfig>,
 }
 
 fn deserialize_nodes_or_node<'de, D>(deserializer: D) -> Result<Vec<InputNode>, D::Error>
@@ -72,6 +96,7 @@ pub enum QueryType {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct InputNode {
     pub id: String,
     /// Entity type (e.g., "User", "Project"). Determines which table to query.
@@ -90,8 +115,28 @@ pub struct InputNode {
     #[serde(default)]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
-    #[serde(default = "default_id_property")]
     pub id_property: String,
+    /// Which DB column to select as the auth ID for this node. Populated unconditionally
+    /// during normalization ("id" for most entities, e.g. "project_id" for Definition).
+    /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
+    #[serde(skip)]
+    pub redaction_id_column: String,
+}
+
+impl Default for InputNode {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            entity: None,
+            table: None,
+            columns: None,
+            filters: HashMap::new(),
+            node_ids: Vec::new(),
+            id_range: None,
+            id_property: DEFAULT_PRIMARY_KEY.to_string(),
+            redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
+        }
+    }
 }
 
 /// Column selection for a node's result set.
@@ -126,10 +171,6 @@ where
             "columns must be '*' or an array of column names",
         )),
     }
-}
-
-fn default_id_property() -> String {
-    "id".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
