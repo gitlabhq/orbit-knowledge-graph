@@ -11,7 +11,6 @@ use crate::ast::{Expr, Node, Op, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
 use once_cell::sync::Lazy;
-use ontology::EDGE_TABLE;
 use regex::Regex;
 
 /// Matches paths like "1/", "1/2/", "123/456/789/"
@@ -166,13 +165,9 @@ fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
 
 /// Determines if a table should have traversal path security filters applied.
 fn should_apply_security_filter(table: &str) -> bool {
-    // Only apply to actual node tables (gl_ prefix)
+    // Only apply to actual node tables and edge table (gl_ prefix)
     // This excludes CTEs like "path_cte" which don't have traversal_path
     if !table.starts_with(GL_TABLE_PREFIX) {
-        return false;
-    }
-    // Skip edge table
-    if table == EDGE_TABLE {
         return false;
     }
     // Skip tables for entities whose visibility is relationship-based
@@ -186,6 +181,7 @@ fn should_apply_security_filter(table: &str) -> bool {
 mod tests {
     use super::*;
     use crate::ast::{JoinType, SelectExpr};
+    use ontology::EDGE_TABLE;
 
     fn simple_query() -> Node {
         Node::Query(Box::new(Query {
@@ -261,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn inject_noop_when_no_node_tables() {
+    fn inject_filters_edge_table() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -273,11 +269,11 @@ mod tests {
         }));
 
         apply_security_context(&mut node, &ctx).unwrap();
-        assert!(matches!(node, Node::Query(q) if q.where_clause.is_none()));
+        assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
     #[test]
-    fn inject_skips_edge_table() {
+    fn inject_includes_edge_table() {
         let from = TableRef::join(
             JoinType::Inner,
             TableRef::scan("gl_project", "p"),
@@ -286,7 +282,7 @@ mod tests {
         );
 
         let aliases = collect_node_aliases(&from);
-        assert_eq!(aliases, vec!["p"]);
+        assert_eq!(aliases, vec!["p", "e"]);
     }
 
     #[test]
@@ -307,7 +303,7 @@ mod tests {
     #[test]
     fn should_apply_security_filter_skips_user() {
         assert!(!should_apply_security_filter("gl_user"));
-        assert!(!should_apply_security_filter(EDGE_TABLE));
+        assert!(should_apply_security_filter(EDGE_TABLE));
         assert!(should_apply_security_filter("gl_project"));
         assert!(should_apply_security_filter("gl_merge_request"));
     }

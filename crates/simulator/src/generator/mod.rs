@@ -31,6 +31,7 @@ pub type IStr = Arc<str>;
 /// Edge record for storage.
 #[derive(Debug, Clone)]
 pub struct EdgeRecord {
+    pub traversal_path: IStr,
     pub relationship_kind: IStr,
     pub source: i64,
     pub source_kind: IStr,
@@ -282,6 +283,7 @@ impl Generator {
             registry.add("Group", ctx.clone());
 
             edges.push(EdgeRecord {
+                traversal_path: self.intern(&parent.traversal_path),
                 relationship_kind: self.intern("CONTAINS"),
                 source: parent.id,
                 source_kind: self.intern("Group"),
@@ -368,6 +370,7 @@ impl Generator {
                     };
 
                     edges.push(EdgeRecord {
+                        traversal_path: self.intern(parent_path),
                         relationship_kind: rel_kind.clone(),
                         source,
                         source_kind,
@@ -452,6 +455,7 @@ impl Generator {
                     };
 
                     edges.push(EdgeRecord {
+                        traversal_path: self.intern("0/"),
                         relationship_kind: rel_kind.clone(),
                         source: source_id,
                         source_kind: src_kind.clone(),
@@ -536,6 +540,7 @@ impl Generator {
             registry.add("Group", ctx.clone());
 
             edge_writer.push(EdgeRecord {
+                traversal_path: self.intern(&parent.traversal_path),
                 relationship_kind: self.intern("CONTAINS"),
                 source: parent.id,
                 source_kind: self.intern("Group"),
@@ -624,6 +629,7 @@ impl Generator {
                     };
 
                     edge_writer.push(EdgeRecord {
+                        traversal_path: self.intern(parent_path),
                         relationship_kind: rel_kind.clone(),
                         source,
                         source_kind,
@@ -696,6 +702,7 @@ impl Generator {
                     };
 
                     edge_writer.push(EdgeRecord {
+                        traversal_path: self.intern("0/"),
                         relationship_kind: rel_kind.clone(),
                         source: source_id,
                         source_kind: src_kind.clone(),

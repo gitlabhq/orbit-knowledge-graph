@@ -4,8 +4,8 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, assert_edge_count, create_namespace_payload, default_test_watermark,
-    get_namespace_handler, get_string_column,
+    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
+    default_test_watermark, get_namespace_handler, get_string_column,
 };
 
 #[tokio::test]
@@ -78,8 +78,17 @@ async fn namespace_handler_processes_pipelines() {
     assert_eq!(status_column.value(0), "success");
     assert_eq!(status_column.value(1), "failed");
 
-    assert_edge_count(&context, "IN_PROJECT", "Pipeline", "Project", 2).await;
-    assert_edge_count(&context, "TRIGGERED", "User", "Pipeline", 2).await;
+    assert_edges_have_traversal_path(
+        &context,
+        "IN_PROJECT",
+        "Pipeline",
+        "Project",
+        "1/100/1000/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(&context, "TRIGGERED", "User", "Pipeline", "1/100/1000/", 2)
+        .await;
 }
 
 #[tokio::test]
@@ -154,8 +163,10 @@ async fn namespace_handler_processes_stages() {
     assert_eq!(name_column.value(1), "test");
     assert_eq!(name_column.value(2), "deploy");
 
-    assert_edge_count(&context, "IN_PROJECT", "Stage", "Project", 3).await;
-    assert_edge_count(&context, "HAS_STAGE", "Pipeline", "Stage", 3).await;
+    assert_edges_have_traversal_path(&context, "IN_PROJECT", "Stage", "Project", "1/100/1000/", 3)
+        .await;
+    assert_edges_have_traversal_path(&context, "HAS_STAGE", "Pipeline", "Stage", "1/100/1000/", 3)
+        .await;
 }
 
 #[tokio::test]
@@ -235,9 +246,10 @@ async fn namespace_handler_processes_jobs() {
     assert_eq!(name_column.value(0), "compile");
     assert_eq!(name_column.value(1), "lint");
 
-    assert_edge_count(&context, "IN_PROJECT", "Job", "Project", 2).await;
-    assert_edge_count(&context, "HAS_JOB", "Stage", "Job", 2).await;
-    assert_edge_count(&context, "TRIGGERED", "User", "Job", 2).await;
+    assert_edges_have_traversal_path(&context, "IN_PROJECT", "Job", "Project", "1/100/1000/", 2)
+        .await;
+    assert_edges_have_traversal_path(&context, "HAS_JOB", "Stage", "Job", "1/100/1000/", 2).await;
+    assert_edges_have_traversal_path(&context, "TRIGGERED", "User", "Job", "1/100/1000/", 2).await;
 }
 
 #[tokio::test]
@@ -335,9 +347,19 @@ async fn namespace_handler_processes_ci_hierarchy() {
     assert!(!job_result.is_empty(), "job result should not be empty");
     assert_eq!(job_result[0].num_rows(), 4, "should have 4 jobs");
 
-    assert_edge_count(&context, "IN_PROJECT", "Pipeline", "Project", 1).await;
-    assert_edge_count(&context, "HAS_STAGE", "Pipeline", "Stage", 2).await;
-    assert_edge_count(&context, "HAS_JOB", "Stage", "Job", 4).await;
-    assert_edge_count(&context, "TRIGGERED", "User", "Pipeline", 1).await;
-    assert_edge_count(&context, "TRIGGERED", "User", "Job", 4).await;
+    assert_edges_have_traversal_path(
+        &context,
+        "IN_PROJECT",
+        "Pipeline",
+        "Project",
+        "1/100/1000/",
+        1,
+    )
+    .await;
+    assert_edges_have_traversal_path(&context, "HAS_STAGE", "Pipeline", "Stage", "1/100/1000/", 2)
+        .await;
+    assert_edges_have_traversal_path(&context, "HAS_JOB", "Stage", "Job", "1/100/1000/", 4).await;
+    assert_edges_have_traversal_path(&context, "TRIGGERED", "User", "Pipeline", "1/100/1000/", 1)
+        .await;
+    assert_edges_have_traversal_path(&context, "TRIGGERED", "User", "Job", "1/100/1000/", 4).await;
 }

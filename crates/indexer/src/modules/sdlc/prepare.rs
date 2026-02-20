@@ -75,6 +75,7 @@ pub struct PreparedEdge {
     pub target_kind: SqlExpr,
     pub type_filter: Option<String>,
     pub delimiter: Option<String>,
+    pub namespaced: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +114,7 @@ pub struct PreparedEdgeEtl {
     pub target_id: String,
     pub target_kind: SqlExpr,
     pub source_type_filter: Option<String>,
+    pub namespaced: bool,
 }
 
 impl PreparedEdgeEtl {
@@ -135,6 +137,7 @@ impl PreparedEdgeEtl {
             target_id,
             target_kind,
             source_type_filter,
+            namespaced: config.scope == EtlScope::Namespaced,
         }
     }
 }
@@ -262,6 +265,7 @@ fn build_extract_query(node: &NodeEntity, etl: &EtlConfig) -> Option<String> {
 }
 
 fn prepare_edges(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Vec<PreparedEdge> {
+    let namespaced = etl.scope() == EtlScope::Namespaced;
     etl.edges()
         .iter()
         .map(|(fk_column, mapping)| {
@@ -272,12 +276,14 @@ fn prepare_edges(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Vec
                 &mapping.relationship_kind,
                 mapping.direction,
                 mapping.delimiter.as_deref(),
+                namespaced,
                 ontology,
             )
         })
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_edge(
     node_kind: &str,
     fk_column: &str,
@@ -285,6 +291,7 @@ fn prepare_edge(
     relationship_kind: &str,
     direction: EdgeDirection,
     delimiter: Option<&str>,
+    namespaced: bool,
     ontology: &Ontology,
 ) -> PreparedEdge {
     match target {
@@ -295,6 +302,7 @@ fn prepare_edge(
             relationship_kind,
             direction,
             delimiter,
+            namespaced,
         ),
         EdgeTarget::Column(type_column) => resolve_polymorphic_edge(
             node_kind,
@@ -303,6 +311,7 @@ fn prepare_edge(
             relationship_kind,
             direction,
             delimiter,
+            namespaced,
             ontology,
         ),
     }
@@ -315,6 +324,7 @@ fn resolve_literal_edge(
     relationship_kind: &str,
     direction: EdgeDirection,
     delimiter: Option<&str>,
+    namespaced: bool,
 ) -> PreparedEdge {
     let (source_id, source_kind, target_id, target_kind) = match direction {
         EdgeDirection::Outgoing => (
@@ -340,9 +350,11 @@ fn resolve_literal_edge(
         target_kind,
         type_filter: None,
         delimiter: delimiter.map(String::from),
+        namespaced,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_polymorphic_edge(
     node_kind: &str,
     fk_column: &str,
@@ -350,6 +362,7 @@ fn resolve_polymorphic_edge(
     relationship_kind: &str,
     direction: EdgeDirection,
     delimiter: Option<&str>,
+    namespaced: bool,
     ontology: &Ontology,
 ) -> PreparedEdge {
     let allowed_types = ontology.get_edge_target_types(relationship_kind, node_kind, direction);
@@ -379,6 +392,7 @@ fn resolve_polymorphic_edge(
         target_kind,
         type_filter,
         delimiter: delimiter.map(String::from),
+        namespaced,
     }
 }
 

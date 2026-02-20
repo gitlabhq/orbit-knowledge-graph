@@ -4,8 +4,9 @@ use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
 use crate::common::{
-    TestContext, create_namespace_payload, default_test_watermark, get_boolean_column,
-    get_int64_column, get_namespace_handler, get_string_column,
+    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
+    default_test_watermark, get_boolean_column, get_int64_column, get_namespace_handler,
+    get_string_column,
 };
 
 #[tokio::test]
@@ -58,18 +59,15 @@ async fn namespace_handler_processes_merge_request_diffs_with_edges() {
     assert_eq!(states.value(0), "collected");
     assert_eq!(states.value(1), "collected");
 
-    let has_diff_edges = context
-        .query(
-            "SELECT source_id, target_id FROM gl_edge
-             WHERE relationship_kind = 'HAS_DIFF' AND source_kind = 'MergeRequest' AND target_kind = 'MergeRequestDiff'
-             ORDER BY target_id",
-        )
-        .await;
-    assert_eq!(
-        has_diff_edges[0].num_rows(),
+    assert_edges_have_traversal_path(
+        &context,
+        "HAS_DIFF",
+        "MergeRequest",
+        "MergeRequestDiff",
+        "1/100/",
         2,
-        "both diffs should have has_diff edges to the MR"
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -142,15 +140,13 @@ async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
     let has_new_file = (0..batch.num_rows()).any(|i| new_file_flags.value(i));
     assert!(has_new_file, "should have at least one new file");
 
-    let has_file_edges = context
-        .query(
-            "SELECT source_id, target_id FROM gl_edge
-             WHERE relationship_kind = 'HAS_FILE' AND source_kind = 'MergeRequestDiff' AND target_kind = 'MergeRequestDiffFile'",
-        )
-        .await;
-    assert_eq!(
-        has_file_edges[0].num_rows(),
+    assert_edges_have_traversal_path(
+        &context,
+        "HAS_FILE",
+        "MergeRequestDiff",
+        "MergeRequestDiffFile",
+        "1/100/",
         3,
-        "all diff files should have has_file edges to the diff"
-    );
+    )
+    .await;
 }
