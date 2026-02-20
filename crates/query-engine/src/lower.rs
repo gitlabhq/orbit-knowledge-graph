@@ -159,23 +159,45 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         .as_deref()
         .ok_or_else(|| QueryError::Lowering("start node has no entity".into()))?;
 
-    // Recursive CTE with full path/edges materialization.
+    // Recursive CTE with path materialization.
+    // Edge materialization is optional (controlled by include_edges).
     // Limited to 1000 paths to prevent memory explosion in dense graphs.
-    let mut base = path_base_query(&start.node_ids, &start_table, &start.id, start_entity);
-    let forward = path_recursive_branch(path.max_depth, true, &end.node_ids, &path.rel_types);
-    let reverse = path_recursive_branch(path.max_depth, false, &end.node_ids, &path.rel_types);
+    let include_edges = path.include_edges;
+    let mut base = path_base_query(
+        &start.node_ids,
+        &start_table,
+        &start.id,
+        start_entity,
+        include_edges,
+    );
+    let forward = path_recursive_branch(
+        path.max_depth,
+        true,
+        &end.node_ids,
+        &path.rel_types,
+        include_edges,
+    );
+    let reverse = path_recursive_branch(
+        path.max_depth,
+        false,
+        &end.node_ids,
+        &path.rel_types,
+        include_edges,
+    );
     base.union_all = vec![forward, reverse];
     base.limit = Some(1000);
 
     let recursive_cte = Cte::recursive("paths", base);
 
+    let mut select = vec![SelectExpr::new(Expr::col("paths", "path"), "_gkg_path")];
+    if include_edges {
+        select.push(SelectExpr::new(Expr::col("paths", "edges"), "_gkg_edges"));
+    }
+    select.push(SelectExpr::new(Expr::col("paths", "depth"), "depth"));
+
     Ok(Node::Query(Box::new(Query {
         ctes: vec![recursive_cte],
-        select: vec![
-            SelectExpr::new(Expr::col("paths", "path"), "_gkg_path"),
-            SelectExpr::new(Expr::col("paths", "edges"), "_gkg_edges"),
-            SelectExpr::new(Expr::col("paths", "depth"), "depth"),
-        ],
+        select,
         from: TableRef::join(
             JoinType::Inner,
             TableRef::scan("paths", "paths"),
@@ -195,25 +217,35 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     })))
 }
 
-/// Base query for path finding with full materialization.
-fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_entity: &str) -> Query {
+/// Base query for path finding. Edge materialization is optional.
+fn path_base_query(
+    start_ids: &[i64],
+    table: &str,
+    start_alias: &str,
+    start_entity: &str,
+    include_edges: bool,
+) -> Query {
     let start_id = Expr::col(start_alias, DEFAULT_PRIMARY_KEY);
     let start_tuple = Expr::func("tuple", vec![start_id.clone(), Expr::lit(start_entity)]);
 
-    Query {
-        select: vec![
-            SelectExpr::new(start_id.clone(), "node_id"),
-            SelectExpr::new(Expr::func("array", vec![start_id]), "path_ids"),
-            SelectExpr::new(Expr::func("array", vec![start_tuple]), "path"),
-            SelectExpr::new(
-                Expr::func(
-                    "arrayResize",
-                    vec![path_edge_tuple_template(), Expr::lit(0)],
-                ),
-                "edges",
+    let mut select = vec![
+        SelectExpr::new(start_id.clone(), "node_id"),
+        SelectExpr::new(Expr::func("array", vec![start_id]), "path_ids"),
+        SelectExpr::new(Expr::func("array", vec![start_tuple]), "path"),
+    ];
+    if include_edges {
+        select.push(SelectExpr::new(
+            Expr::func(
+                "arrayResize",
+                vec![path_edge_tuple_template(), Expr::lit(0)],
             ),
-            SelectExpr::new(Expr::lit(0), "depth"),
-        ],
+            "edges",
+        ));
+    }
+    select.push(SelectExpr::new(Expr::lit(0), "depth"));
+
+    Query {
+        select,
         from: TableRef::scan(table, start_alias),
         where_clause: id_filter(start_alias, DEFAULT_PRIMARY_KEY, start_ids),
         ..Default::default()
@@ -237,13 +269,14 @@ fn path_edge_tuple_template() -> Expr {
     )
 }
 
-/// Recursive branch with full path/edges materialization.
+/// Recursive branch with path materialization and optional edge materialization.
 /// Includes depth limit, cycle detection, early termination, and edge type filtering.
 fn path_recursive_branch(
     max_depth: u32,
     join_on_source: bool,
     target_ids: &[i64],
     rel_types: &[String],
+    include_edges: bool,
 ) -> Query {
     let (next_id_col, next_type_col) = if join_on_source {
         ("target_id", "target_kind")
@@ -323,44 +356,48 @@ fn path_recursive_branch(
     let where_clause =
         Expr::and_all([Some(depth_check), Some(cycle_check), early_term, rel_filter]);
 
+    let mut select = vec![
+        SelectExpr::new(next_node_id, "node_id"),
+        SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "path_ids"),
+                    Expr::func("array", vec![Expr::col("e", next_id_col)]),
+                ],
+            ),
+            "path_ids",
+        ),
+        SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "path"),
+                    Expr::func("array", vec![next_tuple]),
+                ],
+            ),
+            "path",
+        ),
+    ];
+    if include_edges {
+        select.push(SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "edges"),
+                    Expr::func("array", vec![edge_tuple]),
+                ],
+            ),
+            "edges",
+        ));
+    }
+    select.push(SelectExpr::new(
+        Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::lit(1i64)),
+        "depth",
+    ));
+
     Query {
-        select: vec![
-            SelectExpr::new(next_node_id, "node_id"),
-            SelectExpr::new(
-                Expr::func(
-                    "arrayConcat",
-                    vec![
-                        Expr::col("p", "path_ids"),
-                        Expr::func("array", vec![Expr::col("e", next_id_col)]),
-                    ],
-                ),
-                "path_ids",
-            ),
-            SelectExpr::new(
-                Expr::func(
-                    "arrayConcat",
-                    vec![
-                        Expr::col("p", "path"),
-                        Expr::func("array", vec![next_tuple]),
-                    ],
-                ),
-                "path",
-            ),
-            SelectExpr::new(
-                Expr::func(
-                    "arrayConcat",
-                    vec![
-                        Expr::col("p", "edges"),
-                        Expr::func("array", vec![edge_tuple]),
-                    ],
-                ),
-                "edges",
-            ),
-            SelectExpr::new(
-                Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::lit(1i64)),
-                "depth",
-            ),
-        ],
+        select,
         from: TableRef::join(
             JoinType::Inner,
             TableRef::scan("paths", "p"),

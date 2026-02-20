@@ -352,6 +352,10 @@ pub struct InputPath {
     pub max_depth: u32,
     #[serde(default)]
     pub rel_types: Vec<String>,
+    /// When true, include edge metadata (`_gkg_edges`) in the path result.
+    /// Defaults to false — edges are omitted to simplify the recursive CTE.
+    #[serde(default)]
+    pub include_edges: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
