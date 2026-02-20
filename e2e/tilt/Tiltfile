@@ -1,0 +1,301 @@
+# =============================================================================
+# Tiltfile — E2E self-contained environment
+#
+# Spins up a fully self-contained GKG stack inside k8s:
+#   - ClickHouse (both datalake + graph databases)
+#   - NATS
+#   - Siphon producer (reads from host Postgres / GDK)
+#   - Siphon consumer (writes to in-cluster ClickHouse)
+#   - GKG indexer + webserver
+#
+# GitLab Rails continues to run on the host via GDK. It points at GKG via the
+# port-forwards established here (localhost:4200 / localhost:50051).
+#
+# Usage:
+#   cd ~/Desktop/Code/gkg
+#   mise exec -- tilt up --file e2e/tilt/Tiltfile
+#
+# Prerequisites:
+#   - Colima running with Kubernetes: colima start --kubernetes
+#   - GDK running with PostgreSQL + logical replication configured
+#   - e2e/tilt/.secrets file exists (cp e2e/tilt/.secrets.example e2e/tilt/.secrets)
+#   - Siphon publication exists in Postgres:
+#       psql -h ~/Desktop/Code/gdk/postgresql -d gitlabhq_development \
+#         -c "SELECT * FROM pg_publication WHERE pubname = 'siphon_publication_main_db'"
+# =============================================================================
+
+update_settings(k8s_upsert_timeout_secs=600)
+ci_settings(readiness_timeout='10m')
+
+allow_k8s_contexts(['colima', 'docker-desktop', 'minikube', 'kind-kind', 'rancher-desktop'])
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+
+def load_secrets():
+    secrets_file = 'e2e/tilt/.secrets'
+    if not os.path.exists(secrets_file):
+        fail('''
+Missing e2e/tilt/.secrets file. Create it with:
+
+  cp e2e/tilt/.secrets.example e2e/tilt/.secrets
+
+Then fill in GKG_JWT_SECRET from GDK:
+
+  cat ~/Desktop/Code/gdk/gitlab/.gitlab_shell_secret
+''')
+    secrets = {}
+    content = str(read_file(secrets_file))
+    for line in content.strip().split('\n'):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if '=' in line:
+            key, value = line.split('=', 1)
+            secrets[key.strip()] = value.strip()
+    return secrets
+
+secrets = load_secrets()
+
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+type: Opaque
+stringData:
+  password: "{postgres_password}"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clickhouse-credentials
+type: Opaque
+stringData:
+  password: "{clickhouse_password}"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gkg-server-credentials
+type: Opaque
+stringData:
+  jwt-secret: "{jwt_secret}"
+'''.format(
+    postgres_password=secrets.get('POSTGRES_PASSWORD', ''),
+    clickhouse_password=secrets.get('CLICKHOUSE_PASSWORD', ''),
+    jwt_secret=secrets.get('GKG_JWT_SECRET', ''),
+)))
+
+# ── ClickHouse (in-cluster) ───────────────────────────────────────────────────
+#
+# A single ClickHouse instance serves both databases:
+#   - gitlab_clickhouse_development  (datalake — Siphon writes here)
+#   - gkg-development                (graph — GKG indexer writes here)
+#
+# An init ConfigMap creates both databases and applies the GKG graph schema on
+# first startup.
+
+clickhouse_init_sql = '''
+CREATE DATABASE IF NOT EXISTS `gitlab_clickhouse_development`;
+CREATE DATABASE IF NOT EXISTS `gkg-development`;
+'''
+
+k8s_yaml(blob('''
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gkg-e2e-clickhouse-init
+data:
+  init.sql: |
+''' + '\n'.join(['    ' + line for line in clickhouse_init_sql.strip().split('\n')]) + '''
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gkg-e2e-clickhouse
+spec:
+  selector:
+    app: gkg-e2e-clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+    - name: native
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gkg-e2e-clickhouse
+spec:
+  serviceName: gkg-e2e-clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gkg-e2e-clickhouse
+  template:
+    metadata:
+      labels:
+        app: gkg-e2e-clickhouse
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:25.1-alpine
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+          env:
+            - name: CLICKHOUSE_USER
+              value: default
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-credentials
+                  key: password
+            - name: CLICKHOUSE_DB
+              value: gitlab_clickhouse_development
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 100m
+            limits:
+              memory: 4Gi
+              cpu: 1000m
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init
+          configMap:
+            name: gkg-e2e-clickhouse-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+'''))
+
+k8s_resource(
+    'gkg-e2e-clickhouse',
+    labels=['database'],
+    port_forwards=['8124:8123'],  # exposed on host as :8124 to avoid clash with GDK's :8123
+)
+
+# ── GKG schema migration job ──────────────────────────────────────────────────
+#
+# Runs after ClickHouse is ready. Applies the GKG graph schema
+# (gl_group, gl_project, etc.) to the gkg-development database,
+# and the datalake migrations to gitlab_clickhouse_development.
+
+k8s_yaml(blob('''
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gkg-e2e-migrate
+  annotations:
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  template:
+    spec:
+      enableServiceLinks: false
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: gkg-server
+          imagePullPolicy: Never
+          args: ["--mode=migrate"]
+          env:
+            - name: GKG__GRAPH__URL
+              value: "http://gkg-e2e-clickhouse:8123"
+            - name: GKG__GRAPH__DATABASE
+              value: "gkg-development"
+            - name: GKG__GRAPH__USERNAME
+              value: "default"
+            - name: GKG__GRAPH__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-credentials
+                  key: password
+            - name: GKG__DATALAKE__URL
+              value: "http://gkg-e2e-clickhouse:8123"
+            - name: GKG__DATALAKE__DATABASE
+              value: "gitlab_clickhouse_development"
+            - name: GKG__DATALAKE__USERNAME
+              value: "default"
+            - name: GKG__DATALAKE__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-credentials
+                  key: password
+            - name: GKG__JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: gkg-server-credentials
+                  key: jwt-secret
+            - name: GKG__NATS__URL
+              value: "gkg-nats:4222"
+'''))
+
+k8s_resource(
+    'gkg-e2e-migrate',
+    labels=['database'],
+    resource_deps=['gkg-e2e-clickhouse'],
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    auto_init=True,
+)
+
+# ── GKG server image (shared with main Tiltfile) ──────────────────────────────
+
+custom_build(
+    'gkg-server',
+    './scripts/build-dev.sh $EXPECTED_REF',
+    deps=['crates/', 'Cargo.toml', 'Cargo.lock'],
+)
+
+# ── Helm dependencies ─────────────────────────────────────────────────────────
+
+local('helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true', quiet=True)
+local('helm dependency build ./helm-dev/gkg 2>/dev/null', quiet=True)
+
+# ── GKG chart (NATS + Siphon + GKG) ──────────────────────────────────────────
+
+k8s_yaml(helm(
+    './helm-dev/gkg',
+    name='gkg-e2e',
+    namespace='default',
+    values=['./e2e/tilt/values.yaml'],
+))
+
+k8s_resource('gkg-e2e-indexer',    labels=['gkg'], resource_deps=['gkg-e2e-migrate'], pod_readiness='ignore')
+k8s_resource('gkg-e2e-webserver',  labels=['gkg'], resource_deps=['gkg-e2e-migrate'], pod_readiness='ignore',
+             port_forwards=['4200:8080', '50051:50051'])
+k8s_resource('gkg-e2e-health-check', labels=['gkg'], pod_readiness='ignore',
+             port_forwards=['4201:4201'])
+k8s_resource('gkg-nats',           labels=['infrastructure'])
+k8s_resource('siphon-producer',    labels=['siphon'], resource_deps=['gkg-nats'])
+k8s_resource('siphon-consumer',    labels=['siphon'], resource_deps=['gkg-nats', 'gkg-e2e-clickhouse'])

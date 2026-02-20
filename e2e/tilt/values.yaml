@@ -1,0 +1,205 @@
+# =============================================================================
+# values.yaml — E2E self-contained environment
+#
+# Everything GKG needs runs inside k8s. GitLab Rails continues to run on the
+# host via GDK; it connects to GKG via the port-forwards set up by Tiltfile.
+#
+# Services in-cluster:
+#   - NATS (via nats sub-chart)
+#   - ClickHouse (standalone pod — both datalake + graph databases)
+#   - Siphon producer (reads from host Postgres via host.docker.internal)
+#   - Siphon consumer (writes to in-cluster ClickHouse)
+#   - GKG indexer + webserver + health-check
+#
+# Host (GDK):
+#   - PostgreSQL  (logical replication publication must exist)
+#   - GitLab Rails (points at GKG via localhost:4200 / localhost:50051)
+# =============================================================================
+
+gcp:
+  project: ""
+  region: ""
+  cluster: ""
+
+secrets:
+  enabled: false
+
+gitlab-runner:
+  enabled: false
+
+# ── PostgreSQL (host, via GDK) ────────────────────────────────────────────────
+postgres:
+  host: host.docker.internal
+  port: 5432
+  database: gitlabhq_development
+  user: gitlab
+
+# ── ClickHouse (in-cluster) ───────────────────────────────────────────────────
+clickhouse:
+  datalake:
+    host: gkg-e2e-clickhouse   # in-cluster service name
+    port: 8123
+    database: gitlab_clickhouse_development
+    user: default
+    ssl: false
+  graph:
+    host: gkg-e2e-clickhouse
+    port: 8123
+    database: gkg-development
+    user: default
+    ssl: false
+
+# ── NATS (in-cluster via sub-chart) ──────────────────────────────────────────
+nats:
+  enabled: true
+  streamName: siphon_stream_main_db
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 1Gi
+  container:
+    image:
+      repository: nats
+      tag: "2.11-alpine"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  natsBox:
+    enabled: false
+
+# ── Siphon producer (host Postgres → in-cluster NATS) ────────────────────────
+producer:
+  enabled: true
+  applicationIdentifier: "gkg-e2e-producer"
+  publicationName: "siphon_publication_main_db"
+  slotName: "siphon_slot_main_db"
+  advisoryLockId: 144324
+  maxColumnSizeBytes: 8000000
+  memoryBufferSize: 104857600
+  initialDataSnapshotThreadsPerTable: 3
+  snapshotMemoryBufferSize: 10485760
+  logLevel: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Siphon consumer (in-cluster NATS → in-cluster ClickHouse) ────────────────
+consumer:
+  enabled: true
+  applicationIdentifier: "gkg-e2e-consumer"
+  replicas: 1
+  logLevel: info
+  insertBatchSize: 10000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Table mappings (producer subjects → consumer siphon_ targets) ─────────────
+tableMappings:
+  - table: namespaces
+    schema: public
+    subject: namespaces
+    target: siphon_namespaces
+  - table: projects
+    schema: public
+    subject: projects
+    target: siphon_projects
+  - table: issues
+    schema: public
+    subject: issues
+    target: siphon_issues
+  - table: merge_requests
+    schema: public
+    subject: merge_requests
+    target: siphon_merge_requests
+  - table: users
+    schema: public
+    subject: users
+    target: siphon_users
+  - table: members
+    schema: public
+    subject: members
+    target: siphon_members
+  - table: labels
+    schema: public
+    subject: labels
+    target: siphon_labels
+  - table: milestones
+    schema: public
+    subject: milestones
+    target: siphon_milestones
+  - table: notes
+    schema: public
+    subject: notes
+    target: siphon_notes
+  - table: knowledge_graph_enabled_namespaces
+    schema: public
+    subject: knowledge_graph_enabled_namespaces
+    target: siphon_knowledge_graph_enabled_namespaces
+  - table: namespace_details
+    schema: public
+    subject: namespace_details
+    target: siphon_namespace_details
+
+# ── GKG server ────────────────────────────────────────────────────────────────
+gkgServer:
+  logLevel: "info,gkg_server=debug"
+  image:
+    repository: gkg-server
+    tag: dev
+    pullPolicy: Never
+  dispatcher:
+    enabled: false
+  indexer:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  webserver:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  healthCheck:
+    enabled: true
+    replicas: 1
+    namespace: default
+    services:
+      - gkg-indexer
+      - gkg-webserver
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+otel:
+  enabled: false

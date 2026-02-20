@@ -22,6 +22,7 @@ datalake-generator-state/
 
 # Tilt secrets (contains passwords)
 .tilt-secrets
+e2e/tilt/.secrets
 
 # Local dev runtime state (pids, logs from bootstrap-dev.sh)
 .dev/
