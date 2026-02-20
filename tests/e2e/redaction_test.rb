@@ -1,321 +1,280 @@
 # frozen_string_literal: true
 
 # =============================================================================
-# Knowledge Graph — Redaction / Permission E2E Test
+# Knowledge Graph -- Redaction / Permission E2E Test
 # =============================================================================
 #
 # Verifies that the GKG server correctly scopes results to each user's
 # group_traversal_ids JWT claim. Only entities whose traversal_path is a
 # prefix match for one of the user's group paths are returned.
 #
+# All IDs and counts are loaded from /tmp/e2e/manifest.json (written by
+# create_test_data.rb). No hardcoded IDs.
+#
 # Run with:
-#   cd ~/Desktop/Code/gdk/gitlab
-#   bundle exec rails runner \
-#     ~/Desktop/Code/gkg/tests/e2e/redaction_test.rb
+#   bundle exec rails runner /tmp/e2e/redaction_test.rb RAILS_ENV=production
 #
 # =============================================================================
-# TEST DATA SETUP (already in this GDK instance)
-# =============================================================================
-#
-# Private group 99  kg-redaction-test-group  traversal: 1/99/
-# Private project 19  kg-redaction-test-project  traversal: 1/99/19/ (under group 99)
-#
-# Test users and JWT group_traversal_ids:
-#   root (id=1)   admin              → sees everything (org-wide "1/")
-#   lois (id=70)  reporter in group 24 (gitlab-org) + group 99
-#                 → group_traversal_ids: ["1/24/", "1/99/"]
-#   franklyn (id=72)  reporter in group 22 (toolbox)
-#                 → group_traversal_ids: ["1/22/"]
-#   vickey (id=71)  no reporter+ group memberships
-#                 → group_traversal_ids: [] → sees NOTHING
-#   hanna (id=73)   no reporter+ group memberships
-#                 → group_traversal_ids: [] → sees NOTHING
-#
-# Entity counts by traversal scope (verified in ClickHouse):
-#
-#   Scope        Projects  MRs  Notes  WorkItems
-#   1/22/           1        8    52      38       (franklyn)
-#   1/24/25/        1        9    48      39
-#   1/24/26/        1        4    48      42
-#   1/99/ (proj19)  1        0     0       1
-#   lois total      3       13    96      82       (1/24/ + 1/99/)
-#
-# =============================================================================
+
+require_relative 'test_helper'
 
 Feature.enable(:knowledge_graph)
 
-module RedactionTest
-  PASS = []
-  FAIL = []
-
-  def self.run(name, expected_min:, expected_max: nil, &block)
-    result = block.call
-    rows   = result[:result].is_a?(Array) ? result[:result] : []
-    count  = rows.size
-    ok     = count >= expected_min && (expected_max.nil? || count <= expected_max)
-    range  = expected_max ? "#{expected_min}–#{expected_max}" : ">=#{expected_min}"
-    if ok
-      puts "  PASS  #{name} (#{count})"
-      PASS << name
-    else
-      puts "  FAIL  #{name} — got #{count}, expected #{range}"
-      FAIL << name
-    end
-  rescue StandardError => e
-    puts "  FAIL  #{name} — ERROR: #{e.message[0..150]}"
-    FAIL << name
-  end
-
-  def self.section(title)
-    puts "\n--- #{title} ---"
-  end
-
-  def self.summary
-    total = PASS.size + FAIL.size
-    puts "\n#{'=' * 60}"
-    puts "  RESULT: #{PASS.size}/#{total} passed"
-    puts '=' * 60
-    if FAIL.any?
-      puts "\nFAILED:"
-      FAIL.each { |f| puts "  * #{f}" }
-    end
-    puts
-    exit(1) if FAIL.any?
-  end
-end
+manifest = load_manifest!
+m = manifest # short alias
 
 client = Ai::KnowledgeGraph::GrpcClient.new
-org_id = Organizations::Organization.default_organization&.id || 1
+org_id = m[:organization_id]
 
+# Load users
 root     = User.find_by!(username: 'root')
 lois     = User.find_by!(username: 'lois')
 franklyn = User.find_by!(username: 'franklyn.mcdermott')
-User.find_by!(username: 'vickey.schmidt')
-User.find_by!(username: 'hanna')
+vickey   = User.find_by!(username: 'vickey.schmidt')
+hanna    = User.find_by!(username: 'hanna')
 
-def q(client, user, org_id, query_json)
-  client.execute_query(query_json: query_json, user: user, organization_id: org_id)
-end
+# Extract dynamic IDs from manifest
+proj_smoke_id     = m[:projects][:smoke][:id]
+proj_frontend_id  = m[:projects][:frontend][:id]
+proj_backend_id   = m[:projects][:backend][:id]
+proj_redaction_id = m[:projects][:redaction][:id]
+
+total_projects    = m[:counts][:total_projects]
+
+lois_counts     = m[:counts][:per_user][:lois]
+franklyn_counts = m[:counts][:per_user][:franklyn]
 
 puts "\n#{'=' * 60}"
-puts '  Knowledge Graph — Redaction Test Suite'
+puts '  Knowledge Graph -- Redaction Test Suite'
 puts '=' * 60
+puts "  Projects: smoke=#{proj_smoke_id}, frontend=#{proj_frontend_id}, backend=#{proj_backend_id}, redaction=#{proj_redaction_id}"
+puts "  Total projects: #{total_projects}"
 
 # =============================================================================
 # SECTION 1: Admin sees everything
 # =============================================================================
-RedactionTest.section('1. Admin (root) — sees all entities')
+TestHarness.section('1. Admin (root) -- sees all entities')
 
-RedactionTest.run('root: all 4 projects', expected_min: 4, expected_max: 4) do
+TestHarness.run('root: all projects', expected_min: total_projects, expected_max: total_projects) do
   q(client, root, org_id, { query_type: 'search',
                             node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
 end
 
-RedactionTest.run('root: MRs in project 1 via traversal (node_ids=[1])', expected_min: 8) do
-  # Root traverses: project 1 → its MRs via IN_PROJECT
+TestHarness.run('root: MRs in smoke project via traversal', expected_min: 1) do
   q(client, root, org_id, { query_type: 'traversal',
                             nodes: [
-                              { id: 'p', entity: 'Project', columns: ['name'], node_ids: [1] },
+                              { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_smoke_id] },
                               { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
                             ],
                             relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
                             limit: 50 })
 end
 
-RedactionTest.run('root: private project id=19 visible', expected_min: 1, expected_max: 1) do
+TestHarness.run('root: private redaction project visible', expected_min: 1, expected_max: 1) do
   q(client, root, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [19] }, limit: 5 })
+                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
 end
 
-RedactionTest.run('root: private group kg-redaction-test-group visible', expected_min: 1) do
+TestHarness.run('root: private group kg-redaction-test-group visible', expected_min: 1) do
   q(client, root, org_id, { query_type: 'search',
                             node: { id: 'g', entity: 'Group', columns: ['name'],
                                     filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
 end
 
 # =============================================================================
-# SECTION 2: lois — scoped to 1/24/ (gitlab-org) + 1/99/ (kg-redaction-test-group)
+# SECTION 2: lois -- scoped to gitlab-org + redaction groups
 # =============================================================================
-RedactionTest.section('2. lois — group_traversal_ids: ["1/24/", "1/99/"]')
+TestHarness.section("2. lois -- visible projects: frontend, backend, redaction (#{lois_counts[:projects]} total)")
 
-RedactionTest.run('lois: 3 projects (proj 2, 3, 19)', expected_min: 3, expected_max: 3) do
+TestHarness.run("lois: #{lois_counts[:projects]} projects", expected_min: lois_counts[:projects],
+                                                            expected_max: lois_counts[:projects]) do
   q(client, lois, org_id, { query_type: 'search',
                             node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
 end
 
-RedactionTest.run('lois: project 2 visible (1/24/25/)', expected_min: 1, expected_max: 1) do
+TestHarness.run('lois: frontend project visible', expected_min: 1, expected_max: 1) do
   q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [2] }, limit: 5 })
+                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_frontend_id] }, limit: 5 })
 end
 
-RedactionTest.run('lois: project 3 visible (1/24/26/)', expected_min: 1, expected_max: 1) do
+TestHarness.run('lois: backend project visible', expected_min: 1, expected_max: 1) do
   q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [3] }, limit: 5 })
+                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_backend_id] }, limit: 5 })
 end
 
-RedactionTest.run('lois: private project 19 visible (member via group 99)', expected_min: 1, expected_max: 1) do
+TestHarness.run('lois: private redaction project visible (member via group)', expected_min: 1, expected_max: 1) do
   q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [19] }, limit: 5 })
+                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
 end
 
-RedactionTest.run('lois: project 1 NOT visible (not in 1/24/ or 1/99/)', expected_min: 0, expected_max: 0) do
+TestHarness.run('lois: smoke project NOT visible (not in toolbox group)', expected_min: 0, expected_max: 0) do
   q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [1] }, limit: 5 })
+                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_smoke_id] }, limit: 5 })
 end
 
-RedactionTest.run('lois: 13 MRs (proj 2+3, no proj 19 MRs)', expected_min: 13, expected_max: 13) do
+TestHarness.run("lois: #{lois_counts[:merge_requests]} MRs", expected_min: lois_counts[:merge_requests],
+                                                             expected_max: lois_counts[:merge_requests]) do
   q(client, lois, org_id, { query_type: 'search',
                             node: { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }, limit: 200 })
 end
 
-RedactionTest.run('lois: 96 notes (proj 2+3)', expected_min: 96, expected_max: 96) do
+TestHarness.run("lois: #{lois_counts[:notes]} notes", expected_min: lois_counts[:notes],
+                                                      expected_max: lois_counts[:notes]) do
   q(client, lois, org_id, { query_type: 'search',
                             node: { id: 'n', entity: 'Note', columns: ['id'] }, limit: 200 })
 end
 
-RedactionTest.run('lois: 82 work items (proj 2+3+19)', expected_min: 82, expected_max: 82) do
+TestHarness.run("lois: #{lois_counts[:work_items]} work items", expected_min: lois_counts[:work_items],
+                                                                expected_max: lois_counts[:work_items]) do
   q(client, lois, org_id, { query_type: 'search',
                             node: { id: 'wi', entity: 'WorkItem', columns: ['title'] }, limit: 200 })
 end
 
-RedactionTest.run('lois: private group kg-redaction-test-group visible', expected_min: 1) do
+TestHarness.run('lois: private group kg-redaction-test-group visible', expected_min: 1) do
   q(client, lois, org_id, { query_type: 'search',
                             node: { id: 'g', entity: 'Group', columns: ['name'],
                                     filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
 end
 
 # =============================================================================
-# SECTION 3: franklyn — scoped to 1/22/ (toolbox) only
+# SECTION 3: franklyn -- scoped to toolbox group only
 # =============================================================================
-RedactionTest.section('3. franklyn — group_traversal_ids: ["1/22/"]')
+TestHarness.section("3. franklyn -- visible projects: smoke (#{franklyn_counts[:projects]} total)")
 
-RedactionTest.run('franklyn: 1 project (proj 1 only)', expected_min: 1, expected_max: 1) do
+TestHarness.run("franklyn: #{franklyn_counts[:projects]} project", expected_min: franklyn_counts[:projects],
+                                                                   expected_max: franklyn_counts[:projects]) do
   q(client, franklyn, org_id, { query_type: 'search',
                                 node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
 end
 
-RedactionTest.run('franklyn: project 1 visible (1/22/23/)', expected_min: 1, expected_max: 1) do
+TestHarness.run('franklyn: smoke project visible', expected_min: 1, expected_max: 1) do
   q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [1] }, limit: 5 })
+                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_smoke_id] }, limit: 5 })
 end
 
-RedactionTest.run('franklyn: project 2 NOT visible', expected_min: 0, expected_max: 0) do
+TestHarness.run('franklyn: frontend project NOT visible', expected_min: 0, expected_max: 0) do
   q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [2] }, limit: 5 })
+                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_frontend_id] }, limit: 5 })
 end
 
-RedactionTest.run('franklyn: project 19 NOT visible (not in 1/22/)', expected_min: 0, expected_max: 0) do
+TestHarness.run('franklyn: redaction project NOT visible', expected_min: 0, expected_max: 0) do
   q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [19] }, limit: 5 })
+                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
 end
 
-RedactionTest.run('franklyn: 8 MRs (proj 1 only)', expected_min: 8, expected_max: 8) do
+TestHarness.run("franklyn: #{franklyn_counts[:merge_requests]} MRs", expected_min: franklyn_counts[:merge_requests],
+                                                                     expected_max: franklyn_counts[:merge_requests]) do
   q(client, franklyn, org_id, { query_type: 'search',
                                 node: { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }, limit: 200 })
 end
 
-RedactionTest.run('franklyn: 52 notes (proj 1 only)', expected_min: 52, expected_max: 52) do
+TestHarness.run("franklyn: #{franklyn_counts[:notes]} notes", expected_min: franklyn_counts[:notes],
+                                                              expected_max: franklyn_counts[:notes]) do
   q(client, franklyn, org_id, { query_type: 'search',
                                 node: { id: 'n', entity: 'Note', columns: ['id'] }, limit: 200 })
 end
 
-RedactionTest.run('franklyn: 38 work items (proj 1 only)', expected_min: 38, expected_max: 38) do
+TestHarness.run("franklyn: #{franklyn_counts[:work_items]} work items", expected_min: franklyn_counts[:work_items],
+                                                                        expected_max: franklyn_counts[:work_items]) do
   q(client, franklyn, org_id, { query_type: 'search',
                                 node: { id: 'wi', entity: 'WorkItem', columns: ['title'] }, limit: 200 })
 end
 
-RedactionTest.run('franklyn: private group kg-redaction-test-group NOT visible', expected_min: 0, expected_max: 0) do
+TestHarness.run('franklyn: private group kg-redaction-test-group NOT visible', expected_min: 0, expected_max: 0) do
   q(client, franklyn, org_id, { query_type: 'search',
                                 node: { id: 'g', entity: 'Group', columns: ['name'],
                                         filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
 end
 
-RedactionTest.run('franklyn: private project 19 NOT visible', expected_min: 0, expected_max: 0) do
+TestHarness.run('franklyn: private redaction project NOT visible', expected_min: 0, expected_max: 0) do
   q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [19] }, limit: 5 })
+                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
 end
 
 # =============================================================================
-# SECTION 4: vickey and hanna — empty traversal_ids → see nothing
+# SECTION 4: vickey and hanna -- empty traversal_ids -> see nothing
 # =============================================================================
-RedactionTest.section('4. vickey & hanna — group_traversal_ids: [] → zero results')
+TestHarness.section('4. vickey & hanna -- no group memberships -> zero results')
 
-%w[vickey.schmidt hanna].each do |username|
-  u = User.find_by!(username: username)
-
-  RedactionTest.run("#{username}: 0 projects", expected_min: 0, expected_max: 0) do
-    q(client, u, org_id, { query_type: 'search',
-                           node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
+{ 'vickey.schmidt' => vickey, 'hanna' => hanna }.each do |username, user|
+  TestHarness.run("#{username}: 0 projects", expected_min: 0, expected_max: 0) do
+    q(client, user, org_id, { query_type: 'search',
+                              node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
   end
 
-  RedactionTest.run("#{username}: 0 MRs", expected_min: 0, expected_max: 0) do
-    q(client, u, org_id, { query_type: 'search',
-                           node: { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }, limit: 100 })
+  TestHarness.run("#{username}: 0 MRs", expected_min: 0, expected_max: 0) do
+    q(client, user, org_id, { query_type: 'search',
+                              node: { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }, limit: 100 })
   end
 
-  RedactionTest.run("#{username}: 0 notes", expected_min: 0, expected_max: 0) do
-    q(client, u, org_id, { query_type: 'search',
-                           node: { id: 'n', entity: 'Note', columns: ['id'] }, limit: 100 })
+  TestHarness.run("#{username}: 0 notes", expected_min: 0, expected_max: 0) do
+    q(client, user, org_id, { query_type: 'search',
+                              node: { id: 'n', entity: 'Note', columns: ['id'] }, limit: 100 })
   end
 
-  RedactionTest.run("#{username}: 0 work items", expected_min: 0, expected_max: 0) do
-    q(client, u, org_id, { query_type: 'search',
-                           node: { id: 'wi', entity: 'WorkItem', columns: ['title'] }, limit: 100 })
+  TestHarness.run("#{username}: 0 work items", expected_min: 0, expected_max: 0) do
+    q(client, user, org_id, { query_type: 'search',
+                              node: { id: 'wi', entity: 'WorkItem', columns: ['title'] }, limit: 100 })
   end
 
-  RedactionTest.run("#{username}: private group NOT visible", expected_min: 0, expected_max: 0) do
-    q(client, u, org_id, { query_type: 'search',
-                           node: { id: 'g', entity: 'Group', columns: ['name'],
-                                   filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
+  TestHarness.run("#{username}: private group NOT visible", expected_min: 0, expected_max: 0) do
+    q(client, user, org_id, { query_type: 'search',
+                              node: { id: 'g', entity: 'Group', columns: ['name'],
+                                      filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
   end
 
-  RedactionTest.run("#{username}: private project 19 NOT visible", expected_min: 0, expected_max: 0) do
-    q(client, u, org_id, { query_type: 'search',
-                           node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [19] }, limit: 5 })
+  TestHarness.run("#{username}: private redaction project NOT visible", expected_min: 0, expected_max: 0) do
+    q(client, user, org_id, { query_type: 'search',
+                              node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
   end
 end
 
 # =============================================================================
-# SECTION 5: Cross-user isolation — lois cannot see franklyn's project, and vice versa
+# SECTION 5: Cross-user isolation -- lois cannot see franklyn's project, etc.
 # =============================================================================
-RedactionTest.section('5. Cross-user isolation')
+TestHarness.section('5. Cross-user isolation')
 
-RedactionTest.run('lois cannot see proj 1 MRs (1/22/ not in her claims)', expected_min: 0, expected_max: 0) do
-  # Traversal from proj 1: lois has no 1/22/ claim so proj 1 itself is blocked
+TestHarness.run('lois cannot see smoke project MRs (not in toolbox group)', expected_min: 0, expected_max: 0) do
   q(client, lois, org_id, { query_type: 'traversal',
                             nodes: [
-                              { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [1] },
+                              { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [proj_smoke_id] },
                               { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
                             ],
                             relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
                             limit: 50 })
 end
 
-RedactionTest.run('franklyn cannot see proj 2 MRs (1/24/ not in his claims)', expected_min: 0, expected_max: 0) do
-  # Traversal from proj 2: franklyn has no 1/24/ claim so proj 2 itself is blocked
+TestHarness.run('franklyn cannot see frontend project MRs (not in gitlab-org group)', expected_min: 0,
+                                                                                      expected_max: 0) do
   q(client, franklyn, org_id, { query_type: 'traversal',
                                 nodes: [
-                                  { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [2] },
+                                  { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [proj_frontend_id] },
                                   { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
                                 ],
                                 relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
                                 limit: 50 })
 end
 
-RedactionTest.run('lois sees MRs in proj 2 via traversal (9-10 MRs)', expected_min: 9, expected_max: 10) do
+# lois sees MRs in frontend project (she has gitlab-org membership)
+frontend_mr_count = m[:counts][:per_project][:frontend][:merge_requests]
+TestHarness.run("lois sees MRs in frontend project (#{frontend_mr_count})", expected_min: frontend_mr_count,
+                                                                            expected_max: frontend_mr_count) do
   q(client, lois, org_id, { query_type: 'traversal',
                             nodes: [
-                              { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [2] },
+                              { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [proj_frontend_id] },
                               { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
                             ],
                             relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
                             limit: 50 })
 end
 
-RedactionTest.run('franklyn sees MRs in proj 1 via traversal (8 MRs)', expected_min: 8, expected_max: 8) do
+# franklyn sees MRs in smoke project (he has toolbox membership)
+smoke_mr_count = m[:counts][:per_project][:smoke][:merge_requests]
+TestHarness.run("franklyn sees MRs in smoke project (#{smoke_mr_count})", expected_min: smoke_mr_count,
+                                                                          expected_max: smoke_mr_count) do
   q(client, franklyn, org_id, { query_type: 'traversal',
                                 nodes: [
-                                  { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [1] },
+                                  { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [proj_smoke_id] },
                                   { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
                                 ],
                                 relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
@@ -323,4 +282,4 @@ RedactionTest.run('franklyn sees MRs in proj 1 via traversal (8 MRs)', expected_
 end
 
 # =============================================================================
-RedactionTest.summary
+TestHarness.summary
