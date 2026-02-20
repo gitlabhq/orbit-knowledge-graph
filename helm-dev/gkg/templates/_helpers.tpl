@@ -76,18 +76,20 @@ When nats.enabled is false, uses nats.url config value
 {{- end }}
 
 {{/*
-ClickHouse environment variables for config crate (GKG__ prefix, __ separator).
-prefix should be DATALAKE or GRAPH (maps to datalake.* or graph.* in AppConfig).
-Uses double-underscore prefix (GKG__) to avoid K8s service env var injection conflicts.
+ClickHouse YAML config block for config file. Indentation controlled by caller.
 */}}
-{{- define "gkg.clickhouseEnv" -}}
-- name: GKG__{{ .prefix }}__URL
-  value: "http://{{ .config.host }}:8123"
-- name: GKG__{{ .prefix }}__DATABASE
-  value: {{ .config.database }}
-- name: GKG__{{ .prefix }}__USERNAME
-  value: {{ .config.user }}
-- name: GKG__{{ .prefix }}__PASSWORD
+{{- define "gkg.clickhouseConfig" -}}
+url: "http://{{ .config.host }}:8123"
+database: {{ .config.database | quote }}
+username: {{ .config.user | quote }}
+{{- end }}
+
+{{/*
+ClickHouse password secret env var. Passwords stay as env vars to avoid
+storing secrets in ConfigMaps — env vars override config file values.
+*/}}
+{{- define "gkg.clickhouseSecretEnv" -}}
+- name: GKG_{{ .prefix }}__PASSWORD
   valueFrom:
     secretKeyRef:
       name: {{ .secretName }}

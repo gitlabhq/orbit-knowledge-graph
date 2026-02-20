@@ -76,6 +76,7 @@ pub enum FieldKind {
     Date,
     DateTime,
     Enum,
+    Uuid,
 }
 
 impl FieldKind {
@@ -93,6 +94,7 @@ impl FieldKind {
             DataType::String => Self::classify_string(&field.name),
             DataType::Int => Self::classify_int(&field.name),
             DataType::Bool => Self::classify_bool(&field.name),
+            DataType::Uuid => FieldKind::Uuid,
         }
     }
 
@@ -383,6 +385,36 @@ impl FakeValueGenerator {
                     }
                 }
                 FakeValue::static_string("unknown")
+            }
+            FieldKind::Uuid => {
+                self.buf.clear();
+                self.buf.reserve(36);
+                // 8-4-4-4-12 hex format
+                for i in (0..8).rev() {
+                    self.buf
+                        .push(HEX_DIGITS[((bits >> (i * 4)) & 0xf) as usize] as char);
+                }
+                self.buf.push('-');
+                for i in (0..4).rev() {
+                    self.buf
+                        .push(HEX_DIGITS[((high >> (i * 4)) & 0xf) as usize] as char);
+                }
+                self.buf.push('-');
+                for i in (4..8).rev() {
+                    self.buf
+                        .push(HEX_DIGITS[((high >> (i * 4)) & 0xf) as usize] as char);
+                }
+                self.buf.push('-');
+                for i in (0..4).rev() {
+                    self.buf
+                        .push(HEX_DIGITS[((low >> (i * 4)) & 0xf) as usize] as char);
+                }
+                self.buf.push('-');
+                for i in (4..16).rev() {
+                    self.buf
+                        .push(HEX_DIGITS[((low >> (i * 4)) & 0xf) as usize] as char);
+                }
+                FakeValue::String(self.emit_buf())
             }
         }
     }

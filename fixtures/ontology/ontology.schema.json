@@ -19,7 +19,7 @@
 
     "propertyType": {
       "type": "string",
-      "enum": ["string", "int64", "boolean", "timestamp", "date", "enum"],
+      "enum": ["string", "int64", "boolean", "timestamp", "date", "enum", "uuid"],
       "description": "Data type for a property field."
     },
 

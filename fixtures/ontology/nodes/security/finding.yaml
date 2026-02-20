@@ -23,7 +23,7 @@ properties:
     description: "Global identifier for the finding."
 
   uuid:
-    type: string
+    type: uuid
     source: uuid
     nullable: false
     description: "UUID uniquely identifying the finding."
@@ -66,7 +66,7 @@ properties:
     description: "Whether this finding has been deduplicated."
 
   overridden_uuid:
-    type: string
+    type: uuid
     source: overridden_uuid
     nullable: true
     description: "UUID of the finding this one overrides."
@@ -84,13 +84,13 @@ etl:
     SELECT
         traversal_path,
         id,
-        uuid,
+        toString(uuid) AS uuid,
         nullIf(JSONExtractString(finding_data, 'name'), '') AS name,
         nullIf(JSONExtractString(finding_data, 'description'), '') AS description,
         nullIf(JSONExtractString(finding_data, 'solution'), '') AS solution,
         severity,
         deduplicated,
-        overridden_uuid,
+        toString(overridden_uuid) AS overridden_uuid,
         project_id,
         scanner_id,
         scan_id,

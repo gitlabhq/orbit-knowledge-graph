@@ -27,10 +27,14 @@ The Knowledge Graph will expose a Prometheus `/metrics` endpoint, which allows f
 - **Ingest Lag**: The delay between data being written to the Postgres WAL, processed by Siphon, sent through NATS, and ingested.
 - **Consumer Health**: Monitoring NATS JetStream delivery/ack rates, dead-letter counts, and stream retention headroom.
 
-**KG HTTP Server (Indexer and Web Service):**
+**KG Web Server (Indexer and Web Service):**
 
 - HTTP error and success rate by HTTP method and path
 - HTTP latency (p50, p95, p99) by HTTP method and path
+- gRPC error and success rate by RPC method
+- gRPC latency (p50, p95, p99) by RPC method
+- gRPC bidi stream duration for `ExecuteTool` and `ExecuteQuery` RPCs
+- Redaction exchange latency (time spent waiting for Rails authorization responses)
 
 **KG Indexer Service:**
 
