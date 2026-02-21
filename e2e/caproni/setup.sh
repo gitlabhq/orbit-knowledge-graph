@@ -474,7 +474,7 @@ log "13. Copying test scripts to toolbox pod"
 
 toolbox_exec "${TOOLBOX_POD}" mkdir -p "${E2E_POD_DIR}"
 
-for f in "${GKG_ROOT}"/tests/e2e/*.rb; do
+for f in "${GKG_ROOT}"/e2e/tests/*.rb; do
   kubectl cp "${f}" "${GITLAB_NS}/${TOOLBOX_POD}:${E2E_POD_DIR}/$(basename "${f}")"
   echo "  Copied $(basename "${f}")"
 done
@@ -789,7 +789,7 @@ DISPATCHEOF
   log "25. Running E2E redaction tests"
 
   # Re-copy test scripts in case they changed during iteration
-  for f in "${GKG_ROOT}"/tests/e2e/*.rb; do
+  for f in "${GKG_ROOT}"/e2e/tests/*.rb; do
     kubectl cp "${f}" "${GITLAB_NS}/${TOOLBOX_POD}:${E2E_POD_DIR}/$(basename "${f}")"
   done
 

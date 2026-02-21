@@ -4,7 +4,7 @@
 # E2E Test Helper — shared test harness and manifest loader
 # =============================================================================
 #
-# Loaded by redaction_test.rb and mega_test.rb.
+# Loaded by redaction_test.rb.
 # Provides:
 #   - Manifest loading (JSON with dynamic IDs from create_test_data.rb)
 #   - Test runner module (PASS/FAIL tracking, range assertions, summary)

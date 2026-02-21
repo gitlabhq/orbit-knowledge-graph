@@ -12,7 +12,7 @@
 #   - Memberships at various access levels
 #
 # Writes a JSON manifest to /tmp/e2e/manifest.json with all dynamic IDs
-# so that redaction_test.rb and mega_test.rb can load them.
+# so that redaction_test.rb can load them.
 #
 # Run with:
 #   bundle exec rails runner /tmp/e2e/create_test_data.rb RAILS_ENV=production

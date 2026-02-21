@@ -50,7 +50,7 @@ curl http://localhost:4200/health
 ## Test Suite Location
 
 ```
-~/Desktop/Code/gkg/tests/e2e/
+~/Desktop/Code/gkg/e2e/tests/
 ```
 
 All tests run inside the GitLab Rails environment via `rails runner`:
@@ -198,7 +198,7 @@ If missing, create them:
 ```shell
 cd ~/Desktop/Code/gdk/gitlab
 bundle exec rails runner \
-  ~/Desktop/Code/gkg/tests/e2e/create_test_data.rb \
+  ~/Desktop/Code/gkg/e2e/tests/create_test_data.rb \
   2>/dev/null
 ```
 
@@ -242,7 +242,7 @@ instance. It verifies that every user sees exactly the entities their
 ```shell
 cd ~/Desktop/Code/gdk/gitlab
 bundle exec rails runner \
-  ~/Desktop/Code/gkg/tests/e2e/redaction_test.rb \
+  ~/Desktop/Code/gkg/e2e/tests/redaction_test.rb \
   2>/dev/null
 ```
 
@@ -272,31 +272,6 @@ Expected result: **38/38 passed**
 | franklyn | work items | 38 |
 | vickey | anything | 0 |
 | hanna | anything | 0 |
-
----
-
-## 5. Run the Mega Test (optional)
-
-A broader test covering query types, filters, aggregations, traversals,
-path-finding, ordering, and more. Less strict on exact counts.
-
-```shell
-cd ~/Desktop/Code/gdk/gitlab
-bundle exec rails runner \
-  ~/Desktop/Code/gkg/tests/e2e/mega_test.rb \
-  2>/dev/null
-```
-
-Expected: **~88/96** (some tests are loose lower-bounds that may vary with data).
-
-Known failures in the mega test that are not bugs:
-
-- **Groups ≥ 90** — server returns ~9 with limit:100 due to pagination behaviour
-- **Milestones ≥ 80** — same cap (~27 returned)
-- **MR count by state ≥ 2 states** — aggregation returns only `merged` (opened
-  MRs have empty traversal_path and are excluded from the join)
-- **MR/WorkItem count by project ≥ 5** — only 4 projects are indexed in
-  `gl_project`; the aggregation JOIN returns at most 4 buckets
 
 ---
 
