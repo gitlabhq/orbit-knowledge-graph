@@ -1,0 +1,140 @@
+# Small simulator config for local development testing.
+# Targets the gkg-development database in the local k8s ClickHouse.
+#
+# Workflow:
+#   1. Generate data:  cargo run --bin generate -- -c crates/simulator/simulator-dev.yaml
+#   2. Load to CH:     cargo run --bin load -- -c crates/simulator/simulator-dev.yaml
+#   3. Evaluate:       cargo run --bin evaluate -- -c crates/simulator/simulator-dev.yaml
+
+clickhouse:
+  url: http://localhost:8123
+  database: gkg-development
+
+  client:
+    send_timeout: 60
+    receive_timeout: 60
+    max_insert_block_size: 10000
+
+  schema:
+    engine: MergeTree
+    index_granularity: 8192
+
+    node_primary_key: [traversal_path, id]
+    node_order_by: [traversal_path, id]
+
+    edge_primary_key: [traversal_path, source_id, source_kind, target_id, target_kind]
+    edge_order_by: [traversal_path, source_id, source_kind, target_id, target_kind]
+
+    indexes: []
+    projections: []
+
+generation:
+  ontology_path: fixtures/ontology
+  output_dir: gl_synthetic_data_dev
+  skip_if_present: false
+  parallel: false
+  batch_size: 10000
+
+  seed: 42
+
+  organizations: 1
+
+  roots:
+    User: 50
+    Group: 3
+
+  subgroups:
+    max_depth: 2
+    per_group: 2
+    # Total groups: 3 * (1 + 2 + 4) = 21
+
+  relationships:
+    CONTAINS:
+      "Group -> Project": 3          # 21 * 3 = 63 projects
+
+    IN_PROJECT:
+      "MergeRequest -> Project": 5   # 63 * 5 = 315 MRs
+      "WorkItem -> Project": 3
+      "Pipeline -> Project": 3
+      "Vulnerability -> Project": 1
+      "Finding -> Project": 1
+      "Milestone -> Project": 1
+      "Label -> Project": 2
+
+    HAS_STAGE:
+      "Pipeline -> Stage": 2
+
+    HAS_JOB:
+      "Stage -> Job": 2
+
+    HAS_DIFF:
+      "MergeRequest -> MergeRequestDiff": 1
+
+    HAS_FILE:
+      "MergeRequestDiff -> MergeRequestDiffFile": 2
+
+    HAS_NOTE:
+      "MergeRequest -> Note": 1
+      "WorkItem -> Note": 1
+
+    HAS_FINDING:
+      "Vulnerability -> Finding": 1
+
+    HAS_IDENTIFIER:
+      "Finding -> VulnerabilityIdentifier": 1
+
+  associations:
+    AUTHORED:
+      "User -> MergeRequest": 5
+      "User -> WorkItem": 3
+      "User -> Note": 2
+
+    MEMBER_OF:
+      "User -> Group": 5
+
+    ASSIGNED:
+      "User -> MergeRequest": 3
+      "User -> WorkItem": 2
+
+    REVIEWER:
+      "MergeRequest -> User":
+        ratio: 2
+        per: source
+
+    TRIGGERED:
+      "User -> Pipeline": 1
+      "MergeRequest -> Pipeline": 0.5
+
+    CREATOR:
+      "User -> Project": 1
+    OWNER:
+      "User -> Group": 1
+
+    MERGED_BY:
+      "MergeRequest -> User":
+        ratio: 1
+        per: source
+
+    CLOSES:
+      "MergeRequest -> WorkItem": 0.3
+
+    FIXES:
+      "MergeRequest -> Vulnerability": 0.1
+
+    IN_MILESTONE:
+      "WorkItem -> Milestone": 0.3
+
+    HAS_LABEL:
+      "WorkItem -> Label": 0.3
+
+    IN_GROUP:
+      "Project -> Group": 1
+
+evaluation:
+  queries_path: fixtures/queries/sdlc_queries.json
+  metadata_dir: ./evaluation_results_dev
+  sample_size: 10
+  iterations: 1
+  skip_cache_warm: false
+  output:
+    format: text
