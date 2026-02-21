@@ -55,23 +55,30 @@ def find_or_create_user(username, name, email, admin, org)
   user = User.find_by(username: username)
   if user
     puts "  User '#{username}' already exists (id: #{user.id})"
-    return user
+  else
+    password = 'TestPass123!'
+    user = User.new(
+      username: username,
+      name: name,
+      email: email,
+      password: password,
+      password_confirmation: password,
+      confirmed_at: Time.current,
+      organization_id: org.id,
+      skip_confirmation: true
+    )
+    user.assign_personal_namespace(org)
+    user.save!
+    puts "  Created user '#{username}' (id: #{user.id})"
   end
 
-  password = 'TestPass123!'
-  user = User.new(
-    username: username,
-    name: name,
-    email: email,
-    password: password,
-    password_confirmation: password,
-    confirmed_at: Time.current,
-    organization_id: org.id,
-    skip_confirmation: true
-  )
-  user.assign_personal_namespace(org)
-  user.save!
-  puts "  Created user '#{username}' (id: #{user.id})"
+  # Ensure OrganizationUser record exists. GitLab seed data creates this for
+  # the root user but not for programmatically-created users. Without it,
+  # group.add_member fails with "already belongs to another organization".
+  Organizations::OrganizationUser.find_or_create_by!(organization: org, user: user) do |record|
+    record.access_level = :default
+  end
+
   user
 rescue StandardError => e
   # Try alternative creation via service
@@ -88,6 +95,12 @@ rescue StandardError => e
   raise "Failed to create user '#{username}': #{result.inspect}" unless user&.persisted?
 
   puts "  Created user '#{username}' via service (id: #{user.id})"
+
+  # Ensure OrganizationUser for service-created users too
+  Organizations::OrganizationUser.find_or_create_by!(organization: org, user: user) do |record|
+    record.access_level = :default
+  end
+
   user
 end
 
@@ -240,10 +253,14 @@ puts "\n--- 4. Setting up memberships ---"
 def add_group_member(group, user, access_level, label)
   return if group.member?(user)
 
-  group.add_member(user, access_level)
-  puts "  Added #{user.username} to group '#{group.name}' as #{label}"
+  member = group.add_member(user, access_level)
+  if member.persisted?
+    puts "  Added #{user.username} to group '#{group.name}' as #{label}"
+  else
+    puts "  ERROR: Failed to add #{user.username} to group '#{group.name}': #{member.errors.full_messages.join(', ')}"
+  end
 rescue StandardError => e
-  puts "  WARN: Could not add #{user.username} to group '#{group.name}': #{e.message[0..80]}"
+  puts "  ERROR: Could not add #{user.username} to group '#{group.name}': #{e.class}: #{e.message[0..120]}"
 end
 
 def add_project_member(project, user, access_level, label)

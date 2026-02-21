@@ -169,6 +169,19 @@
 #       "state" column. merged_at lives in merge_request_metrics.
 #     - Non-admin users can't create MRs without project access; use admin
 #       as author.
+#     - Organizations::OrganizationUser records are required for group
+#       membership. GitLab seeds create this for root but NOT for
+#       programmatically-created users. Without it, group.add_member fails
+#       with "already belongs to another organization". create_test_data.rb
+#       creates OrganizationUser records in find_or_create_user.
+#
+#   gRPC connectivity:
+#     - The redaction_test.rb runs in the toolbox pod (gitlab namespace).
+#       The GKG webserver is in the default namespace, so the gRPC endpoint
+#       must be set to gkg-webserver.default.svc.cluster.local:50051.
+#     - Set via env var: KNOWLEDGE_GRAPH_GRPC_ENDPOINT, or the test passes
+#       it explicitly to GrpcClient.new(endpoint: ...).
+#     - Default in Rails (localhost:50051) does NOT work cross-namespace.
 #
 # =============================================================================
 set -euo pipefail
