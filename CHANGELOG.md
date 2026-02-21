@@ -1,3 +1,13 @@
+## [0.3.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.3.0...v0.3.1) (2026-02-20)
+
+### Fixes
+
+* **ci:** ensure release builds run for tags ([1991373](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/199137395a34f7b1e69a47b09689920d75b00910)) by Bohdan Parkhomchuk
+
+### Other
+
+* **indexer:** move dispatcher into indexer crate and hook datalake-generator ([04236f1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/04236f13bb71ba9dc0d0c325546aec71d59bd5c9)) by Jean-Gabriel Doyon
+
 ## [0.3.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.2.0...v0.3.0) (2026-02-20)
 
 ### Features

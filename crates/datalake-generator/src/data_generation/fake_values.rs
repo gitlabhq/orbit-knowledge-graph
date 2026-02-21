@@ -282,16 +282,14 @@ impl SiphonFakeValueGenerator {
             ColumnKind::IdList => {
                 use std::fmt::Write;
                 let count = (low % MAX_LIST_LENGTH as u32) as usize;
-                self.buf.push('[');
                 for j in 0..count {
                     if j > 0 {
-                        self.buf.push_str(", ");
+                        self.buf.push('/');
                     }
                     let id_bits = if j == 0 { bits } else { self.next_random() };
                     let id_val = id_bits % MAX_ID_IN_LIST + 1;
                     let _ = write!(self.buf, "{}", id_val);
                 }
-                self.buf.push(']');
             }
             _ => {
                 self.buf.push_str("val");

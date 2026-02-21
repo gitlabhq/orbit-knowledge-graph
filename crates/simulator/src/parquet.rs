@@ -100,6 +100,7 @@ impl StreamingEdgeWriter {
 
     /// Convert edge buffer to Arrow RecordBatch.
     fn edges_to_batch(&self, edges: &[EdgeRecord]) -> Result<RecordBatch> {
+        let traversal_path: StringArray = edges.iter().map(|e| Some(&*e.traversal_path)).collect();
         let relationship_kind: StringArray =
             edges.iter().map(|e| Some(&*e.relationship_kind)).collect();
         let source: Int64Array = edges.iter().map(|e| Some(e.source)).collect();
@@ -110,6 +111,7 @@ impl StreamingEdgeWriter {
         Ok(RecordBatch::try_new(
             self.schema.clone(),
             vec![
+                Arc::new(traversal_path),
                 Arc::new(relationship_kind),
                 Arc::new(source),
                 Arc::new(source_kind),
@@ -244,6 +246,7 @@ impl ParquetWriter {
     fn write_edges(&self, path: &Path, edges: &[EdgeRecord]) -> Result<()> {
         let schema = Arc::new(edge_schema());
 
+        let traversal_path: StringArray = edges.iter().map(|e| Some(&*e.traversal_path)).collect();
         let relationship_kind: StringArray =
             edges.iter().map(|e| Some(&*e.relationship_kind)).collect();
         let source: Int64Array = edges.iter().map(|e| Some(e.source)).collect();
@@ -254,6 +257,7 @@ impl ParquetWriter {
         let batch = RecordBatch::try_new(
             schema.clone(),
             vec![
+                Arc::new(traversal_path),
                 Arc::new(relationship_kind),
                 Arc::new(source),
                 Arc::new(source_kind),

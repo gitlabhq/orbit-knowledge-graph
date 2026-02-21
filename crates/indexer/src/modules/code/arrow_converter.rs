@@ -310,6 +310,8 @@ impl ArrowConverter {
 
     pub fn convert_edges(&self, graph_data: &GraphData) -> Result<RecordBatch, ArrowError> {
         let rels = &graph_data.relationships;
+        let mut traversal_path =
+            StringBuilder::with_capacity(rels.len(), rels.len() * self.traversal_path.len());
         let mut source_id = Int64Builder::with_capacity(rels.len());
         let mut source_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 16);
         let mut relationship_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 32);
@@ -326,6 +328,7 @@ impl ArrowConverter {
                 continue;
             };
 
+            traversal_path.append_value(&self.traversal_path);
             source_id.append_value(src_id);
             source_kind.append_value(src_kind_str);
             relationship_kind.append_value(rel.relationship_type.as_str());
@@ -334,6 +337,7 @@ impl ArrowConverter {
         }
 
         let schema = Schema::new(vec![
+            Field::new("traversal_path", DataType::Utf8, false),
             Field::new("source_id", DataType::Int64, false),
             Field::new("source_kind", DataType::Utf8, false),
             Field::new("relationship_kind", DataType::Utf8, false),
@@ -344,6 +348,7 @@ impl ArrowConverter {
         RecordBatch::try_new(
             Arc::new(schema),
             vec![
+                Arc::new(traversal_path.finish()) as ArrayRef,
                 Arc::new(source_id.finish()) as ArrayRef,
                 Arc::new(source_kind.finish()) as ArrayRef,
                 Arc::new(relationship_kind.finish()) as ArrayRef,

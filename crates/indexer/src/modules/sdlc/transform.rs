@@ -29,8 +29,15 @@ pub fn build_edge_etl_transform_sql(config: &PreparedEdgeEtl) -> String {
         .map(|f| format!(" AND {}", f))
         .unwrap_or_default();
 
+    let traversal_path_expr = if config.namespaced {
+        "traversal_path"
+    } else {
+        "'0/' AS traversal_path"
+    };
+
     format!(
         r#"SELECT
+    {traversal_path_expr},
     {} AS source_id,
     {} AS source_kind,
     '{}' AS relationship_kind,
@@ -72,8 +79,15 @@ fn build_multi_target_edge_sql(edge: &PreparedEdge, delimiter: &str) -> String {
         (edge.source_id.as_str(), exploded_value.as_str())
     };
 
+    let traversal_path_expr = if edge.namespaced {
+        "traversal_path"
+    } else {
+        "'0/' AS traversal_path"
+    };
+
     format!(
         r#"SELECT
+    {traversal_path_expr},
     {source_id} AS source_id,
     {} AS source_kind,
     '{}' AS relationship_kind,
@@ -99,8 +113,15 @@ fn build_single_value_edge_sql(edge: &PreparedEdge) -> String {
         .map(|f| format!(" AND {}", f))
         .unwrap_or_default();
 
+    let traversal_path_expr = if edge.namespaced {
+        "traversal_path"
+    } else {
+        "'0/' AS traversal_path"
+    };
+
     format!(
         r#"SELECT
+    {traversal_path_expr},
     {} AS source_id,
     {} AS source_kind,
     '{}' AS relationship_kind,
