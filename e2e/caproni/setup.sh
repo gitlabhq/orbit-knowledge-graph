@@ -43,6 +43,7 @@
 #   ./setup.sh --skip-build     # Skip CNG image build (reuse existing)
 #   ./setup.sh --skip-caproni   # Skip caproni install (already installed)
 #   ./setup.sh --phase2-only    # Only run post-deploy steps (cluster exists)
+#   ./setup.sh --phase3-only    # Only run GKG stack (Phase 3, skip 1+2)
 #
 # All configuration lives in config.sh. Override any value via env var:
 #   GITLAB_SRC=/my/path COLIMA_MEMORY=16 ./setup.sh --gkg
@@ -174,12 +175,14 @@ source "$(cd "$(dirname "$0")" && pwd)/config.sh"
 SKIP_BUILD=false
 SKIP_CAPRONI=false
 PHASE2_ONLY=false
+PHASE3_ONLY=false
 START_GKG=false
 for arg in "$@"; do
   case "$arg" in
     --skip-build)    SKIP_BUILD=true ;;
     --skip-caproni)  SKIP_CAPRONI=true ;;
     --phase2-only)   PHASE2_ONLY=true ;;
+    --phase3-only)   PHASE3_ONLY=true; PHASE2_ONLY=true; START_GKG=true ;;
     --gkg)           START_GKG=true ;;
     --help|-h)
       head -40 "$0" | grep '^#' | sed 's/^# *//'
@@ -364,6 +367,8 @@ fi  # end PHASE2_ONLY check
 # PHASE 2: Post-deploy
 # ==============================================================================
 
+if [ "${PHASE3_ONLY}" = false ]; then
+
 log "PHASE 2: Post-deploy setup"
 
 ensure_docker_host
@@ -434,7 +439,7 @@ step "Migrations complete"
 
 log "12. Enabling :knowledge_graph feature flag"
 
-toolbox_rails_console "${TOOLBOX_POD}" "Feature.enable(:knowledge_graph)" 2>&1 | tail -3
+toolbox_rails_eval "${TOOLBOX_POD}" "Feature.enable(:knowledge_graph)" 2>&1 | tail -3
 
 step "Feature flag enabled"
 
@@ -470,11 +475,21 @@ else
   warn "Check ${LOG_DIR}/create-test-data.log for errors"
 fi
 
+fi  # end PHASE3_ONLY check (skip Phase 2)
+
 # ==============================================================================
 # PHASE 3: GKG stack
 # ==============================================================================
 
 if [ "${START_GKG}" = true ]; then
+
+  # Re-resolve toolbox pod (needed if we skipped Phase 2 via --phase3-only)
+  ensure_docker_host
+  TOOLBOX_POD=$(get_toolbox_pod)
+  if [ -z "${TOOLBOX_POD}" ]; then
+    echo "ERROR: No toolbox pod found in ${GITLAB_NS} namespace."
+    exit 1
+  fi
   log "PHASE 3: GKG stack"
 
   ensure_docker_host
@@ -550,8 +565,8 @@ CHEOF"
 
   log "19. Verifying knowledge_graph_enabled_namespaces in PG"
 
-  toolbox_rails_console "${TOOLBOX_POD}" \
-    "puts ActiveRecord::Base.connection.select_values(\"SELECT root_namespace_id FROM knowledge_graph_enabled_namespaces ORDER BY root_namespace_id\").inspect" \
+  toolbox_rails_eval "${TOOLBOX_POD}" \
+    'puts ActiveRecord::Base.connection.select_values("SELECT root_namespace_id FROM knowledge_graph_enabled_namespaces ORDER BY root_namespace_id").inspect' \
     2>&1
 
   step "knowledge_graph_enabled_namespaces verified"

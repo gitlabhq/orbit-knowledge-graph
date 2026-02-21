@@ -127,11 +127,13 @@ toolbox_rails_runner() {
     bash -c "cd ${RAILS_ROOT} && bundle exec rails runner ${script} RAILS_ENV=production"
 }
 
-# Run a rails console command in the toolbox pod
-toolbox_rails_console() {
+# Run a one-liner Ruby command via rails runner in the toolbox pod.
+# NOTE: Do NOT use `rails console` with piped input — it hangs in k8s pods
+# because it waits for an interactive TTY even after processing stdin.
+toolbox_rails_eval() {
   local pod="$1" cmd="$2"
   kubectl exec -n "${GITLAB_NS}" "${pod}" -- \
-    bash -c "cd ${RAILS_ROOT} && echo '${cmd}' | bundle exec rails console -e production"
+    bash -c "cd ${RAILS_ROOT} && bundle exec rails runner '${cmd}' RAILS_ENV=production"
 }
 
 # Run a psql command as superuser
