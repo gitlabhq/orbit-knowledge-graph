@@ -23,6 +23,58 @@ impl HydrationStage {
         Self { ontology, client }
     }
 
+    /// Pre-auth hydration: for dynamic nodes with indirect authorization
+    /// (owner_entity is set), fetch the auth_id_column value from the entity table
+    /// so authorization can resolve without relying on edge columns.
+    pub async fn resolve_auth_ids(
+        &self,
+        result: &mut QueryResult,
+        result_context: &ResultContext,
+        security_context: &SecurityContext,
+    ) -> Result<(), PipelineError> {
+        let mut indirect_refs: HashMap<String, Vec<i64>> = HashMap::new();
+        let mut auth_columns: HashMap<String, String> = HashMap::new();
+
+        for row in result.rows() {
+            for node_ref in row.dynamic_nodes() {
+                let Some(auth) = result_context.get_entity_auth(&node_ref.entity_type) else {
+                    continue;
+                };
+                if auth.owner_entity.is_none() {
+                    continue;
+                }
+                indirect_refs
+                    .entry(node_ref.entity_type.clone())
+                    .or_default()
+                    .push(node_ref.id);
+                auth_columns
+                    .entry(node_ref.entity_type.clone())
+                    .or_insert_with(|| auth.auth_id_column.clone());
+            }
+        }
+
+        for ids in indirect_refs.values_mut() {
+            ids.sort_unstable();
+            ids.dedup();
+        }
+
+        if indirect_refs.is_empty() {
+            return Ok(());
+        }
+
+        let mut overrides = HashMap::new();
+        for (entity_type, ids) in &indirect_refs {
+            let auth_col = &auth_columns[entity_type];
+            let resolved = self
+                .fetch_auth_ids(entity_type, ids, auth_col, security_context)
+                .await?;
+            overrides.extend(resolved);
+        }
+
+        result.set_auth_id_overrides(overrides);
+        Ok(())
+    }
+
     pub async fn execute(
         &self,
         mut result: QueryResult,
@@ -43,8 +95,7 @@ impl HydrationStage {
                 if refs.is_empty() {
                     return Ok(result);
                 }
-                let property_map =
-                    self.fetch_all_properties(&refs, security_context).await?;
+                let property_map = self.fetch_all_properties(&refs, security_context).await?;
                 self.merge_dynamic_properties(&mut result, &property_map, result_context);
             }
         }
@@ -126,13 +177,13 @@ impl HydrationStage {
         let is_neighbors = matches!(result_context.query_type, Some(QueryType::Neighbors));
 
         for row in result.authorized_rows() {
-            if is_neighbors {
-                if let (Some(id), Some(entity_type)) = (
+            if is_neighbors
+                && let (Some(id), Some(entity_type)) = (
                     row.get_column_i64("_gkg_neighbor_id"),
                     row.get_column_string("_gkg_neighbor_type"),
-                ) {
-                    refs.entry(entity_type).or_default().push(id);
-                }
+                )
+            {
+                refs.entry(entity_type).or_default().push(id);
             }
 
             // PathFinding and Neighbors both carry dynamic_nodes
@@ -179,11 +230,12 @@ impl HydrationStage {
         security_context: &SecurityContext,
     ) -> Result<PropertyMap, PipelineError> {
         let query_json = self.build_search_query(entity_type, ids);
-        let compiled = query_engine::compile(&query_json, &self.ontology, security_context)
-            .map_err(|e| PipelineError::Compile(e.to_string()))?;
+        let compiled =
+            query_engine::compile_with_columns(&query_json, &self.ontology, security_context)
+                .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
-        let mut query = self.client.query(&compiled.structural.sql);
-        for (key, value) in &compiled.structural.params {
+        let mut query = self.client.query(&compiled.sql);
+        for (key, value) in &compiled.params {
             query = ArrowClickHouseClient::bind_param(query, key, value);
         }
         let batches = query
@@ -192,6 +244,71 @@ impl HydrationStage {
             .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
         self.parse_property_batches(entity_type, &batches)
+    }
+
+    /// Fetch just the auth_id_column for a set of entity IDs. Returns a map
+    /// of (entity_type, entity_pk) -> auth_id for use in pre-auth resolution.
+    async fn fetch_auth_ids(
+        &self,
+        entity_type: &str,
+        ids: &[i64],
+        auth_id_column: &str,
+        security_context: &SecurityContext,
+    ) -> Result<HashMap<(String, i64), i64>, PipelineError> {
+        let query_json = self.build_auth_id_query(entity_type, ids, auth_id_column);
+        let compiled =
+            query_engine::compile_with_columns(&query_json, &self.ontology, security_context)
+                .map_err(|e| PipelineError::Compile(e.to_string()))?;
+
+        let mut query = self.client.query(&compiled.sql);
+        for (key, value) in &compiled.params {
+            query = ArrowClickHouseClient::bind_param(query, key, value);
+        }
+        let batches = query
+            .fetch_arrow()
+            .await
+            .map_err(|e| PipelineError::Execution(e.to_string()))?;
+
+        let mut result = HashMap::new();
+        for batch in &batches {
+            let schema = batch.schema();
+            let pk_idx = schema.index_of("_gkg_n_id").ok();
+            let auth_idx = schema.index_of(auth_id_column).ok();
+
+            let (Some(pk_idx), Some(auth_idx)) = (pk_idx, auth_idx) else {
+                continue;
+            };
+
+            let pk_col = batch.column(pk_idx).as_any().downcast_ref::<Int64Array>();
+            let auth_col = batch.column(auth_idx).as_any().downcast_ref::<Int64Array>();
+
+            let (Some(pks), Some(auths)) = (pk_col, auth_col) else {
+                continue;
+            };
+
+            for row in 0..batch.num_rows() {
+                if pks.is_null(row) || auths.is_null(row) {
+                    continue;
+                }
+                result.insert((entity_type.to_string(), pks.value(row)), auths.value(row));
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn build_auth_id_query(&self, entity_type: &str, ids: &[i64], auth_id_column: &str) -> String {
+        serde_json::json!({
+            "query_type": "search",
+            "node": {
+                "id": "n",
+                "entity": entity_type,
+                "columns": [auth_id_column],
+                "node_ids": ids
+            },
+            "limit": 1000
+        })
+        .to_string()
     }
 
     fn build_search_query(&self, entity_type: &str, ids: &[i64]) -> String {
@@ -282,16 +399,13 @@ impl HydrationStage {
 
         for row in result.authorized_rows_mut() {
             // For Neighbors: merge using _gkg_neighbor_id/_gkg_neighbor_type
-            if is_neighbors {
-                let id = row.get_column_i64("_gkg_neighbor_id");
-                let entity_type = row.get_column_string("_gkg_neighbor_type");
-
-                if let (Some(id), Some(entity_type)) = (id, entity_type)
-                    && let Some(props) = property_map.get(&(entity_type, id))
-                {
-                    for (key, value) in props {
-                        row.set_column(key.clone(), value.clone());
-                    }
+            if is_neighbors
+                && let Some(id) = row.get_column_i64("_gkg_neighbor_id")
+                && let Some(entity_type) = row.get_column_string("_gkg_neighbor_type")
+                && let Some(props) = property_map.get(&(entity_type, id))
+            {
+                for (key, value) in props {
+                    row.set_column(key.clone(), value.clone());
                 }
             }
 

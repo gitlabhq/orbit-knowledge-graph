@@ -171,8 +171,8 @@ async fn fail_closed_no_authorization_returns_nothing() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
@@ -205,8 +205,8 @@ async fn fail_closed_partial_authorization_denies_unknown_ids() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5);
@@ -249,8 +249,8 @@ async fn fail_closed_explicit_deny_filters_row() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
@@ -291,8 +291,8 @@ async fn single_hop_user_group_verifies_both_nodes() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
@@ -362,8 +362,8 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
@@ -415,8 +415,8 @@ async fn three_hop_user_group_project_verifies_all_paths() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -488,8 +488,8 @@ async fn three_hop_denying_one_project_removes_only_those_paths() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -553,8 +553,8 @@ async fn group_project_two_hop_verifies_exact_pairs() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
 
@@ -612,8 +612,8 @@ async fn single_node_project_query_verifies_all_projects() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let p = result.ctx().get("p").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
@@ -672,13 +672,13 @@ async fn all_nodes_have_required_type_columns() {
         "_gkg_p_type",
     ] {
         assert!(
-            query.sql.contains(&format!("AS {col}")),
+            query.structural.sql.contains(&format!("AS {col}")),
             "SQL must include {col}"
         );
     }
 
-    let batches = ctx.query_parameterized(&query).await;
-    let result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -709,8 +709,8 @@ async fn empty_query_result_stays_empty() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert_eq!(result.len(), 0);
 
@@ -743,8 +743,8 @@ async fn all_authorized_preserves_all_data() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
 
@@ -781,8 +781,8 @@ async fn all_columns_preserved_after_redaction() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
 
@@ -891,8 +891,8 @@ async fn all_columns_preserved_on_three_hop_traversal() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -933,8 +933,8 @@ async fn redacted_rows_filtered_from_authorized_iterator() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     let all_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
@@ -1065,8 +1065,8 @@ async fn path_finding_extracts_all_nodes_from_path() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert!(!result.is_empty(), "should find at least one path");
 
@@ -1108,8 +1108,8 @@ async fn path_finding_no_authorization_returns_nothing() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
     assert!(raw_count > 0, "should find paths before redaction");
@@ -1141,8 +1141,8 @@ async fn path_finding_denying_intermediate_node_filters_path() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
     assert!(raw_count > 0, "should find paths");
@@ -1202,8 +1202,8 @@ async fn path_finding_all_nodes_authorized_preserves_paths() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
 
@@ -1240,8 +1240,8 @@ async fn path_finding_denying_start_node_filters_all_paths() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert!(!result.is_empty());
 
@@ -1275,8 +1275,8 @@ async fn path_finding_denying_end_node_filters_those_paths() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
     assert!(raw_count > 0);
@@ -1324,8 +1324,8 @@ async fn path_finding_multiple_paths_independent_authorization() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
     assert!(raw_count >= 2, "should find paths to both projects");
@@ -1377,8 +1377,8 @@ async fn path_finding_shared_intermediate_node_authorization() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
     assert!(raw_count >= 2, "should find paths from both users");
@@ -1427,8 +1427,8 @@ async fn path_finding_deep_traversal_all_nodes_verified() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
     assert!(raw_count > 0, "should find some paths");
@@ -1490,8 +1490,8 @@ async fn path_finding_all_paths_denied_returns_empty() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert!(!result.is_empty(), "should have paths before redaction");
 
@@ -1543,13 +1543,13 @@ async fn search_with_complex_filters_and_redaction() {
 
     // Verify search queries don't generate JOINs
     assert!(
-        !query.sql.contains("JOIN"),
+        !query.structural.sql.contains("JOIN"),
         "search queries should not produce JOINs, got: {}",
-        query.sql
+        query.structural.sql
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     // Should find alice, bob, charlie, diana (all active and in the username list)
@@ -1603,8 +1603,8 @@ async fn search_projects_with_visibility_and_path_filters() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let p = result.ctx().get("p").unwrap().clone();
 
     // Should find: 1000 (public), 1002 (internal), 1004 (public)
@@ -1654,8 +1654,8 @@ async fn search_groups_with_traversal_path_starts_with() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
 
     // All our test groups have paths starting with "1/"
@@ -1702,8 +1702,8 @@ async fn search_with_id_range_filter() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
@@ -1743,8 +1743,8 @@ async fn search_with_specific_node_ids() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let p = result.ctx().get("p").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
@@ -1792,8 +1792,8 @@ async fn search_no_results_with_impossible_filter() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert_eq!(result.len(), 0, "should find no users");
 
@@ -1824,8 +1824,8 @@ async fn search_fail_closed_no_authorization() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
     assert_eq!(raw_count, 3, "should find all 3 groups");
@@ -1867,16 +1867,16 @@ async fn search_preserves_metadata_columns_after_redaction() {
 
     // Verify the SQL includes the required metadata columns
     assert!(
-        query.sql.contains("_gkg_u_id"),
+        query.structural.sql.contains("_gkg_u_id"),
         "SQL should include _gkg_u_id"
     );
     assert!(
-        query.sql.contains("_gkg_u_type"),
+        query.structural.sql.contains("_gkg_u_type"),
         "SQL should include _gkg_u_type"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     // Check columns exist before redaction
@@ -1988,28 +1988,28 @@ async fn column_selection_specific_columns_includes_mandatory_columns() {
 
     // The generated SQL MUST contain the mandatory redaction columns
     assert!(
-        query.sql.contains("_gkg_u_id"),
+        query.structural.sql.contains("_gkg_u_id"),
         "SQL must include _gkg_u_id for redaction. Got: {}",
-        query.sql
+        query.structural.sql
     );
     assert!(
-        query.sql.contains("_gkg_u_type"),
+        query.structural.sql.contains("_gkg_u_type"),
         "SQL must include _gkg_u_type for redaction. Got: {}",
-        query.sql
+        query.structural.sql
     );
 
     // Also verify the requested columns are present
     assert!(
-        query.sql.contains("u_username"),
+        query.structural.sql.contains("u_username"),
         "SQL must include requested column u_username"
     );
     assert!(
-        query.sql.contains("u_state"),
+        query.structural.sql.contains("u_state"),
         "SQL must include requested column u_state"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 users before redaction");
@@ -2063,34 +2063,34 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
 
     // CRITICAL: Mandatory columns must be present for redaction
     assert!(
-        query.sql.contains("_gkg_g_id"),
+        query.structural.sql.contains("_gkg_g_id"),
         "wildcard must include _gkg_g_id for redaction"
     );
     assert!(
-        query.sql.contains("_gkg_g_type"),
+        query.structural.sql.contains("_gkg_g_type"),
         "wildcard must include _gkg_g_type for redaction"
     );
 
     // Group entity columns from ontology
     assert!(
-        query.sql.contains("g_id"),
+        query.structural.sql.contains("g_id"),
         "wildcard should include g_id column"
     );
     assert!(
-        query.sql.contains("g_name"),
+        query.structural.sql.contains("g_name"),
         "wildcard should include g_name column"
     );
     assert!(
-        query.sql.contains("g_visibility_level"),
+        query.structural.sql.contains("g_visibility_level"),
         "wildcard should include g_visibility_level column"
     );
     assert!(
-        query.sql.contains("g_traversal_path"),
+        query.structural.sql.contains("g_traversal_path"),
         "wildcard should include g_traversal_path column"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
 
     assert_eq!(result.len(), 3, "should have all 3 groups before redaction");
@@ -2134,16 +2134,16 @@ async fn column_selection_omitted_includes_mandatory_columns() {
 
     // Mandatory columns MUST be present even when columns is omitted
     assert!(
-        query.sql.contains("_gkg_u_id"),
+        query.structural.sql.contains("_gkg_u_id"),
         "mandatory _gkg_u_id must be present when columns omitted"
     );
     assert!(
-        query.sql.contains("_gkg_u_type"),
+        query.structural.sql.contains("_gkg_u_type"),
         "mandatory _gkg_u_type must be present when columns omitted"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 users");
@@ -2207,33 +2207,33 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns()
 
     // CRITICAL: ALL nodes must have mandatory columns for redaction
     assert!(
-        query.sql.contains("_gkg_u_id"),
+        query.structural.sql.contains("_gkg_u_id"),
         "User node must have _gkg_u_id. SQL: {}",
-        query.sql
+        query.structural.sql
     );
     assert!(
-        query.sql.contains("_gkg_u_type"),
+        query.structural.sql.contains("_gkg_u_type"),
         "User node must have _gkg_u_type"
     );
     assert!(
-        query.sql.contains("_gkg_g_id"),
+        query.structural.sql.contains("_gkg_g_id"),
         "Group node must have _gkg_g_id"
     );
     assert!(
-        query.sql.contains("_gkg_g_type"),
+        query.structural.sql.contains("_gkg_g_type"),
         "Group node must have _gkg_g_type"
     );
     assert!(
-        query.sql.contains("_gkg_p_id"),
+        query.structural.sql.contains("_gkg_p_id"),
         "Project node must have _gkg_p_id"
     );
     assert!(
-        query.sql.contains("_gkg_p_type"),
+        query.structural.sql.contains("_gkg_p_type"),
         "Project node must have _gkg_p_type"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -2293,8 +2293,8 @@ async fn column_selection_redaction_works_with_specific_columns() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
@@ -2358,8 +2358,8 @@ async fn column_selection_fail_closed_on_any_unauthorized_node() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     // Authorize user and group, but DENY the project
     // This should filter ALL rows because fail-closed
@@ -2407,8 +2407,8 @@ async fn column_selection_data_values_preserved_through_redaction() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     // Before redaction, verify we have data
@@ -2463,16 +2463,16 @@ async fn column_selection_id_in_list_no_duplication() {
 
     // Should have mandatory columns plus requested columns (no duplicates)
     assert!(
-        query.sql.contains("_gkg_p_id"),
+        query.structural.sql.contains("_gkg_p_id"),
         "mandatory _gkg_p_id must exist"
     );
     assert!(
-        query.sql.contains("_gkg_p_type"),
+        query.structural.sql.contains("_gkg_p_type"),
         "mandatory _gkg_p_type must exist"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let p = result.ctx().get("p").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 projects");
@@ -2542,41 +2542,44 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
 
     // User (group_by node) should have mandatory columns
     assert!(
-        query.sql.contains("_gkg_u_id"),
+        query.structural.sql.contains("_gkg_u_id"),
         "group_by node must have _gkg_u_id"
     );
     assert!(
-        query.sql.contains("_gkg_u_type"),
+        query.structural.sql.contains("_gkg_u_type"),
         "group_by node must have _gkg_u_type"
     );
 
     // MergeRequest (target node, being aggregated) should NOT have mandatory columns
     // because it doesn't appear as individual rows
     assert!(
-        !query.sql.contains("_gkg_mr_id"),
+        !query.structural.sql.contains("_gkg_mr_id"),
         "aggregated target node should not have _gkg_mr_id"
     );
     assert!(
-        !query.sql.contains("_gkg_mr_type"),
+        !query.structural.sql.contains("_gkg_mr_type"),
         "aggregated target node should not have _gkg_mr_type"
     );
 
     // Should have the aggregation
-    assert!(query.sql.contains("COUNT"), "should have COUNT aggregation");
     assert!(
-        query.sql.contains("GROUP BY"),
+        query.structural.sql.contains("COUNT"),
+        "should have COUNT aggregation"
+    );
+    assert!(
+        query.structural.sql.contains("GROUP BY"),
         "should have GROUP BY clause"
     );
 
     // User's requested columns should be in SELECT and GROUP BY
     assert!(
-        query.sql.contains("u_username"),
+        query.structural.sql.contains("u_username"),
         "group_by node requested columns should be in SELECT: {}",
-        query.sql
+        query.structural.sql
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
@@ -2641,32 +2644,32 @@ async fn column_selection_aggregation_with_wildcard_columns() {
 
     // User (group_by node) should have mandatory columns
     assert!(
-        query.sql.contains("_gkg_u_id"),
+        query.structural.sql.contains("_gkg_u_id"),
         "group_by node must have _gkg_u_id"
     );
     assert!(
-        query.sql.contains("_gkg_u_type"),
+        query.structural.sql.contains("_gkg_u_type"),
         "group_by node must have _gkg_u_type"
     );
 
     // Wildcard should expand to include user columns from ontology
     assert!(
-        query.sql.contains("u_id"),
+        query.structural.sql.contains("u_id"),
         "wildcard should include u_id: {}",
-        query.sql
+        query.structural.sql
     );
     assert!(
-        query.sql.contains("u_username"),
+        query.structural.sql.contains("u_username"),
         "wildcard should include u_username: {}",
-        query.sql
+        query.structural.sql
     );
 
     // All user columns should be in GROUP BY (required by ClickHouse)
-    let group_by_count = query.sql.matches("GROUP BY").count();
+    let group_by_count = query.structural.sql.matches("GROUP BY").count();
     assert_eq!(group_by_count, 1, "should have exactly one GROUP BY clause");
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
@@ -2710,8 +2713,8 @@ async fn column_selection_traversal_join_semantics_preserved() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
 
@@ -2780,18 +2783,18 @@ async fn column_selection_filters_work_with_columns() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Should have mandatory columns and requested column
-    assert!(query.sql.contains("_gkg_u_id"));
-    assert!(query.sql.contains("_gkg_u_type"));
-    assert!(query.sql.contains("u_username"));
+    assert!(query.structural.sql.contains("_gkg_u_id"));
+    assert!(query.structural.sql.contains("_gkg_u_type"));
+    assert!(query.structural.sql.contains("u_username"));
 
     // Filter by state should be in WHERE clause
     assert!(
-        query.sql.contains("state") || query.sql.contains("WHERE"),
+        query.structural.sql.contains("state") || query.structural.sql.contains("WHERE"),
         "query should filter by state"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     // Should find 4 active users (eve is blocked)
@@ -2832,8 +2835,8 @@ async fn column_selection_fail_closed_no_authorization() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let raw_count = result.len();
     assert_eq!(raw_count, 5, "should have all 5 users");
@@ -2882,31 +2885,31 @@ async fn neighbors_query_comprehensive() {
 
     // Verify center node mandatory columns for redaction
     assert!(
-        query.sql.contains("_gkg_u_id"),
+        query.structural.sql.contains("_gkg_u_id"),
         "neighbors query must include _gkg_u_id for center node. SQL: {}",
-        query.sql
+        query.structural.sql
     );
     assert!(
-        query.sql.contains("_gkg_u_type"),
+        query.structural.sql.contains("_gkg_u_type"),
         "neighbors query must include _gkg_u_type"
     );
 
     // Verify neighbor columns are present
     assert!(
-        query.sql.contains("_gkg_neighbor_id"),
+        query.structural.sql.contains("_gkg_neighbor_id"),
         "must include _gkg_neighbor_id"
     );
     assert!(
-        query.sql.contains("_gkg_neighbor_type"),
+        query.structural.sql.contains("_gkg_neighbor_type"),
         "must include _gkg_neighbor_type"
     );
     assert!(
-        query.sql.contains("_gkg_relationship_type"),
+        query.structural.sql.contains("_gkg_relationship_type"),
         "must include _gkg_relationship_type"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     // User 1 is member of groups 100 and 102
@@ -2938,8 +2941,8 @@ async fn neighbors_query_comprehensive() {
     assert_eq!(redacted, 2, "all rows should be redacted");
 
     // --- Test 3: Fail-closed when only center node authorized (neighbors not authorized) ---
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1]); // Only authorize center node
@@ -2955,8 +2958,8 @@ async fn neighbors_query_comprehensive() {
     assert_eq!(redacted, 2);
 
     // --- Test 4: Both center node AND neighbors authorized ---
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1]);
@@ -2975,8 +2978,8 @@ async fn neighbors_query_comprehensive() {
     assert_eq!(neighbor_ids, HashSet::from([100, 102]));
 
     // --- Test 5: Partial neighbor authorization filters specific rows ---
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("users", &[1]);
@@ -3017,8 +3020,8 @@ async fn neighbors_query_center_node_denied_filters_all() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert_eq!(result.len(), 2, "should have 2 neighbors before redaction");
 
@@ -3053,8 +3056,8 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
     let raw_count = result.len();
@@ -3101,8 +3104,8 @@ async fn neighbors_query_incoming_with_redaction() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     // Group 100 has incoming MEMBER_OF from users 1 and 2
     assert_eq!(result.len(), 2, "group 100 should have 2 incoming members");
@@ -3167,23 +3170,29 @@ async fn traversal_edge_columns_preserved_through_redaction() {
 
     // Verify edge columns are in the SQL
     assert!(
-        query.sql.contains("e0_type"),
+        query.structural.sql.contains("e0_type"),
         "SQL must contain e0_type. SQL: {}",
-        query.sql
+        query.structural.sql
     );
-    assert!(query.sql.contains("e0_src"), "SQL must contain e0_src");
     assert!(
-        query.sql.contains("e0_src_type"),
+        query.structural.sql.contains("e0_src"),
+        "SQL must contain e0_src"
+    );
+    assert!(
+        query.structural.sql.contains("e0_src_type"),
         "SQL must contain e0_src_type"
     );
-    assert!(query.sql.contains("e0_dst"), "SQL must contain e0_dst");
     assert!(
-        query.sql.contains("e0_dst_type"),
+        query.structural.sql.contains("e0_dst"),
+        "SQL must contain e0_dst"
+    );
+    assert!(
+        query.structural.sql.contains("e0_dst_type"),
         "SQL must contain e0_dst_type"
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
@@ -3334,13 +3343,25 @@ async fn multi_hop_edge_columns_survive_redaction() {
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Verify both edge column sets are in SQL
-    assert!(query.sql.contains("e0_type"), "SQL must contain e0_type");
-    assert!(query.sql.contains("e0_src"), "SQL must contain e0_src");
-    assert!(query.sql.contains("e1_type"), "SQL must contain e1_type");
-    assert!(query.sql.contains("e1_src"), "SQL must contain e1_src");
+    assert!(
+        query.structural.sql.contains("e0_type"),
+        "SQL must contain e0_type"
+    );
+    assert!(
+        query.structural.sql.contains("e0_src"),
+        "SQL must contain e0_src"
+    );
+    assert!(
+        query.structural.sql.contains("e1_type"),
+        "SQL must contain e1_type"
+    );
+    assert!(
+        query.structural.sql.contains("e1_src"),
+        "SQL must contain e1_src"
+    );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -3462,13 +3483,13 @@ async fn neighbors_query_filters_by_entity_type() {
     // Verify the SQL contains source_kind filter to prevent ID collisions
     // Note: the entity type 'User' is passed as a parameter, not embedded in SQL
     assert!(
-        query.sql.contains("source_kind"),
+        query.structural.sql.contains("source_kind"),
         "neighbors query must filter by source_kind to prevent ID collisions. SQL: {}",
-        query.sql
+        query.structural.sql
     );
 
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     // User 1 has exactly 2 MEMBER_OF edges (to groups 100 and 102)
     // The "colliding" edge (Group 1 -> Project 9999) should NOT appear
@@ -3545,8 +3566,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     // We have 3 human users (alice, bob, charlie)
     assert_eq!(
@@ -3576,8 +3597,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert_eq!(
         result.len(),
@@ -3598,8 +3619,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     // We have 2 opened MRs (2000, 2001)
     assert_eq!(
@@ -3624,8 +3645,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert_eq!(
         result.len(),
@@ -3640,8 +3661,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     // 2 opened + 1 closed = 3
     assert_eq!(
@@ -3662,8 +3683,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let mut result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     // 4 active users (alice, bob, charlie, diana)
     assert_eq!(
@@ -3688,8 +3709,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert_eq!(
         result.len(),
@@ -3704,8 +3725,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query).await;
-    let result = QueryResult::from_batches(&batches, &query.result_context);
+    let batches = ctx.query_parameterized(&query.structural).await;
+    let result = QueryResult::from_batches(&batches, &query.structural.result_context);
 
     assert_eq!(
         result.len(),

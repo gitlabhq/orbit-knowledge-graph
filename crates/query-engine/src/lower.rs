@@ -28,11 +28,26 @@ fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
 
 /// Lower validated input into an AST node.
 ///
+/// For traversal/search queries the structural SELECT is empty: property columns
+/// are fetched via hydration after authorization. Use [`lower_with_columns`] when
+/// compiling hydration queries that need property columns in the SELECT.
+///
 /// Note: Ontology-dependent transformations (wildcard expansion, enum coercion)
 /// are handled in normalize.rs. Lowering is purely mechanical.
 pub fn lower(input: &Input) -> Result<Node> {
+    lower_inner(input, true)
+}
+
+/// Lower with property columns included in the SELECT.
+///
+/// Used for hydration queries that need to return actual entity data.
+pub fn lower_with_columns(input: &Input) -> Result<Node> {
+    lower_inner(input, false)
+}
+
+fn lower_inner(input: &Input, slim: bool) -> Result<Node> {
     match input.query_type {
-        QueryType::Traversal | QueryType::Search => lower_traversal(input),
+        QueryType::Traversal | QueryType::Search => lower_traversal(input, slim),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
@@ -43,14 +58,19 @@ pub fn lower(input: &Input) -> Result<Node> {
 // Traversal & Search
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_traversal(input: &Input) -> Result<Node> {
+fn lower_traversal(input: &Input, slim: bool) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
-    // Structural query: SELECT is empty here. enforce_return adds _gkg_{alias}_id,
-    // _gkg_{alias}_type, and _gkg_{alias}_pk columns. Property columns are fetched
-    // via hydration after authorization and redaction.
-    let select = Vec::new();
+    let select = if slim {
+        // Structural query: SELECT is empty here. enforce_return adds _gkg_{alias}_id,
+        // _gkg_{alias}_type, and _gkg_{alias}_pk columns. Property columns are fetched
+        // via hydration after authorization and redaction.
+        Vec::new()
+    } else {
+        // Full query (hydration): include property and edge columns in SELECT.
+        build_select(&input.nodes, &input.relationships, &edge_aliases)
+    };
 
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
@@ -67,6 +87,31 @@ fn lower_traversal(input: &Input) -> Result<Node> {
         limit: Some(input.limit),
         ..Default::default()
     })))
+}
+
+/// Build full SELECT with property and edge columns (used for hydration queries).
+fn build_select(
+    nodes: &[InputNode],
+    rels: &[InputRelationship],
+    edge_aliases: &HashMap<usize, String>,
+) -> Vec<SelectExpr> {
+    let mut select = Vec::new();
+    for node in nodes {
+        if let Some(ColumnSelection::List(cols)) = &node.columns {
+            for col in cols {
+                select.push(SelectExpr::new(
+                    Expr::col(&node.id, col),
+                    format!("{}_{col}", node.id),
+                ));
+            }
+        }
+    }
+    for (i, _rel) in rels.iter().enumerate() {
+        if let Some(alias) = edge_aliases.get(&i) {
+            select.extend(edge_select_exprs(alias));
+        }
+    }
+    select
 }
 
 fn lower_aggregation(input: &Input) -> Result<Node> {
@@ -816,6 +861,7 @@ fn resolve_table(node: &InputNode) -> Result<String> {
 #[allow(irrefutable_let_patterns)]
 mod tests {
     use super::*;
+    use crate::enforce::enforce_return;
     use crate::input::parse_input;
     use crate::normalize;
     use crate::validate;
@@ -867,13 +913,21 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
         println!("{:?}", q);
         assert_eq!(q.limit, Some(25));
-        // 2 node columns + 6 edge columns (path, type, src, src_type, dst, dst_type)
-        assert_eq!(q.select.len(), 8);
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
+
+        // After enforce_return: 2 nodes × 2 columns (_gkg_{alias}_id, _gkg_{alias}_type) = 4
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.select.len(), 4);
     }
 
     #[test]
@@ -893,10 +947,11 @@ mod tests {
         };
         println!("{:?}", q);
         assert!(!q.group_by.is_empty());
-        assert!(q
-            .select
-            .iter()
-            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"))
+        );
     }
 
     #[test]
@@ -1224,16 +1279,25 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
         println!("{:?}", q);
 
         assert_eq!(q.limit, Some(10));
-        assert_eq!(q.select.len(), 1);
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
         assert!(q.where_clause.is_some());
         assert!(q.group_by.is_empty());
         assert_eq!(count_unions(&q.from), 0);
+
+        // After enforce_return: 1 node × 2 columns = 2
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.select.len(), 2);
     }
 
     #[test]
@@ -1249,12 +1313,20 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
 
         assert_eq!(q.limit, Some(50));
-        assert_eq!(q.select.len(), 1);
+        assert!(q.select.is_empty());
+
+        // After enforce_return: 1 node × 2 columns = 2
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.select.len(), 2);
     }
 
     #[test]
@@ -1271,17 +1343,25 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
 
-        // Should have: u_id (always), u_username, u_state
-        assert_eq!(q.select.len(), 3);
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
+
+        // After enforce_return: _gkg_u_id, _gkg_u_type (property columns u_username,
+        // u_state are fetched via hydration, not in structural SELECT)
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.select.len(), 2);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_id".to_string()));
-        assert!(aliases.contains(&&"u_username".to_string()));
-        assert!(aliases.contains(&&"u_state".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_type".to_string()));
     }
 
     #[test]
@@ -1298,18 +1378,25 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
 
-        // Should have id + all fields from ontology (username, state, created_at)
-        assert!(q.select.len() >= 4);
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
+
+        // After enforce_return: _gkg_u_id, _gkg_u_type. Wildcard property columns
+        // (username, state, created_at) are fetched via hydration, not in structural.
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.select.len(), 2);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_id".to_string()));
-        assert!(aliases.contains(&&"u_username".to_string()));
-        assert!(aliases.contains(&&"u_state".to_string()));
-        assert!(aliases.contains(&&"u_created_at".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_type".to_string()));
     }
 
     #[test]
@@ -1326,21 +1413,28 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
 
-        // Should have: u_id, u_username, n_id, n_confidential + 6 edge columns
-        assert_eq!(q.select.len(), 10);
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
+
+        // After enforce_return: 2 nodes × 2 columns = 4 (_gkg_{u,n}_{id,type}).
+        // Property columns (u_username, n_confidential) and edge columns (e0_*)
+        // are fetched via hydration, not in structural SELECT.
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.select.len(), 4);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_id".to_string()));
-        assert!(aliases.contains(&&"u_username".to_string()));
-        assert!(aliases.contains(&&"n_id".to_string()));
-        assert!(aliases.contains(&&"n_confidential".to_string()));
-        // Edge columns
-        assert!(aliases.contains(&&"e0_type".to_string()));
-        assert!(aliases.contains(&&"e0_src".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_n_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_n_type".to_string()));
     }
 
     #[test]
@@ -1356,13 +1450,22 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
 
-        // No columns specified - should only have id
-        assert_eq!(q.select.len(), 1);
-        assert_eq!(q.select[0].alias, Some("u_id".to_string()));
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
+
+        // After enforce_return: _gkg_u_id, _gkg_u_type
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.select.len(), 2);
+        assert_eq!(q.select[0].alias, Some("_gkg_u_id".to_string()));
+        assert_eq!(q.select[1].alias, Some("_gkg_u_type".to_string()));
     }
 
     #[test]
@@ -1379,16 +1482,25 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
 
-        // When id is explicitly in the list, it should appear once
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
+
+        // After enforce_return: _gkg_u_id, _gkg_u_type. Property columns (u_id,
+        // u_username) are fetched via hydration, not in structural SELECT.
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
         assert_eq!(q.select.len(), 2);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_id".to_string()));
-        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_type".to_string()));
     }
 
     #[test]
@@ -1415,7 +1527,7 @@ mod tests {
                 {"id": "start", "entity": "Project", "node_ids": [100]},
                 {"id": "end", "entity": "Project", "node_ids": [200]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "include_edges": true}
         }"#,
         );
 
@@ -1423,7 +1535,7 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Final select should have _gkg_path, _gkg_edges, and depth
+        // Final select should have _gkg_path, _gkg_edges (include_edges=true), and depth
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"_gkg_path".to_string()));
         assert!(aliases.contains(&&"_gkg_edges".to_string()));
@@ -1445,6 +1557,39 @@ mod tests {
 
         // CTE should have a limit to prevent memory explosion
         assert_eq!(q.ctes[0].query.limit, Some(1000));
+    }
+
+    #[test]
+    fn test_path_finding_without_edges() {
+        let input = validated_input(
+            r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Project", "node_ids": [100]},
+                {"id": "end", "entity": "Project", "node_ids": [200]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // include_edges defaults to false: no _gkg_edges column
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"_gkg_path".to_string()));
+        assert!(!aliases.contains(&&"_gkg_edges".to_string()));
+        assert!(aliases.contains(&&"depth".to_string()));
+
+        // CTE should not have edges column
+        let cte_select: Vec<_> = q.ctes[0]
+            .query
+            .select
+            .iter()
+            .filter_map(|s| s.alias.as_ref())
+            .collect();
+        assert!(!cte_select.contains(&&"edges".to_string()));
     }
 
     #[test]
@@ -1512,17 +1657,38 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let mut node = lower(&input).unwrap();
+        let Node::Query(ref q) = node else {
             panic!("expected Query");
         };
 
-        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
 
-        // Should have edge columns for both relationships (e0 and e1)
-        assert!(aliases.contains(&&"e0_type".to_string()));
-        assert!(aliases.contains(&&"e0_src".to_string()));
-        assert!(aliases.contains(&&"e1_type".to_string()));
-        assert!(aliases.contains(&&"e1_src".to_string()));
+        // Both edge joins should still be in the FROM clause
+        fn count_joins(from: &TableRef) -> usize {
+            match from {
+                TableRef::Join { left, right, .. } => 1 + count_joins(left) + count_joins(right),
+                _ => 0,
+            }
+        }
+        assert!(count_joins(&q.from) >= 2, "should have multiple joins");
+
+        // After enforce_return: 3 nodes × 2 columns = 6 (_gkg_{u,n,p}_{id,type}).
+        // Edge columns (e0_*, e1_*) are fetched via hydration, not in structural.
+        let _ctx = enforce_return(&mut node, &input).unwrap();
+        let Node::Query(q) = &node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.select.len(), 6);
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"_gkg_u_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_u_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_n_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_n_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_p_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_p_type".to_string()));
     }
 
     #[test]

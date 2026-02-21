@@ -605,9 +605,10 @@ mod tests {
             empty_ctx(),
         )
         .unwrap();
-        assert!(r
-            .sql
-            .contains("relationship_kind IN {type_e:Array(String)})"));
+        assert!(
+            r.sql
+                .contains("relationship_kind IN {type_e:Array(String)})")
+        );
         assert_eq!(
             r.params.get("type_e"),
             Some(&Value::Array(vec![

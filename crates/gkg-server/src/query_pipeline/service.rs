@@ -57,8 +57,19 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             result_context: compiled.structural.result_context,
         };
 
-        let query_result = ExtractionStage::execute(execution_output);
-        let authorized = AuthorizationStage::execute(query_result, tx, stream).await?;
+        let mut extraction = ExtractionStage::execute(execution_output);
+
+        // Pre-auth hydration: for dynamic queries with indirect-auth entities,
+        // resolve auth_id_column values before authorization so resource_checks()
+        // and apply_authorizations() can use the correct auth IDs.
+        if matches!(compiled.hydration, query_engine::HydrationPlan::Dynamic) {
+            let result_ctx = extraction.query_result.ctx().clone();
+            self.hydration
+                .resolve_auth_ids(&mut extraction.query_result, &result_ctx, &security_context)
+                .await?;
+        }
+
+        let authorized = AuthorizationStage::execute(extraction, tx, stream).await?;
         let redacted = RedactionStage::execute(authorized);
         let redacted_count = redacted.redacted_count;
         let query_result = redacted.query_result;
