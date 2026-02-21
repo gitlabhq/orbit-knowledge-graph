@@ -24,10 +24,18 @@
 #    15.  Run create_test_data.rb to create users, groups, projects, etc.
 #
 #   Phase 3: GKG stack (optional, use --gkg flag)
-#    16.  Start Tilt (ClickHouse, NATS, Siphon, GKG indexer + webserver)
-#    17.  Wait for ClickHouse, run gitlab:clickhouse:migrate from toolbox
-#         (creates datalake siphon_* tables — same as GDK)
-#    18.  Wait for Tilt CI to finish (all pods healthy)
+#    15.  Deploy ClickHouse (standalone, BEFORE Tilt)
+#    16.  Run datalake migrations (gitlab:clickhouse:migrate — same as GDK)
+#         Creates siphon_* tables + materialized views + dictionaries
+#    17.  Apply GKG graph schema (graph.sql — gl_* tables)
+#    18.  Drop stale replication slot (if re-running Phase 3)
+#    19.  Verify knowledge_graph_enabled_namespaces rows in PG
+#    20.  Start Tilt (NATS, siphon, GKG — data flows into pre-existing tables)
+#    21.  Wait for siphon data to flow (poll hierarchy tables)
+#    22.  Run dispatch-indexing (triggers GKG indexer)
+#    23.  OPTIMIZE TABLE FINAL (force ReplacingMergeTree deduplication)
+#    24.  Verify graph tables have data
+#    25.  Wait for Tilt CI to finish
 #
 # Usage:
 #   cd ~/Desktop/Code/gkg/e2e/caproni
@@ -94,16 +102,20 @@
 #       tables, creates replication slot automatically at startup
 #
 #   ClickHouse:
+#     - ClickHouse is deployed BEFORE Tilt (via clickhouse.yaml) so that
+#       all migrations run before siphon starts inserting data. This is
+#       critical because MVs only fire on NEW inserts — if siphon inserts
+#       data before MVs exist, hierarchy tables stay empty.
 #     - The default user in ClickHouse 25.1-alpine requires explicit empty
-#       password config. The Tiltfile sets CLICKHOUSE_PASSWORD="" and
+#       password config. clickhouse.yaml sets CLICKHOUSE_PASSWORD="" and
 #       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1.
 #     - CLICKHOUSE_PASSWORD in e2e/tilt/.secrets must be empty (not omitted)
 #
 #   ClickHouse / schema:
 #     - gkg-server has NO --mode=migrate. Valid modes: dispatch-indexing,
 #       health-check, indexer, webserver. All assume tables already exist.
-#     - GKG graph schema is applied by the Tiltfile's gkg-e2e-migrate Job
-#       via clickhouse-client (fixtures/schema/graph.sql).
+#     - GKG graph schema (gl_* tables) is applied by setup.sh via
+#       clickhouse-client directly in the ClickHouse pod.
 #     - Datalake tables (siphon_*) are created by GitLab's ClickHouse
 #       migrations: bundle exec rake gitlab:clickhouse:migrate — the same
 #       way GDK does it. setup.sh writes a config/click_house.yml into
@@ -111,13 +123,23 @@
 #       the rake task.
 #     - The rake task needs RAILS_ENV=production and the database
 #       (gitlab_clickhouse_development) must already exist in ClickHouse.
-#     - Some tables (siphon_members, etc.) have DEFAULT expressions
-#       referencing ClickHouse dictionaries. These dictionaries aren't
-#       created in our setup, but the migration uses --ignore-error
-#       approach implicitly: the migration files use CREATE TABLE IF NOT
-#       EXISTS, so tables that can't be created are skipped. The
-#       siphon_members table needs a manual fallback (created without
-#       dictionary dependency in the setup script).
+#     - The MV chain: siphon_namespaces -> namespace_traversal_paths,
+#       siphon_projects -> project_namespace_traversal_paths,
+#       siphon_merge_requests -> hierarchy_merge_requests,
+#       siphon_issues -> hierarchy_work_items. All automatic via MVs.
+#
+#   knowledge_graph_enabled_namespaces / dispatch-indexing:
+#     - The PG table knowledge_graph_enabled_namespaces has no Rails model.
+#       It's a raw table with (id, root_namespace_id, created_at, updated_at).
+#     - Must be populated with root namespace IDs for the dispatcher to know
+#       which namespaces to index. Siphon replicates it to ClickHouse.
+#     - dispatch-indexing reads siphon_knowledge_graph_enabled_namespaces in
+#       ClickHouse, then publishes NATS messages to trigger the indexer.
+#     - Run dispatch-indexing as a k8s Job: same image as indexer
+#       (gkg-server:dev), mount gkg-indexer-config configmap, use ENTRYPOINT
+#       with args: ["--mode=dispatch-indexing"].
+#     - After indexing, run OPTIMIZE TABLE FINAL on all gl_* tables to force
+#       ReplacingMergeTree deduplication before running tests.
 #
 #   Siphon consumer:
 #     - The siphon consumer (Go binary) uses clickhouse-go/v2 which speaks
@@ -526,49 +548,50 @@ fi
 # ==============================================================================
 # PHASE 3: GKG stack (optional)
 # ==============================================================================
+#
+# The key insight: ClickHouse must be deployed and fully migrated BEFORE siphon
+# starts, because materialized views (MVs) only fire on NEW inserts. If siphon
+# inserts data before MVs exist, hierarchy tables stay empty and traversal
+# paths default to '0/'.
+#
+# Order of operations:
+#   1. Deploy ClickHouse (standalone, not via Tilt)
+#   2. Run datalake migrations (creates siphon_* tables, MVs, dictionaries)
+#   3. Apply GKG graph schema (creates gl_* tables)
+#   4. Insert knowledge_graph_enabled_namespaces rows in PG
+#   5. Start Tilt (siphon + GKG — data flows into pre-existing tables)
+#   6. Wait for siphon data + indexing
+#   7. OPTIMIZE TABLE FINAL for deduplication
+# ==============================================================================
 
 if [ "${START_GKG}" = true ]; then
-  log "PHASE 3: Starting GKG stack with Tilt"
+  log "PHASE 3: GKG stack"
 
   ensure_docker_host
 
-  # Tilt's custom_build calls scripts/build-dev.sh which cross-compiles the
-  # GKG server to aarch64-linux via cargo-zigbuild. This requires:
-  #   - Rust + cargo
-  #   - zig (installed via mise)
-  #   - cargo-zigbuild (auto-installed by build-dev.sh)
-  # The Tiltfile's custom_build does 'cd ../.. && scripts/build-dev.sh'
-  # because Tilt CWD is e2e/tilt/ but the cargo workspace is at repo root.
+  CH_URL="http://gkg-e2e-clickhouse.${DEFAULT_NS}.svc.cluster.local:8123"
+  CH_DB="gitlab_clickhouse_development"
+  GRAPH_DB="gkg-development"
 
-  step "Starting Tilt in background (GKG_E2E_CAPRONI=1)..."
+  # ── 15. Deploy ClickHouse ──────────────────────────────────────────────────
+  # Deployed as a standalone k8s resource BEFORE Tilt, so we can run all
+  # migrations before siphon starts inserting data.
 
-  # The Tiltfile handles:
-  #   - ClickHouse StatefulSet (25.1-alpine, no auth, databases created via init SQL)
-  #   - gkg-e2e-migrate Job (applies graph.sql via clickhouse-client)
-  #   - NATS (via sub-chart)
-  #   - Siphon producer (PG WAL -> NATS) and consumer (NATS -> ClickHouse)
-  #   - GKG indexer + webserver + health-check
+  log "15. Deploying ClickHouse"
 
-  (cd "${GKG_ROOT}" && GKG_E2E_CAPRONI=1 mise exec -- tilt ci --file e2e/tilt/Tiltfile --timeout 20m) \
-    > "${LOG_DIR}/tilt-ci.log" 2>&1 &
-  TILT_PID=$!
-  step "Tilt CI started (PID ${TILT_PID}), log: ${LOG_DIR}/tilt-ci.log"
-
-  # ── 16. Wait for ClickHouse, then run datalake migrations ──────────────────
-  # Datalake tables (siphon_*) are created by GitLab's ClickHouse migrations,
-  # the same way GDK does it: write config/click_house.yml pointing at the
-  # in-cluster ClickHouse, then run bundle exec rake gitlab:clickhouse:migrate.
-
-  log "16. Running ClickHouse datalake migrations (like GDK)"
+  kubectl apply -f "${SCRIPT_DIR}/clickhouse.yaml"
+  step "ClickHouse manifests applied"
 
   step "Waiting for ClickHouse pod..."
   kubectl wait --for=condition=ready pod -l app=gkg-e2e-clickhouse \
     -n "${DEFAULT_NS}" --timeout=300s
+  step "ClickHouse is ready"
 
-  # The ClickHouse HTTP interface is at gkg-e2e-clickhouse.default.svc:8123
-  # (cross-namespace from the gitlab toolbox pod).
-  CH_URL="http://gkg-e2e-clickhouse.${DEFAULT_NS}.svc.cluster.local:8123"
-  CH_DB="gitlab_clickhouse_development"
+  # ── 16. Run datalake migrations ────────────────────────────────────────────
+  # Creates ALL siphon_* tables, materialized views, and dictionaries.
+  # Same as GDK: write config/click_house.yml, then rake gitlab:clickhouse:migrate.
+
+  log "16. Running ClickHouse datalake migrations"
 
   step "Writing config/click_house.yml to toolbox pod..."
   kubectl exec -n "${GITLAB_NS}" "${TOOLBOX_POD}" -- bash -c "cat > /srv/gitlab/config/click_house.yml <<CHEOF
@@ -585,60 +608,241 @@ CHEOF"
     bash -c 'cd /srv/gitlab && bundle exec rake gitlab:clickhouse:migrate RAILS_ENV=production' \
     2>&1 | tee "${LOG_DIR}/clickhouse-migrate.log" | tail -10
 
-  step "ClickHouse datalake migrations complete"
+  step "Datalake migrations complete (tables + MVs + dictionaries)"
 
-  # ── 17. Wait for Tilt to finish ────────────────────────────────────────────
-  log "17. Waiting for Tilt CI to finish"
-  step "Tailing Tilt log (Ctrl-C to stop tailing, Tilt continues in background)..."
+  # ── 17. Apply GKG graph schema ─────────────────────────────────────────────
+  # Creates gl_* tables (gl_user, gl_project, gl_merge_request, etc.) in the
+  # gkg-development database. These are where the indexer writes.
 
-  if wait "${TILT_PID}"; then
+  log "17. Applying GKG graph schema"
+
+  CH_POD=$(kubectl get pod -n "${DEFAULT_NS}" -l app=gkg-e2e-clickhouse \
+    -o jsonpath='{.items[0].metadata.name}')
+
+  # Copy graph.sql into the ClickHouse pod and apply it
+  kubectl cp "${GKG_ROOT}/fixtures/schema/graph.sql" \
+    "${DEFAULT_NS}/${CH_POD}:/tmp/graph.sql"
+
+  kubectl exec -n "${DEFAULT_NS}" "${CH_POD}" -- \
+    sh -c "clickhouse-client --user default --database '${GRAPH_DB}' --multiquery < /tmp/graph.sql"
+
+  step "Graph schema applied to ${GRAPH_DB}"
+
+  # ── 18. Drop stale siphon state in PG (if any) ─────────────────────────
+  # If Phase 3 is re-run after a tilt-only teardown, the old replication slot
+  # and publication persist in PG. The producer would pick up from its last
+  # LSN (past all test data) and have nothing to stream. Dropping both forces
+  # the producer to recreate the publication (triggering snapshot events for
+  # each table) and create a fresh replication slot.
+
+  log "18. Dropping stale siphon state in PG (slot + publication)"
+
+  PG_SUPERPASS=$(kubectl get secret -n "${GITLAB_NS}" gitlab-postgresql-password \
+    -o jsonpath='{.data.postgresql-postgres-password}' | base64 -d)
+
+  # Drop replication slot if it exists
+  SLOT_EXISTS=$(kubectl exec -n "${GITLAB_NS}" postgresql-0 -- \
+    bash -c "PGPASSWORD='${PG_SUPERPASS}' psql -U postgres -d gitlabhq_production -t -c \"SELECT count(*) FROM pg_replication_slots WHERE slot_name='siphon_slot_main_db';\"" 2>/dev/null | tr -d ' ')
+
+  if [ "${SLOT_EXISTS}" = "1" ]; then
+    kubectl exec -n "${GITLAB_NS}" postgresql-0 -- \
+      bash -c "PGPASSWORD='${PG_SUPERPASS}' psql -U postgres -d gitlabhq_production -c \"SELECT pg_drop_replication_slot('siphon_slot_main_db');\"" 2>&1
+    step "Dropped stale replication slot"
+  else
+    step "No stale replication slot found"
+  fi
+
+  # Drop publication (forces producer to re-add all tables, triggering snapshots)
+  kubectl exec -n "${GITLAB_NS}" postgresql-0 -- \
+    bash -c "PGPASSWORD='${PG_SUPERPASS}' psql -U postgres -d gitlabhq_production -c \"DROP PUBLICATION IF EXISTS siphon_publication_main_db;\"" 2>&1
+  step "Dropped publication (will be recreated by siphon producer)"
+
+  # ── 19. Verify knowledge_graph_enabled_namespaces ────────────────────────
+  # These rows were inserted by create_test_data.rb (Phase 2, step 5).
+  # Siphon will replicate them to siphon_knowledge_graph_enabled_namespaces
+  # in ClickHouse, which the dispatcher queries to find namespaces to index.
+
+  log "19. Verifying knowledge_graph_enabled_namespaces in PG"
+
+  kubectl exec -n "${GITLAB_NS}" "${TOOLBOX_POD}" -- \
+    bash -c "cd /srv/gitlab && echo 'puts ActiveRecord::Base.connection.select_values(\"SELECT root_namespace_id FROM knowledge_graph_enabled_namespaces ORDER BY root_namespace_id\").inspect' | bundle exec rails runner - RAILS_ENV=production" \
+    2>&1
+
+  step "knowledge_graph_enabled_namespaces verified"
+
+  # ── 20. Start Tilt ─────────────────────────────────────────────────────────
+  # Now that ClickHouse is fully migrated (datalake + graph), start Tilt which
+  # deploys NATS, siphon, and GKG. Siphon will do its initial PG snapshot and
+  # data flows into tables that already have MVs -> hierarchy tables populate
+  # automatically.
+
+  log "20. Starting Tilt (NATS + siphon + GKG)"
+
+  step "Starting Tilt CI in background..."
+  (cd "${GKG_ROOT}" && GKG_E2E_CAPRONI=1 mise exec -- tilt ci --file e2e/tilt/Tiltfile --timeout 20m) \
+    > "${LOG_DIR}/tilt-ci.log" 2>&1 &
+  TILT_PID=$!
+  echo "${TILT_PID}" > "${LOG_DIR}/tilt-ci.pid"
+  step "Tilt CI started (PID ${TILT_PID}), log: ${LOG_DIR}/tilt-ci.log"
+
+  # ── 21. Wait for siphon data ───────────────────────────────────────────────
+  # Siphon needs time to: connect to PG, create publication/replication slot,
+  # snapshot existing data, and stream it through NATS to ClickHouse.
+  # We poll hierarchy_merge_requests to know when data has flowed through.
+
+  log "21. Waiting for siphon data to flow"
+
+  step "Polling hierarchy_merge_requests for data (up to 10 min)..."
+  SIPHON_TIMEOUT=600
+  SIPHON_START=$(date +%s)
+  while true; do
+    ELAPSED=$(( $(date +%s) - SIPHON_START ))
+    if [ "${ELAPSED}" -ge "${SIPHON_TIMEOUT}" ]; then
+      warn "Timed out waiting for siphon data after ${SIPHON_TIMEOUT}s"
+      break
+    fi
+
+    # Check if hierarchy_merge_requests has rows (MVs populated)
+    ROW_COUNT=$(kubectl exec -n "${DEFAULT_NS}" "${CH_POD}" -- \
+      clickhouse-client --user default --database "${CH_DB}" \
+      --query "SELECT count() FROM hierarchy_merge_requests" 2>/dev/null || echo "0")
+
+    if [ "${ROW_COUNT}" -gt 0 ] 2>/dev/null; then
+      step "hierarchy_merge_requests has ${ROW_COUNT} rows (siphon data flowing)"
+      break
+    fi
+
+    sleep 15
+    echo "  ... waiting (${ELAPSED}s elapsed, hierarchy_merge_requests: ${ROW_COUNT:-0} rows)"
+  done
+
+  # ── 22. Run dispatch-indexing ──────────────────────────────────────────────
+  # The dispatch-indexing mode publishes NATS messages to trigger the indexer.
+  # It reads siphon_knowledge_graph_enabled_namespaces for namespace list.
+  # We run it as a one-shot k8s Job using the same gkg-server image + config.
+
+  log "22. Running dispatch-indexing"
+
+  # Delete previous job if it exists (jobs are immutable)
+  kubectl delete job gkg-dispatch-indexing -n "${DEFAULT_NS}" --ignore-not-found 2>/dev/null
+
+  kubectl apply -f - <<'DISPATCHEOF'
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gkg-dispatch-indexing
+  namespace: default
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      containers:
+        - name: dispatch
+          image: gkg-server:dev
+          imagePullPolicy: Never
+          args: ["--mode=dispatch-indexing"]
+          env:
+            - name: RUST_LOG
+              value: "info,gkg_server=debug"
+            - name: GKG_DATALAKE__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-credentials
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: gkg-indexer-config
+DISPATCHEOF
+
+  step "Waiting for dispatch-indexing job to complete..."
+  kubectl wait --for=condition=complete job/gkg-dispatch-indexing \
+    -n "${DEFAULT_NS}" --timeout=120s 2>/dev/null || {
+    warn "dispatch-indexing job did not complete. Checking logs..."
+    kubectl logs -n "${DEFAULT_NS}" job/gkg-dispatch-indexing --tail=20 2>/dev/null || true
+  }
+
+  step "dispatch-indexing complete"
+
+  # Give the indexer time to process the dispatched messages
+  step "Waiting 60s for indexer to process messages..."
+  sleep 60
+
+  # ── 23. OPTIMIZE TABLE FINAL ───────────────────────────────────────────────
+  # ReplacingMergeTree deduplication is lazy. Force it now so test assertions
+  # on exact counts work correctly.
+
+  log "23. Running OPTIMIZE TABLE FINAL on graph tables"
+
+  GL_TABLES="gl_user gl_group gl_project gl_merge_request gl_work_item gl_note gl_milestone gl_label gl_edge"
+  for table in ${GL_TABLES}; do
+    kubectl exec -n "${DEFAULT_NS}" "${CH_POD}" -- \
+      clickhouse-client --user default --database "${GRAPH_DB}" \
+      --query "OPTIMIZE TABLE ${table} FINAL" 2>/dev/null || true
+  done
+
+  step "OPTIMIZE TABLE FINAL complete"
+
+  # ── 24. Verify graph tables have data ──────────────────────────────────────
+
+  log "24. Verifying graph tables"
+
+  step "Row counts in ${GRAPH_DB}:"
+  for table in ${GL_TABLES}; do
+    COUNT=$(kubectl exec -n "${DEFAULT_NS}" "${CH_POD}" -- \
+      clickhouse-client --user default --database "${GRAPH_DB}" \
+      --query "SELECT count() FROM ${table} FINAL" 2>/dev/null || echo "?")
+    echo "  ${table}: ${COUNT}"
+  done
+
+  # ── 25. Wait for Tilt CI to finish ─────────────────────────────────────────
+
+  log "25. Waiting for Tilt CI to finish"
+
+  if wait "${TILT_PID}" 2>/dev/null; then
     step "Tilt CI completed successfully"
   else
     warn "Tilt CI exited with non-zero status. Check ${LOG_DIR}/tilt-ci.log"
   fi
+
+  echo ""
+  echo "================================================================"
+  echo "  Phase 3 complete! GKG stack is running."
+  echo "================================================================"
+  echo ""
+  echo "  Run the E2E tests:"
+  echo "    kubectl exec -n ${GITLAB_NS} ${TOOLBOX_POD} -- \\"
+  echo "      bash -c 'cd /srv/gitlab && bundle exec rails runner /tmp/e2e/redaction_test.rb RAILS_ENV=production'"
+  echo ""
+
 else
   # ==============================================================================
-  # Summary
+  # Summary (Phase 1+2 only)
   # ==============================================================================
 
   echo ""
   echo "================================================================"
-  echo "  Setup complete!"
+  echo "  Phase 1+2 complete! GitLab is running."
   echo "================================================================"
   echo ""
-  echo "  GitLab is running in k8s namespace '${GITLAB_NS}'"
+  echo "  GitLab namespace: ${GITLAB_NS}"
   echo "  Toolbox pod: ${TOOLBOX_POD}"
   echo "  Logs: ${LOG_DIR}/"
   echo ""
-  echo "  Next steps:"
+  echo "  To start the GKG stack (Phase 3), re-run:"
+  echo "    ./setup.sh --phase2-only --gkg"
   echo ""
-  echo "  1. Start GKG stack:"
-  echo "     cd ${GKG_ROOT}"
-  echo "     GKG_E2E_CAPRONI=1 mise exec -- tilt up --file e2e/tilt/Tiltfile"
-  echo ""
-  echo "  2. Once ClickHouse is up, run datalake migrations (creates siphon_* tables):"
-  echo "     kubectl exec -n ${GITLAB_NS} ${TOOLBOX_POD} -- bash -c \\"
-  echo "       \"cat > /srv/gitlab/config/click_house.yml <<EOF"
-  echo "production:"
-  echo "  main:"
-  echo "    database: gitlab_clickhouse_development"
-  echo "    url: 'http://gkg-e2e-clickhouse.${DEFAULT_NS}.svc.cluster.local:8123'"
-  echo "    username: default"
-  echo "    password:"
-  echo "EOF\""
-  echo "     kubectl exec -n ${GITLAB_NS} ${TOOLBOX_POD} -- \\"
-  echo "       bash -c 'cd /srv/gitlab && bundle exec rake gitlab:clickhouse:migrate RAILS_ENV=production'"
-  echo ""
-  echo "  3. Wait for all Tilt resources to be green, then run tests:"
-  echo "     kubectl exec -n ${GITLAB_NS} ${TOOLBOX_POD} -- \\"
-  echo "       bash -c 'cd /srv/gitlab && bundle exec rails runner /tmp/e2e/redaction_test.rb RAILS_ENV=production'"
-  echo ""
-  echo "  4. To re-run create_test_data.rb after fixing bugs:"
-  echo "     for f in ${GKG_ROOT}/tests/e2e/*.rb; do"
-  echo "       kubectl cp \"\$f\" ${GITLAB_NS}/${TOOLBOX_POD}:/tmp/e2e/\$(basename \"\$f\")"
-  echo "     done"
-  echo "     kubectl exec -n ${GITLAB_NS} ${TOOLBOX_POD} -- \\"
-  echo "       bash -c 'cd /srv/gitlab && bundle exec rails runner /tmp/e2e/create_test_data.rb RAILS_ENV=production'"
+  echo "  Or manually:"
+  echo "    1. Deploy ClickHouse:   kubectl apply -f ${SCRIPT_DIR}/clickhouse.yaml"
+  echo "    2. Run migrations:      (see setup.sh --gkg for automated steps)"
+  echo "    3. Start Tilt:          GKG_E2E_CAPRONI=1 mise exec -- tilt up --file e2e/tilt/Tiltfile"
   echo ""
   echo "  PostgreSQL (for Siphon):"
   echo "    Host: postgresql.${GITLAB_NS}.svc.cluster.local:5432"
@@ -647,7 +851,7 @@ else
   echo ""
   echo "  Useful commands:"
   echo "    kubectl get pods -n ${GITLAB_NS}              # Check GitLab pods"
-  echo "    kubectl get pods -n default                    # Check GKG pods (after tilt up)"
+  echo "    kubectl get pods -n default                    # Check GKG pods"
   echo "    kubectl logs -n ${GITLAB_NS} ${TOOLBOX_POD}   # Toolbox logs"
   echo "    colima status --profile ${COLIMA_PROFILE}      # Colima status"
   echo ""

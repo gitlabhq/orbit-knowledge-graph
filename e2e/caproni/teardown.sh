@@ -70,11 +70,12 @@ if command -v tilt &>/dev/null; then
   (cd "${GKG_ROOT}" && tilt down --file e2e/tilt/Tiltfile 2>/dev/null) || true
 fi
 
-# Clean up any remaining Tilt resources in default namespace
+# Clean up any remaining resources in default namespace
+# ClickHouse is deployed standalone (not via Tilt) since setup.sh Phase 3
 step "Cleaning up default namespace resources..."
 kubectl delete deployment -n default -l 'app.kubernetes.io/managed-by=tilt' --ignore-not-found 2>/dev/null || true
 kubectl delete statefulset -n default gkg-e2e-clickhouse --ignore-not-found 2>/dev/null || true
-kubectl delete job -n default gkg-e2e-migrate --ignore-not-found 2>/dev/null || true
+kubectl delete job -n default gkg-e2e-migrate gkg-dispatch-indexing --ignore-not-found 2>/dev/null || true
 kubectl delete service -n default gkg-e2e-clickhouse --ignore-not-found 2>/dev/null || true
 kubectl delete configmap -n default gkg-e2e-clickhouse-init --ignore-not-found 2>/dev/null || true
 kubectl delete secret -n default postgres-credentials clickhouse-credentials gkg-server-credentials --ignore-not-found 2>/dev/null || true
@@ -138,7 +139,9 @@ fi
 
 # Remove logs and manifest
 if [ -d "${LOG_DIR}" ]; then
-  rm -f "${LOG_DIR}/create-test-data.log" "${LOG_DIR}/manifest.json" "${LOG_DIR}/colima-start.log"
+  rm -f "${LOG_DIR}/create-test-data.log" "${LOG_DIR}/manifest.json" \
+        "${LOG_DIR}/colima-start.log" "${LOG_DIR}/tilt-ci.log" \
+        "${LOG_DIR}/tilt-ci.pid" "${LOG_DIR}/clickhouse-migrate.log"
   step "Cleaned ${LOG_DIR}/"
 fi
 

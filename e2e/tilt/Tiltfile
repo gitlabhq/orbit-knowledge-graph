@@ -1,12 +1,15 @@
 # =============================================================================
 # Tiltfile — E2E self-contained environment
 #
-# Spins up the GKG infrastructure stack inside k8s:
-#   - ClickHouse (both datalake + graph databases)
-#   - NATS
-#   - Siphon producer (reads from Postgres)
-#   - Siphon consumer (writes to in-cluster ClickHouse)
-#   - GKG indexer + webserver
+# Manages the GKG data pipeline and server inside k8s:
+#   - NATS (message bus between siphon producer and consumer)
+#   - Siphon producer (reads PG WAL, publishes to NATS)
+#   - Siphon consumer (reads NATS, writes to ClickHouse)
+#   - GKG indexer + webserver + health-check
+#
+# ClickHouse is deployed separately (by setup.sh via clickhouse.yaml) BEFORE
+# Tilt starts. This ensures datalake migrations (MVs, dictionaries) and graph
+# schema are applied before siphon begins inserting data.
 #
 # Two modes:
 #
@@ -16,7 +19,7 @@
 #
 #   Caproni mode (GKG_E2E_CAPRONI=1):
 #     GitLab Rails runs in-cluster (deployed by caproni). Siphon reads from the
-#     in-cluster Postgres at gitlab-postgresql.gitlab.svc.cluster.local.
+#     in-cluster Postgres at postgresql.gitlab.svc.cluster.local.
 #     Tests run via `kubectl exec` into the toolbox pod.
 #
 # Usage:
@@ -24,15 +27,16 @@
 #   cd ~/Desktop/Code/gkg
 #   mise exec -- tilt up --file e2e/tilt/Tiltfile
 #
-#   # Caproni mode:
+#   # Caproni mode (setup.sh does this automatically):
 #   cd ~/Desktop/Code/gkg
 #   GKG_E2E_CAPRONI=1 mise exec -- tilt up --file e2e/tilt/Tiltfile
 #
 # Prerequisites:
 #   - Colima running with Kubernetes: colima start --kubernetes
 #   - e2e/tilt/.secrets file exists (cp e2e/tilt/.secrets.example e2e/tilt/.secrets)
+#   - ClickHouse already deployed and migrated (setup.sh handles this)
 #   - GDK mode: GDK running with PostgreSQL + logical replication
-#   - Caproni mode: `caproni up` + `post-deploy.sh` already completed
+#   - Caproni mode: setup.sh Phase 1+2 completed (GitLab deployed, test data created)
 # =============================================================================
 
 update_settings(k8s_upsert_timeout_secs=600)
@@ -97,184 +101,15 @@ stringData:
     jwt_secret=secrets.get('GKG_JWT_SECRET', ''),
 )))
 
-# ── ClickHouse (in-cluster) ───────────────────────────────────────────────────
+# ── ClickHouse (deployed externally) ──────────────────────────────────────────
 #
-# A single ClickHouse instance serves both databases:
-#   - gitlab_clickhouse_development  (datalake — Siphon writes here)
-#   - gkg-development                (graph — GKG indexer writes here)
+# ClickHouse is deployed by setup.sh BEFORE Tilt starts (via clickhouse.yaml).
+# This ensures datalake migrations (MVs, dictionaries) run before siphon
+# starts inserting data. The service name is gkg-e2e-clickhouse in the default
+# namespace — same as before, so all Helm values work unchanged.
 #
-# An init ConfigMap creates both databases and applies the GKG graph schema on
-# first startup.
-
-clickhouse_init_sql = '''
-CREATE DATABASE IF NOT EXISTS `gitlab_clickhouse_development`;
-CREATE DATABASE IF NOT EXISTS `gkg-development`;
-'''
-
-k8s_yaml(blob('''
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: gkg-e2e-clickhouse-init
-data:
-  init.sql: |
-''' + '\n'.join(['    ' + line for line in clickhouse_init_sql.strip().split('\n')]) + '''
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: gkg-e2e-clickhouse
-spec:
-  selector:
-    app: gkg-e2e-clickhouse
-  ports:
-    - name: http
-      port: 8123
-      targetPort: 8123
-    - name: native
-      port: 9000
-      targetPort: 9000
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: gkg-e2e-clickhouse
-spec:
-  serviceName: gkg-e2e-clickhouse
-  replicas: 1
-  selector:
-    matchLabels:
-      app: gkg-e2e-clickhouse
-  template:
-    metadata:
-      labels:
-        app: gkg-e2e-clickhouse
-    spec:
-      enableServiceLinks: false
-      containers:
-        - name: clickhouse
-          image: clickhouse/clickhouse-server:25.1-alpine
-          ports:
-            - containerPort: 8123
-              name: http
-            - containerPort: 9000
-              name: native
-          env:
-            - name: CLICKHOUSE_USER
-              value: default
-            - name: CLICKHOUSE_PASSWORD
-              value: ""
-            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
-              value: "1"
-            - name: CLICKHOUSE_DB
-              value: gitlab_clickhouse_development
-          resources:
-            requests:
-              memory: 1Gi
-              cpu: 100m
-            limits:
-              memory: 4Gi
-              cpu: 1000m
-          startupProbe:
-            httpGet:
-              path: /ping
-              port: 8123
-            failureThreshold: 30
-            periodSeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /ping
-              port: 8123
-            periodSeconds: 30
-          readinessProbe:
-            httpGet:
-              path: /ping
-              port: 8123
-            periodSeconds: 10
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/clickhouse
-            - name: init
-              mountPath: /docker-entrypoint-initdb.d
-      volumes:
-        - name: init
-          configMap:
-            name: gkg-e2e-clickhouse-init
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 5Gi
-'''))
-
-k8s_resource(
-    'gkg-e2e-clickhouse',
-    labels=['database'],
-    port_forwards=['8124:8123'],  # exposed on host as :8124 to avoid clash with GDK's :8123
-)
-
-# ── GKG graph schema migration job ────────────────────────────────────────────
-#
-# The gkg-server modes (indexer, webserver, etc.) assume ClickHouse tables
-# already exist. This Job applies the GKG graph schema only.
-#
-# Datalake tables (siphon_*) are created by GitLab's ClickHouse migrations
-# (bundle exec rake gitlab:clickhouse:migrate), run from the toolbox pod in
-# setup.sh — the same way GDK does it.
-#
-# Schema file:
-#   - fixtures/schema/graph.sql  (graph tables: gl_user, gl_project, etc.)
-
-graph_sql = str(read_file('../../fixtures/schema/graph.sql'))
-
-k8s_yaml(blob('''
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: gkg-e2e-schema
-data:
-  graph.sql: |
-''' + '\n'.join(['    ' + line for line in graph_sql.strip().split('\n')]) + '''
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: gkg-e2e-migrate
-  annotations:
-    "helm.sh/hook-delete-policy": before-hook-creation
-spec:
-  template:
-    spec:
-      enableServiceLinks: false
-      restartPolicy: OnFailure
-      containers:
-        - name: migrate
-          image: clickhouse/clickhouse-server:25.1-alpine
-          command: ["sh", "-c"]
-          args:
-            - |
-              echo "Applying graph schema to gkg-development..."
-              clickhouse-client --host gkg-e2e-clickhouse --user default --database gkg-development --multiquery < /schema/graph.sql
-              echo "Graph schema migration complete."
-          volumeMounts:
-            - name: schema
-              mountPath: /schema
-      volumes:
-        - name: schema
-          configMap:
-            name: gkg-e2e-schema
-'''))
-
-k8s_resource(
-    'gkg-e2e-migrate',
-    labels=['database'],
-    resource_deps=['gkg-e2e-clickhouse'],
-    trigger_mode=TRIGGER_MODE_MANUAL,
-    auto_init=True,
-)
+# Graph schema (graph.sql) and datalake schema (gitlab:clickhouse:migrate)
+# are both applied by setup.sh before Tilt starts.
 
 # ── GKG server image (shared with main Tiltfile) ──────────────────────────────
 
@@ -307,11 +142,11 @@ k8s_yaml(helm(
     values=values_files,
 ))
 
-k8s_resource('gkg-indexer',    labels=['gkg'], resource_deps=['gkg-e2e-migrate'], pod_readiness='ignore')
-k8s_resource('gkg-webserver',  labels=['gkg'], resource_deps=['gkg-e2e-migrate'], pod_readiness='ignore',
+k8s_resource('gkg-indexer',    labels=['gkg'], pod_readiness='ignore')
+k8s_resource('gkg-webserver',  labels=['gkg'], pod_readiness='ignore',
              port_forwards=['4200:8080', '50051:50051'])
 k8s_resource('gkg-health-check', labels=['gkg'], pod_readiness='ignore',
              port_forwards=['4201:4201'])
 k8s_resource('gkg-e2e-nats',      labels=['infrastructure'])
 k8s_resource('siphon-producer',   labels=['siphon'], resource_deps=['gkg-e2e-nats'])
-k8s_resource('siphon-consumer',   labels=['siphon'], resource_deps=['gkg-e2e-nats', 'gkg-e2e-clickhouse'])
+k8s_resource('siphon-consumer',   labels=['siphon'], resource_deps=['gkg-e2e-nats'])

@@ -290,9 +290,27 @@ manifest[:memberships] = {
 }
 
 # =============================================================================
-# 5. CREATE MILESTONES
+# 5. POPULATE knowledge_graph_enabled_namespaces
 # =============================================================================
-puts "\n--- 5. Creating milestones ---"
+# This PG table has no Rails model — it's a raw table that siphon replicates
+# to siphon_knowledge_graph_enabled_namespaces in ClickHouse. The dispatcher
+# queries it to find which namespaces to index.
+puts "\n--- 5. Populating knowledge_graph_enabled_namespaces ---"
+
+root_groups = [toolbox_group, gitlab_org_group, redaction_group]
+root_groups.each do |group|
+  ActiveRecord::Base.connection.execute(<<~SQL)
+    INSERT INTO knowledge_graph_enabled_namespaces (root_namespace_id, created_at, updated_at)
+    VALUES (#{group.id}, NOW(), NOW())
+    ON CONFLICT (root_namespace_id) DO NOTHING
+  SQL
+  puts "  Enabled namespace: #{group.name} (root_namespace_id: #{group.id})"
+end
+
+# =============================================================================
+# 6. CREATE MILESTONES
+# =============================================================================
+puts "\n--- 6. Creating milestones ---"
 
 milestone_count = 0
 all_projects.each do |proj|
@@ -326,9 +344,9 @@ manifest[:milestones] = all_projects.each_with_object({}) do |proj, h|
 end
 
 # =============================================================================
-# 6. CREATE LABELS
+# 7. CREATE LABELS
 # =============================================================================
-puts "\n--- 6. Creating labels ---"
+puts "\n--- 7. Creating labels ---"
 
 label_count = 0
 colors = %w[#FF0000 #00FF00 #0000FF #FF6600 #9900CC #009999]
@@ -349,9 +367,9 @@ manifest[:labels] = all_projects.each_with_object({}) do |proj, h|
 end
 
 # =============================================================================
-# 7. CREATE WORK ITEMS (issues)
+# 8. CREATE WORK ITEMS (issues)
 # =============================================================================
-puts "\n--- 7. Creating work items (issues) ---"
+puts "\n--- 8. Creating work items (issues) ---"
 
 work_item_count = 0
 all_projects.each do |proj|
@@ -390,9 +408,9 @@ manifest[:work_items] = all_projects.each_with_object({}) do |proj, h|
 end
 
 # =============================================================================
-# 8. CREATE MERGE REQUESTS
+# 9. CREATE MERGE REQUESTS
 # =============================================================================
-puts "\n--- 8. Creating merge requests ---"
+puts "\n--- 9. Creating merge requests ---"
 
 mr_count = 0
 
@@ -458,9 +476,9 @@ manifest[:merge_requests] = all_projects.each_with_object({}) do |proj, h|
 end
 
 # =============================================================================
-# 9. CREATE NOTES (on MRs and issues)
+# 10. CREATE NOTES (on MRs and issues)
 # =============================================================================
-puts "\n--- 9. Creating notes ---"
+puts "\n--- 10. Creating notes ---"
 
 note_count = 0
 all_public_projects.each do |proj|
@@ -517,9 +535,9 @@ manifest[:notes] = all_projects.each_with_object({}) do |proj, h|
 end
 
 # =============================================================================
-# 10. COMPUTE COUNTS FOR MANIFEST
+# 11. COMPUTE COUNTS FOR MANIFEST
 # =============================================================================
-puts "\n--- 10. Computing entity counts ---"
+puts "\n--- 11. Computing entity counts ---"
 
 total_projects = Project.count
 total_users = User.count
@@ -582,9 +600,9 @@ manifest[:counts][:per_user] = {
 }
 
 # =============================================================================
-# 11. WRITE MANIFEST
+# 12. WRITE MANIFEST
 # =============================================================================
-puts "\n--- 11. Writing manifest ---"
+puts "\n--- 12. Writing manifest ---"
 
 File.write(MANIFEST_PATH, JSON.pretty_generate(manifest))
 puts "  Manifest written to #{MANIFEST_PATH}"
