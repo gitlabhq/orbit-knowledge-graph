@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HealthCheckConfig {
@@ -9,50 +9,8 @@ pub struct HealthCheckConfig {
     pub bind_address: SocketAddr,
     #[serde(default = "default_namespace")]
     pub namespace: String,
-    #[serde(
-        default = "default_services",
-        deserialize_with = "deserialize_services"
-    )]
+    #[serde(default = "default_services")]
     pub services: Vec<String>,
-}
-
-/// Accepts either a sequence or a comma-separated string.
-/// The `config` crate passes env vars as strings, not sequences, when
-/// `try_parsing` is disabled.
-fn deserialize_services<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    use serde::de::{SeqAccess, Visitor};
-    use std::fmt;
-
-    struct ServicesVisitor;
-
-    impl<'de> Visitor<'de> for ServicesVisitor {
-        type Value = Vec<String>;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a sequence or comma-separated string")
-        }
-
-        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Vec<String>, E> {
-            Ok(value
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect())
-        }
-
-        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<String>, A::Error> {
-            let mut services = Vec::new();
-            while let Some(s) = seq.next_element::<String>()? {
-                services.push(s);
-            }
-            Ok(services)
-        }
-    }
-
-    deserializer.deserialize_any(ServicesVisitor)
 }
 
 fn default_bind_address() -> SocketAddr {

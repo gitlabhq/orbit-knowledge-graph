@@ -5,25 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::arrow_client::ArrowClickHouseClient;
 use crate::error::ConfigurationError;
 
-fn default_database() -> String {
-    "default".to_string()
-}
-
-fn default_url() -> String {
-    "http://127.0.0.1:8123".to_string()
-}
-
-fn default_username() -> String {
-    "default".to_string()
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClickHouseConfiguration {
-    #[serde(default = "default_database")]
     pub database: String,
-    #[serde(default = "default_url")]
     pub url: String,
-    #[serde(default = "default_username")]
     pub username: String,
     #[serde(default)]
     pub password: Option<String>,
