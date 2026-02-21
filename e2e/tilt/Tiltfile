@@ -216,17 +216,19 @@ k8s_resource(
     port_forwards=['8124:8123'],  # exposed on host as :8124 to avoid clash with GDK's :8123
 )
 
-# ── GKG schema migration job ──────────────────────────────────────────────────
+# ── GKG graph schema migration job ────────────────────────────────────────────
 #
 # The gkg-server modes (indexer, webserver, etc.) assume ClickHouse tables
-# already exist. We apply the schema SQL files via clickhouse-client in a Job.
+# already exist. This Job applies the GKG graph schema only.
 #
-# Two schema files:
-#   - fixtures/schema/graph.sql          (graph tables: gl_user, gl_project, etc.)
-#   - crates/indexer/tests/fixtures/siphon.sql  (datalake tables: siphon_*)
+# Datalake tables (siphon_*) are created by GitLab's ClickHouse migrations
+# (bundle exec rake gitlab:clickhouse:migrate), run from the toolbox pod in
+# setup.sh — the same way GDK does it.
+#
+# Schema file:
+#   - fixtures/schema/graph.sql  (graph tables: gl_user, gl_project, etc.)
 
 graph_sql = str(read_file('../../fixtures/schema/graph.sql'))
-siphon_sql = str(read_file('../../crates/indexer/tests/fixtures/siphon.sql'))
 
 k8s_yaml(blob('''
 apiVersion: v1
@@ -236,8 +238,6 @@ metadata:
 data:
   graph.sql: |
 ''' + '\n'.join(['    ' + line for line in graph_sql.strip().split('\n')]) + '''
-  siphon.sql: |
-''' + '\n'.join(['    ' + line for line in siphon_sql.strip().split('\n')]) + '''
 ---
 apiVersion: batch/v1
 kind: Job
@@ -258,9 +258,7 @@ spec:
             - |
               echo "Applying graph schema to gkg-development..."
               clickhouse-client --host gkg-e2e-clickhouse --user default --database gkg-development --multiquery < /schema/graph.sql
-              echo "Applying siphon schema to gitlab_clickhouse_development..."
-              clickhouse-client --host gkg-e2e-clickhouse --user default --database gitlab_clickhouse_development --multiquery < /schema/siphon.sql
-              echo "Schema migration complete."
+              echo "Graph schema migration complete."
           volumeMounts:
             - name: schema
               mountPath: /schema

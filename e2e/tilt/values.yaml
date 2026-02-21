@@ -38,7 +38,8 @@ postgres:
 clickhouse:
   datalake:
     host: gkg-e2e-clickhouse   # in-cluster service name
-    port: 8123
+    port: 8123                  # HTTP interface — used by GKG server (Rust)
+    nativePort: 9000            # Native TCP — used by Siphon consumer (Go clickhouse-go/v2)
     database: gitlab_clickhouse_development
     user: default
     ssl: false
