@@ -38,12 +38,13 @@
 #
 # Usage:
 #   cd ~/Desktop/Code/gkg/e2e/caproni
-#   ./setup.sh                  # Phase 1 + 2 only
-#   ./setup.sh --gkg            # Phase 1 + 2 + 3 (full stack + tests)
+#   ./setup.sh                  # Phase 1 + 2 (default)
+#   ./setup.sh --gkg            # Phase 1 + 2 + 3 (full stack + E2E tests)
+#   ./setup.sh --phase1         # Phase 1 only (cluster + GitLab)
+#   ./setup.sh --phase2         # Phase 2 only (post-deploy + test data)
+#   ./setup.sh --phase3         # Phase 3 only (GKG stack + E2E tests)
 #   ./setup.sh --skip-build     # Skip CNG image build (reuse existing)
 #   ./setup.sh --skip-caproni   # Skip caproni install (already installed)
-#   ./setup.sh --phase2-only    # Only run post-deploy steps (cluster exists)
-#   ./setup.sh --phase3-only    # Only run GKG stack (Phase 3, skip 1+2)
 #
 # All configuration lives in config.sh. Override any value via env var:
 #   GITLAB_SRC=/my/path COLIMA_MEMORY=16 ./setup.sh --gkg
@@ -171,31 +172,54 @@ set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/config.sh"
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
+#
+# Phase selection:
+#   (no flags)       Phase 1 + 2
+#   --gkg            Phase 1 + 2 + 3
+#   --phase1         Phase 1 only
+#   --phase2         Phase 2 only
+#   --phase3         Phase 3 only
+#
+# Modifiers:
+#   --skip-build     Skip CNG image build in Phase 1 (reuse existing images)
+#   --skip-caproni   Skip caproni CLI install in Phase 1
 
 SKIP_BUILD=false
 SKIP_CAPRONI=false
-PHASE2_ONLY=false
-PHASE3_ONLY=false
-START_GKG=false
+RUN_PHASE1=false
+RUN_PHASE2=false
+RUN_PHASE3=false
+EXPLICIT_PHASE=false
+
 for arg in "$@"; do
   case "$arg" in
     --skip-build)    SKIP_BUILD=true ;;
     --skip-caproni)  SKIP_CAPRONI=true ;;
-    --phase2-only)   PHASE2_ONLY=true ;;
-    --phase3-only)   PHASE3_ONLY=true; PHASE2_ONLY=true; START_GKG=true ;;
-    --gkg)           START_GKG=true ;;
+    --phase1)        RUN_PHASE1=true; EXPLICIT_PHASE=true ;;
+    --phase2)        RUN_PHASE2=true; EXPLICIT_PHASE=true ;;
+    --phase3)        RUN_PHASE3=true; EXPLICIT_PHASE=true ;;
+    --gkg)           RUN_PHASE1=true; RUN_PHASE2=true; RUN_PHASE3=true; EXPLICIT_PHASE=true ;;
+    # Legacy aliases
+    --phase2-only)   RUN_PHASE2=true; EXPLICIT_PHASE=true ;;
+    --phase3-only)   RUN_PHASE3=true; EXPLICIT_PHASE=true ;;
     --help|-h)
-      head -40 "$0" | grep '^#' | sed 's/^# *//'
+      head -45 "$0" | grep '^#' | sed 's/^# *//'
       exit 0
       ;;
   esac
 done
 
+# Default: Phase 1 + 2 if no explicit phase flags
+if [ "${EXPLICIT_PHASE}" = false ]; then
+  RUN_PHASE1=true
+  RUN_PHASE2=true
+fi
+
 mkdir -p "${LOG_DIR}"
 
 # ── Validate prerequisites ────────────────────────────────────────────────────
 
-if [ "${PHASE2_ONLY}" = false ]; then
+if [ "${RUN_PHASE1}" = true ]; then
   if [ "${SKIP_BUILD}" = false ] && [ ! -f "${GITLAB_SRC}/Gemfile" ]; then
     echo "ERROR: GitLab source not found at ${GITLAB_SRC}/Gemfile"
     echo "Set GITLAB_SRC to the path of your GitLab Rails checkout."
@@ -216,14 +240,15 @@ echo "  GKG root:     ${GKG_ROOT}"
 echo "  GitLab src:   ${GITLAB_SRC}"
 echo "  Caproni src:  ${CAPRONI_SRC}"
 echo "  Colima:       profile=${COLIMA_PROFILE} mem=${COLIMA_MEMORY}GiB cpus=${COLIMA_CPUS}"
-echo "  Flags:        skip-build=${SKIP_BUILD} skip-caproni=${SKIP_CAPRONI} phase2-only=${PHASE2_ONLY} gkg=${START_GKG}"
+echo "  Phases:       1=${RUN_PHASE1} 2=${RUN_PHASE2} 3=${RUN_PHASE3}"
+echo "  Modifiers:    skip-build=${SKIP_BUILD} skip-caproni=${SKIP_CAPRONI}"
 echo "================================================================"
 
 # ==============================================================================
 # PHASE 1: Cluster + GitLab
 # ==============================================================================
 
-if [ "${PHASE2_ONLY}" = false ]; then
+if [ "${RUN_PHASE1}" = true ]; then
 
   # ── 1. Install Caproni CLI ──────────────────────────────────────────────────
 
@@ -361,13 +386,13 @@ if [ "${PHASE2_ONLY}" = false ]; then
     echo "  ${line}"
   done
 
-fi  # end PHASE2_ONLY check
+fi  # end RUN_PHASE1
 
 # ==============================================================================
 # PHASE 2: Post-deploy
 # ==============================================================================
 
-if [ "${PHASE3_ONLY}" = false ]; then
+if [ "${RUN_PHASE2}" = true ]; then
 
 log "PHASE 2: Post-deploy setup"
 
@@ -475,24 +500,50 @@ else
   warn "Check ${LOG_DIR}/create-test-data.log for errors"
 fi
 
-fi  # end PHASE3_ONLY check (skip Phase 2)
+fi  # end RUN_PHASE2
 
 # ==============================================================================
 # PHASE 3: GKG stack
 # ==============================================================================
 
-if [ "${START_GKG}" = true ]; then
+if [ "${RUN_PHASE3}" = true ]; then
 
-  # Re-resolve toolbox pod (needed if we skipped Phase 2 via --phase3-only)
+  # Resolve toolbox pod (needed if Phase 2 didn't run in this invocation)
   ensure_docker_host
   TOOLBOX_POD=$(get_toolbox_pod)
   if [ -z "${TOOLBOX_POD}" ]; then
     echo "ERROR: No toolbox pod found in ${GITLAB_NS} namespace."
     exit 1
   fi
+
   log "PHASE 3: GKG stack"
 
   ensure_docker_host
+
+  # Re-bridge PG credentials if missing (tilt-only teardown removes them)
+  if ! kubectl get secret postgres-credentials -n "${DEFAULT_NS}" &>/dev/null; then
+    step "Re-bridging PostgreSQL credentials to ${DEFAULT_NS}..."
+    PG_PASS=$(kubectl get secret -n "${GITLAB_NS}" "${PG_SECRET_NAME}" \
+      -o jsonpath="{.data.${PG_PASSWORD_KEY}}" | base64 -d)
+    kubectl create secret generic postgres-credentials \
+      -n "${DEFAULT_NS}" \
+      --from-literal=password="${PG_PASS}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+  fi
+
+  # Re-write .secrets if missing (tilt-only teardown removes it)
+  if [ ! -f "${TILT_DIR}/.secrets" ]; then
+    step "Re-generating ${TILT_DIR}/.secrets..."
+    PG_PASS="${PG_PASS:-$(kubectl get secret -n "${GITLAB_NS}" "${PG_SECRET_NAME}" \
+      -o jsonpath="{.data.${PG_PASSWORD_KEY}}" | base64 -d)}"
+    JWT_SECRET=$(toolbox_exec "${TOOLBOX_POD}" cat "${JWT_SECRET_PATH}" 2>/dev/null || echo "")
+    cat > "${TILT_DIR}/.secrets" <<EOF
+# Auto-generated by setup.sh -- $(date -u +%Y-%m-%dT%H:%M:%SZ)
+POSTGRES_PASSWORD=${PG_PASS}
+CLICKHOUSE_PASSWORD=
+GKG_JWT_SECRET=${JWT_SECRET}
+EOF
+  fi
 
   # ── 15. Deploy ClickHouse ──────────────────────────────────────────────────
 
@@ -606,6 +657,29 @@ CHEOF"
     echo "  ... waiting (${ELAPSED}s elapsed, hierarchy_merge_requests: ${ROW_COUNT:-0} rows)"
   done
 
+  # Also wait for siphon_knowledge_graph_enabled_namespaces — the dispatcher
+  # reads this table to know which namespaces to index. If we dispatch before
+  # it's populated, we get 0 namespace indexing requests.
+  step "Waiting for siphon_knowledge_graph_enabled_namespaces..."
+  KG_START=$(date +%s)
+  while true; do
+    KG_ELAPSED=$(( $(date +%s) - KG_START ))
+    if [ "${KG_ELAPSED}" -ge 300 ]; then
+      warn "Timed out waiting for siphon_knowledge_graph_enabled_namespaces after 300s"
+      break
+    fi
+
+    KG_COUNT=$(ch_query "${CH_DATALAKE_DB}" "SELECT count() FROM siphon_knowledge_graph_enabled_namespaces" || echo "0")
+
+    if [ "${KG_COUNT}" -gt 0 ] 2>/dev/null; then
+      step "siphon_knowledge_graph_enabled_namespaces has ${KG_COUNT} rows"
+      break
+    fi
+
+    sleep 10
+    echo "  ... waiting (${KG_ELAPSED}s elapsed, siphon_knowledge_graph_enabled_namespaces: ${KG_COUNT:-0} rows)"
+  done
+
   # ── 22. Run dispatch-indexing ──────────────────────────────────────────────
 
   log "22. Running dispatch-indexing"
@@ -665,9 +739,30 @@ DISPATCHEOF
 
   step "dispatch-indexing complete"
 
-  # Give the indexer time to process the dispatched messages
-  step "Waiting 60s for indexer to process messages..."
-  sleep 60
+  # Wait for the indexer to process dispatched messages by polling gl_project.
+  # gl_project is populated by namespace indexing, so once it has rows, the
+  # indexer has processed at least some namespace requests.
+  step "Waiting for indexer to populate graph tables (polling gl_project)..."
+  IDX_START=$(date +%s)
+  while true; do
+    IDX_ELAPSED=$(( $(date +%s) - IDX_START ))
+    if [ "${IDX_ELAPSED}" -ge 300 ]; then
+      warn "Timed out waiting for indexer after 300s"
+      break
+    fi
+
+    PROJECT_COUNT=$(ch_query "${CH_GRAPH_DB}" "SELECT count() FROM gl_project" || echo "0")
+
+    if [ "${PROJECT_COUNT}" -gt 0 ] 2>/dev/null; then
+      step "gl_project has ${PROJECT_COUNT} rows — indexer is working"
+      # Give it a bit more time to finish all pipelines
+      sleep 30
+      break
+    fi
+
+    sleep 10
+    echo "  ... waiting (${IDX_ELAPSED}s elapsed, gl_project: ${PROJECT_COUNT:-0} rows)"
+  done
 
   # ── 23. OPTIMIZE TABLE FINAL ───────────────────────────────────────────────
 
@@ -730,31 +825,35 @@ DISPATCHEOF
   echo "      bash -c 'cd ${RAILS_ROOT} && KNOWLEDGE_GRAPH_GRPC_ENDPOINT=${GKG_GRPC_ENDPOINT} bundle exec rails runner ${E2E_POD_DIR}/redaction_test.rb RAILS_ENV=production'"
   echo ""
 
-else
-  # ==============================================================================
-  # Summary (Phase 1+2 only)
-  # ==============================================================================
+fi  # end RUN_PHASE3
 
-  echo ""
-  echo "================================================================"
-  echo "  Phase 1+2 complete! GitLab is running."
-  echo "================================================================"
-  echo ""
-  echo "  GitLab namespace: ${GITLAB_NS}"
-  echo "  Toolbox pod: ${TOOLBOX_POD}"
-  echo "  Logs: ${LOG_DIR}/"
-  echo ""
-  echo "  To start the GKG stack (Phase 3), re-run:"
-  echo "    ./setup.sh --phase2-only --gkg"
-  echo ""
-  echo "  PostgreSQL (for Siphon):"
-  echo "    Host: ${PG_POD%.0}.${GITLAB_NS}.svc.cluster.local:5432"
-  echo "    Database: ${PG_DATABASE}"
-  echo "    User: ${PG_USER}"
-  echo ""
-  echo "  Useful commands:"
-  echo "    kubectl get pods -n ${GITLAB_NS}              # Check GitLab pods"
-  echo "    kubectl get pods -n ${DEFAULT_NS}              # Check GKG pods"
-  echo "    colima status --profile ${COLIMA_PROFILE}      # Colima status"
+# ==============================================================================
+# Summary
+# ==============================================================================
+
+echo ""
+echo "================================================================"
+echo "  Setup complete!"
+PHASES_RAN=""
+[ "${RUN_PHASE1}" = true ] && PHASES_RAN="${PHASES_RAN}1 "
+[ "${RUN_PHASE2}" = true ] && PHASES_RAN="${PHASES_RAN}2 "
+[ "${RUN_PHASE3}" = true ] && PHASES_RAN="${PHASES_RAN}3 "
+echo "  Phases run: ${PHASES_RAN:-none}"
+echo "================================================================"
+echo ""
+if [ "${RUN_PHASE3}" = false ]; then
+  echo "  Next steps:"
+  if [ "${RUN_PHASE2}" = false ] && [ "${RUN_PHASE1}" = true ]; then
+    echo "    ./setup.sh --phase2        # Run post-deploy setup"
+  fi
+  if [ "${RUN_PHASE3}" = false ]; then
+    echo "    ./setup.sh --phase3        # Run GKG stack + E2E tests"
+    echo "    ./setup.sh --gkg           # Run all phases"
+  fi
   echo ""
 fi
+echo "  Useful commands:"
+echo "    kubectl get pods -n ${GITLAB_NS}              # Check GitLab pods"
+echo "    kubectl get pods -n ${DEFAULT_NS}              # Check GKG pods"
+echo "    colima status --profile ${COLIMA_PROFILE}      # Colima status"
+echo ""
