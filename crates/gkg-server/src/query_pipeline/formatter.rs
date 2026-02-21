@@ -51,6 +51,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
         let json_value = match value {
             ColumnValue::Int64(v) => json!(v),
             ColumnValue::String(v) => json!(v),
+            ColumnValue::Json(v) => v.clone(),
             ColumnValue::Null => Value::Null,
         };
         obj.insert(name.clone(), json_value);
@@ -156,6 +157,28 @@ mod tests {
 
         assert!(!obj.contains_key("_gkg_p_id"));
         assert!(!obj.contains_key("_gkg_p_type"));
+    }
+
+    #[test]
+    fn row_to_json_serializes_json_column_value() {
+        let (mut result, ctx) = make_test_result();
+        let path_nodes = serde_json::json!([
+            {"id": 1, "type": "User", "username": "alice"},
+            {"id": 100, "type": "Group", "name": "Engineering"}
+        ]);
+        result.rows_mut()[0].set_column(
+            "path_nodes".to_string(),
+            ColumnValue::Json(path_nodes.clone()),
+        );
+
+        let json = row_to_json(&result.rows()[0], &ctx);
+        let obj = json.as_object().unwrap();
+
+        let actual = obj.get("path_nodes").expect("path_nodes should be present");
+        assert_eq!(actual, &path_nodes);
+        assert!(actual.is_array());
+        assert_eq!(actual.as_array().unwrap().len(), 2);
+        assert_eq!(actual[0]["username"].as_str().unwrap(), "alice");
     }
 
     #[test]

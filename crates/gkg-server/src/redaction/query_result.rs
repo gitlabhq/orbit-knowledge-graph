@@ -65,11 +65,24 @@ impl RedactableNodes {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum ColumnValue {
     Int64(i64),
     String(String),
+    Json(serde_json::Value),
     Null,
+}
+
+impl PartialEq for ColumnValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ColumnValue::Int64(a), ColumnValue::Int64(b)) => a == b,
+            (ColumnValue::String(a), ColumnValue::String(b)) => a == b,
+            (ColumnValue::Json(a), ColumnValue::Json(b)) => a == b,
+            (ColumnValue::Null, ColumnValue::Null) => true,
+            _ => false,
+        }
+    }
 }
 
 impl ColumnValue {
@@ -97,7 +110,7 @@ pub struct QueryResultRow {
 }
 
 impl QueryResultRow {
-    fn new(columns: HashMap<String, ColumnValue>, dynamic_nodes: Vec<NodeRef>) -> Self {
+    pub(crate) fn new(columns: HashMap<String, ColumnValue>, dynamic_nodes: Vec<NodeRef>) -> Self {
         Self {
             columns,
             dynamic_nodes,
@@ -207,6 +220,16 @@ impl QueryResult {
         Self {
             rows,
             ctx: ctx.clone(),
+            auth_id_overrides: HashMap::new(),
+        }
+    }
+
+    /// Build a QueryResult directly from rows and context (for testing).
+    #[cfg(test)]
+    pub(crate) fn from_rows(rows: Vec<QueryResultRow>, ctx: ResultContext) -> Self {
+        Self {
+            rows,
+            ctx,
             auth_id_overrides: HashMap::new(),
         }
     }
