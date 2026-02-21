@@ -8,27 +8,15 @@
 # Usage:
 #   ./build-images.sh [gitlab-source-dir]
 #
-# Default gitlab-source-dir: ~/Desktop/Code/gdk/gitlab
+# All configuration (registry, tag, prefix) comes from config.sh.
 # =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-GITLAB_SRC="${1:-$HOME/Desktop/Code/gdk/gitlab}"
+# shellcheck source=config.sh
+source "$(cd "$(dirname "$0")" && pwd)/config.sh"
 
-# Closest stable release to the feature branch (18.9.0-pre).
-# Update this if the feature branch is rebased onto a newer release.
-BASE_TAG="v18.8.1"
-REGISTRY="registry.gitlab.com/gitlab-org/build/cng"
-LOCAL_PREFIX="gkg-e2e"
-LOCAL_TAG="local"
-
-# Components to build -- all use the same Dockerfile since they all
-# inherit from gitlab-rails-ee with Rails code at /srv/gitlab/.
-COMPONENTS=(
-  "gitlab-webservice-ee"
-  "gitlab-sidekiq-ee"
-  "gitlab-toolbox-ee"
-)
+# Allow overriding GITLAB_SRC via positional arg
+GITLAB_SRC="${1:-${GITLAB_SRC}}"
 
 # Validate source directory
 if [ ! -f "${GITLAB_SRC}/Gemfile" ]; then
@@ -40,7 +28,8 @@ fi
 echo "=== GKG E2E: Building custom CNG images ==="
 echo "  Source:   ${GITLAB_SRC}"
 echo "  Base tag: ${BASE_TAG}"
-echo "  Registry: ${REGISTRY}"
+echo "  Registry: ${CNG_REGISTRY}"
+echo "  Prefix:   ${LOCAL_PREFIX}"
 echo ""
 
 # Stage Rails code to a temp directory to avoid the GitLab .dockerignore
@@ -68,13 +57,13 @@ echo ".git" > "${STAGING_DIR}/.dockerignore"
 echo "    Staged $(du -sh "${STAGING_DIR}" | cut -f1) of Rails code"
 echo ""
 
-for component in "${COMPONENTS[@]}"; do
+for component in "${CNG_COMPONENTS[@]}"; do
   echo "--- Building ${LOCAL_PREFIX}/${component}:${LOCAL_TAG} ---"
-  echo "    Base: ${REGISTRY}/${component}:${BASE_TAG}"
+  echo "    Base: ${CNG_REGISTRY}/${component}:${BASE_TAG}"
 
   docker build \
     ${NO_CACHE:+--no-cache} \
-    --build-arg "BASE_IMAGE=${REGISTRY}/${component}" \
+    --build-arg "BASE_IMAGE=${CNG_REGISTRY}/${component}" \
     --build-arg "BASE_TAG=${BASE_TAG}" \
     -f "${SCRIPT_DIR}/Dockerfile.rails" \
     -t "${LOCAL_PREFIX}/${component}:${LOCAL_TAG}" \
