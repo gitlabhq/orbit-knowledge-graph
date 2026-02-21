@@ -358,7 +358,7 @@ impl QueryResult {
                     redacted_count += 1;
                     break;
                 };
-                if !is_authorized(&node_ref, authorizations, ctx) {
+                if !is_authorized(&node_ref.entity_type, node_ref.id, authorizations, ctx) {
                     row.set_unauthorized();
                     redacted_count += 1;
                     break;
@@ -369,9 +369,9 @@ impl QueryResult {
             // so auth ID may need resolution via pre-auth overrides or edge columns
             if row.authorized {
                 for node_ref in &row.dynamic_nodes {
-                    let mut node_ref = node_ref.clone();
-                    resolve_dynamic_auth_id(row, &mut node_ref, ctx, overrides);
-                    if !is_authorized(&node_ref, authorizations, ctx) {
+                    let auth_id =
+                        resolve_auth_id(row, &node_ref.entity_type, node_ref.id, ctx, overrides);
+                    if !is_authorized(&node_ref.entity_type, auth_id, authorizations, ctx) {
                         row.set_unauthorized();
                         redacted_count += 1;
                         break;
@@ -397,11 +397,12 @@ impl QueryResult {
 }
 
 fn is_authorized(
-    node_ref: &NodeRef,
+    entity_type: &str,
+    auth_id: i64,
     authorizations: &[ResourceAuthorization],
     ctx: &ResultContext,
 ) -> bool {
-    let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
+    let Some(auth_config) = ctx.get_entity_auth(entity_type) else {
         return false;
     };
     let Some(auth) = authorizations
@@ -410,33 +411,30 @@ fn is_authorized(
     else {
         return false;
     };
-    auth.authorized.get(&node_ref.id).copied().unwrap_or(false)
+    auth.authorized.get(&auth_id).copied().unwrap_or(false)
 }
 
-/// For indirect-auth entities (owner_entity is set in EntityAuthConfig), rewrite
-/// node_ref.id to the owner entity's ID. Checks pre-resolved auth_id_overrides
-/// first (populated by pre-auth hydration), then falls back to edge columns.
-fn resolve_dynamic_auth_id(
+/// For indirect-auth entities (owner_entity is set in EntityAuthConfig), resolve
+/// the owner entity's ID for authorization. Returns the resolved auth ID (which
+/// may differ from `node_id` for entities with `owner_entity`).
+/// Checks pre-resolved auth_id_overrides first, then falls back to edge columns.
+fn resolve_auth_id(
     row: &QueryResultRow,
-    node_ref: &mut NodeRef,
+    entity_type: &str,
+    node_id: i64,
     ctx: &ResultContext,
     auth_id_overrides: &HashMap<(String, i64), i64>,
-) {
-    let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
-        return;
+) -> i64 {
+    let Some(auth_config) = ctx.get_entity_auth(entity_type) else {
+        return node_id;
     };
     let Some(ref owner) = auth_config.owner_entity else {
-        return;
+        return node_id;
     };
-    // Check pre-resolved overrides from the pre-auth hydration step.
-    if let Some(&auth_id) = auth_id_overrides.get(&(node_ref.entity_type.clone(), node_ref.id)) {
-        node_ref.id = auth_id;
-        return;
+    if let Some(&auth_id) = auth_id_overrides.get(&(entity_type.to_string(), node_id)) {
+        return auth_id;
     }
-    // Fallback to edge column resolution (for cases where edge columns are present).
-    if let Some(owner_id) = get_edge_id_for_entity(row, owner) {
-        node_ref.id = owner_id;
-    }
+    get_edge_id_for_entity(row, owner).unwrap_or(node_id)
 }
 
 fn get_edge_id_for_entity(row: &QueryResultRow, entity_type: &str) -> Option<i64> {

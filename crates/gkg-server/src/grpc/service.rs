@@ -219,7 +219,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                         .send(Ok(ExecuteQueryMessage {
                             message: Some(execute_query_message::Message::Result(QueryResult {
                                 result_json: output.formatted_result.to_string(),
-                                generated_sql: output.generated_sql.unwrap_or_default(),
+                                generated_sql: output.generated_sql,
                             })),
                         }))
                         .await;

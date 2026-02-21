@@ -282,7 +282,7 @@ impl FakeValueGenerator {
                 self.buf.clear();
                 self.buf.reserve(40);
                 let lo128 = ((bits as u128) << 64) | (low as u128);
-                let hi32 = high as u32;
+                let hi32 = high;
                 for i in (0..8).rev() {
                     let nibble = ((hi32 >> (i * 4)) & 0xf) as usize;
                     self.buf.push(HEX_DIGITS[nibble] as char);

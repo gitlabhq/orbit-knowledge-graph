@@ -48,7 +48,6 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
 
         let compiled: CompiledQuery = compile(query_json, &self.ontology, &security_context)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
-        let structural_sql = compiled.structural.sql.clone();
         let batches = self.execute_query(&compiled.structural).await?;
 
         let mut query_result =
@@ -58,29 +57,22 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
         // resolve auth_id_column values before authorization so resource_checks()
         // and apply_authorizations() can use the correct auth IDs.
         if matches!(compiled.hydration, query_engine::HydrationPlan::Dynamic) {
-            let result_ctx = query_result.ctx().clone();
             self.hydration
-                .resolve_auth_ids(&mut query_result, &result_ctx, &security_context)
+                .resolve_auth_ids(&mut query_result, &security_context)
                 .await?;
         }
 
         let authorized = AuthorizationStage::execute(query_result, tx, stream).await?;
         let (query_result, redacted_count) = RedactionStage::execute(authorized);
 
-        let result_context = query_result.ctx().clone();
         let hydrated = self
             .hydration
-            .execute(
-                query_result,
-                &result_context,
-                &security_context,
-                &compiled.hydration,
-            )
+            .execute(query_result, &security_context, &compiled.hydration)
             .await?;
 
         let formatting_stage =
             FormattingStage::new(self.formatter.clone(), Arc::clone(&self.ontology));
-        Ok(formatting_stage.execute(hydrated, result_context, redacted_count, structural_sql))
+        Ok(formatting_stage.execute(hydrated, redacted_count, compiled.structural.sql))
     }
 
     async fn execute_query(

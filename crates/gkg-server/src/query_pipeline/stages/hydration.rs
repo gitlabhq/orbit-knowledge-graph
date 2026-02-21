@@ -5,7 +5,7 @@ use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
-use query_engine::{HydrationPlan, HydrationTemplate, QueryType, ResultContext, SecurityContext};
+use query_engine::{HydrationPlan, HydrationTemplate, QueryType, SecurityContext};
 
 use crate::redaction::{ColumnValue, QueryResult};
 
@@ -29,15 +29,13 @@ impl HydrationStage {
     pub async fn resolve_auth_ids(
         &self,
         result: &mut QueryResult,
-        result_context: &ResultContext,
         security_context: &SecurityContext,
     ) -> Result<(), PipelineError> {
-        // Collect indirect-auth entity IDs and their auth columns in a single map.
         let mut indirect_refs: HashMap<String, (Vec<i64>, String)> = HashMap::new();
 
         for row in result.rows() {
             for node_ref in row.dynamic_nodes() {
-                let Some(auth) = result_context.get_entity_auth(&node_ref.entity_type) else {
+                let Some(auth) = result.ctx().get_entity_auth(&node_ref.entity_type) else {
                     continue;
                 };
                 if auth.owner_entity.is_none() {
@@ -74,29 +72,33 @@ impl HydrationStage {
     pub async fn execute(
         &self,
         mut result: QueryResult,
-        result_context: &ResultContext,
         security_context: &SecurityContext,
         hydration_plan: &HydrationPlan,
     ) -> Result<QueryResult, PipelineError> {
         match hydration_plan {
             HydrationPlan::None => return Ok(result),
             HydrationPlan::Static(templates) => {
+                // Clone the small Vec<RedactionNode> to avoid borrowing result while mutating.
+                let redaction_nodes: Vec<_> = result.ctx().nodes().cloned().collect();
                 let property_map = self
-                    .hydrate_static(&result, templates, result_context, security_context)
+                    .hydrate_static(&result, templates, security_context)
                     .await?;
-                self.merge_static_properties(&mut result, &property_map, result_context);
+                merge_static_properties(&mut result, &property_map, &redaction_nodes);
             }
             HydrationPlan::Dynamic => {
-                let refs = self.extract_entity_refs(&result, result_context);
+                let query_type = result.ctx().query_type;
+                let refs = extract_entity_refs(&result, query_type);
                 if refs.is_empty() {
                     return Ok(result);
                 }
                 let property_map = self.fetch_all_properties(&refs, security_context).await?;
-                self.merge_dynamic_properties(&mut result, &property_map, result_context);
+                merge_dynamic_properties(&mut result, &property_map, query_type);
             }
         }
         Ok(result)
     }
+
+    // TODO: parallelize per-entity fetches with futures::future::try_join_all
 
     /// Hydrate using pre-compiled templates (Traversal/Search).
     /// Extracts entity IDs from `_gkg_{alias}_pk` or `_gkg_{alias}_id` columns,
@@ -105,22 +107,24 @@ impl HydrationStage {
         &self,
         result: &QueryResult,
         templates: &[HydrationTemplate],
-        result_context: &ResultContext,
         security_context: &SecurityContext,
     ) -> Result<PropertyMap, PipelineError> {
         let mut all_props = HashMap::new();
 
         for template in templates {
-            let redaction_node = result_context.get(&template.node_alias);
-            let Some(rn) = redaction_node else { continue };
+            let Some(rn) = result.ctx().get(&template.node_alias) else {
+                continue;
+            };
 
             // Prefer _gkg_{alias}_pk (true primary key) for hydration lookup;
             // fall back to _gkg_{alias}_id which may be the auth ID.
+            let pk_col = rn.pk_column.clone();
+            let id_col = rn.id_column.clone();
             let mut ids: Vec<i64> = result
                 .authorized_rows()
                 .filter_map(|row| {
-                    row.get_column_i64(&rn.pk_column)
-                        .or_else(|| row.get_column_i64(&rn.id_column))
+                    row.get_column_i64(&pk_col)
+                        .or_else(|| row.get_column_i64(&id_col))
                 })
                 .collect();
             ids.sort_unstable();
@@ -137,65 +141,6 @@ impl HydrationStage {
         }
 
         Ok(all_props)
-    }
-
-    /// Merge hydrated properties into rows for static (Traversal/Search) queries.
-    fn merge_static_properties(
-        &self,
-        result: &mut QueryResult,
-        property_map: &PropertyMap,
-        result_context: &ResultContext,
-    ) {
-        for row in result.authorized_rows_mut() {
-            for rn in result_context.nodes() {
-                let pk = row
-                    .get_column_i64(&rn.pk_column)
-                    .or_else(|| row.get_column_i64(&rn.id_column));
-                let Some(pk) = pk else { continue };
-
-                if let Some(props) = property_map.get(&(rn.entity_type.clone(), pk)) {
-                    for (key, value) in props {
-                        row.set_column(key.clone(), value.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    /// Extract entity references from dynamic query results (Neighbors or PathFinding).
-    fn extract_entity_refs(
-        &self,
-        result: &QueryResult,
-        result_context: &ResultContext,
-    ) -> HashMap<String, Vec<i64>> {
-        let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
-
-        let is_neighbors = matches!(result_context.query_type, Some(QueryType::Neighbors));
-
-        for row in result.authorized_rows() {
-            if is_neighbors
-                && let (Some(id), Some(entity_type)) = (
-                    row.get_column_i64("_gkg_neighbor_id"),
-                    row.get_column_string("_gkg_neighbor_type"),
-                )
-            {
-                refs.entry(entity_type).or_default().push(id);
-            }
-
-            // PathFinding and Neighbors both carry dynamic_nodes
-            for node_ref in row.dynamic_nodes() {
-                refs.entry(node_ref.entity_type.clone())
-                    .or_default()
-                    .push(node_ref.id);
-            }
-        }
-
-        for ids in refs.values_mut() {
-            ids.sort_unstable();
-            ids.dedup();
-        }
-
-        refs
     }
 
     async fn fetch_all_properties(
@@ -365,66 +310,115 @@ impl HydrationStage {
 
         Ok(result)
     }
+}
 
-    /// Merge hydrated properties into rows for dynamic (Neighbors/PathFinding) queries.
-    ///
-    /// Neighbors: properties are merged as flat columns on the row (one neighbor per row).
-    /// PathFinding: properties are stored as a JSON array in a `path_nodes` column.
-    /// Each element has `id`, `type`, and the entity's property columns (with the
-    /// hydration query alias prefix stripped so names match the ontology schema).
-    fn merge_dynamic_properties(
-        &self,
-        result: &mut QueryResult,
-        property_map: &PropertyMap,
-        result_context: &ResultContext,
-    ) {
-        let is_neighbors = matches!(result_context.query_type, Some(QueryType::Neighbors));
+fn merge_static_properties(
+    result: &mut QueryResult,
+    property_map: &PropertyMap,
+    redaction_nodes: &[query_engine::RedactionNode],
+) {
+    for row in result.authorized_rows_mut() {
+        for rn in redaction_nodes {
+            let pk = row
+                .get_column_i64(&rn.pk_column)
+                .or_else(|| row.get_column_i64(&rn.id_column));
+            let Some(pk) = pk else { continue };
 
-        for row in result.authorized_rows_mut() {
-            if is_neighbors {
-                if let Some(id) = row.get_column_i64("_gkg_neighbor_id")
-                    && let Some(entity_type) = row.get_column_string("_gkg_neighbor_type")
-                    && let Some(props) = property_map.get(&(entity_type, id))
+            if let Some(props) = property_map.get(&(rn.entity_type.clone(), pk)) {
+                for (key, value) in props {
+                    row.set_column(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+}
+
+fn extract_entity_refs(
+    result: &QueryResult,
+    query_type: Option<QueryType>,
+) -> HashMap<String, Vec<i64>> {
+    let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
+    let is_neighbors = matches!(query_type, Some(QueryType::Neighbors));
+
+    for row in result.authorized_rows() {
+        if is_neighbors
+            && let (Some(id), Some(entity_type)) = (
+                row.get_column_i64("_gkg_neighbor_id"),
+                row.get_column_string("_gkg_neighbor_type"),
+            )
+        {
+            refs.entry(entity_type).or_default().push(id);
+        }
+
+        for node_ref in row.dynamic_nodes() {
+            refs.entry(node_ref.entity_type.clone())
+                .or_default()
+                .push(node_ref.id);
+        }
+    }
+
+    for ids in refs.values_mut() {
+        ids.sort_unstable();
+        ids.dedup();
+    }
+
+    refs
+}
+
+/// Merge hydrated properties into rows for dynamic (Neighbors/PathFinding) queries.
+///
+/// Neighbors: flat column merge (one neighbor per row).
+/// PathFinding: builds a `path_nodes` JSON array with `n_` prefix stripped.
+fn merge_dynamic_properties(
+    result: &mut QueryResult,
+    property_map: &PropertyMap,
+    query_type: Option<QueryType>,
+) {
+    let is_neighbors = matches!(query_type, Some(QueryType::Neighbors));
+
+    for row in result.authorized_rows_mut() {
+        if is_neighbors {
+            if let Some(id) = row.get_column_i64("_gkg_neighbor_id")
+                && let Some(entity_type) = row.get_column_string("_gkg_neighbor_type")
+                && let Some(props) = property_map.get(&(entity_type, id))
+            {
+                for (key, value) in props {
+                    row.set_column(key.clone(), value.clone());
+                }
+            }
+            continue;
+        }
+
+        let nodes: Vec<serde_json::Value> = row
+            .dynamic_nodes()
+            .iter()
+            .map(|node_ref| {
+                let mut obj = serde_json::Map::new();
+                obj.insert("id".to_string(), serde_json::json!(node_ref.id));
+                obj.insert("type".to_string(), serde_json::json!(&node_ref.entity_type));
+
+                if let Some(props) = property_map.get(&(node_ref.entity_type.clone(), node_ref.id))
                 {
                     for (key, value) in props {
-                        row.set_column(key.clone(), value.clone());
+                        let name = key.strip_prefix("n_").unwrap_or(key);
+                        let json_val = match value {
+                            ColumnValue::Int64(v) => serde_json::json!(v),
+                            ColumnValue::String(v) => serde_json::json!(v),
+                            ColumnValue::Json(v) => v.clone(),
+                            ColumnValue::Null => serde_json::Value::Null,
+                        };
+                        obj.insert(name.to_string(), json_val);
                     }
                 }
-                continue;
-            }
 
-            let nodes: Vec<serde_json::Value> = row
-                .dynamic_nodes()
-                .iter()
-                .map(|node_ref| {
-                    let mut obj = serde_json::Map::new();
-                    obj.insert("id".to_string(), serde_json::json!(node_ref.id));
-                    obj.insert("type".to_string(), serde_json::json!(&node_ref.entity_type));
+                serde_json::Value::Object(obj)
+            })
+            .collect();
 
-                    if let Some(props) =
-                        property_map.get(&(node_ref.entity_type.clone(), node_ref.id))
-                    {
-                        for (key, value) in props {
-                            let name = key.strip_prefix("n_").unwrap_or(key);
-                            let json_val = match value {
-                                ColumnValue::Int64(v) => serde_json::json!(v),
-                                ColumnValue::String(v) => serde_json::json!(v),
-                                ColumnValue::Json(v) => v.clone(),
-                                ColumnValue::Null => serde_json::Value::Null,
-                            };
-                            obj.insert(name.to_string(), json_val);
-                        }
-                    }
-
-                    serde_json::Value::Object(obj)
-                })
-                .collect();
-
-            row.set_column(
-                "path_nodes".to_string(),
-                ColumnValue::Json(serde_json::Value::Array(nodes)),
-            );
-        }
+        row.set_column(
+            "path_nodes".to_string(),
+            ColumnValue::Json(serde_json::Value::Array(nodes)),
+        );
     }
 }
 
@@ -451,7 +445,7 @@ fn extract_column_value(col: &dyn Array, row: usize) -> Option<ColumnValue> {
 mod tests {
     use super::*;
     use crate::redaction::{NodeRef, QueryResultRow};
-    use query_engine::QueryType;
+    use query_engine::{QueryType, ResultContext};
     use std::collections::HashMap;
 
     fn make_path_result(paths: Vec<Vec<NodeRef>>) -> (QueryResult, ResultContext) {
@@ -490,6 +484,7 @@ mod tests {
         (QueryResult::from_rows(rows, ctx.clone()), ctx)
     }
 
+    #[allow(clippy::type_complexity)]
     fn make_property_map(entries: Vec<(&str, i64, Vec<(&str, ColumnValue)>)>) -> PropertyMap {
         let mut map = HashMap::new();
         for (entity_type, id, props) in entries {
@@ -500,20 +495,8 @@ mod tests {
         map
     }
 
-    fn make_stage() -> HydrationStage {
-        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-        let client = Arc::new(ArrowClickHouseClient::new(
-            "http://localhost:8123",
-            "test",
-            "default",
-            None,
-        ));
-        HydrationStage::new(ontology, client)
-    }
-
     #[test]
     fn path_merge_builds_hydrated_path_nodes_array() {
-        let stage = make_stage();
         let path = vec![
             NodeRef::new(1, "User"),
             NodeRef::new(100, "Group"),
@@ -542,7 +525,7 @@ mod tests {
             ),
         ]);
 
-        stage.merge_dynamic_properties(&mut result, &props, &ctx);
+        merge_dynamic_properties(&mut result, &props, ctx.query_type);
 
         let row = &result.rows()[0];
         let path_nodes = row.get("path_nodes").expect("path_nodes should be set");
@@ -569,18 +552,16 @@ mod tests {
 
     #[test]
     fn path_merge_handles_missing_properties() {
-        let stage = make_stage();
         let path = vec![NodeRef::new(1, "User"), NodeRef::new(999, "Group")];
         let (mut result, ctx) = make_path_result(vec![path]);
 
-        // Only User has properties; Group 999 is missing from the map.
         let props = make_property_map(vec![(
             "User",
             1,
             vec![("n_username", ColumnValue::String("alice".to_string()))],
         )]);
 
-        stage.merge_dynamic_properties(&mut result, &props, &ctx);
+        merge_dynamic_properties(&mut result, &props, ctx.query_type);
 
         let row = &result.rows()[0];
         let ColumnValue::Json(json_val) = row.get("path_nodes").unwrap() else {
@@ -589,10 +570,8 @@ mod tests {
         let arr = json_val.as_array().unwrap();
         assert_eq!(arr.len(), 2);
 
-        // User has properties
         assert_eq!(arr[0]["username"], "alice");
 
-        // Group 999 has only id and type (no properties found)
         assert_eq!(arr[1]["id"], 999);
         assert_eq!(arr[1]["type"], "Group");
         assert_eq!(arr[1].as_object().unwrap().len(), 2);
@@ -600,7 +579,6 @@ mod tests {
 
     #[test]
     fn path_merge_handles_multiple_rows() {
-        let stage = make_stage();
         let path1 = vec![NodeRef::new(1, "User"), NodeRef::new(100, "Group")];
         let path2 = vec![NodeRef::new(2, "User"), NodeRef::new(100, "Group")];
         let (mut result, ctx) = make_path_result(vec![path1, path2]);
@@ -623,7 +601,7 @@ mod tests {
             ),
         ]);
 
-        stage.merge_dynamic_properties(&mut result, &props, &ctx);
+        merge_dynamic_properties(&mut result, &props, ctx.query_type);
 
         let rows = result.rows();
         let ColumnValue::Json(v1) = rows[0].get("path_nodes").unwrap() else {
@@ -635,14 +613,12 @@ mod tests {
 
         assert_eq!(v1[0]["username"], "alice");
         assert_eq!(v2[0]["username"], "bob");
-        // Both paths share group 100
         assert_eq!(v1[1]["name"], "Engineering");
         assert_eq!(v2[1]["name"], "Engineering");
     }
 
     #[test]
     fn neighbor_merge_sets_flat_columns() {
-        let stage = make_stage();
         let (mut result, ctx) =
             make_neighbor_result(vec![NodeRef::new(1, "User"), NodeRef::new(100, "Group")]);
 
@@ -659,10 +635,9 @@ mod tests {
             ),
         ]);
 
-        stage.merge_dynamic_properties(&mut result, &props, &ctx);
+        merge_dynamic_properties(&mut result, &props, ctx.query_type);
 
         let rows = result.rows();
-        // Neighbor rows get flat columns (with n_ prefix from hydration query)
         assert_eq!(
             rows[0].get("n_username"),
             Some(&ColumnValue::String("alice".to_string()))
@@ -671,14 +646,12 @@ mod tests {
             rows[1].get("n_name"),
             Some(&ColumnValue::String("Engineering".to_string()))
         );
-        // Neighbors should NOT have path_nodes column
         assert!(rows[0].get("path_nodes").is_none());
         assert!(rows[1].get("path_nodes").is_none());
     }
 
     #[test]
     fn path_merge_strips_n_prefix_from_property_names() {
-        let stage = make_stage();
         let path = vec![NodeRef::new(1, "User")];
         let (mut result, ctx) = make_path_result(vec![path]);
 
@@ -691,14 +664,13 @@ mod tests {
             ],
         )]);
 
-        stage.merge_dynamic_properties(&mut result, &props, &ctx);
+        merge_dynamic_properties(&mut result, &props, ctx.query_type);
 
         let row = &result.rows()[0];
         let ColumnValue::Json(json_val) = row.get("path_nodes").unwrap() else {
             panic!("expected Json");
         };
         let node = &json_val[0];
-        // "n_username" becomes "username", "n_id" becomes "id" (but id is also set from NodeRef)
         assert!(node.get("username").is_some());
         assert!(node.get("n_username").is_none());
     }

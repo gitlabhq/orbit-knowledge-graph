@@ -17,6 +17,15 @@ use std::collections::{HashMap, HashSet};
 /// Uses EDGE_RESERVED_COLUMNS order: traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind
 const EDGE_ALIAS_SUFFIXES: &[&str] = &["path", "type", "src", "src_type", "dst", "dst_type"];
 
+fn lower_order_by(input: &Input) -> Vec<OrderExpr> {
+    input.order_by.as_ref().map_or(vec![], |ob| {
+        vec![OrderExpr {
+            expr: Expr::col(&ob.node, &ob.property),
+            desc: ob.direction == OrderDirection::Desc,
+        }]
+    })
+}
+
 /// Generate SELECT expressions for all edge columns with the given table alias.
 fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
     EDGE_RESERVED_COLUMNS
@@ -72,18 +81,11 @@ fn lower_traversal(input: &Input, slim: bool) -> Result<Node> {
         build_select(&input.nodes, &input.relationships, &edge_aliases)
     };
 
-    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        vec![OrderExpr {
-            expr: Expr::col(&ob.node, &ob.property),
-            desc: ob.direction == OrderDirection::Desc,
-        }]
-    });
-
     Ok(Node::Query(Box::new(Query {
         select,
         from,
         where_clause,
-        order_by,
+        order_by: lower_order_by(input),
         limit: Some(input.limit),
         ..Default::default()
     })))
@@ -118,20 +120,19 @@ fn lower_aggregation(input: &Input) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
-    // Collect unique group_by node IDs
-    let group_by_node_ids: HashSet<_> = input
+    let group_by_node_ids: HashSet<&str> = input
         .aggregations
         .iter()
-        .filter_map(|agg| agg.group_by.clone())
+        .filter_map(|agg| agg.group_by.as_deref())
         .collect();
 
-    // Build SELECT and GROUP BY columns for group_by nodes
-    // Note: Wildcards are expanded to List by normalize, so we only handle None/List
+    // Build SELECT and GROUP BY columns for group_by nodes.
+    // Wildcards are expanded to List by normalize, so we only handle None/List.
     let mut select = Vec::new();
     let mut group_by = Vec::new();
 
     for node in &input.nodes {
-        if !group_by_node_ids.contains(&node.id) {
+        if !group_by_node_ids.contains(node.id.as_str()) {
             continue;
         }
         if let Some(ColumnSelection::List(cols)) = &node.columns {
@@ -339,16 +340,6 @@ fn path_recursive_branch(
         "tuple",
         vec![next_node_id.clone(), Expr::col("e", next_type_col)],
     );
-    let edge_tuple = Expr::func(
-        "tuple",
-        vec![
-            Expr::col("e", "relationship_kind"),
-            Expr::col("e", "source_id"),
-            Expr::col("e", "source_kind"),
-            Expr::col("e", "target_id"),
-            Expr::col("e", "target_kind"),
-        ],
-    );
 
     // depth < max_depth
     let depth_check = Expr::binary(Op::Lt, Expr::col("p", "depth"), Expr::lit(max_depth as i64));
@@ -425,6 +416,16 @@ fn path_recursive_branch(
         ),
     ];
     if include_edges {
+        let edge_tuple = Expr::func(
+            "tuple",
+            vec![
+                Expr::col("e", "relationship_kind"),
+                Expr::col("e", "source_id"),
+                Expr::col("e", "source_kind"),
+                Expr::col("e", "target_id"),
+                Expr::col("e", "target_kind"),
+            ],
+        );
         select.push(SelectExpr::new(
             Expr::func(
                 "arrayConcat",
@@ -533,18 +534,11 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
 
     let where_clause = id_filter(&center_node.id, DEFAULT_PRIMARY_KEY, &center_node.node_ids);
 
-    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        vec![OrderExpr {
-            expr: Expr::col(&ob.node, &ob.property),
-            desc: ob.direction == OrderDirection::Desc,
-        }]
-    });
-
     Ok(Node::Query(Box::new(Query {
         select,
         from,
         where_clause,
-        order_by,
+        order_by: lower_order_by(input),
         limit: Some(input.limit),
         ..Default::default()
     })))

@@ -9,7 +9,7 @@ pub struct AuthorizationOutput {
 
 pub struct PipelineOutput {
     pub formatted_result: Value,
-    pub generated_sql: Option<String>,
+    pub generated_sql: String,
     pub row_count: usize,
     pub redacted_count: usize,
 }
