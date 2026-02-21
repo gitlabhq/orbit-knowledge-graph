@@ -723,6 +723,14 @@ CHEOF"
 
   log "22. Running dispatch-indexing"
 
+  # Tilt tags images as gkg-server:tilt-<hash>, not gkg-server:dev.
+  # The dispatch-indexing Job needs gkg-server:dev, so tag the latest build.
+  TILT_TAG=$(docker images gkg-server --format '{{.Tag}}' 2>/dev/null | grep '^tilt-' | head -1)
+  if [ -n "${TILT_TAG}" ]; then
+    docker tag "gkg-server:${TILT_TAG}" gkg-server:dev 2>/dev/null || true
+    step "Tagged gkg-server:${TILT_TAG} as gkg-server:dev"
+  fi
+
   # Delete previous job if it exists (jobs are immutable)
   kubectl delete job gkg-dispatch-indexing -n "${DEFAULT_NS}" --ignore-not-found 2>/dev/null
 
@@ -819,7 +827,7 @@ DISPATCHEOF
   echo ""
   echo "  Run the E2E tests:"
   echo "    kubectl exec -n ${GITLAB_NS} ${TOOLBOX_POD} -- \\"
-  echo "      bash -c 'cd /srv/gitlab && bundle exec rails runner /tmp/e2e/redaction_test.rb RAILS_ENV=production'"
+  echo "      bash -c 'cd /srv/gitlab && KNOWLEDGE_GRAPH_GRPC_ENDPOINT=gkg-webserver.default.svc.cluster.local:50051 bundle exec rails runner /tmp/e2e/redaction_test.rb RAILS_ENV=production'"
   echo ""
 
 else
