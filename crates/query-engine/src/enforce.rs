@@ -92,14 +92,14 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth = input.entity_auth.clone();
 
-    let selectable_nodes = match input.query_type {
+    let selectable_nodes: HashSet<&str> = match input.query_type {
         QueryType::Aggregation => input
             .aggregations
             .iter()
-            .filter_map(|agg| agg.group_by.clone())
+            .filter_map(|agg| agg.group_by.as_deref())
             .collect(),
         QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
-            input.nodes.iter().map(|n| n.id.clone()).collect()
+            input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
         QueryType::PathFinding => HashSet::new(),
     };
@@ -114,64 +114,63 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
 fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
-    selectable_nodes: &HashSet<String>,
+    selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
 ) -> Result<()> {
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
 
-        if !selectable_nodes.contains(&node.id) {
+        if !selectable_nodes.contains(node.id.as_str()) {
             continue;
         }
 
         ctx.add_node(&node.id, entity);
+        let redaction_node = ctx.get(&node.id).expect("just inserted by add_node");
 
-        if let Some(redaction_node) = ctx.get(&node.id) {
-            let pk_col = redaction_node.pk_column.clone();
-            let id_col = redaction_node.id_column.clone();
-            let type_col = redaction_node.type_column.clone();
+        let pk_col = redaction_node.pk_column.clone();
+        let id_col = redaction_node.id_column.clone();
+        let type_col = redaction_node.type_column.clone();
 
-            // Always emit the primary key column for hydration lookups.
-            // For most entities pk == auth_id ("id"), but for indirect-auth
-            // entities (e.g., Definition) pk is "id" while auth_id is "project_id".
-            let needs_separate_pk = node.redaction_id_column != "id";
+        // Always emit the primary key column for hydration lookups.
+        // For most entities pk == auth_id ("id"), but for indirect-auth
+        // entities (e.g., Definition) pk is "id" while auth_id is "project_id".
+        let needs_separate_pk = node.redaction_id_column != "id";
 
-            if needs_separate_pk {
-                let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
-                if !has_pk {
-                    q.select.push(SelectExpr {
-                        expr: Expr::col(&node.id, "id"),
-                        alias: Some(pk_col),
-                    });
-                }
-            }
-
-            let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
-            let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
-
-            if !has_id {
+        if needs_separate_pk {
+            let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+            if !has_pk {
                 q.select.push(SelectExpr {
-                    expr: Expr::col(&node.id, &node.redaction_id_column),
-                    alias: Some(id_col.clone()),
+                    expr: Expr::col(&node.id, "id"),
+                    alias: Some(pk_col),
                 });
             }
+        }
 
-            if !has_type {
-                let insert_pos = q
-                    .select
-                    .iter()
-                    .position(|s| s.alias.as_ref() == Some(&id_col))
-                    .map(|i| i + 1)
-                    .unwrap_or(q.select.len());
+        let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+        let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
 
-                q.select.insert(
-                    insert_pos,
-                    SelectExpr {
-                        expr: Expr::lit(entity.as_str()),
-                        alias: Some(type_col),
-                    },
-                );
-            }
+        if !has_id {
+            q.select.push(SelectExpr {
+                expr: Expr::col(&node.id, &node.redaction_id_column),
+                alias: Some(id_col.clone()),
+            });
+        }
+
+        if !has_type {
+            let insert_pos = q
+                .select
+                .iter()
+                .position(|s| s.alias.as_ref() == Some(&id_col))
+                .map(|i| i + 1)
+                .unwrap_or(q.select.len());
+
+            q.select.insert(
+                insert_pos,
+                SelectExpr {
+                    expr: Expr::lit(entity.as_str()),
+                    alias: Some(type_col),
+                },
+            );
         }
     }
     Ok(())

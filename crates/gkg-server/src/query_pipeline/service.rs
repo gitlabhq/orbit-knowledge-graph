@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::auth::Claims;
-use crate::redaction::RedactionMessage;
+use crate::redaction::{QueryResult, RedactionMessage};
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use query_engine::{CompiledQuery, ParameterizedQuery, compile};
@@ -11,10 +11,9 @@ use tonic::{Status, Streaming};
 use super::error::PipelineError;
 use super::formatter::ResultFormatter;
 use super::stages::{
-    AuthorizationStage, ExtractionStage, FormattingStage, HydrationStage, RedactionStage,
-    SecurityStage,
+    AuthorizationStage, FormattingStage, HydrationStage, RedactionStage, SecurityStage,
 };
-use super::types::{ExecutionOutput, PipelineOutput};
+use super::types::PipelineOutput;
 
 #[derive(Clone)]
 pub struct QueryPipelineService<F: ResultFormatter + Clone> {
@@ -52,27 +51,21 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
         let structural_sql = compiled.structural.sql.clone();
         let batches = self.execute_query(&compiled.structural).await?;
 
-        let execution_output = ExecutionOutput {
-            batches,
-            result_context: compiled.structural.result_context,
-        };
-
-        let mut extraction = ExtractionStage::execute(execution_output);
+        let mut query_result =
+            QueryResult::from_batches(&batches, &compiled.structural.result_context);
 
         // Pre-auth hydration: for dynamic queries with indirect-auth entities,
         // resolve auth_id_column values before authorization so resource_checks()
         // and apply_authorizations() can use the correct auth IDs.
         if matches!(compiled.hydration, query_engine::HydrationPlan::Dynamic) {
-            let result_ctx = extraction.query_result.ctx().clone();
+            let result_ctx = query_result.ctx().clone();
             self.hydration
-                .resolve_auth_ids(&mut extraction.query_result, &result_ctx, &security_context)
+                .resolve_auth_ids(&mut query_result, &result_ctx, &security_context)
                 .await?;
         }
 
-        let authorized = AuthorizationStage::execute(extraction, tx, stream).await?;
-        let redacted = RedactionStage::execute(authorized);
-        let redacted_count = redacted.redacted_count;
-        let query_result = redacted.query_result;
+        let authorized = AuthorizationStage::execute(query_result, tx, stream).await?;
+        let (query_result, redacted_count) = RedactionStage::execute(authorized);
 
         let result_context = query_result.ctx().clone();
         let hydrated = self

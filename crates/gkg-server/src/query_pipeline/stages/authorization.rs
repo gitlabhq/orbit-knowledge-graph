@@ -2,19 +2,19 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use tracing::info;
 
-use crate::redaction::{RedactionExchangeError, RedactionMessage, RedactionService};
+use crate::redaction::{QueryResult, RedactionExchangeError, RedactionMessage, RedactionService};
 
-use super::super::types::{AuthorizationOutput, ExtractionOutput};
+use super::super::types::AuthorizationOutput;
 
 pub struct AuthorizationStage;
 
 impl AuthorizationStage {
     pub async fn execute<M: RedactionMessage>(
-        input: ExtractionOutput,
+        query_result: QueryResult,
         tx: &mpsc::Sender<Result<M, Status>>,
         stream: &mut Streaming<M>,
     ) -> Result<AuthorizationOutput, RedactionExchangeError> {
-        let resources_to_check = input.query_result.resource_checks();
+        let resources_to_check = query_result.resource_checks();
         let authorizations = if resources_to_check.is_empty() {
             info!("No redaction required, returning result directly");
             Vec::new()
@@ -25,7 +25,7 @@ impl AuthorizationStage {
         };
 
         Ok(AuthorizationOutput {
-            query_result: input.query_result,
+            query_result,
             authorizations,
         })
     }

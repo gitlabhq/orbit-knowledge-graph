@@ -27,11 +27,13 @@ impl NodeRef {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 pub struct RedactableNodes {
     nodes: Vec<NodeRef>,
 }
 
+#[cfg(test)]
 impl RedactableNodes {
     pub fn new() -> Self {
         Self { nodes: Vec::new() }
@@ -65,24 +67,12 @@ impl RedactableNodes {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ColumnValue {
     Int64(i64),
     String(String),
     Json(serde_json::Value),
     Null,
-}
-
-impl PartialEq for ColumnValue {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (ColumnValue::Int64(a), ColumnValue::Int64(b)) => a == b,
-            (ColumnValue::String(a), ColumnValue::String(b)) => a == b,
-            (ColumnValue::Json(a), ColumnValue::Json(b)) => a == b,
-            (ColumnValue::Null, ColumnValue::Null) => true,
-            _ => false,
-        }
-    }
 }
 
 impl ColumnValue {
@@ -239,13 +229,6 @@ impl QueryResult {
         self.auth_id_overrides = overrides;
     }
 
-    /// Look up a pre-resolved auth ID for a dynamic node.
-    pub fn get_auth_id_override(&self, entity_type: &str, entity_id: i64) -> Option<i64> {
-        self.auth_id_overrides
-            .get(&(entity_type.to_string(), entity_id))
-            .copied()
-    }
-
     pub fn rows(&self) -> &[QueryResultRow] {
         &self.rows
     }
@@ -258,6 +241,7 @@ impl QueryResult {
         &self.ctx
     }
 
+    #[cfg(test)]
     pub fn node_aliases(&self) -> Vec<String> {
         self.ctx.nodes().map(|n| n.alias.clone()).collect()
     }
@@ -274,6 +258,7 @@ impl QueryResult {
         self.rows.iter()
     }
 
+    #[cfg(test)]
     pub fn extract_redactable_nodes(&self) -> RedactableNodes {
         let mut nodes = RedactableNodes::new();
         for row in &self.rows {
@@ -440,7 +425,7 @@ fn resolve_dynamic_auth_id(
     let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
         return;
     };
-    let Some(ref _owner) = auth_config.owner_entity else {
+    let Some(ref owner) = auth_config.owner_entity else {
         return;
     };
     // Check pre-resolved overrides from the pre-auth hydration step.
@@ -449,7 +434,7 @@ fn resolve_dynamic_auth_id(
         return;
     }
     // Fallback to edge column resolution (for cases where edge columns are present).
-    if let Some(owner_id) = get_edge_id_for_entity(row, _owner) {
+    if let Some(owner_id) = get_edge_id_for_entity(row, owner) {
         node_ref.id = owner_id;
     }
 }

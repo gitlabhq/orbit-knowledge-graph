@@ -32,8 +32,8 @@ impl HydrationStage {
         result_context: &ResultContext,
         security_context: &SecurityContext,
     ) -> Result<(), PipelineError> {
-        let mut indirect_refs: HashMap<String, Vec<i64>> = HashMap::new();
-        let mut auth_columns: HashMap<String, String> = HashMap::new();
+        // Collect indirect-auth entity IDs and their auth columns in a single map.
+        let mut indirect_refs: HashMap<String, (Vec<i64>, String)> = HashMap::new();
 
         for row in result.rows() {
             for node_ref in row.dynamic_nodes() {
@@ -43,28 +43,24 @@ impl HydrationStage {
                 if auth.owner_entity.is_none() {
                     continue;
                 }
-                indirect_refs
+                let entry = indirect_refs
                     .entry(node_ref.entity_type.clone())
-                    .or_default()
-                    .push(node_ref.id);
-                auth_columns
-                    .entry(node_ref.entity_type.clone())
-                    .or_insert_with(|| auth.auth_id_column.clone());
+                    .or_insert_with(|| (Vec::new(), auth.auth_id_column.clone()));
+                entry.0.push(node_ref.id);
             }
-        }
-
-        for ids in indirect_refs.values_mut() {
-            ids.sort_unstable();
-            ids.dedup();
         }
 
         if indirect_refs.is_empty() {
             return Ok(());
         }
 
+        for (ids, _) in indirect_refs.values_mut() {
+            ids.sort_unstable();
+            ids.dedup();
+        }
+
         let mut overrides = HashMap::new();
-        for (entity_type, ids) in &indirect_refs {
-            let auth_col = &auth_columns[entity_type];
+        for (entity_type, (ids, auth_col)) in &indirect_refs {
             let resolved = self
                 .fetch_auth_ids(entity_type, ids, auth_col, security_context)
                 .await?;
@@ -223,27 +219,36 @@ impl HydrationStage {
         Ok(result)
     }
 
-    async fn fetch_entity_properties(
+    async fn compile_and_fetch(
         &self,
-        entity_type: &str,
-        ids: &[i64],
+        query_json: &str,
         security_context: &SecurityContext,
-    ) -> Result<PropertyMap, PipelineError> {
-        let query_json = self.build_search_query(entity_type, ids);
+    ) -> Result<Vec<RecordBatch>, PipelineError> {
         let compiled =
-            query_engine::compile_with_columns(&query_json, &self.ontology, security_context)
+            query_engine::compile_with_columns(query_json, &self.ontology, security_context)
                 .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
         let mut query = self.client.query(&compiled.sql);
         for (key, value) in &compiled.params {
             query = ArrowClickHouseClient::bind_param(query, key, value);
         }
-        let batches = query
+        query
             .fetch_arrow()
             .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))?;
+            .map_err(|e| PipelineError::Execution(e.to_string()))
+    }
 
-        self.parse_property_batches(entity_type, &batches)
+    async fn fetch_entity_properties(
+        &self,
+        entity_type: &str,
+        ids: &[i64],
+        security_context: &SecurityContext,
+    ) -> Result<PropertyMap, PipelineError> {
+        let query_json = Self::build_search_query(entity_type, ids);
+        let batches = self
+            .compile_and_fetch(&query_json, security_context)
+            .await?;
+        Self::parse_property_batches(entity_type, &batches)
     }
 
     /// Fetch just the auth_id_column for a set of entity IDs. Returns a map
@@ -255,34 +260,26 @@ impl HydrationStage {
         auth_id_column: &str,
         security_context: &SecurityContext,
     ) -> Result<HashMap<(String, i64), i64>, PipelineError> {
-        let query_json = self.build_auth_id_query(entity_type, ids, auth_id_column);
-        let compiled =
-            query_engine::compile_with_columns(&query_json, &self.ontology, security_context)
-                .map_err(|e| PipelineError::Compile(e.to_string()))?;
+        let query_json = Self::build_auth_id_query(entity_type, ids, auth_id_column);
+        let batches = self
+            .compile_and_fetch(&query_json, security_context)
+            .await?;
 
-        let mut query = self.client.query(&compiled.sql);
-        for (key, value) in &compiled.params {
-            query = ArrowClickHouseClient::bind_param(query, key, value);
-        }
-        let batches = query
-            .fetch_arrow()
-            .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))?;
-
+        let entity_type_owned = entity_type.to_string();
         let mut result = HashMap::new();
         for batch in &batches {
             let schema = batch.schema();
-            let pk_idx = schema.index_of("_gkg_n_id").ok();
-            let auth_idx = schema.index_of(auth_id_column).ok();
-
-            let (Some(pk_idx), Some(auth_idx)) = (pk_idx, auth_idx) else {
+            let (Some(pk_idx), Some(auth_idx)) = (
+                schema.index_of("_gkg_n_id").ok(),
+                schema.index_of(auth_id_column).ok(),
+            ) else {
                 continue;
             };
 
-            let pk_col = batch.column(pk_idx).as_any().downcast_ref::<Int64Array>();
-            let auth_col = batch.column(auth_idx).as_any().downcast_ref::<Int64Array>();
-
-            let (Some(pks), Some(auths)) = (pk_col, auth_col) else {
+            let (Some(pks), Some(auths)) = (
+                batch.column(pk_idx).as_any().downcast_ref::<Int64Array>(),
+                batch.column(auth_idx).as_any().downcast_ref::<Int64Array>(),
+            ) else {
                 continue;
             };
 
@@ -290,14 +287,17 @@ impl HydrationStage {
                 if pks.is_null(row) || auths.is_null(row) {
                     continue;
                 }
-                result.insert((entity_type.to_string(), pks.value(row)), auths.value(row));
+                result.insert(
+                    (entity_type_owned.clone(), pks.value(row)),
+                    auths.value(row),
+                );
             }
         }
 
         Ok(result)
     }
 
-    fn build_auth_id_query(&self, entity_type: &str, ids: &[i64], auth_id_column: &str) -> String {
+    fn build_auth_id_query(entity_type: &str, ids: &[i64], auth_id_column: &str) -> String {
         serde_json::json!({
             "query_type": "search",
             "node": {
@@ -311,7 +311,7 @@ impl HydrationStage {
         .to_string()
     }
 
-    fn build_search_query(&self, entity_type: &str, ids: &[i64]) -> String {
+    fn build_search_query(entity_type: &str, ids: &[i64]) -> String {
         serde_json::json!({
             "query_type": "search",
             "node": {
@@ -326,22 +326,19 @@ impl HydrationStage {
     }
 
     fn parse_property_batches(
-        &self,
         entity_type: &str,
         batches: &[RecordBatch],
     ) -> Result<PropertyMap, PipelineError> {
+        let entity_type_owned = entity_type.to_string();
         let mut result = HashMap::new();
 
         for batch in batches {
             let schema = batch.schema();
-            let id_idx = schema.index_of("_gkg_n_id").ok();
-
-            let Some(id_idx) = id_idx else {
+            let Some(id_idx) = schema.index_of("_gkg_n_id").ok() else {
                 continue;
             };
 
-            let id_col = batch.column(id_idx).as_any().downcast_ref::<Int64Array>();
-            let Some(ids) = id_col else {
+            let Some(ids) = batch.column(id_idx).as_any().downcast_ref::<Int64Array>() else {
                 continue;
             };
 
@@ -357,35 +354,16 @@ impl HydrationStage {
                     if name.starts_with("_gkg_") {
                         continue;
                     }
-                    if let Some(value) = self.column_value_to_column(batch.column(col_idx), row) {
+                    if let Some(value) = extract_column_value(batch.column(col_idx), row) {
                         props.insert(name.clone(), value);
                     }
                 }
 
-                result.insert((entity_type.to_string(), id), props);
+                result.insert((entity_type_owned.clone(), id), props);
             }
         }
 
         Ok(result)
-    }
-
-    fn column_value_to_column(&self, col: &dyn Array, row: usize) -> Option<ColumnValue> {
-        if col.is_null(row) {
-            return Some(ColumnValue::Null);
-        }
-        if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
-            return Some(ColumnValue::String(arr.value(row).to_string()));
-        }
-        if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
-            return Some(ColumnValue::Int64(arr.value(row)));
-        }
-        if let Some(arr) = col.as_any().downcast_ref::<BooleanArray>() {
-            return Some(ColumnValue::String(arr.value(row).to_string()));
-        }
-        if let Some(arr) = col.as_any().downcast_ref::<Float64Array>() {
-            return Some(ColumnValue::String(arr.value(row).to_string()));
-        }
-        None
     }
 
     /// Merge hydrated properties into rows for dynamic (Neighbors/PathFinding) queries.
@@ -448,6 +426,25 @@ impl HydrationStage {
             );
         }
     }
+}
+
+fn extract_column_value(col: &dyn Array, row: usize) -> Option<ColumnValue> {
+    if col.is_null(row) {
+        return Some(ColumnValue::Null);
+    }
+    if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
+        return Some(ColumnValue::String(arr.value(row).to_string()));
+    }
+    if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
+        return Some(ColumnValue::Int64(arr.value(row)));
+    }
+    if let Some(arr) = col.as_any().downcast_ref::<BooleanArray>() {
+        return Some(ColumnValue::String(arr.value(row).to_string()));
+    }
+    if let Some(arr) = col.as_any().downcast_ref::<Float64Array>() {
+        return Some(ColumnValue::String(arr.value(row).to_string()));
+    }
+    None
 }
 
 #[cfg(test)]

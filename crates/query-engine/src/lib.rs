@@ -61,6 +61,16 @@ pub use validate::Validator;
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Validate and normalize a JSON query string into a typed `Input`.
+fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
+    let v = Validator::new(ontology);
+    let value = v.check_json(json_input)?;
+    v.check_ontology(&value)?;
+    let input: Input = serde_json::from_value(value)?;
+    v.check_references(&input)?;
+    Ok(normalize(input, ontology))
+}
+
 /// Compile a JSON query into a structural query and hydration plan.
 ///
 /// Returns a [`CompiledQuery`] containing the structural SQL (IDs/types only for
@@ -72,12 +82,7 @@ pub fn compile(
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<CompiledQuery> {
-    let v = Validator::new(ontology);
-    let value = v.check_json(json_input)?;
-    v.check_ontology(&value)?;
-    let input: Input = serde_json::from_value(value)?;
-    v.check_references(&input)?;
-    let input = normalize(input, ontology);
+    let input = validated_input(json_input, ontology)?;
 
     let mut node = lower(&input)?;
     let result_context = enforce_return(&mut node, &input)?;
@@ -150,12 +155,7 @@ pub fn compile_with_columns(
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<ParameterizedQuery> {
-    let v = Validator::new(ontology);
-    let value = v.check_json(json_input)?;
-    v.check_ontology(&value)?;
-    let input: Input = serde_json::from_value(value)?;
-    v.check_references(&input)?;
-    let input = normalize(input, ontology);
+    let input = validated_input(json_input, ontology)?;
 
     let mut node = lower_with_columns(&input)?;
     let result_context = enforce_return(&mut node, &input)?;
