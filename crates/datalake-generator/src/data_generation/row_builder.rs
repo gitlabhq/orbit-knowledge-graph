@@ -4,9 +4,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use arrow::array::{
     BooleanBuilder, Date32Builder, Float64Builder, Int8Builder, Int64Builder, ListBuilder,
-    RecordBatch, StringBuilder,
+    RecordBatch, StringBuilder, TimestampMicrosecondBuilder,
 };
-use arrow::datatypes::{DataType, Schema};
+use arrow::datatypes::{DataType, Schema, TimeUnit};
 
 use super::fake_values::{ColumnKind, SiphonFakeValueGenerator, SiphonValue};
 
@@ -60,11 +60,13 @@ fn build_field_strategies<'a>(
             }
 
             let kind = ColumnKind::classify(field_name);
-            let is_datetime = matches!(field.data_type(), DataType::Int64)
-                && (kind == ColumnKind::DateTime
-                    || field_name.ends_with("_at")
-                    || field_name == "created_at"
-                    || field_name == "updated_at");
+            let is_datetime = matches!(
+                field.data_type(),
+                DataType::Int64 | DataType::Timestamp(TimeUnit::Microsecond, _)
+            ) && (kind == ColumnKind::DateTime
+                || field_name.ends_with("_at")
+                || field_name == "created_at"
+                || field_name == "updated_at");
 
             FieldStrategy::Generate(GenerateStrategy {
                 data_type: field.data_type().clone(),
@@ -108,6 +110,9 @@ pub fn generate_value(
                 generator.generate_int64(strategy.kind, strategy.nullable)
             }
         }
+        DataType::Timestamp(TimeUnit::Microsecond, _) => {
+            generator.generate_datetime64(strategy.nullable)
+        }
         DataType::Int8 => generator.generate_int8(strategy.nullable),
         DataType::Utf8 => generator.generate_string(strategy.kind, strategy.nullable),
         DataType::Boolean => generator.generate_bool(strategy.nullable),
@@ -127,6 +132,7 @@ pub enum ColumnBuilder {
     Float64(Float64Builder),
     Date32(Date32Builder),
     ListInt64(ListBuilder<Int64Builder>),
+    TimestampMicrosecond(TimestampMicrosecondBuilder, Option<Arc<str>>),
 }
 
 impl ColumnBuilder {
@@ -140,6 +146,12 @@ impl ColumnBuilder {
             DataType::Boolean => ColumnBuilder::Boolean(BooleanBuilder::with_capacity(capacity)),
             DataType::Float64 => ColumnBuilder::Float64(Float64Builder::with_capacity(capacity)),
             DataType::Date32 => ColumnBuilder::Date32(Date32Builder::with_capacity(capacity)),
+            DataType::Timestamp(TimeUnit::Microsecond, ref tz) => {
+                ColumnBuilder::TimestampMicrosecond(
+                    TimestampMicrosecondBuilder::with_capacity(capacity),
+                    tz.clone(),
+                )
+            }
             DataType::List(field) => ColumnBuilder::ListInt64(
                 ListBuilder::new(Int64Builder::new()).with_field(field.clone()),
             ),
@@ -156,6 +168,13 @@ impl ColumnBuilder {
             ColumnBuilder::Float64(mut b) => Arc::new(b.finish()),
             ColumnBuilder::Date32(mut b) => Arc::new(b.finish()),
             ColumnBuilder::ListInt64(mut b) => Arc::new(b.finish()),
+            ColumnBuilder::TimestampMicrosecond(mut b, tz) => {
+                let array = b.finish();
+                match tz {
+                    Some(tz) => Arc::new(array.with_timezone(tz)),
+                    None => Arc::new(array),
+                }
+            }
         }
     }
 
@@ -174,6 +193,13 @@ impl ColumnBuilder {
             (ColumnBuilder::Float64(b), SiphonValue::Null) => b.append_null(),
             (ColumnBuilder::Date32(b), SiphonValue::Date32(v)) => b.append_value(*v),
             (ColumnBuilder::Date32(b), SiphonValue::Null) => b.append_null(),
+            (ColumnBuilder::TimestampMicrosecond(b, _), SiphonValue::Int64(v)) => {
+                b.append_value(*v)
+            }
+            (ColumnBuilder::TimestampMicrosecond(b, _), SiphonValue::DateTime64(v)) => {
+                b.append_value(*v)
+            }
+            (ColumnBuilder::TimestampMicrosecond(b, _), SiphonValue::Null) => b.append_null(),
             (ColumnBuilder::ListInt64(b), SiphonValue::ListInt64(v)) => {
                 let values = b.values();
                 for item in v {
@@ -195,6 +221,7 @@ impl ColumnBuilder {
             (ColumnBuilder::Float64(b), _) => b.append_null(),
             (ColumnBuilder::Date32(b), _) => b.append_null(),
             (ColumnBuilder::ListInt64(b), _) => b.append(false),
+            (ColumnBuilder::TimestampMicrosecond(b, _), _) => b.append_null(),
         }
     }
 }

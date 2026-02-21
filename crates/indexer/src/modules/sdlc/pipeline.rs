@@ -9,10 +9,12 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use futures::StreamExt;
 use ontology::{EDGE_TABLE, EdgeSourceEtlConfig, NodeEntity, Ontology};
+use opentelemetry::KeyValue;
 use serde_json::Value;
 use tracing::{debug, info};
 
 use super::datalake::DatalakeQuery;
+use super::metrics::SdlcMetrics;
 use super::prepare::{PreparedEdgeEtl, PreparedEtlConfig};
 use super::transform::{
     SOURCE_DATA_TABLE, build_all_edge_sql, build_edge_etl_transform_sql, build_transform_sql,
@@ -25,6 +27,7 @@ pub struct OntologyEntityPipeline {
     transform_sql: String,
     edge_transforms: Vec<String>,
     datalake: Arc<dyn DatalakeQuery>,
+    metrics: SdlcMetrics,
 }
 
 impl OntologyEntityPipeline {
@@ -32,6 +35,7 @@ impl OntologyEntityPipeline {
         node: &NodeEntity,
         ontology: &Ontology,
         datalake: Arc<dyn DatalakeQuery>,
+        metrics: SdlcMetrics,
     ) -> Option<Self> {
         let config = PreparedEtlConfig::from_node(node, ontology)?;
         let transform_sql = build_transform_sql(&config);
@@ -44,6 +48,7 @@ impl OntologyEntityPipeline {
             transform_sql,
             edge_transforms,
             datalake,
+            metrics,
         })
     }
 
@@ -55,8 +60,13 @@ impl OntologyEntityPipeline {
         &self,
         params: Value,
         destination: &dyn Destination,
+        scope: &str,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
+        let labels = [
+            KeyValue::new("entity", self.entity_name.clone()),
+            KeyValue::new("scope", scope.to_owned()),
+        ];
 
         let entity_writer = destination
             .new_batch_writer(&self.destination_table)
@@ -84,6 +94,7 @@ impl OntologyEntityPipeline {
             "querying datalake for entity data"
         );
 
+        let query_start = Instant::now();
         let mut stream = self
             .datalake
             .query_arrow(&self.extract_query, params)
@@ -91,10 +102,14 @@ impl OntologyEntityPipeline {
             .map_err(|e| {
                 HandlerError::Processing(format!("failed to query {} data: {e}", self.entity_name))
             })?;
+        self.metrics.datalake_query_duration.record(
+            query_start.elapsed().as_secs_f64(),
+            &[KeyValue::new("entity", self.entity_name.clone())],
+        );
 
-        let mut batch_count = 0;
-        let mut total_rows = 0;
-        let mut total_edges = 0;
+        let mut batch_count: u64 = 0;
+        let mut total_rows: u64 = 0;
+        let mut total_edges: u64 = 0;
 
         while let Some(result) = stream.next().await {
             let source_batch = result.map_err(|e| {
@@ -106,7 +121,7 @@ impl OntologyEntityPipeline {
             }
 
             batch_count += 1;
-            let batch_rows = source_batch.num_rows();
+            let batch_rows = source_batch.num_rows() as u64;
             total_rows += batch_rows;
 
             let edges_written = self
@@ -116,15 +131,28 @@ impl OntologyEntityPipeline {
                     edge_writer.as_ref(),
                 )
                 .await?;
-            total_edges += edges_written;
+            total_edges += edges_written as u64;
         }
 
-        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+        let elapsed = started_at.elapsed();
+
+        self.metrics
+            .pipeline_duration
+            .record(elapsed.as_secs_f64(), &labels);
+        self.metrics
+            .pipeline_rows_processed
+            .add(total_rows, &labels);
+        self.metrics
+            .pipeline_edges_processed
+            .add(total_edges, &labels);
+        self.metrics
+            .pipeline_batches_processed
+            .add(batch_count, &labels);
 
         if total_rows == 0 {
             debug!(
                 entity = %self.entity_name,
-                elapsed_ms,
+                elapsed_ms = elapsed.as_millis() as u64,
                 "entity pipeline processing complete"
             );
         } else {
@@ -133,7 +161,7 @@ impl OntologyEntityPipeline {
                 batches_processed = batch_count,
                 total_rows,
                 total_edges,
-                elapsed_ms,
+                elapsed_ms = elapsed.as_millis() as u64,
                 "entity pipeline processing complete"
             );
         }
@@ -147,6 +175,7 @@ impl OntologyEntityPipeline {
         entity_writer: &dyn BatchWriter,
         edge_writer: &dyn BatchWriter,
     ) -> Result<usize, HandlerError> {
+        let transform_start = Instant::now();
         let session = SessionContext::new();
 
         let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
@@ -195,6 +224,11 @@ impl OntologyEntityPipeline {
             }
         }
 
+        self.metrics.transform_duration.record(
+            transform_start.elapsed().as_secs_f64(),
+            &[KeyValue::new("entity", self.entity_name.clone())],
+        );
+
         Ok(edges_written)
     }
 
@@ -240,6 +274,7 @@ pub struct OntologyEdgePipeline {
     extract_query: String,
     transform_sql: String,
     datalake: Arc<dyn DatalakeQuery>,
+    metrics: SdlcMetrics,
 }
 
 impl OntologyEdgePipeline {
@@ -248,6 +283,7 @@ impl OntologyEdgePipeline {
         config: &EdgeSourceEtlConfig,
         ontology: &Ontology,
         datalake: Arc<dyn DatalakeQuery>,
+        metrics: SdlcMetrics,
     ) -> Self {
         let prepared = PreparedEdgeEtl::from_config(relationship_kind, config, ontology);
         let transform_sql = build_edge_etl_transform_sql(&prepared);
@@ -257,6 +293,7 @@ impl OntologyEdgePipeline {
             extract_query: prepared.extract_query,
             transform_sql,
             datalake,
+            metrics,
         }
     }
 
@@ -268,8 +305,13 @@ impl OntologyEdgePipeline {
         &self,
         params: Value,
         destination: &dyn Destination,
+        scope: &str,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
+        let labels = [
+            KeyValue::new("entity", self.relationship_kind.clone()),
+            KeyValue::new("scope", scope.to_owned()),
+        ];
 
         let edge_writer = destination
             .new_batch_writer(EDGE_TABLE)
@@ -287,6 +329,7 @@ impl OntologyEdgePipeline {
             "querying datalake for edge data"
         );
 
+        let query_start = Instant::now();
         let mut stream = self
             .datalake
             .query_arrow(&self.extract_query, params)
@@ -297,10 +340,14 @@ impl OntologyEdgePipeline {
                     self.relationship_kind
                 ))
             })?;
+        self.metrics.datalake_query_duration.record(
+            query_start.elapsed().as_secs_f64(),
+            &[KeyValue::new("entity", self.relationship_kind.clone())],
+        );
 
-        let mut batch_count = 0;
-        let mut total_rows = 0;
-        let mut total_edges_written = 0;
+        let mut batch_count: u64 = 0;
+        let mut total_rows: u64 = 0;
+        let mut total_edges_written: u64 = 0;
 
         while let Some(result) = stream.next().await {
             let source_batch = result.map_err(|e| {
@@ -315,21 +362,34 @@ impl OntologyEdgePipeline {
             }
 
             batch_count += 1;
-            let batch_rows = source_batch.num_rows();
+            let batch_rows = source_batch.num_rows() as u64;
             total_rows += batch_rows;
 
             let edges_written = self
                 .transform_and_write_batch(source_batch, edge_writer.as_ref())
                 .await?;
-            total_edges_written += edges_written;
+            total_edges_written += edges_written as u64;
         }
 
-        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+        let elapsed = started_at.elapsed();
+
+        self.metrics
+            .pipeline_duration
+            .record(elapsed.as_secs_f64(), &labels);
+        self.metrics
+            .pipeline_rows_processed
+            .add(total_rows, &labels);
+        self.metrics
+            .pipeline_edges_processed
+            .add(total_edges_written, &labels);
+        self.metrics
+            .pipeline_batches_processed
+            .add(batch_count, &labels);
 
         if total_rows == 0 {
             debug!(
                 edge = %self.relationship_kind,
-                elapsed_ms,
+                elapsed_ms = elapsed.as_millis() as u64,
                 "edge pipeline processing complete"
             );
         } else {
@@ -338,7 +398,7 @@ impl OntologyEdgePipeline {
                 batches_processed = batch_count,
                 source_rows = total_rows,
                 edges_written = total_edges_written,
-                elapsed_ms,
+                elapsed_ms = elapsed.as_millis() as u64,
                 "edge pipeline processing complete"
             );
         }
@@ -351,6 +411,7 @@ impl OntologyEdgePipeline {
         batch: RecordBatch,
         edge_writer: &dyn BatchWriter,
     ) -> Result<usize, HandlerError> {
+        let transform_start = Instant::now();
         let session = SessionContext::new();
 
         let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
@@ -385,6 +446,11 @@ impl OntologyEdgePipeline {
                 "edge batch transform and write complete"
             );
         }
+
+        self.metrics.transform_duration.record(
+            transform_start.elapsed().as_secs_f64(),
+            &[KeyValue::new("entity", self.relationship_kind.clone())],
+        );
 
         Ok(edges_count)
     }
@@ -431,6 +497,12 @@ mod tests {
     use futures::stream;
     use ontology::{DataType, EtlConfig, EtlScope, Field};
     use std::collections::BTreeMap;
+
+    fn test_metrics() -> SdlcMetrics {
+        let provider = opentelemetry::global::meter_provider();
+        let meter = provider.meter("test");
+        SdlcMetrics::with_meter(&meter)
+    }
 
     struct MockDatalake;
 
@@ -489,7 +561,8 @@ mod tests {
         let ontology = Ontology::new();
         let datalake = Arc::new(MockDatalake);
 
-        let pipeline = OntologyEntityPipeline::from_node(&node, &ontology, datalake);
+        let pipeline =
+            OntologyEntityPipeline::from_node(&node, &ontology, datalake, test_metrics());
 
         assert!(pipeline.is_some());
         assert_eq!(pipeline.unwrap().entity_name(), "User");
@@ -512,7 +585,8 @@ mod tests {
         let ontology = Ontology::new();
         let datalake = Arc::new(MockDatalake);
 
-        let pipeline = OntologyEntityPipeline::from_node(&node, &ontology, datalake);
+        let pipeline =
+            OntologyEntityPipeline::from_node(&node, &ontology, datalake, test_metrics());
 
         assert!(pipeline.is_none());
     }

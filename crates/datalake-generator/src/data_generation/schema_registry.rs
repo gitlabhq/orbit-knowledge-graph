@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::seeding::catalog;
 use anyhow::{Context, Result};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use clickhouse_client::ArrowClickHouseClient;
 use tracing::warn;
 
@@ -123,7 +123,10 @@ fn parse_clickhouse_type(type_str: &str) -> (DataType, bool) {
         "String" => DataType::Utf8,
         "Bool" => DataType::Boolean,
         "Date32" => DataType::Date32,
-        t if t.starts_with("DateTime64") => DataType::Int64,
+        t if t.starts_with("DateTime64") => {
+            let timezone = t.split('\'').nth(1).map(Arc::from);
+            DataType::Timestamp(TimeUnit::Microsecond, timezone)
+        }
         other => {
             warn!(
                 clickhouse_type = other,
