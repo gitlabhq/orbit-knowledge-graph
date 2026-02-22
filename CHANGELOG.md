@@ -1,3 +1,15 @@
+## [0.4.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.3.1...v0.4.0) (2026-02-22)
+
+### Features
+
+* **indexer:** add sdlc indexing metrics ([6a1951b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6a1951b865e2c57413e2ed22ab477120376c2a16)) by Jean-Gabriel Doyon
+* **indexer:** add traversal_path to gl_edge table ([f397d68](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f397d689c3ba0dab46e36a6fc7861bc91d81e04b)) by Jean-Gabriel Doyon
+* **proto:** add gkg-proto Ruby gem build pipeline ([6eb77da](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6eb77daff361ffdf50963ce421aa515922f3872c)) by Michael Angelo Rivera
+* setup xtask crate ([7f37c08](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7f37c08c5b34e0797295186220fe83fac6bc03c9)) by Michael Usachenko
+* xtask for e2e testing infra - gitlab cloud native cluster setup ([0b35d0a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0b35d0a5b8a0ea4f2168aed3b4436df9c7a640f3)) by Michael Usachenko
+* **xtask:** clickhouse setup and migrations for e2e harness ([6ff0e44](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6ff0e44213af61b7e7ef5e1c26b1cd1cce23254b)) by Michael Usachenko
+* **xtask:** handle cng post-deployment tasks for e2e harness ([ddef2bd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ddef2bdaa653accffb85f056e37acf8690ae06c7)) by Michael Usachenko
+
 ## [0.3.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.3.0...v0.3.1) (2026-02-20)
 
 ### Fixes
