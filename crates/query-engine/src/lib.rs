@@ -51,7 +51,7 @@ pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
 pub use input::EntityAuthConfig;
 pub use input::{Input, QueryType, parse_input};
-pub use lower::lower;
+pub use lower::{lower, lower_with_columns};
 pub use normalize::{build_entity_auth, normalize};
 pub use ontology::{EDGE_TABLE, NODE_RESERVED_COLUMNS, Ontology, OntologyError};
 pub use security::{SecurityContext, apply_security_context};
@@ -89,7 +89,7 @@ pub fn compile(
     apply_security_context(&mut node, ctx)?;
     let structural = codegen(&node, result_context)?;
 
-    let hydration = build_hydration_plan(&input);
+    let hydration = build_hydration_plan(&input, ontology, ctx)?;
 
     Ok(CompiledQuery {
         structural,
@@ -104,10 +104,14 @@ pub fn compile(
 ///   so we pre-compile one search query template per entity type.
 /// - PathFinding/Neighbors: dynamic hydration — entity types are discovered at
 ///   runtime from edge data, so the server builds search queries on the fly.
-fn build_hydration_plan(input: &Input) -> HydrationPlan {
+fn build_hydration_plan(
+    input: &Input,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<HydrationPlan> {
     match input.query_type {
-        QueryType::Aggregation => HydrationPlan::None,
-        QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
+        QueryType::Aggregation => Ok(HydrationPlan::None),
+        QueryType::PathFinding | QueryType::Neighbors => Ok(HydrationPlan::Dynamic),
         QueryType::Traversal | QueryType::Search => {
             let mut templates = Vec::new();
 
@@ -127,16 +131,36 @@ fn build_hydration_plan(input: &Input) -> HydrationPlan {
                 })
                 .to_string();
 
+                let hydration_query = compile_with_columns(&hydration_json, ontology, ctx)?;
+
                 templates.push(HydrationTemplate {
                     entity_type: entity.clone(),
                     node_alias: node.id.clone(),
-                    query_json: hydration_json,
+                    query: hydration_query,
                 });
             }
 
-            HydrationPlan::Static(templates)
+            Ok(HydrationPlan::Static(templates))
         }
     }
+}
+
+/// Compile a JSON query into a ParameterizedQuery with property columns in SELECT.
+///
+/// Unlike [`compile`] which produces a slim structural query (IDs/types only),
+/// this returns a full query with all requested columns. Used for hydration
+/// queries that fetch entity properties after authorization.
+pub fn compile_with_columns(
+    json_input: &str,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<ParameterizedQuery> {
+    let input = validated_input(json_input, ontology)?;
+
+    let mut node = lower_with_columns(&input)?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx)?;
+    codegen(&node, result_context)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,8 +226,8 @@ mod tests {
             panic!("expected Query");
         };
         assert_eq!(q.limit, Some(10));
-        // lower() still returns full columns in this stage; slim SELECT comes later
-        assert!(!q.select.is_empty());
+        // Structural query starts with empty SELECT from lower()
+        assert!(q.select.is_empty());
     }
 
     #[test]
@@ -707,19 +731,21 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Search with columns SQL: {}", result.structural.sql);
 
-        // Structural query still includes all columns (slim SELECT not yet implemented)
+        // Structural query has only _gkg_* columns; property columns are in hydration
         assert!(result.structural.sql.contains("_gkg_u_id"));
         assert!(result.structural.sql.contains("_gkg_u_type"));
-        assert!(result.structural.sql.contains("u_username"));
+        assert!(
+            !result.structural.sql.contains("u_username"),
+            "property columns should be in hydration, not structural"
+        );
 
-        // Hydration plan should have a template for User
+        // Hydration plan should have a template for User with wildcard columns
         let HydrationPlan::Static(templates) = &result.hydration else {
             panic!("expected Static hydration plan");
         };
         assert_eq!(templates.len(), 1);
         assert_eq!(templates[0].entity_type, "User");
-        assert_eq!(templates[0].node_alias, "u");
-        assert!(templates[0].query_json.contains("User"));
+        assert!(templates[0].query.sql.contains("username"));
     }
 
     #[test]
@@ -737,17 +763,17 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Search with wildcard SQL: {}", result.structural.sql);
 
-        // Structural query still includes all columns (slim SELECT not yet implemented)
+        // Structural query has only _gkg_* columns
         assert!(result.structural.sql.contains("_gkg_u_id"));
         assert!(result.structural.sql.contains("_gkg_u_type"));
 
-        // Hydration plan should have a template for User
+        // Hydration plan should have a template for User with all columns
         let HydrationPlan::Static(templates) = &result.hydration else {
             panic!("expected Static hydration plan");
         };
         assert_eq!(templates.len(), 1);
         assert_eq!(templates[0].entity_type, "User");
-        assert!(templates[0].query_json.contains("User"));
+        assert!(templates[0].query.sql.contains("username"));
     }
 
     #[test]
@@ -765,12 +791,15 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Traversal with columns SQL: {}", result.structural.sql);
 
-        // Structural query still includes all columns (slim SELECT not yet implemented)
+        // Structural query has only _gkg_* columns
         assert!(result.structural.sql.contains("_gkg_u_id"));
         assert!(result.structural.sql.contains("_gkg_u_type"));
         assert!(result.structural.sql.contains("_gkg_p_id"));
         assert!(result.structural.sql.contains("_gkg_p_type"));
-        assert!(result.structural.sql.contains("u_username"));
+        assert!(
+            !result.structural.sql.contains("u_username"),
+            "property columns should be in hydration, not structural"
+        );
 
         // Hydration plan should have templates for both nodes
         let HydrationPlan::Static(templates) = &result.hydration else {

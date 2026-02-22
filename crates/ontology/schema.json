@@ -502,6 +502,11 @@
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           }
+        },
+        "include_edges": {
+          "type": "boolean",
+          "description": "When true, include edge metadata in path results. Defaults to false.",
+          "default": false
         }
       }
     },

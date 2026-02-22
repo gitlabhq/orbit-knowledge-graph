@@ -36,9 +36,7 @@ pub enum HydrationPlan {
 pub struct HydrationTemplate {
     pub entity_type: String,
     pub node_alias: String,
-    /// Raw JSON for the hydration query. Pre-compilation deferred to MR 2
-    /// (requires `compile_with_columns` which depends on slim SELECT in `lower.rs`).
-    pub query_json: String,
+    pub query: ParameterizedQuery,
 }
 
 /// Display inlines parameters into SQL for debugging/testing.
@@ -609,9 +607,10 @@ mod tests {
             empty_ctx(),
         )
         .unwrap();
-        assert!(r
-            .sql
-            .contains("relationship_kind IN {type_e:Array(String)})"));
+        assert!(
+            r.sql
+                .contains("relationship_kind IN {type_e:Array(String)})")
+        );
         assert_eq!(
             r.params.get("type_e"),
             Some(&Value::Array(vec![

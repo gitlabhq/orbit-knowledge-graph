@@ -449,22 +449,26 @@ mod tests {
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
         assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string())));
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string())));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string())));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string())));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
+        );
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
+        );
 
         // Context should only have the group_by node
         assert_eq!(ctx.len(), 1);
@@ -503,6 +507,7 @@ mod tests {
                 to: "end".to_string(),
                 max_depth: 3,
                 rel_types: vec![],
+                include_edges: false,
             }),
             neighbors: None,
             limit: 30,
