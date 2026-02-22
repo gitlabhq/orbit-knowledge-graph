@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition = "2024"
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { workspace = true }
+anyhow = { workspace = true }

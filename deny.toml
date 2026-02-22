@@ -48,6 +48,11 @@ ignore = true
 registries = []
 
 [[licenses.clarify]]
+name = "xtask"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "ontology"
 expression = "LicenseRef-EE"
 license-files = []
