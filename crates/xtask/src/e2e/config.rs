@@ -1,25 +1,16 @@
 //! E2E environment configuration.
 //!
-//! All configurable values for the E2E harness. Each field can be overridden
-//! via the corresponding environment variable.
+//! All configurable values for the E2E harness. Infrastructure defaults
+//! (namespaces, PG pod names, in-pod paths, etc.) are stable and have
+//! sensible fallbacks. User-specific paths like `GITLAB_SRC` are **required**
+//! — the binary panics at startup if they are not set, rather than silently
+//! using a path that only works on one developer's machine.
 
 use std::env;
 use std::path::PathBuf;
 
-/// Resolve `~` at the start of a path to `$HOME`.
-fn expand_home(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/")
-        && let Ok(home) = env::var("HOME")
-    {
-        return PathBuf::from(home).join(rest);
-    }
-    PathBuf::from(path)
-}
-
-/// Read an env var or return the default.
-fn env_or(key: &str, default: &str) -> String {
-    env::var(key).unwrap_or_else(|_| default.to_string())
-}
+use super::constants as c;
+use super::env as e;
 
 /// All configuration for the E2E environment.
 pub struct Config {
@@ -28,8 +19,12 @@ pub struct Config {
     pub gkg_root: PathBuf,
     /// Path to the e2e/cng directory (contains Dockerfile, values files).
     pub cng_dir: PathBuf,
+    /// Path to the Tilt directory (e2e/tilt).
+    pub tilt_dir: PathBuf,
     /// Path to the local GitLab Rails checkout.
     pub gitlab_src: PathBuf,
+    /// Log / artifact output directory (.dev/).
+    pub log_dir: PathBuf,
 
     // -- Colima / k8s ---------------------------------------------------------
     pub colima_profile: String,
@@ -40,6 +35,7 @@ pub struct Config {
 
     // -- Kubernetes namespaces ------------------------------------------------
     pub gitlab_ns: String,
+    pub default_ns: String,
 
     // -- CNG image settings ---------------------------------------------------
     pub base_tag: String,
@@ -48,43 +44,73 @@ pub struct Config {
     pub local_tag: String,
     pub workhorse_image: String,
     pub cng_components: Vec<String>,
+
+    // -- PostgreSQL ------------------------------------------------------------
+    pub pg_secret_name: String,
+    pub pg_password_key: String,
+    pub pg_superpass_key: String,
+    pub pg_pod: String,
+    pub pg_database: String,
+    pub pg_user: String,
+
+    // -- Paths inside pods ----------------------------------------------------
+    pub rails_root: String,
+    pub jwt_secret_path: String,
+    pub e2e_pod_dir: String,
+    pub manifest_pod_path: String,
 }
 
 impl Config {
     /// Build config from environment variables with sensible defaults.
     pub fn from_env() -> Self {
-        let gkg_root = workspace_root();
+        let gkg_root = e::workspace_root();
         let cng_dir = gkg_root.join("e2e/cng");
+        let tilt_dir = gkg_root.join("e2e/tilt");
+        let log_dir = gkg_root.join(".dev");
 
-        let base_tag = env_or("BASE_TAG", "v18.8.1");
-        let cng_registry = env_or("CNG_REGISTRY", "registry.gitlab.com/gitlab-org/build/cng");
-        let local_prefix = env_or("LOCAL_PREFIX", "gkg-e2e");
-        let local_tag = env_or("LOCAL_TAG", "local");
+        let base_tag = e::env_or("BASE_TAG", c::BASE_TAG);
+        let cng_registry = e::env_or("CNG_REGISTRY", c::CNG_REGISTRY);
+        let local_prefix = e::env_or("LOCAL_PREFIX", c::LOCAL_PREFIX);
+        let local_tag = e::env_or("LOCAL_TAG", c::LOCAL_TAG);
         let workhorse_image = format!("{cng_registry}/gitlab-workhorse-ee:{base_tag}");
 
+        let e2e_pod_dir = e::env_or("E2E_POD_DIR", c::E2E_POD_DIR);
+        let manifest_pod_path = format!("{e2e_pod_dir}/manifest.json");
+
         Self {
-            gitlab_src: expand_home(&env_or("GITLAB_SRC", "~/Desktop/Code/gdk/gitlab")),
+            gitlab_src: e::expand_home(&e::require("GITLAB_SRC")),
             cng_dir,
+            tilt_dir,
+            log_dir,
             gkg_root,
 
-            colima_profile: env_or("COLIMA_PROFILE", "cng"),
-            colima_memory: env_or("COLIMA_MEMORY", "12"),
-            colima_cpus: env_or("COLIMA_CPUS", "4"),
-            colima_disk: env_or("COLIMA_DISK", "60"),
-            colima_k8s_version: env_or("COLIMA_K8S_VERSION", "v1.31.5+k3s1"),
+            colima_profile: e::env_or("COLIMA_PROFILE", c::COLIMA_PROFILE),
+            colima_memory: e::env_or("COLIMA_MEMORY", c::COLIMA_MEMORY),
+            colima_cpus: e::env_or("COLIMA_CPUS", c::COLIMA_CPUS),
+            colima_disk: e::env_or("COLIMA_DISK", c::COLIMA_DISK),
+            colima_k8s_version: e::env_or("COLIMA_K8S_VERSION", c::COLIMA_K8S_VERSION),
 
-            gitlab_ns: env_or("GITLAB_NS", "gitlab"),
+            gitlab_ns: e::env_or("GITLAB_NS", c::GITLAB_NS),
+            default_ns: e::env_or("DEFAULT_NS", c::DEFAULT_NS),
 
-            cng_components: vec![
-                "gitlab-webservice-ee".into(),
-                "gitlab-sidekiq-ee".into(),
-                "gitlab-toolbox-ee".into(),
-            ],
+            cng_components: c::CNG_COMPONENTS.iter().map(|s| (*s).into()).collect(),
             base_tag,
             cng_registry,
             local_prefix,
             local_tag,
             workhorse_image,
+
+            pg_secret_name: e::env_or("PG_SECRET_NAME", c::PG_SECRET_NAME),
+            pg_password_key: e::env_or("PG_PASSWORD_KEY", c::PG_PASSWORD_KEY),
+            pg_superpass_key: e::env_or("PG_SUPERPASS_KEY", c::PG_SUPERPASS_KEY),
+            pg_pod: e::env_or("PG_POD", c::PG_POD),
+            pg_database: e::env_or("PG_DATABASE", c::PG_DATABASE),
+            pg_user: e::env_or("PG_USER", c::PG_USER),
+
+            rails_root: e::env_or("RAILS_ROOT", c::RAILS_ROOT),
+            jwt_secret_path: e::env_or("JWT_SECRET_PATH", c::JWT_SECRET_PATH),
+            e2e_pod_dir,
+            manifest_pod_path,
         }
     }
 
@@ -93,27 +119,4 @@ impl Config {
         let home = env::var("HOME").unwrap_or_default();
         format!("unix://{home}/.colima/{}/docker.sock", self.colima_profile)
     }
-}
-
-/// Find the workspace root by walking up from the xtask binary location.
-/// Falls back to CARGO_MANIFEST_DIR at compile time.
-fn workspace_root() -> PathBuf {
-    // At runtime: the binary is at <root>/target/debug/xtask.
-    // Walk up from current exe to find Cargo.toml with [workspace].
-    if let Ok(exe) = env::current_exe() {
-        let mut dir = exe.as_path();
-        while let Some(parent) = dir.parent() {
-            if parent.join("Cargo.toml").exists() && parent.join("crates").exists() {
-                return parent.to_path_buf();
-            }
-            dir = parent;
-        }
-    }
-
-    // Compile-time fallback: xtask's Cargo.toml is at crates/xtask/
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.to_path_buf())
-        .expect("could not determine workspace root")
 }

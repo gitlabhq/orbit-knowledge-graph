@@ -1,4 +1,4 @@
-//! CNG setup: Cluster + Cloud Native GitLab.
+//! CNG deploy: Cluster + Cloud Native GitLab.
 //!
 //! Steps:
 //!   1. Start Colima (k3s cluster)
@@ -14,13 +14,15 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use xshell::{Shell, cmd};
 
-use super::cmd as cmd_helpers;
-use super::config::Config;
-use super::ui;
+use super::super::cmd as cmd_helpers;
+use super::super::config::Config;
+use super::super::constants as c;
+use super::super::kubectl;
+use super::super::ui;
 
-/// Run all CNG setup steps.
+/// Run all CNG deploy steps.
 pub fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
-    ui::banner("CNG Setup: Cluster + GitLab")?;
+    ui::banner("CNG Deploy: Cluster + GitLab")?;
     ui::detail("GKG root    ", &cfg.gkg_root.display().to_string())?;
     ui::detail("GitLab src  ", &cfg.gitlab_src.display().to_string())?;
     ui::detail(
@@ -44,7 +46,7 @@ pub fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
     deploy_gitlab(sh, cfg)?;
     wait_for_pods(sh, cfg)?;
 
-    ui::outro("CNG setup complete")?;
+    ui::outro("CNG deploy complete")?;
     Ok(())
 }
 
@@ -169,8 +171,7 @@ fn build_images(sh: &Shell, cfg: &Config) -> Result<()> {
 
     ui::info(&format!("Staging Rails code to {}", staging.display()))?;
 
-    let dirs_to_copy = ["app", "config", "db", "ee", "lib", "locale", "gems"];
-    for dir in &dirs_to_copy {
+    for dir in c::STAGING_DIRS {
         let src = cfg.gitlab_src.join(dir);
         let dst = staging.join(dir);
         if src.exists() {
@@ -237,17 +238,7 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
 
     let docker_host = cfg.docker_host();
 
-    let already = cmd!(sh, "helm status traefik -n kube-system")
-        .env("DOCKER_HOST", &docker_host)
-        .quiet()
-        .ignore_status()
-        .ignore_stdout()
-        .ignore_stderr()
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    if already {
+    if kubectl::helm_release_exists(sh, "traefik", "kube-system", &docker_host) {
         ui::info("Traefik already deployed")?;
         return Ok(());
     }
@@ -303,17 +294,7 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     let values_file = cfg.cng_dir.join("gitlab-values.yaml");
     let values_str = values_file.to_string_lossy().to_string();
 
-    let already = cmd!(sh, "helm status gitlab -n {ns}")
-        .env("DOCKER_HOST", &docker_host)
-        .quiet()
-        .ignore_status()
-        .ignore_stdout()
-        .ignore_stderr()
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    if already {
+    if kubectl::helm_release_exists(sh, "gitlab", ns, &docker_host) {
         ui::info("GitLab already deployed, upgrading")?;
         cmd!(
             sh,
@@ -352,50 +333,15 @@ fn wait_for_pods(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(6, "Waiting for GitLab pods to be ready")?;
 
     let ns = &cfg.gitlab_ns;
-    let checks = [
-        ("app.kubernetes.io/name=postgresql", "600s"),
-        ("app=webservice", "600s"),
-        ("app=sidekiq", "600s"),
-        ("app=toolbox", "300s"),
-        ("app=gitaly", "300s"),
-    ];
 
-    for (label, timeout) in &checks {
-        wait_for_pod(sh, label, ns, timeout)?;
+    for (label, timeout) in c::POD_READINESS_CHECKS {
+        kubectl::wait_for_pod(sh, label, ns, timeout)?;
     }
 
     // Print pod status
     ui::info("Pod status")?;
     let _ = cmd!(sh, "kubectl get pods -n {ns}").run();
 
-    Ok(())
-}
-
-fn wait_for_pod(sh: &Shell, label: &str, namespace: &str, timeout: &str) -> Result<()> {
-    ui::info(&format!(
-        "Waiting for pod ({label}) in {namespace} (timeout {timeout})"
-    ))?;
-    let timeout_arg = format!("--timeout={timeout}");
-    let ok = cmd!(
-        sh,
-        "kubectl wait --for=condition=ready pod
-            -l {label}
-            -n {namespace}
-            {timeout_arg}"
-    )
-    .quiet()
-    .ignore_status()
-    .ignore_stdout()
-    .ignore_stderr()
-    .output()
-    .map(|o| o.status.success())
-    .unwrap_or(false);
-
-    if !ok {
-        ui::warn(&format!(
-            "Pod {label} not ready after {timeout}. Continuing..."
-        ))?;
-    }
     Ok(())
 }
 
