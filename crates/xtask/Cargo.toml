@@ -13,3 +13,6 @@ workspace = true
 [dependencies]
 clap = { workspace = true }
 anyhow = { workspace = true }
+tempfile = { workspace = true }
+xshell = { workspace = true }
+cliclack = { workspace = true }

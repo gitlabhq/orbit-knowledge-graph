@@ -1,0 +1,74 @@
+# =============================================================================
+# Dockerfile.rails -- Overlay feature branch Rails code onto stock CNG image
+#
+# Usage:
+#   docker build \
+#     --build-arg BASE_IMAGE=registry.gitlab.com/gitlab-org/build/CNG-mirror/gitlab-webservice-ee \
+#     --build-arg BASE_TAG=v18.8.1 \
+#     -f Dockerfile.rails \
+#     -t gkg-e2e/gitlab-webservice-ee:local \
+#     /path/to/gitlab-source
+#
+# The build context should be the root of the GitLab Rails source tree
+# (the feature branch checkout).
+#
+# This works for all three CNG components since they all inherit from
+# gitlab-rails-ee and keep Rails code at /srv/gitlab/:
+#   - gitlab-webservice-ee
+#   - gitlab-sidekiq-ee
+#   - gitlab-toolbox-ee
+# =============================================================================
+
+ARG BASE_IMAGE=registry.gitlab.com/gitlab-org/build/cng/gitlab-webservice-ee
+ARG BASE_TAG=v18.8.1
+
+FROM ${BASE_IMAGE}:${BASE_TAG}
+
+USER root
+
+# Remove directories that will be fully replaced to prevent stale files
+# (e.g. feature flags that moved between base release and feature branch,
+# or vendored gems with new methods/APIs).
+# We keep /srv/gitlab/vendor/bundle/ intact as a base for bundle install,
+# but remove source-tracked directories that may have changed.
+#
+# Preserve CNG-specific config files that use absolute /srv/gitlab/ paths
+# (the feature branch copies are GDK-specific with local machine paths).
+# puma.rb only exists in the webservice base image, so use cp -f to tolerate absence.
+RUN cp /srv/gitlab/config/puma.rb /tmp/puma.rb.cng 2>/dev/null || true && \
+    rm -rf /srv/gitlab/app/ /srv/gitlab/config/ /srv/gitlab/db/ \
+           /srv/gitlab/ee/ /srv/gitlab/lib/ /srv/gitlab/locale/ \
+           /srv/gitlab/gems/ /srv/gitlab/vendor/gems/
+
+# Copy feature branch Rails code over the stock release.
+# We copy specific directories to avoid overwriting CNG-specific configs
+# and scripts that live outside the Rails tree.
+COPY app/           /srv/gitlab/app/
+COPY config/        /srv/gitlab/config/
+
+# Restore CNG-specific puma.rb if it was preserved (webservice only)
+RUN if [ -f /tmp/puma.rb.cng ]; then cp /tmp/puma.rb.cng /srv/gitlab/config/puma.rb && rm /tmp/puma.rb.cng; fi
+COPY db/            /srv/gitlab/db/
+COPY ee/            /srv/gitlab/ee/
+COPY lib/           /srv/gitlab/lib/
+COPY locale/        /srv/gitlab/locale/
+COPY gems/          /srv/gitlab/gems/
+COPY vendor_gems/   /srv/gitlab/vendor/gems/
+COPY Gemfile        /srv/gitlab/Gemfile
+COPY Gemfile.lock   /srv/gitlab/Gemfile.lock
+
+# Reconcile gems -- the feature branch may have different gem versions.
+# Install build deps if needed (they may have been cleaned from the base image).
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends build-essential libpq-dev && \
+    cd /srv/gitlab && \
+    bundle config set --local deployment true && \
+    bundle config set --local without 'development test' && \
+    bundle install --jobs "$(nproc)" --quiet && \
+    apt-get purge -y --auto-remove build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+# Fix ownership back to git user
+RUN chown -R git:git /srv/gitlab/
+
+USER git
