@@ -1,0 +1,143 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+require 'tmpdir'
+require 'optparse'
+
+File.umask(0o022)
+
+SOURCE_DIR = File.absolute_path(File.join(__dir__, '..', '..'))
+PROTO_DIR = File.join(SOURCE_DIR, 'crates', 'gkg-server', 'proto')
+GEM_NAME = 'gitlab-gkg-proto'
+DEFAULT_VERSION = '0.1.0'
+
+def parse_options
+  options = {
+    version: nil,
+    workdir: nil,
+    output: nil
+  }
+
+  OptionParser.new do |opts|
+    opts.banner = "Usage: #{$PROGRAM_NAME} [options]"
+
+    opts.on('--version VERSION', "Gem version (default: #{DEFAULT_VERSION})") do |v|
+      options[:version] = v
+    end
+
+    opts.on('--workdir DIR', 'Working directory for build artifacts') do |dir|
+      options[:workdir] = dir
+    end
+
+    opts.on('--output PATH', 'Output path for the built gem') do |path|
+      options[:output] = path
+    end
+  end.parse!
+
+  options
+end
+
+def run!(cmd)
+  output = `#{cmd} 2>&1`
+  raise "Command failed: #{cmd}\n#{output}" unless $?.success?
+
+  output
+end
+
+def generate_sources(workdir, version)
+  gem_lib = File.join(workdir, 'lib')
+  proto_out = File.join(gem_lib, 'gkg', 'v1')
+  FileUtils.mkdir_p(proto_out)
+
+  run!(
+    "bundle exec grpc_tools_ruby_protoc " \
+    "--ruby_out=#{proto_out} " \
+    "--grpc_out=#{proto_out} " \
+    "-I #{PROTO_DIR} " \
+    "#{File.join(PROTO_DIR, 'gkg.proto')}"
+  )
+
+  write_version_file(gem_lib, version)
+  write_entry_point(gem_lib)
+
+  gem_lib
+end
+
+def write_version_file(gem_lib, version)
+  version_dir = File.join(gem_lib, 'gkg')
+  FileUtils.mkdir_p(version_dir)
+
+  File.write(File.join(version_dir, 'version.rb'), <<~RUBY)
+    module Gkg
+      VERSION = '#{version}'
+    end
+  RUBY
+end
+
+def write_entry_point(gem_lib)
+  File.write(File.join(gem_lib, 'gkg.rb'), <<~RUBY)
+    require_relative 'gkg/version'
+    require_relative 'gkg/v1/gkg_services_pb'
+  RUBY
+end
+
+def build_gem(workdir, version, output)
+  gemspec_path = File.join(workdir, "#{GEM_NAME}.gemspec")
+
+  File.write(gemspec_path, <<~GEMSPEC)
+    Gem::Specification.new do |spec|
+      spec.name          = '#{GEM_NAME}'
+      spec.version       = '#{version}'
+      spec.authors       = ['GitLab']
+      spec.email         = ['engineering@gitlab.com']
+      spec.summary       = 'Auto-generated gRPC client for the GitLab Knowledge Graph service'
+      spec.homepage      = 'https://gitlab.com/gitlab-org/orbit/knowledge-graph'
+      spec.license       = 'MIT'
+      spec.metadata      = {
+        'allowed_push_host' => 'https://rubygems.org',
+        'source_code_uri'   => 'https://gitlab.com/gitlab-org/orbit/knowledge-graph'
+      }
+
+      spec.required_ruby_version = '>= 2.7'
+
+      spec.files         = Dir[File.join('lib', '**', '*.rb')]
+      spec.require_paths = ['lib']
+
+      spec.add_dependency 'grpc', '~> 1.0'
+    end
+  GEMSPEC
+
+  run!("cd #{workdir} && gem build #{GEM_NAME}.gemspec")
+
+  gem_file = File.join(workdir, "#{GEM_NAME}-#{version}.gem")
+  raise "Gem was not built: #{gem_file}" unless File.exist?(gem_file)
+
+  if output
+    FileUtils.mkdir_p(File.dirname(output))
+    FileUtils.cp(gem_file, output)
+    puts "Gem built: #{output}"
+  else
+    puts "Gem built: #{gem_file}"
+  end
+
+  gem_file
+end
+
+def main(options)
+  version = options[:version] || DEFAULT_VERSION
+  puts "Building #{GEM_NAME} v#{version}"
+
+  workdir = options[:workdir] || Dir.mktmpdir("#{GEM_NAME}-build-")
+  FileUtils.mkdir_p(workdir)
+
+  begin
+    ENV['BUNDLE_GEMFILE'] = File.join(__dir__, 'Gemfile')
+    generate_sources(workdir, version)
+    output = options[:output] || File.join(SOURCE_DIR, '_build', "#{GEM_NAME}-#{version}.gem")
+    build_gem(workdir, version, output)
+  ensure
+    FileUtils.rm_rf(workdir) unless options[:workdir]
+  end
+end
+
+main(parse_options)
