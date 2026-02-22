@@ -1,5 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use xshell::Shell;
+
+mod e2e;
 
 /// GKG development task runner.
 ///
@@ -24,23 +27,32 @@ enum Command {
 #[derive(Subcommand)]
 enum E2eCommand {
     /// Set up the full E2E environment (cluster, GitLab, GKG stack).
-    Setup,
+    Setup {
+        /// Skip building CNG images (use previously built images).
+        #[arg(long)]
+        skip_build: bool,
+    },
     /// Tear down the E2E environment.
-    Teardown,
+    Teardown {
+        /// Keep the Colima VM running (only remove GitLab + Traefik).
+        #[arg(long)]
+        keep_colima: bool,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let sh = Shell::new()?;
 
     match cli.command {
         Command::E2e { command } => match command {
-            E2eCommand::Setup => {
-                println!("e2e setup: not yet implemented");
-                Ok(())
+            E2eCommand::Setup { skip_build } => {
+                let cfg = e2e::config::Config::from_env();
+                e2e::cng::run(&sh, &cfg, skip_build)
             }
-            E2eCommand::Teardown => {
-                println!("e2e teardown: not yet implemented");
-                Ok(())
+            E2eCommand::Teardown { keep_colima } => {
+                let cfg = e2e::config::Config::from_env();
+                e2e::teardown::run(&sh, &cfg, keep_colima)
             }
         },
     }
