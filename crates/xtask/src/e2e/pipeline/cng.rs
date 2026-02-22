@@ -238,32 +238,39 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
 
     let docker_host = cfg.docker_host();
 
-    if kubectl::helm_release_exists(sh, "traefik", "kube-system", &docker_host) {
+    let release = c::TRAEFIK_HELM_RELEASE;
+    let kube_ns = c::KUBE_SYSTEM_NS;
+
+    if kubectl::helm_release_exists(sh, release, kube_ns, &docker_host) {
         ui::info("Traefik already deployed")?;
         return Ok(());
     }
 
     // Add/update repo
-    let _ = cmd!(sh, "helm repo add traefik https://traefik.github.io/charts")
+    let repo_name = c::TRAEFIK_HELM_REPO_NAME;
+    let repo_url = c::TRAEFIK_HELM_REPO_URL;
+    let _ = cmd!(sh, "helm repo add {repo_name} {repo_url}")
         .env("DOCKER_HOST", &docker_host)
         .quiet()
         .ignore_status()
         .run();
 
-    cmd!(sh, "helm repo update traefik")
+    cmd!(sh, "helm repo update {repo_name}")
         .env("DOCKER_HOST", &docker_host)
         .run()?;
 
     let values_file = cfg.cng_dir.join("traefik-values.yaml");
     let values_str = values_file.to_string_lossy().to_string();
+    let chart = c::TRAEFIK_HELM_CHART;
+    let timeout = c::TRAEFIK_HELM_TIMEOUT;
 
     cmd!(
         sh,
-        "helm install traefik traefik/traefik
-            -n kube-system
+        "helm install {release} {chart}
+            -n {kube_ns}
             -f {values_str}
             --wait
-            --timeout 5m"
+            --timeout {timeout}"
     )
     .env("DOCKER_HOST", &docker_host)
     .run()?;
@@ -279,29 +286,34 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
 
     let docker_host = cfg.docker_host();
     let ns = &cfg.gitlab_ns;
+    let release = c::GITLAB_HELM_RELEASE;
+    let chart = c::GITLAB_HELM_CHART;
+    let timeout = c::GITLAB_HELM_TIMEOUT;
 
     // Add/update repo
-    let _ = cmd!(sh, "helm repo add gitlab https://charts.gitlab.io")
+    let repo_name = c::GITLAB_HELM_REPO_NAME;
+    let repo_url = c::GITLAB_HELM_REPO_URL;
+    let _ = cmd!(sh, "helm repo add {repo_name} {repo_url}")
         .env("DOCKER_HOST", &docker_host)
         .quiet()
         .ignore_status()
         .run();
 
-    cmd!(sh, "helm repo update gitlab")
+    cmd!(sh, "helm repo update {repo_name}")
         .env("DOCKER_HOST", &docker_host)
         .run()?;
 
     let values_file = cfg.cng_dir.join("gitlab-values.yaml");
     let values_str = values_file.to_string_lossy().to_string();
 
-    if kubectl::helm_release_exists(sh, "gitlab", ns, &docker_host) {
+    if kubectl::helm_release_exists(sh, release, ns, &docker_host) {
         ui::info("GitLab already deployed, upgrading")?;
         cmd!(
             sh,
-            "helm upgrade gitlab gitlab/gitlab
+            "helm upgrade {release} {chart}
                 -n {ns}
                 -f {values_str}
-                --timeout 15m"
+                --timeout {timeout}"
         )
         .env("DOCKER_HOST", &docker_host)
         .run()?;
@@ -314,10 +326,10 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
 
         cmd!(
             sh,
-            "helm install gitlab gitlab/gitlab
+            "helm install {release} {chart}
                 -n {ns}
                 -f {values_str}
-                --timeout 15m"
+                --timeout {timeout}"
         )
         .env("DOCKER_HOST", &docker_host)
         .run()?;

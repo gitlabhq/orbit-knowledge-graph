@@ -1,0 +1,116 @@
+# =============================================================================
+# clickhouse.yaml -- Standalone ClickHouse for E2E
+#
+# Deployed by setup.sh BEFORE Tilt starts, so that:
+#   1. ClickHouse is up and healthy
+#   2. gitlab:clickhouse:migrate creates datalake tables + MVs + dictionaries
+#   3. graph.sql creates GKG graph tables
+#   4. THEN Tilt starts siphon + GKG (data flows into pre-existing tables)
+#
+# This eliminates the race condition where siphon inserts data before MVs
+# exist (which causes empty hierarchy tables and wrong traversal paths).
+#
+# The service name is gkg-e2e-clickhouse -- same as the Tiltfile used to
+# create, so all Helm values (values.yaml, values-caproni.yaml) continue
+# to work unchanged.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gkg-e2e-clickhouse-init
+  namespace: default
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS `gitlab_clickhouse_development`;
+    CREATE DATABASE IF NOT EXISTS `gkg-development`;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gkg-e2e-clickhouse
+  namespace: default
+spec:
+  selector:
+    app: gkg-e2e-clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+    - name: native
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gkg-e2e-clickhouse
+  namespace: default
+spec:
+  serviceName: gkg-e2e-clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gkg-e2e-clickhouse
+  template:
+    metadata:
+      labels:
+        app: gkg-e2e-clickhouse
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:25.1-alpine
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+          env:
+            - name: CLICKHOUSE_USER
+              value: default
+            - name: CLICKHOUSE_PASSWORD
+              value: ""
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+            - name: CLICKHOUSE_DB
+              value: gitlab_clickhouse_development
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 100m
+            limits:
+              memory: 4Gi
+              cpu: 1000m
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init
+          configMap:
+            name: gkg-e2e-clickhouse-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

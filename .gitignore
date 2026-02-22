@@ -34,3 +34,6 @@ helm-dev/tmpcharts*/
 
 # Git worktrees
 .worktrees/
+
+# Local planning docs
+todo.md

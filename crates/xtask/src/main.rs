@@ -30,7 +30,7 @@ enum E2eCommand {
     ///
     /// By default, runs CNG + CNG-setup (cluster deploy then configure).
     /// Use --cng or --cng-setup to run a single phase.
-    /// Use --gkg to run all phases (once the GKG stack phase is implemented).
+    /// Use --gkg to run all phases including ClickHouse + schema setup.
     Setup {
         /// Skip building CNG images (use previously built images).
         #[arg(long)]
@@ -44,7 +44,7 @@ enum E2eCommand {
         #[arg(long)]
         cng_setup: bool,
 
-        /// Run all phases including GKG stack.
+        /// Run all phases including GKG stack (ClickHouse + schema).
         #[arg(long)]
         gkg: bool,
     },
@@ -76,14 +76,16 @@ fn main() -> Result<()> {
                 let explicit = cng || cng_setup || gkg;
                 let run_cng = !explicit || cng || gkg;
                 let run_cng_setup = !explicit || cng_setup || gkg;
-                // GKG stack phase — not yet implemented.
-                // let run_gkg_stack = gkg;
+                let run_gkg_stack = gkg;
 
                 if run_cng {
                     e2e::pipeline::cng::run(&sh, &cfg, skip_build)?;
                 }
                 if run_cng_setup {
                     e2e::pipeline::cngsetup::run(&sh, &cfg)?;
+                }
+                if run_gkg_stack {
+                    e2e::pipeline::gkg::run(&sh, &cfg)?;
                 }
 
                 Ok(())

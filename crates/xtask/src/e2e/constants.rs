@@ -19,6 +19,7 @@ pub const COLIMA_K8S_VERSION: &str = "v1.31.5+k3s1";
 
 pub const GITLAB_NS: &str = "gitlab";
 pub const DEFAULT_NS: &str = "default";
+pub const KUBE_SYSTEM_NS: &str = "kube-system";
 
 // -- CNG image settings -------------------------------------------------------
 
@@ -33,6 +34,8 @@ pub const CNG_COMPONENTS: &[&str] = &[
     "gitlab-toolbox-ee",
 ];
 
+pub const WORKHORSE_COMPONENT: &str = "gitlab-workhorse-ee";
+
 /// Directories staged from the GitLab checkout into the temp build context.
 pub const STAGING_DIRS: &[&str] = &["app", "config", "db", "ee", "lib", "locale", "gems"];
 
@@ -44,12 +47,36 @@ pub const PG_SUPERPASS_KEY: &str = "postgresql-postgres-password";
 pub const PG_POD: &str = "postgresql-0";
 pub const PG_DATABASE: &str = "gitlabhq_production";
 pub const PG_USER: &str = "gitlab";
+pub const PG_SUPERUSER: &str = "postgres";
+
+/// Secret name for PG credentials bridged to the default namespace (for Siphon).
+pub const PG_BRIDGE_SECRET_NAME: &str = "postgres-credentials";
 
 // -- Paths inside pods --------------------------------------------------------
 
 pub const RAILS_ROOT: &str = "/srv/gitlab";
 pub const JWT_SECRET_PATH: &str = "/etc/gitlab/shell/.gitlab_shell_secret";
 pub const E2E_POD_DIR: &str = "/tmp/e2e";
+
+// -- Helm releases & repos ----------------------------------------------------
+
+pub const GITLAB_HELM_RELEASE: &str = "gitlab";
+pub const GITLAB_HELM_CHART: &str = "gitlab/gitlab";
+pub const GITLAB_HELM_REPO_NAME: &str = "gitlab";
+pub const GITLAB_HELM_REPO_URL: &str = "https://charts.gitlab.io";
+pub const GITLAB_HELM_TIMEOUT: &str = "15m";
+
+pub const TRAEFIK_HELM_RELEASE: &str = "traefik";
+pub const TRAEFIK_HELM_CHART: &str = "traefik/traefik";
+pub const TRAEFIK_HELM_REPO_NAME: &str = "traefik";
+pub const TRAEFIK_HELM_REPO_URL: &str = "https://traefik.github.io/charts";
+pub const TRAEFIK_HELM_TIMEOUT: &str = "5m";
+
+pub const HELM_UNINSTALL_TIMEOUT: &str = "5m";
+
+// -- Label selectors ----------------------------------------------------------
+
+pub const TOOLBOX_LABEL: &str = "app=toolbox";
 
 // -- Pod readiness checks -----------------------------------------------------
 
@@ -61,6 +88,13 @@ pub const POD_READINESS_CHECKS: &[(&str, &str)] = &[
     ("app=toolbox", "300s"),
     ("app=gitaly", "300s"),
 ];
+
+// -- ClickHouse ---------------------------------------------------------------
+
+pub const CH_SERVICE_NAME: &str = "gkg-e2e-clickhouse";
+pub const CH_DATALAKE_DB: &str = "gitlab_clickhouse_development";
+pub const CH_GRAPH_DB: &str = "gkg-development";
+pub const CH_DEFAULT_USER: &str = "default";
 
 // -- Log / artifact files cleaned during teardown -----------------------------
 

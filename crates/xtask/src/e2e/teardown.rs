@@ -71,9 +71,12 @@ fn teardown_gitlab(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
 
     let ns = &cfg.gitlab_ns;
 
-    if kubectl::helm_release_exists(sh, "gitlab", ns, docker_host) {
+    let release = c::GITLAB_HELM_RELEASE;
+
+    if kubectl::helm_release_exists(sh, release, ns, docker_host) {
         ui::info("Uninstalling GitLab Helm release")?;
-        let _ = cmd!(sh, "helm uninstall gitlab -n {ns} --timeout 5m")
+        let timeout = c::HELM_UNINSTALL_TIMEOUT;
+        let _ = cmd!(sh, "helm uninstall {release} -n {ns} --timeout {timeout}")
             .env("DOCKER_HOST", docker_host)
             .ignore_status()
             .run();
@@ -106,15 +109,16 @@ fn teardown_cngsetup_artifacts(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(2, "Removing CNG setup artifacts")?;
 
     let default_ns = &cfg.default_ns;
+    let bridge_secret = c::PG_BRIDGE_SECRET_NAME;
 
     let _ = cmd!(
         sh,
-        "kubectl delete secret postgres-credentials -n {default_ns} --ignore-not-found"
+        "kubectl delete secret {bridge_secret} -n {default_ns} --ignore-not-found"
     )
     .quiet()
     .ignore_status()
     .run();
-    ui::info("Removed postgres-credentials secret")?;
+    ui::info(&format!("Removed {bridge_secret} secret"))?;
 
     Ok(())
 }
@@ -124,9 +128,12 @@ fn teardown_cngsetup_artifacts(sh: &Shell, cfg: &Config) -> Result<()> {
 fn teardown_traefik(sh: &Shell, docker_host: &str) -> Result<()> {
     ui::step(3, "Tearing down Traefik")?;
 
-    if kubectl::helm_release_exists(sh, "traefik", "kube-system", docker_host) {
+    let release = c::TRAEFIK_HELM_RELEASE;
+    let kube_ns = c::KUBE_SYSTEM_NS;
+
+    if kubectl::helm_release_exists(sh, release, kube_ns, docker_host) {
         ui::info("Uninstalling Traefik")?;
-        let _ = cmd!(sh, "helm uninstall traefik -n kube-system")
+        let _ = cmd!(sh, "helm uninstall {release} -n {kube_ns}")
             .env("DOCKER_HOST", docker_host)
             .ignore_status()
             .run();

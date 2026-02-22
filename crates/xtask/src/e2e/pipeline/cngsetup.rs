@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use xshell::{Shell, cmd};
 
 use super::super::config::Config;
+use super::super::constants as c;
 use super::super::kubectl;
 use super::super::ui;
 
@@ -53,11 +54,12 @@ fn bridge_pg_credentials(sh: &Shell, cfg: &Config) -> Result<()> {
         &cfg.pg_password_key,
     )?;
     let default_ns = &cfg.default_ns;
+    let bridge_secret = c::PG_BRIDGE_SECRET_NAME;
 
     // kubectl create --dry-run=client -o yaml | kubectl apply -f - is idempotent.
     let yaml = cmd!(
         sh,
-        "kubectl create secret generic postgres-credentials
+        "kubectl create secret generic {bridge_secret}
             -n {default_ns}
             --from-literal=password={pg_pass}
             --dry-run=client -o yaml"
@@ -67,9 +69,7 @@ fn bridge_pg_credentials(sh: &Shell, cfg: &Config) -> Result<()> {
 
     cmd!(sh, "kubectl apply -f -").stdin(&yaml).quiet().run()?;
 
-    ui::done(&format!(
-        "postgres-credentials secret created in {default_ns}"
-    ))?;
+    ui::done(&format!("{bridge_secret} secret created in {default_ns}"))?;
     Ok(())
 }
 
@@ -140,11 +140,11 @@ fn run_db_migrate(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
 
     let ns = &cfg.gitlab_ns;
     let rails_root = &cfg.rails_root;
-    let bash_cmd = format!("cd {rails_root} && bundle exec rails db:migrate RAILS_ENV=production");
+    let script = r#"cd "$0" && bundle exec rails db:migrate RAILS_ENV=production"#;
 
     cmd!(
         sh,
-        "kubectl exec -n {ns} {toolbox_pod} -- bash -c {bash_cmd}"
+        "kubectl exec -n {ns} {toolbox_pod} -- bash -c {script} {rails_root}"
     )
     .run()
     .context("rails db:migrate failed")?;
@@ -205,13 +205,12 @@ fn create_test_data(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
     let ns = &cfg.gitlab_ns;
     let rails_root = &cfg.rails_root;
     let e2e_pod_dir = &cfg.e2e_pod_dir;
-    let bash_cmd = format!(
-        "cd {rails_root} && bundle exec rails runner {e2e_pod_dir}/create_test_data.rb RAILS_ENV=production"
-    );
+    let script =
+        r#"cd "$0" && bundle exec rails runner "$1"/create_test_data.rb RAILS_ENV=production"#;
 
     let output = cmd!(
         sh,
-        "kubectl exec -n {ns} {toolbox_pod} -- bash -c {bash_cmd}"
+        "kubectl exec -n {ns} {toolbox_pod} -- bash -c {script} {rails_root} {e2e_pod_dir}"
     )
     .ignore_status()
     .output()?;
