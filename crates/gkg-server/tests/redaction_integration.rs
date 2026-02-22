@@ -1998,15 +1998,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns() {
         query.structural.sql
     );
 
-    // Also verify the requested columns are present
-    assert!(
-        query.structural.sql.contains("u_username"),
-        "SQL must include requested column u_username"
-    );
-    assert!(
-        query.structural.sql.contains("u_state"),
-        "SQL must include requested column u_state"
-    );
+    // Requested property columns are NOT in structural SQL (hydration fills them).
 
     let batches = ctx.query_parameterized(&query.structural).await;
     let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
@@ -2071,23 +2063,8 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
         "wildcard must include _gkg_g_type for redaction"
     );
 
-    // Group entity columns from ontology
-    assert!(
-        query.structural.sql.contains("g_id"),
-        "wildcard should include g_id column"
-    );
-    assert!(
-        query.structural.sql.contains("g_name"),
-        "wildcard should include g_name column"
-    );
-    assert!(
-        query.structural.sql.contains("g_visibility_level"),
-        "wildcard should include g_visibility_level column"
-    );
-    assert!(
-        query.structural.sql.contains("g_traversal_path"),
-        "wildcard should include g_traversal_path column"
-    );
+    // Property columns (g_name, g_visibility_level, etc.) are NOT in structural SQL.
+    // They are fetched via hydration after authorization.
 
     let batches = ctx.query_parameterized(&query.structural).await;
     let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
@@ -2562,7 +2539,10 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
     );
 
     // Should have the aggregation
-    assert!(query.structural.sql.contains("COUNT"), "should have COUNT aggregation");
+    assert!(
+        query.structural.sql.contains("COUNT"),
+        "should have COUNT aggregation"
+    );
     assert!(
         query.structural.sql.contains("GROUP BY"),
         "should have GROUP BY clause"
@@ -2779,10 +2759,9 @@ async fn column_selection_filters_work_with_columns() {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Should have mandatory columns and requested column
+    // Structural SQL has identity columns only (property columns come from hydration)
     assert!(query.structural.sql.contains("_gkg_u_id"));
     assert!(query.structural.sql.contains("_gkg_u_type"));
-    assert!(query.structural.sql.contains("u_username"));
 
     // Filter by state should be in WHERE clause
     assert!(
@@ -3165,21 +3144,15 @@ async fn traversal_edge_columns_preserved_through_redaction() {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Verify edge columns are in the SQL
+    // Edge columns (e0_type, e0_src, etc.) are NOT in structural SQL — they
+    // come from hydration after authorization. Structural SQL only has _gkg_* identity cols.
     assert!(
-        query.structural.sql.contains("e0_type"),
-        "SQL must contain e0_type. SQL: {}",
-        query.structural.sql
+        query.structural.sql.contains("_gkg_u_id"),
+        "SQL must contain _gkg_u_id"
     );
-    assert!(query.structural.sql.contains("e0_src"), "SQL must contain e0_src");
     assert!(
-        query.structural.sql.contains("e0_src_type"),
-        "SQL must contain e0_src_type"
-    );
-    assert!(query.structural.sql.contains("e0_dst"), "SQL must contain e0_dst");
-    assert!(
-        query.structural.sql.contains("e0_dst_type"),
-        "SQL must contain e0_dst_type"
+        query.structural.sql.contains("_gkg_g_id"),
+        "SQL must contain _gkg_g_id"
     );
 
     let batches = ctx.query_parameterized(&query.structural).await;
@@ -3190,36 +3163,10 @@ async fn traversal_edge_columns_preserved_through_redaction() {
     // We have 7 MEMBER_OF edges in test data
     assert_eq!(result.len(), 7, "should have 7 user-group memberships");
 
-    // Verify edge columns are present and correct BEFORE redaction
+    // Verify identity columns are present BEFORE redaction
     for row in result.iter() {
-        let user_id = row.get_id(&u).expect("user id should be present");
-        let group_id = row.get_id(&g).expect("group id should be present");
-
-        assert_eq!(
-            row.get("e0_type").and_then(|v| v.as_str()),
-            Some("MEMBER_OF"),
-            "edge type should be MEMBER_OF"
-        );
-        assert_eq!(
-            row.get("e0_src").and_then(|v| v.as_i64()),
-            Some(user_id),
-            "edge source should match user id"
-        );
-        assert_eq!(
-            row.get("e0_src_type").and_then(|v| v.as_str()),
-            Some("User"),
-            "edge source type should be User"
-        );
-        assert_eq!(
-            row.get("e0_dst").and_then(|v| v.as_i64()),
-            Some(group_id),
-            "edge target should match group id"
-        );
-        assert_eq!(
-            row.get("e0_dst_type").and_then(|v| v.as_str()),
-            Some("Group"),
-            "edge target type should be Group"
-        );
+        row.get_id(&u).expect("user id should be present");
+        row.get_id(&g).expect("group id should be present");
     }
 
     // Now apply redaction - allow only user 1 and group 100
@@ -3261,49 +3208,13 @@ async fn traversal_edge_columns_preserved_through_redaction() {
         );
     }
 
-    // Verify edge columns are preserved in the authorized row
+    // Verify identity columns are preserved in the authorized row
     let authorized_row = result.authorized_rows().next().expect("should have 1 row");
     assert_eq!(authorized_row.get_id(&u), Some(1));
     assert_eq!(authorized_row.get_id(&g), Some(100));
-    assert_eq!(
-        authorized_row.get("e0_type").and_then(|v| v.as_str()),
-        Some("MEMBER_OF"),
-        "edge type should be preserved after redaction"
-    );
-    assert_eq!(
-        authorized_row.get("e0_src").and_then(|v| v.as_i64()),
-        Some(1),
-        "edge source should be user 1"
-    );
-    assert_eq!(
-        authorized_row.get("e0_dst").and_then(|v| v.as_i64()),
-        Some(100),
-        "edge target should be group 100"
-    );
 
-    // Verify edge data for unauthorized entities is also not exposed
-    let authorized_edge_sources: HashSet<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get("e0_src").and_then(|v| v.as_i64()))
-        .collect();
-    let authorized_edge_targets: HashSet<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get("e0_dst").and_then(|v| v.as_i64()))
-        .collect();
-
-    // Edge sources should only contain authorized user IDs
-    assert_eq!(
-        authorized_edge_sources,
-        HashSet::from([1]),
-        "edge sources should only contain authorized user 1"
-    );
-
-    // Edge targets should only contain authorized group IDs
-    assert_eq!(
-        authorized_edge_targets,
-        HashSet::from([100]),
-        "edge targets should only contain authorized group 100"
-    );
+    // Edge columns (e0_type, e0_src, e0_dst) would be populated by the hydration
+    // stage after authorization — not available in structural results.
 }
 
 /// Verifies multi-hop traversals have edge columns for each relationship,
@@ -3333,11 +3244,11 @@ async fn multi_hop_edge_columns_survive_redaction() {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Verify both edge column sets are in SQL
-    assert!(query.structural.sql.contains("e0_type"), "SQL must contain e0_type");
-    assert!(query.structural.sql.contains("e0_src"), "SQL must contain e0_src");
-    assert!(query.structural.sql.contains("e1_type"), "SQL must contain e1_type");
-    assert!(query.structural.sql.contains("e1_src"), "SQL must contain e1_src");
+    // Edge columns (e0_*, e1_*) are NOT in structural SQL — they come from hydration.
+    // Verify identity columns for all three nodes are present.
+    assert!(query.structural.sql.contains("_gkg_u_id"));
+    assert!(query.structural.sql.contains("_gkg_g_id"));
+    assert!(query.structural.sql.contains("_gkg_p_id"));
 
     let batches = ctx.query_parameterized(&query.structural).await;
     let mut result = QueryResult::from_batches(&batches, &query.structural.result_context);
@@ -3371,59 +3282,7 @@ async fn multi_hop_edge_columns_survive_redaction() {
     assert_eq!(row.get_id(&g), Some(100), "group should be 100");
     assert_eq!(row.get_id(&p), Some(1000), "project should be 1000");
 
-    // First edge: User 1 -> Group 100 (MEMBER_OF)
-    assert_eq!(
-        row.get("e0_type").and_then(|v| v.as_str()),
-        Some("MEMBER_OF"),
-        "first edge type should be MEMBER_OF"
-    );
-    assert_eq!(
-        row.get("e0_src").and_then(|v| v.as_i64()),
-        Some(1),
-        "e0 source should be user 1"
-    );
-    assert_eq!(
-        row.get("e0_src_type").and_then(|v| v.as_str()),
-        Some("User"),
-        "e0 source type should be User"
-    );
-    assert_eq!(
-        row.get("e0_dst").and_then(|v| v.as_i64()),
-        Some(100),
-        "e0 target should be group 100"
-    );
-    assert_eq!(
-        row.get("e0_dst_type").and_then(|v| v.as_str()),
-        Some("Group"),
-        "e0 target type should be Group"
-    );
-
-    // Second edge: Group 100 -> Project 1000 (CONTAINS)
-    assert_eq!(
-        row.get("e1_type").and_then(|v| v.as_str()),
-        Some("CONTAINS"),
-        "second edge type should be CONTAINS"
-    );
-    assert_eq!(
-        row.get("e1_src").and_then(|v| v.as_i64()),
-        Some(100),
-        "e1 source should be group 100"
-    );
-    assert_eq!(
-        row.get("e1_src_type").and_then(|v| v.as_str()),
-        Some("Group"),
-        "e1 source type should be Group"
-    );
-    assert_eq!(
-        row.get("e1_dst").and_then(|v| v.as_i64()),
-        Some(1000),
-        "e1 target should be project 1000"
-    );
-    assert_eq!(
-        row.get("e1_dst_type").and_then(|v| v.as_str()),
-        Some("Project"),
-        "e1 target type should be Project"
-    );
+    // Edge columns (e0_*, e1_*) are populated by hydration, not structural query.
 }
 
 /// Tests that neighbors query filters by entity type, preventing ID collisions.
@@ -3559,15 +3418,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     mock_service.allow("users", ALL_USER_IDS);
     run_redaction(&mut result, &mock_service);
 
-    // Verify the user_type values are the string labels
-    for row in result.authorized_rows() {
-        let user_type = row.get("u_user_type").and_then(|v| v.as_str());
-        assert_eq!(
-            user_type,
-            Some("human"),
-            "user_type should be 'human' string"
-        );
-    }
+    // Property column values (u_user_type) are populated by hydration, not structural query.
+    // Row count above confirms the filter worked correctly.
 
     // Filter by int 6 should be coerced to "project_bot"
     let json = r#"{
@@ -3612,10 +3464,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     mock_service.allow("merge_requests", ALL_MR_IDS);
     run_redaction(&mut result, &mock_service);
 
-    for row in result.authorized_rows() {
-        let state = row.get("mr_state").and_then(|v| v.as_str());
-        assert_eq!(state, Some("opened"), "MR state should be 'opened' string");
-    }
+    // Property column values (mr_state) are populated by hydration, not structural query.
+    // Row count above confirms the filter worked correctly.
 
     // Filter by int 3 should be coerced to "merged"
     let json = r#"{
@@ -3676,10 +3526,8 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     mock_service.allow("users", ALL_USER_IDS);
     run_redaction(&mut result, &mock_service);
 
-    for row in result.authorized_rows() {
-        let state = row.get("u_state").and_then(|v| v.as_str());
-        assert_eq!(state, Some("active"), "state should be 'active' string");
-    }
+    // Property column values (u_state) are populated by hydration, not structural query.
+    // Row count above confirms the filter worked correctly.
 
     // Filter blocked user (string enum value)
     let json = r#"{

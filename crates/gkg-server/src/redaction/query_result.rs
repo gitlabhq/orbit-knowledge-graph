@@ -27,11 +27,13 @@ impl NodeRef {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 pub struct RedactableNodes {
     nodes: Vec<NodeRef>,
 }
 
+#[cfg(test)]
 impl RedactableNodes {
     pub fn new() -> Self {
         Self { nodes: Vec::new() }
@@ -69,6 +71,7 @@ impl RedactableNodes {
 pub enum ColumnValue {
     Int64(i64),
     String(String),
+    Json(serde_json::Value),
     Null,
 }
 
@@ -97,7 +100,7 @@ pub struct QueryResultRow {
 }
 
 impl QueryResultRow {
-    fn new(columns: HashMap<String, ColumnValue>, dynamic_nodes: Vec<NodeRef>) -> Self {
+    pub(crate) fn new(columns: HashMap<String, ColumnValue>, dynamic_nodes: Vec<NodeRef>) -> Self {
         Self {
             columns,
             dynamic_nodes,
@@ -166,6 +169,10 @@ impl QueryResultRow {
 pub struct QueryResult {
     rows: Vec<QueryResultRow>,
     ctx: ResultContext,
+    /// Pre-resolved auth IDs for dynamic nodes with indirect authorization.
+    /// Maps (entity_type, entity_pk) -> auth_id. Populated by the pre-auth
+    /// hydration step for entities with `owner_entity` (e.g., Definition -> project_id).
+    auth_id_overrides: HashMap<(String, i64), i64>,
 }
 
 impl QueryResult {
@@ -203,7 +210,23 @@ impl QueryResult {
         Self {
             rows,
             ctx: ctx.clone(),
+            auth_id_overrides: HashMap::new(),
         }
+    }
+
+    /// Build a QueryResult directly from rows and context (for testing).
+    #[cfg(test)]
+    pub(crate) fn from_rows(rows: Vec<QueryResultRow>, ctx: ResultContext) -> Self {
+        Self {
+            rows,
+            ctx,
+            auth_id_overrides: HashMap::new(),
+        }
+    }
+
+    /// Set pre-resolved auth IDs for dynamic nodes with indirect authorization.
+    pub fn set_auth_id_overrides(&mut self, overrides: HashMap<(String, i64), i64>) {
+        self.auth_id_overrides = overrides;
     }
 
     pub fn rows(&self) -> &[QueryResultRow] {
@@ -218,6 +241,7 @@ impl QueryResult {
         &self.ctx
     }
 
+    #[cfg(test)]
     pub fn node_aliases(&self) -> Vec<String> {
         self.ctx.nodes().map(|n| n.alias.clone()).collect()
     }
@@ -234,6 +258,7 @@ impl QueryResult {
         self.rows.iter()
     }
 
+    #[cfg(test)]
     pub fn extract_redactable_nodes(&self) -> RedactableNodes {
         let mut nodes = RedactableNodes::new();
         for row in &self.rows {
@@ -274,8 +299,18 @@ impl QueryResult {
                 let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
                     continue;
                 };
-                let auth_id = if let Some(ref owner) = auth.owner_entity {
-                    get_edge_id_for_entity(row, owner).unwrap_or(node_ref.id)
+                let auth_id = if auth.owner_entity.is_some() {
+                    // Prefer pre-resolved overrides from pre-auth hydration;
+                    // fall back to edge column resolution for backward compatibility.
+                    self.auth_id_overrides
+                        .get(&(node_ref.entity_type.clone(), node_ref.id))
+                        .copied()
+                        .or_else(|| {
+                            auth.owner_entity
+                                .as_ref()
+                                .and_then(|owner| get_edge_id_for_entity(row, owner))
+                        })
+                        .unwrap_or(node_ref.id)
                 } else {
                     node_ref.id
                 };
@@ -307,6 +342,8 @@ impl QueryResult {
     pub fn apply_authorizations(&mut self, authorizations: &[ResourceAuthorization]) -> usize {
         let mut redacted_count = 0;
         let redaction_nodes: Vec<_> = self.ctx.nodes().cloned().collect();
+        let ctx = &self.ctx;
+        let overrides = &self.auth_id_overrides;
 
         for row in &mut self.rows {
             if !row.authorized {
@@ -321,7 +358,7 @@ impl QueryResult {
                     redacted_count += 1;
                     break;
                 };
-                if !is_authorized(&node_ref, authorizations, &self.ctx) {
+                if !is_authorized(&node_ref.entity_type, node_ref.id, authorizations, ctx) {
                     row.set_unauthorized();
                     redacted_count += 1;
                     break;
@@ -329,12 +366,12 @@ impl QueryResult {
             }
 
             // Dynamic nodes (path finding, neighbors): entity type discovered at runtime,
-            // so auth ID may need resolution from edge columns
+            // so auth ID may need resolution via pre-auth overrides or edge columns
             if row.authorized {
                 for node_ref in &row.dynamic_nodes {
-                    let mut node_ref = node_ref.clone();
-                    resolve_dynamic_auth_id(row, &mut node_ref, &self.ctx);
-                    if !is_authorized(&node_ref, authorizations, &self.ctx) {
+                    let auth_id =
+                        resolve_auth_id(row, &node_ref.entity_type, node_ref.id, ctx, overrides);
+                    if !is_authorized(&node_ref.entity_type, auth_id, authorizations, ctx) {
                         row.set_unauthorized();
                         redacted_count += 1;
                         break;
@@ -360,11 +397,12 @@ impl QueryResult {
 }
 
 fn is_authorized(
-    node_ref: &NodeRef,
+    entity_type: &str,
+    auth_id: i64,
     authorizations: &[ResourceAuthorization],
     ctx: &ResultContext,
 ) -> bool {
-    let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
+    let Some(auth_config) = ctx.get_entity_auth(entity_type) else {
         return false;
     };
     let Some(auth) = authorizations
@@ -373,21 +411,30 @@ fn is_authorized(
     else {
         return false;
     };
-    auth.authorized.get(&node_ref.id).copied().unwrap_or(false)
+    auth.authorized.get(&auth_id).copied().unwrap_or(false)
 }
 
-/// For indirect-auth entities (owner_entity is set in EntityAuthConfig), rewrite
-/// node_ref.id to the owner entity's ID from edge columns so is_authorized can use it directly.
-fn resolve_dynamic_auth_id(row: &QueryResultRow, node_ref: &mut NodeRef, ctx: &ResultContext) {
-    let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
-        return;
+/// For indirect-auth entities (owner_entity is set in EntityAuthConfig), resolve
+/// the owner entity's ID for authorization. Returns the resolved auth ID (which
+/// may differ from `node_id` for entities with `owner_entity`).
+/// Checks pre-resolved auth_id_overrides first, then falls back to edge columns.
+fn resolve_auth_id(
+    row: &QueryResultRow,
+    entity_type: &str,
+    node_id: i64,
+    ctx: &ResultContext,
+    auth_id_overrides: &HashMap<(String, i64), i64>,
+) -> i64 {
+    let Some(auth_config) = ctx.get_entity_auth(entity_type) else {
+        return node_id;
     };
     let Some(ref owner) = auth_config.owner_entity else {
-        return;
+        return node_id;
     };
-    if let Some(owner_id) = get_edge_id_for_entity(row, owner) {
-        node_ref.id = owner_id;
+    if let Some(&auth_id) = auth_id_overrides.get(&(entity_type.to_string(), node_id)) {
+        return auth_id;
     }
+    get_edge_id_for_entity(row, owner).unwrap_or(node_id)
 }
 
 fn get_edge_id_for_entity(row: &QueryResultRow, entity_type: &str) -> Option<i64> {
@@ -784,7 +831,7 @@ mod tests {
             let ghost = RedactionNode {
                 alias: "ghost".to_string(),
                 entity_type: "Ghost".to_string(),
-                pk_column: "_gkg_ghost_id".to_string(),
+                pk_column: "_gkg_ghost_pk".to_string(),
                 id_column: "_gkg_ghost_id".to_string(),
                 type_column: "_gkg_ghost_type".to_string(),
             };
