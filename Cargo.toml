@@ -19,6 +19,7 @@ members = [
   "crates/health-check",
   "crates/siphon-proto",
   "crates/datalake-generator",
+  "crates/xtask",
 ]
 
 [workspace.dependencies]
