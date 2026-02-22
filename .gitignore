@@ -32,6 +32,9 @@ e2e/tilt/.secrets
 helm-dev/charts/
 helm-dev/tmpcharts*/
 
+# Proto gem build output
+_build/
+
 # Git worktrees
 .worktrees/
 

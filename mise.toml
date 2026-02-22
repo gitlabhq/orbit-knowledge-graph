@@ -94,6 +94,18 @@ echo "Ruby proto files generated in crates/gkg-server/proto/ruby/"
 '''
 description = "Generate Ruby protobuf files for Rails client"
 
+[tasks."proto:build-gem"]
+run = '''
+BUNDLE_GEMFILE=tools/protogem/Gemfile bundle install --quiet
+ruby tools/protogem/build-proto-gem
+'''
+description = "Build gitlab-gkg-proto Ruby gem from proto definitions"
+
+[tasks."proto:publish-gem"]
+depends = ["proto:build-gem"]
+run = 'gem push _build/gitlab-gkg-proto-*.gem'
+description = "Publish gitlab-gkg-proto gem to RubyGems.org"
+
 [tasks."server:start"]
 run = 'GKG_JWT_SECRET=${GKG_JWT_SECRET:-$(cat ~/gitlab/gdk/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
 description = "Start the GKG server (webserver mode)"
