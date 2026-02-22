@@ -15,6 +15,32 @@ pub struct ParameterizedQuery {
     pub result_context: ResultContext,
 }
 
+#[derive(Debug, Clone)]
+pub struct CompiledQuery {
+    pub structural: ParameterizedQuery,
+    pub hydration: HydrationPlan,
+}
+
+#[derive(Debug, Clone)]
+pub enum HydrationPlan {
+    /// No hydration needed (e.g., Aggregation).
+    None,
+    /// Entity types known at compile time (Traversal, Search).
+    /// One template per entity type, with IDs to be filled at runtime.
+    Static(Vec<HydrationTemplate>),
+    /// Entity types discovered at runtime (PathFinding, Neighbors).
+    Dynamic,
+}
+
+#[derive(Debug, Clone)]
+pub struct HydrationTemplate {
+    pub entity_type: String,
+    pub node_alias: String,
+    /// Raw JSON for the hydration query. Pre-compilation deferred to MR 2
+    /// (requires `compile_with_columns` which depends on slim SELECT in `lower.rs`).
+    pub query_json: String,
+}
+
 /// Display inlines parameters into SQL for debugging/testing.
 ///
 /// Replaces `{name:Type}` placeholders with literal values.
@@ -253,16 +279,18 @@ impl Context {
                     .iter()
                     .map(|item| {
                         let name = format!("p{}", self.params.len());
-                        self.params.insert(name.clone(), item.clone());
-                        format!("{{{name}:{}}}", ch_type(item))
+                        let placeholder = format!("{{{name}:{}}}", ch_type(item));
+                        self.params.insert(name, item.clone());
+                        placeholder
                     })
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
             _ => {
                 let name = format!("p{}", self.params.len());
-                self.params.insert(name.clone(), v.clone());
-                format!("{{{name}:{}}}", ch_type(v))
+                let placeholder = format!("{{{name}:{}}}", ch_type(v));
+                self.params.insert(name, v.clone());
+                placeholder
             }
         }
     }
@@ -278,18 +306,18 @@ impl Context {
                 let type_conditions = match type_filter {
                     Some(types) if types.len() == 1 => {
                         let param = format!("type_{alias}");
-                        self.params
-                            .insert(param.clone(), Value::String(types[0].clone()));
-                        vec![format!("({alias}.relationship_kind = {{{param}:String}})")]
+                        let condition = format!("({alias}.relationship_kind = {{{param}:String}})");
+                        self.params.insert(param, Value::String(types[0].clone()));
+                        vec![condition]
                     }
                     Some(types) if types.len() > 1 => {
                         let param = format!("type_{alias}");
+                        let condition =
+                            format!("({alias}.relationship_kind IN {{{param}:Array(String)}})");
                         let arr =
                             Value::Array(types.iter().map(|t| Value::String(t.clone())).collect());
-                        self.params.insert(param.clone(), arr);
-                        vec![format!(
-                            "({alias}.relationship_kind IN {{{param}:Array(String)}})"
-                        )]
+                        self.params.insert(param, arr);
+                        vec![condition]
                     }
                     _ => vec![],
                 };
@@ -581,10 +609,9 @@ mod tests {
             empty_ctx(),
         )
         .unwrap();
-        assert!(
-            r.sql
-                .contains("relationship_kind IN {type_e:Array(String)})")
-        );
+        assert!(r
+            .sql
+            .contains("relationship_kind IN {type_e:Array(String)})"));
         assert_eq!(
             r.params.get("type_e"),
             Some(&Value::Array(vec![

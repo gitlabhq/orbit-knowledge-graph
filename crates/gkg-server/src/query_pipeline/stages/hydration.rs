@@ -94,8 +94,8 @@ impl HydrationStage {
         let compiled = query_engine::compile(&query_json, &self.ontology, security_context)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
-        let mut query = self.client.query(&compiled.sql);
-        for (key, value) in &compiled.params {
+        let mut query = self.client.query(&compiled.structural.sql);
+        for (key, value) in &compiled.structural.params {
             query = ArrowClickHouseClient::bind_param(query, key, value);
         }
         let batches = query

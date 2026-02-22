@@ -784,6 +784,7 @@ mod tests {
             let ghost = RedactionNode {
                 alias: "ghost".to_string(),
                 entity_type: "Ghost".to_string(),
+                pk_column: "_gkg_ghost_id".to_string(),
                 id_column: "_gkg_ghost_id".to_string(),
                 type_column: "_gkg_ghost_type".to_string(),
             };

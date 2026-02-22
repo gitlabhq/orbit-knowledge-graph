@@ -10,7 +10,7 @@
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, Node, Query, SelectExpr};
-use crate::constants::{redaction_id_column, redaction_type_column};
+use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::Result;
 use crate::input::{EntityAuthConfig, Input, QueryType};
 use std::collections::{HashMap, HashSet};
@@ -19,6 +19,9 @@ use std::collections::{HashMap, HashSet};
 pub struct RedactionNode {
     pub alias: String,
     pub entity_type: String,
+    /// Column holding the entity's primary key (always "id"). Used for hydration lookups.
+    pub pk_column: String,
+    /// Column holding the authorization ID (may be "project_id" for indirect-auth entities).
     pub id_column: String,
     pub type_column: String,
 }
@@ -49,6 +52,7 @@ impl ResultContext {
             RedactionNode {
                 alias: alias.to_string(),
                 entity_type: entity_type.to_string(),
+                pk_column: primary_key_column(alias),
                 id_column: redaction_id_column(alias),
                 type_column: redaction_type_column(alias),
             },
@@ -88,14 +92,14 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth = input.entity_auth.clone();
 
-    let selectable_nodes = match input.query_type {
+    let selectable_nodes: HashSet<&str> = match input.query_type {
         QueryType::Aggregation => input
             .aggregations
             .iter()
-            .filter_map(|agg| agg.group_by.clone())
+            .filter_map(|agg| agg.group_by.as_deref())
             .collect(),
         QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
-            input.nodes.iter().map(|n| n.id.clone()).collect()
+            input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
         QueryType::PathFinding => HashSet::new(),
     };
@@ -110,49 +114,63 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
 fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
-    selectable_nodes: &HashSet<String>,
+    selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
 ) -> Result<()> {
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
 
-        // Only add columns for nodes that are valid to select in this query type.
-        if !selectable_nodes.contains(&node.id) {
+        if !selectable_nodes.contains(node.id.as_str()) {
             continue;
         }
 
         ctx.add_node(&node.id, entity);
+        let redaction_node = ctx.get(&node.id).expect("just inserted by add_node");
 
-        if let Some(redaction_node) = ctx.get(&node.id) {
-            let id_col = redaction_node.id_column.clone();
-            let type_col = redaction_node.type_column.clone();
+        let pk_col = redaction_node.pk_column.clone();
+        let id_col = redaction_node.id_column.clone();
+        let type_col = redaction_node.type_column.clone();
 
-            let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
-            let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+        // Always emit the primary key column for hydration lookups.
+        // For most entities pk == auth_id ("id"), but for indirect-auth
+        // entities (e.g., Definition) pk is "id" while auth_id is "project_id".
+        let needs_separate_pk = node.redaction_id_column != "id";
 
-            if !has_id {
+        if needs_separate_pk {
+            let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+            if !has_pk {
                 q.select.push(SelectExpr {
-                    expr: Expr::col(&node.id, &node.redaction_id_column),
-                    alias: Some(id_col.clone()),
+                    expr: Expr::col(&node.id, "id"),
+                    alias: Some(pk_col),
                 });
             }
+        }
 
-            if !has_type {
-                let insert_pos = q
-                    .select
-                    .iter()
-                    .position(|s| s.alias.as_ref() == Some(&id_col))
-                    .map(|i| i + 1)
-                    .unwrap_or(q.select.len());
+        let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+        let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
 
-                q.select.insert(
-                    insert_pos,
-                    SelectExpr {
-                        expr: Expr::lit(entity.as_str()),
-                        alias: Some(type_col),
-                    },
-                );
-            }
+        if !has_id {
+            q.select.push(SelectExpr {
+                expr: Expr::col(&node.id, &node.redaction_id_column),
+                alias: Some(id_col.clone()),
+            });
+        }
+
+        if !has_type {
+            let insert_pos = q
+                .select
+                .iter()
+                .position(|s| s.alias.as_ref() == Some(&id_col))
+                .map(|i| i + 1)
+                .unwrap_or(q.select.len());
+
+            q.select.insert(
+                insert_pos,
+                SelectExpr {
+                    expr: Expr::lit(entity.as_str()),
+                    alias: Some(type_col),
+                },
+            );
         }
     }
     Ok(())
@@ -431,26 +449,22 @@ mod tests {
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
         assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
-        );
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
-        );
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string())));
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string())));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string())));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string())));
 
         // Context should only have the group_by node
         assert_eq!(ctx.len(), 1);

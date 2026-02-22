@@ -277,12 +277,18 @@ impl FakeValueGenerator {
                 FakeValue::String(self.emit_buf())
             }
             FieldKind::ShaOrHash => {
-                // 40-char hex (160 bits) - use fixed-width formatting
+                // 40-char hex (160 bits) — only 128 bits of entropy available,
+                // so the top 32 bits (8 hex digits) are filled from `high`.
                 self.buf.clear();
                 self.buf.reserve(40);
-                let val = ((bits as u128) << 64) | (low as u128);
-                for i in (0..40).rev() {
-                    let nibble = ((val >> (i * 4)) & 0xf) as usize;
+                let lo128 = ((bits as u128) << 64) | (low as u128);
+                let hi32 = high;
+                for i in (0..8).rev() {
+                    let nibble = ((hi32 >> (i * 4)) & 0xf) as usize;
+                    self.buf.push(HEX_DIGITS[nibble] as char);
+                }
+                for i in (0..32).rev() {
+                    let nibble = ((lo128 >> (i * 4)) & 0xf) as usize;
                     self.buf.push(HEX_DIGITS[nibble] as char);
                 }
                 FakeValue::String(self.emit_buf())
@@ -387,32 +393,34 @@ impl FakeValueGenerator {
                 FakeValue::static_string("unknown")
             }
             FieldKind::Uuid => {
+                let bits2 = self.next_random();
                 self.buf.clear();
                 self.buf.reserve(36);
-                // 8-4-4-4-12 hex format
+                // 8-4-4-4-12 hex format (32 hex digits = 128 bits)
+                // Use `bits` for the first 16 hex digits, `bits2` for the last 16.
                 for i in (0..8).rev() {
+                    self.buf
+                        .push(HEX_DIGITS[((bits >> (i * 4)) & 0xf) as usize] as char);
+                }
+                self.buf.push('-');
+                for i in (8..12).rev() {
+                    self.buf
+                        .push(HEX_DIGITS[((bits >> (i * 4)) & 0xf) as usize] as char);
+                }
+                self.buf.push('-');
+                for i in (12..16).rev() {
                     self.buf
                         .push(HEX_DIGITS[((bits >> (i * 4)) & 0xf) as usize] as char);
                 }
                 self.buf.push('-');
                 for i in (0..4).rev() {
                     self.buf
-                        .push(HEX_DIGITS[((high >> (i * 4)) & 0xf) as usize] as char);
-                }
-                self.buf.push('-');
-                for i in (4..8).rev() {
-                    self.buf
-                        .push(HEX_DIGITS[((high >> (i * 4)) & 0xf) as usize] as char);
-                }
-                self.buf.push('-');
-                for i in (0..4).rev() {
-                    self.buf
-                        .push(HEX_DIGITS[((low >> (i * 4)) & 0xf) as usize] as char);
+                        .push(HEX_DIGITS[((bits2 >> (i * 4)) & 0xf) as usize] as char);
                 }
                 self.buf.push('-');
                 for i in (4..16).rev() {
                     self.buf
-                        .push(HEX_DIGITS[((low >> (i * 4)) & 0xf) as usize] as char);
+                        .push(HEX_DIGITS[((bits2 >> (i * 4)) & 0xf) as usize] as char);
                 }
                 FakeValue::String(self.emit_buf())
             }

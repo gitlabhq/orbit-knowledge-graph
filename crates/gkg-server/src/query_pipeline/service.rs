@@ -49,11 +49,11 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
 
         let compiled = compile(query_json, &self.ontology, &security_context)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
-        let batches = self.execute_query(&compiled).await?;
+        let batches = self.execute_query(&compiled.structural).await?;
 
         let execution_output = ExecutionOutput {
             batches,
-            result_context: compiled.result_context,
+            result_context: compiled.structural.result_context,
         };
 
         let query_result = ExtractionStage::execute(execution_output);
@@ -70,7 +70,7 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
 
         let formatting_stage =
             FormattingStage::new(self.formatter.clone(), Arc::clone(&self.ontology));
-        Ok(formatting_stage.execute(hydrated, result_context, redacted_count, compiled.sql))
+        Ok(formatting_stage.execute(hydrated, result_context, redacted_count, compiled.structural.sql))
     }
 
     async fn execute_query(

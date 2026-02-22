@@ -14,10 +14,10 @@ output/
 git_diff_full.txt
 
 # simulator
-gl_synthetic_data/
+gl_synthetic_data*/
 gkg_simulator_manifest.json
 crates/simulator/profiles
-evaluation_results/
+evaluation_results*/
 datalake-generator-state/
 datalake-generator-report.json
 
