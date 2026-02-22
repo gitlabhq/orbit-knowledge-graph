@@ -8,6 +8,7 @@ use xshell::{Shell, cmd};
 
 use super::cmd as cmd_helpers;
 use super::config::Config;
+use super::constants as c;
 use super::ui;
 
 // -- Helm ---------------------------------------------------------------------
@@ -71,7 +72,7 @@ pub fn get_toolbox_pod(sh: &Shell, cfg: &Config) -> Result<String> {
             "-n",
             ns,
             "-l",
-            "app=toolbox",
+            c::TOOLBOX_LABEL,
             "-o",
             &format!("jsonpath={jsonpath}"),
         ],
@@ -104,16 +105,21 @@ pub fn toolbox_exec(sh: &Shell, cfg: &Config, pod: &str, command: &[&str]) -> Re
 }
 
 /// Run a one-liner Ruby command via `rails runner` in the toolbox pod.
+///
+/// `rails_root` and `ruby_cmd` are passed as positional parameters to
+/// `bash -c` (`$0` and `$1`) so they are never interpreted as shell syntax.
 pub fn toolbox_rails_eval(sh: &Shell, cfg: &Config, pod: &str, ruby_cmd: &str) -> Result<String> {
     let ns = &cfg.gitlab_ns;
     let rails_root = &cfg.rails_root;
-    let bash_cmd =
-        format!("cd {rails_root} && bundle exec rails runner '{ruby_cmd}' RAILS_ENV=production");
+    let script = r#"cd "$0" && bundle exec rails runner "$1" RAILS_ENV=production"#;
 
-    let output = cmd!(sh, "kubectl exec -n {ns} {pod} -- bash -c {bash_cmd}")
-        .quiet()
-        .ignore_status()
-        .output()?;
+    let output = cmd!(
+        sh,
+        "kubectl exec -n {ns} {pod} -- bash -c {script} {rails_root} {ruby_cmd}"
+    )
+    .quiet()
+    .ignore_status()
+    .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -157,6 +163,9 @@ pub fn read_secret(sh: &Shell, namespace: &str, secret_name: &str, key: &str) ->
 // -- PostgreSQL ---------------------------------------------------------------
 
 /// Run a psql command as superuser in the PG pod.
+///
+/// The password and SQL are passed as positional parameters to `bash -c`
+/// (`$0` and `$1`) so they are never interpreted as shell syntax.
 pub fn pg_superuser_exec(
     sh: &Shell,
     cfg: &Config,
@@ -166,12 +175,16 @@ pub fn pg_superuser_exec(
     let ns = &cfg.gitlab_ns;
     let pod = &cfg.pg_pod;
     let db = &cfg.pg_database;
-    let bash_cmd = format!("PGPASSWORD='{pg_superpass}' psql -U postgres -d {db} -c \"{sql}\"");
+    let superuser = c::PG_SUPERUSER;
+    let script = format!(r#"PGPASSWORD="$0" psql -U {superuser} -d {db} -c "$1""#);
 
-    let output = cmd!(sh, "kubectl exec -n {ns} {pod} -- bash -c {bash_cmd}")
-        .quiet()
-        .ignore_status()
-        .output()?;
+    let output = cmd!(
+        sh,
+        "kubectl exec -n {ns} {pod} -- bash -c {script} {pg_superpass} {sql}"
+    )
+    .quiet()
+    .ignore_status()
+    .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -179,4 +192,35 @@ pub fn pg_superuser_exec(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+// -- ClickHouse ---------------------------------------------------------------
+
+/// Resolve the ClickHouse pod name in the default namespace.
+pub fn get_ch_pod(sh: &Shell, cfg: &Config) -> Result<String> {
+    let ns = &cfg.default_ns;
+    let label = format!("app={}", cfg.ch_service_name);
+    let jsonpath = "{.items[0].metadata.name}";
+    let pod = cmd_helpers::capture(
+        sh,
+        "kubectl",
+        &[
+            "get",
+            "pod",
+            "-n",
+            ns,
+            "-l",
+            &label,
+            "-o",
+            &format!("jsonpath={jsonpath}"),
+        ],
+    );
+
+    match pod {
+        Some(name) if !name.is_empty() => Ok(name),
+        _ => bail!(
+            "No ClickHouse pod found in {ns} namespace.\n\
+             Has ClickHouse been deployed? (step 15)"
+        ),
+    }
 }

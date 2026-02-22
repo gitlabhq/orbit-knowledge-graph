@@ -58,6 +58,12 @@ pub struct Config {
     pub jwt_secret_path: String,
     pub e2e_pod_dir: String,
     pub manifest_pod_path: String,
+
+    // -- ClickHouse -----------------------------------------------------------
+    pub ch_service_name: String,
+    pub ch_url: String,
+    pub ch_datalake_db: String,
+    pub ch_graph_db: String,
 }
 
 impl Config {
@@ -72,11 +78,17 @@ impl Config {
         let cng_registry = e::env_or("CNG_REGISTRY", c::CNG_REGISTRY);
         let local_prefix = e::env_or("LOCAL_PREFIX", c::LOCAL_PREFIX);
         let local_tag = e::env_or("LOCAL_TAG", c::LOCAL_TAG);
-        let workhorse_image = format!("{cng_registry}/gitlab-workhorse-ee:{base_tag}");
+        let workhorse_image = format!("{cng_registry}/{}:{base_tag}", c::WORKHORSE_COMPONENT);
 
         let e2e_pod_dir = e::env_or("E2E_POD_DIR", c::E2E_POD_DIR);
         let manifest_pod_path = format!("{e2e_pod_dir}/manifest.json");
 
+        let ch_service_name = e::env_or("CH_SERVICE_NAME", c::CH_SERVICE_NAME);
+        let default_ns_val = e::env_or("DEFAULT_NS", c::DEFAULT_NS);
+        let ch_url = e::env_or(
+            "CH_URL",
+            &format!("http://{ch_service_name}.{default_ns_val}.svc.cluster.local:8123"),
+        );
         Self {
             gitlab_src: e::expand_home(&e::require("GITLAB_SRC")),
             cng_dir,
@@ -91,7 +103,7 @@ impl Config {
             colima_k8s_version: e::env_or("COLIMA_K8S_VERSION", c::COLIMA_K8S_VERSION),
 
             gitlab_ns: e::env_or("GITLAB_NS", c::GITLAB_NS),
-            default_ns: e::env_or("DEFAULT_NS", c::DEFAULT_NS),
+            default_ns: default_ns_val,
 
             cng_components: c::CNG_COMPONENTS.iter().map(|s| (*s).into()).collect(),
             base_tag,
@@ -111,6 +123,11 @@ impl Config {
             jwt_secret_path: e::env_or("JWT_SECRET_PATH", c::JWT_SECRET_PATH),
             e2e_pod_dir,
             manifest_pod_path,
+
+            ch_service_name,
+            ch_url,
+            ch_datalake_db: e::env_or("CH_DATALAKE_DB", c::CH_DATALAKE_DB),
+            ch_graph_db: e::env_or("CH_GRAPH_DB", c::CH_GRAPH_DB),
         }
     }
 
