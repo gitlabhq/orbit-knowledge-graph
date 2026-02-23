@@ -10,6 +10,7 @@ mod gitaly;
 mod project_store;
 mod push_event_handler;
 mod siphon_decoder;
+mod stale_data_cleaner;
 #[cfg(test)]
 mod test_helpers;
 mod watermark_store;
@@ -23,12 +24,14 @@ pub use config::CodeIndexingConfig;
 pub use gitaly::{GitalyConfiguration, GitalyRepositoryService, RepositoryService};
 pub use project_store::ClickHouseProjectStore;
 pub use push_event_handler::PushEventHandler;
+pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 pub use watermark_store::ClickHouseCodeWatermarkStore;
 
 pub struct CodeModule {
     repository_service: Arc<dyn RepositoryService>,
     watermark_store: Arc<dyn watermark_store::CodeWatermarkStore>,
     project_store: Arc<dyn project_store::ProjectStore>,
+    stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner>,
     config: CodeIndexingConfig,
 }
 
@@ -43,7 +46,10 @@ impl CodeModule {
         Ok(Self {
             repository_service: GitalyRepositoryService::create(gitaly_config.clone()),
             watermark_store: Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(&client))),
-            project_store: Arc::new(ClickHouseProjectStore::new(client)),
+            project_store: Arc::new(ClickHouseProjectStore::new(Arc::clone(&client))),
+            stale_data_cleaner: Arc::new(stale_data_cleaner::ClickHouseStaleDataCleaner::new(
+                client,
+            )),
             config,
         })
     }
@@ -59,6 +65,7 @@ impl Module for CodeModule {
             Arc::clone(&self.repository_service),
             Arc::clone(&self.watermark_store),
             Arc::clone(&self.project_store),
+            Arc::clone(&self.stale_data_cleaner),
             self.config.clone(),
         ))]
     }

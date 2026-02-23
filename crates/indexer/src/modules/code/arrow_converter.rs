@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Int64Builder, StringBuilder};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::array::{ArrayRef, Int64Builder, StringBuilder, TimestampMicrosecondBuilder};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, Utc};
 use code_graph::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode,
 };
@@ -15,14 +16,21 @@ pub struct ArrowConverter {
     traversal_path: String,
     project_id: i64,
     branch: String,
+    version_micros: i64,
 }
 
 impl ArrowConverter {
-    pub fn new(traversal_path: String, project_id: i64, branch: String) -> Self {
+    pub fn new(
+        traversal_path: String,
+        project_id: i64,
+        branch: String,
+        version_timestamp: DateTime<Utc>,
+    ) -> Self {
         Self {
             traversal_path,
             project_id,
             branch,
+            version_micros: version_timestamp.timestamp_micros(),
         }
     }
 
@@ -37,7 +45,13 @@ impl ArrowConverter {
     }
 
     fn base_builders(&self, count: usize) -> BaseColumnBuilders {
-        BaseColumnBuilders::new(&self.traversal_path, self.project_id, &self.branch, count)
+        BaseColumnBuilders::new(
+            &self.traversal_path,
+            self.project_id,
+            &self.branch,
+            self.version_micros,
+            count,
+        )
     }
 
     pub fn convert_directories(&self, nodes: &[DirectoryNode]) -> Result<RecordBatch, ArrowError> {
@@ -317,6 +331,7 @@ impl ArrowConverter {
         let mut relationship_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 32);
         let mut target_id = Int64Builder::with_capacity(rels.len());
         let mut target_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 16);
+        let mut version = TimestampMicrosecondBuilder::with_capacity(rels.len());
 
         for rel in rels {
             let (src_kind_str, tgt_kind_str) = relationship_kind_to_strings(&rel.kind);
@@ -334,6 +349,7 @@ impl ArrowConverter {
             relationship_kind.append_value(edge_label(&rel.relationship_type));
             target_id.append_value(tgt_id);
             target_kind.append_value(tgt_kind_str);
+            version.append_value(self.version_micros);
         }
 
         let schema = Schema::new(vec![
@@ -343,6 +359,11 @@ impl ArrowConverter {
             Field::new("relationship_kind", DataType::Utf8, false),
             Field::new("target_id", DataType::Int64, false),
             Field::new("target_kind", DataType::Utf8, false),
+            Field::new(
+                "_version",
+                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                false,
+            ),
         ]);
 
         RecordBatch::try_new(
@@ -354,6 +375,7 @@ impl ArrowConverter {
                 Arc::new(relationship_kind.finish()) as ArrayRef,
                 Arc::new(target_id.finish()) as ArrayRef,
                 Arc::new(target_kind.finish()) as ArrayRef,
+                Arc::new(version.finish().with_timezone("UTC")) as ArrayRef,
             ],
         )
     }
@@ -382,20 +404,30 @@ struct BaseColumnBuilders {
     traversal_path: StringBuilder,
     project_id: Int64Builder,
     branch: StringBuilder,
+    version: TimestampMicrosecondBuilder,
     traversal_path_value: String,
     project_id_value: i64,
     branch_value: String,
+    version_micros: i64,
 }
 
 impl BaseColumnBuilders {
-    fn new(traversal_path: &str, project_id: i64, branch: &str, capacity: usize) -> Self {
+    fn new(
+        traversal_path: &str,
+        project_id: i64,
+        branch: &str,
+        version_micros: i64,
+        capacity: usize,
+    ) -> Self {
         Self {
             traversal_path: StringBuilder::with_capacity(capacity, capacity * traversal_path.len()),
             project_id: Int64Builder::with_capacity(capacity),
             branch: StringBuilder::with_capacity(capacity, capacity * branch.len()),
+            version: TimestampMicrosecondBuilder::with_capacity(capacity),
             traversal_path_value: traversal_path.to_string(),
             project_id_value: project_id,
             branch_value: branch.to_string(),
+            version_micros,
         }
     }
 
@@ -403,6 +435,7 @@ impl BaseColumnBuilders {
         self.traversal_path.append_value(&self.traversal_path_value);
         self.project_id.append_value(self.project_id_value);
         self.branch.append_value(&self.branch_value);
+        self.version.append_value(self.version_micros);
     }
 
     fn build_batch_with_id(
@@ -415,6 +448,11 @@ impl BaseColumnBuilders {
             Field::new("traversal_path", DataType::Utf8, false),
             Field::new("project_id", DataType::Int64, false),
             Field::new("branch", DataType::Utf8, false),
+            Field::new(
+                "_version",
+                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                false,
+            ),
         ];
 
         let mut columns: Vec<ArrayRef> = vec![
@@ -422,6 +460,7 @@ impl BaseColumnBuilders {
             Arc::new(self.traversal_path.finish()),
             Arc::new(self.project_id.finish()),
             Arc::new(self.branch.finish()),
+            Arc::new(self.version.finish().with_timezone("UTC")),
         ];
 
         for (name, dtype, nullable, array) in extra_columns {

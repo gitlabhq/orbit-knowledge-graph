@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS gl_user (
     user_type String DEFAULT '',
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id);
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS gl_group (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String default '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS gl_project (
     star_count Nullable(Int64),
     last_activity_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String default '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS gl_note (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     discussion_locked Nullable(Bool),
     prepared_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     deleted_file Bool DEFAULT false,
     binary Nullable(Bool),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS gl_label (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -189,7 +189,7 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     updated_at Nullable(DateTime64(6, 'UTC')),
     closed_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     relationship_kind String,
     target_id Int64,
     target_kind String,
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, source_kind, target_id, target_kind)
@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     started_at Nullable(DateTime64(6, 'UTC')),
     finished_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS gl_job (
     finished_at Nullable(DateTime64(6, 'UTC')),
     queued_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     confirmed_at Nullable(DateTime64(6, 'UTC')),
     dismissed_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -294,7 +294,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -323,7 +323,7 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     deduplicated Bool DEFAULT false,
     overridden_uuid Nullable(String),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -336,7 +336,7 @@ CREATE TABLE IF NOT EXISTS gl_security_scan (
     created_at DateTime64(6, 'UTC') DEFAULT now(),
     updated_at DateTime64(6, 'UTC') DEFAULT now(),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -357,7 +357,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     updated_at DateTime64(6, 'UTC') DEFAULT now(),
     detected_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id);
@@ -371,7 +371,7 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     branch String,
     path String,
     name String,
-    _version  DateTime64(6, 'UTC') DEFAULT now(),
+    _version  DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
@@ -387,7 +387,7 @@ CREATE TABLE IF NOT EXISTS gl_file (
     name String,
     extension String,
     language String,
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
@@ -407,7 +407,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     end_line Int64,
     start_byte Int64,
     end_byte Int64,
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
@@ -428,7 +428,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     end_line Int64,
     start_byte Int64,
     end_byte Int64,
-    _version DateTime64(6, 'UTC') DEFAULT now(),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)

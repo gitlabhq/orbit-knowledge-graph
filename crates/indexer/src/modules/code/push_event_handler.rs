@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Topic};
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
 use code_graph::loading::DirectoryFileSource;
 use ontology::EDGE_TABLE;
@@ -18,6 +18,7 @@ use super::config::{CodeIndexingConfig, siphon_actions, siphon_ref_types, subjec
 use super::gitaly::RepositoryService;
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
+use super::stale_data_cleaner::StaleDataCleaner;
 use super::watermark_store::{CodeIndexingWatermark, CodeWatermarkStore};
 use crate::modules::sdlc::locking::project_lock_key;
 
@@ -25,6 +26,7 @@ pub struct PushEventHandler {
     repository_service: Arc<dyn RepositoryService>,
     watermark_store: Arc<dyn CodeWatermarkStore>,
     project_store: Arc<dyn ProjectStore>,
+    stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     config: CodeIndexingConfig,
 }
 
@@ -33,12 +35,14 @@ impl PushEventHandler {
         repository_service: Arc<dyn RepositoryService>,
         watermark_store: Arc<dyn CodeWatermarkStore>,
         project_store: Arc<dyn ProjectStore>,
+        stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         config: CodeIndexingConfig,
     ) -> Self {
         Self {
             repository_service,
             watermark_store,
             project_store,
+            stale_data_cleaner,
             config,
         }
     }
@@ -156,6 +160,7 @@ impl PushEventHandler {
             return Ok(());
         }
 
+        let indexed_at = Utc::now();
         let result = self
             .run_indexing(
                 context,
@@ -163,6 +168,7 @@ impl PushEventHandler {
                 branch,
                 &event.revision_after,
                 &project.traversal_path,
+                indexed_at,
             )
             .await;
 
@@ -170,7 +176,7 @@ impl PushEventHandler {
             warn!(project_id, branch = %branch, error = %e, "failed to release lock");
         }
 
-        self.finalize_indexing(event, project_id, branch, result)
+        self.finalize_indexing(event, project_id, branch, indexed_at, result)
             .await
     }
 
@@ -181,6 +187,7 @@ impl PushEventHandler {
         branch: &str,
         commit_id: &str,
         traversal_path: &str,
+        indexed_at: DateTime<Utc>,
     ) -> Result<(), HandlerError> {
         let temp_dir = TempDir::new()
             .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
@@ -202,8 +209,23 @@ impl PushEventHandler {
         if let Some(mut graph_data) = result.graph_data {
             // TODO: This should be done on construction of the GraphData struct.
             graph_data.assign_node_ids(project_id, branch);
-            self.write_graph_data(context, project_id, branch, traversal_path, &graph_data)
-                .await?;
+            self.write_graph_data(
+                context,
+                project_id,
+                branch,
+                traversal_path,
+                indexed_at,
+                &graph_data,
+            )
+            .await?;
+        }
+
+        if let Err(error) = self
+            .stale_data_cleaner
+            .delete_stale_data(traversal_path, project_id, branch, indexed_at)
+            .await
+        {
+            warn!(%error, "failed to delete stale data, will retry on next push");
         }
 
         Ok(())
@@ -214,6 +236,7 @@ impl PushEventHandler {
         event: &PushEventPayload,
         project_id: i64,
         branch: &str,
+        indexed_at: DateTime<Utc>,
         result: Result<(), HandlerError>,
     ) -> Result<(), HandlerError> {
         if let Err(e) = &result {
@@ -226,7 +249,7 @@ impl PushEventHandler {
             branch: branch.to_string(),
             last_event_id: event.event_id,
             last_commit: event.revision_after.clone(),
-            indexed_at: Utc::now(),
+            indexed_at,
         };
 
         self.watermark_store
@@ -362,10 +385,15 @@ impl PushEventHandler {
         project_id: i64,
         branch: &str,
         traversal_path: &str,
+        indexed_at: DateTime<Utc>,
         graph_data: &code_graph::analysis::types::GraphData,
     ) -> Result<(), HandlerError> {
-        let converter =
-            ArrowConverter::new(traversal_path.to_string(), project_id, branch.to_string());
+        let converter = ArrowConverter::new(
+            traversal_path.to_string(),
+            project_id,
+            branch.to_string(),
+            indexed_at,
+        );
 
         let converted = converter
             .convert_all(graph_data)
@@ -444,6 +472,7 @@ mod tests {
     use crate::modules::code::gitaly::test_utils::MockRepositoryService;
     use crate::modules::code::project_store::ProjectInfo;
     use crate::modules::code::project_store::test_utils::MockProjectStore;
+    use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::modules::code::test_helpers::{build_replication_events, push_payload_columns};
     use crate::modules::code::watermark_store::test_utils::MockCodeWatermarkStore;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
@@ -461,11 +490,13 @@ mod tests {
             let mock_locks = Arc::new(MockLockService::new());
             let watermark_store = Arc::new(MockCodeWatermarkStore::new());
             let project_store = Arc::new(MockProjectStore::new());
+            let stale_data_cleaner = Arc::new(MockStaleDataCleaner::default());
 
             let handler = PushEventHandler::new(
                 repository_service,
                 watermark_store.clone(),
                 project_store.clone(),
+                stale_data_cleaner,
                 CodeIndexingConfig::default(),
             );
 
