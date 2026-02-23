@@ -502,7 +502,9 @@ semantic-release:
     - saas-linux-small-amd64
   variables:
     GIT_STRATEGY: clone
-  needs: []
+  needs:
+    - job: build-proto-gem
+      optional: true
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
