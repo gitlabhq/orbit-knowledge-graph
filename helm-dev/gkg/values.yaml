@@ -109,6 +109,18 @@ consumer:
       cpu: 1
       memory: 1Gi
 
+engine:
+  max_concurrent_workers: 16
+  modules:
+    sdlc:
+      max_concurrency: 8
+      max_retry_attempts: 5
+      retry_interval_secs: 60
+    code:
+      max_concurrency: 4
+      max_retry_attempts: 5
+      retry_interval_secs: 60
+
 gkgServer:
   image:
     repository: ""
