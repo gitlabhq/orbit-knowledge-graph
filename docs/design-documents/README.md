@@ -234,6 +234,7 @@ Please see the following design documents for more details on the Knowledge Grap
 - [Knowledge Graph Security](security.md)
 - [Knowledge Graph Observability](observability.md)
 - [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md)
+- [ADR: Rust Core Runtime](decisions/002_rust_core_runtime.md)
 
 ## Binary Breakdown
 
