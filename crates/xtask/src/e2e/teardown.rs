@@ -150,7 +150,7 @@ fn teardown_traefik(sh: &Shell, docker_host: &str) -> Result<()> {
 fn cleanup_local_artifacts(cfg: &Config) -> Result<()> {
     ui::step(4, "Cleaning up local artifacts")?;
 
-    let secrets_file = cfg.tilt_dir.join(".secrets");
+    let secrets_file = cfg.tilt_dir.join(c::SECRETS_FILE);
     if secrets_file.exists() {
         fs::remove_file(&secrets_file)?;
         ui::info(&format!("Removed {}", secrets_file.display()))?;

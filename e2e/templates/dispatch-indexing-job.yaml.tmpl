@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${JOB_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      containers:
+        - name: dispatch
+          image: ${SERVER_IMAGE}:${IMAGE_TAG}
+          imagePullPolicy: Never
+          args: ["--mode=dispatch-indexing"]
+          env:
+            - name: RUST_LOG
+              value: "info,gkg_server=debug"
+            - name: GKG_DATALAKE__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${CH_SECRET}
+                  key: ${CH_SECRET_KEY}
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: ${CONFIGMAP}

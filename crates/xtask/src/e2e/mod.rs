@@ -5,4 +5,5 @@ pub mod env;
 pub mod kubectl;
 pub mod pipeline;
 pub mod teardown;
+pub mod template;
 pub mod ui;

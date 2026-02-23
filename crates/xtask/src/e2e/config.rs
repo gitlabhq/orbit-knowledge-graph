@@ -64,15 +64,25 @@ pub struct Config {
     pub ch_url: String,
     pub ch_datalake_db: String,
     pub ch_graph_db: String,
+
+    // -- Siphon ---------------------------------------------------------------
+    pub siphon_publication: String,
+    pub siphon_slot: String,
+    pub siphon_poll_timeout: u64,
+
+    // -- GKG ------------------------------------------------------------------
+    pub gkg_server_image: String,
+    pub gkg_dispatch_job: String,
+    pub gkg_indexer_configmap: String,
 }
 
 impl Config {
     /// Build config from environment variables with sensible defaults.
     pub fn from_env() -> Self {
         let gkg_root = e::workspace_root();
-        let cng_dir = gkg_root.join("e2e/cng");
-        let tilt_dir = gkg_root.join("e2e/tilt");
-        let log_dir = gkg_root.join(".dev");
+        let cng_dir = gkg_root.join(c::CNG_DIR);
+        let tilt_dir = gkg_root.join(c::TILT_DIR);
+        let log_dir = gkg_root.join(c::LOG_DIR);
 
         let base_tag = e::env_or("BASE_TAG", c::BASE_TAG);
         let cng_registry = e::env_or("CNG_REGISTRY", c::CNG_REGISTRY);
@@ -81,7 +91,7 @@ impl Config {
         let workhorse_image = format!("{cng_registry}/{}:{base_tag}", c::WORKHORSE_COMPONENT);
 
         let e2e_pod_dir = e::env_or("E2E_POD_DIR", c::E2E_POD_DIR);
-        let manifest_pod_path = format!("{e2e_pod_dir}/manifest.json");
+        let manifest_pod_path = format!("{e2e_pod_dir}/{}", c::MANIFEST_JSON);
 
         let ch_service_name = e::env_or("CH_SERVICE_NAME", c::CH_SERVICE_NAME);
         let default_ns_val = e::env_or("DEFAULT_NS", c::DEFAULT_NS);
@@ -128,6 +138,17 @@ impl Config {
             ch_url,
             ch_datalake_db: e::env_or("CH_DATALAKE_DB", c::CH_DATALAKE_DB),
             ch_graph_db: e::env_or("CH_GRAPH_DB", c::CH_GRAPH_DB),
+
+            siphon_publication: e::env_or("SIPHON_PUBLICATION", c::SIPHON_PUBLICATION),
+            siphon_slot: e::env_or("SIPHON_SLOT", c::SIPHON_SLOT),
+            siphon_poll_timeout: env::var("SIPHON_POLL_TIMEOUT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(c::SIPHON_POLL_TIMEOUT),
+
+            gkg_server_image: e::env_or("GKG_SERVER_IMAGE", c::GKG_SERVER_IMAGE),
+            gkg_dispatch_job: e::env_or("GKG_DISPATCH_JOB", c::GKG_DISPATCH_JOB),
+            gkg_indexer_configmap: e::env_or("GKG_INDEXER_CONFIGMAP", c::GKG_INDEXER_CONFIGMAP),
         }
     }
 

@@ -111,7 +111,7 @@ pub fn toolbox_exec(sh: &Shell, cfg: &Config, pod: &str, command: &[&str]) -> Re
 pub fn toolbox_rails_eval(sh: &Shell, cfg: &Config, pod: &str, ruby_cmd: &str) -> Result<String> {
     let ns = &cfg.gitlab_ns;
     let rails_root = &cfg.rails_root;
-    let script = r#"cd "$0" && bundle exec rails runner "$1" RAILS_ENV=production"#;
+    let script = r#"cd "$0" && bundle exec rails runner "$1" RAILS_ENV=production"#.to_string();
 
     let output = cmd!(
         sh,
@@ -194,6 +194,42 @@ pub fn pg_superuser_exec(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Run a psql query as superuser and return the scalar result (no headers).
+///
+/// Uses `-t` (tuples-only) so the output is just the value, no column
+/// headers or row-count footers. Whitespace is stripped.
+///
+/// The password and SQL are passed as positional parameters to `bash -c`
+/// (`$0` and `$1`) so they are never interpreted as shell syntax.
+pub fn pg_superuser_query(
+    sh: &Shell,
+    cfg: &Config,
+    pg_superpass: &str,
+    sql: &str,
+) -> Result<String> {
+    let ns = &cfg.gitlab_ns;
+    let pod = &cfg.pg_pod;
+    let db = &cfg.pg_database;
+    let superuser = c::PG_SUPERUSER;
+    let script = format!(r#"PGPASSWORD="$0" psql -U {superuser} -d {db} -t -c "$1""#);
+
+    let output = cmd!(
+        sh,
+        "kubectl exec -n {ns} {pod} -- bash -c {script} {pg_superpass} {sql}"
+    )
+    .quiet()
+    .ignore_status()
+    .ignore_stderr()
+    .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("psql query failed: {stderr}");
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 // -- ClickHouse ---------------------------------------------------------------
 
 /// Resolve the ClickHouse pod name in the default namespace.
@@ -223,4 +259,32 @@ pub fn get_ch_pod(sh: &Shell, cfg: &Config) -> Result<String> {
              Has ClickHouse been deployed? (step 15)"
         ),
     }
+}
+
+/// Run a clickhouse-client query and return the output.
+pub fn ch_query(
+    sh: &Shell,
+    cfg: &Config,
+    ch_pod: &str,
+    database: &str,
+    query: &str,
+) -> Result<String> {
+    let ns = &cfg.default_ns;
+    let ch_user = c::CH_DEFAULT_USER;
+    let output = cmd!(
+        sh,
+        "kubectl exec -n {ns} {ch_pod} --
+            clickhouse-client --user {ch_user} --database {database} --query {query}"
+    )
+    .quiet()
+    .ignore_status()
+    .ignore_stderr()
+    .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("clickhouse-client query failed: {stderr}");
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

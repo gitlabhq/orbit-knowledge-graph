@@ -7,6 +7,8 @@
 //! User-specific paths (e.g. GITLAB_SRC) are intentionally absent —
 //! those are required env vars with no fallback.
 
+use const_format::concatcp;
+
 // -- Colima / k8s -------------------------------------------------------------
 
 pub const COLIMA_PROFILE: &str = "cng";
@@ -51,6 +53,7 @@ pub const PG_SUPERUSER: &str = "postgres";
 
 /// Secret name for PG credentials bridged to the default namespace (for Siphon).
 pub const PG_BRIDGE_SECRET_NAME: &str = "postgres-credentials";
+pub const PG_GKG_ENABLED_TABLE: &str = "knowledge_graph_enabled_namespaces";
 
 // -- Paths inside pods --------------------------------------------------------
 
@@ -96,15 +99,105 @@ pub const CH_DATALAKE_DB: &str = "gitlab_clickhouse_development";
 pub const CH_GRAPH_DB: &str = "gkg-development";
 pub const CH_DEFAULT_USER: &str = "default";
 
+// -- Siphon -------------------------------------------------------------------
+
+pub const SIPHON_PUBLICATION: &str = "siphon_publication_main_db";
+pub const SIPHON_SLOT: &str = "siphon_slot_main_db";
+pub const SIPHON_POLL_TIMEOUT: u64 = 600;
+
+/// Tables polled during step 21 to confirm siphon data is flowing.
+pub const SIPHON_MR_TABLE: &str = "hierarchy_merge_requests";
+pub const SIPHON_KG_NS_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
+
+/// Poll intervals (seconds) for siphon data checks.
+pub const SIPHON_MR_POLL_INTERVAL: u64 = 15;
+pub const SIPHON_KG_POLL_INTERVAL: u64 = 10;
+pub const SIPHON_KG_POLL_TIMEOUT: u64 = 300;
+
+// -- GKG ----------------------------------------------------------------------
+
+pub const GKG_SERVER_IMAGE: &str = "gkg-server";
+pub const GKG_DISPATCH_JOB: &str = "gkg-dispatch-indexing";
+pub const GKG_INDEXER_CONFIGMAP: &str = "gkg-indexer-config";
+
+/// Image tag used by the dispatch-indexing k8s Job.
+pub const GKG_DEV_TAG: &str = "dev";
+
+/// k8s secret providing the ClickHouse password to dispatch-indexing.
+pub const CH_CREDENTIALS_SECRET: &str = "clickhouse-credentials";
+pub const CH_CREDENTIALS_KEY: &str = "password";
+
+/// ClickHouse graph tables operated on by OPTIMIZE TABLE FINAL and row-count
+/// verification.
+pub const GL_TABLES: &[&str] = &[
+    "gl_user",
+    "gl_group",
+    "gl_project",
+    "gl_merge_request",
+    "gl_work_item",
+    "gl_note",
+    "gl_milestone",
+    "gl_label",
+    "gl_edge",
+];
+
+/// Table polled after dispatch-indexing to confirm the indexer is working.
+pub const GL_PROJECT_TABLE: &str = "gl_project";
+
+// -- Timeouts -----------------------------------------------------------------
+
+pub const CH_POD_TIMEOUT: &str = "300s";
+pub const TILT_CI_TIMEOUT: &str = "20m";
+pub const DISPATCH_JOB_TIMEOUT: &str = "120s";
+pub const INDEXER_POLL_TIMEOUT: u64 = 300;
+pub const INDEXER_POLL_INTERVAL: u64 = 10;
+pub const INDEXER_SETTLE_SECS: u64 = 30;
+
+// -- Tilt ---------------------------------------------------------------------
+
+pub const TILT_CAPRONI_ENV: &str = "GKG_E2E_CAPRONI";
+
+// -- Directories (relative to GKG repo root) ----------------------------------
+
+pub const CNG_DIR: &str = "e2e/cng";
+pub const TILT_DIR: &str = "e2e/tilt";
+pub const LOG_DIR: &str = ".dev";
+pub const E2E_TESTS_DIR: &str = "e2e/tests";
+
+// -- Paths (relative to GKG repo root) ----------------------------------------
+
+pub const GRAPH_SQL_PATH: &str = "fixtures/schema/graph.sql";
+pub const TILTFILE_PATH: &str = concatcp!(TILT_DIR, "/Tiltfile");
+pub const DISPATCH_JOB_TEMPLATE: &str = "e2e/templates/dispatch-indexing-job.yaml.tmpl";
+
+// -- Filenames ----------------------------------------------------------------
+
+/// Stem shared by Tilt CI log and PID files.
+const TILT_CI_STEM: &str = "tilt-ci";
+pub const TILT_CI_LOG: &str = concatcp!(TILT_CI_STEM, ".log");
+pub const TILT_CI_PID: &str = concatcp!(TILT_CI_STEM, ".pid");
+
+pub const CLICKHOUSE_YAML: &str = "clickhouse.yaml";
+pub const CREATE_TEST_DATA_LOG: &str = "create-test-data.log";
+pub const MANIFEST_JSON: &str = "manifest.json";
+pub const SECRETS_FILE: &str = ".secrets";
+pub const TRAEFIK_VALUES_YAML: &str = "traefik-values.yaml";
+pub const GITLAB_VALUES_YAML: &str = "gitlab-values.yaml";
+pub const DOCKERFILE_RAILS: &str = "Dockerfile.rails";
+pub const COLIMA_START_LOG: &str = "colima-start.log";
+pub const CH_MIGRATE_LOG: &str = "clickhouse-migrate.log";
+pub const REDACTION_TEST_LOG: &str = "redaction-test.log";
+pub const TILT_E2E_LOG: &str = "tilt-e2e.log";
+
 // -- Log / artifact files cleaned during teardown -----------------------------
 
 pub const TEARDOWN_LOG_FILES: &[&str] = &[
-    "create-test-data.log",
-    "manifest.json",
-    "colima-start.log",
-    "tilt-ci.log",
-    "tilt-ci.pid",
-    "clickhouse-migrate.log",
-    "redaction-test.log",
-    "tilt-e2e.log",
+    CREATE_TEST_DATA_LOG,
+    MANIFEST_JSON,
+    COLIMA_START_LOG,
+    TILT_CI_LOG,
+    TILT_CI_PID,
+    CH_MIGRATE_LOG,
+    REDACTION_TEST_LOG,
+    TILT_E2E_LOG,
 ];

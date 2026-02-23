@@ -112,7 +112,7 @@ fn extract_jwt_secret(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()>
                 &cfg.pg_password_key,
             )?;
 
-            let secrets_file = cfg.tilt_dir.join(".secrets");
+            let secrets_file = cfg.tilt_dir.join(c::SECRETS_FILE);
             fs::create_dir_all(&cfg.tilt_dir)?;
 
             let contents = format!(
@@ -140,7 +140,7 @@ fn run_db_migrate(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
 
     let ns = &cfg.gitlab_ns;
     let rails_root = &cfg.rails_root;
-    let script = r#"cd "$0" && bundle exec rails db:migrate RAILS_ENV=production"#;
+    let script = r#"cd "$0" && bundle exec rails db:migrate RAILS_ENV=production"#.to_string();
 
     cmd!(
         sh,
@@ -174,7 +174,7 @@ fn copy_test_scripts(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> 
 
     kubectl::toolbox_exec(sh, cfg, toolbox_pod, &["mkdir", "-p", e2e_pod_dir])?;
 
-    let tests_dir = cfg.gkg_root.join("e2e/tests");
+    let tests_dir = cfg.gkg_root.join(c::E2E_TESTS_DIR);
     if !tests_dir.exists() {
         ui::warn(&format!("No test scripts found at {}", tests_dir.display()))?;
         return Ok(());
@@ -206,7 +206,8 @@ fn create_test_data(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
     let rails_root = &cfg.rails_root;
     let e2e_pod_dir = &cfg.e2e_pod_dir;
     let script =
-        r#"cd "$0" && bundle exec rails runner "$1"/create_test_data.rb RAILS_ENV=production"#;
+        r#"cd "$0" && bundle exec rails runner "$1"/create_test_data.rb RAILS_ENV=production"#
+            .to_string();
 
     let output = cmd!(
         sh,
@@ -218,7 +219,7 @@ fn create_test_data(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Write log
-    let log_path = cfg.log_dir.join("create-test-data.log");
+    let log_path = cfg.log_dir.join(c::CREATE_TEST_DATA_LOG);
     fs::write(&log_path, stdout.as_ref())?;
 
     if !output.status.success() {
@@ -241,7 +242,7 @@ fn create_test_data(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
         ui::info("Manifest verified in toolbox pod")?;
 
         let pod_path = format!("{ns}/{toolbox_pod}:{}", cfg.manifest_pod_path);
-        let local_path = cfg.log_dir.join("manifest.json");
+        let local_path = cfg.log_dir.join(c::MANIFEST_JSON);
         let local_str = local_path.to_string_lossy().to_string();
         let _ = cmd!(sh, "kubectl cp {pod_path} {local_str}")
             .quiet()
