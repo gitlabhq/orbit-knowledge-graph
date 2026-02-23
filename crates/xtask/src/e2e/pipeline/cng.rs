@@ -199,7 +199,7 @@ fn build_images(sh: &Shell, cfg: &Config) -> Result<()> {
     fs::write(staging.join(".dockerignore"), ".git\n")?;
 
     // Build each component
-    let dockerfile = cfg.cng_dir.join("Dockerfile.rails");
+    let dockerfile = cfg.cng_dir.join(c::DOCKERFILE_RAILS);
     let dockerfile_str = dockerfile.to_string_lossy().to_string();
     let staging_str = staging.to_string_lossy().to_string();
 
@@ -259,7 +259,7 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
         .env("DOCKER_HOST", &docker_host)
         .run()?;
 
-    let values_file = cfg.cng_dir.join("traefik-values.yaml");
+    let values_file = cfg.cng_dir.join(c::TRAEFIK_VALUES_YAML);
     let values_str = values_file.to_string_lossy().to_string();
     let chart = c::TRAEFIK_HELM_CHART;
     let timeout = c::TRAEFIK_HELM_TIMEOUT;
@@ -303,7 +303,7 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
         .env("DOCKER_HOST", &docker_host)
         .run()?;
 
-    let values_file = cfg.cng_dir.join("gitlab-values.yaml");
+    let values_file = cfg.cng_dir.join(c::GITLAB_VALUES_YAML);
     let values_str = values_file.to_string_lossy().to_string();
 
     if kubectl::helm_release_exists(sh, release, ns, &docker_host) {
