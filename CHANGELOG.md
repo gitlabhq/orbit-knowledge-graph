@@ -1,3 +1,26 @@
+## [0.5.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.4.0...v0.5.0) (2026-02-23)
+
+### Features
+
+* **indexer:** add per-module retry policy configuration ([d9fe7b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d9fe7b70fef6f0da9dd1328ad2e527780c60f3de)) by Jean-Gabriel Doyon
+* **xtask:** add in e2e test suite for e2e harness ([d96ac3c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d96ac3c04c5f4207ace344e4a1df5509abf2dddc)) by Michael Usachenko
+* **xtask:** deploy and configure gkg services for e2e harness ([2cc569c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2cc569cee0221596ecfe0ad44040671ddea3129f)) by Michael Usachenko
+* **xtask:** wire up e2e harness to tilt + hardening ([fe41c24](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fe41c248c13b26d1b66101e4a2526191722d9d17)) by Michael Usachenko
+
+### Fixes
+
+* **indexer:** use correct code edge labels ([0ec50a1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0ec50a1de727ebe9222963d52c9fa8b57052edee)) by Jean-Gabriel Doyon
+* proto gem require path for generated gRPC files ([f7157ca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f7157ca27126d22735cd12e8d53ee19e81ef31fc)) by Michael Angelo Rivera
+
+### Other
+
+* **deps:** update rust crate chrono to v0.4.44 ([b7c8922](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b7c8922a9330f57c15ac2f2521a0641fa5ae5190)) by GitLab Renovate Bot
+* **deps:** update rust crate parquet to v58 ([8140a09](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8140a09796a5ebc62128765af6914ec2fc891bc3)) by GitLab Renovate Bot
+* **deps:** update rust crate strum to 0.28.0 ([0f565e0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0f565e0a6a2d953f293801978365fe3144b8f6d9)) by GitLab Renovate Bot
+* **deps:** update rust crate testcontainers-modules to 0.15.0 ([128b6c1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/128b6c15d276ab9b72843483701ee749bab97471)) by GitLab Dependency Bot
+* **xtask:** add centralized config.yaml for e2e harness ([f406800](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f40680088e0cfa53f543ffd63d0dd8d2b807c589)) by Michael Usachenko
+* **xtask:** remove tilt from e2e harness ([8ef98e2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8ef98e2d50da92bbcce3751a86972934c4995255)) by Michael Usachenko
+
 ## [0.4.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.3.1...v0.4.0) (2026-02-22)
 
 ### Features
