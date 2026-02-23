@@ -105,14 +105,31 @@ pub const SIPHON_PUBLICATION: &str = "siphon_publication_main_db";
 pub const SIPHON_SLOT: &str = "siphon_slot_main_db";
 pub const SIPHON_POLL_TIMEOUT: u64 = 600;
 
-/// Tables polled during step 21 to confirm siphon data is flowing.
-pub const SIPHON_MR_TABLE: &str = "hierarchy_merge_requests";
-pub const SIPHON_KG_NS_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
+/// Datalake tables polled during step 21 to confirm siphon data is flowing
+/// before dispatch-indexing.
+///
+/// `hierarchy_merge_requests` — canary for the full MV chain (namespace
+///   traversal paths → project traversal paths → hierarchy MV).
+/// `siphon_knowledge_graph_enabled_namespaces` — the dispatcher reads this
+///   to discover which namespaces to index.
+/// `siphon_namespace_details` — the Group entity's ETL query does a 3-way
+///   INNER JOIN (`siphon_namespaces ⋈ siphon_namespace_details ⋈
+///   namespace_traversal_paths`). This table is replicated independently
+///   from the others and can lag behind, causing `gl_group: 0` if the
+///   indexer runs before it arrives. Polling it here prevents that race.
+///
+/// We intentionally do NOT poll `hierarchy_work_items` here — it may lag
+/// behind `hierarchy_merge_requests` and is not required pre-dispatch. The
+/// post-indexer poll (step 22) waits for every graph table including
+/// `gl_work_item`, which is the real gate.
+pub const SIPHON_POLL_TABLES: &[&str] = &[
+    "hierarchy_merge_requests",
+    "siphon_knowledge_graph_enabled_namespaces",
+    "siphon_namespace_details",
+];
 
-/// Poll intervals (seconds) for siphon data checks.
-pub const SIPHON_MR_POLL_INTERVAL: u64 = 15;
-pub const SIPHON_KG_POLL_INTERVAL: u64 = 10;
-pub const SIPHON_KG_POLL_TIMEOUT: u64 = 300;
+/// Poll interval (seconds) for siphon data checks.
+pub const SIPHON_POLL_INTERVAL: u64 = 15;
 
 // -- GKG ----------------------------------------------------------------------
 
@@ -128,6 +145,15 @@ pub const GKG_DEV_TAG: &str = "dev";
 pub const CH_CREDENTIALS_SECRET: &str = "clickhouse-credentials";
 pub const CH_CREDENTIALS_KEY: &str = "password";
 
+/// Helm release name for the GKG chart (NATS + siphon + GKG).
+pub const GKG_HELM_RELEASE: &str = "gkg-e2e";
+
+/// ClickHouse init ConfigMap created by clickhouse.yaml.
+pub const CH_INIT_CONFIGMAP: &str = "gkg-e2e-clickhouse-init";
+
+/// GKG server credentials secret (JWT secret, created by Tilt).
+pub const GKG_SERVER_CREDENTIALS_SECRET: &str = "gkg-server-credentials";
+
 /// ClickHouse graph tables operated on by OPTIMIZE TABLE FINAL and row-count
 /// verification.
 pub const GL_TABLES: &[&str] = &[
@@ -142,9 +168,6 @@ pub const GL_TABLES: &[&str] = &[
     "gl_edge",
 ];
 
-/// Table polled after dispatch-indexing to confirm the indexer is working.
-pub const GL_PROJECT_TABLE: &str = "gl_project";
-
 // -- Timeouts -----------------------------------------------------------------
 
 pub const CH_POD_TIMEOUT: &str = "300s";
@@ -156,7 +179,7 @@ pub const INDEXER_SETTLE_SECS: u64 = 30;
 
 // -- Tilt ---------------------------------------------------------------------
 
-pub const TILT_CAPRONI_ENV: &str = "GKG_E2E_CAPRONI";
+pub const TILT_CNG_ENV: &str = "GKG_E2E_CNG";
 
 // -- Directories (relative to GKG repo root) ----------------------------------
 
@@ -197,6 +220,16 @@ pub const TEARDOWN_LOG_FILES: &[&str] = &[
     CREATE_TEST_DATA_LOG,
     MANIFEST_JSON,
     COLIMA_START_LOG,
+    TILT_CI_LOG,
+    TILT_CI_PID,
+    CH_MIGRATE_LOG,
+    REDACTION_TEST_LOG,
+    TILT_E2E_LOG,
+];
+
+/// Subset of log files removed during GKG-only teardown.
+/// Omits CNG-phase logs (colima-start, create-test-data, manifest).
+pub const GKG_TEARDOWN_LOG_FILES: &[&str] = &[
     TILT_CI_LOG,
     TILT_CI_PID,
     CH_MIGRATE_LOG,

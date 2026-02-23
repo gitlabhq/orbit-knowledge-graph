@@ -48,6 +48,7 @@ spec:
       annotations:
         checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitaly | sha256sum }}-{{ toJson .Values.otel | sha256sum }}
     spec:
+      enableServiceLinks: false
       securityContext:
         {{- include "gkg.podSecurityContext" . | nindent 8 }}
       containers:

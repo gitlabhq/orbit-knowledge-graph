@@ -19,7 +19,7 @@ data:
 
     clickhouse:
       host: {{ .Values.clickhouse.datalake.host | quote }}
-      port: {{ .Values.clickhouse.datalake.port }}
+      port: {{ .Values.clickhouse.datalake.nativePort | default 9000 }}
       database: {{ .Values.clickhouse.datalake.database | quote }}
       username: {{ .Values.clickhouse.datalake.user | quote }}
       password: ${CH_DB_PASSWORD}
@@ -68,8 +68,8 @@ spec:
           imagePullPolicy: {{ .Values.siphon.image.pullPolicy }}
           command: ["/app/clickhouse_consumer"]
           args:
-            - "--config=/config/config.yaml"
-            - "--log-level={{ .Values.consumer.logLevel }}"
+            - "-config=/config/config.yaml"
+            - "-log-level={{ .Values.consumer.logLevel }}"
           ports:
             - name: metrics
               containerPort: 8081
