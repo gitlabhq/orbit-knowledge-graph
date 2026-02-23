@@ -23,6 +23,10 @@ pub mod tables {
     pub const GL_FILE: &str = "gl_file";
     pub const GL_DEFINITION: &str = "gl_definition";
     pub const GL_IMPORTED_SYMBOL: &str = "gl_imported_symbol";
+
+    pub fn all() -> Vec<&'static str> {
+        vec![GL_DIRECTORY, GL_FILE, GL_DEFINITION, GL_IMPORTED_SYMBOL]
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
