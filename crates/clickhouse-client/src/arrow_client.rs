@@ -6,10 +6,14 @@ use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
 use clickhouse::sql::Bind;
 use clickhouse::{Client, query::Query};
+use futures::StreamExt;
 use futures::stream;
 use futures::stream::BoxStream;
 use serde::Serialize;
 use serde_json::Value;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::io::SyncIoBridge;
 use tracing::warn;
 
 use crate::error::ClickHouseError;
@@ -210,5 +214,43 @@ impl ArrowQuery {
 
         let batch_iter = reader.map(|result| result.map_err(ClickHouseError::ArrowDecode));
         Ok(Box::pin(stream::iter(batch_iter)))
+    }
+
+    pub async fn fetch_arrow_streamed(
+        mut self,
+        max_block_size: u64,
+    ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
+        self.inner = self
+            .inner
+            .with_option("max_block_size", max_block_size.to_string());
+
+        let cursor = self
+            .inner
+            .fetch_bytes("ArrowStream")
+            .map_err(ClickHouseError::Query)?;
+
+        let handle = tokio::runtime::Handle::current();
+        let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
+
+        tokio::task::spawn_blocking(move || {
+            let bridge = SyncIoBridge::new_with_handle(cursor, handle);
+            let reader = match StreamReader::try_new(bridge, None) {
+                Ok(reader) => reader,
+                Err(err) => {
+                    let _ = tx.blocking_send(Err(ClickHouseError::ArrowDecode(err)));
+                    return;
+                }
+            };
+
+            for batch_result in reader {
+                let mapped: Result<RecordBatch, ClickHouseError> =
+                    batch_result.map_err(ClickHouseError::ArrowDecode);
+                if tx.blocking_send(mapped).is_err() {
+                    break;
+                }
+            }
+        });
+
+        Ok(ReceiverStream::new(rx).boxed())
     }
 }

@@ -37,7 +37,7 @@ async fn global_handler_processes_and_transforms_users() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, &context.config)
+    let sdlc_module = SdlcModule::new(&context.config, &context.config, 1)
         .await
         .expect("failed to create SDLC module");
 
@@ -114,7 +114,7 @@ async fn global_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, &context.config)
+    let sdlc_module = SdlcModule::new(&context.config, &context.config, 1)
         .await
         .expect("failed to create SDLC module");
 
