@@ -74,6 +74,7 @@ pub struct Config {
     pub gkg_server_image: String,
     pub gkg_dispatch_job: String,
     pub gkg_indexer_configmap: String,
+    pub gkg_grpc_endpoint: String,
 }
 
 impl Config {
@@ -149,6 +150,7 @@ impl Config {
             gkg_server_image: e::env_or("GKG_SERVER_IMAGE", c::GKG_SERVER_IMAGE),
             gkg_dispatch_job: e::env_or("GKG_DISPATCH_JOB", c::GKG_DISPATCH_JOB),
             gkg_indexer_configmap: e::env_or("GKG_INDEXER_CONFIGMAP", c::GKG_INDEXER_CONFIGMAP),
+            gkg_grpc_endpoint: e::env_or("GKG_GRPC_ENDPOINT", c::GKG_GRPC_ENDPOINT),
         }
     }
 
