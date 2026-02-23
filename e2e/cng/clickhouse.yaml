@@ -11,8 +11,7 @@
 # exist (which causes empty hierarchy tables and wrong traversal paths).
 #
 # The service name is gkg-e2e-clickhouse -- same as the Tiltfile used to
-# create, so all Helm values (values.yaml, values-caproni.yaml) continue
-# to work unchanged.
+# create, so all Helm values (values.yaml) continue to work unchanged.
 # =============================================================================
 apiVersion: v1
 kind: ConfigMap

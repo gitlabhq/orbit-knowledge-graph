@@ -79,6 +79,7 @@ spec:
       annotations:
         checksum/config: {{ toJson .Values.clickhouse.graph | sha256sum }}-{{ toJson .Values.gkgServer.healthCheck | sha256sum }}-{{ toJson .Values.otel | sha256sum }}
     spec:
+      enableServiceLinks: false
       serviceAccountName: gkg-health-check
       securityContext:
         {{- include "gkg.podSecurityContext" . | nindent 8 }}
