@@ -91,16 +91,16 @@ async fn indexes_repository_from_gitaly() {
         "no definitions indexed"
     );
 
-    let file_defines_edges = clickhouse
+    let defines_edges = clickhouse
         .query(
             "SELECT source_id, target_id, relationship_kind FROM gl_edge \
              WHERE source_kind = 'File' AND target_kind = 'Definition' \
-             AND relationship_kind = 'FILE_DEFINES'",
+             AND relationship_kind = 'DEFINES'",
         )
         .await;
     assert!(
-        file_defines_edges.first().is_some_and(|b| b.num_rows() > 0),
-        "no FILE_DEFINES edges indexed"
+        defines_edges.first().is_some_and(|b| b.num_rows() > 0),
+        "no DEFINES edges indexed"
     );
 
     let file_ids = clickhouse
@@ -125,18 +125,18 @@ async fn indexes_repository_from_gitaly() {
         "definition should have an id"
     );
 
-    let class_to_method_edges = clickhouse
+    let definition_defines_edges = clickhouse
         .query(
             "SELECT source_id, target_id, relationship_kind FROM gl_edge \
              WHERE source_kind = 'Definition' AND target_kind = 'Definition' \
-             AND relationship_kind = 'CLASS_TO_METHOD'",
+             AND relationship_kind = 'DEFINES'",
         )
         .await;
     assert!(
-        class_to_method_edges
+        definition_defines_edges
             .first()
             .is_some_and(|b| b.num_rows() > 0),
-        "no CLASS_TO_METHOD edges indexed"
+        "no DEFINES edges (Definition → Definition) indexed"
     );
 
     // Code edges should carry the project's traversal_path

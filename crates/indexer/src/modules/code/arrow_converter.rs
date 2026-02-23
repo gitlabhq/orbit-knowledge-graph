@@ -9,7 +9,7 @@ use arrow::record_batch::RecordBatch;
 use code_graph::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode,
 };
-use code_graph::graph::RelationshipKind;
+use code_graph::graph::{RelationshipKind, RelationshipType};
 
 pub struct ArrowConverter {
     traversal_path: String,
@@ -331,7 +331,7 @@ impl ArrowConverter {
             traversal_path.append_value(&self.traversal_path);
             source_id.append_value(src_id);
             source_kind.append_value(src_kind_str);
-            relationship_kind.append_value(rel.relationship_type.as_str());
+            relationship_kind.append_value(edge_label(&rel.relationship_type));
             target_id.append_value(tgt_id);
             target_kind.append_value(tgt_kind_str);
         }
@@ -453,6 +453,65 @@ fn relationship_kind_to_strings(kind: &RelationshipKind) -> (&'static str, &'sta
         RelationshipKind::ImportedSymbolToDefinition => ("ImportedSymbol", "Definition"),
         RelationshipKind::ImportedSymbolToFile => ("ImportedSymbol", "File"),
         RelationshipKind::Empty => ("Unknown", "Unknown"),
+    }
+}
+
+/// Maps a fine-grained `RelationshipType` to the ontology edge label
+/// stored in the `relationship_kind` column of the edges table.
+fn edge_label(relationship_type: &RelationshipType) -> &'static str {
+    match relationship_type {
+        RelationshipType::DirContainsDir | RelationshipType::DirContainsFile => "CONTAINS",
+
+        RelationshipType::FileDefines
+        | RelationshipType::DefinesImportedSymbol
+        | RelationshipType::ModuleToMethod
+        | RelationshipType::ModuleToSingletonMethod
+        | RelationshipType::ModuleToClass
+        | RelationshipType::ModuleToModule
+        | RelationshipType::ClassToMethod
+        | RelationshipType::ClassToSingletonMethod
+        | RelationshipType::ClassToClass
+        | RelationshipType::ClassToLambda
+        | RelationshipType::ClassToProc
+        | RelationshipType::ClassToInterface
+        | RelationshipType::ClassToProperty
+        | RelationshipType::ClassToConstructor
+        | RelationshipType::ClassToEnumEntry
+        | RelationshipType::FunctionToFunction
+        | RelationshipType::FunctionToClass
+        | RelationshipType::FunctionToLambda
+        | RelationshipType::FunctionToProc
+        | RelationshipType::LambdaToLambda
+        | RelationshipType::LambdaToClass
+        | RelationshipType::LambdaToFunction
+        | RelationshipType::LambdaToProc
+        | RelationshipType::LambdaToMethod
+        | RelationshipType::LambdaToProperty
+        | RelationshipType::LambdaToInterface
+        | RelationshipType::MethodToMethod
+        | RelationshipType::MethodToClass
+        | RelationshipType::MethodToFunction
+        | RelationshipType::MethodToLambda
+        | RelationshipType::MethodToProc
+        | RelationshipType::MethodToProperty
+        | RelationshipType::MethodToInterface
+        | RelationshipType::InterfaceToInterface
+        | RelationshipType::InterfaceToClass
+        | RelationshipType::InterfaceToMethod
+        | RelationshipType::InterfaceToFunction
+        | RelationshipType::InterfaceToProperty
+        | RelationshipType::InterfaceToLambda => "DEFINES",
+
+        RelationshipType::FileImports
+        | RelationshipType::ImportedSymbolToImportedSymbol
+        | RelationshipType::ImportedSymbolToDefinition
+        | RelationshipType::ImportedSymbolToFile => "IMPORTS",
+
+        RelationshipType::Calls
+        | RelationshipType::AmbiguouslyCalls
+        | RelationshipType::PropertyReference => "CALLS",
+
+        RelationshipType::Empty => "EMPTY",
     }
 }
 
