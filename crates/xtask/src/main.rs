@@ -56,15 +56,15 @@ enum E2eCommand {
     /// Tear down the E2E environment.
     ///
     /// By default, tears down everything (GKG + GitLab + Traefik + Colima).
-    /// Use --gkg-only to tear down just the GKG/Tilt stack, keeping GitLab
-    /// and Colima running (equivalent to the harness's --tilt-only).
+    /// Use --gkg-only to tear down just the GKG stack, keeping GitLab
+    /// and Colima running.
     /// Use --keep-colima to remove everything except the Colima VM.
     Teardown {
         /// Keep the Colima VM running (only remove GitLab + Traefik).
         #[arg(long)]
         keep_colima: bool,
 
-        /// Only tear down GKG/Tilt resources. Keeps GitLab and Colima running.
+        /// Only tear down GKG resources. Keeps GitLab and Colima running.
         #[arg(long)]
         gkg_only: bool,
     },

@@ -1,18 +1,19 @@
 //! GKG stack: ClickHouse, schema, siphon, dispatch-indexing, E2E tests.
 //!
-//! Deploys ClickHouse, applies schemas, starts Tilt (NATS + siphon + GKG),
-//! waits for data to flow, runs dispatch-indexing, verifies graph tables,
-//! and runs the redaction/permission E2E test suite.
+//! Deploys ClickHouse, applies schemas, builds and deploys the GKG Helm
+//! chart (NATS + siphon + GKG services), waits for data to flow, runs
+//! dispatch-indexing, verifies graph tables, and runs the redaction/
+//! permission E2E test suite.
 //!
-//! ClickHouse MUST be deployed before Tilt starts siphon — materialized
-//! views only fire on NEW inserts, so tables must exist before data flows in.
+//! ClickHouse MUST be deployed before the GKG chart — materialized views
+//! only fire on NEW inserts, so tables must exist before data flows in.
 //!
-//!  15.  Deploy ClickHouse (standalone StatefulSet, before Tilt)
+//!  15.  Deploy ClickHouse (standalone StatefulSet, before Helm chart)
 //!  16.  Run datalake migrations (gitlab:clickhouse:migrate)
 //!  17.  Apply GKG graph schema (graph.sql -> gl_* tables)
 //!  18.  Drop stale siphon state in PG (slot + publication)
 //!  19.  Verify knowledge_graph_enabled_namespaces rows in PG
-//!  20.  Start Tilt in background (tilt ci)
+//!  20.  Build GKG image, create K8s secrets, deploy GKG Helm chart
 //!  21.  Wait for siphon data to flow (poll hierarchy tables)
 //!  22.  Run dispatch-indexing (k8s Job, wait, poll gl_project)
 //!  23.  OPTIMIZE TABLE FINAL on all gl_* tables
@@ -21,7 +22,6 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -50,49 +50,19 @@ pub fn run(sh: &Shell, cfg: &Config) -> Result<()> {
     apply_graph_schema(sh, cfg)?;
     drop_stale_siphon_state(sh, cfg)?;
     verify_kg_enabled_namespaces(sh, cfg, &toolbox_pod)?;
-    ensure_tilt_secrets(sh, cfg, &toolbox_pod)?;
-    start_tilt(cfg)?;
-
-    // After Tilt starts, any failure must kill the Tilt process so it
-    // doesn't linger as an orphan. Wrap all post-Tilt steps and clean
-    // up on error.
-    let result = run_post_tilt_steps(sh, cfg, &toolbox_pod);
-    if let Err(ref e) = result {
-        ui::warn(&format!("Post-Tilt step failed: {e:#}"))?;
-        ui::warn("Killing Tilt process to avoid orphan...")?;
-        kill_tilt(cfg);
-        return result;
-    }
-
-    ui::outro("GKG stack setup complete")?;
-    Ok(())
-}
-
-/// Steps that run after Tilt starts. Factored out so the caller can
-/// catch errors and kill Tilt before propagating.
-fn run_post_tilt_steps(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
+    build_gkg_image(sh, cfg)?;
+    create_k8s_secrets(sh, cfg, &toolbox_pod)?;
+    deploy_gkg_chart(sh, cfg)?;
+    wait_for_gkg_pods(sh, cfg)?;
     wait_for_siphon_data(sh, cfg)?;
     run_dispatch_indexing(sh, cfg)?;
     optimize_graph_tables(sh, cfg)?;
     verify_graph_tables(sh, cfg)?;
     dump_datalake_diagnostics(sh, cfg)?;
-    run_redaction_tests(sh, cfg, toolbox_pod)?;
-    Ok(())
-}
+    run_redaction_tests(sh, cfg, &toolbox_pod)?;
 
-/// Kill the Tilt process via the PID file. Best-effort — does not error.
-pub fn kill_tilt(cfg: &Config) {
-    let pid_path = cfg.log_dir.join(c::TILT_CI_PID);
-    if let Ok(pid_str) = fs::read_to_string(&pid_path) {
-        let pid = pid_str.trim();
-        if !pid.is_empty() {
-            let _ = std::process::Command::new("kill")
-                .arg(pid)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-    }
+    ui::outro("GKG stack setup complete")?;
+    Ok(())
 }
 
 // -- Step 15: Deploy ClickHouse -----------------------------------------------
@@ -206,8 +176,6 @@ fn apply_graph_schema(sh: &Shell, cfg: &Config) -> Result<()> {
         .context("failed to copy graph.sql into ClickHouse pod")?;
 
     // Execute the schema via clickhouse-client.
-    // `graph_db` is passed as a direct argument (no shell), avoiding
-    // single-quote breakout from `sh -c` interpolation.
     let ch_user = &cfg.clickhouse.default_user;
     cmd!(
         sh,
@@ -225,10 +193,6 @@ fn apply_graph_schema(sh: &Shell, cfg: &Config) -> Result<()> {
 // -- Step 18: Drop stale siphon state -----------------------------------------
 
 /// Drop the replication slot and publication so siphon takes a fresh snapshot.
-///
-/// If the publication already exists with all tables from a previous run,
-/// no tables get "added" and no snapshots fire. Must drop both to force
-/// a clean start.
 fn drop_stale_siphon_state(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(18, "Dropping stale siphon state in PG (slot + publication)")?;
 
@@ -239,7 +203,6 @@ fn drop_stale_siphon_state(sh: &Shell, cfg: &Config) -> Result<()> {
         &cfg.postgres.superpass_key,
     )?;
 
-    // Check if replication slot exists before trying to drop it.
     let slot = &cfg.siphon.slot;
     let count_sql = format!("SELECT count(*) FROM pg_replication_slots WHERE slot_name='{slot}';");
     let slot_count = kubectl::pg_superuser_query(sh, cfg, &pg_superpass, &count_sql)?;
@@ -276,96 +239,125 @@ fn verify_kg_enabled_namespaces(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> 
     Ok(())
 }
 
-// -- Preamble: Ensure e2e/tilt/.secrets exists --------------------------------
+// -- Step 20a: Build GKG server image -----------------------------------------
 
-/// Ensure the `.secrets` file that Tilt needs exists. If missing (e.g. first
-/// `--gkg-only` run, or user manually deleted it), regenerate it from the
-/// running GitLab cluster — exactly the same logic as step 10 in cngsetup.
-fn ensure_tilt_secrets(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    let secrets_file = cfg.tilt_dir.join(c::SECRETS_FILE);
-    if secrets_file.exists() {
-        ui::info(&format!(
-            "Tilt secrets file already exists: {}",
-            secrets_file.display()
-        ))?;
-        return Ok(());
-    }
+/// Build the `gkg-server:dev` Docker image via `scripts/build-dev.sh`.
+///
+/// The script handles cross-compilation (cargo-zigbuild on macOS) and
+/// produces a minimal UBI container with the debug binary.
+fn build_gkg_image(sh: &Shell, cfg: &Config) -> Result<()> {
+    ui::step(20, "Building GKG server image")?;
 
-    ui::info("Regenerating e2e/tilt/.secrets (needed by Tilt)...")?;
+    let script = cfg.gkg_root.join(c::BUILD_DEV_SCRIPT);
+    let script_str = script.to_string_lossy().to_string();
+    let image_tag = format!("{}:{}", cfg.gkg.server_image, cfg.gkg.dev_tag);
 
-    let pg_pass = kubectl::read_secret(
-        sh,
-        &cfg.namespaces.gitlab,
-        &cfg.postgres.secret_name,
-        &cfg.postgres.password_key,
-    )
-    .unwrap_or_default();
+    cmd!(sh, "bash {script_str} {image_tag}")
+        .run()
+        .context("scripts/build-dev.sh failed")?;
 
-    let path = utils::write_tilt_secrets(sh, cfg, toolbox_pod, &pg_pass)?;
-    ui::info(&format!("Written {path}"))?;
+    ui::done(&format!("Built {image_tag}"))?;
     Ok(())
 }
 
-// -- Step 20: Start Tilt ------------------------------------------------------
+// -- Step 20b: Create K8s secrets for GKG chart -------------------------------
 
-/// Start `tilt ci` as a background process.
+fn create_k8s_secrets(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
+    ui::info("Creating K8s secrets for GKG chart...")?;
+
+    utils::create_k8s_secrets(sh, cfg, toolbox_pod)?;
+
+    ui::done("K8s secrets created")?;
+    Ok(())
+}
+
+// -- Step 20c: Deploy GKG Helm chart ------------------------------------------
+
+/// Deploy the GKG Helm chart (NATS + siphon + GKG services).
 ///
-/// Tilt orchestrates NATS, siphon, and GKG services. It runs as a
-/// long-lived background process; we capture its PID so teardown can
-/// stop it. Output goes to `.dev/tilt-ci.log`.
-fn start_tilt(cfg: &Config) -> Result<()> {
-    ui::step(20, "Starting Tilt (NATS + siphon + GKG)")?;
+/// Uses `helm install --wait` which blocks until all pods are ready.
+fn deploy_gkg_chart(sh: &Shell, cfg: &Config) -> Result<()> {
+    ui::info("Deploying GKG Helm chart...")?;
 
-    fs::create_dir_all(&cfg.log_dir)?;
-    let log_path = cfg.log_dir.join(c::TILT_CI_LOG);
-    let pid_path = cfg.log_dir.join(c::TILT_CI_PID);
+    let chart_path = cfg.gkg_root.join(c::GKG_CHART_PATH);
+    let chart_str = chart_path.to_string_lossy().to_string();
+    let values_path = cfg.gkg_root.join(c::HELM_VALUES_YAML);
+    let values_str = values_path.to_string_lossy().to_string();
+    let release = &cfg.helm.gkg.release;
+    let default_ns = &cfg.namespaces.default;
+    let timeout = &cfg.timeouts.gkg_chart;
+    let docker_host = cfg.docker_host();
 
-    let log_file = fs::File::create(&log_path).context(format!("creating {}", c::TILT_CI_LOG))?;
+    // Ensure Helm dependencies are built (NATS sub-chart).
+    let _ = cmd!(sh, "helm dependency build {chart_str}")
+        .env("DOCKER_HOST", &docker_host)
+        .quiet()
+        .ignore_status()
+        .run();
 
-    let tiltfile = cfg.gkg_root.join(c::TILTFILE_PATH);
-    let tiltfile_str = tiltfile.to_string_lossy().to_string();
-    let gkg_root_str = cfg.gkg_root.to_string_lossy().to_string();
+    // CNG mode: override Postgres connection to point at in-cluster PG.
+    let pg_host = format!("postgresql.{}.svc.cluster.local", cfg.namespaces.gitlab);
+    let pg_port = "5432";
+    let pg_db = &cfg.postgres.database;
+    let pg_user = &cfg.postgres.user;
 
-    let child = std::process::Command::new("mise")
-        .args([
-            "exec",
-            "--",
-            "tilt",
-            "ci",
-            "--file",
-            &tiltfile_str,
-            "--timeout",
-            cfg.timeouts.tilt_ci.as_str(),
-        ])
-        .current_dir(&gkg_root_str)
-        .env(c::TILT_CNG_ENV, "1")
-        .stdout(Stdio::from(log_file.try_clone()?))
-        .stderr(Stdio::from(log_file))
-        .spawn()
-        .context("failed to start tilt ci")?;
+    // Uninstall any previous release first (idempotent).
+    let _ = cmd!(sh, "helm uninstall {release} -n {default_ns}")
+        .env("DOCKER_HOST", &docker_host)
+        .quiet()
+        .ignore_status()
+        .run();
 
-    let pid = child.id();
-    fs::write(&pid_path, pid.to_string())?;
+    cmd!(
+        sh,
+        "helm install {release} {chart_str}
+            -n {default_ns}
+            -f {values_str}
+            --set postgres.host={pg_host}
+            --set postgres.port={pg_port}
+            --set postgres.database={pg_db}
+            --set postgres.user={pg_user}
+            --wait
+            --timeout {timeout}"
+    )
+    .env("DOCKER_HOST", &docker_host)
+    .run()
+    .context("helm install of GKG chart failed")?;
 
-    // Keep the child handle alive to prevent process termination.
-    // The process is intentionally long-lived; teardown uses the PID file.
-    std::mem::forget(child);
+    ui::done(&format!("GKG chart deployed (release: {release})"))?;
+    Ok(())
+}
 
-    ui::done(&format!(
-        "Tilt CI started (PID {pid}), log: {}",
-        log_path.display()
-    ))?;
+// -- Step 20d: Wait for GKG pods ----------------------------------------------
+
+/// Wait for critical GKG pods to be ready.
+///
+/// `helm install --wait` already checks that pods reach Ready, but we
+/// add explicit per-label waits for better diagnostics if something is
+/// slow to converge.
+fn wait_for_gkg_pods(sh: &Shell, cfg: &Config) -> Result<()> {
+    ui::info("Verifying GKG pod readiness...")?;
+
+    let default_ns = &cfg.namespaces.default;
+    let labels = [
+        "app.kubernetes.io/name=nats",
+        "app.kubernetes.io/component=siphon-producer",
+        "app.kubernetes.io/component=siphon-consumer",
+        "app.kubernetes.io/component=gkg-indexer",
+        "app.kubernetes.io/component=gkg-webserver",
+    ];
+
+    for label in labels {
+        kubectl::wait_for_pod(sh, label, default_ns, "120s")?;
+    }
+
+    ui::done("All GKG pods ready")?;
     Ok(())
 }
 
 // -- Step 21: Wait for siphon data --------------------------------------------
 
 /// Poll ClickHouse until siphon data appears in datalake tables.
-///
-/// Checks three tables (see `SIPHON_POLL_TABLES`):
-/// 1. `hierarchy_merge_requests` — canary for the full MV chain
-/// 2. `siphon_knowledge_graph_enabled_namespaces` — needed by dispatch-indexing
-/// 3. `siphon_namespace_details` — needed by Group entity INNER JOIN
 fn wait_for_siphon_data(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(21, "Waiting for siphon data to flow")?;
 
@@ -390,7 +382,7 @@ fn wait_for_siphon_data(sh: &Shell, cfg: &Config) -> Result<()> {
         if start.elapsed() >= timeout {
             bail!(
                 "Timed out after {}s. Still empty: {}. \
-                 Check Tilt logs: .dev/tilt-ci.log",
+                 Check siphon pod logs: kubectl logs -l app.kubernetes.io/component=siphon-producer",
                 timeout.as_secs(),
                 pending.join(", ")
             );
@@ -430,39 +422,16 @@ fn wait_for_siphon_data(sh: &Shell, cfg: &Config) -> Result<()> {
 
 /// Create a k8s Job that runs gkg-server in dispatch-indexing mode.
 ///
-/// Tilt tags images as `gkg-server:tilt-<hash>`, so we re-tag to `:dev`
-/// first. After the job completes, poll `gl_project` to confirm the
-/// indexer processed at least some namespace requests.
+/// The image is already built as `gkg-server:dev` (step 20a). After the
+/// job completes, poll graph tables to confirm the indexer processed data.
 fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(22, "Running dispatch-indexing")?;
 
-    let docker_host = cfg.docker_host();
     let server_image = &cfg.gkg.server_image;
     let default_ns = &cfg.namespaces.default;
     let job_name = &cfg.gkg.dispatch_job;
     let configmap = &cfg.gkg.indexer_configmap;
-
-    // Re-tag the Tilt-built image to :dev so the Job spec can reference it.
-    let fmt_arg = "{{.Tag}}";
-    let tags_output = cmd!(sh, "docker images {server_image} --format {fmt_arg}")
-        .env("DOCKER_HOST", &docker_host)
-        .quiet()
-        .ignore_status()
-        .read()
-        .unwrap_or_default();
-
     let dev_tag = &cfg.gkg.dev_tag;
-    let tilt_tag = tags_output.lines().filter(|t| t.starts_with("tilt-")).max();
-    if let Some(tag) = tilt_tag {
-        let src_ref = format!("{server_image}:{tag}");
-        let dst_ref = format!("{server_image}:{dev_tag}");
-        let _ = cmd!(sh, "docker tag {src_ref} {dst_ref}")
-            .env("DOCKER_HOST", &docker_host)
-            .quiet()
-            .ignore_status()
-            .run();
-        ui::info(&format!("Tagged {src_ref} as {dst_ref}"))?;
-    }
 
     // Delete previous job if it exists (jobs are immutable).
     let _ = cmd!(
@@ -519,9 +488,8 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
 
     ui::info("dispatch-indexing complete")?;
 
-    // Poll all graph tables concurrently — each cycle checks every table that
-    // hasn't been seen yet. This way the total wait time is bounded by the
-    // slowest table, not the sum of all tables.
+    // Poll all graph tables — each cycle checks every table that hasn't
+    // been seen yet.
     let ch_pod = kubectl::get_ch_pod(sh, cfg)?;
     let graph_db = &cfg.clickhouse.graph_db;
     let idx_timeout = Duration::from_secs(cfg.timeouts.indexer_poll);
@@ -548,7 +516,6 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
             break;
         }
 
-        // Check every pending table this cycle.
         let mut still_pending = Vec::new();
         for table in &pending {
             let query = format!("SELECT count() FROM {table}");

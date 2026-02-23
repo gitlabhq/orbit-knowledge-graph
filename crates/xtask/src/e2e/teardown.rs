@@ -1,11 +1,11 @@
 //! E2E environment teardown.
 //!
 //! Full teardown (inverse of CNG deploy + CNG setup + GKG stack):
-//!   1. Tear down Tilt / GKG stack (stop Tilt, delete ClickHouse, GKG resources)
+//!   1. Tear down GKG stack (uninstall Helm chart, delete ClickHouse, secrets)
 //!   2. Uninstall GitLab Helm release, delete PVCs and namespace
 //!   3. Remove CNG setup artifacts (postgres-credentials secret)
 //!   4. Uninstall Traefik Helm release
-//!   5. Clean up local artifacts (.dev/ logs, e2e/tilt/.secrets)
+//!   5. Clean up local artifacts (.dev/ logs)
 //!   6. Stop and delete the Colima VM (unless --keep-colima)
 
 use std::fs;
@@ -17,13 +17,12 @@ use super::cmd as cmd_helpers;
 use super::config::Config;
 use super::constants as c;
 use super::kubectl;
-use super::pipeline::gkg as gkg_pipeline;
 use super::ui;
 
 /// Run the E2E teardown.
 ///
-/// - `gkg_only`: only tear down GKG/Tilt resources (step 1), keeping
-///   GitLab and Colima running. Equivalent to `teardown.sh --tilt-only`.
+/// - `gkg_only`: only tear down GKG resources (step 1), keeping GitLab
+///   and Colima running.
 /// - `keep_colima`: remove everything *except* the Colima VM.
 ///
 /// When `gkg_only` is set, `keep_colima` is ignored (Colima is always kept).
@@ -86,42 +85,23 @@ pub fn run(sh: &Shell, cfg: &Config, keep_colima: bool, gkg_only: bool) -> Resul
     Ok(())
 }
 
-// -- Step 1: Tear down GKG stack (Tilt + ClickHouse) -------------------------
+// -- Step 1: Tear down GKG stack (Helm chart + ClickHouse) --------------------
 
-/// Stop Tilt, run `tilt down`, and remove all GKG resources from the default
+/// Uninstall the GKG Helm chart and remove all GKG resources from the default
 /// namespace (ClickHouse, NATS, siphon, dispatch-indexing, secrets, PVCs).
 fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
-    ui::step(1, "Tearing down Tilt / GKG stack")?;
-
-    // Kill Tilt process if running (via PID file).
-    ui::info("Stopping Tilt process...")?;
-    gkg_pipeline::kill_tilt(cfg);
-    // Give it a moment to exit.
-    std::thread::sleep(std::time::Duration::from_secs(2));
-
-    // Run `tilt down` via mise to clean up Tilt-managed resources.
-    if cmd_helpers::exists(sh, "mise") {
-        ui::info("Running tilt down...")?;
-        let tiltfile = cfg.gkg_root.join(c::TILTFILE_PATH);
-        let tiltfile_str = tiltfile.to_string_lossy().to_string();
-        let _ = cmd!(sh, "mise exec -- tilt down --file {tiltfile_str}")
-            .quiet()
-            .ignore_status()
-            .run();
-    }
+    ui::step(1, "Tearing down GKG stack")?;
 
     let default_ns = &cfg.namespaces.default;
     let ch_svc = &cfg.clickhouse.service_name;
 
-    // Delete Tilt-managed deployments.
-    ui::info("Cleaning up default namespace resources...")?;
-    let _ = cmd!(
-        sh,
-        "kubectl delete deployment -n {default_ns} -l app.kubernetes.io/managed-by=tilt --ignore-not-found"
-    )
-    .quiet()
-    .ignore_status()
-    .run();
+    // Uninstall the GKG Helm release first (removes NATS, siphon, GKG pods).
+    let gkg_release = &cfg.helm.gkg.release;
+    ui::info("Uninstalling GKG Helm release...")?;
+    let _ = cmd!(sh, "helm uninstall {gkg_release} -n {default_ns}")
+        .quiet()
+        .ignore_status()
+        .run();
 
     // Delete ClickHouse StatefulSet + Service + init ConfigMap + PVCs.
     let _ = cmd!(
@@ -158,7 +138,7 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
     .ignore_status()
     .run();
 
-    // Delete secrets created by Tilt and the xtask setup.
+    // Delete secrets created by the xtask setup.
     let bridge_secret = &cfg.postgres.bridge_secret_name;
     let ch_cred = &cfg.clickhouse.credentials_secret;
     let gkg_cred = &cfg.gkg.server_credentials_secret;
@@ -179,13 +159,6 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
     .quiet()
     .ignore_status()
     .run();
-
-    // Uninstall the GKG Helm release if it exists.
-    let gkg_release = &cfg.helm.gkg.release;
-    let _ = cmd!(sh, "helm uninstall {gkg_release} -n {default_ns}")
-        .quiet()
-        .ignore_status()
-        .run();
 
     ui::info("GKG stack resources removed")?;
     Ok(())
@@ -275,31 +248,17 @@ fn teardown_traefik(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
 
 fn cleanup_local_artifacts(cfg: &Config) -> Result<()> {
     ui::step(5, "Cleaning up local artifacts")?;
-    do_cleanup_local_artifacts(cfg, c::TEARDOWN_LOG_FILES, true)
+    do_cleanup_local_artifacts(cfg, c::TEARDOWN_LOG_FILES)
 }
 
-/// GKG-only variant — removes only Tilt/GKG logs, leaving `.secrets` and
-/// CNG-phase logs (colima-start, create-test-data, manifest) intact.
-/// `.secrets` is preserved because it contains long-lived credentials
-/// (JWT, PG password) that don't change across GKG stack rebuilds.
+/// GKG-only variant — removes only GKG-phase logs, leaving CNG-phase logs
+/// (colima-start, create-test-data, manifest) intact.
 fn cleanup_local_artifacts_gkg(cfg: &Config) -> Result<()> {
     ui::step(2, "Cleaning up GKG local artifacts")?;
-    do_cleanup_local_artifacts(cfg, c::GKG_TEARDOWN_LOG_FILES, false)
+    do_cleanup_local_artifacts(cfg, c::GKG_TEARDOWN_LOG_FILES)
 }
 
-fn do_cleanup_local_artifacts(
-    cfg: &Config,
-    log_files: &[&str],
-    remove_secrets: bool,
-) -> Result<()> {
-    if remove_secrets {
-        let secrets_file = cfg.tilt_dir.join(c::SECRETS_FILE);
-        if secrets_file.exists() {
-            fs::remove_file(&secrets_file)?;
-            ui::info(&format!("Removed {}", secrets_file.display()))?;
-        }
-    }
-
+fn do_cleanup_local_artifacts(cfg: &Config, log_files: &[&str]) -> Result<()> {
     if cfg.log_dir.is_dir() {
         for name in log_files {
             let path = cfg.log_dir.join(name);

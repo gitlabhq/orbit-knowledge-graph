@@ -5,11 +5,10 @@
 //!
 //!   8.  Bridge PG credentials to default namespace (for Siphon)
 //!   9.  Grant REPLICATION privilege to gitlab PG user (for Siphon WAL sender)
-//!  10.  Extract JWT secret from toolbox pod -> e2e/tilt/.secrets
-//!  11.  Run Rails db:migrate
-//!  12.  Enable :knowledge_graph feature flag
-//!  13.  Copy test scripts into toolbox pod
-//!  14.  Create test data (users, groups, projects, MRs)
+//!  10.  Run Rails db:migrate
+//!  11.  Enable :knowledge_graph feature flag
+//!  12.  Copy test scripts into toolbox pod
+//!  13.  Create test data (users, groups, projects, MRs)
 
 use std::fs;
 
@@ -33,7 +32,6 @@ pub fn run(sh: &Shell, cfg: &Config) -> Result<()> {
 
     bridge_pg_credentials(sh, cfg)?;
     grant_replication(sh, cfg)?;
-    extract_jwt_secret(sh, cfg, &toolbox_pod)?;
     run_db_migrate(sh, cfg, &toolbox_pod)?;
     enable_feature_flag(sh, cfg, &toolbox_pod)?;
     copy_test_scripts(sh, cfg, &toolbox_pod)?;
@@ -99,30 +97,10 @@ fn grant_replication(sh: &Shell, cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-// -- Step 10: Write Tilt secrets (.secrets file) ------------------------------
-
-fn extract_jwt_secret(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    ui::step(10, "Writing Tilt secrets")?;
-
-    let pg_pass = kubectl::read_secret(
-        sh,
-        &cfg.namespaces.gitlab,
-        &cfg.postgres.secret_name,
-        &cfg.postgres.password_key,
-    )?;
-
-    match utils::write_tilt_secrets(sh, cfg, toolbox_pod, &pg_pass) {
-        Ok(path) => ui::done(&format!("Written to {path}"))?,
-        Err(_) => ui::warn("Could not extract JWT secret. You'll need to set it manually.")?,
-    }
-
-    Ok(())
-}
-
-// -- Step 11: Run Rails db:migrate --------------------------------------------
+// -- Step 10: Run Rails db:migrate --------------------------------------------
 
 fn run_db_migrate(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    ui::step(11, "Running Rails db:migrate")?;
+    ui::step(10, "Running Rails db:migrate")?;
 
     let ns = &cfg.namespaces.gitlab;
     let rails_root = &cfg.pod_paths.rails_root;
@@ -139,10 +117,10 @@ fn run_db_migrate(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
     Ok(())
 }
 
-// -- Step 12: Enable feature flag ---------------------------------------------
+// -- Step 11: Enable feature flag ---------------------------------------------
 
 fn enable_feature_flag(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    ui::step(12, "Enabling :knowledge_graph feature flag")?;
+    ui::step(11, "Enabling :knowledge_graph feature flag")?;
 
     kubectl::toolbox_rails_eval(sh, cfg, toolbox_pod, "Feature.enable(:knowledge_graph)")?;
 
@@ -150,10 +128,10 @@ fn enable_feature_flag(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()
     Ok(())
 }
 
-// -- Step 13: Copy test scripts -----------------------------------------------
+// -- Step 12: Copy test scripts -----------------------------------------------
 
 fn copy_test_scripts(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    ui::step(13, "Copying test scripts to toolbox pod")?;
+    ui::step(12, "Copying test scripts to toolbox pod")?;
 
     let count = utils::copy_test_scripts(sh, cfg, toolbox_pod)?;
     if count == 0 {
@@ -165,10 +143,10 @@ fn copy_test_scripts(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> 
     Ok(())
 }
 
-// -- Step 14: Create test data ------------------------------------------------
+// -- Step 13: Create test data ------------------------------------------------
 
 fn create_test_data(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    ui::step(14, "Creating test data")?;
+    ui::step(13, "Creating test data")?;
 
     let ns = &cfg.namespaces.gitlab;
     let rails_root = &cfg.pod_paths.rails_root;
