@@ -1,14 +1,16 @@
 //! Kubernetes / Helm helpers built on top of [`xshell`].
 //!
 //! Shared operations used across CNG deploy, CNG setup, teardown, and
-//! (eventually) the GKG stack phase.
+//! the GKG stack phase.
+
+use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use xshell::{Shell, cmd};
 
 use super::cmd as cmd_helpers;
 use super::config::Config;
-use super::constants as c;
 use super::ui;
 
 // -- Helm ---------------------------------------------------------------------
@@ -61,7 +63,7 @@ pub fn wait_for_pod(sh: &Shell, label: &str, namespace: &str, timeout: &str) -> 
 
 /// Resolve the toolbox pod name in the gitlab namespace.
 pub fn get_toolbox_pod(sh: &Shell, cfg: &Config) -> Result<String> {
-    let ns = &cfg.gitlab_ns;
+    let ns = &cfg.namespaces.gitlab;
     let jsonpath = "{.items[0].metadata.name}";
     let pod = cmd_helpers::capture(
         sh,
@@ -72,7 +74,7 @@ pub fn get_toolbox_pod(sh: &Shell, cfg: &Config) -> Result<String> {
             "-n",
             ns,
             "-l",
-            c::TOOLBOX_LABEL,
+            &cfg.labels.toolbox,
             "-o",
             &format!("jsonpath={jsonpath}"),
         ],
@@ -89,7 +91,7 @@ pub fn get_toolbox_pod(sh: &Shell, cfg: &Config) -> Result<String> {
 
 /// Run an arbitrary command inside the toolbox pod.
 pub fn toolbox_exec(sh: &Shell, cfg: &Config, pod: &str, command: &[&str]) -> Result<String> {
-    let ns = &cfg.gitlab_ns;
+    let ns = &cfg.namespaces.gitlab;
     let output = cmd!(sh, "kubectl exec -n {ns} {pod} --")
         .args(command)
         .quiet()
@@ -109,8 +111,8 @@ pub fn toolbox_exec(sh: &Shell, cfg: &Config, pod: &str, command: &[&str]) -> Re
 /// `rails_root` and `ruby_cmd` are passed as positional parameters to
 /// `bash -c` (`$0` and `$1`) so they are never interpreted as shell syntax.
 pub fn toolbox_rails_eval(sh: &Shell, cfg: &Config, pod: &str, ruby_cmd: &str) -> Result<String> {
-    let ns = &cfg.gitlab_ns;
-    let rails_root = &cfg.rails_root;
+    let ns = &cfg.namespaces.gitlab;
+    let rails_root = &cfg.pod_paths.rails_root;
     let script = r#"cd "$0" && bundle exec rails runner "$1" RAILS_ENV=production"#.to_string();
 
     let output = cmd!(
@@ -172,10 +174,10 @@ pub fn pg_superuser_exec(
     pg_superpass: &str,
     sql: &str,
 ) -> Result<String> {
-    let ns = &cfg.gitlab_ns;
-    let pod = &cfg.pg_pod;
-    let db = &cfg.pg_database;
-    let superuser = c::PG_SUPERUSER;
+    let ns = &cfg.namespaces.gitlab;
+    let pod = &cfg.postgres.pod;
+    let db = &cfg.postgres.database;
+    let superuser = &cfg.postgres.superuser;
     let script = format!(r#"PGPASSWORD="$0" psql -U {superuser} -d {db} -c "$1""#);
 
     let output = cmd!(
@@ -207,10 +209,10 @@ pub fn pg_superuser_query(
     pg_superpass: &str,
     sql: &str,
 ) -> Result<String> {
-    let ns = &cfg.gitlab_ns;
-    let pod = &cfg.pg_pod;
-    let db = &cfg.pg_database;
-    let superuser = c::PG_SUPERUSER;
+    let ns = &cfg.namespaces.gitlab;
+    let pod = &cfg.postgres.pod;
+    let db = &cfg.postgres.database;
+    let superuser = &cfg.postgres.superuser;
     let script = format!(r#"PGPASSWORD="$0" psql -U {superuser} -d {db} -t -c "$1""#);
 
     let output = cmd!(
@@ -234,8 +236,8 @@ pub fn pg_superuser_query(
 
 /// Resolve the ClickHouse pod name in the default namespace.
 pub fn get_ch_pod(sh: &Shell, cfg: &Config) -> Result<String> {
-    let ns = &cfg.default_ns;
-    let label = format!("app={}", cfg.ch_service_name);
+    let ns = &cfg.namespaces.default;
+    let label = cfg.ch_label();
     let jsonpath = "{.items[0].metadata.name}";
     let pod = cmd_helpers::capture(
         sh,
@@ -269,8 +271,8 @@ pub fn ch_query(
     database: &str,
     query: &str,
 ) -> Result<String> {
-    let ns = &cfg.default_ns;
-    let ch_user = c::CH_DEFAULT_USER;
+    let ns = &cfg.namespaces.default;
+    let ch_user = &cfg.clickhouse.default_user;
     let output = cmd!(
         sh,
         "kubectl exec -n {ns} {ch_pod} --
@@ -287,4 +289,40 @@ pub fn ch_query(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+// -- File copying -------------------------------------------------------------
+
+/// Copy local files matching `extension` from `local_dir` into a pod.
+///
+/// Creates `pod_dir` inside the pod first (`mkdir -p`).  Returns the number
+/// of files copied.  If `local_dir` does not exist, returns 0.
+pub fn cp_files(
+    sh: &Shell,
+    cfg: &Config,
+    pod: &str,
+    namespace: &str,
+    local_dir: &Path,
+    pod_dir: &str,
+    extension: &str,
+) -> Result<usize> {
+    toolbox_exec(sh, cfg, pod, &["mkdir", "-p", pod_dir])?;
+
+    if !local_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut count = 0;
+    for entry in fs::read_dir(local_dir)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|ext| ext == extension) {
+            let filename = path.file_name().unwrap().to_string_lossy();
+            let src = path.to_string_lossy().to_string();
+            let dest = format!("{namespace}/{pod}:{pod_dir}/{filename}");
+            cmd!(sh, "kubectl cp {src} {dest}").quiet().run()?;
+            count += 1;
+        }
+    }
+
+    Ok(count)
 }

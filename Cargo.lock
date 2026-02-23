@@ -8154,6 +8154,8 @@ dependencies = [
  "clap",
  "cliclack",
  "const_format",
+ "serde",
+ "serde_yaml",
  "tempfile",
  "xshell",
 ]

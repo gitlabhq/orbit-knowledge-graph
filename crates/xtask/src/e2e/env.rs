@@ -3,11 +3,6 @@
 use std::env;
 use std::path::PathBuf;
 
-/// Read an env var or return the default.
-pub fn env_or(key: &str, default: &str) -> String {
-    env::var(key).unwrap_or_else(|_| default.to_string())
-}
-
 /// Read a required env var. Panics with a clear message if not set.
 pub fn require(key: &str) -> String {
     env::var(key).unwrap_or_else(|_| {
