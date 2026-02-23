@@ -40,6 +40,9 @@ engine:
 code_indexing:
   events_stream_name: siphon_stream_main_db
 
+sdlc_indexing:
+  datalake_batch_size: 1000000
+
 health_check:
   bind_address: "0.0.0.0:4201"
   namespace: default

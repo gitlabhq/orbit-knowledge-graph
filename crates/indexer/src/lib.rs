@@ -57,6 +57,7 @@ use gitaly_client::GitalyError;
 use module::{ModuleInitError, ModuleRegistry};
 use modules::code::GitalyConfiguration;
 use modules::code::config::CodeIndexingConfig;
+use modules::sdlc::config::SdlcIndexingConfig;
 use modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
 use modules::{CodeModule, SdlcModule};
 use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
@@ -78,6 +79,8 @@ pub struct IndexerConfig {
     pub gitaly: Option<GitalyConfiguration>,
     #[serde(default)]
     pub code_indexing: CodeIndexingConfig,
+    #[serde(default)]
+    pub sdlc_indexing: SdlcIndexingConfig,
 }
 
 #[derive(Debug, Error)]
@@ -112,7 +115,12 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     let destination = Arc::new(ClickHouseDestination::new(config.graph.clone())?);
 
     info!("initializing SDLC module");
-    let sdlc_module = SdlcModule::new(&config.datalake, &config.graph).await?;
+    let sdlc_module = SdlcModule::new(
+        &config.datalake,
+        &config.graph,
+        config.sdlc_indexing.datalake_batch_size,
+    )
+    .await?;
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);

@@ -6,6 +6,7 @@ use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
 use indexer::modules::code::GitalyConfiguration;
 use indexer::modules::code::config::CodeIndexingConfig;
+use indexer::modules::sdlc::config::SdlcIndexingConfig;
 use indexer::nats::NatsConfiguration;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,8 @@ pub struct AppConfig {
     pub gitaly: Option<GitalyConfiguration>,
     #[serde(default)]
     pub code_indexing: CodeIndexingConfig,
+    #[serde(default)]
+    pub sdlc_indexing: SdlcIndexingConfig,
     #[serde(default)]
     pub health_check: HealthCheckConfig,
     #[serde(default)]

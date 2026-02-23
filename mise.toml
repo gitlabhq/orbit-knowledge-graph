@@ -42,10 +42,7 @@ run = "cargo nextest run --all-features --test '*' -j 1"
 description = "Run integration tests (requires Docker)"
 
 [tasks.clean]
-run = [
-    "cargo clean",
-    "rm -rf lib/*/"
-]
+run = ["cargo clean", "rm -rf lib/*/"]
 description = "Clean the crates"
 
 [tasks."lint:code"]
@@ -53,7 +50,11 @@ run = "cargo clippy --all-targets --all-features -- -D warnings"
 description = "Run clippy lint checks"
 
 [tasks."lint:code:fix"]
-run = ["cargo fmt", "cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings", "cargo fmt"]
+run = [
+  "cargo fmt",
+  "cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings",
+  "cargo fmt",
+]
 description = "Run clippy lint checks and fix applicable issues"
 
 [tasks."fix:newlines"]

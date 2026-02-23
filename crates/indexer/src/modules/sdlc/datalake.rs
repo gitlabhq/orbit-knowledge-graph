@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::clickhouse::ArrowClickHouseClient;
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde_json::Value;
 use thiserror::Error;
@@ -37,11 +38,15 @@ pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 
 pub(crate) struct Datalake {
     client: DatalakeClient,
+    max_block_size: u64,
 }
 
 impl Datalake {
-    pub fn new(client: DatalakeClient) -> Self {
-        Self { client }
+    pub fn new(client: DatalakeClient, max_block_size: u64) -> Self {
+        Self {
+            client,
+            max_block_size,
+        }
     }
 }
 
@@ -60,11 +65,13 @@ impl DatalakeQuery for Datalake {
             }
         }
 
-        let batches = query
-            .fetch_arrow()
+        let stream = query
+            .fetch_arrow_streamed(self.max_block_size)
             .await
             .map_err(|e| DatalakeError::Query(e.to_string()))?;
 
-        Ok(Box::pin(futures::stream::iter(batches.into_iter().map(Ok))))
+        Ok(Box::pin(stream.map(|result| {
+            result.map_err(|e| DatalakeError::Query(e.to_string()))
+        })))
     }
 }
