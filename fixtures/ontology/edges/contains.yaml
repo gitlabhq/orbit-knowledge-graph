@@ -19,6 +19,14 @@ variants:
     to_node: { type: WorkItem, id: id }
     description: "Work item contains child work item (e.g., epic contains issue, epic contains epic, etc.)."
 
+  - from_node: { type: Directory, id: id }
+    to_node: { type: Directory, id: id }
+    description: "Directory contains subdirectory."
+
+  - from_node: { type: Directory, id: id }
+    to_node: { type: File, id: id }
+    description: "Directory contains file."
+
 etl:
   scope: namespaced
   source: siphon_work_item_parent_links
