@@ -1,7 +1,8 @@
-//! GKG stack: ClickHouse, schema, siphon, dispatch-indexing.
+//! GKG stack: ClickHouse, schema, siphon, dispatch-indexing, E2E tests.
 //!
 //! Deploys ClickHouse, applies schemas, starts Tilt (NATS + siphon + GKG),
-//! waits for data to flow, runs dispatch-indexing, and verifies graph tables.
+//! waits for data to flow, runs dispatch-indexing, verifies graph tables,
+//! and runs the redaction/permission E2E test suite.
 //!
 //! ClickHouse MUST be deployed before Tilt starts siphon — materialized
 //! views only fire on NEW inserts, so tables must exist before data flows in.
@@ -16,6 +17,7 @@
 //!  22.  Run dispatch-indexing (k8s Job, wait, poll gl_project)
 //!  23.  OPTIMIZE TABLE FINAL on all gl_* tables
 //!  24.  Verify graph tables have data (row counts)
+//!  25.  Run E2E redaction tests (redaction_test.rb in toolbox pod)
 
 use std::collections::HashMap;
 use std::fs;
@@ -32,7 +34,7 @@ use super::super::kubectl;
 use super::super::template;
 use super::super::ui;
 
-/// Run all GKG stack steps (15-24).
+/// Run all GKG stack steps (15-25).
 pub fn run(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::banner("GKG Stack")?;
 
@@ -52,6 +54,7 @@ pub fn run(sh: &Shell, cfg: &Config) -> Result<()> {
     run_dispatch_indexing(sh, cfg)?;
     optimize_graph_tables(sh, cfg)?;
     verify_graph_tables(sh, cfg)?;
+    run_redaction_tests(sh, cfg, &toolbox_pod)?;
 
     ui::outro("GKG stack setup complete")?;
     Ok(())
@@ -532,5 +535,78 @@ fn verify_graph_tables(sh: &Shell, cfg: &Config) -> Result<()> {
     }
 
     ui::done("Graph table verification complete")?;
+    Ok(())
+}
+
+// -- Step 25: Run E2E redaction tests -----------------------------------------
+
+/// Run `redaction_test.rb` in the toolbox pod via `rails runner`.
+///
+/// Re-copies all `.rb` test scripts first (in case they changed during
+/// iteration), then executes the test with `KNOWLEDGE_GRAPH_GRPC_ENDPOINT`
+/// pointing at the GKG webserver in the default namespace. Output is
+/// captured to `.dev/redaction-test.log`.
+fn run_redaction_tests(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
+    ui::step(25, "Running E2E redaction tests")?;
+
+    let ns = &cfg.gitlab_ns;
+    let e2e_pod_dir = &cfg.e2e_pod_dir;
+    let rails_root = &cfg.rails_root;
+    let grpc_endpoint = &cfg.gkg_grpc_endpoint;
+
+    // Re-copy test scripts in case they changed during iteration.
+    let tests_dir = cfg.gkg_root.join(c::E2E_TESTS_DIR);
+    if tests_dir.exists() {
+        for entry in fs::read_dir(&tests_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "rb") {
+                let filename = path.file_name().unwrap().to_string_lossy();
+                let src = path.to_string_lossy().to_string();
+                let dest = format!("{ns}/{toolbox_pod}:{e2e_pod_dir}/{filename}");
+                cmd!(sh, "kubectl cp {src} {dest}").quiet().run()?;
+            }
+        }
+        ui::info("Test scripts re-copied to toolbox pod")?;
+    }
+
+    // Run redaction_test.rb via rails runner with the gRPC endpoint.
+    let test_file = c::REDACTION_TEST_RB;
+    ui::info(&format!("Running {test_file}..."))?;
+
+    let script = r#"cd "$0" && KNOWLEDGE_GRAPH_GRPC_ENDPOINT="$1" bundle exec rails runner "$2" RAILS_ENV=production"#;
+    let test_path = format!("{e2e_pod_dir}/{test_file}");
+
+    let output = cmd!(
+        sh,
+        "kubectl exec -n {ns} {toolbox_pod} -- bash -c {script} {rails_root} {grpc_endpoint} {test_path}"
+    )
+    .ignore_status()
+    .output()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Write log.
+    let log_path = cfg.log_dir.join(c::REDACTION_TEST_LOG);
+    let log_contents = format!("{stdout}\n--- stderr ---\n{stderr}");
+    fs::write(&log_path, &log_contents)?;
+
+    // Print test output (it contains PASS/FAIL lines).
+    for line in stdout.lines() {
+        ui::info(line)?;
+    }
+
+    if output.status.success() {
+        ui::done("All redaction tests passed")?;
+    } else {
+        ui::warn(&format!(
+            "Redaction tests failed (exit {}). Check: {}",
+            output.status.code().unwrap_or(-1),
+            log_path.display()
+        ))?;
+        bail!("redaction_test.rb failed — see {}", log_path.display());
+    }
+
     Ok(())
 }

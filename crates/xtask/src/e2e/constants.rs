@@ -119,6 +119,7 @@ pub const SIPHON_KG_POLL_TIMEOUT: u64 = 300;
 pub const GKG_SERVER_IMAGE: &str = "gkg-server";
 pub const GKG_DISPATCH_JOB: &str = "gkg-dispatch-indexing";
 pub const GKG_INDEXER_CONFIGMAP: &str = "gkg-indexer-config";
+pub const GKG_GRPC_ENDPOINT: &str = "gkg-webserver.default.svc.cluster.local:50051";
 
 /// Image tag used by the dispatch-indexing k8s Job.
 pub const GKG_DEV_TAG: &str = "dev";
@@ -186,6 +187,7 @@ pub const GITLAB_VALUES_YAML: &str = "gitlab-values.yaml";
 pub const DOCKERFILE_RAILS: &str = "Dockerfile.rails";
 pub const COLIMA_START_LOG: &str = "colima-start.log";
 pub const CH_MIGRATE_LOG: &str = "clickhouse-migrate.log";
+pub const REDACTION_TEST_RB: &str = "redaction_test.rb";
 pub const REDACTION_TEST_LOG: &str = "redaction-test.log";
 pub const TILT_E2E_LOG: &str = "tilt-e2e.log";
 
