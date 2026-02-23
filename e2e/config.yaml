@@ -121,7 +121,7 @@ pod_readiness:
 # -- Timeouts ------------------------------------------------------------------
 timeouts:
   ch_pod: 300s
-  tilt_ci: 20m
+  gkg_chart: 10m
   dispatch_job: 120s
   indexer_poll: 300          # seconds
   indexer_poll_interval: 10  # seconds

@@ -23,7 +23,6 @@ datalake-generator-report.json
 
 # Tilt secrets (contains passwords)
 .tilt-secrets
-e2e/tilt/.secrets
 
 # Dev logs, pid files, and runtime artifacts
 .dev/

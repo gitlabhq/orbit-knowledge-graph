@@ -128,7 +128,7 @@ pub struct PodReadiness {
 #[derive(Debug, Deserialize)]
 pub struct Timeouts {
     pub ch_pod: String,
-    pub tilt_ci: String,
+    pub gkg_chart: String,
     pub dispatch_job: String,
     pub indexer_poll: u64,
     pub indexer_poll_interval: u64,
@@ -165,8 +165,6 @@ pub struct Config {
     #[serde(skip)]
     pub cng_dir: PathBuf,
     #[serde(skip)]
-    pub tilt_dir: PathBuf,
-    #[serde(skip)]
     pub gitlab_src: PathBuf,
     #[serde(skip)]
     pub log_dir: PathBuf,
@@ -187,7 +185,6 @@ impl Config {
             .with_context(|| format!("parsing {}", yaml_path.display()))?;
 
         cfg.cng_dir = gkg_root.join(c::CNG_DIR);
-        cfg.tilt_dir = gkg_root.join(c::TILT_DIR);
         cfg.log_dir = gkg_root.join(c::LOG_DIR);
         cfg.gitlab_src = e::expand_home(&e::require("GITLAB_SRC"));
         cfg.gkg_root = gkg_root;
