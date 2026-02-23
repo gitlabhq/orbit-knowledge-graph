@@ -33,6 +33,7 @@ use super::super::constants as c;
 use super::super::kubectl;
 use super::super::template;
 use super::super::ui;
+use super::super::utils;
 
 /// Run all GKG stack steps (15-25).
 pub fn run(sh: &Shell, cfg: &Config) -> Result<()> {
@@ -107,8 +108,12 @@ fn deploy_clickhouse(sh: &Shell, cfg: &Config) -> Result<()> {
         .context("failed to apply clickhouse.yaml")?;
     ui::info("ClickHouse manifests applied")?;
 
-    let label = format!("app={}", cfg.ch_service_name);
-    kubectl::wait_for_pod(sh, &label, &cfg.default_ns, c::CH_POD_TIMEOUT)?;
+    kubectl::wait_for_pod(
+        sh,
+        &cfg.ch_label(),
+        &cfg.namespaces.default,
+        &cfg.timeouts.ch_pod,
+    )?;
 
     ui::done("ClickHouse is ready")?;
     Ok(())
@@ -126,22 +131,17 @@ fn run_datalake_migrations(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Resul
     // shell interpolation of the URL / database values.
     ui::info("Writing config/click_house.yml to toolbox pod...")?;
 
-    let ch_url = &cfg.ch_url;
-    let ch_db = &cfg.ch_datalake_db;
-    let ns = &cfg.gitlab_ns;
-    let rails_root = &cfg.rails_root;
+    let ns = &cfg.namespaces.gitlab;
+    let rails_root = &cfg.pod_paths.rails_root;
 
-    let ch_user = c::CH_DEFAULT_USER;
-    let click_house_yml = format!(
-        "\
-production:
-  main:
-    database: {ch_db}
-    url: '{ch_url}'
-    username: {ch_user}
-    password:
-"
-    );
+    let tmpl_path = cfg.gkg_root.join(c::CLICK_HOUSE_YML_TEMPLATE);
+    let ch_url = cfg.ch_url();
+    let vars = HashMap::from([
+        ("DATABASE", cfg.clickhouse.datalake_db.as_str()),
+        ("URL", ch_url.as_str()),
+        ("USERNAME", cfg.clickhouse.default_user.as_str()),
+    ]);
+    let click_house_yml = template::render(&tmpl_path, &vars)?;
 
     let tmp = tempfile::NamedTempFile::new().context("creating temp file for click_house.yml")?;
     fs::write(tmp.path(), &click_house_yml)?;
@@ -192,8 +192,8 @@ fn apply_graph_schema(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(17, "Applying GKG graph schema")?;
 
     let ch_pod = kubectl::get_ch_pod(sh, cfg)?;
-    let ns = &cfg.default_ns;
-    let graph_db = &cfg.ch_graph_db;
+    let ns = &cfg.namespaces.default;
+    let graph_db = &cfg.clickhouse.graph_db;
 
     // Copy graph.sql into the ClickHouse pod.
     let graph_sql = cfg.gkg_root.join(c::GRAPH_SQL_PATH);
@@ -208,7 +208,7 @@ fn apply_graph_schema(sh: &Shell, cfg: &Config) -> Result<()> {
     // Execute the schema via clickhouse-client.
     // `graph_db` is passed as a direct argument (no shell), avoiding
     // single-quote breakout from `sh -c` interpolation.
-    let ch_user = c::CH_DEFAULT_USER;
+    let ch_user = &cfg.clickhouse.default_user;
     cmd!(
         sh,
         "kubectl exec -n {ns} {ch_pod} -i --
@@ -234,13 +234,13 @@ fn drop_stale_siphon_state(sh: &Shell, cfg: &Config) -> Result<()> {
 
     let pg_superpass = kubectl::read_secret(
         sh,
-        &cfg.gitlab_ns,
-        &cfg.pg_secret_name,
-        &cfg.pg_superpass_key,
+        &cfg.namespaces.gitlab,
+        &cfg.postgres.secret_name,
+        &cfg.postgres.superpass_key,
     )?;
 
     // Check if replication slot exists before trying to drop it.
-    let slot = &cfg.siphon_slot;
+    let slot = &cfg.siphon.slot;
     let count_sql = format!("SELECT count(*) FROM pg_replication_slots WHERE slot_name='{slot}';");
     let slot_count = kubectl::pg_superuser_query(sh, cfg, &pg_superpass, &count_sql)?;
 
@@ -252,7 +252,7 @@ fn drop_stale_siphon_state(sh: &Shell, cfg: &Config) -> Result<()> {
         ui::info("No stale replication slot found")?;
     }
 
-    let publication = &cfg.siphon_publication;
+    let publication = &cfg.siphon.publication;
     let drop_pub = format!("DROP PUBLICATION IF EXISTS {publication};");
     kubectl::pg_superuser_exec(sh, cfg, &pg_superpass, &drop_pub)?;
     ui::done("Publication dropped (will be recreated by siphon producer)")?;
@@ -263,7 +263,7 @@ fn drop_stale_siphon_state(sh: &Shell, cfg: &Config) -> Result<()> {
 // -- Step 19: Verify knowledge_graph_enabled_namespaces -----------------------
 
 fn verify_kg_enabled_namespaces(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    let table = c::PG_GKG_ENABLED_TABLE;
+    let table = &cfg.postgres.kg_enabled_table;
     ui::step(19, &format!("Verifying {table} in PG"))?;
 
     let ruby = format!(
@@ -293,28 +293,16 @@ fn ensure_tilt_secrets(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()
 
     ui::info("Regenerating e2e/tilt/.secrets (needed by Tilt)...")?;
 
-    let jwt_path = &cfg.jwt_secret_path;
-    let jwt_secret = kubectl::toolbox_exec(sh, cfg, toolbox_pod, &["cat", jwt_path])
-        .context("failed to read JWT secret from toolbox pod")?;
-
     let pg_pass = kubectl::read_secret(
         sh,
-        &cfg.gitlab_ns,
-        &cfg.pg_secret_name,
-        &cfg.pg_password_key,
+        &cfg.namespaces.gitlab,
+        &cfg.postgres.secret_name,
+        &cfg.postgres.password_key,
     )
     .unwrap_or_default();
 
-    fs::create_dir_all(&cfg.tilt_dir)?;
-    let contents = format!(
-        "# Auto-generated by cargo xtask e2e setup --gkg-only\n\
-         POSTGRES_PASSWORD={pg_pass}\n\
-         CLICKHOUSE_PASSWORD=\n\
-         GKG_JWT_SECRET={jwt_secret}\n"
-    );
-    fs::write(&secrets_file, contents)?;
-
-    ui::info(&format!("Written {}", secrets_file.display()))?;
+    let path = utils::write_tilt_secrets(sh, cfg, toolbox_pod, &pg_pass)?;
+    ui::info(&format!("Written {path}"))?;
     Ok(())
 }
 
@@ -347,7 +335,7 @@ fn start_tilt(cfg: &Config) -> Result<()> {
             "--file",
             &tiltfile_str,
             "--timeout",
-            c::TILT_CI_TIMEOUT,
+            cfg.timeouts.tilt_ci.as_str(),
         ])
         .current_dir(&gkg_root_str)
         .env(c::TILT_CNG_ENV, "1")
@@ -382,8 +370,8 @@ fn wait_for_siphon_data(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(21, "Waiting for siphon data to flow")?;
 
     let ch_pod = kubectl::get_ch_pod(sh, cfg)?;
-    let db = &cfg.ch_datalake_db;
-    let timeout = Duration::from_secs(cfg.siphon_poll_timeout);
+    let db = &cfg.clickhouse.datalake_db;
+    let timeout = Duration::from_secs(cfg.siphon.poll_timeout);
 
     let start = Instant::now();
     let mut pending: Vec<&str> = c::SIPHON_POLL_TABLES.to_vec();
@@ -431,7 +419,7 @@ fn wait_for_siphon_data(sh: &Shell, cfg: &Config) -> Result<()> {
             still_pending.join(", ")
         ))?;
         pending = still_pending;
-        thread::sleep(Duration::from_secs(c::SIPHON_POLL_INTERVAL));
+        thread::sleep(Duration::from_secs(cfg.siphon.poll_interval));
     }
 
     ui::done("Siphon data check complete")?;
@@ -449,10 +437,10 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(22, "Running dispatch-indexing")?;
 
     let docker_host = cfg.docker_host();
-    let server_image = &cfg.gkg_server_image;
-    let default_ns = &cfg.default_ns;
-    let job_name = &cfg.gkg_dispatch_job;
-    let configmap = &cfg.gkg_indexer_configmap;
+    let server_image = &cfg.gkg.server_image;
+    let default_ns = &cfg.namespaces.default;
+    let job_name = &cfg.gkg.dispatch_job;
+    let configmap = &cfg.gkg.indexer_configmap;
 
     // Re-tag the Tilt-built image to :dev so the Job spec can reference it.
     let fmt_arg = "{{.Tag}}";
@@ -463,7 +451,7 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
         .read()
         .unwrap_or_default();
 
-    let dev_tag = c::GKG_DEV_TAG;
+    let dev_tag = &cfg.gkg.dev_tag;
     let tilt_tag = tags_output.lines().filter(|t| t.starts_with("tilt-")).max();
     if let Some(tag) = tilt_tag {
         let src_ref = format!("{server_image}:{tag}");
@@ -491,9 +479,9 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
         ("JOB_NAME", job_name.as_str()),
         ("NAMESPACE", default_ns.as_str()),
         ("SERVER_IMAGE", server_image.as_str()),
-        ("IMAGE_TAG", dev_tag),
-        ("CH_SECRET", c::CH_CREDENTIALS_SECRET),
-        ("CH_SECRET_KEY", c::CH_CREDENTIALS_KEY),
+        ("IMAGE_TAG", dev_tag.as_str()),
+        ("CH_SECRET", cfg.clickhouse.credentials_secret.as_str()),
+        ("CH_SECRET_KEY", cfg.clickhouse.credentials_key.as_str()),
         ("CONFIGMAP", configmap.as_str()),
     ]);
     let job_yaml = template::render(&tmpl_path, &vars)?;
@@ -505,7 +493,7 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
 
     // Wait for the job to complete.
     ui::info("Waiting for dispatch-indexing job to complete...")?;
-    let timeout_arg = format!("--timeout={}", c::DISPATCH_JOB_TIMEOUT);
+    let timeout_arg = format!("--timeout={}", cfg.timeouts.dispatch_job);
     let job_ref = format!("job/{job_name}");
     let ok = cmd!(
         sh,
@@ -521,7 +509,7 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
     if !ok {
         ui::warn(&format!(
             "dispatch-indexing job did not complete within {}",
-            c::DISPATCH_JOB_TIMEOUT
+            cfg.timeouts.dispatch_job
         ))?;
         let _ = cmd!(sh, "kubectl logs -n {default_ns} {job_ref} --tail=20")
             .quiet()
@@ -535,8 +523,8 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
     // hasn't been seen yet. This way the total wait time is bounded by the
     // slowest table, not the sum of all tables.
     let ch_pod = kubectl::get_ch_pod(sh, cfg)?;
-    let graph_db = &cfg.ch_graph_db;
-    let idx_timeout = Duration::from_secs(c::INDEXER_POLL_TIMEOUT);
+    let graph_db = &cfg.clickhouse.graph_db;
+    let idx_timeout = Duration::from_secs(cfg.timeouts.indexer_poll);
     let idx_start = Instant::now();
 
     let mut pending: Vec<&str> = c::GL_TABLES.to_vec();
@@ -584,11 +572,11 @@ fn run_dispatch_indexing(sh: &Shell, cfg: &Config) -> Result<()> {
             still_pending.join(", ")
         ))?;
         pending = still_pending;
-        thread::sleep(Duration::from_secs(c::INDEXER_POLL_INTERVAL));
+        thread::sleep(Duration::from_secs(cfg.timeouts.indexer_poll_interval));
     }
 
     // Final settle — give the indexer time to flush any in-progress writes.
-    let settle = c::INDEXER_SETTLE_SECS;
+    let settle = cfg.timeouts.indexer_settle;
     ui::info(&format!(
         "Waiting {settle}s for indexer to finish remaining pipelines..."
     ))?;
@@ -605,7 +593,7 @@ fn optimize_graph_tables(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(23, "Running OPTIMIZE TABLE FINAL on graph tables")?;
 
     let ch_pod = kubectl::get_ch_pod(sh, cfg)?;
-    let graph_db = &cfg.ch_graph_db;
+    let graph_db = &cfg.clickhouse.graph_db;
 
     for table in c::GL_TABLES {
         let query = format!("OPTIMIZE TABLE {table} FINAL");
@@ -624,7 +612,7 @@ fn verify_graph_tables(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(24, "Verifying graph tables")?;
 
     let ch_pod = kubectl::get_ch_pod(sh, cfg)?;
-    let graph_db = &cfg.ch_graph_db;
+    let graph_db = &cfg.clickhouse.graph_db;
 
     ui::info(&format!("Row counts in {graph_db}:"))?;
     for table in c::GL_TABLES {
@@ -646,7 +634,7 @@ fn dump_datalake_diagnostics(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::info("Datalake diagnostics (hierarchy tables in datalake DB):")?;
 
     let ch_pod = kubectl::get_ch_pod(sh, cfg)?;
-    let datalake_db = &cfg.ch_datalake_db;
+    let datalake_db = &cfg.clickhouse.datalake_db;
 
     let tables = [
         "hierarchy_merge_requests",
@@ -669,7 +657,7 @@ fn dump_datalake_diagnostics(sh: &Shell, cfg: &Config) -> Result<()> {
 
     // Also dump indexer logs for any error signals.
     ui::info("Indexer pod logs (last 30 lines):")?;
-    let default_ns = &cfg.default_ns;
+    let default_ns = &cfg.namespaces.default;
     let _ = cmd!(
         sh,
         "kubectl logs -n {default_ns} -l app.kubernetes.io/component=gkg-indexer --tail=30"
@@ -692,25 +680,15 @@ fn dump_datalake_diagnostics(sh: &Shell, cfg: &Config) -> Result<()> {
 fn run_redaction_tests(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
     ui::step(25, "Running E2E redaction tests")?;
 
-    let ns = &cfg.gitlab_ns;
-    let e2e_pod_dir = &cfg.e2e_pod_dir;
-    let rails_root = &cfg.rails_root;
-    let grpc_endpoint = &cfg.gkg_grpc_endpoint;
+    let ns = &cfg.namespaces.gitlab;
+    let e2e_pod_dir = &cfg.pod_paths.e2e_pod_dir;
+    let rails_root = &cfg.pod_paths.rails_root;
+    let grpc_endpoint = &cfg.gkg.grpc_endpoint;
 
     // Re-copy test scripts in case they changed during iteration.
-    let tests_dir = cfg.gkg_root.join(c::E2E_TESTS_DIR);
-    if tests_dir.exists() {
-        for entry in fs::read_dir(&tests_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "rb") {
-                let filename = path.file_name().unwrap().to_string_lossy();
-                let src = path.to_string_lossy().to_string();
-                let dest = format!("{ns}/{toolbox_pod}:{e2e_pod_dir}/{filename}");
-                cmd!(sh, "kubectl cp {src} {dest}").quiet().run()?;
-            }
-        }
-        ui::info("Test scripts re-copied to toolbox pod")?;
+    let count = utils::copy_test_scripts(sh, cfg, toolbox_pod)?;
+    if count > 0 {
+        ui::info(&format!("{count} test scripts re-copied to toolbox pod"))?;
     }
 
     // Run redaction_test.rb via rails runner with the gRPC endpoint.

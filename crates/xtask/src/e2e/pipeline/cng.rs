@@ -29,7 +29,7 @@ pub fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
         "Colima      ",
         &format!(
             "profile={} mem={}GiB cpus={}",
-            cfg.colima_profile, cfg.colima_memory, cfg.colima_cpus
+            cfg.colima.profile, cfg.colima.memory, cfg.colima.cpus
         ),
     )?;
     ui::detail("Skip build  ", &skip_build.to_string())?;
@@ -71,7 +71,7 @@ fn validate_prerequisites(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<
 // -- Step 1: Start Colima -----------------------------------------------------
 
 fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
-    let profile = &cfg.colima_profile;
+    let profile = &cfg.colima.profile;
     ui::step(1, &format!("Starting Colima (profile: {profile})"))?;
 
     if cmd_helpers::succeeds(sh, "colima", &["status", "--profile", profile]) {
@@ -81,13 +81,13 @@ fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
 
     ui::info(&format!(
         "Starting Colima with k3s, {}GiB RAM, {} CPUs",
-        cfg.colima_memory, cfg.colima_cpus
+        cfg.colima.memory, cfg.colima.cpus
     ))?;
 
-    let mem = &cfg.colima_memory;
-    let cpus = &cfg.colima_cpus;
-    let disk = &cfg.colima_disk;
-    let k8s_ver = &cfg.colima_k8s_version;
+    let mem = &cfg.colima.memory;
+    let cpus = &cfg.colima.cpus;
+    let disk = &cfg.colima.disk;
+    let k8s_ver = &cfg.colima.k8s_version;
 
     cmd!(
         sh,
@@ -132,7 +132,7 @@ fn prepull_workhorse(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(2, "Pre-pulling workhorse image")?;
 
     let docker_host = cfg.docker_host();
-    let image = &cfg.workhorse_image;
+    let image = cfg.workhorse_image();
 
     let already_present = cmd!(sh, "docker image inspect {image}")
         .env("DOCKER_HOST", &docker_host)
@@ -161,7 +161,7 @@ fn prepull_workhorse(sh: &Shell, cfg: &Config) -> Result<()> {
 fn build_images(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(3, "Building custom CNG images")?;
     ui::info(&format!("Source: {}", cfg.gitlab_src.display()))?;
-    ui::info(&format!("Base tag: {}", cfg.base_tag))?;
+    ui::info(&format!("Base tag: {}", cfg.cng.base_tag))?;
 
     let docker_host = cfg.docker_host();
 
@@ -171,7 +171,7 @@ fn build_images(sh: &Shell, cfg: &Config) -> Result<()> {
 
     ui::info(&format!("Staging Rails code to {}", staging.display()))?;
 
-    for dir in c::STAGING_DIRS {
+    for dir in &cfg.cng.staging_dirs {
         let src = cfg.gitlab_src.join(dir);
         let dst = staging.join(dir);
         if src.exists() {
@@ -203,14 +203,17 @@ fn build_images(sh: &Shell, cfg: &Config) -> Result<()> {
     let dockerfile_str = dockerfile.to_string_lossy().to_string();
     let staging_str = staging.to_string_lossy().to_string();
 
-    for component in &cfg.cng_components {
-        let tag = format!("{}/{}:{}", cfg.local_prefix, component, cfg.local_tag);
-        let base_image = format!("{}/{}", cfg.cng_registry, component);
+    for component in &cfg.cng.components {
+        let tag = format!(
+            "{}/{}:{}",
+            cfg.cng.local_prefix, component, cfg.cng.local_tag
+        );
+        let base_image = format!("{}/{}", cfg.cng.registry, component);
         let base_image_arg = format!("BASE_IMAGE={base_image}");
-        let base_tag_arg = format!("BASE_TAG={}", cfg.base_tag);
+        let base_tag_arg = format!("BASE_TAG={}", cfg.cng.base_tag);
 
         ui::info(&format!("Building {tag}"))?;
-        ui::detail_item(&format!("Base: {base_image}:{}", cfg.base_tag))?;
+        ui::detail_item(&format!("Base: {base_image}:{}", cfg.cng.base_tag))?;
 
         cmd!(
             sh,
@@ -238,8 +241,8 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
 
     let docker_host = cfg.docker_host();
 
-    let release = c::TRAEFIK_HELM_RELEASE;
-    let kube_ns = c::KUBE_SYSTEM_NS;
+    let release = &cfg.helm.traefik.release;
+    let kube_ns = &cfg.namespaces.kube_system;
 
     if kubectl::helm_release_exists(sh, release, kube_ns, &docker_host) {
         ui::info("Traefik already deployed")?;
@@ -247,8 +250,8 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
     }
 
     // Add/update repo
-    let repo_name = c::TRAEFIK_HELM_REPO_NAME;
-    let repo_url = c::TRAEFIK_HELM_REPO_URL;
+    let repo_name = &cfg.helm.traefik.repo_name;
+    let repo_url = &cfg.helm.traefik.repo_url;
     let _ = cmd!(sh, "helm repo add {repo_name} {repo_url}")
         .env("DOCKER_HOST", &docker_host)
         .quiet()
@@ -261,8 +264,8 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
 
     let values_file = cfg.cng_dir.join(c::TRAEFIK_VALUES_YAML);
     let values_str = values_file.to_string_lossy().to_string();
-    let chart = c::TRAEFIK_HELM_CHART;
-    let timeout = c::TRAEFIK_HELM_TIMEOUT;
+    let chart = &cfg.helm.traefik.chart;
+    let timeout = &cfg.helm.traefik.timeout;
 
     cmd!(
         sh,
@@ -285,14 +288,14 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(5, "Deploying GitLab via Helm chart")?;
 
     let docker_host = cfg.docker_host();
-    let ns = &cfg.gitlab_ns;
-    let release = c::GITLAB_HELM_RELEASE;
-    let chart = c::GITLAB_HELM_CHART;
-    let timeout = c::GITLAB_HELM_TIMEOUT;
+    let ns = &cfg.namespaces.gitlab;
+    let release = &cfg.helm.gitlab.release;
+    let chart = &cfg.helm.gitlab.chart;
+    let timeout = &cfg.helm.gitlab.timeout;
 
     // Add/update repo
-    let repo_name = c::GITLAB_HELM_REPO_NAME;
-    let repo_url = c::GITLAB_HELM_REPO_URL;
+    let repo_name = &cfg.helm.gitlab.repo_name;
+    let repo_url = &cfg.helm.gitlab.repo_url;
     let _ = cmd!(sh, "helm repo add {repo_name} {repo_url}")
         .env("DOCKER_HOST", &docker_host)
         .quiet()
@@ -344,10 +347,10 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
 fn wait_for_pods(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(6, "Waiting for GitLab pods to be ready")?;
 
-    let ns = &cfg.gitlab_ns;
+    let ns = &cfg.namespaces.gitlab;
 
-    for (label, timeout) in c::POD_READINESS_CHECKS {
-        kubectl::wait_for_pod(sh, label, ns, timeout)?;
+    for pr in &cfg.pod_readiness {
+        kubectl::wait_for_pod(sh, &pr.label, ns, &pr.timeout)?;
     }
 
     // Print pod status

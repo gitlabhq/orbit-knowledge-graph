@@ -49,18 +49,18 @@ pub fn run(sh: &Shell, cfg: &Config, keep_colima: bool, gkg_only: bool) -> Resul
 
     teardown_gitlab(sh, cfg, &docker_host)?;
     teardown_cngsetup_artifacts(sh, cfg)?;
-    teardown_traefik(sh, &docker_host)?;
+    teardown_traefik(sh, cfg, &docker_host)?;
     cleanup_local_artifacts(cfg)?;
 
     if keep_colima {
         ui::step(6, "Keeping Colima VM (--keep-colima)")?;
         ui::info(&format!(
             "Colima profile '{}' still running",
-            cfg.colima_profile
+            cfg.colima.profile
         ))?;
 
         // Show what images are still present
-        let prefix_glob = format!("{}/*", cfg.local_prefix);
+        let prefix_glob = format!("{}/*", cfg.cng.local_prefix);
         let fmt = "  {{.Repository}}:{{.Tag}}  ({{.Size}})";
         let _ = cmd!(sh, "docker images {prefix_glob} --format {fmt}")
             .env("DOCKER_HOST", &docker_host)
@@ -76,7 +76,7 @@ pub fn run(sh: &Shell, cfg: &Config, keep_colima: bool, gkg_only: bool) -> Resul
             "Colima VM still running. To fully remove:\n  \
              colima stop --profile {profile}\n  \
              colima delete --profile {profile} --force",
-            profile = cfg.colima_profile
+            profile = cfg.colima.profile
         ))?;
     }
 
@@ -110,8 +110,8 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
             .run();
     }
 
-    let default_ns = &cfg.default_ns;
-    let ch_svc = &cfg.ch_service_name;
+    let default_ns = &cfg.namespaces.default;
+    let ch_svc = &cfg.clickhouse.service_name;
 
     // Delete Tilt-managed deployments.
     ui::info("Cleaning up default namespace resources...")?;
@@ -132,7 +132,7 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
     .ignore_status()
     .run();
 
-    let dispatch_job = &cfg.gkg_dispatch_job;
+    let dispatch_job = &cfg.gkg.dispatch_job;
     let _ = cmd!(
         sh,
         "kubectl delete job -n {default_ns} {dispatch_job} --ignore-not-found"
@@ -149,7 +149,7 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
     .ignore_status()
     .run();
 
-    let ch_init_cm = c::CH_INIT_CONFIGMAP;
+    let ch_init_cm = &cfg.clickhouse.init_configmap;
     let _ = cmd!(
         sh,
         "kubectl delete configmap -n {default_ns} {ch_init_cm} --ignore-not-found"
@@ -159,9 +159,9 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
     .run();
 
     // Delete secrets created by Tilt and the xtask setup.
-    let bridge_secret = c::PG_BRIDGE_SECRET_NAME;
-    let ch_cred = c::CH_CREDENTIALS_SECRET;
-    let gkg_cred = c::GKG_SERVER_CREDENTIALS_SECRET;
+    let bridge_secret = &cfg.postgres.bridge_secret_name;
+    let ch_cred = &cfg.clickhouse.credentials_secret;
+    let gkg_cred = &cfg.gkg.server_credentials_secret;
     let _ = cmd!(
         sh,
         "kubectl delete secret -n {default_ns} {bridge_secret} {ch_cred} {gkg_cred} --ignore-not-found"
@@ -171,7 +171,7 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
     .run();
 
     // Delete ClickHouse PVCs.
-    let ch_label = format!("app={ch_svc}");
+    let ch_label = cfg.ch_label();
     let _ = cmd!(
         sh,
         "kubectl delete pvc -n {default_ns} -l {ch_label} --ignore-not-found"
@@ -181,7 +181,7 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
     .run();
 
     // Uninstall the GKG Helm release if it exists.
-    let gkg_release = c::GKG_HELM_RELEASE;
+    let gkg_release = &cfg.helm.gkg.release;
     let _ = cmd!(sh, "helm uninstall {gkg_release} -n {default_ns}")
         .quiet()
         .ignore_status()
@@ -196,13 +196,12 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
 fn teardown_gitlab(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
     ui::step(2, "Tearing down GitLab")?;
 
-    let ns = &cfg.gitlab_ns;
-
-    let release = c::GITLAB_HELM_RELEASE;
+    let ns = &cfg.namespaces.gitlab;
+    let release = &cfg.helm.gitlab.release;
 
     if kubectl::helm_release_exists(sh, release, ns, docker_host) {
         ui::info("Uninstalling GitLab Helm release")?;
-        let timeout = c::HELM_UNINSTALL_TIMEOUT;
+        let timeout = &cfg.helm.uninstall_timeout;
         let _ = cmd!(sh, "helm uninstall {release} -n {ns} --timeout {timeout}")
             .env("DOCKER_HOST", docker_host)
             .ignore_status()
@@ -235,8 +234,8 @@ fn teardown_gitlab(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
 fn teardown_cngsetup_artifacts(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(3, "Removing CNG setup artifacts")?;
 
-    let default_ns = &cfg.default_ns;
-    let bridge_secret = c::PG_BRIDGE_SECRET_NAME;
+    let default_ns = &cfg.namespaces.default;
+    let bridge_secret = &cfg.postgres.bridge_secret_name;
 
     let _ = cmd!(
         sh,
@@ -252,11 +251,11 @@ fn teardown_cngsetup_artifacts(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 4: Tear down Traefik ------------------------------------------------
 
-fn teardown_traefik(sh: &Shell, docker_host: &str) -> Result<()> {
+fn teardown_traefik(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
     ui::step(4, "Tearing down Traefik")?;
 
-    let release = c::TRAEFIK_HELM_RELEASE;
-    let kube_ns = c::KUBE_SYSTEM_NS;
+    let release = &cfg.helm.traefik.release;
+    let kube_ns = &cfg.namespaces.kube_system;
 
     if kubectl::helm_release_exists(sh, release, kube_ns, docker_host) {
         ui::info("Uninstalling Traefik")?;
@@ -317,7 +316,7 @@ fn do_cleanup_local_artifacts(
 // -- Step 6: Stop and delete Colima -------------------------------------------
 
 fn teardown_colima(sh: &Shell, cfg: &Config) -> Result<()> {
-    let profile = &cfg.colima_profile;
+    let profile = &cfg.colima.profile;
     ui::step(6, &format!("Stopping Colima (profile: {profile})"))?;
 
     if cmd_helpers::succeeds(sh, "colima", &["status", "--profile", profile]) {

@@ -83,7 +83,7 @@ fn main() -> Result<()> {
                 gkg,
                 gkg_only,
             } => {
-                let cfg = e2e::config::Config::from_env();
+                let cfg = e2e::config::Config::load()?;
 
                 // Resolve which phases to run.
                 // --gkg implies all. --gkg-only runs just phase 3.
@@ -110,7 +110,7 @@ fn main() -> Result<()> {
                 keep_colima,
                 gkg_only,
             } => {
-                let cfg = e2e::config::Config::from_env();
+                let cfg = e2e::config::Config::load()?;
                 e2e::teardown::run(&sh, &cfg, keep_colima, gkg_only)
             }
         },
