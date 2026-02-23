@@ -76,6 +76,8 @@ end
 
 def write_entry_point(gem_lib)
   File.write(File.join(gem_lib, 'gkg.rb'), <<~RUBY)
+    $:.unshift(File.expand_path('gkg/v1', __dir__))
+
     require_relative 'gkg/version'
     require_relative 'gkg/v1/gkg_services_pb'
   RUBY
