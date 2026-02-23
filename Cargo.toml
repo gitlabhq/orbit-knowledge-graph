@@ -55,7 +55,7 @@ log = "0.4.29"
 num_cpus = "1.17.0"
 parquet = { version = "57.2.0", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
-strum = { version = "0.27.2", features = ["derive"] }
+strum = { version = "0.28.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tokio-util = "0.7.18"
 tokio-rayon = "2.1.0"
