@@ -223,6 +223,7 @@ mod tests {
             "limited".into(),
             ModuleConfiguration {
                 max_concurrency: Some(2),
+                ..Default::default()
             },
         );
 
@@ -275,6 +276,7 @@ mod tests {
             "module-a".into(),
             ModuleConfiguration {
                 max_concurrency: Some(2),
+                ..Default::default()
             },
         );
         let pool = Arc::new(WorkerPool::new(&config, test_metrics()));
@@ -349,6 +351,7 @@ mod tests {
             "module-a".into(),
             ModuleConfiguration {
                 max_concurrency: Some(1),
+                ..Default::default()
             },
         );
         let pool = Arc::new(WorkerPool::new(&config, test_metrics()));
@@ -392,6 +395,7 @@ mod tests {
             "known".into(),
             ModuleConfiguration {
                 max_concurrency: Some(1),
+                ..Default::default()
             },
         );
 

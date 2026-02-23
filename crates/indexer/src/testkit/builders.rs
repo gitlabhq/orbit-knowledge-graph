@@ -69,6 +69,7 @@ impl TestEngineBuilder {
             module.to_string(),
             ModuleConfiguration {
                 max_concurrency: Some(max),
+                ..Default::default()
             },
         );
         self

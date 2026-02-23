@@ -1,6 +1,7 @@
 //! NATS message types.
 
 use std::pin::Pin;
+use std::time::Duration;
 
 use async_nats::jetstream::AckKind;
 use futures::stream::Stream as FuturesStream;
@@ -23,6 +24,14 @@ impl NatsMessage {
     pub async fn nack(self) -> Result<(), NatsError> {
         self.acker
             .ack_with(AckKind::Nak(None))
+            .await
+            .map_err(map_nack_error)
+    }
+
+    /// Negatively acknowledges the message with a delay before redelivery.
+    pub async fn nack_with_delay(self, delay: Duration) -> Result<(), NatsError> {
+        self.acker
+            .ack_with(AckKind::Nak(Some(delay)))
             .await
             .map_err(map_nack_error)
     }

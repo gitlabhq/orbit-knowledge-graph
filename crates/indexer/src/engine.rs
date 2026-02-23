@@ -27,7 +27,7 @@
 //! ```
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use opentelemetry::KeyValue;
@@ -41,7 +41,7 @@ use crate::locking::{LockService, NatsLockService};
 use crate::metrics::EngineMetrics;
 use crate::module::{Handler, HandlerContext, HandlerError, ModuleRegistry};
 use crate::nats::{NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
-use crate::types::Topic;
+use crate::types::{Envelope, Topic};
 use crate::worker_pool::WorkerPool;
 
 /// Errors that can occur during engine operation.
@@ -174,23 +174,30 @@ impl Engine {
 
         self.broker.ensure_streams(&topics).await?;
 
-        let worker_pool = Arc::new(WorkerPool::new(configuration, self.metrics.clone()));
+        let configuration = Arc::new(configuration.clone());
+        let runtime = Arc::new(EngineRuntime {
+            worker_pool: WorkerPool::new(&configuration, self.metrics.clone()),
+            metrics: self.metrics.clone(),
+            configuration,
+        });
         let tasks: Vec<_> = topics
             .into_iter()
-            .map(|topic| self.listen(topic, worker_pool.clone()))
+            .map(|topic| self.listen(topic, runtime.clone()))
             .collect();
         futures::future::try_join_all(tasks).await?;
 
         Ok(())
     }
 
-    async fn listen(&self, topic: Topic, worker_pool: Arc<WorkerPool>) -> Result<(), EngineError> {
+    async fn listen(&self, topic: Topic, runtime: Arc<EngineRuntime>) -> Result<(), EngineError> {
         let topic_name = format!("{}.{}", topic.stream, topic.subject);
         info!(topic = %topic_name, "topic listener starting");
 
-        let mut subscription = self.broker.subscribe(&topic, self.metrics.clone()).await?;
+        let mut subscription = self
+            .broker
+            .subscribe(&topic, runtime.metrics.clone())
+            .await?;
         let mut inflight = tokio::task::JoinSet::new();
-        let topic_label = KeyValue::new("topic", topic_name.clone());
 
         loop {
             tokio::select! {
@@ -201,9 +208,7 @@ impl Engine {
                         message,
                         self.registry.handlers_for(&topic),
                         HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone()),
-                        worker_pool.clone(),
-                        self.metrics.clone(),
-                        topic_label.clone(),
+                        runtime.clone(),
                         topic_name.clone(),
                     ));
                 }
@@ -229,17 +234,27 @@ impl Engine {
     }
 }
 
+enum HandlersOutcome {
+    Success,
+    Failed { retry_delay: Option<Duration> },
+}
+
+struct EngineRuntime {
+    worker_pool: WorkerPool,
+    metrics: Arc<EngineMetrics>,
+    configuration: Arc<EngineConfiguration>,
+}
+
 async fn process_message(
     message: NatsMessage,
     handlers: Vec<(Arc<dyn Handler>, Arc<str>)>,
     context: HandlerContext,
-    worker_pool: Arc<WorkerPool>,
-    metrics: Arc<EngineMetrics>,
-    topic_label: KeyValue,
+    runtime: Arc<EngineRuntime>,
     topic_name: String,
 ) {
     let message_id = message.envelope.id.0.clone();
     let attempt = message.envelope.attempt;
+    let topic_label = KeyValue::new("topic", topic_name.clone());
 
     debug!(topic = %topic_name, %message_id, attempt, "message received");
 
@@ -248,29 +263,33 @@ async fn process_message(
     }
 
     let message_start = Instant::now();
+    let outcome = run_handlers(&handlers, &context, &message.envelope, &runtime).await;
 
-    let result = run_handlers(&handlers, &context, &message, &worker_pool, &metrics).await;
-
-    let outcome = match result {
-        Ok(()) => {
+    let outcome_label = match outcome {
+        HandlersOutcome::Success => {
             if let Err(error) = message.ack().await {
                 warn!(%error, %message_id, "failed to ack message");
             }
             "ack"
         }
-        Err(_) => {
+        HandlersOutcome::Failed { retry_delay } => {
             info!(topic = %topic_name, %message_id, "message nacked, handler failure");
-            if let Err(error) = message.nack().await {
+            let nack_result = match retry_delay {
+                Some(delay) => message.nack_with_delay(delay).await,
+                None => message.nack().await,
+            };
+            if let Err(error) = nack_result {
                 warn!(%error, %message_id, "failed to nack message");
             }
             "nack"
         }
     };
 
-    metrics
-        .messages_processed
-        .add(1, &[topic_label.clone(), KeyValue::new("outcome", outcome)]);
-    metrics.message_duration.record(
+    runtime.metrics.messages_processed.add(
+        1,
+        &[topic_label.clone(), KeyValue::new("outcome", outcome_label)],
+    );
+    runtime.metrics.message_duration.record(
         message_start.elapsed().as_secs_f64(),
         std::slice::from_ref(&topic_label),
     );
@@ -279,28 +298,148 @@ async fn process_message(
 async fn run_handlers(
     handlers: &[(Arc<dyn Handler>, Arc<str>)],
     context: &HandlerContext,
-    msg: &NatsMessage,
-    worker_pool: &WorkerPool,
-    metrics: &EngineMetrics,
-) -> Result<(), HandlerError> {
+    envelope: &Envelope,
+    runtime: &EngineRuntime,
+) -> HandlersOutcome {
     for (handler, module_name) in handlers {
-        let _permit = worker_pool
+        let _permit = runtime
+            .worker_pool
             .acquire_handler_slot(module_name)
             .await
             .expect("worker pool semaphore closed unexpectedly");
 
         let handler_start = Instant::now();
-        handler
-            .handle(context.clone(), msg.envelope.clone())
-            .await?;
+        let result = handler.handle(context.clone(), envelope.clone()).await;
 
-        metrics.handler_duration.record(
+        runtime.metrics.handler_duration.record(
             handler_start.elapsed().as_secs_f64(),
             &[
                 KeyValue::new("handler", handler.name().to_owned()),
                 KeyValue::new("module", module_name.to_string()),
             ],
         );
+
+        if let Err(error) = result {
+            let module_config = runtime.configuration.modules.get(module_name.as_ref());
+            let max_attempts = module_config.and_then(|c| c.max_retry_attempts);
+
+            if let Some(max_attempts) = max_attempts
+                && envelope.attempt >= max_attempts
+            {
+                warn!(
+                    module = %module_name,
+                    message_id = %envelope.id.0,
+                    attempt = envelope.attempt,
+                    %max_attempts,
+                    %error,
+                    "retry attempts exhausted, skipping handler"
+                );
+                continue;
+            }
+
+            let retry_delay = module_config.and_then(|c| c.retry_interval());
+            return HandlersOutcome::Failed { retry_delay };
+        }
     }
-    Ok(())
+    HandlersOutcome::Success
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::configuration::ModuleConfiguration;
+    use crate::testkit::mocks::{
+        MockDestination, MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
+    };
+
+    fn test_context() -> HandlerContext {
+        HandlerContext::new(
+            Arc::new(MockDestination::new()),
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        )
+    }
+
+    fn test_runtime(configuration: &EngineConfiguration) -> EngineRuntime {
+        let metrics = Arc::new(EngineMetrics::new());
+        EngineRuntime {
+            worker_pool: WorkerPool::new(configuration, metrics.clone()),
+            metrics,
+            configuration: Arc::new(configuration.clone()),
+        }
+    }
+
+    #[tokio::test]
+    async fn handler_failure_under_retry_limit_returns_failed() {
+        let configuration = EngineConfiguration {
+            modules: HashMap::from([(
+                "test-module".to_string(),
+                ModuleConfiguration {
+                    max_retry_attempts: Some(3),
+                    retry_interval_secs: Some(5),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+
+        let handler = MockHandler::new("stream", "subject")
+            .with_error(HandlerError::Processing("boom".into()));
+        let handlers: Vec<(Arc<dyn Handler>, Arc<str>)> =
+            vec![(Arc::new(handler), Arc::from("test-module"))];
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
+        let runtime = test_runtime(&configuration);
+        let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay == Some(Duration::from_secs(5)))
+        );
+    }
+
+    #[tokio::test]
+    async fn handler_failure_at_retry_limit_returns_success() {
+        let configuration = EngineConfiguration {
+            modules: HashMap::from([(
+                "test-module".to_string(),
+                ModuleConfiguration {
+                    max_retry_attempts: Some(3),
+                    retry_interval_secs: Some(5),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+
+        let handler = MockHandler::new("stream", "subject")
+            .with_error(HandlerError::Processing("boom".into()));
+        let handlers: Vec<(Arc<dyn Handler>, Arc<str>)> =
+            vec![(Arc::new(handler), Arc::from("test-module"))];
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
+        let runtime = test_runtime(&configuration);
+        let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+
+        assert!(matches!(outcome, HandlersOutcome::Success));
+    }
+
+    #[tokio::test]
+    async fn handler_failure_without_retry_config_returns_failed_no_delay() {
+        let configuration = EngineConfiguration::default();
+
+        let handler = MockHandler::new("stream", "subject")
+            .with_error(HandlerError::Processing("boom".into()));
+        let handlers: Vec<(Arc<dyn Handler>, Arc<str>)> =
+            vec![(Arc::new(handler), Arc::from("test-module"))];
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
+        let runtime = test_runtime(&configuration);
+        let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay.is_none())
+        );
+    }
 }

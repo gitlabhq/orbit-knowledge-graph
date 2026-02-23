@@ -25,6 +25,18 @@ graph:
 #   storage: default
 #   token: ""
 
+engine:
+  max_concurrent_workers: 16
+  modules:
+    sdlc:
+      max_concurrency: 8
+      max_retry_attempts: 5
+      retry_interval_secs: 60
+    code:
+      max_concurrency: 4
+      max_retry_attempts: 5
+      retry_interval_secs: 60
+
 code_indexing:
   events_stream_name: siphon_stream_main_db
 
