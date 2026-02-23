@@ -24,6 +24,10 @@ data:
       otlp_endpoint: {{ .Values.otel.endpoint | quote }}
       service_name: "gkg-indexer"
     {{- end }}
+    {{- if .Values.engine }}
+    engine:
+      {{- toYaml .Values.engine | nindent 6 }}
+    {{- end }}
     {{- if .Values.nats.streamName }}
     code_indexing:
       events_stream_name: {{ .Values.nats.streamName | quote }}
@@ -46,7 +50,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-indexer") | nindent 8 }}
       annotations:
-        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitaly | sha256sum }}-{{ toJson .Values.otel | sha256sum }}
+        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitaly | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.engine | sha256sum }}
     spec:
       enableServiceLinks: false
       securityContext:
