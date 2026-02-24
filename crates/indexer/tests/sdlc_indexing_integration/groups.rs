@@ -1,18 +1,13 @@
-//! Integration tests for group processing in the namespace handler.
+//! Integration subtests for group processing.
 
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
 use crate::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
     create_namespace_payload, default_test_watermark, get_namespace_handler, get_string_column,
 };
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_and_transforms_groups() {
-    let context = TestContext::new().await;
-
+pub async fn processes_and_transforms_groups(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -43,7 +38,7 @@ async fn namespace_handler_processes_and_transforms_groups() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -67,11 +62,7 @@ async fn namespace_handler_processes_and_transforms_groups() {
     assert_eq!(visibility_column.value(2), "public");
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_creates_group_edges() {
-    let context = TestContext::new().await;
-
+pub async fn creates_group_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -95,7 +86,7 @@ async fn namespace_handler_creates_group_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -106,21 +97,13 @@ async fn namespace_handler_creates_group_edges() {
         .await
         .expect("handler should succeed");
 
-    // Group 100 (path 1/100/) has owner_id=1, group 101 (path 1/100/101/) has owner_id=2.
-    // Each OWNER edge carries the owning group's traversal_path.
-    assert_edge_count_for_traversal_path(&context, "OWNER", "User", "Group", "1/100/", 1).await;
-    assert_edge_count_for_traversal_path(&context, "OWNER", "User", "Group", "1/100/101/", 1).await;
+    assert_edge_count_for_traversal_path(context, "OWNER", "User", "Group", "1/100/", 1).await;
+    assert_edge_count_for_traversal_path(context, "OWNER", "User", "Group", "1/100/101/", 1).await;
 
-    // CONTAINS edge: sourced from the child group's row (which has parent_id),
-    // so it carries the child's traversal_path.
-    assert_edges_have_traversal_path(&context, "CONTAINS", "Group", "Group", "1/100/101/", 1).await;
+    assert_edges_have_traversal_path(context, "CONTAINS", "Group", "Group", "1/100/101/", 1).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_creates_member_of_edges_for_groups() {
-    let context = TestContext::new().await;
-
+pub async fn creates_member_of_edges_for_groups(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -160,7 +143,7 @@ async fn namespace_handler_creates_member_of_edges_for_groups() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -171,5 +154,5 @@ async fn namespace_handler_creates_member_of_edges_for_groups() {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(&context, "MEMBER_OF", "User", "Group", "1/100/", 2).await;
+    assert_edges_have_traversal_path(context, "MEMBER_OF", "User", "Group", "1/100/", 2).await;
 }

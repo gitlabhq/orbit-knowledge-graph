@@ -1,18 +1,13 @@
-//! Integration tests for note processing in the namespace handler.
+//! Integration subtests for note processing.
 
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
 use crate::common::{
     TestContext, assert_edges_have_traversal_path, create_namespace_payload,
     default_test_watermark, get_namespace_handler, get_string_column,
 };
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_notes_with_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_notes_with_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_notes (id, note, noteable_type, noteable_id, author_id, system, internal, traversal_path, created_at, updated_at, _siphon_replicated_at)
@@ -23,7 +18,7 @@ async fn namespace_handler_processes_notes_with_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -40,10 +35,10 @@ async fn namespace_handler_processes_notes_with_edges() {
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 3);
 
-    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "Note", "1/100/", 3).await;
+    assert_edges_have_traversal_path(context, "AUTHORED", "User", "Note", "1/100/", 3).await;
 
     let has_note_edges = context
-        .query("SELECT source_id, source_kind, target_id FROM gl_edge WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")
+        .query("SELECT source_id, source_kind, target_id FROM gl_edge FINAL WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")
         .await;
 
     assert!(!has_note_edges.is_empty(), "has_note edges should exist");
@@ -57,11 +52,7 @@ async fn namespace_handler_processes_notes_with_edges() {
     assert_eq!(source_kind.value(2), "Vulnerability");
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_filters_out_system_notes() {
-    let context = TestContext::new().await;
-
+pub async fn filters_out_system_notes(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_notes (id, note, noteable_type, noteable_id, author_id, system, internal, traversal_path, created_at, updated_at, _siphon_replicated_at)
@@ -73,7 +64,7 @@ async fn namespace_handler_filters_out_system_notes() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -92,10 +83,10 @@ async fn namespace_handler_filters_out_system_notes() {
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 2, "should only have 2 non-system notes");
 
-    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "Note", "1/100/", 2).await;
+    assert_edges_have_traversal_path(context, "AUTHORED", "User", "Note", "1/100/", 2).await;
 
     let has_note_edges = context
-        .query("SELECT source_id, source_kind, target_id FROM gl_edge WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")
+        .query("SELECT source_id, source_kind, target_id FROM gl_edge FINAL WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")
         .await;
 
     assert!(!has_note_edges.is_empty(), "has_note edges should exist");

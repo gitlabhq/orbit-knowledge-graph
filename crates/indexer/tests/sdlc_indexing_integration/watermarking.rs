@@ -1,19 +1,14 @@
-//! Integration tests for watermark-based incremental processing in the namespace handler.
+//! Integration subtests for watermark-based incremental processing.
 
 use arrow::array::UInt64Array;
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
 use crate::common::{
     TestContext, create_namespace_payload, default_test_watermark, get_namespace_handler,
     get_string_column,
 };
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_uses_watermark_for_incremental_processing() {
-    let context = TestContext::new().await;
-
+pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
     context
         .execute(
             "INSERT INTO namespace_indexing_watermark (namespace, entity, watermark)
@@ -44,7 +39,7 @@ async fn namespace_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));

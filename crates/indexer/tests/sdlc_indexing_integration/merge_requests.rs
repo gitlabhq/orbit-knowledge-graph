@@ -1,18 +1,13 @@
-//! Integration tests for merge request processing in the namespace handler.
+//! Integration subtests for merge request processing.
 
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
 use crate::common::{
     TestContext, assert_edges_have_traversal_path, create_namespace_payload,
     default_test_watermark, get_namespace_handler, get_string_column,
 };
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_merge_requests_with_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_merge_requests_with_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_milestones (id, title, project_id, state, traversal_path, _siphon_replicated_at)
@@ -34,7 +29,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -62,7 +57,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
     assert_eq!(states.value(1), "merged");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "IN_PROJECT",
         "MergeRequest",
         "Project",
@@ -70,14 +65,14 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
         2,
     )
     .await;
-    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "MergeRequest", "1/100/", 2)
+    assert_edges_have_traversal_path(context, "AUTHORED", "User", "MergeRequest", "1/100/", 2)
         .await;
-    assert_edges_have_traversal_path(&context, "ASSIGNED", "User", "MergeRequest", "1/100/", 2)
+    assert_edges_have_traversal_path(context, "ASSIGNED", "User", "MergeRequest", "1/100/", 2)
         .await;
-    assert_edges_have_traversal_path(&context, "MERGED_BY", "User", "MergeRequest", "1/100/", 1)
+    assert_edges_have_traversal_path(context, "MERGED_BY", "User", "MergeRequest", "1/100/", 1)
         .await;
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "IN_MILESTONE",
         "MergeRequest",
         "Milestone",
@@ -87,11 +82,7 @@ async fn namespace_handler_processes_merge_requests_with_edges() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_merge_requests_closing_issues() {
-    let context = TestContext::new().await;
-
+pub async fn processes_merge_requests_closing_issues(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -150,7 +141,7 @@ async fn namespace_handler_processes_merge_requests_closing_issues() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -161,6 +152,6 @@ async fn namespace_handler_processes_merge_requests_closing_issues() {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(&context, "CLOSES", "MergeRequest", "WorkItem", "1/100/", 2)
+    assert_edges_have_traversal_path(context, "CLOSES", "MergeRequest", "WorkItem", "1/100/", 2)
         .await;
 }
