@@ -2,11 +2,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use health_check::HealthCheckConfig;
+use indexer::ModulesConfig;
 use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
 use indexer::modules::code::GitalyConfiguration;
-use indexer::modules::code::config::CodeIndexingConfig;
-use indexer::modules::sdlc::config::SdlcIndexingConfig;
 use indexer::nats::NatsConfiguration;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
@@ -46,9 +45,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub gitaly: Option<GitalyConfiguration>,
     #[serde(default)]
-    pub code_indexing: CodeIndexingConfig,
-    #[serde(default)]
-    pub sdlc_indexing: SdlcIndexingConfig,
+    pub modules: ModulesConfig,
     #[serde(default)]
     pub health_check: HealthCheckConfig,
     #[serde(default)]

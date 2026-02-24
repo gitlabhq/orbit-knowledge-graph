@@ -17,7 +17,8 @@ pub struct EngineConfiguration {
     pub max_concurrent_workers: usize,
 
     /// Per-module overrides, keyed by [`Module::name`](crate::module::Module::name).
-    #[serde(default)]
+    /// Populated programmatically from the unified module configs — not deserialized from YAML.
+    #[serde(skip)]
     pub modules: HashMap<String, ModuleConfiguration>,
 }
 

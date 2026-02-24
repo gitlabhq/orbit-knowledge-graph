@@ -78,9 +78,15 @@ pub struct IndexerConfig {
     #[serde(default)]
     pub gitaly: Option<GitalyConfiguration>,
     #[serde(default)]
-    pub code_indexing: CodeIndexingConfig,
+    pub modules: ModulesConfig,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct ModulesConfig {
     #[serde(default)]
-    pub sdlc_indexing: SdlcIndexingConfig,
+    pub sdlc: SdlcIndexingConfig,
+    #[serde(default)]
+    pub code: CodeIndexingConfig,
 }
 
 #[derive(Debug, Error)]
@@ -115,12 +121,8 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     let destination = Arc::new(ClickHouseDestination::new(config.graph.clone())?);
 
     info!("initializing SDLC module");
-    let sdlc_module = SdlcModule::new(
-        &config.datalake,
-        &config.graph,
-        config.sdlc_indexing.datalake_batch_size,
-    )
-    .await?;
+    let sdlc_module =
+        SdlcModule::new(&config.datalake, &config.graph, &config.modules.sdlc).await?;
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);
@@ -128,7 +130,7 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     if let Some(gitaly_config) = &config.gitaly {
         info!("initializing Code module");
         let code_module =
-            CodeModule::new(&config.graph, gitaly_config, config.code_indexing.clone())
+            CodeModule::new(&config.graph, gitaly_config, config.modules.code.clone())
                 .map_err(IndexerError::ModuleInit)?;
         registry.register_module(&code_module);
     } else {
@@ -146,8 +148,18 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
         engine_handle.stop();
     });
 
+    let mut engine_config = config.engine.clone();
+    engine_config
+        .modules
+        .insert("sdlc".into(), config.modules.sdlc.engine.clone());
+    if config.gitaly.is_some() {
+        engine_config
+            .modules
+            .insert("code".into(), config.modules.code.engine.clone());
+    }
+
     info!("indexer started");
-    let result = engine.run(&config.engine).await;
+    let result = engine.run(&engine_config).await;
 
     shutdown_task.abort();
 

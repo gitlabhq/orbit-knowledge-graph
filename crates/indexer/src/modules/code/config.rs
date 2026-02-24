@@ -1,6 +1,5 @@
 //! Configuration for the code indexing module.
 
-use std::env;
 use std::time::Duration;
 
 pub const LOCK_TTL: Duration = Duration::from_secs(60);
@@ -29,10 +28,15 @@ pub mod tables {
     }
 }
 
+use crate::configuration::ModuleConfiguration;
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct CodeIndexingConfig {
     #[serde(default = "default_events_stream_name")]
     pub events_stream_name: String,
+
+    #[serde(flatten)]
+    pub engine: ModuleConfiguration,
 }
 
 fn default_events_stream_name() -> String {
@@ -43,15 +47,7 @@ impl Default for CodeIndexingConfig {
     fn default() -> Self {
         Self {
             events_stream_name: "siphon_stream_main_db".to_string(),
-        }
-    }
-}
-
-impl CodeIndexingConfig {
-    pub fn from_env() -> Self {
-        Self {
-            events_stream_name: env::var("CODE_INDEX_EVENTS_STREAM")
-                .unwrap_or_else(|_| "siphon_stream_main_db".to_string()),
+            engine: ModuleConfiguration::default(),
         }
     }
 }

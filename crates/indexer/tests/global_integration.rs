@@ -8,6 +8,7 @@ use arrow::array::{BooleanArray, StringArray, UInt64Array};
 use chrono::{DateTime, Utc};
 use indexer::module::Module;
 use indexer::modules::SdlcModule;
+use indexer::modules::sdlc::config::SdlcIndexingConfig;
 use indexer::testkit::TestEnvelopeFactory;
 use serial_test::serial;
 
@@ -37,7 +38,11 @@ async fn global_handler_processes_and_transforms_users() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, &context.config, 1)
+    let sdlc_config = SdlcIndexingConfig {
+        datalake_batch_size: 1,
+        ..Default::default()
+    };
+    let sdlc_module = SdlcModule::new(&context.config, &context.config, &sdlc_config)
         .await
         .expect("failed to create SDLC module");
 
@@ -114,7 +119,11 @@ async fn global_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let sdlc_module = SdlcModule::new(&context.config, &context.config, 1)
+    let sdlc_config = SdlcIndexingConfig {
+        datalake_batch_size: 1,
+        ..Default::default()
+    };
+    let sdlc_module = SdlcModule::new(&context.config, &context.config, &sdlc_config)
         .await
         .expect("failed to create SDLC module");
 

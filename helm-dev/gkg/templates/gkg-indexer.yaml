@@ -28,9 +28,9 @@ data:
     engine:
       {{- toYaml .Values.engine | nindent 6 }}
     {{- end }}
-    {{- if .Values.nats.streamName }}
-    code_indexing:
-      events_stream_name: {{ .Values.nats.streamName | quote }}
+    {{- if .Values.modules }}
+    modules:
+      {{- toYaml .Values.modules | nindent 6 }}
     {{- end }}
 ---
 apiVersion: apps/v1
@@ -50,7 +50,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-indexer") | nindent 8 }}
       annotations:
-        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitaly | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.engine | sha256sum }}
+        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitaly | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.engine | sha256sum }}-{{ toJson .Values.modules | sha256sum }}
     spec:
       enableServiceLinks: false
       securityContext:

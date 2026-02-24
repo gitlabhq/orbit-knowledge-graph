@@ -27,21 +27,18 @@ graph:
 
 engine:
   max_concurrent_workers: 16
-  modules:
-    sdlc:
-      max_concurrency: 8
-      max_retry_attempts: 5
-      retry_interval_secs: 60
-    code:
-      max_concurrency: 4
-      max_retry_attempts: 5
-      retry_interval_secs: 60
 
-code_indexing:
-  events_stream_name: siphon_stream_main_db
-
-sdlc_indexing:
-  datalake_batch_size: 1000000
+modules:
+  sdlc:
+    max_concurrency: 8
+    max_retry_attempts: 5
+    retry_interval_secs: 60
+    datalake_batch_size: 1000000
+  code:
+    max_concurrency: 4
+    max_retry_attempts: 5
+    retry_interval_secs: 60
+    events_stream_name: siphon_stream_main_db
 
 health_check:
   bind_address: "0.0.0.0:4201"
