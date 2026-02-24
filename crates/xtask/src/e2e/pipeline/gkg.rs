@@ -27,12 +27,12 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use xshell::{Shell, cmd};
 
-use super::super::config::Config;
-use super::super::constants as c;
-use super::super::kube::{self, DeleteTarget};
-use super::super::template;
-use super::super::ui;
-use super::super::utils;
+use crate::e2e::{
+    config::Config,
+    constants as c,
+    kube::{self, DeleteTarget},
+    template, ui, utils,
+};
 
 /// Run all GKG stack steps (15-25).
 pub async fn run(sh: &Shell, cfg: &Config) -> Result<()> {
@@ -107,11 +107,12 @@ async fn run_datalake_migrations(cfg: &Config, toolbox_pod: &str) -> Result<()> 
     ]);
     let click_house_yml = template::render(&tmpl_path, &vars)?;
 
-    let tmp = tempfile::NamedTempFile::new().context("creating temp file for click_house.yml")?;
-    fs::write(tmp.path(), &click_house_yml)?;
+    let tmp_dir = tempfile::tempdir().context("creating temp dir for click_house.yml")?;
+    let tmp_path = tmp_dir.path().join("click_house.yml");
+    fs::write(&tmp_path, &click_house_yml)?;
 
     let dest_dir = format!("{rails_root}/config");
-    kube::cp_to_pod(ns, toolbox_pod, &[tmp.path()], &dest_dir)
+    kube::cp_to_pod(ns, toolbox_pod, &[tmp_path.as_path()], &dest_dir)
         .await
         .context("failed to copy click_house.yml into toolbox pod")?;
 

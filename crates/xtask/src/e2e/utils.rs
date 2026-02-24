@@ -5,10 +5,7 @@
 
 use anyhow::{Context, Result, anyhow};
 
-use super::config::Config;
-use super::constants as c;
-use super::kube;
-use super::ui;
+use crate::e2e::{config::Config, constants as c, kube, ui};
 
 // =============================================================================
 // GitLab toolbox pod

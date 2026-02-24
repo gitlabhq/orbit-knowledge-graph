@@ -14,11 +14,7 @@ use std::fs;
 
 use anyhow::Result;
 
-use super::super::config::Config;
-use super::super::constants as c;
-use super::super::kube;
-use super::super::ui;
-use super::super::utils;
+use crate::e2e::{config::Config, constants as c, kube, ui, utils};
 
 /// Run all CNG setup steps.
 pub async fn run(cfg: &Config) -> Result<()> {

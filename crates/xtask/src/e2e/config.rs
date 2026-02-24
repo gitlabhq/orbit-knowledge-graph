@@ -9,8 +9,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use super::constants as c;
-use super::env as e;
+use crate::e2e::{constants as c, env as e};
 
 // =============================================================================
 // Sub-structs — mirror the YAML sections, deserialized directly.

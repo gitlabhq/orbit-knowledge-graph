@@ -8,17 +8,14 @@
 //!   5. Deploy GitLab via Helm chart
 //!   6. Wait for all GitLab pods to be ready
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use xshell::{Shell, cmd};
 
-use super::super::cmd as cmd_helpers;
-use super::super::config::Config;
-use super::super::constants as c;
-use super::super::kube;
-use super::super::ui;
+use crate::e2e::{cmd as cmd_helpers, colima, config::Config, constants as c, docker, kube, ui};
 
 /// Run all CNG deploy steps.
 pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
@@ -36,11 +33,11 @@ pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
 
     validate_prerequisites(sh, cfg, skip_build)?;
     start_colima(sh, cfg).await?;
-    prepull_workhorse(sh, cfg)?;
+    prepull_workhorse(cfg).await?;
     if skip_build {
         ui::step(3, "Skipping CNG image build (--skip-build)")?;
     } else {
-        build_images(sh, cfg)?;
+        build_images(cfg).await?;
     }
     deploy_traefik(sh, cfg)?;
     deploy_gitlab(sh, cfg).await?;
@@ -74,7 +71,7 @@ async fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
     let profile = &cfg.colima.profile;
     ui::step(1, &format!("Starting Colima (profile: {profile})"))?;
 
-    if cmd_helpers::succeeds(sh, "colima", &["status", "--profile", profile]) {
+    if colima::is_running(sh, profile) {
         ui::info(&format!("Colima ({profile}) already running"))?;
         return Ok(());
     }
@@ -84,40 +81,17 @@ async fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
         cfg.colima.memory, cfg.colima.cpus
     ))?;
 
-    let mem = &cfg.colima.memory;
-    let cpus = &cfg.colima.cpus;
-    let disk = &cfg.colima.disk;
-    let k8s_ver = &cfg.colima.k8s_version;
-
-    cmd!(
+    colima::start(
         sh,
-        "colima start
-            --profile {profile}
-            --memory {mem}
-            --cpu {cpus}
-            --disk {disk}
-            --vm-type vz
-            --kubernetes
-            --kubernetes-version {k8s_ver}"
-    )
-    .run()?;
+        profile,
+        &cfg.colima.memory,
+        &cfg.colima.cpus,
+        &cfg.colima.disk,
+        &cfg.colima.k8s_version,
+    )?;
 
-    let docker_host = cfg.docker_host();
-
-    // Verify docker works
-    if !cmd_helpers::succeeds(sh, "docker", &["info"]) {
-        let ok = cmd!(sh, "docker info")
-            .env("DOCKER_HOST", &docker_host)
-            .quiet()
-            .ignore_status()
-            .ignore_stdout()
-            .ignore_stderr()
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if !ok {
-            bail!("docker not reachable via {docker_host}");
-        }
+    if !docker::is_reachable(profile).await {
+        bail!("docker not reachable via colima profile {profile}");
     }
     if !kube::cluster_reachable().await {
         bail!("cannot reach k8s cluster");
@@ -128,42 +102,28 @@ async fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 2: Pre-pull workhorse -----------------------------------------------
 
-fn prepull_workhorse(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn prepull_workhorse(cfg: &Config) -> Result<()> {
     ui::step(2, "Pre-pulling workhorse image")?;
 
-    let docker_host = cfg.docker_host();
     let image = cfg.workhorse_image();
+    let profile = &cfg.colima.profile;
 
-    let already_present = cmd!(sh, "docker image inspect {image}")
-        .env("DOCKER_HOST", &docker_host)
-        .quiet()
-        .ignore_status()
-        .ignore_stdout()
-        .ignore_stderr()
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    if already_present {
+    if docker::image_exists(profile, &image).await? {
         ui::info("Workhorse image already present")?;
         return Ok(());
     }
 
     ui::info(&format!("Pulling {image}"))?;
-    cmd!(sh, "docker pull {image}")
-        .env("DOCKER_HOST", &docker_host)
-        .run()?;
+    docker::pull_image(profile, &image).await?;
     Ok(())
 }
 
 // -- Step 3: Build CNG images -------------------------------------------------
 
-fn build_images(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn build_images(cfg: &Config) -> Result<()> {
     ui::step(3, "Building custom CNG images")?;
     ui::info(&format!("Source: {}", cfg.gitlab_src.display()))?;
     ui::info(&format!("Base tag: {}", cfg.cng.base_tag))?;
-
-    let docker_host = cfg.docker_host();
 
     // Stage Rails code to a temp directory (avoids GitLab's restrictive .dockerignore).
     let staging_dir = tempfile::tempdir().context("creating staging directory")?;
@@ -198,10 +158,8 @@ fn build_images(sh: &Shell, cfg: &Config) -> Result<()> {
     // Create a permissive .dockerignore
     fs::write(staging.join(".dockerignore"), ".git\n")?;
 
-    // Build each component
     let dockerfile = cfg.cng_dir.join(c::DOCKERFILE_RAILS);
-    let dockerfile_str = dockerfile.to_string_lossy().to_string();
-    let staging_str = staging.to_string_lossy().to_string();
+    let profile = &cfg.colima.profile;
 
     for component in &cfg.cng.components {
         let tag = format!(
@@ -209,23 +167,15 @@ fn build_images(sh: &Shell, cfg: &Config) -> Result<()> {
             cfg.cng.local_prefix, component, cfg.cng.local_tag
         );
         let base_image = format!("{}/{}", cfg.cng.registry, component);
-        let base_image_arg = format!("BASE_IMAGE={base_image}");
-        let base_tag_arg = format!("BASE_TAG={}", cfg.cng.base_tag);
 
         ui::info(&format!("Building {tag}"))?;
         ui::detail_item(&format!("Base: {base_image}:{}", cfg.cng.base_tag))?;
 
-        cmd!(
-            sh,
-            "docker build
-                --build-arg {base_image_arg}
-                --build-arg {base_tag_arg}
-                -f {dockerfile_str}
-                -t {tag}
-                {staging_str}"
-        )
-        .env("DOCKER_HOST", &docker_host)
-        .run()?;
+        let build_args = HashMap::from([
+            ("BASE_IMAGE", base_image.as_str()),
+            ("BASE_TAG", cfg.cng.base_tag.as_str()),
+        ]);
+        docker::build_image(profile, staging, &dockerfile, &tag, &build_args).await?;
 
         ui::detail_item(&format!("Done: {tag}"))?;
     }

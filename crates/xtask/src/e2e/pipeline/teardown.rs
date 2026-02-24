@@ -13,11 +13,13 @@ use std::fs;
 use anyhow::Result;
 use xshell::{Shell, cmd};
 
-use super::cmd as cmd_helpers;
-use super::config::Config;
-use super::constants as c;
-use super::kube::{self, DeleteTarget};
-use super::ui;
+use crate::e2e::{
+    colima,
+    config::Config,
+    constants as c, docker,
+    kube::{self, DeleteTarget},
+    ui,
+};
 
 /// Run the E2E teardown.
 ///
@@ -60,12 +62,11 @@ pub async fn run(sh: &Shell, cfg: &Config, keep_colima: bool, gkg_only: bool) ->
 
         // Show what images are still present
         let prefix_glob = format!("{}/*", cfg.cng.local_prefix);
-        let fmt = "  {{.Repository}}:{{.Tag}}  ({{.Size}})";
-        let _ = cmd!(sh, "docker images {prefix_glob} --format {fmt}")
-            .env("DOCKER_HOST", &docker_host)
-            .quiet()
-            .ignore_status()
-            .run();
+        if let Ok(lines) = docker::list_images(&cfg.colima.profile, &prefix_glob).await {
+            for line in &lines {
+                let _ = ui::info(line);
+            }
+        }
     } else {
         teardown_colima(sh, cfg)?;
     }
@@ -241,17 +242,9 @@ fn teardown_colima(sh: &Shell, cfg: &Config) -> Result<()> {
     let profile = &cfg.colima.profile;
     ui::step(6, &format!("Stopping Colima (profile: {profile})"))?;
 
-    if cmd_helpers::succeeds(sh, "colima", &["status", "--profile", profile]) {
-        ui::info("Stopping Colima VM")?;
-        let _ = cmd!(sh, "colima stop --profile {profile}")
-            .ignore_status()
-            .run();
-
-        ui::info("Deleting Colima VM")?;
-        let _ = cmd!(sh, "colima delete --profile {profile} --force")
-            .ignore_status()
-            .run();
-
+    if colima::is_running(sh, profile) {
+        ui::info("Stopping and deleting Colima VM")?;
+        colima::stop_and_delete(sh, profile);
         ui::info("Colima VM deleted")?;
     } else {
         ui::info(&format!("Colima ({profile}) not running"))?;
