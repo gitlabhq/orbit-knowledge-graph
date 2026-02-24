@@ -30,7 +30,7 @@ use kube::runtime::wait::{Condition, await_condition};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use xshell::{Shell, cmd};
 
-use super::ui;
+use crate::e2e::ui;
 
 // =============================================================================
 // Client

@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
                 gkg_only,
             } => {
                 let cfg = e2e::config::Config::load()?;
-                e2e::teardown::run(&sh, &cfg, keep_colima, gkg_only).await
+                e2e::pipeline::teardown::run(&sh, &cfg, keep_colima, gkg_only).await
             }
         },
     }
