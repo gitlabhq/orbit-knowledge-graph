@@ -204,8 +204,8 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, source_id, source_kind, target_id, target_kind)
-PRIMARY KEY (traversal_path, source_id, source_kind, target_id, target_kind);
+ORDER BY (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind)
+PRIMARY KEY (traversal_path, source_id, source_kind, relationship_kind);
 
 -- CI graph tables
 

@@ -1,24 +1,12 @@
-//! Integration tests for the global handler (which includes User entities).
-//!
-//! These tests require a Docker-compatible runtime (Docker, Colima, etc).
-
-mod common;
+//! Integration subtests for the global handler (User entities).
 
 use arrow::array::{BooleanArray, StringArray, UInt64Array};
 use chrono::{DateTime, Utc};
-use indexer::module::Module;
-use indexer::modules::SdlcModule;
-use indexer::modules::sdlc::config::SdlcIndexingConfig;
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
-use common::{TestContext, create_user_payload};
+use crate::common::{TestContext, create_user_payload, get_global_handler};
 
-#[tokio::test]
-#[serial]
-async fn global_handler_processes_and_transforms_users() {
-    let context = TestContext::new().await;
-
+pub async fn processes_and_transforms_users(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_users (
@@ -38,19 +26,7 @@ async fn global_handler_processes_and_transforms_users() {
         )
         .await;
 
-    let sdlc_config = SdlcIndexingConfig {
-        datalake_batch_size: 1,
-        ..Default::default()
-    };
-    let sdlc_module = SdlcModule::new(&context.config, &context.config, &sdlc_config)
-        .await
-        .expect("failed to create SDLC module");
-
-    let handlers = sdlc_module.handlers();
-    let global_handler = handlers
-        .iter()
-        .find(|h| h.name() == "global-handler")
-        .expect("global-handler not found");
+    let global_handler = get_global_handler(context).await;
 
     let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
         .unwrap()
@@ -94,11 +70,7 @@ async fn global_handler_processes_and_transforms_users() {
     assert!(!is_admin_column.value(2));
 }
 
-#[tokio::test]
-#[serial]
-async fn global_handler_uses_watermark_for_incremental_processing() {
-    let context = TestContext::new().await;
-
+pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
     context
         .execute("INSERT INTO global_indexing_watermark (watermark) VALUES ('2024-01-19 00:00:00')")
         .await;
@@ -119,19 +91,7 @@ async fn global_handler_uses_watermark_for_incremental_processing() {
         )
         .await;
 
-    let sdlc_config = SdlcIndexingConfig {
-        datalake_batch_size: 1,
-        ..Default::default()
-    };
-    let sdlc_module = SdlcModule::new(&context.config, &context.config, &sdlc_config)
-        .await
-        .expect("failed to create SDLC module");
-
-    let handlers = sdlc_module.handlers();
-    let global_handler = handlers
-        .iter()
-        .find(|h| h.name() == "global-handler")
-        .expect("global-handler not found");
+    let global_handler = get_global_handler(context).await;
 
     let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
         .unwrap()

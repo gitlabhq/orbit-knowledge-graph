@@ -1,18 +1,13 @@
-//! Integration tests for project processing in the namespace handler.
+//! Integration subtests for project processing.
 
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
 use crate::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
     create_namespace_payload, default_test_watermark, get_namespace_handler, get_string_column,
 };
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_projects() {
-    let context = TestContext::new().await;
-
+pub async fn processes_projects(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -50,7 +45,7 @@ async fn namespace_handler_processes_projects() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -72,37 +67,18 @@ async fn namespace_handler_processes_projects() {
     assert_eq!(visibility_column.value(0), "private");
     assert_eq!(visibility_column.value(1), "public");
 
-    // Each project edge carries the project's own traversal_path
-    assert_edge_count_for_traversal_path(&context, "CREATOR", "User", "Project", "1/100/1000/", 1)
+    assert_edge_count_for_traversal_path(context, "CREATOR", "User", "Project", "1/100/1000/", 1)
         .await;
-    assert_edge_count_for_traversal_path(&context, "CREATOR", "User", "Project", "1/100/1001/", 1)
+    assert_edge_count_for_traversal_path(context, "CREATOR", "User", "Project", "1/100/1001/", 1)
         .await;
 
-    assert_edge_count_for_traversal_path(
-        &context,
-        "CONTAINS",
-        "Group",
-        "Project",
-        "1/100/1000/",
-        1,
-    )
-    .await;
-    assert_edge_count_for_traversal_path(
-        &context,
-        "CONTAINS",
-        "Group",
-        "Project",
-        "1/100/1001/",
-        1,
-    )
-    .await;
+    assert_edge_count_for_traversal_path(context, "CONTAINS", "Group", "Project", "1/100/1000/", 1)
+        .await;
+    assert_edge_count_for_traversal_path(context, "CONTAINS", "Group", "Project", "1/100/1001/", 1)
+        .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_creates_member_of_edges_for_projects() {
-    let context = TestContext::new().await;
-
+pub async fn creates_member_of_edges_for_projects(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -152,7 +128,7 @@ async fn namespace_handler_creates_member_of_edges_for_projects() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -163,5 +139,5 @@ async fn namespace_handler_creates_member_of_edges_for_projects() {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(&context, "MEMBER_OF", "User", "Project", "1/100/", 1).await;
+    assert_edges_have_traversal_path(context, "MEMBER_OF", "User", "Project", "1/100/", 1).await;
 }

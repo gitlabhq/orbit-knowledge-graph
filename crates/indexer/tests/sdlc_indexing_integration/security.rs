@@ -1,19 +1,14 @@
-//! Integration tests for security entity processing in the namespace handler.
+//! Integration subtests for security entity processing.
 
 use arrow::array::Array;
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
 use crate::common::{
     TestContext, assert_edges_have_traversal_path, create_namespace_payload,
     default_test_watermark, get_boolean_column, get_namespace_handler, get_string_column,
 };
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_vulnerabilities() {
-    let context = TestContext::new().await;
-
+pub async fn processes_vulnerabilities(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -58,7 +53,7 @@ async fn namespace_handler_processes_vulnerabilities() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -90,7 +85,7 @@ async fn namespace_handler_processes_vulnerabilities() {
     assert_eq!(severities.value(1), "medium");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "IN_PROJECT",
         "Vulnerability",
         "Project",
@@ -98,15 +93,11 @@ async fn namespace_handler_processes_vulnerabilities() {
         2,
     )
     .await;
-    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "Vulnerability", "1/100/", 2)
+    assert_edges_have_traversal_path(context, "AUTHORED", "User", "Vulnerability", "1/100/", 2)
         .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_scanners() {
-    let context = TestContext::new().await;
-
+pub async fn processes_scanners(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -145,7 +136,7 @@ async fn namespace_handler_processes_scanners() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -173,7 +164,7 @@ async fn namespace_handler_processes_scanners() {
     assert_eq!(external_ids.value(1), "bandit");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "SCANS",
         "VulnerabilityScanner",
         "Project",
@@ -183,11 +174,7 @@ async fn namespace_handler_processes_scanners() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_vulnerability_identifiers() {
-    let context = TestContext::new().await;
-
+pub async fn processes_vulnerability_identifiers(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -226,7 +213,7 @@ async fn namespace_handler_processes_vulnerability_identifiers() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -258,7 +245,7 @@ async fn namespace_handler_processes_vulnerability_identifiers() {
     assert_eq!(external_ids.value(1), "CWE-89");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "IN_PROJECT",
         "VulnerabilityIdentifier",
         "Project",
@@ -268,11 +255,7 @@ async fn namespace_handler_processes_vulnerability_identifiers() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_findings() {
-    let context = TestContext::new().await;
-
+pub async fn processes_findings(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -319,7 +302,7 @@ async fn namespace_handler_processes_findings() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -362,10 +345,10 @@ async fn namespace_handler_processes_findings() {
     assert!(deduplicated.value(0));
     assert!(!deduplicated.value(1));
 
-    assert_edges_have_traversal_path(&context, "IN_PROJECT", "Finding", "Project", "1/100/", 2)
+    assert_edges_have_traversal_path(context, "IN_PROJECT", "Finding", "Project", "1/100/", 2)
         .await;
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "DETECTED_BY",
         "Finding",
         "VulnerabilityScanner",
@@ -375,11 +358,7 @@ async fn namespace_handler_processes_findings() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_vulnerability_with_user_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_vulnerability_with_user_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -427,7 +406,7 @@ async fn namespace_handler_processes_vulnerability_with_user_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -444,10 +423,10 @@ async fn namespace_handler_processes_vulnerability_with_user_edges() {
     assert!(!result.is_empty(), "vulnerabilities should exist");
     assert_eq!(result[0].num_rows(), 3);
 
-    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "Vulnerability", "1/100/", 3)
+    assert_edges_have_traversal_path(context, "AUTHORED", "User", "Vulnerability", "1/100/", 3)
         .await;
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "CONFIRMED_BY",
         "User",
         "Vulnerability",
@@ -455,17 +434,10 @@ async fn namespace_handler_processes_vulnerability_with_user_edges() {
         1,
     )
     .await;
+    assert_edges_have_traversal_path(context, "RESOLVED_BY", "User", "Vulnerability", "1/100/", 1)
+        .await;
     assert_edges_have_traversal_path(
-        &context,
-        "RESOLVED_BY",
-        "User",
-        "Vulnerability",
-        "1/100/",
-        1,
-    )
-    .await;
-    assert_edges_have_traversal_path(
-        &context,
+        context,
         "DISMISSED_BY",
         "User",
         "Vulnerability",
@@ -475,11 +447,7 @@ async fn namespace_handler_processes_vulnerability_with_user_edges() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_vulnerability_finding_edge() {
-    let context = TestContext::new().await;
-
+pub async fn processes_vulnerability_finding_edge(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -527,7 +495,7 @@ async fn namespace_handler_processes_vulnerability_finding_edge() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -539,7 +507,7 @@ async fn namespace_handler_processes_vulnerability_finding_edge() {
         .expect("handler should succeed");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "HAS_FINDING",
         "Vulnerability",
         "Finding",
@@ -549,11 +517,7 @@ async fn namespace_handler_processes_vulnerability_finding_edge() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_vulnerability_occurrences() {
-    let context = TestContext::new().await;
-
+pub async fn processes_vulnerability_occurrences(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -627,7 +591,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -671,7 +635,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     assert_eq!(detection_methods.value(1), "external_security_report");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "IN_PROJECT",
         "VulnerabilityOccurrence",
         "Project",
@@ -680,7 +644,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     )
     .await;
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "DETECTED_BY",
         "VulnerabilityOccurrence",
         "VulnerabilityScanner",
@@ -689,7 +653,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     )
     .await;
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "HAS_IDENTIFIER",
         "VulnerabilityOccurrence",
         "VulnerabilityIdentifier",
@@ -698,7 +662,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     )
     .await;
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "OCCURRENCE_OF",
         "VulnerabilityOccurrence",
         "Vulnerability",
@@ -708,11 +672,7 @@ async fn namespace_handler_processes_vulnerability_occurrences() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_vulnerability_merge_request_links() {
-    let context = TestContext::new().await;
-
+pub async fn processes_vulnerability_merge_request_links(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -778,7 +738,7 @@ async fn namespace_handler_processes_vulnerability_merge_request_links() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -790,7 +750,7 @@ async fn namespace_handler_processes_vulnerability_merge_request_links() {
         .expect("handler should succeed");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "FIXES",
         "MergeRequest",
         "Vulnerability",
@@ -800,11 +760,7 @@ async fn namespace_handler_processes_vulnerability_merge_request_links() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
-    let context = TestContext::new().await;
-
+pub async fn processes_vulnerability_occurrence_identifiers(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -861,7 +817,7 @@ async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
             VALUES
                 (1, '00000000-0000-0000-0000-0000000000a1', 'SQL Injection', 7, 0, 0, 1000, 1, 1, '1.0', 'src/main.rs:42', 'fp-loc-1',
                  '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, '00000000-0000-0000-0000-0000000000a2', 'XSS Vulnerability', 5, 0, 0, 1000, 1, 2, '1.0', 'src/web.rs:100', 'fp-loc-2',
+                (2, '00000000-0000-0000-0000-0000000000a2', 'XSS Vulnerability', 5, 0, 0, 1000, 1, 3, '1.0', 'src/web.rs:100', 'fp-loc-2',
                  '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
         )
         .await;
@@ -878,7 +834,7 @@ async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -890,7 +846,7 @@ async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
         .expect("handler should succeed");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "HAS_IDENTIFIER",
         "VulnerabilityOccurrence",
         "VulnerabilityIdentifier",
@@ -900,11 +856,7 @@ async fn namespace_handler_processes_vulnerability_occurrence_identifiers() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_security_scans() {
-    let context = TestContext::new().await;
-
+pub async fn processes_security_scans(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -960,7 +912,7 @@ async fn namespace_handler_processes_security_scans() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -992,7 +944,7 @@ async fn namespace_handler_processes_security_scans() {
     assert!(latest_values.value(1));
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "IN_PROJECT",
         "SecurityScan",
         "Project",
@@ -1001,7 +953,7 @@ async fn namespace_handler_processes_security_scans() {
     )
     .await;
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "IN_PIPELINE",
         "SecurityScan",
         "Pipeline",
@@ -1009,14 +961,10 @@ async fn namespace_handler_processes_security_scans() {
         2,
     )
     .await;
-    assert_edges_have_traversal_path(&context, "RAN_BY", "SecurityScan", "Job", "1/100/", 2).await;
+    assert_edges_have_traversal_path(context, "RAN_BY", "SecurityScan", "Job", "1/100/", 2).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_security_scan_finding_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_security_scan_finding_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -1072,7 +1020,7 @@ async fn namespace_handler_processes_security_scan_finding_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -1084,7 +1032,7 @@ async fn namespace_handler_processes_security_scan_finding_edges() {
         .expect("handler should succeed");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "HAS_FINDING",
         "SecurityScan",
         "Finding",

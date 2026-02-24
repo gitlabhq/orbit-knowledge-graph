@@ -1,7 +1,6 @@
-//! Integration tests for merge request diff processing in the namespace handler.
+//! Integration subtests for merge request diff processing.
 
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
 use crate::common::{
     TestContext, assert_edges_have_traversal_path, create_namespace_payload,
@@ -9,11 +8,7 @@ use crate::common::{
     get_string_column,
 };
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_merge_request_diffs_with_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_merge_request_diffs_with_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO hierarchy_merge_requests
@@ -36,7 +31,7 @@ async fn namespace_handler_processes_merge_request_diffs_with_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -60,7 +55,7 @@ async fn namespace_handler_processes_merge_request_diffs_with_edges() {
     assert_eq!(states.value(1), "collected");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "HAS_DIFF",
         "MergeRequest",
         "MergeRequestDiff",
@@ -70,11 +65,7 @@ async fn namespace_handler_processes_merge_request_diffs_with_edges() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_merge_request_diff_files_with_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO hierarchy_merge_requests
@@ -107,7 +98,7 @@ async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -141,7 +132,7 @@ async fn namespace_handler_processes_merge_request_diff_files_with_edges() {
     assert!(has_new_file, "should have at least one new file");
 
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "HAS_FILE",
         "MergeRequestDiff",
         "MergeRequestDiffFile",

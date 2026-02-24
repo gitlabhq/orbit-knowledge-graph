@@ -165,6 +165,19 @@ impl TestContext {
         }
     }
 
+    pub async fn truncate_all_tables(&self) {
+        let batches = self
+            .query("SELECT name FROM system.tables WHERE database = 'test' AND engine != 'View'")
+            .await;
+        for batch in &batches {
+            let names = get_string_column(batch, "name");
+            for i in 0..batch.num_rows() {
+                self.execute(&format!("TRUNCATE TABLE {}", names.value(i)))
+                    .await;
+            }
+        }
+    }
+
     async fn run_schema(url: &str) {
         let client =
             ArrowClickHouseClient::new(url, TEST_DATABASE, TEST_USERNAME, Some(TEST_PASSWORD));
@@ -227,6 +240,35 @@ pub async fn get_namespace_handler(context: &TestContext) -> Box<dyn Handler> {
         .expect("namespace-handler not found")
 }
 
+/// Get the global handler from an SdlcModule.
+pub async fn get_global_handler(context: &TestContext) -> Box<dyn Handler> {
+    let sdlc_config = SdlcIndexingConfig {
+        datalake_batch_size: 1,
+        ..Default::default()
+    };
+    let sdlc_module = SdlcModule::new(&context.config, &context.config, &sdlc_config)
+        .await
+        .expect("failed to create SDLC module");
+    let handlers = sdlc_module.handlers();
+    handlers
+        .into_iter()
+        .find(|h| h.name() == "global-handler")
+        .expect("global-handler not found")
+}
+
+/// Run a subtest with automatic table truncation afterward.
+#[allow(unused_macros)]
+macro_rules! run_subtest {
+    ($name:expr, $context:expr, $test_fn:expr) => {{
+        eprintln!("--- {}", $name);
+        $test_fn($context).await;
+        $context.truncate_all_tables().await;
+    }};
+}
+
+#[allow(unused_imports)]
+pub(crate) use run_subtest;
+
 /// Extract a string column from a RecordBatch.
 pub fn get_string_column<'a>(batch: &'a RecordBatch, name: &str) -> &'a StringArray {
     batch
@@ -276,7 +318,7 @@ pub async fn assert_edge_count(
     expected_count: usize,
 ) {
     let query = format!(
-        "SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = '{relationship_kind}' \
+        "SELECT source_id, target_id FROM gl_edge FINAL WHERE relationship_kind = '{relationship_kind}' \
          AND source_kind = '{source_kind}' AND target_kind = '{target_kind}'"
     );
     let result = context.query(&query).await;
@@ -305,7 +347,7 @@ pub async fn assert_edge_count_for_traversal_path(
     expected_count: usize,
 ) {
     let query = format!(
-        "SELECT 1 FROM gl_edge WHERE relationship_kind = '{relationship_kind}' \
+        "SELECT 1 FROM gl_edge FINAL WHERE relationship_kind = '{relationship_kind}' \
          AND source_kind = '{source_kind}' AND target_kind = '{target_kind}' \
          AND traversal_path = '{traversal_path}'"
     );
@@ -328,7 +370,7 @@ pub async fn assert_edges_have_traversal_path(
     expected_count: usize,
 ) {
     let query = format!(
-        "SELECT traversal_path FROM gl_edge WHERE relationship_kind = '{relationship_kind}' \
+        "SELECT traversal_path FROM gl_edge FINAL WHERE relationship_kind = '{relationship_kind}' \
          AND source_kind = '{source_kind}' AND target_kind = '{target_kind}'"
     );
     let result = context.query(&query).await;

@@ -1,18 +1,13 @@
-//! Integration tests for work item processing in the namespace handler.
+//! Integration subtests for work item processing.
 
 use indexer::testkit::TestEnvelopeFactory;
-use serial_test::serial;
 
 use crate::common::{
     TestContext, assert_edges_have_traversal_path, create_namespace_payload,
     default_test_watermark, get_namespace_handler, get_string_column,
 };
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_work_items_with_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_work_items_with_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_milestones (id, title, project_id, state, traversal_path, _siphon_replicated_at)
@@ -41,7 +36,7 @@ async fn namespace_handler_processes_work_items_with_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -75,11 +70,7 @@ async fn namespace_handler_processes_work_items_with_edges() {
     assert_eq!(work_item_types.value(1), "task");
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_work_item_single_value_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_work_item_single_value_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_milestones (id, title, project_id, state, traversal_path, _siphon_replicated_at)
@@ -110,7 +101,7 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -121,9 +112,9 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(&context, "AUTHORED", "User", "WorkItem", "1/100/", 1).await;
+    assert_edges_have_traversal_path(context, "AUTHORED", "User", "WorkItem", "1/100/", 1).await;
     assert_edges_have_traversal_path(
-        &context,
+        context,
         "IN_MILESTONE",
         "WorkItem",
         "Milestone",
@@ -131,14 +122,10 @@ async fn namespace_handler_processes_work_item_single_value_edges() {
         1,
     )
     .await;
-    assert_edges_have_traversal_path(&context, "IN_GROUP", "WorkItem", "Group", "1/100/", 1).await;
+    assert_edges_have_traversal_path(context, "IN_GROUP", "WorkItem", "Group", "1/100/", 1).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_work_item_multi_target_edges() {
-    let context = TestContext::new().await;
-
+pub async fn processes_work_item_multi_target_edges(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_issues (id, title, description, _siphon_replicated_at)
@@ -155,7 +142,7 @@ async fn namespace_handler_processes_work_item_multi_target_edges() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -166,15 +153,11 @@ async fn namespace_handler_processes_work_item_multi_target_edges() {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(&context, "ASSIGNED", "User", "WorkItem", "1/100/", 3).await;
-    assert_edges_have_traversal_path(&context, "HAS_LABEL", "WorkItem", "Label", "1/100/", 2).await;
+    assert_edges_have_traversal_path(context, "ASSIGNED", "User", "WorkItem", "1/100/", 3).await;
+    assert_edges_have_traversal_path(context, "HAS_LABEL", "WorkItem", "Label", "1/100/", 2).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_work_item_parent_links() {
-    let context = TestContext::new().await;
-
+pub async fn processes_work_item_parent_links(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -225,7 +208,7 @@ async fn namespace_handler_processes_work_item_parent_links() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -236,15 +219,11 @@ async fn namespace_handler_processes_work_item_parent_links() {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(&context, "CONTAINS", "WorkItem", "WorkItem", "1/100/", 3)
+    assert_edges_have_traversal_path(context, "CONTAINS", "WorkItem", "WorkItem", "1/100/", 3)
         .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn namespace_handler_processes_issue_links() {
-    let context = TestContext::new().await;
-
+pub async fn processes_issue_links(context: &TestContext) {
     context
         .execute(
             "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
@@ -292,7 +271,7 @@ async fn namespace_handler_processes_issue_links() {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(&context).await;
+    let namespace_handler = get_namespace_handler(context).await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -303,6 +282,6 @@ async fn namespace_handler_processes_issue_links() {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(&context, "RELATED_TO", "WorkItem", "WorkItem", "1/100/", 2)
+    assert_edges_have_traversal_path(context, "RELATED_TO", "WorkItem", "WorkItem", "1/100/", 2)
         .await;
 }
