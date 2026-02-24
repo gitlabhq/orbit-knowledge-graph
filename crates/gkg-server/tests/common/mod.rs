@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
 use indexer::module::{Handler, HandlerContext, Module};
 use indexer::modules::SdlcModule;
+use indexer::modules::sdlc::config::SdlcIndexingConfig;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use query_engine::ParameterizedQuery;
 use serde_json::Value;
@@ -212,7 +213,11 @@ pub fn default_test_watermark() -> DateTime<Utc> {
 
 /// Get the namespace handler from an SdlcModule.
 pub async fn get_namespace_handler(context: &TestContext) -> Box<dyn Handler> {
-    let sdlc_module = SdlcModule::new(&context.config, &context.config, 1)
+    let sdlc_config = SdlcIndexingConfig {
+        datalake_batch_size: 1,
+        ..Default::default()
+    };
+    let sdlc_module = SdlcModule::new(&context.config, &context.config, &sdlc_config)
         .await
         .expect("failed to create SDLC module");
     let handlers = sdlc_module.handlers();

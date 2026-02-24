@@ -42,8 +42,7 @@ async fn main() -> anyhow::Result<()> {
                 datalake: config.datalake.clone(),
                 engine: config.engine.clone(),
                 gitaly: config.gitaly.clone(),
-                code_indexing: config.code_indexing.clone(),
-                sdlc_indexing: config.sdlc_indexing.clone(),
+                modules: config.modules.clone(),
             };
             indexer::run(&indexer_config, shutdown)
                 .await
