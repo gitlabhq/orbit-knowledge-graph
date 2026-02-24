@@ -28,17 +28,3 @@ pub fn succeeds(sh: &Shell, program: &str, args: &[&str]) -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
-
-/// Run a command and capture its stdout as a trimmed string.
-/// Returns `None` if the command fails.
-pub fn capture(sh: &Shell, program: &str, args: &[&str]) -> Option<String> {
-    cmd!(sh, "{program}")
-        .args(args)
-        .quiet()
-        .ignore_status()
-        .ignore_stderr()
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-}

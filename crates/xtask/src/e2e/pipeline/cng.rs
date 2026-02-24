@@ -17,11 +17,11 @@ use xshell::{Shell, cmd};
 use super::super::cmd as cmd_helpers;
 use super::super::config::Config;
 use super::super::constants as c;
-use super::super::kubectl;
+use super::super::kube;
 use super::super::ui;
 
 /// Run all CNG deploy steps.
-pub fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
+pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
     ui::banner("CNG Deploy: Cluster + GitLab")?;
     ui::detail("GKG root    ", &cfg.gkg_root.display().to_string())?;
     ui::detail("GitLab src  ", &cfg.gitlab_src.display().to_string())?;
@@ -35,7 +35,7 @@ pub fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
     ui::detail("Skip build  ", &skip_build.to_string())?;
 
     validate_prerequisites(sh, cfg, skip_build)?;
-    start_colima(sh, cfg)?;
+    start_colima(sh, cfg).await?;
     prepull_workhorse(sh, cfg)?;
     if skip_build {
         ui::step(3, "Skipping CNG image build (--skip-build)")?;
@@ -43,8 +43,8 @@ pub fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
         build_images(sh, cfg)?;
     }
     deploy_traefik(sh, cfg)?;
-    deploy_gitlab(sh, cfg)?;
-    wait_for_pods(sh, cfg)?;
+    deploy_gitlab(sh, cfg).await?;
+    wait_for_pods(cfg).await?;
 
     ui::outro("CNG deploy complete")?;
     Ok(())
@@ -60,7 +60,7 @@ fn validate_prerequisites(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<
             cfg.gitlab_src.display()
         );
     }
-    for tool in ["colima", "docker", "kubectl", "helm"] {
+    for tool in ["colima", "docker", "helm"] {
         if !cmd_helpers::exists(sh, tool) {
             bail!("{tool} not found on PATH");
         }
@@ -70,7 +70,7 @@ fn validate_prerequisites(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<
 
 // -- Step 1: Start Colima -----------------------------------------------------
 
-fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
     let profile = &cfg.colima.profile;
     ui::step(1, &format!("Starting Colima (profile: {profile})"))?;
 
@@ -104,7 +104,7 @@ fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
 
     let docker_host = cfg.docker_host();
 
-    // Verify docker + kubectl work
+    // Verify docker works
     if !cmd_helpers::succeeds(sh, "docker", &["info"]) {
         let ok = cmd!(sh, "docker info")
             .env("DOCKER_HOST", &docker_host)
@@ -119,10 +119,10 @@ fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
             bail!("docker not reachable via {docker_host}");
         }
     }
-    if !cmd_helpers::succeeds(sh, "kubectl", &["cluster-info"]) {
-        bail!("kubectl cannot reach cluster");
+    if !kube::cluster_reachable().await {
+        bail!("cannot reach k8s cluster");
     }
-    ui::info("Docker + kubectl connected")?;
+    ui::info("Docker + k8s cluster connected")?;
     Ok(())
 }
 
@@ -244,7 +244,7 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
     let release = &cfg.helm.traefik.release;
     let kube_ns = &cfg.namespaces.kube_system;
 
-    if kubectl::helm_release_exists(sh, release, kube_ns, &docker_host) {
+    if kube::helm_release_exists(sh, release, kube_ns, &docker_host) {
         ui::info("Traefik already deployed")?;
         return Ok(());
     }
@@ -284,7 +284,7 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 5: Deploy GitLab ----------------------------------------------------
 
-fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(5, "Deploying GitLab via Helm chart")?;
 
     let docker_host = cfg.docker_host();
@@ -309,7 +309,7 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     let values_file = cfg.cng_dir.join(c::GITLAB_VALUES_YAML);
     let values_str = values_file.to_string_lossy().to_string();
 
-    if kubectl::helm_release_exists(sh, release, ns, &docker_host) {
+    if kube::helm_release_exists(sh, release, ns, &docker_host) {
         ui::info("GitLab already deployed, upgrading")?;
         cmd!(
             sh,
@@ -321,11 +321,7 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
         .env("DOCKER_HOST", &docker_host)
         .run()?;
     } else {
-        // Create namespace (ignore error if it already exists)
-        let _ = cmd!(sh, "kubectl create namespace {ns}")
-            .quiet()
-            .ignore_status()
-            .run();
+        kube::create_namespace(ns).await?;
 
         cmd!(
             sh,
@@ -344,18 +340,18 @@ fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 6: Wait for pods ----------------------------------------------------
 
-fn wait_for_pods(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn wait_for_pods(cfg: &Config) -> Result<()> {
     ui::step(6, "Waiting for GitLab pods to be ready")?;
 
     let ns = &cfg.namespaces.gitlab;
 
     for pr in &cfg.pod_readiness {
-        kubectl::wait_for_pod(sh, &pr.label, ns, &pr.timeout)?;
+        kube::wait_for_pod(&pr.label, ns, &pr.timeout).await?;
     }
 
     // Print pod status
     ui::info("Pod status")?;
-    let _ = cmd!(sh, "kubectl get pods -n {ns}").run();
+    kube::print_pod_status(ns).await?;
 
     Ok(())
 }
