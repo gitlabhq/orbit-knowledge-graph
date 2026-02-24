@@ -12,30 +12,29 @@
 
 use std::fs;
 
-use anyhow::{Context, Result};
-use xshell::{Shell, cmd};
+use anyhow::Result;
 
 use super::super::config::Config;
 use super::super::constants as c;
-use super::super::kubectl;
+use super::super::kube;
 use super::super::ui;
 use super::super::utils;
 
 /// Run all CNG setup steps.
-pub fn run(sh: &Shell, cfg: &Config) -> Result<()> {
+pub async fn run(cfg: &Config) -> Result<()> {
     ui::banner("CNG Setup: Post-deploy Configuration")?;
 
     fs::create_dir_all(&cfg.log_dir)?;
 
-    let toolbox_pod = kubectl::get_toolbox_pod(sh, cfg)?;
+    let toolbox_pod = utils::get_toolbox_pod(cfg).await?;
     ui::detail("Toolbox pod", &toolbox_pod)?;
 
-    bridge_pg_credentials(sh, cfg)?;
-    grant_replication(sh, cfg)?;
-    run_db_migrate(sh, cfg, &toolbox_pod)?;
-    enable_feature_flag(sh, cfg, &toolbox_pod)?;
-    copy_test_scripts(sh, cfg, &toolbox_pod)?;
-    create_test_data(sh, cfg, &toolbox_pod)?;
+    bridge_pg_credentials(cfg).await?;
+    grant_replication(cfg).await?;
+    run_db_migrate(cfg, &toolbox_pod).await?;
+    enable_feature_flag(cfg, &toolbox_pod).await?;
+    copy_test_scripts(cfg, &toolbox_pod).await?;
+    create_test_data(cfg, &toolbox_pod).await?;
 
     ui::outro("CNG setup complete")?;
     Ok(())
@@ -43,30 +42,19 @@ pub fn run(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 8: Bridge PG credentials --------------------------------------------
 
-fn bridge_pg_credentials(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn bridge_pg_credentials(cfg: &Config) -> Result<()> {
     ui::step(8, "Bridging PostgreSQL credentials")?;
 
-    let pg_pass = kubectl::read_secret(
-        sh,
+    let pg_pass = kube::read_secret(
         &cfg.namespaces.gitlab,
         &cfg.postgres.secret_name,
         &cfg.postgres.password_key,
-    )?;
+    )
+    .await?;
     let default_ns = &cfg.namespaces.default;
     let bridge_secret = &cfg.postgres.bridge_secret_name;
 
-    // kubectl create --dry-run=client -o yaml | kubectl apply -f - is idempotent.
-    let yaml = cmd!(
-        sh,
-        "kubectl create secret generic {bridge_secret}
-            -n {default_ns}
-            --from-literal=password={pg_pass}
-            --dry-run=client -o yaml"
-    )
-    .quiet()
-    .read()?;
-
-    cmd!(sh, "kubectl apply -f -").stdin(&yaml).quiet().run()?;
+    kube::apply_secret(default_ns, bridge_secret, "password", &pg_pass).await?;
 
     ui::done(&format!("{bridge_secret} secret created in {default_ns}"))?;
     Ok(())
@@ -74,7 +62,7 @@ fn bridge_pg_credentials(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 9: Grant REPLICATION privilege ---------------------------------------
 
-fn grant_replication(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn grant_replication(cfg: &Config) -> Result<()> {
     ui::step(
         9,
         &format!(
@@ -83,15 +71,15 @@ fn grant_replication(sh: &Shell, cfg: &Config) -> Result<()> {
         ),
     )?;
 
-    let pg_superpass = kubectl::read_secret(
-        sh,
+    let pg_superpass = kube::read_secret(
         &cfg.namespaces.gitlab,
         &cfg.postgres.secret_name,
         &cfg.postgres.superpass_key,
-    )?;
+    )
+    .await?;
     let sql = format!("ALTER USER {} REPLICATION;", cfg.postgres.user);
 
-    kubectl::pg_superuser_exec(sh, cfg, &pg_superpass, &sql)?;
+    utils::pg_superuser(cfg, &pg_superpass, &sql, false).await?;
 
     ui::done("REPLICATION privilege granted")?;
     Ok(())
@@ -99,19 +87,16 @@ fn grant_replication(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 10: Run Rails db:migrate --------------------------------------------
 
-fn run_db_migrate(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
+async fn run_db_migrate(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     ui::step(10, "Running Rails db:migrate")?;
 
     let ns = &cfg.namespaces.gitlab;
     let rails_root = &cfg.pod_paths.rails_root;
-    let script = r#"cd "$0" && bundle exec rails db:migrate RAILS_ENV=production"#.to_string();
+    let script = r#"cd "$0" && bundle exec rails db:migrate RAILS_ENV=production"#;
 
-    cmd!(
-        sh,
-        "kubectl exec -n {ns} {toolbox_pod} -- bash -c {script} {rails_root}"
-    )
-    .run()
-    .context("rails db:migrate failed")?;
+    kube::exec_bash_output(ns, toolbox_pod, script, &[rails_root])
+        .await?
+        .strict("rails db:migrate failed")?;
 
     ui::done("Migrations complete")?;
     Ok(())
@@ -119,10 +104,10 @@ fn run_db_migrate(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
 
 // -- Step 11: Enable feature flag ---------------------------------------------
 
-fn enable_feature_flag(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
+async fn enable_feature_flag(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     ui::step(11, "Enabling :knowledge_graph feature flag")?;
 
-    kubectl::toolbox_rails_eval(sh, cfg, toolbox_pod, "Feature.enable(:knowledge_graph)")?;
+    utils::toolbox_rails_eval(cfg, toolbox_pod, "Feature.enable(:knowledge_graph)").await?;
 
     ui::done("Feature flag enabled")?;
     Ok(())
@@ -130,10 +115,10 @@ fn enable_feature_flag(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()
 
 // -- Step 12: Copy test scripts -----------------------------------------------
 
-fn copy_test_scripts(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
+async fn copy_test_scripts(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     ui::step(12, "Copying test scripts to toolbox pod")?;
 
-    let count = utils::copy_test_scripts(sh, cfg, toolbox_pod)?;
+    let count = utils::copy_test_scripts(cfg, toolbox_pod).await?;
     if count == 0 {
         ui::warn("No test scripts found")?;
     } else {
@@ -145,32 +130,26 @@ fn copy_test_scripts(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> 
 
 // -- Step 13: Create test data ------------------------------------------------
 
-fn create_test_data(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
+async fn create_test_data(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     ui::step(13, "Creating test data")?;
 
     let ns = &cfg.namespaces.gitlab;
     let rails_root = &cfg.pod_paths.rails_root;
     let e2e_pod_dir = &cfg.pod_paths.e2e_pod_dir;
     let script =
-        r#"cd "$0" && bundle exec rails runner "$1"/create_test_data.rb RAILS_ENV=production"#
-            .to_string();
+        r#"cd "$0" && bundle exec rails runner "$1"/create_test_data.rb RAILS_ENV=production"#;
 
-    let output = cmd!(
-        sh,
-        "kubectl exec -n {ns} {toolbox_pod} -- bash -c {script} {rails_root} {e2e_pod_dir}"
-    )
-    .ignore_status()
-    .output()?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let r = kube::exec_bash_output(ns, toolbox_pod, script, &[rails_root, e2e_pod_dir]).await?;
 
     // Write log
     let log_path = cfg.log_dir.join(c::CREATE_TEST_DATA_LOG);
-    fs::write(&log_path, stdout.as_ref())?;
+    fs::write(&log_path, &r.stdout)?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        ui::warn(&format!("create_test_data.rb exited with error: {stderr}"))?;
+    if !r.success {
+        ui::warn(&format!(
+            "create_test_data.rb exited with error: {}",
+            r.stderr
+        ))?;
         ui::warn(&format!("Check {}", log_path.display()))?;
     }
 
@@ -179,18 +158,13 @@ fn create_test_data(sh: &Shell, cfg: &Config, toolbox_pod: &str) -> Result<()> {
     // Check if manifest was written
     let manifest_pod_path = cfg.manifest_pod_path();
     let manifest_check =
-        kubectl::toolbox_exec(sh, cfg, toolbox_pod, &["test", "-f", &manifest_pod_path]);
+        utils::toolbox_exec(cfg, toolbox_pod, &["test", "-f", &manifest_pod_path]).await;
 
     if manifest_check.is_ok() {
         ui::info("Manifest verified in toolbox pod")?;
 
-        let pod_path = format!("{ns}/{toolbox_pod}:{manifest_pod_path}");
         let local_path = cfg.log_dir.join(c::MANIFEST_JSON);
-        let local_str = local_path.to_string_lossy().to_string();
-        let _ = cmd!(sh, "kubectl cp {pod_path} {local_str}")
-            .quiet()
-            .ignore_status()
-            .run();
+        let _ = kube::cp_from_pod(ns, toolbox_pod, &manifest_pod_path, &local_path).await;
         ui::info(&format!("Manifest copied to {}", local_path.display()))?;
     } else {
         ui::warn(&format!(

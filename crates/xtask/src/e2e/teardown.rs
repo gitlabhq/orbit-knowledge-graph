@@ -16,7 +16,7 @@ use xshell::{Shell, cmd};
 use super::cmd as cmd_helpers;
 use super::config::Config;
 use super::constants as c;
-use super::kubectl;
+use super::kube::{self, DeleteTarget};
 use super::ui;
 
 /// Run the E2E teardown.
@@ -26,13 +26,13 @@ use super::ui;
 /// - `keep_colima`: remove everything *except* the Colima VM.
 ///
 /// When `gkg_only` is set, `keep_colima` is ignored (Colima is always kept).
-pub fn run(sh: &Shell, cfg: &Config, keep_colima: bool, gkg_only: bool) -> Result<()> {
+pub async fn run(sh: &Shell, cfg: &Config, keep_colima: bool, gkg_only: bool) -> Result<()> {
     ui::banner("E2E Teardown")?;
     ui::detail("GKG only", &gkg_only.to_string())?;
     ui::detail("Keep Colima", &keep_colima.to_string())?;
 
     // Step 1 is always executed.
-    teardown_gkg_stack(sh, cfg)?;
+    teardown_gkg_stack(sh, cfg).await?;
 
     if gkg_only {
         // Only clean GKG-related local artifacts, then exit early.
@@ -46,8 +46,8 @@ pub fn run(sh: &Shell, cfg: &Config, keep_colima: bool, gkg_only: bool) -> Resul
 
     let docker_host = cfg.docker_host();
 
-    teardown_gitlab(sh, cfg, &docker_host)?;
-    teardown_cngsetup_artifacts(sh, cfg)?;
+    teardown_gitlab(sh, cfg, &docker_host).await?;
+    teardown_cngsetup_artifacts(cfg).await?;
     teardown_traefik(sh, cfg, &docker_host)?;
     cleanup_local_artifacts(cfg)?;
 
@@ -89,76 +89,54 @@ pub fn run(sh: &Shell, cfg: &Config, keep_colima: bool, gkg_only: bool) -> Resul
 
 /// Uninstall the GKG Helm chart and remove all GKG resources from the default
 /// namespace (ClickHouse, NATS, siphon, dispatch-indexing, secrets, PVCs).
-fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(1, "Tearing down GKG stack")?;
 
-    let default_ns = &cfg.namespaces.default;
+    let ns = &cfg.namespaces.default;
     let ch_svc = &cfg.clickhouse.service_name;
 
     // Uninstall the GKG Helm release first (removes NATS, siphon, GKG pods).
     let gkg_release = &cfg.helm.gkg.release;
     ui::info("Uninstalling GKG Helm release...")?;
-    let _ = cmd!(sh, "helm uninstall {gkg_release} -n {default_ns}")
+    let _ = cmd!(sh, "helm uninstall {gkg_release} -n {ns}")
         .quiet()
         .ignore_status()
         .run();
 
-    // Delete ClickHouse StatefulSet + Service + init ConfigMap + PVCs.
-    let _ = cmd!(
-        sh,
-        "kubectl delete statefulset -n {default_ns} {ch_svc} --ignore-not-found"
+    let _ = kube::delete(ns, "apps/v1", "StatefulSet", DeleteTarget::Names(&[ch_svc])).await;
+    let _ = kube::delete(
+        ns,
+        "batch/v1",
+        "Job",
+        DeleteTarget::Names(&[&cfg.gkg.dispatch_job]),
     )
-    .quiet()
-    .ignore_status()
-    .run();
-
-    let dispatch_job = &cfg.gkg.dispatch_job;
-    let _ = cmd!(
-        sh,
-        "kubectl delete job -n {default_ns} {dispatch_job} --ignore-not-found"
+    .await;
+    let _ = kube::delete(ns, "v1", "Service", DeleteTarget::Names(&[ch_svc])).await;
+    let _ = kube::delete(
+        ns,
+        "v1",
+        "ConfigMap",
+        DeleteTarget::Names(&[&cfg.clickhouse.init_configmap]),
     )
-    .quiet()
-    .ignore_status()
-    .run();
-
-    let _ = cmd!(
-        sh,
-        "kubectl delete service -n {default_ns} {ch_svc} --ignore-not-found"
+    .await;
+    let _ = kube::delete(
+        ns,
+        "v1",
+        "Secret",
+        DeleteTarget::Names(&[
+            &cfg.postgres.bridge_secret_name,
+            &cfg.clickhouse.credentials_secret,
+            &cfg.gkg.server_credentials_secret,
+        ]),
     )
-    .quiet()
-    .ignore_status()
-    .run();
-
-    let ch_init_cm = &cfg.clickhouse.init_configmap;
-    let _ = cmd!(
-        sh,
-        "kubectl delete configmap -n {default_ns} {ch_init_cm} --ignore-not-found"
+    .await;
+    let _ = kube::delete(
+        ns,
+        "v1",
+        "PersistentVolumeClaim",
+        DeleteTarget::Label(&cfg.ch_label()),
     )
-    .quiet()
-    .ignore_status()
-    .run();
-
-    // Delete secrets created by the xtask setup.
-    let bridge_secret = &cfg.postgres.bridge_secret_name;
-    let ch_cred = &cfg.clickhouse.credentials_secret;
-    let gkg_cred = &cfg.gkg.server_credentials_secret;
-    let _ = cmd!(
-        sh,
-        "kubectl delete secret -n {default_ns} {bridge_secret} {ch_cred} {gkg_cred} --ignore-not-found"
-    )
-    .quiet()
-    .ignore_status()
-    .run();
-
-    // Delete ClickHouse PVCs.
-    let ch_label = cfg.ch_label();
-    let _ = cmd!(
-        sh,
-        "kubectl delete pvc -n {default_ns} -l {ch_label} --ignore-not-found"
-    )
-    .quiet()
-    .ignore_status()
-    .run();
+    .await;
 
     ui::info("GKG stack resources removed")?;
     Ok(())
@@ -166,13 +144,13 @@ fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 2: Tear down GitLab -------------------------------------------------
 
-fn teardown_gitlab(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
+async fn teardown_gitlab(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
     ui::step(2, "Tearing down GitLab")?;
 
     let ns = &cfg.namespaces.gitlab;
     let release = &cfg.helm.gitlab.release;
 
-    if kubectl::helm_release_exists(sh, release, ns, docker_host) {
+    if kube::helm_release_exists(sh, release, ns, docker_host) {
         ui::info("Uninstalling GitLab Helm release")?;
         let timeout = &cfg.helm.uninstall_timeout;
         let _ = cmd!(sh, "helm uninstall {release} -n {ns} --timeout {timeout}")
@@ -185,38 +163,23 @@ fn teardown_gitlab(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
     }
 
     ui::info("Removing GitLab PVCs")?;
-    let _ = cmd!(sh, "kubectl delete pvc -n {ns} --all --ignore-not-found")
-        .quiet()
-        .ignore_status()
-        .run();
+    let _ = kube::delete(ns, "v1", "PersistentVolumeClaim", DeleteTarget::Label("")).await;
 
     ui::info(&format!("Removing {ns} namespace"))?;
-    let _ = cmd!(
-        sh,
-        "kubectl delete namespace {ns} --ignore-not-found --timeout=120s"
-    )
-    .quiet()
-    .ignore_status()
-    .run();
+    let _ = kube::delete_namespace(ns).await;
 
     Ok(())
 }
 
 // -- Step 3: Remove CNG setup artifacts ---------------------------------------
 
-fn teardown_cngsetup_artifacts(sh: &Shell, cfg: &Config) -> Result<()> {
+async fn teardown_cngsetup_artifacts(cfg: &Config) -> Result<()> {
     ui::step(3, "Removing CNG setup artifacts")?;
 
-    let default_ns = &cfg.namespaces.default;
+    let ns = &cfg.namespaces.default;
     let bridge_secret = &cfg.postgres.bridge_secret_name;
 
-    let _ = cmd!(
-        sh,
-        "kubectl delete secret {bridge_secret} -n {default_ns} --ignore-not-found"
-    )
-    .quiet()
-    .ignore_status()
-    .run();
+    let _ = kube::delete(ns, "v1", "Secret", DeleteTarget::Names(&[bridge_secret])).await;
     ui::info(&format!("Removed {bridge_secret} secret"))?;
 
     Ok(())
@@ -230,7 +193,7 @@ fn teardown_traefik(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
     let release = &cfg.helm.traefik.release;
     let kube_ns = &cfg.namespaces.kube_system;
 
-    if kubectl::helm_release_exists(sh, release, kube_ns, docker_host) {
+    if kube::helm_release_exists(sh, release, kube_ns, docker_host) {
         ui::info("Uninstalling Traefik")?;
         let _ = cmd!(sh, "helm uninstall {release} -n {kube_ns}")
             .env("DOCKER_HOST", docker_host)

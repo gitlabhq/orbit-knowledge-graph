@@ -19,3 +19,7 @@ serde_yaml = { workspace = true }
 tempfile = { workspace = true }
 xshell = { workspace = true }
 cliclack = { workspace = true }
+kube = { workspace = true }
+k8s-openapi = { workspace = true }
+tar = { workspace = true }
+tokio = { workspace = true }

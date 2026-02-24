@@ -70,7 +70,8 @@ enum E2eCommand {
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
     let sh = Shell::new()?;
 
@@ -95,13 +96,13 @@ fn main() -> Result<()> {
                 let run_gkg_stack = gkg || gkg_only;
 
                 if run_cng {
-                    e2e::pipeline::cng::run(&sh, &cfg, skip_build)?;
+                    e2e::pipeline::cng::run(&sh, &cfg, skip_build).await?;
                 }
                 if run_cng_setup {
-                    e2e::pipeline::cngsetup::run(&sh, &cfg)?;
+                    e2e::pipeline::cngsetup::run(&cfg).await?;
                 }
                 if run_gkg_stack {
-                    e2e::pipeline::gkg::run(&sh, &cfg)?;
+                    e2e::pipeline::gkg::run(&sh, &cfg).await?;
                 }
 
                 Ok(())
@@ -111,7 +112,7 @@ fn main() -> Result<()> {
                 gkg_only,
             } => {
                 let cfg = e2e::config::Config::load()?;
-                e2e::teardown::run(&sh, &cfg, keep_colima, gkg_only)
+                e2e::teardown::run(&sh, &cfg, keep_colima, gkg_only).await
             }
         },
     }

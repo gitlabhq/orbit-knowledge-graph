@@ -2,7 +2,7 @@ pub mod cmd;
 pub mod config;
 pub mod constants;
 pub mod env;
-pub mod kubectl;
+pub mod kube;
 pub mod pipeline;
 pub mod teardown;
 pub mod template;
