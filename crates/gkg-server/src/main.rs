@@ -9,6 +9,8 @@ use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use indexer::IndexerConfig;
+use indexer::dispatcher::Dispatcher;
+use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -31,9 +33,24 @@ async fn main() -> anyhow::Result<()> {
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));
 
     let result = match args.mode {
-        Mode::DispatchIndexing => indexer::dispatcher::run(&config.nats, &config.datalake)
-            .await
-            .map_err(Into::into),
+        Mode::DispatchIndexing => {
+            let services = indexer::dispatcher::connect(&config.nats).await?;
+            let datalake = config.datalake.build_client();
+            let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
+                Box::new(GlobalDispatcher::new(
+                    services.nats.clone(),
+                    services.lock_service.clone(),
+                )),
+                Box::new(NamespaceDispatcher::new(
+                    services.nats,
+                    services.lock_service,
+                    datalake,
+                )),
+            ];
+            indexer::dispatcher::run(&dispatchers)
+                .await
+                .map_err(Into::into)
+        }
         Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig {

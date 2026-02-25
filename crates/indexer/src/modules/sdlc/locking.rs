@@ -13,8 +13,8 @@ pub fn global_lock_key() -> &'static str {
     "global"
 }
 
-pub fn namespace_lock_key(namespace_id: i64) -> String {
-    format!("namespace.{namespace_id}")
+pub fn namespace_lock_key(organization_id: i64, namespace_id: i64) -> String {
+    format!("namespace.{organization_id}.{namespace_id}")
 }
 
 pub fn project_lock_key(project_id: i64, branch: &str) -> String {
@@ -34,8 +34,8 @@ mod tests {
 
     #[test]
     fn namespace_lock_key_formats_correctly() {
-        assert_eq!(namespace_lock_key(123), "namespace.123");
-        assert_eq!(namespace_lock_key(456), "namespace.456");
+        assert_eq!(namespace_lock_key(1, 123), "namespace.1.123");
+        assert_eq!(namespace_lock_key(2, 456), "namespace.2.456");
     }
 
     #[test]
