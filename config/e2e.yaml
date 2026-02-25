@@ -11,6 +11,7 @@ colima:
   memory: "12"              # GB
   cpus: "4"
   disk: "60"                # GB
+  vm_type: vz                 # vz (macOS Virtualization.framework) or qemu
   k8s_version: v1.31.5+k3s1
 
 # -- Kubernetes namespaces -----------------------------------------------------
@@ -44,12 +45,14 @@ helm:
   gitlab:
     release: gitlab
     chart: gitlab/gitlab
+    chart_version: "9.8.1"    # must match cng.base_tag (v18.8.1 → chart 9.8.1)
     repo_name: gitlab
     repo_url: https://charts.gitlab.io
     timeout: 15m
   traefik:
     release: traefik
     chart: traefik/traefik
+    chart_version: ""          # empty = latest
     repo_name: traefik
     repo_url: https://traefik.github.io/charts
     timeout: 5m
@@ -80,8 +83,10 @@ pod_paths:
 
 # -- ClickHouse ----------------------------------------------------------------
 clickhouse:
+  image: "clickhouse/clickhouse-server:25.1-alpine"
   service_name: gkg-e2e-clickhouse
   http_port: "8123"
+  native_port: "9000"
   datalake_db: gitlab_clickhouse_development
   graph_db: gkg-development
   default_user: default

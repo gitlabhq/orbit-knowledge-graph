@@ -94,9 +94,10 @@ async fn run_db_migrate(cfg: &Config, toolbox_pod: &str) -> Result<()> {
 
     let ns = &cfg.namespaces.gitlab;
     let rails_root = &cfg.pod_paths.rails_root;
-    let script = r#"cd "$0" && bundle exec rails db:migrate RAILS_ENV=production"#;
+    let rails_env = c::RAILS_ENV;
+    let script = format!(r#"cd "$0" && bundle exec rails db:migrate RAILS_ENV={rails_env}"#);
 
-    kube::exec_bash_output(ns, toolbox_pod, script, &[rails_root])
+    kube::exec_bash_output(ns, toolbox_pod, &script, &[rails_root])
         .await?
         .strict("rails db:migrate failed")?;
 
@@ -138,10 +139,12 @@ async fn create_test_data(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     let ns = &cfg.namespaces.gitlab;
     let rails_root = &cfg.pod_paths.rails_root;
     let e2e_pod_dir = &cfg.pod_paths.e2e_pod_dir;
-    let script =
-        r#"cd "$0" && bundle exec rails runner "$1"/create_test_data.rb RAILS_ENV=production"#;
+    let rails_env = c::RAILS_ENV;
+    let script = format!(
+        r#"cd "$0" && E2E_POD_DIR="$1" bundle exec rails runner "$1"/create_test_data.rb RAILS_ENV={rails_env}"#
+    );
 
-    let r = kube::exec_bash_output(ns, toolbox_pod, script, &[rails_root, e2e_pod_dir]).await?;
+    let r = kube::exec_bash_output(ns, toolbox_pod, &script, &[rails_root, e2e_pod_dir]).await?;
 
     // Write log
     let log_path = cfg.log_dir.join(c::CREATE_TEST_DATA_LOG);

@@ -39,13 +39,15 @@ pub fn repo_add_update(
     Ok(())
 }
 
-/// Install a Helm chart with `--wait`. Pass `&[]` for `sets` if no overrides.
+/// Install a Helm chart with `--wait`. Pass `""` for `version` to skip pinning.
+#[allow(clippy::too_many_arguments)]
 pub fn install(
     sh: &Shell,
     release: &str,
     chart: &str,
     namespace: &str,
     values_file: &str,
+    version: &str,
     timeout: &str,
     docker_host: &str,
 ) -> Result<()> {
@@ -56,12 +58,14 @@ pub fn install(
         namespace,
         values_file,
         &[],
+        version,
         timeout,
         docker_host,
     )
 }
 
 /// Install a Helm chart with extra `--set` flags and `--wait`.
+/// Pass `""` for `version` to skip pinning.
 #[allow(clippy::too_many_arguments)]
 pub fn install_with_sets(
     sh: &Shell,
@@ -70,6 +74,7 @@ pub fn install_with_sets(
     namespace: &str,
     values_file: &str,
     sets: &[(&str, &str)],
+    version: &str,
     timeout: &str,
     docker_host: &str,
 ) -> Result<()> {
@@ -78,12 +83,19 @@ pub fn install_with_sets(
         .flat_map(|(k, v)| ["--set".to_string(), format!("{k}={v}")])
         .collect();
 
+    let version_args: Vec<String> = if version.is_empty() {
+        vec![]
+    } else {
+        vec!["--version".to_string(), version.to_string()]
+    };
+
     cmd!(
         sh,
         "helm install {release} {chart}
             -n {namespace}
             -f {values_file}
             {set_args...}
+            {version_args...}
             --wait
             --timeout {timeout}"
     )
@@ -94,21 +106,37 @@ pub fn install_with_sets(
     Ok(())
 }
 
-/// Upgrade an existing Helm release.
+/// Upgrade an existing Helm release with optional `--set` overrides and version pin.
+#[allow(clippy::too_many_arguments)]
 pub fn upgrade(
     sh: &Shell,
     release: &str,
     chart: &str,
     namespace: &str,
     values_file: &str,
+    sets: &[(&str, &str)],
+    version: &str,
     timeout: &str,
     docker_host: &str,
 ) -> Result<()> {
+    let set_args: Vec<String> = sets
+        .iter()
+        .flat_map(|(k, v)| ["--set".to_string(), format!("{k}={v}")])
+        .collect();
+
+    let version_args: Vec<String> = if version.is_empty() {
+        vec![]
+    } else {
+        vec!["--version".to_string(), version.to_string()]
+    };
+
     cmd!(
         sh,
         "helm upgrade {release} {chart}
             -n {namespace}
             -f {values_file}
+            {set_args...}
+            {version_args...}
             --timeout {timeout}"
     )
     .env(c::DOCKER_HOST_ENV, docker_host)

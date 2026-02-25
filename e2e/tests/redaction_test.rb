@@ -31,12 +31,12 @@ grpc_endpoint = ENV.fetch('KNOWLEDGE_GRAPH_GRPC_ENDPOINT',
 client = Ai::KnowledgeGraph::GrpcClient.new(endpoint: grpc_endpoint)
 org_id = m[:organization_id]
 
-# Load users
-root     = User.find_by!(username: 'root')
-lois     = User.find_by!(username: 'lois')
-franklyn = User.find_by!(username: 'franklyn.mcdermott')
-vickey   = User.find_by!(username: 'vickey.schmidt')
-hanna    = User.find_by!(username: 'hanna')
+# Load users from manifest (single source of truth for usernames)
+root     = User.find_by!(username: m[:users][:root][:username])
+lois     = User.find_by!(username: m[:users][:lois][:username])
+franklyn = User.find_by!(username: m[:users][:franklyn][:username])
+vickey   = User.find_by!(username: m[:users][:vickey][:username])
+hanna    = User.find_by!(username: m[:users][:hanna][:username])
 
 # Extract dynamic IDs from manifest
 proj_smoke_id     = m[:projects][:smoke][:id]

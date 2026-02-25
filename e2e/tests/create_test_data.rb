@@ -21,7 +21,21 @@
 
 require 'json'
 
-MANIFEST_PATH = '/tmp/e2e/manifest.json'
+E2E_POD_DIR = ENV.fetch('E2E_POD_DIR', '/tmp/e2e')
+MANIFEST_PATH = "#{E2E_POD_DIR}/manifest.json"
+TEST_PASSWORD = 'TestPass123!'
+
+# GitLab service objects return results in various shapes: ServiceResponse with
+# payload hash, plain hash, or the model directly. This normalizes all of them.
+def unwrap(result, key)
+  if result.respond_to?(:payload) && result.payload.is_a?(Hash)
+    result.payload[key] || result.payload
+  elsif result.is_a?(Hash)
+    result[key] || result
+  else
+    result
+  end
+end
 
 # GitLab service objects return results in various shapes: ServiceResponse with
 # payload hash, plain hash, or the model directly. This normalizes all of them.
@@ -68,13 +82,12 @@ def find_or_create_user(username, name, email, admin, org)
   if user
     puts "  User '#{username}' already exists (id: #{user.id})"
   else
-    password = 'TestPass123!'
     user = User.new(
       username: username,
       name: name,
       email: email,
-      password: password,
-      password_confirmation: password,
+      password: TEST_PASSWORD,
+      password_confirmation: TEST_PASSWORD,
       confirmed_at: Time.current,
       organization_id: org.id,
       skip_confirmation: true
@@ -99,7 +112,7 @@ rescue StandardError => e
                                       username: username,
                                       name: name,
                                       email: email,
-                                      password: 'TestPass123!',
+                                      password: TEST_PASSWORD,
                                       skip_confirmation: true,
                                       organization_id: org.id
                                     }).execute

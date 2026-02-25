@@ -4,8 +4,12 @@
 # Target: ~4GB RAM. Single replica everything. No registry, pages, KAS, runner,
 # prometheus, cert-manager. PostgreSQL with logical replication for Siphon.
 #
-# Custom CNG images built from the feature branch are referenced here with
-# imagePullPolicy: Never (loaded into colima's docker daemon).
+# Only non-default overrides. Chart defaults (minio enabled, UTC timezone,
+# shell port 22, artifacts/uploads buckets, etc.) are intentionally omitted.
+#
+# NOTE: Image repos/tags, workhorse image, and PG config are overridden at
+# deploy time via --set flags from config/e2e.yaml (see cng.rs deploy_gitlab).
+# Values below are documentation defaults only.
 # =============================================================================
 
 global:
@@ -20,11 +24,6 @@ global:
     class: traefik
     tls:
       enabled: false
-
-  shell:
-    port: 22
-
-  time_zone: UTC
 
   kas:
     enabled: false
@@ -45,9 +44,6 @@ global:
         cpu: 300m
         memory: 512Mi
 
-  minio:
-    enabled: true
-
   # Skip the ClickHouse schema version check in init containers.
   # Without this, the rails-dependencies script crashes on a nil ClickHouse
   # config and prevents pods from starting.
@@ -58,19 +54,8 @@ global:
     enableUsagePing: false
     enableSeatLink: false
     lfs:
-      enabled: true
-      bucket: gitlab-lfs
-    artifacts:
-      enabled: true
-      bucket: gitlab-artifacts
-    uploads:
-      enabled: true
-      bucket: gitlab-uploads
+      bucket: gitlab-lfs    # default is git-lfs, we use gitlab-lfs
     packages:
-      enabled: false
-    terraformState:
-      enabled: false
-    dependencyProxy:
       enabled: false
     gitlab_kas:
       enabled: false
@@ -108,7 +93,7 @@ gitlab:
       repository: gkg-e2e/gitlab-webservice-ee
       tag: local
       pullPolicy: Never
-    workhorse:
+    workhorse:  # overridden by --set from config.yaml cng.base_tag
       image: registry.gitlab.com/gitlab-org/build/cng/gitlab-workhorse-ee
       tag: v18.8.1
       pullPolicy: IfNotPresent

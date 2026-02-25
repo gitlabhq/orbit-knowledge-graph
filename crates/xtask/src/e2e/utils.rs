@@ -34,11 +34,12 @@ pub async fn toolbox_exec(cfg: &Config, pod: &str, command: &[&str]) -> Result<S
 /// `rails_root` and `ruby_cmd` are passed as positional parameters to
 /// `bash -c` (`$0` and `$1`) so they are never interpreted as shell syntax.
 pub async fn toolbox_rails_eval(cfg: &Config, pod: &str, ruby_cmd: &str) -> Result<String> {
-    let script = r#"cd "$0" && bundle exec rails runner "$1" RAILS_ENV=production"#;
+    let rails_env = c::RAILS_ENV;
+    let script = format!(r#"cd "$0" && bundle exec rails runner "$1" RAILS_ENV={rails_env}"#);
     kube::exec_bash_output(
         &cfg.namespaces.gitlab,
         pod,
-        script,
+        &script,
         &[&cfg.pod_paths.rails_root, ruby_cmd],
     )
     .await?

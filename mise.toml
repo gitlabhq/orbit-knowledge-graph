@@ -21,6 +21,7 @@ SIPHON_PROTO_ROOT = "~/gitlab/gdk/siphon"
 "zig" = "0.15.2"
 clickhouse = "25.12"
 uv = "0.9.28"
+node = "24"
 vale = "3.13.0"
 lychee = "0.21.0"
 

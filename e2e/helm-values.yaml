@@ -1,6 +1,10 @@
 # =============================================================================
 # values.yaml — E2E self-contained environment
 #
+# NOTE: Postgres, ClickHouse, siphon, and GKG image values are overridden at
+# deploy time via --set flags from config/e2e.yaml (see gkg.rs deploy_gkg_chart).
+# Values below are documentation defaults only.
+#
 # Everything GKG needs runs inside k8s. GitLab Rails continues to run on the
 # host via GDK; it connects to GKG via the port-forwards set up by Tiltfile.
 #

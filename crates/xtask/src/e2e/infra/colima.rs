@@ -17,6 +17,7 @@ pub fn start(
     memory: &str,
     cpus: &str,
     disk: &str,
+    vm_type: &str,
     k8s_version: &str,
 ) -> Result<()> {
     cmd!(
@@ -26,7 +27,7 @@ pub fn start(
             --memory {memory}
             --cpu {cpus}
             --disk {disk}
-            --vm-type vz
+            --vm-type {vm_type}
             --kubernetes
             --kubernetes-version {k8s_version}"
     )
