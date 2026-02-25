@@ -11,7 +11,7 @@ style:
   color: "#7F1D1D"
 
 redaction:
-  resource_type: vulnerability_identifiers
+  resource_type: vulnerability_identifier
   id_column: id
   ability: read_vulnerability
 

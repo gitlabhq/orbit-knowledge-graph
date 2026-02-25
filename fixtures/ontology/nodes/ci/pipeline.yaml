@@ -11,7 +11,7 @@ style:
   color: "#6366F1"
 
 redaction:
-  resource_type: ci_pipelines
+  resource_type: ci_pipeline
   id_column: id
   ability: read_pipeline
 

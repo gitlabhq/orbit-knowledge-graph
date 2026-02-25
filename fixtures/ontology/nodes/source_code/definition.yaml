@@ -11,7 +11,7 @@ style:
   color: "#2DD4BF"
 
 redaction:
-  resource_type: projects
+  resource_type: project
   id_column: project_id
   ability: read_code
 

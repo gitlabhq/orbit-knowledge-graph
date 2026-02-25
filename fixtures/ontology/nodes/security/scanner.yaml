@@ -11,7 +11,7 @@ style:
   color: "#FCA5A5"
 
 redaction:
-  resource_type: vulnerability_scanners
+  resource_type: vulnerability_scanner
   id_column: id
   ability: read_vulnerability
 

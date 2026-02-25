@@ -11,7 +11,7 @@ style:
   color: "#10B981"
 
 redaction:
-  resource_type: users
+  resource_type: user
   id_column: id
   ability: read_user
 

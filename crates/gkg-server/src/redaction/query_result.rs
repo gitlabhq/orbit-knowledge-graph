@@ -542,7 +542,7 @@ mod tests {
         ctx.add_entity_auth(
             "User",
             EntityAuthConfig {
-                resource_type: "users".to_string(),
+                resource_type: "user".to_string(),
                 ability: "read_user".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
@@ -551,7 +551,7 @@ mod tests {
         ctx.add_entity_auth(
             "Project",
             EntityAuthConfig {
-                resource_type: "projects".to_string(),
+                resource_type: "project".to_string(),
                 ability: "read".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
@@ -563,11 +563,11 @@ mod tests {
     fn full_auth() -> Vec<ResourceAuthorization> {
         vec![
             ResourceAuthorization {
-                resource_type: "users".to_string(),
+                resource_type: "user".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             },
             ResourceAuthorization {
-                resource_type: "projects".to_string(),
+                resource_type: "project".to_string(),
                 authorized: [(100, true), (200, true), (300, true)]
                     .into_iter()
                     .collect(),
@@ -961,11 +961,11 @@ mod tests {
 
             let authorizations = vec![
                 ResourceAuthorization {
-                    resource_type: "users".to_string(),
+                    resource_type: "user".to_string(),
                     authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
-                    resource_type: "projects".to_string(),
+                    resource_type: "project".to_string(),
                     authorized: [(100, true), (200, false), (300, true)]
                         .into_iter()
                         .collect(),
@@ -987,11 +987,11 @@ mod tests {
 
             let authorizations = vec![
                 ResourceAuthorization {
-                    resource_type: "users".to_string(),
+                    resource_type: "user".to_string(),
                     authorized: [(1, false), (2, true), (3, false)].into_iter().collect(),
                 },
                 ResourceAuthorization {
-                    resource_type: "projects".to_string(),
+                    resource_type: "project".to_string(),
                     authorized: [(100, true), (200, true), (300, true)]
                         .into_iter()
                         .collect(),
@@ -1032,7 +1032,7 @@ mod tests {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
 
             let authorizations = vec![ResourceAuthorization {
-                resource_type: "users".to_string(),
+                resource_type: "user".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             }];
 
@@ -1048,11 +1048,11 @@ mod tests {
 
             let authorizations = vec![
                 ResourceAuthorization {
-                    resource_type: "users".to_string(),
+                    resource_type: "user".to_string(),
                     authorized: [(1, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
-                    resource_type: "projects".to_string(),
+                    resource_type: "project".to_string(),
                     authorized: [(100, true), (200, true), (300, true)]
                         .into_iter()
                         .collect(),

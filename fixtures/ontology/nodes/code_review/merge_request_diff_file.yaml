@@ -11,7 +11,7 @@ style:
   color: "#B45309"
 
 redaction:
-  resource_type: merge_requests
+  resource_type: merge_request
   id_column: merge_request_id
   ability: read_merge_request
 

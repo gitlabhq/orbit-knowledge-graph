@@ -11,7 +11,7 @@ style:
   color: "#64748B"
 
 redaction:
-  resource_type: notes
+  resource_type: note
   id_column: id
   ability: read_note
 

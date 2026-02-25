@@ -11,7 +11,7 @@ style:
   color: "#A855F7"
 
 redaction:
-  resource_type: labels
+  resource_type: label
   id_column: id
   ability: read_label
 

@@ -212,7 +212,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids() {
     assert_eq!(result.len(), 5);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2]);
+    mock_service.allow("user", &[1, 2]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -254,8 +254,8 @@ async fn fail_closed_explicit_deny_filters_row() {
     let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2, 3, 4]);
-    mock_service.deny("users", &[5]);
+    mock_service.allow("user", &[1, 2, 3, 4]);
+    mock_service.deny("user", &[5]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -316,8 +316,8 @@ async fn single_hop_user_group_verifies_both_nodes() {
     );
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2]);
-    mock_service.allow("groups", &[100]);
+    mock_service.allow("user", &[1, 2]);
+    mock_service.allow("group", &[100]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -368,9 +368,9 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it() {
     let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", ALL_USER_IDS);
-    mock_service.allow("groups", &[100]);
-    mock_service.deny("groups", &[101, 102]);
+    mock_service.allow("user", ALL_USER_IDS);
+    mock_service.allow("group", &[100]);
+    mock_service.deny("group", &[101, 102]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -446,9 +446,9 @@ async fn three_hop_user_group_project_verifies_all_paths() {
     );
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2]);
-    mock_service.allow("groups", &[100]);
-    mock_service.allow("projects", &[1000]);
+    mock_service.allow("user", &[1, 2]);
+    mock_service.allow("group", &[100]);
+    mock_service.allow("project", &[1000]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -495,10 +495,10 @@ async fn three_hop_denying_one_project_removes_only_those_paths() {
     let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", ALL_USER_IDS);
-    mock_service.allow("groups", ALL_GROUP_IDS);
-    mock_service.allow("projects", &[1000, 1002, 1004]);
-    mock_service.deny("projects", &[1001, 1003]);
+    mock_service.allow("user", ALL_USER_IDS);
+    mock_service.allow("group", ALL_GROUP_IDS);
+    mock_service.allow("project", &[1000, 1002, 1004]);
+    mock_service.deny("project", &[1001, 1003]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -573,10 +573,10 @@ async fn group_project_two_hop_verifies_exact_pairs() {
     assert_eq!(raw_pairs, expected_raw);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("groups", &[100, 102]);
-    mock_service.deny("groups", &[101]);
-    mock_service.allow("projects", &[1000, 1002, 1004]);
-    mock_service.deny("projects", &[1001, 1003]);
+    mock_service.allow("group", &[100, 102]);
+    mock_service.deny("group", &[101]);
+    mock_service.allow("project", &[1000, 1002, 1004]);
+    mock_service.deny("project", &[1001, 1003]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -623,7 +623,7 @@ async fn single_node_project_query_verifies_all_projects() {
     );
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("projects", &[1000, 1004]);
+    mock_service.allow("project", &[1000, 1004]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -715,7 +715,7 @@ async fn empty_query_result_stays_empty() {
     assert_eq!(result.len(), 0);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", ALL_USER_IDS);
+    mock_service.allow("user", ALL_USER_IDS);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -749,8 +749,8 @@ async fn all_authorized_preserves_all_data() {
     let raw_count = result.len();
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("groups", ALL_GROUP_IDS);
-    mock_service.allow("projects", ALL_PROJECT_IDS);
+    mock_service.allow("group", ALL_GROUP_IDS);
+    mock_service.allow("project", ALL_PROJECT_IDS);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -816,10 +816,10 @@ async fn all_columns_preserved_after_redaction() {
     );
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("groups", &[100]);
-    mock_service.deny("groups", &[101, 102]);
-    mock_service.allow("projects", &[1000, 1002]);
-    mock_service.deny("projects", &[1001, 1003, 1004]);
+    mock_service.allow("group", &[100]);
+    mock_service.deny("group", &[101, 102]);
+    mock_service.allow("project", &[1000, 1002]);
+    mock_service.deny("project", &[1001, 1003, 1004]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -898,9 +898,9 @@ async fn all_columns_preserved_on_three_hop_traversal() {
     let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]);
-    mock_service.allow("projects", &[1000]);
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]);
+    mock_service.allow("project", &[1000]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -944,7 +944,7 @@ async fn redacted_rows_filtered_from_authorized_iterator() {
     );
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2]);
+    mock_service.allow("user", &[1, 2]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1020,8 +1020,8 @@ fn fail_closed_null_id_denies_row() {
     let mut result = QueryResult::from_batches(&[batch], &ctx);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 3]);
-    mock_service.allow("projects", &[100, 200, 300]);
+    mock_service.allow("user", &[1, 3]);
+    mock_service.allow("project", &[100, 200, 300]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -1148,10 +1148,10 @@ async fn path_finding_denying_intermediate_node_filters_path() {
     assert!(raw_count > 0, "should find paths");
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]); // Only allow group 100, deny 102
-    mock_service.deny("groups", &[102]);
-    mock_service.allow("projects", &[1000, 1002, 1004]);
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]); // Only allow group 100, deny 102
+    mock_service.deny("group", &[102]);
+    mock_service.allow("project", &[1000, 1002, 1004]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1208,9 +1208,9 @@ async fn path_finding_all_nodes_authorized_preserves_paths() {
     let raw_count = result.len();
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", ALL_USER_IDS);
-    mock_service.allow("groups", ALL_GROUP_IDS);
-    mock_service.allow("projects", ALL_PROJECT_IDS);
+    mock_service.allow("user", ALL_USER_IDS);
+    mock_service.allow("group", ALL_GROUP_IDS);
+    mock_service.allow("project", ALL_PROJECT_IDS);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -1246,9 +1246,9 @@ async fn path_finding_denying_start_node_filters_all_paths() {
     assert!(!result.is_empty());
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.deny("users", &[1]); // Deny the start node
-    mock_service.allow("groups", ALL_GROUP_IDS);
-    mock_service.allow("projects", ALL_PROJECT_IDS);
+    mock_service.deny("user", &[1]); // Deny the start node
+    mock_service.allow("group", ALL_GROUP_IDS);
+    mock_service.allow("project", ALL_PROJECT_IDS);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -1282,10 +1282,10 @@ async fn path_finding_denying_end_node_filters_those_paths() {
     assert!(raw_count > 0);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", ALL_GROUP_IDS);
-    mock_service.allow("projects", &[1000]);
-    mock_service.deny("projects", &[1002]); // Deny one end node
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", ALL_GROUP_IDS);
+    mock_service.allow("project", &[1000]);
+    mock_service.deny("project", &[1002]); // Deny one end node
 
     run_redaction(&mut result, &mock_service);
 
@@ -1332,10 +1332,10 @@ async fn path_finding_multiple_paths_independent_authorization() {
 
     // Authorize the path through group 100 to project 1000 only
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]);
-    mock_service.allow("projects", &[1000]);
-    mock_service.deny("projects", &[1002]); // Deny one destination
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]);
+    mock_service.allow("project", &[1000]);
+    mock_service.deny("project", &[1002]); // Deny one destination
 
     run_redaction(&mut result, &mock_service);
 
@@ -1385,10 +1385,10 @@ async fn path_finding_shared_intermediate_node_authorization() {
 
     // Authorize user 1's path but deny user 2
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.deny("users", &[2]);
-    mock_service.allow("groups", &[100]);
-    mock_service.allow("projects", &[1000]);
+    mock_service.allow("user", &[1]);
+    mock_service.deny("user", &[2]);
+    mock_service.allow("group", &[100]);
+    mock_service.allow("project", &[1000]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1435,10 +1435,10 @@ async fn path_finding_deep_traversal_all_nodes_verified() {
 
     // Authorize everything except intermediate group 102
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]); // Only group 100
-    mock_service.deny("groups", &[102]); // Deny group 102
-    mock_service.allow("projects", ALL_PROJECT_IDS);
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]); // Only group 100
+    mock_service.deny("group", &[102]); // Deny group 102
+    mock_service.allow("project", ALL_PROJECT_IDS);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1497,9 +1497,9 @@ async fn path_finding_all_paths_denied_returns_empty() {
 
     // Deny ALL intermediate nodes - paths cannot complete
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.deny("groups", ALL_GROUP_IDS); // Deny all groups
-    mock_service.allow("projects", &[1000]);
+    mock_service.allow("user", &[1]);
+    mock_service.deny("group", ALL_GROUP_IDS); // Deny all groups
+    mock_service.allow("project", &[1000]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1563,8 +1563,8 @@ async fn search_with_complex_filters_and_redaction() {
 
     // Now apply redaction: only allow users 1 (alice) and 2 (bob)
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2]);
-    mock_service.deny("users", &[3, 4]);
+    mock_service.allow("user", &[1, 2]);
+    mock_service.deny("user", &[3, 4]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -1618,8 +1618,8 @@ async fn search_projects_with_visibility_and_path_filters() {
 
     // Redaction: allow only project 1000
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("projects", &[1000]);
-    mock_service.deny("projects", &[1002, 1004]);
+    mock_service.allow("project", &[1000]);
+    mock_service.deny("project", &[1002, 1004]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1668,8 +1668,8 @@ async fn search_groups_with_traversal_path_starts_with() {
 
     // Partial authorization
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("groups", &[100, 102]);
-    mock_service.deny("groups", &[101]);
+    mock_service.allow("group", &[100, 102]);
+    mock_service.deny("group", &[101]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1715,7 +1715,7 @@ async fn search_with_id_range_filter() {
 
     // Full authorization for this range
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[2, 3, 4]);
+    mock_service.allow("user", &[2, 3, 4]);
 
     let redacted = run_redaction(&mut result, &mock_service);
     assert_eq!(redacted, 0);
@@ -1756,8 +1756,8 @@ async fn search_with_specific_node_ids() {
 
     // Allow one, deny the other
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("projects", &[1000]);
-    mock_service.deny("projects", &[1003]);
+    mock_service.allow("project", &[1000]);
+    mock_service.deny("project", &[1003]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1798,7 +1798,7 @@ async fn search_no_results_with_impossible_filter() {
     assert_eq!(result.len(), 0, "should find no users");
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", ALL_USER_IDS);
+    mock_service.allow("user", ALL_USER_IDS);
 
     let redacted = run_redaction(&mut result, &mock_service);
     assert_eq!(redacted, 0);
@@ -1886,7 +1886,7 @@ async fn search_preserves_metadata_columns_after_redaction() {
     }
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
+    mock_service.allow("user", &[1]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -1938,7 +1938,7 @@ fn fail_closed_null_type_denies_row() {
     let mut result = QueryResult::from_batches(&[batch], &ctx);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2]);
+    mock_service.allow("user", &[1, 2]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2016,8 +2016,8 @@ async fn column_selection_specific_columns_includes_mandatory_columns() {
 
     // Run redaction with partial authorization
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2, 3]);
-    mock_service.deny("users", &[4, 5]);
+    mock_service.allow("user", &[1, 2, 3]);
+    mock_service.deny("user", &[4, 5]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2097,8 +2097,8 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
 
     // Run redaction - allow only group 100 (Public Group)
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("groups", &[100]);
-    mock_service.deny("groups", &[101, 102]);
+    mock_service.allow("group", &[100]);
+    mock_service.deny("group", &[101, 102]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2150,8 +2150,8 @@ async fn column_selection_omitted_includes_mandatory_columns() {
 
     // Run redaction - allow users 1, 2; deny the rest
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2]);
-    mock_service.deny("users", &[3, 4, 5]);
+    mock_service.allow("user", &[1, 2]);
+    mock_service.deny("user", &[3, 4, 5]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2243,12 +2243,12 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns()
 
     // Run redaction: allow specific path (user 1 -> group 100 -> project 1000)
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.deny("users", &[2, 3, 4, 5]);
-    mock_service.allow("groups", &[100]);
-    mock_service.deny("groups", &[101, 102]);
-    mock_service.allow("projects", &[1000]);
-    mock_service.deny("projects", &[1001, 1002, 1003, 1004]);
+    mock_service.allow("user", &[1]);
+    mock_service.deny("user", &[2, 3, 4, 5]);
+    mock_service.allow("group", &[100]);
+    mock_service.deny("group", &[101, 102]);
+    mock_service.allow("project", &[1000]);
+    mock_service.deny("project", &[1001, 1002, 1003, 1004]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2303,10 +2303,10 @@ async fn column_selection_redaction_works_with_specific_columns() {
 
     // Authorize only user 1 and group 100
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]);
-    mock_service.deny("users", &[2, 3, 4, 5]);
-    mock_service.deny("groups", &[101, 102]);
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]);
+    mock_service.deny("user", &[2, 3, 4, 5]);
+    mock_service.deny("group", &[101, 102]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2364,9 +2364,9 @@ async fn column_selection_fail_closed_on_any_unauthorized_node() {
     // Authorize user and group, but DENY the project
     // This should filter ALL rows because fail-closed
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", ALL_USER_IDS);
-    mock_service.allow("groups", ALL_GROUP_IDS);
-    mock_service.deny("projects", ALL_PROJECT_IDS); // Deny all projects
+    mock_service.allow("user", ALL_USER_IDS);
+    mock_service.allow("group", ALL_GROUP_IDS);
+    mock_service.deny("project", ALL_PROJECT_IDS); // Deny all projects
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2416,7 +2416,7 @@ async fn column_selection_data_values_preserved_through_redaction() {
 
     // Allow both users
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2]);
+    mock_service.allow("user", &[1, 2]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -2479,8 +2479,8 @@ async fn column_selection_id_in_list_no_duplication() {
 
     // Run redaction - allow only public projects (1000, 1004)
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("projects", &[1000, 1004]);
-    mock_service.deny("projects", &[1001, 1002, 1003]);
+    mock_service.allow("project", &[1000, 1004]);
+    mock_service.deny("project", &[1001, 1002, 1003]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2584,8 +2584,8 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
 
     // Run redaction - only allow user 1
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.deny("users", &[2]);
+    mock_service.allow("user", &[1]);
+    mock_service.deny("user", &[2]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2674,8 +2674,8 @@ async fn column_selection_aggregation_with_wildcard_columns() {
 
     // Run redaction - only allow user 1
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.deny("users", &[2]);
+    mock_service.allow("user", &[1]);
+    mock_service.deny("user", &[2]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2736,8 +2736,8 @@ async fn column_selection_traversal_join_semantics_preserved() {
 
     // Apply redaction and verify it still works
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("groups", &[100]);
-    mock_service.allow("projects", &[1000, 1002]);
+    mock_service.allow("group", &[100]);
+    mock_service.allow("project", &[1000, 1002]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -2799,7 +2799,7 @@ async fn column_selection_filters_work_with_columns() {
 
     // Redaction should work
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1, 2, 3, 4]);
+    mock_service.allow("user", &[1, 2, 3, 4]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -2942,7 +2942,7 @@ async fn neighbors_query_comprehensive() {
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]); // Only authorize center node
+    mock_service.allow("user", &[1]); // Only authorize center node
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2959,8 +2959,8 @@ async fn neighbors_query_comprehensive() {
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100, 102]); // Authorize both neighbor groups
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100, 102]); // Authorize both neighbor groups
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2979,9 +2979,9 @@ async fn neighbors_query_comprehensive() {
     let mut result = QueryResult::from_batches(&batches, &query.result_context);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]); // Only authorize group 100
-    mock_service.deny("groups", &[102]); // Deny group 102
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]); // Only authorize group 100
+    mock_service.deny("group", &[102]); // Deny group 102
 
     run_redaction(&mut result, &mock_service);
 
@@ -3024,8 +3024,8 @@ async fn neighbors_query_center_node_denied_filters_all() {
 
     // Authorize neighbors but DENY center node
     let mut mock_service = MockRedactionService::new();
-    mock_service.deny("users", &[1]);
-    mock_service.allow("groups", ALL_GROUP_IDS);
+    mock_service.deny("user", &[1]);
+    mock_service.allow("group", ALL_GROUP_IDS);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -3065,10 +3065,10 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization() {
 
     // Authorize user 1 and its neighbors, deny user 3
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.deny("users", &[3]);
-    mock_service.allow("groups", &[100, 102]); // User 1's neighbors
-    mock_service.deny("groups", &[101]); // User 3's neighbor
+    mock_service.allow("user", &[1]);
+    mock_service.deny("user", &[3]);
+    mock_service.allow("group", &[100, 102]); // User 1's neighbors
+    mock_service.deny("group", &[101]); // User 3's neighbor
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -3109,9 +3109,9 @@ async fn neighbors_query_incoming_with_redaction() {
 
     // Authorize center (group 100) and one neighbor (user 1)
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("groups", &[100]);
-    mock_service.allow("users", &[1]);
-    mock_service.deny("users", &[2]);
+    mock_service.allow("group", &[100]);
+    mock_service.allow("user", &[1]);
+    mock_service.deny("user", &[2]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -3224,8 +3224,8 @@ async fn traversal_edge_columns_preserved_through_redaction() {
 
     // Now apply redaction - allow only user 1 and group 100
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]);
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -3354,9 +3354,9 @@ async fn multi_hop_edge_columns_survive_redaction() {
 
     // Allow specific path: user 1 -> group 100 -> project 1000
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]);
-    mock_service.allow("projects", &[1000]);
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]);
+    mock_service.allow("project", &[1000]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -3492,9 +3492,9 @@ async fn neighbors_query_filters_by_entity_type() {
 
     // Verify redaction works correctly on filtered neighbors
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", &[1]);
-    mock_service.allow("groups", &[100]);
-    mock_service.deny("groups", &[102]);
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]);
+    mock_service.deny("group", &[102]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -3556,7 +3556,7 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     );
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", ALL_USER_IDS);
+    mock_service.allow("user", ALL_USER_IDS);
     run_redaction(&mut result, &mock_service);
 
     // Verify the user_type values are the string labels
@@ -3609,7 +3609,7 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     );
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("merge_requests", ALL_MR_IDS);
+    mock_service.allow("merge_request", ALL_MR_IDS);
     run_redaction(&mut result, &mock_service);
 
     for row in result.authorized_rows() {
@@ -3673,7 +3673,7 @@ async fn enum_filter_normalization_int_vs_string_enums() {
     );
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("users", ALL_USER_IDS);
+    mock_service.allow("user", ALL_USER_IDS);
     run_redaction(&mut result, &mock_service);
 
     for row in result.authorized_rows() {
