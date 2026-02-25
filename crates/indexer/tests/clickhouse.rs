@@ -55,7 +55,10 @@ impl TestContext {
     }
 
     async fn execute(&self, sql: &str) {
-        self.create_client().execute(sql).await.expect("execute failed");
+        self.create_client()
+            .execute(sql)
+            .await
+            .expect("execute failed");
     }
 
     async fn query(&self, sql: &str) -> Vec<RecordBatch> {
@@ -161,7 +164,9 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
 }
 
 async fn write_batch_to_clickhouse(context: &TestContext) {
-    context.execute(&format!("TRUNCATE TABLE {TEST_TABLE}")).await;
+    context
+        .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
+        .await;
 
     let writer = context
         .destination
@@ -183,7 +188,9 @@ async fn write_batch_to_clickhouse(context: &TestContext) {
 }
 
 async fn write_multiple_batches(context: &TestContext) {
-    context.execute(&format!("TRUNCATE TABLE {TEST_TABLE}")).await;
+    context
+        .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
+        .await;
 
     let writer = context
         .destination
@@ -213,7 +220,9 @@ async fn write_multiple_batches(context: &TestContext) {
 }
 
 async fn write_empty_batch_succeeds(context: &TestContext) {
-    context.execute(&format!("TRUNCATE TABLE {TEST_TABLE}")).await;
+    context
+        .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
+        .await;
 
     let writer = context
         .destination
