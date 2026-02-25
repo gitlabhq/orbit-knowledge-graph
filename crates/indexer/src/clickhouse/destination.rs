@@ -1,19 +1,29 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfiguration};
 
 use super::batch_writer::ClickHouseBatchWriter;
 use crate::destination::{BatchWriter, Destination, DestinationError};
+use crate::metrics::EngineMetrics;
 
 pub struct ClickHouseDestination {
     configuration: ClickHouseConfiguration,
+    metrics: Arc<EngineMetrics>,
 }
 
 impl ClickHouseDestination {
-    pub fn new(configuration: ClickHouseConfiguration) -> Result<Self, DestinationError> {
+    pub fn new(
+        configuration: ClickHouseConfiguration,
+        metrics: Arc<EngineMetrics>,
+    ) -> Result<Self, DestinationError> {
         configuration
             .validate()
             .map_err(|e| DestinationError::InvalidConfiguration(e.to_string()))?;
-        Ok(Self { configuration })
+        Ok(Self {
+            configuration,
+            metrics,
+        })
     }
 
     fn create_client(&self) -> ArrowClickHouseClient {
@@ -32,6 +42,7 @@ impl Destination for ClickHouseDestination {
         Ok(Box::new(ClickHouseBatchWriter::new(
             client,
             table.to_string(),
+            self.metrics.clone(),
         )))
     }
 }

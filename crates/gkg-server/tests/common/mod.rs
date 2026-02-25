@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use indexer::clickhouse::ClickHouseDestination;
+use indexer::metrics::EngineMetrics;
 use indexer::module::{Handler, HandlerContext, Module};
 use indexer::modules::SdlcModule;
 use indexer::modules::sdlc::config::SdlcIndexingConfig;
@@ -31,7 +32,8 @@ pub trait GkgServerTestExt {
 
 impl GkgServerTestExt for TestContext {
     fn create_destination(&self) -> ClickHouseDestination {
-        ClickHouseDestination::new(self.config.clone()).expect("failed to create destination")
+        ClickHouseDestination::new(self.config.clone(), Arc::new(EngineMetrics::default()))
+            .expect("failed to create destination")
     }
 
     fn create_handler_context(&self) -> HandlerContext {

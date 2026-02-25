@@ -14,6 +14,7 @@ use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickH
 use indexer::configuration::EngineConfiguration;
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::entities::Entity;
+use indexer::metrics::EngineMetrics;
 use indexer::module::{Handler, HandlerContext, HandlerError, Module, ModuleRegistry};
 use indexer::nats::{NatsBroker, NatsConfiguration};
 use indexer::types::{Envelope, Event, Topic};
@@ -260,12 +261,15 @@ impl TestContext {
 
     async fn create_destination(&self) -> Arc<ClickHouseDestination> {
         Arc::new(
-            ClickHouseDestination::new(ClickHouseConfiguration {
-                database: DATABASE.to_string(),
-                url: self.clickhouse_endpoint.clone(),
-                username: USERNAME.to_string(),
-                password: Some(PASSWORD.to_string()),
-            })
+            ClickHouseDestination::new(
+                ClickHouseConfiguration {
+                    database: DATABASE.to_string(),
+                    url: self.clickhouse_endpoint.clone(),
+                    username: USERNAME.to_string(),
+                    password: Some(PASSWORD.to_string()),
+                },
+                Arc::new(EngineMetrics::default()),
+            )
             .expect("failed to create destination"),
         )
     }
