@@ -213,6 +213,8 @@ integration-test:
   needs: []
   before_script:
     - !reference [.sccache-template, before_script]
+    - docker pull clickhouse/clickhouse-server:25.12
+    - docker pull nats:2.11-alpine
   script:
     - cargo nextest run --profile ci --all-features --test '*' --ignore-default-filter -E 'not package(gitaly-client)'
     - sccache --show-stats || true
