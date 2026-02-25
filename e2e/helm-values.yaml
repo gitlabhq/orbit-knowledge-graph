@@ -17,7 +17,7 @@
 #
 # Host (GDK):
 #   - PostgreSQL  (logical replication publication must exist)
-#   - GitLab Rails (points at GKG via localhost:4200 / localhost:50051)
+#   - GitLab Rails (points at GKG via localhost:4200 / localhost:50054)
 # =============================================================================
 
 gcp:

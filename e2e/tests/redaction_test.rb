@@ -24,10 +24,11 @@ manifest = load_manifest!
 m = manifest # short alias
 
 # The GKG webserver runs in the default namespace; this test runs in the
-# gitlab-namespace toolbox pod.  Override the default "localhost:50051" with
+# gitlab-namespace toolbox pod.  Override the default "localhost:50054" with
 # the cross-namespace service FQDN.
 grpc_endpoint = ENV.fetch('KNOWLEDGE_GRAPH_GRPC_ENDPOINT',
-                          'gkg-webserver.default.svc.cluster.local:50051')
+                          'gkg-webserver.default.svc.cluster.local:50054')
+puts "  gRPC endpoint: #{grpc_endpoint}"
 client = Ai::KnowledgeGraph::GrpcClient.new(endpoint: grpc_endpoint)
 org_id = m[:organization_id]
 

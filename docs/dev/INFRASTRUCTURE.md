@@ -23,7 +23,7 @@ See [GITLAB_INSTANCE.md](GITLAB_INSTANCE.md) for GitLab-specific configuration.
 
 | Service | Internal IP | Ports | GCP Address Name |
 |---------|-------------|-------|------------------|
-| gkg-webserver | 10.128.0.51 | 8080 (HTTP), 50051 (gRPC) | `gkg-webserver-ip` |
+| gkg-webserver | 10.128.0.51 | 8080 (HTTP), 50054 (gRPC) | `gkg-webserver-ip` |
 
 Static internal IP reserved in GCP ensures the address persists across service recreations.
 

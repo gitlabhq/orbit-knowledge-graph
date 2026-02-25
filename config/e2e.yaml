@@ -107,7 +107,7 @@ gkg:
   dev_tag: dev
   dispatch_job: gkg-dispatch-indexing
   indexer_configmap: gkg-indexer-config
-  grpc_endpoint: gkg-webserver.default.svc.cluster.local:50051
+  grpc_endpoint: gkg-webserver.default.svc.cluster.local:50054
   server_credentials_secret: gkg-server-credentials
   server_credentials_jwt_key: jwt-secret
   indexer_label: app.kubernetes.io/component=gkg-indexer
