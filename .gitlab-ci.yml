@@ -36,6 +36,11 @@ stages:
   before_script:
     - mise install
     - |
+      mkdir -p .cargo-cache/registry .cargo-cache/git
+      rm -rf "${HOME}/.cargo/registry" "${HOME}/.cargo/git"
+      ln -sf "$(pwd)/.cargo-cache/registry" "${HOME}/.cargo/registry"
+      ln -sf "$(pwd)/.cargo-cache/git" "${HOME}/.cargo/git"
+    - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
         export RUSTC_WRAPPER="sccache"
         sccache --start-server || true
@@ -47,12 +52,10 @@ stages:
     - .sccache-template
   variables:
     RUST_BACKTRACE: "1"
-    CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
   cache:
-    key: "cargo-registry-${CI_JOB_IMAGE}"
+    key: "cargo-registry"
     paths:
-      - .cargo/registry/
-      - .cargo/git/db/
+      - .cargo-cache/
   artifacts:
     when: always
     reports:
