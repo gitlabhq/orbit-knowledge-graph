@@ -3,8 +3,8 @@
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
-    default_test_watermark, get_namespace_handler, get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_string_column,
 };
 
 pub async fn processes_work_items_with_edges(context: &TestContext) {
@@ -36,7 +36,7 @@ pub async fn processes_work_items_with_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -101,7 +101,7 @@ pub async fn processes_work_item_single_value_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -112,17 +112,15 @@ pub async fn processes_work_item_single_value_edges(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(context, "AUTHORED", "User", "WorkItem", "1/100/", 1).await;
-    assert_edges_have_traversal_path(
-        context,
-        "IN_MILESTONE",
-        "WorkItem",
-        "Milestone",
-        "1/100/",
-        1,
-    )
-    .await;
-    assert_edges_have_traversal_path(context, "IN_GROUP", "WorkItem", "Group", "1/100/", 1).await;
+    context
+        .assert_edges_have_traversal_path("AUTHORED", "User", "WorkItem", "1/100/", 1)
+        .await;
+    context
+        .assert_edges_have_traversal_path("IN_MILESTONE", "WorkItem", "Milestone", "1/100/", 1)
+        .await;
+    context
+        .assert_edges_have_traversal_path("IN_GROUP", "WorkItem", "Group", "1/100/", 1)
+        .await;
 }
 
 pub async fn processes_work_item_multi_target_edges(context: &TestContext) {
@@ -142,7 +140,7 @@ pub async fn processes_work_item_multi_target_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -153,8 +151,12 @@ pub async fn processes_work_item_multi_target_edges(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(context, "ASSIGNED", "User", "WorkItem", "1/100/", 3).await;
-    assert_edges_have_traversal_path(context, "HAS_LABEL", "WorkItem", "Label", "1/100/", 2).await;
+    context
+        .assert_edges_have_traversal_path("ASSIGNED", "User", "WorkItem", "1/100/", 3)
+        .await;
+    context
+        .assert_edges_have_traversal_path("HAS_LABEL", "WorkItem", "Label", "1/100/", 2)
+        .await;
 }
 
 pub async fn processes_work_item_parent_links(context: &TestContext) {
@@ -208,7 +210,7 @@ pub async fn processes_work_item_parent_links(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -219,7 +221,8 @@ pub async fn processes_work_item_parent_links(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(context, "CONTAINS", "WorkItem", "WorkItem", "1/100/", 3)
+    context
+        .assert_edges_have_traversal_path("CONTAINS", "WorkItem", "WorkItem", "1/100/", 3)
         .await;
 }
 
@@ -271,7 +274,7 @@ pub async fn processes_issue_links(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -282,6 +285,7 @@ pub async fn processes_issue_links(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(context, "RELATED_TO", "WorkItem", "WorkItem", "1/100/", 2)
+    context
+        .assert_edges_have_traversal_path("RELATED_TO", "WorkItem", "WorkItem", "1/100/", 2)
         .await;
 }

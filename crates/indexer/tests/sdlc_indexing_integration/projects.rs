@@ -3,8 +3,8 @@
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
-    create_namespace_payload, default_test_watermark, get_namespace_handler, get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_string_column,
 };
 
 pub async fn processes_projects(context: &TestContext) {
@@ -45,7 +45,7 @@ pub async fn processes_projects(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -67,14 +67,18 @@ pub async fn processes_projects(context: &TestContext) {
     assert_eq!(visibility_column.value(0), "private");
     assert_eq!(visibility_column.value(1), "public");
 
-    assert_edge_count_for_traversal_path(context, "CREATOR", "User", "Project", "1/100/1000/", 1)
+    context
+        .assert_edge_count_for_traversal_path("CREATOR", "User", "Project", "1/100/1000/", 1)
         .await;
-    assert_edge_count_for_traversal_path(context, "CREATOR", "User", "Project", "1/100/1001/", 1)
+    context
+        .assert_edge_count_for_traversal_path("CREATOR", "User", "Project", "1/100/1001/", 1)
         .await;
 
-    assert_edge_count_for_traversal_path(context, "CONTAINS", "Group", "Project", "1/100/1000/", 1)
+    context
+        .assert_edge_count_for_traversal_path("CONTAINS", "Group", "Project", "1/100/1000/", 1)
         .await;
-    assert_edge_count_for_traversal_path(context, "CONTAINS", "Group", "Project", "1/100/1001/", 1)
+    context
+        .assert_edge_count_for_traversal_path("CONTAINS", "Group", "Project", "1/100/1001/", 1)
         .await;
 }
 
@@ -128,7 +132,7 @@ pub async fn creates_member_of_edges_for_projects(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -139,5 +143,7 @@ pub async fn creates_member_of_edges_for_projects(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(context, "MEMBER_OF", "User", "Project", "1/100/", 1).await;
+    context
+        .assert_edges_have_traversal_path("MEMBER_OF", "User", "Project", "1/100/", 1)
+        .await;
 }

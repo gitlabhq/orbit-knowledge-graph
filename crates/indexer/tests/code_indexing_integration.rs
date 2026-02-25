@@ -18,7 +18,7 @@ use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ExecCommand, ImageExt, WaitFor};
 use testcontainers::runners::AsyncRunner;
 
-use common::TestContext;
+use common::{GRAPH_SCHEMA_SQL, IndexerTestExt, SIPHON_SCHEMA_SQL, TestContext};
 
 const GITALY_IMAGE: &str = "registry.gitlab.com/gitlab-org/build/cng/gitaly";
 const GITALY_TAG: &str = "17-7-stable";
@@ -28,7 +28,7 @@ const GITALY_TOKEN: &str = "secret_token";
 async fn indexes_repository_from_gitaly() {
     let project_id: i64 = 1;
 
-    let clickhouse = TestContext::new().await;
+    let clickhouse = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
     let (gitaly_address, _container) = start_gitaly().await;
 
     let repo_path = hashed_repo_path(project_id);
@@ -173,7 +173,7 @@ async fn indexes_repository_from_gitaly() {
 async fn soft_deletes_stale_code_data_after_reindexing() {
     let project_id: i64 = 2;
 
-    let clickhouse = TestContext::new().await;
+    let clickhouse = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
     let (gitaly_address, gitaly_container) = start_gitaly().await;
     let repo_path = hashed_repo_path(project_id);
 

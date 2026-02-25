@@ -3,8 +3,8 @@
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
-    default_test_watermark, get_namespace_handler, get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_string_column,
 };
 
 pub async fn processes_notes_with_edges(context: &TestContext) {
@@ -18,7 +18,7 @@ pub async fn processes_notes_with_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -35,7 +35,9 @@ pub async fn processes_notes_with_edges(context: &TestContext) {
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 3);
 
-    assert_edges_have_traversal_path(context, "AUTHORED", "User", "Note", "1/100/", 3).await;
+    context
+        .assert_edges_have_traversal_path("AUTHORED", "User", "Note", "1/100/", 3)
+        .await;
 
     let has_note_edges = context
         .query("SELECT source_id, source_kind, target_id FROM gl_edge FINAL WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")
@@ -64,7 +66,7 @@ pub async fn filters_out_system_notes(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -83,7 +85,9 @@ pub async fn filters_out_system_notes(context: &TestContext) {
     let batch = &result[0];
     assert_eq!(batch.num_rows(), 2, "should only have 2 non-system notes");
 
-    assert_edges_have_traversal_path(context, "AUTHORED", "User", "Note", "1/100/", 2).await;
+    context
+        .assert_edges_have_traversal_path("AUTHORED", "User", "Note", "1/100/", 2)
+        .await;
 
     let has_note_edges = context
         .query("SELECT source_id, source_kind, target_id FROM gl_edge FINAL WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id")

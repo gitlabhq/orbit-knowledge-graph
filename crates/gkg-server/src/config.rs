@@ -95,14 +95,12 @@ pub enum ConfigError {
 #[allow(unsafe_code)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     /// Reproduces the crash seen when deploying with GKG_ prefixed env vars.
     /// `try_parsing(true)` + `list_separator(",")` without `with_list_parse_key`
     /// wraps every value in a sequence, causing "invalid type: sequence, expected
     /// a string" errors for plain string fields.
     #[test]
-    #[serial]
     fn env_string_fields_not_parsed_as_lists() {
         let vars = [
             ("GKG_NATS__URL", "gkg-nats:4222"),
@@ -113,7 +111,7 @@ mod tests {
             ("GKG_METRICS__OTLP_ENDPOINT", "http://gkg-obs-alloy:4317"),
         ];
 
-        // SAFETY: tests run serially via #[serial], no concurrent env access
+        // SAFETY: nextest runs each test in its own process, so env mutations are isolated
         unsafe {
             for (k, v) in &vars {
                 std::env::set_var(k, v);
@@ -135,7 +133,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn health_check_services_parsed_as_list() {
         let vars = [(
             "GKG_HEALTH_CHECK__SERVICES",

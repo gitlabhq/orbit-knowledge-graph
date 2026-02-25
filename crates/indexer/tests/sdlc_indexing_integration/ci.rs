@@ -3,8 +3,8 @@
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
-    default_test_watermark, get_namespace_handler, get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_string_column,
 };
 
 pub async fn processes_pipelines(context: &TestContext) {
@@ -52,7 +52,7 @@ pub async fn processes_pipelines(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -73,16 +73,11 @@ pub async fn processes_pipelines(context: &TestContext) {
     assert_eq!(status_column.value(0), "success");
     assert_eq!(status_column.value(1), "failed");
 
-    assert_edges_have_traversal_path(
-        context,
-        "IN_PROJECT",
-        "Pipeline",
-        "Project",
-        "1/100/1000/",
-        2,
-    )
-    .await;
-    assert_edges_have_traversal_path(context, "TRIGGERED", "User", "Pipeline", "1/100/1000/", 2)
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "Pipeline", "Project", "1/100/1000/", 2)
+        .await;
+    context
+        .assert_edges_have_traversal_path("TRIGGERED", "User", "Pipeline", "1/100/1000/", 2)
         .await;
 }
 
@@ -132,7 +127,7 @@ pub async fn processes_stages(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -154,9 +149,11 @@ pub async fn processes_stages(context: &TestContext) {
     assert_eq!(name_column.value(1), "test");
     assert_eq!(name_column.value(2), "deploy");
 
-    assert_edges_have_traversal_path(context, "IN_PROJECT", "Stage", "Project", "1/100/1000/", 3)
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "Stage", "Project", "1/100/1000/", 3)
         .await;
-    assert_edges_have_traversal_path(context, "HAS_STAGE", "Pipeline", "Stage", "1/100/1000/", 3)
+    context
+        .assert_edges_have_traversal_path("HAS_STAGE", "Pipeline", "Stage", "1/100/1000/", 3)
         .await;
 }
 
@@ -212,7 +209,7 @@ pub async fn processes_jobs(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -233,10 +230,15 @@ pub async fn processes_jobs(context: &TestContext) {
     assert_eq!(name_column.value(0), "compile");
     assert_eq!(name_column.value(1), "lint");
 
-    assert_edges_have_traversal_path(context, "IN_PROJECT", "Job", "Project", "1/100/1000/", 2)
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "Job", "Project", "1/100/1000/", 2)
         .await;
-    assert_edges_have_traversal_path(context, "HAS_JOB", "Stage", "Job", "1/100/1000/", 2).await;
-    assert_edges_have_traversal_path(context, "TRIGGERED", "User", "Job", "1/100/1000/", 2).await;
+    context
+        .assert_edges_have_traversal_path("HAS_JOB", "Stage", "Job", "1/100/1000/", 2)
+        .await;
+    context
+        .assert_edges_have_traversal_path("TRIGGERED", "User", "Job", "1/100/1000/", 2)
+        .await;
 }
 
 pub async fn processes_ci_hierarchy(context: &TestContext) {
@@ -302,7 +304,7 @@ pub async fn processes_ci_hierarchy(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -330,19 +332,19 @@ pub async fn processes_ci_hierarchy(context: &TestContext) {
     assert!(!job_result.is_empty(), "job result should not be empty");
     assert_eq!(job_result[0].num_rows(), 4, "should have 4 jobs");
 
-    assert_edges_have_traversal_path(
-        context,
-        "IN_PROJECT",
-        "Pipeline",
-        "Project",
-        "1/100/1000/",
-        1,
-    )
-    .await;
-    assert_edges_have_traversal_path(context, "HAS_STAGE", "Pipeline", "Stage", "1/100/1000/", 2)
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "Pipeline", "Project", "1/100/1000/", 1)
         .await;
-    assert_edges_have_traversal_path(context, "HAS_JOB", "Stage", "Job", "1/100/1000/", 4).await;
-    assert_edges_have_traversal_path(context, "TRIGGERED", "User", "Pipeline", "1/100/1000/", 1)
+    context
+        .assert_edges_have_traversal_path("HAS_STAGE", "Pipeline", "Stage", "1/100/1000/", 2)
         .await;
-    assert_edges_have_traversal_path(context, "TRIGGERED", "User", "Job", "1/100/1000/", 4).await;
+    context
+        .assert_edges_have_traversal_path("HAS_JOB", "Stage", "Job", "1/100/1000/", 4)
+        .await;
+    context
+        .assert_edges_have_traversal_path("TRIGGERED", "User", "Pipeline", "1/100/1000/", 1)
+        .await;
+    context
+        .assert_edges_have_traversal_path("TRIGGERED", "User", "Job", "1/100/1000/", 4)
+        .await;
 }

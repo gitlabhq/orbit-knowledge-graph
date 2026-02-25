@@ -48,6 +48,11 @@ ignore = true
 registries = []
 
 [[licenses.clarify]]
+name = "integration-testkit"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "xtask"
 expression = "LicenseRef-EE"
 license-files = []

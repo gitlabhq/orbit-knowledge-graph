@@ -18,9 +18,8 @@ use indexer::module::{Handler, HandlerContext, HandlerError, Module, ModuleRegis
 use indexer::nats::{NatsBroker, NatsConfiguration};
 use indexer::types::{Envelope, Event, Topic};
 use serde::{Deserialize, Serialize};
-use serial_test::serial;
 use testcontainers::GenericImage;
-use testcontainers::core::{ContainerPort, ImageExt};
+use testcontainers::core::{ContainerPort, ImageExt, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
@@ -163,6 +162,8 @@ impl TestContext {
         let container = Nats::default()
             .with_cmd(&NatsServerCmd::default().with_jetstream())
             .with_tag("2.11-alpine")
+            .with_mapped_port(0, ContainerPort::Tcp(4222))
+            .with_ready_conditions(vec![WaitFor::seconds(3)])
             .start()
             .await
             .expect("failed to start NATS container");
@@ -328,7 +329,6 @@ fn create_engine(
 }
 
 #[tokio::test]
-#[serial]
 async fn single_message_flows_through_engine() {
     let context = TestContext::new().await;
     let broker = context.create_broker().await;
@@ -342,7 +342,6 @@ async fn single_message_flows_through_engine() {
 }
 
 #[tokio::test]
-#[serial]
 async fn multiple_messages_processed() {
     let context = TestContext::new().await;
     let broker = context.create_broker().await;
@@ -361,7 +360,6 @@ async fn multiple_messages_processed() {
 }
 
 #[tokio::test]
-#[serial]
 async fn multiple_handlers_receive_same_message() {
     let context = TestContext::new().await;
     let broker = context.create_broker().await;

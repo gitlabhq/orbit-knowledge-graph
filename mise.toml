@@ -38,9 +38,9 @@ run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ca
 description = "Run unit tests with reduced debug info for faster builds"
 
 [tasks."test:integration"]
-run = "cargo nextest run --all-features --test '*' -j 1"
-# For Colima users: env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/default/docker.sock" }
-description = "Run integration tests (requires Docker)"
+run = "cargo nextest run --all-features --test '*'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run integration tests (requires Docker and `mise colima:start`)"
 
 [tasks.clean]
 run = ["cargo clean", "rm -rf lib/*/"]
@@ -139,6 +139,18 @@ description = "Rebuild Rails CNG images and helm upgrade GitLab"
 [tasks."e2e:rebuild:all"]
 run = "cargo xtask e2e rebuild --gkg --rails"
 description = "Rebuild both Rails CNG and GKG images"
+
+[tasks."colima:start"]
+run = "colima start gkg --memory 12"
+description = "Start gkg Colima instance for integration tests"
+
+[tasks."colima:stop"]
+run = "colima stop gkg"
+description = "Stop gkg Colima instance"
+
+[tasks."colima:status"]
+run = "colima list"
+description = "Show status of all Colima instances"
 
 [tasks."lint:markdown"]
 run = "npx markdownlint-cli2@0.19.0 '**/*.md'"

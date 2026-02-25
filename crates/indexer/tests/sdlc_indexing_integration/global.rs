@@ -4,7 +4,7 @@ use arrow::array::{BooleanArray, StringArray, UInt64Array};
 use chrono::{DateTime, Utc};
 use indexer::testkit::TestEnvelopeFactory;
 
-use crate::common::{TestContext, create_user_payload, get_global_handler};
+use crate::common::{IndexerTestExt, TestContext, create_user_payload};
 
 pub async fn processes_and_transforms_users(context: &TestContext) {
     context
@@ -26,7 +26,7 @@ pub async fn processes_and_transforms_users(context: &TestContext) {
         )
         .await;
 
-    let global_handler = get_global_handler(context).await;
+    let global_handler = context.get_global_handler().await;
 
     let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
         .unwrap()
@@ -91,7 +91,7 @@ pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
         )
         .await;
 
-    let global_handler = get_global_handler(context).await;
+    let global_handler = context.get_global_handler().await;
 
     let watermark = DateTime::parse_from_rfc3339("2024-01-21T00:00:00Z")
         .unwrap()
