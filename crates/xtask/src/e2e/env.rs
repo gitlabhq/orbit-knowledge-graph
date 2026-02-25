@@ -3,13 +3,6 @@
 use std::env;
 use std::path::PathBuf;
 
-/// Read a required env var. Panics with a clear message if not set.
-pub fn require(key: &str) -> String {
-    env::var(key).unwrap_or_else(|_| {
-        panic!("{key} environment variable is required but not set");
-    })
-}
-
 /// Resolve `~` at the start of a path to `$HOME`.
 pub fn expand_home(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/")

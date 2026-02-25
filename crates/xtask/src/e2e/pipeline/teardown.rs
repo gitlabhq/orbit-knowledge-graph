@@ -11,13 +11,15 @@
 use std::fs;
 
 use anyhow::Result;
-use xshell::{Shell, cmd};
+use xshell::Shell;
 
 use crate::e2e::{
-    colima,
     config::Config,
-    constants as c, docker,
-    kube::{self, DeleteTarget},
+    constants as c,
+    infra::{
+        colima, docker, helm,
+        kube::{self, DeleteTarget},
+    },
     ui,
 };
 
@@ -98,46 +100,36 @@ async fn teardown_gkg_stack(sh: &Shell, cfg: &Config) -> Result<()> {
 
     // Uninstall the GKG Helm release first (removes NATS, siphon, GKG pods).
     let gkg_release = &cfg.helm.gkg.release;
+    let docker_host = cfg.docker_host();
     ui::info("Uninstalling GKG Helm release...")?;
-    let _ = cmd!(sh, "helm uninstall {gkg_release} -n {ns}")
-        .quiet()
-        .ignore_status()
-        .run();
+    helm::uninstall(sh, gkg_release, ns, &docker_host);
 
-    let _ = kube::delete(ns, "apps/v1", "StatefulSet", DeleteTarget::Names(&[ch_svc])).await;
-    let _ = kube::delete(
-        ns,
-        "batch/v1",
-        "Job",
-        DeleteTarget::Names(&[&cfg.gkg.dispatch_job]),
-    )
-    .await;
-    let _ = kube::delete(ns, "v1", "Service", DeleteTarget::Names(&[ch_svc])).await;
-    let _ = kube::delete(
-        ns,
-        "v1",
-        "ConfigMap",
-        DeleteTarget::Names(&[&cfg.clickhouse.init_configmap]),
-    )
-    .await;
-    let _ = kube::delete(
-        ns,
-        "v1",
-        "Secret",
-        DeleteTarget::Names(&[
-            &cfg.postgres.bridge_secret_name,
-            &cfg.clickhouse.credentials_secret,
-            &cfg.gkg.server_credentials_secret,
-        ]),
-    )
-    .await;
-    let _ = kube::delete(
-        ns,
-        "v1",
-        "PersistentVolumeClaim",
-        DeleteTarget::Label(&cfg.ch_label()),
-    )
-    .await;
+    let ch_label = cfg.ch_label();
+    let dispatch_job = &cfg.gkg.dispatch_job;
+    let init_cm = &cfg.clickhouse.init_configmap;
+    let ss_names: [&str; 1] = [ch_svc];
+    let job_names: [&str; 1] = [dispatch_job];
+    let svc_names: [&str; 1] = [ch_svc];
+    let cm_names: [&str; 1] = [init_cm];
+    let secret_names: [&str; 3] = [
+        &cfg.postgres.bridge_secret_name,
+        &cfg.clickhouse.credentials_secret,
+        &cfg.gkg.server_credentials_secret,
+    ];
+
+    let _ = tokio::join!(
+        kube::delete(ns, "apps/v1", "StatefulSet", DeleteTarget::Names(&ss_names)),
+        kube::delete(ns, "batch/v1", "Job", DeleteTarget::Names(&job_names)),
+        kube::delete(ns, "v1", "Service", DeleteTarget::Names(&svc_names)),
+        kube::delete(ns, "v1", "ConfigMap", DeleteTarget::Names(&cm_names)),
+        kube::delete(ns, "v1", "Secret", DeleteTarget::Names(&secret_names)),
+        kube::delete(
+            ns,
+            "v1",
+            "PersistentVolumeClaim",
+            DeleteTarget::Label(&ch_label)
+        ),
+    );
 
     ui::info("GKG stack resources removed")?;
     Ok(())
@@ -151,13 +143,9 @@ async fn teardown_gitlab(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<
     let ns = &cfg.namespaces.gitlab;
     let release = &cfg.helm.gitlab.release;
 
-    if kube::helm_release_exists(sh, release, ns, docker_host) {
+    if helm::release_exists(sh, release, ns, docker_host) {
         ui::info("Uninstalling GitLab Helm release")?;
-        let timeout = &cfg.helm.uninstall_timeout;
-        let _ = cmd!(sh, "helm uninstall {release} -n {ns} --timeout {timeout}")
-            .env("DOCKER_HOST", docker_host)
-            .ignore_status()
-            .run();
+        helm::uninstall_with_timeout(sh, release, ns, &cfg.helm.uninstall_timeout, docker_host);
         ui::info("GitLab Helm release removed")?;
     } else {
         ui::info("No GitLab Helm release found")?;
@@ -194,12 +182,9 @@ fn teardown_traefik(sh: &Shell, cfg: &Config, docker_host: &str) -> Result<()> {
     let release = &cfg.helm.traefik.release;
     let kube_ns = &cfg.namespaces.kube_system;
 
-    if kube::helm_release_exists(sh, release, kube_ns, docker_host) {
+    if helm::release_exists(sh, release, kube_ns, docker_host) {
         ui::info("Uninstalling Traefik")?;
-        let _ = cmd!(sh, "helm uninstall {release} -n {kube_ns}")
-            .env("DOCKER_HOST", docker_host)
-            .ignore_status()
-            .run();
+        helm::uninstall(sh, release, kube_ns, docker_host);
         ui::info("Traefik removed")?;
     } else {
         ui::info("No Traefik release found")?;

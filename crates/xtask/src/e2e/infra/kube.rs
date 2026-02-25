@@ -16,8 +16,10 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use crate::e2e::{constants as c, ui};
 use anyhow::{Context, Result, anyhow, bail};
 use k8s_openapi::ByteString;
+use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{Namespace, Pod, Secret};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -28,9 +30,6 @@ use kube::api::{
 use kube::core::{ApiResource, GroupVersionKind, TypeMeta};
 use kube::runtime::wait::{Condition, await_condition};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use xshell::{Shell, cmd};
-
-use crate::e2e::ui;
 
 // =============================================================================
 // Client
@@ -205,7 +204,7 @@ pub async fn apply_secret(ns: &str, name: &str, key: &str, value: &str) -> Resul
         ..Default::default()
     };
 
-    let pp = PatchParams::apply("xtask").force();
+    let pp = PatchParams::apply(c::SSA_FIELD_MANAGER).force();
     secrets
         .patch(name, &pp, &Patch::Apply(&secret))
         .await
@@ -275,7 +274,7 @@ async fn apply_single_doc(client: &Client, yaml: &str) -> Result<()> {
     let ns = obj.metadata.namespace.as_deref().unwrap_or("default");
 
     let api: Api<DynamicObject> = Api::namespaced_with(client.clone(), ns, &ar);
-    let pp = PatchParams::apply("xtask").force();
+    let pp = PatchParams::apply(c::SSA_FIELD_MANAGER).force();
     api.patch(name, &pp, &Patch::Apply(&obj))
         .await
         .with_context(|| format!("server-side apply of {}/{name}", tm.kind))?;
@@ -371,7 +370,7 @@ pub async fn create_namespace(ns: &str) -> Result<()> {
         },
         ..Default::default()
     };
-    let pp = PatchParams::apply("xtask").force();
+    let pp = PatchParams::apply(c::SSA_FIELD_MANAGER).force();
     namespaces
         .patch(ns, &pp, &Patch::Apply(&ns_obj))
         .await
@@ -445,15 +444,22 @@ pub async fn wait_for_pod(label: &str, namespace: &str, timeout: &str) -> Result
         let lp = ListParams::default().labels(label);
 
         let list = pods.list(&lp).await.context("listing pods")?;
-        for pod in &list.items {
-            if let Some(name) = &pod.metadata.name {
+        let futs: Vec<_> = list
+            .items
+            .iter()
+            .filter_map(|pod| pod.metadata.name.as_deref())
+            .map(|name| {
                 let cond = await_condition(pods.clone(), name, is_pod_ready());
-                tokio::time::timeout(duration, cond)
-                    .await
-                    .with_context(|| format!("timeout waiting for pod {name}"))?
-                    .with_context(|| format!("watching pod {name}"))?;
-            }
-        }
+                async move {
+                    tokio::time::timeout(duration, cond)
+                        .await
+                        .with_context(|| format!("timeout waiting for pod {name}"))?
+                        .with_context(|| format!("watching pod {name}"))?;
+                    Ok::<_, anyhow::Error>(())
+                }
+            })
+            .collect();
+        futures::future::try_join_all(futs).await?;
         Ok(())
     }
     .await;
@@ -463,6 +469,22 @@ pub async fn wait_for_pod(label: &str, namespace: &str, timeout: &str) -> Result
             "Pod {label} not ready after {timeout}: {e:#}. Continuing..."
         ))?;
     }
+    Ok(())
+}
+
+/// Wait for multiple pods by label in parallel. Each label/timeout pair is
+/// awaited concurrently, turning `sum(timeouts)` into `max(timeouts)`.
+pub async fn wait_for_pods_parallel(
+    pods: &[(&str, &str, &str)], // (label, namespace, timeout)
+) -> Result<()> {
+    let futs: Vec<_> = pods
+        .iter()
+        .map(|(label, ns, timeout)| wait_for_pod(label, ns, timeout))
+        .collect();
+    futures::future::join_all(futs)
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
     Ok(())
 }
 
@@ -478,6 +500,43 @@ pub async fn wait_for_job(ns: &str, name: &str, timeout: &str) -> Result<bool> {
         Ok(Err(e)) => Err(e).context(format!("watching job {name}")),
         Err(_) => Ok(false),
     }
+}
+
+// =============================================================================
+// Rollout restart (patch deployment annotation)
+// =============================================================================
+
+/// Trigger a rolling restart of a Deployment by patching its pod template
+/// annotation with the current timestamp — the same mechanism as
+/// `kubectl rollout restart deployment/<name>`.
+pub async fn rollout_restart(ns: &str, deployment: &str) -> Result<()> {
+    let client = client().await?;
+    let deployments: Api<Deployment> = Api::namespaced(client, ns);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let patch = serde_json::json!({
+        "spec": {
+            "template": {
+                "metadata": {
+                    "annotations": {
+                        "kubectl.kubernetes.io/restartedAt": now.to_string()
+                    }
+                }
+            }
+        }
+    });
+
+    deployments
+        .patch(deployment, &PatchParams::default(), &Patch::Merge(&patch))
+        .await
+        .with_context(|| format!("rollout restart of {deployment} in {ns}"))?;
+
+    ui::info(&format!("Rollout restart triggered for {deployment}"))?;
+    Ok(())
 }
 
 // =============================================================================
@@ -671,21 +730,4 @@ pub async fn cp_from_pod(ns: &str, pod: &str, pod_path: &str, local_path: &Path)
     }
 
     bail!("no files found in tar archive from {pod}:{pod_path}")
-}
-
-// =============================================================================
-// Helm (shell-outs — no Rust Helm library exists)
-// =============================================================================
-
-/// Check whether a Helm release exists in the given namespace.
-pub fn helm_release_exists(sh: &Shell, release: &str, namespace: &str, docker_host: &str) -> bool {
-    cmd!(sh, "helm status {release} -n {namespace}")
-        .env("DOCKER_HOST", docker_host)
-        .quiet()
-        .ignore_status()
-        .ignore_stdout()
-        .ignore_stderr()
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }

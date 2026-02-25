@@ -1,10 +1,23 @@
 //! Structural constants for the E2E harness.
 //!
-//! File paths, table lists, filenames, and env var names. These are not
-//! configurable — they define the shape of the harness itself.
+//! File paths, table lists, filenames, env var names, and concurrency limits.
+//! These are not configurable — they define the shape of the harness itself.
 //!
 //! All configurable defaults (namespaces, timeouts, image tags, etc.)
 //! live in `e2e/config.yaml` and are loaded by `config.rs`.
+
+// -- Preflight: required CLI tools --------------------------------------------
+
+pub const REQUIRED_TOOLS: &[&str] = &["colima", "docker", "helm"];
+
+// -- Environment variable names -----------------------------------------------
+
+pub const DOCKER_HOST_ENV: &str = "DOCKER_HOST";
+pub const GITLAB_SRC_ENV: &str = "GITLAB_SRC";
+
+// -- SSA field manager (kube-rs server-side apply) ----------------------------
+
+pub const SSA_FIELD_MANAGER: &str = "xtask";
 
 // -- Config file path ---------------------------------------------------------
 
@@ -76,6 +89,7 @@ pub const COLIMA_START_LOG: &str = "colima-start.log";
 pub const CH_MIGRATE_LOG: &str = "clickhouse-migrate.log";
 pub const REDACTION_TEST_RB: &str = "redaction_test.rb";
 pub const REDACTION_TEST_LOG: &str = "redaction-test.log";
+pub const TEST_RESULTS_JSON: &str = "test-results.json";
 
 // -- Log / artifact files cleaned during teardown -----------------------------
 
@@ -85,8 +99,46 @@ pub const TEARDOWN_LOG_FILES: &[&str] = &[
     COLIMA_START_LOG,
     CH_MIGRATE_LOG,
     REDACTION_TEST_LOG,
+    TEST_RESULTS_JSON,
 ];
 
 /// Subset of log files removed during GKG-only teardown.
 /// Omits CNG-phase logs (colima-start, create-test-data, manifest).
-pub const GKG_TEARDOWN_LOG_FILES: &[&str] = &[CH_MIGRATE_LOG, REDACTION_TEST_LOG];
+pub const GKG_TEARDOWN_LOG_FILES: &[&str] =
+    &[CH_MIGRATE_LOG, REDACTION_TEST_LOG, TEST_RESULTS_JSON];
+
+// -- GKG Helm chart deployments (rollout restart targets) ---------------------
+
+/// Deployment names created by the GKG Helm chart in helm-dev/gkg/templates/.
+pub const GKG_DEPLOYMENTS: &[&str] = &[
+    "gkg-indexer",
+    "gkg-webserver",
+    "gkg-health-check",
+    "siphon-producer",
+    "siphon-consumer",
+];
+
+/// Datalake tables dumped for diagnostics after indexing.
+pub const DATALAKE_DIAGNOSTIC_TABLES: &[&str] = &[
+    "hierarchy_merge_requests",
+    "hierarchy_work_items",
+    "siphon_merge_requests",
+    "siphon_issues",
+    "siphon_namespace_details",
+    "siphon_namespaces",
+    "project_namespace_traversal_paths",
+    "namespace_traversal_paths",
+    "siphon_organizations",
+];
+
+// -- Concurrency limits -------------------------------------------------------
+
+pub const CH_OPTIMIZE_CONCURRENCY: usize = 3;
+
+// -- Diagnostic defaults ------------------------------------------------------
+
+pub const DIAGNOSTIC_LOG_TAIL_LINES: i64 = 30;
+
+// -- Colima docker socket path pattern ----------------------------------------
+
+pub const COLIMA_SOCKET_TEMPLATE: &str = ".colima/{}/docker.sock";

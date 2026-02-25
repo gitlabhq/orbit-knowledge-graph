@@ -115,6 +115,30 @@ description = "Start the GKG server (webserver mode)"
 run = "find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile fixtures/ontology/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
 
+[tasks."e2e:setup"]
+run = "cargo xtask e2e setup"
+description = "Set up the full E2E environment (cluster, GitLab, GKG stack)"
+
+[tasks."e2e:teardown"]
+run = "cargo xtask e2e teardown"
+description = "Tear down the full E2E environment (cluster, GitLab, GKG stack)"
+
+[tasks."e2e:test"]
+run = "cargo xtask e2e test"
+description = "Run E2E redaction tests (assumes environment is up)"
+
+[tasks."e2e:rebuild:gkg"]
+run = "cargo xtask e2e rebuild --gkg"
+description = "Rebuild GKG image and restart GKG pods"
+
+[tasks."e2e:rebuild:rails"]
+run = "cargo xtask e2e rebuild --rails"
+description = "Rebuild Rails CNG images and helm upgrade GitLab"
+
+[tasks."e2e:rebuild:all"]
+run = "cargo xtask e2e rebuild --gkg --rails"
+description = "Rebuild both Rails CNG and GKG images"
+
 [tasks."lint:markdown"]
 run = "npx markdownlint-cli2@0.19.0 '**/*.md'"
 description = "Run markdownlint on all markdown files"

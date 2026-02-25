@@ -12,10 +12,15 @@ use bollard::{API_DEFAULT_VERSION, Docker, body_try_stream};
 use futures::{StreamExt, TryStreamExt};
 use tokio_util::io::ReaderStream;
 
+use crate::e2e::constants as c;
+
 /// Connect to the Colima Docker socket for the given profile.
 fn client(colima_profile: &str) -> Result<Docker> {
     let home = std::env::var("HOME").context("HOME not set")?;
-    let socket = format!("{home}/.colima/{colima_profile}/docker.sock");
+    let socket = format!(
+        "{home}/{}",
+        c::COLIMA_SOCKET_TEMPLATE.replace("{}", colima_profile)
+    );
     Docker::connect_with_socket(&socket, 120, API_DEFAULT_VERSION)
         .with_context(|| format!("connecting to docker socket: {socket}"))
 }

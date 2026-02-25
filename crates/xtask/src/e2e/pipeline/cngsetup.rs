@@ -14,7 +14,7 @@ use std::fs;
 
 use anyhow::Result;
 
-use crate::e2e::{config::Config, constants as c, kube, ui, utils};
+use crate::e2e::{config::Config, constants as c, infra::kube, ui, utils};
 
 /// Run all CNG setup steps.
 pub async fn run(cfg: &Config) -> Result<()> {
@@ -50,7 +50,13 @@ async fn bridge_pg_credentials(cfg: &Config) -> Result<()> {
     let default_ns = &cfg.namespaces.default;
     let bridge_secret = &cfg.postgres.bridge_secret_name;
 
-    kube::apply_secret(default_ns, bridge_secret, "password", &pg_pass).await?;
+    kube::apply_secret(
+        default_ns,
+        bridge_secret,
+        &cfg.postgres.bridge_password_key,
+        &pg_pass,
+    )
+    .await?;
 
     ui::done(&format!("{bridge_secret} secret created in {default_ns}"))?;
     Ok(())

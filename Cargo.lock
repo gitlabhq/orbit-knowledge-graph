@@ -8203,6 +8203,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tar",
  "tempfile",

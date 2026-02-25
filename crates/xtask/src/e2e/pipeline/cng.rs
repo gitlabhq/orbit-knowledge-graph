@@ -13,15 +13,21 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use xshell::{Shell, cmd};
+use futures::stream::{self, StreamExt};
+use xshell::Shell;
 
-use crate::e2e::{cmd as cmd_helpers, colima, config::Config, constants as c, docker, kube, ui};
+use crate::e2e::{
+    config::Config,
+    constants as c,
+    infra::{colima, docker, helm, kube},
+    ui,
+};
 
 /// Run all CNG deploy steps.
 pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
     ui::banner("CNG Deploy: Cluster + GitLab")?;
     ui::detail("GKG root    ", &cfg.gkg_root.display().to_string())?;
-    ui::detail("GitLab src  ", &cfg.gitlab_src.display().to_string())?;
+    ui::detail("GitLab src  ", &cfg.gitlab_src()?.display().to_string())?;
     ui::detail(
         "Colima      ",
         &format!(
@@ -31,7 +37,7 @@ pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
     )?;
     ui::detail("Skip build  ", &skip_build.to_string())?;
 
-    validate_prerequisites(sh, cfg, skip_build)?;
+    validate_prerequisites(cfg, skip_build)?;
     start_colima(sh, cfg).await?;
     prepull_workhorse(cfg).await?;
     if skip_build {
@@ -49,17 +55,17 @@ pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
 
 // -- Prerequisites ------------------------------------------------------------
 
-fn validate_prerequisites(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
-    if !skip_build && !cfg.gitlab_src.join("Gemfile").exists() {
-        bail!(
-            "GitLab source not found at {}/Gemfile\n\
-             Set GITLAB_SRC to the path of your GitLab Rails checkout.",
-            cfg.gitlab_src.display()
-        );
-    }
-    for tool in ["colima", "docker", "helm"] {
-        if !cmd_helpers::exists(sh, tool) {
-            bail!("{tool} not found on PATH");
+fn validate_prerequisites(cfg: &Config, skip_build: bool) -> Result<()> {
+    // Tool checks (colima, docker, helm) are handled by preflight::check
+    // in main.rs before any pipeline runs.
+    if !skip_build {
+        let src = cfg.gitlab_src()?;
+        if !src.join("Gemfile").exists() {
+            bail!(
+                "GitLab source not found at {}/Gemfile\n\
+                 Set GITLAB_SRC to the path of your GitLab Rails checkout.",
+                src.display()
+            );
         }
     }
     Ok(())
@@ -120,9 +126,10 @@ async fn prepull_workhorse(cfg: &Config) -> Result<()> {
 
 // -- Step 3: Build CNG images -------------------------------------------------
 
-async fn build_images(cfg: &Config) -> Result<()> {
+pub(crate) async fn build_images(cfg: &Config) -> Result<()> {
     ui::step(3, "Building custom CNG images")?;
-    ui::info(&format!("Source: {}", cfg.gitlab_src.display()))?;
+    let gitlab_src = cfg.gitlab_src()?;
+    ui::info(&format!("Source: {}", gitlab_src.display()))?;
     ui::info(&format!("Base tag: {}", cfg.cng.base_tag))?;
 
     // Stage Rails code to a temp directory (avoids GitLab's restrictive .dockerignore).
@@ -132,7 +139,7 @@ async fn build_images(cfg: &Config) -> Result<()> {
     ui::info(&format!("Staging Rails code to {}", staging.display()))?;
 
     for dir in &cfg.cng.staging_dirs {
-        let src = cfg.gitlab_src.join(dir);
+        let src = gitlab_src.join(dir);
         let dst = staging.join(dir);
         if src.exists() {
             ui::detail_item(&format!("Copying {dir}/"))?;
@@ -141,7 +148,7 @@ async fn build_images(cfg: &Config) -> Result<()> {
     }
 
     // vendor/gems -> vendor_gems (avoid the large vendor/bundle/)
-    let vendor_gems_src = cfg.gitlab_src.join("vendor/gems");
+    let vendor_gems_src = gitlab_src.join("vendor/gems");
     if vendor_gems_src.exists() {
         ui::detail_item("Copying vendor/gems/ -> vendor_gems/")?;
         copy_dir_recursive(&vendor_gems_src, &staging.join("vendor_gems"))?;
@@ -149,9 +156,9 @@ async fn build_images(cfg: &Config) -> Result<()> {
 
     // Gemfile + Gemfile.lock
     ui::detail_item("Copying Gemfile, Gemfile.lock")?;
-    fs::copy(cfg.gitlab_src.join("Gemfile"), staging.join("Gemfile"))?;
+    fs::copy(gitlab_src.join("Gemfile"), staging.join("Gemfile"))?;
     fs::copy(
-        cfg.gitlab_src.join("Gemfile.lock"),
+        gitlab_src.join("Gemfile.lock"),
         staging.join("Gemfile.lock"),
     )?;
 
@@ -161,23 +168,50 @@ async fn build_images(cfg: &Config) -> Result<()> {
     let dockerfile = cfg.cng_dir.join(c::DOCKERFILE_RAILS);
     let profile = &cfg.colima.profile;
 
-    for component in &cfg.cng.components {
-        let tag = format!(
-            "{}/{}:{}",
-            cfg.cng.local_prefix, component, cfg.cng.local_tag
-        );
-        let base_image = format!("{}/{}", cfg.cng.registry, component);
+    // Build images with bounded concurrency (2 at a time to avoid
+    // overwhelming Colima's CPU/RAM while still overlapping I/O).
+    let builds: Vec<_> = cfg
+        .cng
+        .components
+        .iter()
+        .map(|component| {
+            let tag = format!(
+                "{}/{}:{}",
+                cfg.cng.local_prefix, component, cfg.cng.local_tag
+            );
+            let base_image = format!("{}/{}", cfg.cng.registry, component);
+            (tag, base_image)
+        })
+        .collect();
 
-        ui::info(&format!("Building {tag}"))?;
-        ui::detail_item(&format!("Base: {base_image}:{}", cfg.cng.base_tag))?;
+    for (tag, base_image) in &builds {
+        ui::info(&format!(
+            "Queued: {tag} (base: {base_image}:{}",
+            cfg.cng.base_tag
+        ))?;
+    }
 
+    let results: Vec<Result<String>> = stream::iter(builds.iter().map(|(tag, base_image)| {
         let build_args = HashMap::from([
             ("BASE_IMAGE", base_image.as_str()),
             ("BASE_TAG", cfg.cng.base_tag.as_str()),
         ]);
-        docker::build_image(profile, staging, &dockerfile, &tag, &build_args).await?;
+        let df = &dockerfile;
+        let s = staging;
+        let p = profile;
+        let t = tag.clone();
+        async move {
+            docker::build_image(p, s, df, &t, &build_args).await?;
+            Ok(t)
+        }
+    }))
+    .buffer_unordered(3)
+    .collect()
+    .await;
 
-        ui::detail_item(&format!("Done: {tag}"))?;
+    for result in results {
+        let tag = result?;
+        ui::detail_item(&format!("Built: {tag}"))?;
     }
 
     ui::done("All images built")?;
@@ -190,43 +224,33 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(4, "Deploying Traefik ingress controller")?;
 
     let docker_host = cfg.docker_host();
-
     let release = &cfg.helm.traefik.release;
     let kube_ns = &cfg.namespaces.kube_system;
 
-    if kube::helm_release_exists(sh, release, kube_ns, &docker_host) {
+    if helm::release_exists(sh, release, kube_ns, &docker_host) {
         ui::info("Traefik already deployed")?;
         return Ok(());
     }
 
-    // Add/update repo
-    let repo_name = &cfg.helm.traefik.repo_name;
-    let repo_url = &cfg.helm.traefik.repo_url;
-    let _ = cmd!(sh, "helm repo add {repo_name} {repo_url}")
-        .env("DOCKER_HOST", &docker_host)
-        .quiet()
-        .ignore_status()
-        .run();
-
-    cmd!(sh, "helm repo update {repo_name}")
-        .env("DOCKER_HOST", &docker_host)
-        .run()?;
+    helm::repo_add_update(
+        sh,
+        &cfg.helm.traefik.repo_name,
+        &cfg.helm.traefik.repo_url,
+        &docker_host,
+    )?;
 
     let values_file = cfg.cng_dir.join(c::TRAEFIK_VALUES_YAML);
     let values_str = values_file.to_string_lossy().to_string();
-    let chart = &cfg.helm.traefik.chart;
-    let timeout = &cfg.helm.traefik.timeout;
 
-    cmd!(
+    helm::install(
         sh,
-        "helm install {release} {chart}
-            -n {kube_ns}
-            -f {values_str}
-            --wait
-            --timeout {timeout}"
-    )
-    .env("DOCKER_HOST", &docker_host)
-    .run()?;
+        release,
+        &cfg.helm.traefik.chart,
+        kube_ns,
+        &values_str,
+        &cfg.helm.traefik.timeout,
+        &docker_host,
+    )?;
 
     ui::info("Traefik deployed")?;
     Ok(())
@@ -234,7 +258,7 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 5: Deploy GitLab ----------------------------------------------------
 
-async fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
+pub(crate) async fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(5, "Deploying GitLab via Helm chart")?;
 
     let docker_host = cfg.docker_host();
@@ -243,45 +267,22 @@ async fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     let chart = &cfg.helm.gitlab.chart;
     let timeout = &cfg.helm.gitlab.timeout;
 
-    // Add/update repo
-    let repo_name = &cfg.helm.gitlab.repo_name;
-    let repo_url = &cfg.helm.gitlab.repo_url;
-    let _ = cmd!(sh, "helm repo add {repo_name} {repo_url}")
-        .env("DOCKER_HOST", &docker_host)
-        .quiet()
-        .ignore_status()
-        .run();
-
-    cmd!(sh, "helm repo update {repo_name}")
-        .env("DOCKER_HOST", &docker_host)
-        .run()?;
+    helm::repo_add_update(
+        sh,
+        &cfg.helm.gitlab.repo_name,
+        &cfg.helm.gitlab.repo_url,
+        &docker_host,
+    )?;
 
     let values_file = cfg.cng_dir.join(c::GITLAB_VALUES_YAML);
     let values_str = values_file.to_string_lossy().to_string();
 
-    if kube::helm_release_exists(sh, release, ns, &docker_host) {
+    if helm::release_exists(sh, release, ns, &docker_host) {
         ui::info("GitLab already deployed, upgrading")?;
-        cmd!(
-            sh,
-            "helm upgrade {release} {chart}
-                -n {ns}
-                -f {values_str}
-                --timeout {timeout}"
-        )
-        .env("DOCKER_HOST", &docker_host)
-        .run()?;
+        helm::upgrade(sh, release, chart, ns, &values_str, timeout, &docker_host)?;
     } else {
         kube::create_namespace(ns).await?;
-
-        cmd!(
-            sh,
-            "helm install {release} {chart}
-                -n {ns}
-                -f {values_str}
-                --timeout {timeout}"
-        )
-        .env("DOCKER_HOST", &docker_host)
-        .run()?;
+        helm::install(sh, release, chart, ns, &values_str, timeout, &docker_host)?;
     }
 
     ui::info("GitLab deploy initiated")?;
@@ -290,16 +291,17 @@ async fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 6: Wait for pods ----------------------------------------------------
 
-async fn wait_for_pods(cfg: &Config) -> Result<()> {
+pub(crate) async fn wait_for_pods(cfg: &Config) -> Result<()> {
     ui::step(6, "Waiting for GitLab pods to be ready")?;
 
     let ns = &cfg.namespaces.gitlab;
+    let pods: Vec<(&str, &str, &str)> = cfg
+        .pod_readiness
+        .iter()
+        .map(|pr| (pr.label.as_str(), ns.as_str(), pr.timeout.as_str()))
+        .collect();
+    kube::wait_for_pods_parallel(&pods).await?;
 
-    for pr in &cfg.pod_readiness {
-        kube::wait_for_pod(&pr.label, ns, &pr.timeout).await?;
-    }
-
-    // Print pod status
     ui::info("Pod status")?;
     kube::print_pod_status(ns).await?;
 
