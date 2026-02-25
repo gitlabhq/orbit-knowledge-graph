@@ -1519,42 +1519,186 @@ mod tests {
         assert_eq!(enum_values, vec!["active", "inactive", "pending"]);
     }
 
-    #[test]
-    fn test_redaction_config_parsing() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        let project_config = ontology
-            .get_redaction_config("Project")
-            .expect("Project should have redaction config");
-        assert_eq!(project_config.resource_type, "project");
-        assert_eq!(project_config.id_column, "id");
-
-        let user_config = ontology
-            .get_redaction_config("User")
-            .expect("User should have redaction config");
-        assert_eq!(user_config.resource_type, "user");
-        assert_eq!(user_config.id_column, "id");
-
-        let group_config = ontology
-            .get_redaction_config("Group")
-            .expect("Group should have redaction config");
-        assert_eq!(group_config.resource_type, "group");
-        assert_eq!(group_config.id_column, "id");
-
-        let mr_config = ontology
-            .get_redaction_config("MergeRequest")
-            .expect("MergeRequest should have redaction config");
-        assert_eq!(mr_config.resource_type, "merge_request");
-        assert_eq!(mr_config.id_column, "id");
+    fn assert_redaction(
+        ontology: &Ontology,
+        entity: &str,
+        resource_type: &str,
+        id_column: &str,
+        ability: &str,
+    ) {
+        let config = ontology
+            .get_redaction_config(entity)
+            .unwrap_or_else(|| panic!("{entity} should have redaction config"));
+        assert_eq!(
+            config.resource_type, resource_type,
+            "{entity}: resource_type mismatch"
+        );
+        assert_eq!(config.id_column, id_column, "{entity}: id_column mismatch");
+        assert_eq!(config.ability, ability, "{entity}: ability mismatch");
     }
 
     #[test]
-    fn test_requires_redaction() {
+    fn redaction_config_core_nodes() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        assert!(ontology.requires_redaction("Project"));
-        assert!(ontology.requires_redaction("User"));
-        assert!(ontology.requires_redaction("Group"));
-        assert!(ontology.requires_redaction("MergeRequest"));
+        assert_redaction(&ontology, "Project", "project", "id", "read_project");
+        assert_redaction(&ontology, "Group", "group", "id", "read_group");
+        assert_redaction(&ontology, "User", "user", "id", "read_user");
+        assert_redaction(&ontology, "Note", "note", "id", "read_note");
+    }
+
+    #[test]
+    fn redaction_config_plan_nodes() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_redaction(&ontology, "WorkItem", "work_item", "id", "read_work_item");
+        assert_redaction(&ontology, "Milestone", "milestone", "id", "read_milestone");
+        assert_redaction(&ontology, "Label", "label", "id", "read_label");
+    }
+
+    #[test]
+    fn redaction_config_code_review_nodes() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_redaction(
+            &ontology,
+            "MergeRequest",
+            "merge_request",
+            "id",
+            "read_merge_request",
+        );
+        assert_redaction(
+            &ontology,
+            "MergeRequestDiff",
+            "merge_request",
+            "merge_request_id",
+            "read_merge_request",
+        );
+        assert_redaction(
+            &ontology,
+            "MergeRequestDiffFile",
+            "merge_request",
+            "merge_request_id",
+            "read_merge_request",
+        );
+    }
+
+    #[test]
+    fn redaction_config_ci_nodes() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_redaction(&ontology, "Pipeline", "ci_pipeline", "id", "read_pipeline");
+        assert_redaction(&ontology, "Stage", "ci_stage", "id", "read_build");
+        assert_redaction(&ontology, "Job", "ci_build", "id", "read_build");
+    }
+
+    #[test]
+    fn redaction_config_security_nodes() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_redaction(
+            &ontology,
+            "Vulnerability",
+            "vulnerability",
+            "id",
+            "read_vulnerability",
+        );
+        assert_redaction(
+            &ontology,
+            "VulnerabilityOccurrence",
+            "vulnerability_occurrence",
+            "id",
+            "read_vulnerability",
+        );
+        assert_redaction(
+            &ontology,
+            "VulnerabilityScanner",
+            "vulnerability_scanner",
+            "id",
+            "read_vulnerability_scanner",
+        );
+        assert_redaction(
+            &ontology,
+            "VulnerabilityIdentifier",
+            "vulnerability_identifier",
+            "id",
+            "read_vulnerability",
+        );
+        assert_redaction(
+            &ontology,
+            "Finding",
+            "security_finding",
+            "id",
+            "read_security_resource",
+        );
+        assert_redaction(
+            &ontology,
+            "SecurityScan",
+            "security_scan",
+            "id",
+            "read_scan",
+        );
+    }
+
+    #[test]
+    fn redaction_config_source_code_nodes() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_redaction(&ontology, "Branch", "project", "project_id", "read_code");
+        assert_redaction(&ontology, "File", "project", "project_id", "read_code");
+        assert_redaction(&ontology, "Directory", "project", "project_id", "read_code");
+        assert_redaction(
+            &ontology,
+            "Definition",
+            "project",
+            "project_id",
+            "read_code",
+        );
+        assert_redaction(
+            &ontology,
+            "ImportedSymbol",
+            "project",
+            "project_id",
+            "read_code",
+        );
+    }
+
+    #[test]
+    fn all_nodes_require_redaction() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        let expected = [
+            "Project",
+            "Group",
+            "User",
+            "Note",
+            "WorkItem",
+            "Milestone",
+            "Label",
+            "MergeRequest",
+            "MergeRequestDiff",
+            "MergeRequestDiffFile",
+            "Pipeline",
+            "Stage",
+            "Job",
+            "Vulnerability",
+            "VulnerabilityOccurrence",
+            "VulnerabilityScanner",
+            "VulnerabilityIdentifier",
+            "Finding",
+            "SecurityScan",
+            "Branch",
+            "File",
+            "Directory",
+            "Definition",
+            "ImportedSymbol",
+        ];
+
+        for entity in &expected {
+            assert!(
+                ontology.requires_redaction(entity),
+                "{entity} should require redaction"
+            );
+        }
     }
 }

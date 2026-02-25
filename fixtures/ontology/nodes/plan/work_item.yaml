@@ -11,9 +11,9 @@ style:
   color: "#EC4899"
 
 redaction:
-  resource_type: issue
+  resource_type: work_item
   id_column: id
-  ability: read_issue
+  ability: read_work_item
 
 properties:
   id:
