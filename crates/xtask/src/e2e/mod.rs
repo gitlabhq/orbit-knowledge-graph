@@ -1,10 +1,8 @@
 pub mod cmd;
-pub mod colima;
 pub mod config;
 pub mod constants;
-pub mod docker;
 pub mod env;
-pub mod kube;
+pub mod infra;
 pub mod pipeline;
 pub mod template;
 pub mod ui;

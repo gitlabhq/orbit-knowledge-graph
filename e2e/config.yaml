@@ -66,7 +66,10 @@ postgres:
   database: gitlabhq_production
   user: gitlab
   superuser: postgres
+  port: "5432"
+  service_name: postgresql
   bridge_secret_name: postgres-credentials
+  bridge_password_key: password
   kg_enabled_table: knowledge_graph_enabled_namespaces
 
 # -- Paths inside pods ---------------------------------------------------------
@@ -78,6 +81,7 @@ pod_paths:
 # -- ClickHouse ----------------------------------------------------------------
 clickhouse:
   service_name: gkg-e2e-clickhouse
+  http_port: "8123"
   datalake_db: gitlab_clickhouse_development
   graph_db: gkg-development
   default_user: default
@@ -100,12 +104,14 @@ gkg:
   indexer_configmap: gkg-indexer-config
   grpc_endpoint: gkg-webserver.default.svc.cluster.local:50051
   server_credentials_secret: gkg-server-credentials
+  server_credentials_jwt_key: jwt-secret
+  indexer_label: app.kubernetes.io/component=gkg-indexer
 
 # -- Label selectors -----------------------------------------------------------
 labels:
   toolbox: app=toolbox
 
-# -- Pod readiness checks ------------------------------------------------------
+# -- Pod readiness checks (GitLab) ---------------------------------------------
 pod_readiness:
   - label: app.kubernetes.io/name=postgresql
     timeout: 600s
@@ -117,6 +123,19 @@ pod_readiness:
     timeout: 300s
   - label: app=gitaly
     timeout: 300s
+
+# -- Pod readiness checks (GKG) ------------------------------------------------
+gkg_pod_readiness:
+  - label: app.kubernetes.io/name=nats
+    timeout: 120s
+  - label: app.kubernetes.io/component=siphon-producer
+    timeout: 120s
+  - label: app.kubernetes.io/component=siphon-consumer
+    timeout: 120s
+  - label: app.kubernetes.io/component=gkg-indexer
+    timeout: 120s
+  - label: app.kubernetes.io/component=gkg-webserver
+    timeout: 120s
 
 # -- Timeouts ------------------------------------------------------------------
 timeouts:

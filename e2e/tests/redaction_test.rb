@@ -28,7 +28,6 @@ m = manifest # short alias
 # the cross-namespace service FQDN.
 grpc_endpoint = ENV.fetch('KNOWLEDGE_GRAPH_GRPC_ENDPOINT',
                           'gkg-webserver.default.svc.cluster.local:50051')
-puts "  gRPC endpoint: #{grpc_endpoint}"
 client = Ai::KnowledgeGraph::GrpcClient.new(endpoint: grpc_endpoint)
 org_id = m[:organization_id]
 
@@ -49,12 +48,6 @@ total_projects    = m[:counts][:total_projects]
 
 lois_counts     = m[:counts][:per_user][:lois]
 franklyn_counts = m[:counts][:per_user][:franklyn]
-
-puts "\n#{'=' * 60}"
-puts '  Knowledge Graph -- Redaction Test Suite'
-puts '=' * 60
-puts "  Projects: smoke=#{proj_smoke_id}, frontend=#{proj_frontend_id}, backend=#{proj_backend_id}, redaction=#{proj_redaction_id}"
-puts "  Total projects: #{total_projects}"
 
 # =============================================================================
 # SECTION 1: Admin sees everything

@@ -53,6 +53,26 @@ enum E2eCommand {
         #[arg(long)]
         gkg_only: bool,
     },
+    /// Run E2E tests against the running environment (~10s).
+    ///
+    /// Copies test scripts to the toolbox pod and runs the redaction test
+    /// suite. Assumes setup --gkg has been run.
+    Test,
+    /// Rebuild images and restart pods.
+    ///
+    /// Use --gkg to rebuild the GKG server image and rollout restart (~2-3min).
+    /// Use --rails to rebuild CNG images from GITLAB_SRC and helm upgrade (~5-8min).
+    /// Both flags can be combined. At least one is required.
+    /// Migrations and test data persist across restarts.
+    Rebuild {
+        /// Rebuild the GKG server image and rollout restart all GKG deployments.
+        #[arg(long)]
+        gkg: bool,
+
+        /// Rebuild Rails CNG images from GITLAB_SRC and helm upgrade GitLab.
+        #[arg(long)]
+        rails: bool,
+    },
     /// Tear down the E2E environment.
     ///
     /// By default, tears down everything (GKG + GitLab + Traefik + Colima).
@@ -76,44 +96,63 @@ async fn main() -> Result<()> {
     let sh = Shell::new()?;
 
     match cli.command {
-        Command::E2e { command } => match command {
-            E2eCommand::Setup {
-                skip_build,
-                cng,
-                cng_setup,
-                gkg,
-                gkg_only,
-            } => {
-                let cfg = e2e::config::Config::load()?;
-
-                // Resolve which phases to run.
-                // --gkg implies all. --gkg-only runs just phase 3.
-                // Individual flags run just that phase.
-                // No flags = CNG + CNG-setup (default).
-                let explicit = cng || cng_setup || gkg || gkg_only;
-                let run_cng = !explicit || cng || gkg;
-                let run_cng_setup = !explicit || cng_setup || gkg;
-                let run_gkg_stack = gkg || gkg_only;
-
-                if run_cng {
-                    e2e::pipeline::cng::run(&sh, &cfg, skip_build).await?;
+        Command::E2e { command } => {
+            for tool in e2e::constants::REQUIRED_TOOLS {
+                if !e2e::cmd::exists(&sh, tool) {
+                    anyhow::bail!("{tool} not found on PATH");
                 }
-                if run_cng_setup {
-                    e2e::pipeline::cngsetup::run(&cfg).await?;
-                }
-                if run_gkg_stack {
-                    e2e::pipeline::gkg::run(&sh, &cfg).await?;
-                }
-
-                Ok(())
             }
-            E2eCommand::Teardown {
-                keep_colima,
-                gkg_only,
-            } => {
-                let cfg = e2e::config::Config::load()?;
-                e2e::pipeline::teardown::run(&sh, &cfg, keep_colima, gkg_only).await
+
+            match command {
+                E2eCommand::Setup {
+                    skip_build,
+                    cng,
+                    cng_setup,
+                    gkg,
+                    gkg_only,
+                } => {
+                    let cfg = e2e::config::Config::load()?;
+
+                    // Resolve which phases to run.
+                    // --gkg implies all. --gkg-only runs just phase 3.
+                    // Individual flags run just that phase.
+                    // No flags = CNG + CNG-setup (default).
+                    let explicit = cng || cng_setup || gkg || gkg_only;
+                    let run_cng = !explicit || cng || gkg;
+                    let run_cng_setup = !explicit || cng_setup || gkg;
+                    let run_gkg_stack = gkg || gkg_only;
+
+                    if run_cng {
+                        e2e::pipeline::cng::run(&sh, &cfg, skip_build).await?;
+                    }
+                    if run_cng_setup {
+                        e2e::pipeline::cngsetup::run(&cfg).await?;
+                    }
+                    if run_gkg_stack {
+                        e2e::pipeline::gkg::run(&sh, &cfg).await?;
+                    }
+
+                    Ok(())
+                }
+                E2eCommand::Test => {
+                    let cfg = e2e::config::Config::load()?;
+                    e2e::pipeline::test::run(&cfg).await
+                }
+                E2eCommand::Rebuild { gkg, rails } => {
+                    if !gkg && !rails {
+                        anyhow::bail!("rebuild requires at least one of --gkg or --rails");
+                    }
+                    let cfg = e2e::config::Config::load()?;
+                    e2e::pipeline::rebuild::run(&sh, &cfg, gkg, rails).await
+                }
+                E2eCommand::Teardown {
+                    keep_colima,
+                    gkg_only,
+                } => {
+                    let cfg = e2e::config::Config::load()?;
+                    e2e::pipeline::teardown::run(&sh, &cfg, keep_colima, gkg_only).await
+                }
             }
-        },
+        }
     }
 }

@@ -23,6 +23,18 @@ require 'json'
 
 MANIFEST_PATH = '/tmp/e2e/manifest.json'
 
+# GitLab service objects return results in various shapes: ServiceResponse with
+# payload hash, plain hash, or the model directly. This normalizes all of them.
+def unwrap(result, key)
+  if result.respond_to?(:payload) && result.payload.is_a?(Hash)
+    result.payload[key] || result.payload
+  elsif result.is_a?(Hash)
+    result[key] || result
+  else
+    result
+  end
+end
+
 puts '=== CREATING E2E TEST DATA ==='
 
 Feature.enable(:knowledge_graph)
@@ -138,16 +150,7 @@ def find_or_create_group(name, path, admin, org, parent: nil, visibility: 20)
   params[:parent_id] = parent.id if parent
 
   result = Groups::CreateService.new(admin, params).execute
-  # ServiceResponse wraps the group in :group payload or responds to []
-  group = if result.respond_to?(:payload) && result.payload.is_a?(Hash)
-            result.payload[:group]
-          elsif result.is_a?(Hash)
-            result[:group] || result
-          elsif result.is_a?(Group)
-            result
-          else
-            result
-          end
+  group = unwrap(result, :group)
   raise "Failed to create group '#{name}': #{result.inspect}" unless group.is_a?(Group) && group.persisted?
 
   puts "  Created group '#{name}' (id: #{group.id}, traversal: #{group.traversal_ids.join('/')}/) #{visibility == 0 ? '[PRIVATE]' : '[PUBLIC]'}"
@@ -208,7 +211,7 @@ def find_or_create_project(name, path, namespace, admin, org, visibility: 20)
                                          organization_id: org.id,
                                          initialize_with_readme: true
                                        }).execute
-  project = result.is_a?(Hash) ? (result[:project] || result) : result
+  project = unwrap(result, :project)
   raise "Failed to create project '#{name}': #{result.inspect}" unless project.is_a?(Project) && project.persisted?
 
   puts "  Created project '#{name}' (id: #{project.id}, visibility: #{visibility == 0 ? 'private' : 'public'})"
@@ -341,15 +344,7 @@ all_projects.each do |proj|
                                          start_date: Date.today - (30 * (3 - i)),
                                          due_date: Date.today + (30 * (i + 1))
                                        }).execute
-    milestone = if ms.is_a?(Milestone)
-                  ms
-                else
-                  begin
-                    ms[:milestone]
-                  rescue StandardError
-                    ms
-                  end
-                end
+    milestone = unwrap(ms, :milestone)
     milestone_count += 1 if milestone&.persisted?
   end
 end
@@ -407,13 +402,7 @@ all_projects.each do |proj|
       current_user: admin,
       params: params
     ).execute
-    issue = if result.respond_to?(:payload) && result.payload.is_a?(Hash)
-              result.payload[:issue]
-            elsif result.is_a?(Hash)
-              result[:issue]
-            else
-              result
-            end
+    issue = unwrap(result, :issue)
     work_item_count += 1 if issue.is_a?(Issue) && issue.persisted?
   end
 end
@@ -457,15 +446,7 @@ all_public_projects.each do |proj|
         target_branch: proj.default_branch || 'main'
       }
     ).execute
-    mr = if result.respond_to?(:payload) && result.payload.is_a?(Hash)
-           result.payload[:merge_request] || result.payload
-         elsif result.is_a?(Hash)
-           result[:merge_request] || result
-         elsif result.is_a?(MergeRequest)
-           result
-         else
-           result
-         end
+    mr = unwrap(result, :merge_request)
 
     if mr.is_a?(MergeRequest) && mr.persisted? && state == 'merged'
       # MergeRequest uses state_id: 1=opened, 2=closed, 3=merged, 4=locked
@@ -509,11 +490,7 @@ all_public_projects.each do |proj|
                                           noteable: mr,
                                           note: body
                                         }).execute
-      note = if result.is_a?(Note)
-               result
-             else
-               (result.respond_to?(:payload) ? result.payload[:note] : result)
-             end
+      note = unwrap(result, :note)
       note_count += 1 if note.is_a?(Note) && note.persisted?
     end
   end
@@ -528,11 +505,7 @@ all_public_projects.each do |proj|
                                           noteable: issue,
                                           note: body
                                         }).execute
-      note = if result.is_a?(Note)
-               result
-             else
-               (result.respond_to?(:payload) ? result.payload[:note] : result)
-             end
+      note = unwrap(result, :note)
       note_count += 1 if note.is_a?(Note) && note.persisted?
     end
   end

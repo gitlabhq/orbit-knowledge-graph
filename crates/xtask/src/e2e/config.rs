@@ -1,10 +1,11 @@
 //! E2E environment configuration.
 //!
 //! Deserializes `e2e/config.yaml` directly into [`Config`].  The only env var
-//! is `GITLAB_SRC` — a required, user-specific path with no YAML default.
+//! is `GITLAB_SRC` — an optional, user-specific path with no YAML default,
+//! required only for commands that build CNG images (setup, rebuild --rails).
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -73,7 +74,10 @@ pub struct Postgres {
     pub database: String,
     pub user: String,
     pub superuser: String,
+    pub port: String,
+    pub service_name: String,
     pub bridge_secret_name: String,
+    pub bridge_password_key: String,
     pub kg_enabled_table: String,
 }
 
@@ -87,6 +91,7 @@ pub struct PodPaths {
 #[derive(Debug, Deserialize)]
 pub struct ClickHouse {
     pub service_name: String,
+    pub http_port: String,
     pub datalake_db: String,
     pub graph_db: String,
     pub default_user: String,
@@ -111,6 +116,8 @@ pub struct Gkg {
     pub indexer_configmap: String,
     pub grpc_endpoint: String,
     pub server_credentials_secret: String,
+    pub server_credentials_jwt_key: String,
+    pub indexer_label: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,6 +163,7 @@ pub struct Config {
     pub gkg: Gkg,
     pub labels: Labels,
     pub pod_readiness: Vec<PodReadiness>,
+    pub gkg_pod_readiness: Vec<PodReadiness>,
     pub timeouts: Timeouts,
 
     // -- Runtime-derived paths (not in YAML) ----------------------------------
@@ -164,7 +172,7 @@ pub struct Config {
     #[serde(skip)]
     pub cng_dir: PathBuf,
     #[serde(skip)]
-    pub gitlab_src: PathBuf,
+    pub gitlab_src: Option<PathBuf>,
     #[serde(skip)]
     pub log_dir: PathBuf,
 }
@@ -185,16 +193,30 @@ impl Config {
 
         cfg.cng_dir = gkg_root.join(c::CNG_DIR);
         cfg.log_dir = gkg_root.join(c::LOG_DIR);
-        cfg.gitlab_src = e::expand_home(&e::require("GITLAB_SRC"));
+        cfg.gitlab_src = std::env::var(c::GITLAB_SRC_ENV)
+            .ok()
+            .map(|v| e::expand_home(&v));
         cfg.gkg_root = gkg_root;
 
         Ok(cfg)
     }
 
+    /// Returns the GitLab source path, or errors if `GITLAB_SRC` was not set.
+    pub fn gitlab_src(&self) -> Result<&Path> {
+        self.gitlab_src.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} environment variable is required for this command.\n\
+                 Set it to the path of your GitLab Rails checkout.",
+                c::GITLAB_SRC_ENV
+            )
+        })
+    }
+
     /// Docker socket path for the colima profile.
     pub fn docker_host(&self) -> String {
         let home = env::var("HOME").unwrap_or_default();
-        format!("unix://{home}/.colima/{}/docker.sock", self.colima.profile)
+        let socket = c::COLIMA_SOCKET_TEMPLATE.replace("{}", &self.colima.profile);
+        format!("unix://{home}/{socket}")
     }
 
     /// Workhorse container image (computed from CNG registry + tag).
@@ -208,8 +230,8 @@ impl Config {
     /// ClickHouse HTTP URL (computed from service name + default namespace).
     pub fn ch_url(&self) -> String {
         format!(
-            "http://{}.{}.svc.cluster.local:8123",
-            self.clickhouse.service_name, self.namespaces.default,
+            "http://{}.{}.svc.cluster.local:{}",
+            self.clickhouse.service_name, self.namespaces.default, self.clickhouse.http_port,
         )
     }
 

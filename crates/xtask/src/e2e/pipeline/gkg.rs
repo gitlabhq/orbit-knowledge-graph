@@ -25,12 +25,16 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use futures::stream::{self, StreamExt};
 use xshell::{Shell, cmd};
 
 use crate::e2e::{
     config::Config,
     constants as c,
-    kube::{self, DeleteTarget},
+    infra::{
+        helm,
+        kube::{self, DeleteTarget},
+    },
     template, ui, utils,
 };
 
@@ -39,7 +43,7 @@ pub async fn run(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::banner("GKG Stack")?;
 
     let docker_host = cfg.docker_host();
-    sh.set_var("DOCKER_HOST", &docker_host);
+    sh.set_var(c::DOCKER_HOST_ENV, &docker_host);
 
     let toolbox_pod = utils::get_toolbox_pod(cfg).await?;
     ui::detail("Toolbox pod", &toolbox_pod)?;
@@ -58,7 +62,6 @@ pub async fn run(sh: &Shell, cfg: &Config) -> Result<()> {
     optimize_graph_tables(cfg).await?;
     verify_graph_tables(cfg).await?;
     dump_datalake_diagnostics(cfg).await?;
-    run_redaction_tests(cfg, &toolbox_pod).await?;
 
     ui::outro("GKG stack setup complete")?;
     Ok(())
@@ -215,7 +218,7 @@ async fn verify_kg_enabled_namespaces(cfg: &Config, toolbox_pod: &str) -> Result
 
 // -- Step 20a: Build GKG server image -----------------------------------------
 
-fn build_gkg_image(sh: &Shell, cfg: &Config) -> Result<()> {
+pub(crate) fn build_gkg_image(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::step(20, "Building GKG server image")?;
 
     let script = cfg.gkg_root.join(c::BUILD_DEV_SCRIPT);
@@ -253,38 +256,30 @@ fn deploy_gkg_chart(sh: &Shell, cfg: &Config) -> Result<()> {
     let timeout = &cfg.timeouts.gkg_chart;
     let docker_host = cfg.docker_host();
 
-    let _ = cmd!(sh, "helm dependency build {chart_str}")
-        .env("DOCKER_HOST", &docker_host)
-        .quiet()
-        .ignore_status()
-        .run();
+    helm::dependency_build(sh, &chart_str, &docker_host);
 
-    let pg_host = format!("postgresql.{}.svc.cluster.local", cfg.namespaces.gitlab);
-    let pg_port = "5432";
-    let pg_db = &cfg.postgres.database;
-    let pg_user = &cfg.postgres.user;
+    let pg_host = format!(
+        "{}.{}.svc.cluster.local",
+        cfg.postgres.service_name, cfg.namespaces.gitlab
+    );
 
-    let _ = cmd!(sh, "helm uninstall {release} -n {default_ns}")
-        .env("DOCKER_HOST", &docker_host)
-        .quiet()
-        .ignore_status()
-        .run();
+    helm::uninstall(sh, release, default_ns, &docker_host);
 
-    cmd!(
+    helm::install_with_sets(
         sh,
-        "helm install {release} {chart_str}
-            -n {default_ns}
-            -f {values_str}
-            --set postgres.host={pg_host}
-            --set postgres.port={pg_port}
-            --set postgres.database={pg_db}
-            --set postgres.user={pg_user}
-            --wait
-            --timeout {timeout}"
-    )
-    .env("DOCKER_HOST", &docker_host)
-    .run()
-    .context("helm install of GKG chart failed")?;
+        release,
+        &chart_str,
+        default_ns,
+        &values_str,
+        &[
+            ("postgres.host", &pg_host),
+            ("postgres.port", &cfg.postgres.port),
+            ("postgres.database", &cfg.postgres.database),
+            ("postgres.user", &cfg.postgres.user),
+        ],
+        timeout,
+        &docker_host,
+    )?;
 
     ui::done(&format!("GKG chart deployed (release: {release})"))?;
     Ok(())
@@ -292,21 +287,16 @@ fn deploy_gkg_chart(sh: &Shell, cfg: &Config) -> Result<()> {
 
 // -- Step 20d: Wait for GKG pods ----------------------------------------------
 
-async fn wait_for_gkg_pods(cfg: &Config) -> Result<()> {
+pub(crate) async fn wait_for_gkg_pods(cfg: &Config) -> Result<()> {
     ui::info("Verifying GKG pod readiness...")?;
 
-    let default_ns = &cfg.namespaces.default;
-    let labels = [
-        "app.kubernetes.io/name=nats",
-        "app.kubernetes.io/component=siphon-producer",
-        "app.kubernetes.io/component=siphon-consumer",
-        "app.kubernetes.io/component=gkg-indexer",
-        "app.kubernetes.io/component=gkg-webserver",
-    ];
-
-    for label in labels {
-        kube::wait_for_pod(label, default_ns, "120s").await?;
-    }
+    let ns = &cfg.namespaces.default;
+    let pods: Vec<(&str, &str, &str)> = cfg
+        .gkg_pod_readiness
+        .iter()
+        .map(|pr| (pr.label.as_str(), ns.as_str(), pr.timeout.as_str()))
+        .collect();
+    kube::wait_for_pods_parallel(&pods).await?;
 
     ui::done("All GKG pods ready")?;
     Ok(())
@@ -344,12 +334,9 @@ async fn wait_for_siphon_data(cfg: &Config) -> Result<()> {
             );
         }
 
+        let results = utils::ch_row_counts(cfg, &ch_pod, db, &pending).await;
         let mut still_pending = Vec::new();
-        for table in &pending {
-            let query = format!("SELECT count() FROM {table}");
-            let count = utils::ch_query(cfg, &ch_pod, db, &query)
-                .await
-                .unwrap_or_else(|_| "0".into());
+        for (table, count) in &results {
             if count.trim().parse::<u64>().unwrap_or(0) > 0 {
                 ui::info(&format!("{table}: {count} rows"))?;
             } else {
@@ -377,7 +364,7 @@ async fn wait_for_siphon_data(cfg: &Config) -> Result<()> {
 
 // -- Step 22: Run dispatch-indexing -------------------------------------------
 
-async fn run_dispatch_indexing(cfg: &Config) -> Result<()> {
+pub(crate) async fn run_dispatch_indexing(cfg: &Config) -> Result<()> {
     ui::step(22, "Running dispatch-indexing")?;
 
     let default_ns = &cfg.namespaces.default;
@@ -460,12 +447,9 @@ async fn run_dispatch_indexing(cfg: &Config) -> Result<()> {
             break;
         }
 
+        let results = utils::ch_row_counts(cfg, &ch_pod, graph_db, &pending).await;
         let mut still_pending = Vec::new();
-        for table in &pending {
-            let query = format!("SELECT count() FROM {table}");
-            let count = utils::ch_query(cfg, &ch_pod, graph_db, &query)
-                .await
-                .unwrap_or_else(|_| "0".into());
+        for (table, count) in &results {
             if count.trim().parse::<u64>().unwrap_or(0) > 0 {
                 ui::info(&format!("{table}: {count} rows"))?;
             } else {
@@ -499,15 +483,28 @@ async fn run_dispatch_indexing(cfg: &Config) -> Result<()> {
 
 // -- Step 23: OPTIMIZE TABLE FINAL --------------------------------------------
 
-async fn optimize_graph_tables(cfg: &Config) -> Result<()> {
+pub(crate) async fn optimize_graph_tables(cfg: &Config) -> Result<()> {
     ui::step(23, "Running OPTIMIZE TABLE FINAL on graph tables")?;
 
     let ch_pod = utils::get_ch_pod(cfg).await?;
     let graph_db = &cfg.clickhouse.graph_db;
 
-    for table in c::GL_TABLES {
-        let query = format!("OPTIMIZE TABLE {table} FINAL");
-        if let Err(e) = utils::ch_query(cfg, &ch_pod, graph_db, &query).await {
+    let futs: Vec<_> = c::GL_TABLES
+        .iter()
+        .map(|table| {
+            let query = format!("OPTIMIZE TABLE {table} FINAL");
+            let ch_pod = &ch_pod;
+            async move { (*table, utils::ch_query(cfg, ch_pod, graph_db, &query).await) }
+        })
+        .collect();
+
+    let results: Vec<_> = stream::iter(futs)
+        .buffer_unordered(c::CH_OPTIMIZE_CONCURRENCY)
+        .collect()
+        .await;
+
+    for (table, result) in results {
+        if let Err(e) = result {
             ui::warn(&format!("OPTIMIZE TABLE {table} failed: {e}"))?;
         }
     }
@@ -518,18 +515,15 @@ async fn optimize_graph_tables(cfg: &Config) -> Result<()> {
 
 // -- Step 24: Verify graph tables have data -----------------------------------
 
-async fn verify_graph_tables(cfg: &Config) -> Result<()> {
+pub(crate) async fn verify_graph_tables(cfg: &Config) -> Result<()> {
     ui::step(24, "Verifying graph tables")?;
 
     let ch_pod = utils::get_ch_pod(cfg).await?;
     let graph_db = &cfg.clickhouse.graph_db;
 
     ui::info(&format!("Row counts in {graph_db}:"))?;
-    for table in c::GL_TABLES {
-        let query = format!("SELECT count() FROM {table} FINAL");
-        let count = utils::ch_query(cfg, &ch_pod, graph_db, &query)
-            .await
-            .unwrap_or_else(|_| "?".into());
+    let results = utils::ch_row_counts(cfg, &ch_pod, graph_db, c::GL_TABLES).await;
+    for (table, count) in &results {
         ui::info(&format!("  {table}: {count}"))?;
     }
 
@@ -539,35 +533,30 @@ async fn verify_graph_tables(cfg: &Config) -> Result<()> {
 
 // -- Diagnostic: Datalake hierarchy table dump --------------------------------
 
-async fn dump_datalake_diagnostics(cfg: &Config) -> Result<()> {
+pub(crate) async fn dump_datalake_diagnostics(cfg: &Config) -> Result<()> {
     ui::info("Datalake diagnostics (hierarchy tables in datalake DB):")?;
 
     let ch_pod = utils::get_ch_pod(cfg).await?;
     let datalake_db = &cfg.clickhouse.datalake_db;
 
-    let tables = [
-        "hierarchy_merge_requests",
-        "hierarchy_work_items",
-        "siphon_merge_requests",
-        "siphon_issues",
-        "siphon_namespace_details",
-        "siphon_namespaces",
-        "project_namespace_traversal_paths",
-        "namespace_traversal_paths",
-        "siphon_organizations",
-    ];
-
-    for table in tables {
-        let query = format!("SELECT count() FROM {table}");
-        let count = utils::ch_query(cfg, &ch_pod, datalake_db, &query)
-            .await
-            .unwrap_or_else(|_| "? (table may not exist)".into());
+    let results =
+        utils::ch_row_counts(cfg, &ch_pod, datalake_db, c::DATALAKE_DIAGNOSTIC_TABLES).await;
+    for (table, count) in &results {
         ui::info(&format!("  {table}: {count}"))?;
     }
 
-    ui::info("Indexer pod logs (last 30 lines):")?;
+    ui::info(&format!(
+        "Indexer pod logs (last {} lines):",
+        c::DIAGNOSTIC_LOG_TAIL_LINES
+    ))?;
     let default_ns = &cfg.namespaces.default;
-    match kube::get_logs(default_ns, "app.kubernetes.io/component=gkg-indexer", 30).await {
+    match kube::get_logs(
+        default_ns,
+        &cfg.gkg.indexer_label,
+        c::DIAGNOSTIC_LOG_TAIL_LINES,
+    )
+    .await
+    {
         Ok(logs) => {
             for line in logs.lines() {
                 ui::info(line)?;
@@ -583,7 +572,7 @@ async fn dump_datalake_diagnostics(cfg: &Config) -> Result<()> {
 
 // -- Step 25: Run E2E redaction tests -----------------------------------------
 
-async fn run_redaction_tests(cfg: &Config, toolbox_pod: &str) -> Result<()> {
+pub(crate) async fn run_redaction_tests(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     ui::step(25, "Running E2E redaction tests")?;
 
     let ns = &cfg.namespaces.gitlab;
@@ -614,19 +603,44 @@ async fn run_redaction_tests(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     let log_contents = format!("{}\n--- stderr ---\n{}", r.stdout, r.stderr);
     fs::write(&log_path, &log_contents)?;
 
-    for line in r.stdout.lines() {
-        ui::info(line)?;
+    // Pull the structured JSON report from the pod.
+    let results_pod_path = format!("{e2e_pod_dir}/{}", c::TEST_RESULTS_JSON);
+    let results_local_path = cfg.log_dir.join(c::TEST_RESULTS_JSON);
+    let _ = kube::cp_from_pod(ns, toolbox_pod, &results_pod_path, &results_local_path).await;
+
+    if !results_local_path.exists() {
+        if r.success {
+            ui::warn("JSON report not found, but Ruby exited 0 — treating as pass")?;
+            ui::done("All redaction tests passed")?;
+        } else {
+            bail!("redaction_test.rb failed — see {}", log_path.display());
+        }
+        return Ok(());
     }
 
-    if r.success {
-        ui::done("All redaction tests passed")?;
-    } else {
-        ui::warn(&format!(
-            "Redaction tests failed. Check: {}",
-            log_path.display()
-        ))?;
-        bail!("redaction_test.rb failed — see {}", log_path.display());
+    let json_str = fs::read_to_string(&results_local_path)?;
+    let report: serde_json::Value = serde_json::from_str(&json_str)
+        .with_context(|| format!("parsing {}", results_local_path.display()))?;
+
+    let passed = report.get("passed").and_then(|v| v.as_u64()).unwrap_or(0);
+    let failed = report.get("failed").and_then(|v| v.as_u64()).unwrap_or(0);
+    let total = report.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+    if passed + failed != total {
+        bail!(
+            "malformed test report: passed ({passed}) + failed ({failed}) != total ({total}) — see {}",
+            results_local_path.display()
+        );
     }
 
+    ui::info(&serde_json::to_string_pretty(&report)?)?;
+
+    if failed > 0 {
+        bail!(
+            "{failed}/{total} redaction tests failed — see {}",
+            results_local_path.display()
+        );
+    }
+
+    ui::done(&format!("All redaction tests passed ({passed}/{total})"))?;
     Ok(())
 }

@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::e2e::{config::Config, constants as c, kube, ui};
+use crate::e2e::{config::Config, constants as c, infra::kube, ui};
 
 // =============================================================================
 // GitLab toolbox pod
@@ -136,6 +136,27 @@ pub async fn ch_exec_stdin(
     .context("clickhouse-client exec failed")
 }
 
+/// Query row counts for multiple tables concurrently. Returns a vec of
+/// `(table_name, count_string)` pairs preserving input order.
+pub async fn ch_row_counts<'a>(
+    cfg: &Config,
+    ch_pod: &str,
+    database: &str,
+    tables: &[&'a str],
+) -> Vec<(&'a str, String)> {
+    let futs: Vec<_> = tables
+        .iter()
+        .map(|table| async move {
+            let query = format!("SELECT count() FROM {table}");
+            let count = ch_query(cfg, ch_pod, database, &query)
+                .await
+                .unwrap_or_else(|_| "0".into());
+            (*table, count)
+        })
+        .collect();
+    futures::future::join_all(futs).await
+}
+
 // =============================================================================
 // K8s secrets (shared across cngsetup + gkg)
 // =============================================================================
@@ -161,25 +182,32 @@ pub async fn create_k8s_secrets(cfg: &Config, toolbox_pod: &str) -> Result<()> {
 
     let default_ns = &cfg.namespaces.default;
 
-    for (name, key, value) in [
+    let secrets: Vec<(&str, &str, &str)> = vec![
         (
             &cfg.postgres.bridge_secret_name,
-            "password",
+            &cfg.postgres.bridge_password_key,
             pg_pass.as_str(),
         ),
         (
             &cfg.clickhouse.credentials_secret,
-            cfg.clickhouse.credentials_key.as_str(),
+            &cfg.clickhouse.credentials_key,
             "",
         ),
         (
             &cfg.gkg.server_credentials_secret,
-            "jwt-secret",
+            &cfg.gkg.server_credentials_jwt_key,
             jwt_secret.as_str(),
         ),
-    ] {
-        kube::apply_secret(default_ns, name, key, value).await?;
-        ui::detail_item(&name.to_string())?;
+    ];
+
+    let futs: Vec<_> = secrets
+        .iter()
+        .map(|(name, key, value)| kube::apply_secret(default_ns, name, key, value))
+        .collect();
+    futures::future::try_join_all(futs).await?;
+
+    for (name, _, _) in &secrets {
+        ui::detail_item(name)?;
     }
 
     Ok(())
