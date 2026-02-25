@@ -1,5 +1,6 @@
 pub mod config;
 mod datalake;
+pub mod dispatch;
 mod global_handler;
 pub mod locking;
 mod metrics;

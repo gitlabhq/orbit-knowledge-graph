@@ -7,6 +7,8 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
+use indexer::dispatcher::Dispatcher;
+use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::nats::NatsConfiguration;
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT};
 use serde::Deserialize;
@@ -178,10 +180,24 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
 
     context.given_enabled_namespaces([100, 200, 300]).await;
 
-    let before = Utc::now();
-    indexer::dispatcher::run(&context.nats_config(), &context.clickhouse.config)
+    let services = indexer::dispatcher::connect(&context.nats_config())
         .await
         .unwrap();
+    let datalake = context.clickhouse.config.build_client();
+    let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
+        Box::new(GlobalDispatcher::new(
+            services.nats.clone(),
+            services.lock_service.clone(),
+        )),
+        Box::new(NamespaceDispatcher::new(
+            services.nats,
+            services.lock_service,
+            datalake,
+        )),
+    ];
+
+    let before = Utc::now();
+    indexer::dispatcher::run(&dispatchers).await.unwrap();
     let after = Utc::now();
 
     // Global indexing request

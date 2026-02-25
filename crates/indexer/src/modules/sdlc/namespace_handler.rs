@@ -243,7 +243,7 @@ impl Handler for NamespaceHandler {
         let handler_labels = [KeyValue::new("handler", "namespace-handler")];
 
         if errors.is_empty() {
-            let lock_key = namespace_lock_key(payload.namespace);
+            let lock_key = namespace_lock_key(payload.organization, payload.namespace);
             if let Err(error) = context.lock_service.release(&lock_key).await {
                 error!(
                     namespace_id = payload.namespace,
@@ -526,7 +526,7 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let mock_locks = Arc::new(MockLockService::new());
-        let lock_key = namespace_lock_key(namespace_id);
+        let lock_key = namespace_lock_key(1, namespace_id);
         mock_locks.set_lock(&lock_key);
 
         let destination = Arc::new(MockDestination::new());
@@ -880,7 +880,7 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let mock_locks = Arc::new(MockLockService::new());
-        let lock_key = namespace_lock_key(namespace_id);
+        let lock_key = namespace_lock_key(1, namespace_id);
         mock_locks.set_lock(&lock_key);
 
         let destination = Arc::new(MockDestination::new());

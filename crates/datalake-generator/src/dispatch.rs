@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use indexer::dispatcher::Dispatcher;
+use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use tracing::info;
 
 use crate::config::SimulatorConfig;
@@ -18,7 +20,24 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
         password: config.datalake.password.clone(),
     };
 
-    indexer::dispatcher::run(&nats_config, &datalake_config)
+    let services = indexer::dispatcher::connect(&nats_config)
+        .await
+        .context("dispatcher connect failed")?;
+
+    let datalake = datalake_config.build_client();
+    let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
+        Box::new(GlobalDispatcher::new(
+            services.nats.clone(),
+            services.lock_service.clone(),
+        )),
+        Box::new(NamespaceDispatcher::new(
+            services.nats,
+            services.lock_service,
+            datalake,
+        )),
+    ];
+
+    indexer::dispatcher::run(&dispatchers)
         .await
         .context("dispatch indexing failed")?;
 
