@@ -13,7 +13,7 @@ style:
 redaction:
   resource_type: security_scan
   id_column: id
-  ability: read_security_resource
+  ability: read_scan
 
 properties:
   id:
