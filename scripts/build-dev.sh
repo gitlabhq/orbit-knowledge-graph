@@ -41,7 +41,7 @@ if [ -n "$CI" ] || ! command -v cargo &> /dev/null; then
         ${SCCACHE_ARGS} \
         -w /build \
         registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest \
-        cargo build -p gkg-server
+        cargo build
 
     CONTEXT_DIR=$(mktemp -d)
     trap "rm -rf $CONTEXT_DIR" EXIT
@@ -63,9 +63,9 @@ else
             echo "Install with: mise install"
             exit 1
         fi
-        cargo zigbuild -p gkg-server --target "$RUST_TARGET"
+        cargo zigbuild --target "$RUST_TARGET"
     else
-        cargo build -p gkg-server --target "$RUST_TARGET"
+        cargo build --target "$RUST_TARGET"
     fi
 
     CONTEXT_DIR=$(mktemp -d)

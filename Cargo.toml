@@ -21,6 +21,9 @@ members = [
   "crates/datalake-generator",
   "crates/xtask",
 ]
+default-members = [
+  "crates/gkg-server",
+]
 
 [workspace.dependencies]
 arrow = "57.2.0"

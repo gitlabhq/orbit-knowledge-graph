@@ -108,7 +108,7 @@ run = 'gem push _build/gitlab-gkg-proto-*.gem'
 description = "Publish gitlab-gkg-proto gem to RubyGems.org"
 
 [tasks."server:start"]
-run = 'GKG_JWT_SECRET=${GKG_JWT_SECRET:-$(cat ~/gitlab/gdk/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
+run = 'GKG_JWT_SECRET=${GKG_JWT_SECRET:-$(cat ~/gitlab/gdk/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run'
 description = "Start the GKG server (webserver mode)"
 
 [tasks."ontology:validate"]
