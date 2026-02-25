@@ -4,7 +4,7 @@ use arrow::array::UInt64Array;
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, create_namespace_payload, default_test_watermark, get_namespace_handler,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
     get_string_column,
 };
 
@@ -39,7 +39,7 @@ pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));

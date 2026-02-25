@@ -82,8 +82,6 @@ fn env_var_or<T: FromStr>(key: &str, default: T) -> T {
 
 #[cfg(test)]
 mod tests {
-    use serial_test::serial;
-
     use super::*;
 
     #[test]
@@ -170,7 +168,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_from_env_with_prefix_reads_prefixed_variables() {
         unsafe {
             std::env::set_var("DATALAKE_CLICKHOUSE_URL", "http://datalake:8123");
@@ -195,7 +192,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_from_env_with_empty_prefix_reads_standard_variables() {
         unsafe {
             std::env::set_var("CLICKHOUSE_URL", "http://standard:8123");
@@ -214,7 +210,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_empty_password_treated_as_none() {
         unsafe {
             std::env::set_var("CLICKHOUSE_PASSWORD", "");

@@ -62,7 +62,7 @@ async-nats = { workspace = true }
 tokio = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
-serial_test = { workspace = true }
+integration-testkit = { path = "../integration-testkit" }
 indexer = { path = "../indexer", features = ["testkit"] }
 query-engine = { path = "../query-engine" }
 regex = { workspace = true }

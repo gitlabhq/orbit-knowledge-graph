@@ -4,8 +4,8 @@ use arrow::array::Array;
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
-    default_test_watermark, get_boolean_column, get_namespace_handler, get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_boolean_column, get_string_column,
 };
 
 pub async fn processes_vulnerabilities(context: &TestContext) {
@@ -53,7 +53,7 @@ pub async fn processes_vulnerabilities(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -84,16 +84,11 @@ pub async fn processes_vulnerabilities(context: &TestContext) {
     assert_eq!(severities.value(0), "critical");
     assert_eq!(severities.value(1), "medium");
 
-    assert_edges_have_traversal_path(
-        context,
-        "IN_PROJECT",
-        "Vulnerability",
-        "Project",
-        "1/100/",
-        2,
-    )
-    .await;
-    assert_edges_have_traversal_path(context, "AUTHORED", "User", "Vulnerability", "1/100/", 2)
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "Vulnerability", "Project", "1/100/", 2)
+        .await;
+    context
+        .assert_edges_have_traversal_path("AUTHORED", "User", "Vulnerability", "1/100/", 2)
         .await;
 }
 
@@ -136,7 +131,7 @@ pub async fn processes_scanners(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -163,15 +158,9 @@ pub async fn processes_scanners(context: &TestContext) {
     assert_eq!(external_ids.value(0), "gemnasium");
     assert_eq!(external_ids.value(1), "bandit");
 
-    assert_edges_have_traversal_path(
-        context,
-        "SCANS",
-        "VulnerabilityScanner",
-        "Project",
-        "1/100/",
-        2,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path("SCANS", "VulnerabilityScanner", "Project", "1/100/", 2)
+        .await;
 }
 
 pub async fn processes_vulnerability_identifiers(context: &TestContext) {
@@ -213,7 +202,7 @@ pub async fn processes_vulnerability_identifiers(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -244,15 +233,15 @@ pub async fn processes_vulnerability_identifiers(context: &TestContext) {
     assert_eq!(external_ids.value(0), "CVE-2021-44228");
     assert_eq!(external_ids.value(1), "CWE-89");
 
-    assert_edges_have_traversal_path(
-        context,
-        "IN_PROJECT",
-        "VulnerabilityIdentifier",
-        "Project",
-        "1/100/",
-        2,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path(
+            "IN_PROJECT",
+            "VulnerabilityIdentifier",
+            "Project",
+            "1/100/",
+            2,
+        )
+        .await;
 }
 
 pub async fn processes_findings(context: &TestContext) {
@@ -302,7 +291,7 @@ pub async fn processes_findings(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -345,17 +334,18 @@ pub async fn processes_findings(context: &TestContext) {
     assert!(deduplicated.value(0));
     assert!(!deduplicated.value(1));
 
-    assert_edges_have_traversal_path(context, "IN_PROJECT", "Finding", "Project", "1/100/", 2)
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "Finding", "Project", "1/100/", 2)
         .await;
-    assert_edges_have_traversal_path(
-        context,
-        "DETECTED_BY",
-        "Finding",
-        "VulnerabilityScanner",
-        "1/100/",
-        2,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path(
+            "DETECTED_BY",
+            "Finding",
+            "VulnerabilityScanner",
+            "1/100/",
+            2,
+        )
+        .await;
 }
 
 pub async fn processes_vulnerability_with_user_edges(context: &TestContext) {
@@ -406,7 +396,7 @@ pub async fn processes_vulnerability_with_user_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -423,28 +413,18 @@ pub async fn processes_vulnerability_with_user_edges(context: &TestContext) {
     assert!(!result.is_empty(), "vulnerabilities should exist");
     assert_eq!(result[0].num_rows(), 3);
 
-    assert_edges_have_traversal_path(context, "AUTHORED", "User", "Vulnerability", "1/100/", 3)
+    context
+        .assert_edges_have_traversal_path("AUTHORED", "User", "Vulnerability", "1/100/", 3)
         .await;
-    assert_edges_have_traversal_path(
-        context,
-        "CONFIRMED_BY",
-        "User",
-        "Vulnerability",
-        "1/100/",
-        1,
-    )
-    .await;
-    assert_edges_have_traversal_path(context, "RESOLVED_BY", "User", "Vulnerability", "1/100/", 1)
+    context
+        .assert_edges_have_traversal_path("CONFIRMED_BY", "User", "Vulnerability", "1/100/", 1)
         .await;
-    assert_edges_have_traversal_path(
-        context,
-        "DISMISSED_BY",
-        "User",
-        "Vulnerability",
-        "1/100/",
-        1,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path("RESOLVED_BY", "User", "Vulnerability", "1/100/", 1)
+        .await;
+    context
+        .assert_edges_have_traversal_path("DISMISSED_BY", "User", "Vulnerability", "1/100/", 1)
+        .await;
 }
 
 pub async fn processes_vulnerability_finding_edge(context: &TestContext) {
@@ -495,7 +475,7 @@ pub async fn processes_vulnerability_finding_edge(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -506,15 +486,9 @@ pub async fn processes_vulnerability_finding_edge(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(
-        context,
-        "HAS_FINDING",
-        "Vulnerability",
-        "Finding",
-        "1/100/",
-        1,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path("HAS_FINDING", "Vulnerability", "Finding", "1/100/", 1)
+        .await;
 }
 
 pub async fn processes_vulnerability_occurrences(context: &TestContext) {
@@ -591,7 +565,7 @@ pub async fn processes_vulnerability_occurrences(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -634,42 +608,42 @@ pub async fn processes_vulnerability_occurrences(context: &TestContext) {
     assert_eq!(detection_methods.value(0), "gitlab_security_report");
     assert_eq!(detection_methods.value(1), "external_security_report");
 
-    assert_edges_have_traversal_path(
-        context,
-        "IN_PROJECT",
-        "VulnerabilityOccurrence",
-        "Project",
-        "1/100/",
-        2,
-    )
-    .await;
-    assert_edges_have_traversal_path(
-        context,
-        "DETECTED_BY",
-        "VulnerabilityOccurrence",
-        "VulnerabilityScanner",
-        "1/100/",
-        2,
-    )
-    .await;
-    assert_edges_have_traversal_path(
-        context,
-        "HAS_IDENTIFIER",
-        "VulnerabilityOccurrence",
-        "VulnerabilityIdentifier",
-        "1/100/",
-        2,
-    )
-    .await;
-    assert_edges_have_traversal_path(
-        context,
-        "OCCURRENCE_OF",
-        "VulnerabilityOccurrence",
-        "Vulnerability",
-        "1/100/",
-        1,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path(
+            "IN_PROJECT",
+            "VulnerabilityOccurrence",
+            "Project",
+            "1/100/",
+            2,
+        )
+        .await;
+    context
+        .assert_edges_have_traversal_path(
+            "DETECTED_BY",
+            "VulnerabilityOccurrence",
+            "VulnerabilityScanner",
+            "1/100/",
+            2,
+        )
+        .await;
+    context
+        .assert_edges_have_traversal_path(
+            "HAS_IDENTIFIER",
+            "VulnerabilityOccurrence",
+            "VulnerabilityIdentifier",
+            "1/100/",
+            2,
+        )
+        .await;
+    context
+        .assert_edges_have_traversal_path(
+            "OCCURRENCE_OF",
+            "VulnerabilityOccurrence",
+            "Vulnerability",
+            "1/100/",
+            1,
+        )
+        .await;
 }
 
 pub async fn processes_vulnerability_merge_request_links(context: &TestContext) {
@@ -738,7 +712,7 @@ pub async fn processes_vulnerability_merge_request_links(context: &TestContext) 
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -749,15 +723,9 @@ pub async fn processes_vulnerability_merge_request_links(context: &TestContext) 
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(
-        context,
-        "FIXES",
-        "MergeRequest",
-        "Vulnerability",
-        "1/100/",
-        2,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path("FIXES", "MergeRequest", "Vulnerability", "1/100/", 2)
+        .await;
 }
 
 pub async fn processes_vulnerability_occurrence_identifiers(context: &TestContext) {
@@ -834,7 +802,7 @@ pub async fn processes_vulnerability_occurrence_identifiers(context: &TestContex
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -845,15 +813,15 @@ pub async fn processes_vulnerability_occurrence_identifiers(context: &TestContex
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(
-        context,
-        "HAS_IDENTIFIER",
-        "VulnerabilityOccurrence",
-        "VulnerabilityIdentifier",
-        "1/100/",
-        3,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path(
+            "HAS_IDENTIFIER",
+            "VulnerabilityOccurrence",
+            "VulnerabilityIdentifier",
+            "1/100/",
+            3,
+        )
+        .await;
 }
 
 pub async fn processes_security_scans(context: &TestContext) {
@@ -912,7 +880,7 @@ pub async fn processes_security_scans(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -943,25 +911,15 @@ pub async fn processes_security_scans(context: &TestContext) {
     assert!(latest_values.value(0));
     assert!(latest_values.value(1));
 
-    assert_edges_have_traversal_path(
-        context,
-        "IN_PROJECT",
-        "SecurityScan",
-        "Project",
-        "1/100/",
-        2,
-    )
-    .await;
-    assert_edges_have_traversal_path(
-        context,
-        "IN_PIPELINE",
-        "SecurityScan",
-        "Pipeline",
-        "1/100/",
-        2,
-    )
-    .await;
-    assert_edges_have_traversal_path(context, "RAN_BY", "SecurityScan", "Job", "1/100/", 2).await;
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "SecurityScan", "Project", "1/100/", 2)
+        .await;
+    context
+        .assert_edges_have_traversal_path("IN_PIPELINE", "SecurityScan", "Pipeline", "1/100/", 2)
+        .await;
+    context
+        .assert_edges_have_traversal_path("RAN_BY", "SecurityScan", "Job", "1/100/", 2)
+        .await;
 }
 
 pub async fn processes_security_scan_finding_edges(context: &TestContext) {
@@ -1020,7 +978,7 @@ pub async fn processes_security_scan_finding_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -1031,13 +989,7 @@ pub async fn processes_security_scan_finding_edges(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(
-        context,
-        "HAS_FINDING",
-        "SecurityScan",
-        "Finding",
-        "1/100/",
-        2,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path("HAS_FINDING", "SecurityScan", "Finding", "1/100/", 2)
+        .await;
 }

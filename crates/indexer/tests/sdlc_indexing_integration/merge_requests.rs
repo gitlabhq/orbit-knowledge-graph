@@ -3,8 +3,8 @@
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
-    default_test_watermark, get_namespace_handler, get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_string_column,
 };
 
 pub async fn processes_merge_requests_with_edges(context: &TestContext) {
@@ -29,7 +29,7 @@ pub async fn processes_merge_requests_with_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -56,30 +56,21 @@ pub async fn processes_merge_requests_with_edges(context: &TestContext) {
     assert_eq!(states.value(0), "opened");
     assert_eq!(states.value(1), "merged");
 
-    assert_edges_have_traversal_path(
-        context,
-        "IN_PROJECT",
-        "MergeRequest",
-        "Project",
-        "1/100/",
-        2,
-    )
-    .await;
-    assert_edges_have_traversal_path(context, "AUTHORED", "User", "MergeRequest", "1/100/", 2)
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "MergeRequest", "Project", "1/100/", 2)
         .await;
-    assert_edges_have_traversal_path(context, "ASSIGNED", "User", "MergeRequest", "1/100/", 2)
+    context
+        .assert_edges_have_traversal_path("AUTHORED", "User", "MergeRequest", "1/100/", 2)
         .await;
-    assert_edges_have_traversal_path(context, "MERGED_BY", "User", "MergeRequest", "1/100/", 1)
+    context
+        .assert_edges_have_traversal_path("ASSIGNED", "User", "MergeRequest", "1/100/", 2)
         .await;
-    assert_edges_have_traversal_path(
-        context,
-        "IN_MILESTONE",
-        "MergeRequest",
-        "Milestone",
-        "1/100/",
-        1,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path("MERGED_BY", "User", "MergeRequest", "1/100/", 1)
+        .await;
+    context
+        .assert_edges_have_traversal_path("IN_MILESTONE", "MergeRequest", "Milestone", "1/100/", 1)
+        .await;
 }
 
 pub async fn processes_merge_requests_closing_issues(context: &TestContext) {
@@ -141,7 +132,7 @@ pub async fn processes_merge_requests_closing_issues(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -152,6 +143,7 @@ pub async fn processes_merge_requests_closing_issues(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(context, "CLOSES", "MergeRequest", "WorkItem", "1/100/", 2)
+    context
+        .assert_edges_have_traversal_path("CLOSES", "MergeRequest", "WorkItem", "1/100/", 2)
         .await;
 }

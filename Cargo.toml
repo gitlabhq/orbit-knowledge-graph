@@ -20,6 +20,7 @@ members = [
   "crates/siphon-proto",
   "crates/datalake-generator",
   "crates/xtask",
+  "crates/integration-testkit",
 ]
 
 [workspace.dependencies]
@@ -81,8 +82,6 @@ arrow-ipc = "57.2.0"
 clickhouse = { version = "0.14", features = ["inserter"] }
 testcontainers = "0.27.1"
 testcontainers-modules = { version = "0.15.0", features = ["nats", "clickhouse"] }
-serial_test = "3.3.1"
-
 # Query engine dependencies
 jsonschema = "0.42.0"
 const_format = "0.2.35"

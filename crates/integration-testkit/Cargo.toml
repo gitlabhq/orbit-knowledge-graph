@@ -1,0 +1,13 @@
+[package]
+name = "integration-testkit"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+arrow = { workspace = true }
+clickhouse-client = { path = "../clickhouse-client" }
+futures = { workspace = true }
+query-engine = { path = "../query-engine" }
+serde_json = { workspace = true }
+testcontainers = { workspace = true }
+tokio = { workspace = true }

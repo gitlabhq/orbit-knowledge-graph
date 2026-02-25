@@ -9,7 +9,6 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
 use indexer::destination::Destination;
-use serial_test::serial;
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
@@ -158,7 +157,6 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
 }
 
 #[tokio::test]
-#[serial]
 async fn write_batch_to_clickhouse() {
     let context = TestContext::new().await;
 
@@ -182,7 +180,6 @@ async fn write_batch_to_clickhouse() {
 }
 
 #[tokio::test]
-#[serial]
 async fn write_multiple_batches() {
     let context = TestContext::new().await;
 
@@ -214,7 +211,6 @@ async fn write_multiple_batches() {
 }
 
 #[tokio::test]
-#[serial]
 async fn write_empty_batch_succeeds() {
     let context = TestContext::new().await;
 
@@ -231,7 +227,6 @@ async fn write_empty_batch_succeeds() {
 }
 
 #[tokio::test]
-#[serial]
 async fn connection_failure_returns_error() {
     let config = ClickHouseConfiguration {
         database: "nonexistent".to_string(),

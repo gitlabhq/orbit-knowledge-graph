@@ -214,7 +214,7 @@ integration-test:
   before_script:
     - !reference [.sccache-template, before_script]
   script:
-    - cargo nextest run --profile ci --all-features --test '*' -j 12 --ignore-default-filter -E 'not package(gitaly-client)'
+    - cargo nextest run --profile ci --all-features --test '*' --ignore-default-filter -E 'not package(gitaly-client)'
     - sccache --show-stats || true
 
 gitaly-integration-test:

@@ -12,8 +12,8 @@ use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::nats::NatsConfiguration;
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT};
 use serde::Deserialize;
-use serial_test::serial;
 use testcontainers::ImageExt;
+use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
@@ -44,7 +44,8 @@ struct TestContext {
 
 impl TestContext {
     async fn new() -> Self {
-        let clickhouse = ClickHouseContext::new().await;
+        let clickhouse =
+            ClickHouseContext::new(&[common::SIPHON_SCHEMA_SQL, common::GRAPH_SCHEMA_SQL]).await;
         let (nats, nats_url) = Self::start_nats().await;
         Self::create_stream(&nats_url).await;
         Self {
@@ -126,6 +127,8 @@ impl TestContext {
         let container = Nats::default()
             .with_cmd(&NatsServerCmd::default().with_jetstream())
             .with_tag("2.11-alpine")
+            .with_mapped_port(0, ContainerPort::Tcp(4222))
+            .with_ready_conditions(vec![WaitFor::seconds(3)])
             .start()
             .await
             .unwrap();
@@ -157,7 +160,6 @@ impl TestContext {
 // --- Tests ---
 
 #[tokio::test]
-#[serial]
 async fn dispatcher_publishes_global_and_namespace_requests() {
     let context = TestContext::new().await;
 

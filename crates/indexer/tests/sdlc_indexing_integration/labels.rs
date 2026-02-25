@@ -3,8 +3,8 @@
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
-    default_test_watermark, get_namespace_handler, get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_string_column,
 };
 
 pub async fn processes_labels_with_edges(context: &TestContext) {
@@ -47,7 +47,7 @@ pub async fn processes_labels_with_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -76,6 +76,10 @@ pub async fn processes_labels_with_edges(context: &TestContext) {
     assert_eq!(colors.value(1), "#00ff00");
     assert_eq!(colors.value(2), "#0000ff");
 
-    assert_edges_have_traversal_path(context, "IN_PROJECT", "Label", "Project", "1/100/", 2).await;
-    assert_edges_have_traversal_path(context, "IN_GROUP", "Label", "Group", "1/100/", 1).await;
+    context
+        .assert_edges_have_traversal_path("IN_PROJECT", "Label", "Project", "1/100/", 2)
+        .await;
+    context
+        .assert_edges_have_traversal_path("IN_GROUP", "Label", "Group", "1/100/", 1)
+        .await;
 }

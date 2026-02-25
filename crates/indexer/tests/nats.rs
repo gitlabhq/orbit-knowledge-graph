@@ -9,8 +9,8 @@ use indexer::metrics::EngineMetrics;
 use indexer::nats::{NatsBroker, NatsConfiguration};
 use indexer::types::{Envelope, Event, Topic};
 use serde::{Deserialize, Serialize};
-use serial_test::serial;
 use testcontainers::ImageExt;
+use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
@@ -34,6 +34,8 @@ async fn start_nats_container() -> (testcontainers::ContainerAsync<Nats>, String
     let container = Nats::default()
         .with_cmd(&nats_cmd)
         .with_tag("2.11-alpine")
+        .with_mapped_port(0, ContainerPort::Tcp(4222))
+        .with_ready_conditions(vec![WaitFor::seconds(3)])
         .start()
         .await
         .expect("failed to start NATS container");
@@ -70,7 +72,6 @@ async fn create_test_stream(url: &str) {
 }
 
 #[tokio::test]
-#[serial]
 async fn connect_to_nats() {
     let (_container, url) = start_nats_container().await;
 
@@ -84,7 +85,6 @@ async fn connect_to_nats() {
 }
 
 #[tokio::test]
-#[serial]
 async fn publish_and_subscribe() {
     let (_container, url) = start_nats_container().await;
     create_test_stream(&url).await;
@@ -131,7 +131,6 @@ async fn publish_and_subscribe() {
 }
 
 #[tokio::test]
-#[serial]
 async fn nack_redelivers_message() {
     let (_container, url) = start_nats_container().await;
     create_test_stream(&url).await;
@@ -183,7 +182,6 @@ async fn nack_redelivers_message() {
 }
 
 #[tokio::test]
-#[serial]
 async fn nonexistent_stream() {
     let (_container, url) = start_nats_container().await;
 
@@ -204,7 +202,6 @@ async fn nonexistent_stream() {
 }
 
 #[tokio::test]
-#[serial]
 async fn multiple_streams() {
     let (_container, url) = start_nats_container().await;
 
@@ -293,7 +290,6 @@ async fn multiple_streams() {
 }
 
 #[tokio::test]
-#[serial]
 async fn auto_creates_stream_with_configured_settings() {
     let (_container, url) = start_nats_container().await;
 
@@ -334,7 +330,6 @@ async fn auto_creates_stream_with_configured_settings() {
 }
 
 #[tokio::test]
-#[serial]
 async fn skips_creation_when_disabled() {
     let (_container, url) = start_nats_container().await;
 
@@ -369,7 +364,6 @@ async fn skips_creation_when_disabled() {
 }
 
 #[tokio::test]
-#[serial]
 async fn idempotent_when_stream_exists() {
     let (_container, url) = start_nats_container().await;
     create_test_stream(&url).await;

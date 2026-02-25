@@ -1,17 +1,18 @@
 //! E2E integration tests for the redaction flow.
 //!
-//! Tests verify fail-closed behavior: any node that cannot be explicitly verified
-//! as authorized results in the entire row being filtered.
+//! Each `#[tokio::test]` starts a single ClickHouse container and runs all
+//! subtests sequentially, truncating tables between them to avoid cross-test
+//! contamination while eliminating per-test container startup overhead.
 
 mod common;
 
 use std::collections::{HashMap, HashSet};
 
-use common::TestContext;
+use common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
 use gkg_server::redaction::{QueryResult, ResourceAuthorization, ResourceCheck};
+use integration_testkit::run_subtests;
 use ontology::Ontology;
 use query_engine::{SecurityContext, build_entity_auth, compile};
-use serial_test::serial;
 
 fn load_ontology() -> Ontology {
     Ontology::load_embedded().expect("embedded ontology should load")
@@ -155,11 +156,12 @@ fn run_redaction(result: &mut QueryResult, mock_service: &MockRedactionService) 
     result.apply_authorizations(&authorizations)
 }
 
-#[tokio::test]
-#[serial]
-async fn fail_closed_no_authorization_returns_nothing() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+// ─────────────────────────────────────────────────────────────────────────────
+// Fail-Closed / Core Redaction Subtests
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -189,11 +191,8 @@ async fn fail_closed_no_authorization_returns_nothing() {
     assert_eq!(result.authorized_count(), 0, "no rows should be authorized");
 }
 
-#[tokio::test]
-#[serial]
-async fn fail_closed_partial_authorization_denies_unknown_ids() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -233,11 +232,8 @@ async fn fail_closed_partial_authorization_denies_unknown_ids() {
     assert!(!authorized_ids.contains(&5));
 }
 
-#[tokio::test]
-#[serial]
-async fn fail_closed_explicit_deny_filters_row() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -271,11 +267,8 @@ async fn fail_closed_explicit_deny_filters_row() {
     assert!(!authorized_ids.contains(&5));
 }
 
-#[tokio::test]
-#[serial]
-async fn single_hop_user_group_verifies_both_nodes() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -342,11 +335,8 @@ async fn single_hop_user_group_verifies_both_nodes() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn two_hop_denying_intermediate_group_filters_all_paths_through_it() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -391,11 +381,8 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn three_hop_user_group_project_verifies_all_paths() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -464,11 +451,8 @@ async fn three_hop_user_group_project_verifies_all_paths() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn three_hop_denying_one_project_removes_only_those_paths() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -533,11 +517,8 @@ async fn three_hop_denying_one_project_removes_only_those_paths() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn group_project_two_hop_verifies_exact_pairs() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -596,11 +577,8 @@ async fn group_project_two_hop_verifies_exact_pairs() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn single_node_project_query_verifies_all_projects() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -638,11 +616,8 @@ async fn single_node_project_query_verifies_all_projects() {
     assert!(!authorized_ids.contains(&1003));
 }
 
-#[tokio::test]
-#[serial]
-async fn all_nodes_have_required_type_columns() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -693,11 +668,8 @@ async fn all_nodes_have_required_type_columns() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn empty_query_result_stays_empty() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn empty_query_result_stays_empty(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -723,11 +695,8 @@ async fn empty_query_result_stays_empty() {
     assert_eq!(result.authorized_count(), 0);
 }
 
-#[tokio::test]
-#[serial]
-async fn all_authorized_preserves_all_data() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn all_authorized_preserves_all_data(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -761,11 +730,8 @@ async fn all_authorized_preserves_all_data() {
     assert_eq!(result.authorized_count(), raw_count);
 }
 
-#[tokio::test]
-#[serial]
-async fn all_columns_preserved_after_redaction() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -867,11 +833,8 @@ async fn all_columns_preserved_after_redaction() {
     assert_eq!(row_1002.get_type(&p), Some("Project"));
 }
 
-#[tokio::test]
-#[serial]
-async fn all_columns_preserved_on_three_hop_traversal() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -917,11 +880,8 @@ async fn all_columns_preserved_on_three_hop_traversal() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn redacted_rows_filtered_from_authorized_iterator() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1042,14 +1002,11 @@ fn fail_closed_null_id_denies_row() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Path Finding Tests
+// Path Finding Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[tokio::test]
-#[serial]
-async fn path_finding_extracts_all_nodes_from_path() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1089,11 +1046,8 @@ async fn path_finding_extracts_all_nodes_from_path() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn path_finding_no_authorization_returns_nothing() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1121,11 +1075,8 @@ async fn path_finding_no_authorization_returns_nothing() {
     assert_eq!(result.authorized_count(), 0);
 }
 
-#[tokio::test]
-#[serial]
-async fn path_finding_denying_intermediate_node_filters_path() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1183,11 +1134,8 @@ async fn path_finding_denying_intermediate_node_filters_path() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn path_finding_all_nodes_authorized_preserves_paths() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1221,11 +1169,8 @@ async fn path_finding_all_nodes_authorized_preserves_paths() {
     assert_eq!(result.authorized_count(), raw_count);
 }
 
-#[tokio::test]
-#[serial]
-async fn path_finding_denying_start_node_filters_all_paths() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1256,11 +1201,8 @@ async fn path_finding_denying_start_node_filters_all_paths() {
     assert_eq!(result.authorized_count(), 0);
 }
 
-#[tokio::test]
-#[serial]
-async fn path_finding_denying_end_node_filters_those_paths() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1302,11 +1244,8 @@ async fn path_finding_denying_end_node_filters_those_paths() {
 /// Path finding with multiple valid paths to same destination - authorization
 /// must check ALL nodes in EACH path independently. Denying a node in one path
 /// should not affect other paths that don't traverse that node.
-#[tokio::test]
-#[serial]
-async fn path_finding_multiple_paths_independent_authorization() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1357,11 +1296,8 @@ async fn path_finding_multiple_paths_independent_authorization() {
 
 /// Verify that path finding correctly handles the case where the same node
 /// appears at different depths. Each path instance is checked independently.
-#[tokio::test]
-#[serial]
-async fn path_finding_shared_intermediate_node_authorization() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1407,11 +1343,8 @@ async fn path_finding_shared_intermediate_node_authorization() {
 
 /// Path finding with max depth traversal - verifies that authorization
 /// is checked for ALL nodes in paths, not just start/end.
-#[tokio::test]
-#[serial]
-async fn path_finding_deep_traversal_all_nodes_verified() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1471,11 +1404,8 @@ async fn path_finding_deep_traversal_all_nodes_verified() {
 }
 
 /// Verify path finding with zero valid paths after authorization returns empty.
-#[tokio::test]
-#[serial]
-async fn path_finding_all_paths_denied_returns_empty() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1511,14 +1441,11 @@ async fn path_finding_all_paths_denied_returns_empty() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Search Query Tests
+// Search Query Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[tokio::test]
-#[serial]
-async fn search_with_complex_filters_and_redaction() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1579,11 +1506,8 @@ async fn search_with_complex_filters_and_redaction() {
     assert_eq!(authorized_ids, HashSet::from([1, 2]));
 }
 
-#[tokio::test]
-#[serial]
-async fn search_projects_with_visibility_and_path_filters() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1631,11 +1555,8 @@ async fn search_projects_with_visibility_and_path_filters() {
     assert_eq!(authorized_ids, HashSet::from([1000]));
 }
 
-#[tokio::test]
-#[serial]
-async fn search_groups_with_traversal_path_starts_with() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1681,11 +1602,8 @@ async fn search_groups_with_traversal_path_starts_with() {
     assert_eq!(authorized_ids, HashSet::from([100, 102]));
 }
 
-#[tokio::test]
-#[serial]
-async fn search_with_id_range_filter() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn search_with_id_range_filter(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1722,11 +1640,8 @@ async fn search_with_id_range_filter() {
     assert_eq!(result.authorized_count(), 3);
 }
 
-#[tokio::test]
-#[serial]
-async fn search_with_specific_node_ids() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn search_with_specific_node_ids(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1769,11 +1684,8 @@ async fn search_with_specific_node_ids() {
     assert_eq!(authorized_ids, HashSet::from([1000]));
 }
 
-#[tokio::test]
-#[serial]
-async fn search_no_results_with_impossible_filter() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1805,11 +1717,8 @@ async fn search_no_results_with_impossible_filter() {
     assert_eq!(result.authorized_count(), 0);
 }
 
-#[tokio::test]
-#[serial]
-async fn search_fail_closed_no_authorization() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn search_fail_closed_no_authorization(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1842,11 +1751,8 @@ async fn search_fail_closed_no_authorization() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn search_preserves_metadata_columns_after_redaction() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1951,7 +1857,7 @@ fn fail_closed_null_type_denies_row() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Column Selection Integration Tests
+// Column Selection Integration Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // These tests verify the column selection feature introduced in the query DSL.
@@ -1964,11 +1870,8 @@ fn fail_closed_null_type_denies_row() {
 
 /// Verify mandatory columns (`_gkg_*_id`, `_gkg_*_type`) are present when
 /// requesting specific columns, and redaction works correctly.
-#[tokio::test]
-#[serial]
-async fn column_selection_specific_columns_includes_mandatory_columns() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2039,11 +1942,8 @@ async fn column_selection_specific_columns_includes_mandatory_columns() {
 /// Verify wildcard `"*"` returns all entity columns plus mandatory columns,
 /// and redaction works correctly with all columns selected.
 /// Uses Group entity which has all ontology columns present in the test schema.
-#[tokio::test]
-#[serial]
-async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2114,11 +2014,8 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory() {
 
 /// Verify omitting `columns` entirely still includes mandatory columns
 /// and redaction works correctly.
-#[tokio::test]
-#[serial]
-async fn column_selection_omitted_includes_mandatory_columns() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2176,11 +2073,8 @@ async fn column_selection_omitted_includes_mandatory_columns() {
 /// This is the most complex case: User -> Group -> Project with different
 /// column selections on each node. Redaction must verify authorization
 /// for every node in the path.
-#[tokio::test]
-#[serial]
-async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2273,11 +2167,8 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns()
 /// Deep test: Verify redaction works correctly when using specific column selection.
 /// Authorization checks depend on mandatory columns - if they were missing,
 /// redaction would fail or behave incorrectly.
-#[tokio::test]
-#[serial]
-async fn column_selection_redaction_works_with_specific_columns() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2333,11 +2224,8 @@ async fn column_selection_redaction_works_with_specific_columns() {
 
 /// Deep test: Verify that denying ANY node in a path filters the entire row,
 /// even when using column selection. This ensures fail-closed behavior.
-#[tokio::test]
-#[serial]
-async fn column_selection_fail_closed_on_any_unauthorized_node() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2385,11 +2273,8 @@ async fn column_selection_fail_closed_on_any_unauthorized_node() {
 
 /// Deep test: Verify column values are preserved correctly through
 /// the entire query and redaction pipeline.
-#[tokio::test]
-#[serial]
-async fn column_selection_data_values_preserved_through_redaction() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_data_values_preserved_through_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2439,11 +2324,8 @@ async fn column_selection_data_values_preserved_through_redaction() {
 /// Deep test: Verify that requesting the same column as a mandatory column
 /// (e.g., "id" in the columns list) doesn't cause duplicates or errors,
 /// and redaction still works correctly.
-#[tokio::test]
-#[serial]
-async fn column_selection_id_in_list_no_duplication() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2501,11 +2383,8 @@ async fn column_selection_id_in_list_no_duplication() {
 /// Deep test: Verify aggregation queries properly handle column selection
 /// and redaction works on the group_by node.
 /// Aggregations only add mandatory columns for the group_by node, not the target.
-#[tokio::test]
-#[serial]
-async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     // Insert some additional data for aggregation
     ctx.execute(
@@ -2599,11 +2478,8 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns()
 
 /// Deep test: Verify aggregation with wildcard columns returns all entity fields
 /// for the group_by node.
-#[tokio::test]
-#[serial]
-async fn column_selection_aggregation_with_wildcard_columns() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     // Insert MRs for aggregation
     ctx.execute(
@@ -2689,11 +2565,8 @@ async fn column_selection_aggregation_with_wildcard_columns() {
 
 /// Deep test: Verify that column selection with traversal maintains proper
 /// JOIN semantics. Rows should still match correctly across relationships.
-#[tokio::test]
-#[serial]
-async fn column_selection_traversal_join_semantics_preserved() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2756,11 +2629,8 @@ async fn column_selection_traversal_join_semantics_preserved() {
 /// Deep test: Verify filters work correctly with column selection.
 /// Even if a column is used in a filter, it must be explicitly requested
 /// or only mandatory columns appear.
-#[tokio::test]
-#[serial]
-async fn column_selection_filters_work_with_columns() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2812,11 +2682,8 @@ async fn column_selection_filters_work_with_columns() {
 
 /// Deep test: Ensure that column selection with no authorization
 /// still exhibits fail-closed behavior.
-#[tokio::test]
-#[serial]
-async fn column_selection_fail_closed_no_authorization() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2847,7 +2714,7 @@ async fn column_selection_fail_closed_no_authorization() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Neighbors Query Tests
+// Neighbors Query Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Neighbors queries discover connected nodes dynamically. Unlike traversals where
@@ -2862,11 +2729,8 @@ async fn column_selection_fail_closed_no_authorization() {
 /// - Both center node AND neighbor authorization is required (fail-closed)
 /// - Different directions (outgoing, incoming) work correctly
 /// - Relationship type filtering works with redaction
-#[tokio::test]
-#[serial]
-async fn neighbors_query_comprehensive() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn neighbors_query_comprehensive(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3001,11 +2865,8 @@ async fn neighbors_query_comprehensive() {
 }
 
 /// Tests that denying the center node filters ALL its neighbors.
-#[tokio::test]
-#[serial]
-async fn neighbors_query_center_node_denied_filters_all() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3034,11 +2895,8 @@ async fn neighbors_query_center_node_denied_filters_all() {
 }
 
 /// Tests neighbors query with multiple center nodes and mixed authorization.
-#[tokio::test]
-#[serial]
-async fn neighbors_query_multiple_center_nodes_mixed_authorization() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3084,11 +2942,8 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization() {
 }
 
 /// Tests incoming direction with neighbor authorization.
-#[tokio::test]
-#[serial]
-async fn neighbors_query_incoming_with_redaction() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3131,7 +2986,7 @@ async fn neighbors_query_incoming_with_redaction() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Edge Column Tests
+// Edge Column Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // These tests verify that edge columns (relationship metadata) are correctly
@@ -3144,11 +2999,8 @@ async fn neighbors_query_incoming_with_redaction() {
 /// - Edge values correctly reflect the relationship data
 /// - Edge columns are preserved in authorized rows after redaction
 /// - Redacted rows still had valid edge data before being filtered
-#[tokio::test]
-#[serial]
-async fn traversal_edge_columns_preserved_through_redaction() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3308,11 +3160,8 @@ async fn traversal_edge_columns_preserved_through_redaction() {
 
 /// Verifies multi-hop traversals have edge columns for each relationship,
 /// and that edge data is correctly associated with its hop after redaction.
-#[tokio::test]
-#[serial]
-async fn multi_hop_edge_columns_survive_redaction() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3432,11 +3281,8 @@ async fn multi_hop_edge_columns_survive_redaction() {
 /// for unrelated entities that happen to share the same numeric ID.
 /// For example, User 1's neighbors should not include edges where source_id=1
 /// but source_kind='Group'.
-#[tokio::test]
-#[serial]
-async fn neighbors_query_filters_by_entity_type() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     // Insert a "colliding" edge: source_id=1 but source_kind='Group'
     // This simulates a Group with ID=1 having an edge, which should NOT
@@ -3523,11 +3369,8 @@ async fn neighbors_query_filters_by_entity_type() {
 ///
 /// This ensures the normalization layer correctly distinguishes between enum storage types
 /// and only applies int→string coercion where appropriate.
-#[tokio::test]
-#[serial]
-async fn enum_filter_normalization_int_vs_string_enums() {
-    let ctx = TestContext::new().await;
-    setup_test_data(&ctx).await;
+async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
+    setup_test_data(ctx).await;
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3711,5 +3554,76 @@ async fn enum_filter_normalization_int_vs_string_enums() {
         result.len(),
         5,
         "should find all 5 users with IN filter on string enum"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orchestrator Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn redaction_integration() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    run_subtests!(
+        &ctx,
+        // basics
+        fail_closed_no_authorization_returns_nothing,
+        fail_closed_partial_authorization_denies_unknown_ids,
+        fail_closed_explicit_deny_filters_row,
+        single_hop_user_group_verifies_both_nodes,
+        two_hop_denying_intermediate_group_filters_all_paths_through_it,
+        three_hop_user_group_project_verifies_all_paths,
+        three_hop_denying_one_project_removes_only_those_paths,
+        group_project_two_hop_verifies_exact_pairs,
+        single_node_project_query_verifies_all_projects,
+        all_nodes_have_required_type_columns,
+        empty_query_result_stays_empty,
+        all_authorized_preserves_all_data,
+        all_columns_preserved_after_redaction,
+        all_columns_preserved_on_three_hop_traversal,
+        redacted_rows_filtered_from_authorized_iterator,
+        // path finding
+        path_finding_extracts_all_nodes_from_path,
+        path_finding_no_authorization_returns_nothing,
+        path_finding_denying_intermediate_node_filters_path,
+        path_finding_all_nodes_authorized_preserves_paths,
+        path_finding_denying_start_node_filters_all_paths,
+        path_finding_denying_end_node_filters_those_paths,
+        path_finding_multiple_paths_independent_authorization,
+        path_finding_shared_intermediate_node_authorization,
+        path_finding_deep_traversal_all_nodes_verified,
+        path_finding_all_paths_denied_returns_empty,
+        // search
+        search_with_complex_filters_and_redaction,
+        search_projects_with_visibility_and_path_filters,
+        search_groups_with_traversal_path_starts_with,
+        search_with_id_range_filter,
+        search_with_specific_node_ids,
+        search_no_results_with_impossible_filter,
+        search_fail_closed_no_authorization,
+        search_preserves_metadata_columns_after_redaction,
+        // column selection
+        column_selection_specific_columns_includes_mandatory_columns,
+        column_selection_wildcard_returns_all_columns_plus_mandatory,
+        column_selection_omitted_includes_mandatory_columns,
+        column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns,
+        column_selection_redaction_works_with_specific_columns,
+        column_selection_fail_closed_on_any_unauthorized_node,
+        column_selection_data_values_preserved_through_redaction,
+        column_selection_id_in_list_no_duplication,
+        column_selection_aggregation_only_group_by_node_has_mandatory_columns,
+        column_selection_aggregation_with_wildcard_columns,
+        column_selection_traversal_join_semantics_preserved,
+        column_selection_filters_work_with_columns,
+        column_selection_fail_closed_no_authorization,
+        // neighbors and edges
+        neighbors_query_comprehensive,
+        neighbors_query_center_node_denied_filters_all,
+        neighbors_query_multiple_center_nodes_mixed_authorization,
+        neighbors_query_incoming_with_redaction,
+        traversal_edge_columns_preserved_through_redaction,
+        multi_hop_edge_columns_survive_redaction,
+        neighbors_query_filters_by_entity_type,
+        enum_filter_normalization_int_vs_string_enums,
     );
 }

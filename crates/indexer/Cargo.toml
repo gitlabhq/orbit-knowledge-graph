@@ -48,4 +48,4 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", 
 tokio-stream = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
-serial_test = { workspace = true }
+integration-testkit = { path = "../integration-testkit" }

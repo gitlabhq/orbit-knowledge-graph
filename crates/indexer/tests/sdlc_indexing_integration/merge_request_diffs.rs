@@ -3,9 +3,8 @@
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edges_have_traversal_path, create_namespace_payload,
-    default_test_watermark, get_boolean_column, get_int64_column, get_namespace_handler,
-    get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_boolean_column, get_int64_column, get_string_column,
 };
 
 pub async fn processes_merge_request_diffs_with_edges(context: &TestContext) {
@@ -31,7 +30,7 @@ pub async fn processes_merge_request_diffs_with_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -54,15 +53,15 @@ pub async fn processes_merge_request_diffs_with_edges(context: &TestContext) {
     assert_eq!(states.value(0), "collected");
     assert_eq!(states.value(1), "collected");
 
-    assert_edges_have_traversal_path(
-        context,
-        "HAS_DIFF",
-        "MergeRequest",
-        "MergeRequestDiff",
-        "1/100/",
-        2,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path(
+            "HAS_DIFF",
+            "MergeRequest",
+            "MergeRequestDiff",
+            "1/100/",
+            2,
+        )
+        .await;
 }
 
 pub async fn processes_merge_request_diff_files_with_edges(context: &TestContext) {
@@ -98,7 +97,7 @@ pub async fn processes_merge_request_diff_files_with_edges(context: &TestContext
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -131,13 +130,13 @@ pub async fn processes_merge_request_diff_files_with_edges(context: &TestContext
     let has_new_file = (0..batch.num_rows()).any(|i| new_file_flags.value(i));
     assert!(has_new_file, "should have at least one new file");
 
-    assert_edges_have_traversal_path(
-        context,
-        "HAS_FILE",
-        "MergeRequestDiff",
-        "MergeRequestDiffFile",
-        "1/100/",
-        3,
-    )
-    .await;
+    context
+        .assert_edges_have_traversal_path(
+            "HAS_FILE",
+            "MergeRequestDiff",
+            "MergeRequestDiffFile",
+            "1/100/",
+            3,
+        )
+        .await;
 }

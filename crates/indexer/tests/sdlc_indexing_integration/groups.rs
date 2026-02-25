@@ -3,8 +3,8 @@
 use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
-    create_namespace_payload, default_test_watermark, get_namespace_handler, get_string_column,
+    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
+    get_string_column,
 };
 
 pub async fn processes_and_transforms_groups(context: &TestContext) {
@@ -38,7 +38,7 @@ pub async fn processes_and_transforms_groups(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -86,7 +86,7 @@ pub async fn creates_group_edges(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -97,10 +97,16 @@ pub async fn creates_group_edges(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edge_count_for_traversal_path(context, "OWNER", "User", "Group", "1/100/", 1).await;
-    assert_edge_count_for_traversal_path(context, "OWNER", "User", "Group", "1/100/101/", 1).await;
+    context
+        .assert_edge_count_for_traversal_path("OWNER", "User", "Group", "1/100/", 1)
+        .await;
+    context
+        .assert_edge_count_for_traversal_path("OWNER", "User", "Group", "1/100/101/", 1)
+        .await;
 
-    assert_edges_have_traversal_path(context, "CONTAINS", "Group", "Group", "1/100/101/", 1).await;
+    context
+        .assert_edges_have_traversal_path("CONTAINS", "Group", "Group", "1/100/101/", 1)
+        .await;
 }
 
 pub async fn creates_member_of_edges_for_groups(context: &TestContext) {
@@ -143,7 +149,7 @@ pub async fn creates_member_of_edges_for_groups(context: &TestContext) {
         )
         .await;
 
-    let namespace_handler = get_namespace_handler(context).await;
+    let namespace_handler = context.get_namespace_handler().await;
     let watermark = default_test_watermark();
 
     let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
@@ -154,5 +160,7 @@ pub async fn creates_member_of_edges_for_groups(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_edges_have_traversal_path(context, "MEMBER_OF", "User", "Group", "1/100/", 2).await;
+    context
+        .assert_edges_have_traversal_path("MEMBER_OF", "User", "Group", "1/100/", 2)
+        .await;
 }
