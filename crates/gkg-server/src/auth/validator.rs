@@ -2,6 +2,8 @@
 // (RS256, RS384, RS512, PS256, PS384, PS512) until jsonwebtoken updates to
 // rsa 0.10+ which fixes RUSTSEC-2023-0071 (Marvin Attack timing vulnerability).
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 
 use super::{AuthError, Claims};
@@ -25,7 +27,12 @@ impl JwtValidator {
             )));
         }
 
-        let decoding_key = DecodingKey::from_secret(secret.as_bytes());
+        // Rails base64-decodes the secret file before signing JWTs
+        // (via Gitlab::JwtAuthenticatable). Decode here to match.
+        let decoded = STANDARD
+            .decode(secret.trim().as_bytes())
+            .unwrap_or_else(|_| secret.as_bytes().to_vec());
+        let decoding_key = DecodingKey::from_secret(&decoded);
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_issuer(&[ISSUER]);
         validation.set_audience(&[AUDIENCE]);
@@ -44,5 +51,45 @@ impl JwtValidator {
                 jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::TokenExpired,
                 _ => AuthError::InvalidToken,
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonwebtoken::{EncodingKey, Header, encode};
+
+    #[test]
+    fn validates_token_signed_with_decoded_base64_secret() {
+        let raw_secret = b"test-secret-that-is-at-least-32-bytes-long";
+        let base64_secret = STANDARD.encode(raw_secret);
+
+        let validator = JwtValidator::new(&base64_secret, 0).unwrap();
+
+        let now = chrono::Utc::now().timestamp();
+        let claims = Claims {
+            sub: "user".into(),
+            iss: ISSUER.into(),
+            aud: AUDIENCE.into(),
+            iat: now,
+            exp: now + 3600,
+            user_id: 1,
+            username: "testuser".into(),
+            admin: false,
+            organization_id: None,
+            min_access_level: None,
+            group_traversal_ids: vec![],
+        };
+
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(raw_secret),
+        )
+        .unwrap();
+
+        let result = validator.validate(&token);
+        assert!(result.is_ok(), "expected valid token, got: {result:?}");
+        assert_eq!(result.unwrap().username, "testuser");
     }
 }
