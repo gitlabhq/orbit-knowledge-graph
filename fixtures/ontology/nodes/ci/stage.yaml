@@ -11,7 +11,7 @@ style:
   color: "#818CF8"
 
 redaction:
-  resource_type: ci_stages
+  resource_type: ci_stage
   id_column: id
   ability: read_pipeline
 

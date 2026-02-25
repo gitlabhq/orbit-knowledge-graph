@@ -11,7 +11,7 @@ style:
   color: "#D946EF"
 
 redaction:
-  resource_type: milestones
+  resource_type: milestone
   id_column: id
   ability: read_milestone
 

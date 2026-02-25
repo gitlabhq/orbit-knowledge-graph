@@ -11,7 +11,7 @@ style:
   color: "#EF4444"
 
 redaction:
-  resource_type: vulnerability_occurrences
+  resource_type: vulnerability_occurrence
   id_column: id
   ability: read_vulnerability
 

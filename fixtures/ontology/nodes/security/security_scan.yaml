@@ -11,7 +11,7 @@ style:
   color: "#B91C1C"
 
 redaction:
-  resource_type: security_scans
+  resource_type: security_scan
   id_column: id
   ability: read_security_resource
 

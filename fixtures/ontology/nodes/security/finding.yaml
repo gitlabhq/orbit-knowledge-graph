@@ -11,7 +11,7 @@ style:
   color: "#F87171"
 
 redaction:
-  resource_type: security_findings
+  resource_type: security_finding
   id_column: id
   ability: read_security_resource
 

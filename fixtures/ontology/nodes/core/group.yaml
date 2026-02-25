@@ -11,7 +11,7 @@ style:
   color: "#8B5CF6"
 
 redaction:
-  resource_type: groups
+  resource_type: group
   id_column: id
   ability: read_group
 

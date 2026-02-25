@@ -1526,25 +1526,25 @@ mod tests {
         let project_config = ontology
             .get_redaction_config("Project")
             .expect("Project should have redaction config");
-        assert_eq!(project_config.resource_type, "projects");
+        assert_eq!(project_config.resource_type, "project");
         assert_eq!(project_config.id_column, "id");
 
         let user_config = ontology
             .get_redaction_config("User")
             .expect("User should have redaction config");
-        assert_eq!(user_config.resource_type, "users");
+        assert_eq!(user_config.resource_type, "user");
         assert_eq!(user_config.id_column, "id");
 
         let group_config = ontology
             .get_redaction_config("Group")
             .expect("Group should have redaction config");
-        assert_eq!(group_config.resource_type, "groups");
+        assert_eq!(group_config.resource_type, "group");
         assert_eq!(group_config.id_column, "id");
 
         let mr_config = ontology
             .get_redaction_config("MergeRequest")
             .expect("MergeRequest should have redaction config");
-        assert_eq!(mr_config.resource_type, "merge_requests");
+        assert_eq!(mr_config.resource_type, "merge_request");
         assert_eq!(mr_config.id_column, "id");
     }
 
