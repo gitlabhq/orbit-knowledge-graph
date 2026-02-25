@@ -174,56 +174,23 @@ impl Module for SdlcModule {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod test_fixtures {
+    use std::sync::Arc;
 
-    #[test]
-    fn create_global_pipelines_returns_global_entities() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let module = SdlcModule::with_ontology(
-            Arc::new(MockDatalake),
-            Arc::new(MockWatermarkStore),
-            ontology,
-        );
-
-        let pipelines = module.create_global_pipelines();
-
-        let entity_names: Vec<_> = pipelines.iter().map(|p| p.entity_name()).collect();
-        assert!(entity_names.contains(&"User"), "should include User entity");
-    }
-
-    #[test]
-    fn create_namespace_pipelines_returns_namespaced_entities() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let module = SdlcModule::with_ontology(
-            Arc::new(MockDatalake),
-            Arc::new(MockWatermarkStore),
-            ontology,
-        );
-
-        let pipelines = module.create_namespace_pipelines();
-
-        let entity_names: Vec<_> = pipelines.iter().map(|p| p.entity_name()).collect();
-        assert!(
-            entity_names.contains(&"Group"),
-            "should include Group entity"
-        );
-        assert!(
-            entity_names.contains(&"Project"),
-            "should include Project entity"
-        );
-    }
-
+    use arrow::array::{BooleanArray, Int64Array};
+    use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
+    use arrow::record_batch::RecordBatch;
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
-    use datalake::{DatalakeError, RecordBatchStream};
     use futures::stream;
-    use watermark_store::WatermarkError;
 
-    struct MockDatalake;
+    use super::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
+    use super::watermark_store::{WatermarkError, WatermarkStore};
+
+    pub(crate) struct EmptyDatalake;
 
     #[async_trait]
-    impl DatalakeQuery for MockDatalake {
+    impl DatalakeQuery for EmptyDatalake {
         async fn query_arrow(
             &self,
             _sql: &str,
@@ -233,7 +200,49 @@ mod tests {
         }
     }
 
-    struct MockWatermarkStore;
+    pub(crate) struct NonEmptyDatalake;
+
+    #[async_trait]
+    impl DatalakeQuery for NonEmptyDatalake {
+        async fn query_arrow(
+            &self,
+            _sql: &str,
+            _params: serde_json::Value,
+        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
+            let schema = Arc::new(Schema::new(vec![
+                ArrowField::new("id", ArrowDataType::Int64, false),
+                ArrowField::new("_version", ArrowDataType::Int64, false),
+                ArrowField::new("_deleted", ArrowDataType::Boolean, false),
+            ]));
+
+            let batch = RecordBatch::try_new(
+                schema,
+                vec![
+                    Arc::new(Int64Array::from(vec![1])),
+                    Arc::new(Int64Array::from(vec![1])),
+                    Arc::new(BooleanArray::from(vec![false])),
+                ],
+            )
+            .unwrap();
+
+            Ok(Box::pin(stream::once(async { Ok(batch) })))
+        }
+    }
+
+    pub(crate) struct FailingDatalake;
+
+    #[async_trait]
+    impl DatalakeQuery for FailingDatalake {
+        async fn query_arrow(
+            &self,
+            _sql: &str,
+            _params: serde_json::Value,
+        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
+            Err(DatalakeError::Query("simulated failure".to_string()))
+        }
+    }
+
+    pub(crate) struct MockWatermarkStore;
 
     #[async_trait]
     impl WatermarkStore for MockWatermarkStore {
@@ -261,5 +270,48 @@ mod tests {
         ) -> Result<(), WatermarkError> {
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_fixtures::{EmptyDatalake, MockWatermarkStore};
+
+    #[test]
+    fn create_global_pipelines_returns_global_entities() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let module = SdlcModule::with_ontology(
+            Arc::new(EmptyDatalake),
+            Arc::new(MockWatermarkStore),
+            ontology,
+        );
+
+        let pipelines = module.create_global_pipelines();
+
+        let entity_names: Vec<_> = pipelines.iter().map(|p| p.entity_name()).collect();
+        assert!(entity_names.contains(&"User"), "should include User entity");
+    }
+
+    #[test]
+    fn create_namespace_pipelines_returns_namespaced_entities() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let module = SdlcModule::with_ontology(
+            Arc::new(EmptyDatalake),
+            Arc::new(MockWatermarkStore),
+            ontology,
+        );
+
+        let pipelines = module.create_namespace_pipelines();
+
+        let entity_names: Vec<_> = pipelines.iter().map(|p| p.entity_name()).collect();
+        assert!(
+            entity_names.contains(&"Group"),
+            "should include Group entity"
+        );
+        assert!(
+            entity_names.contains(&"Project"),
+            "should include Project entity"
+        );
     }
 }

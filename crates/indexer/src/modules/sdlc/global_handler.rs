@@ -107,30 +107,35 @@ impl Handler for GlobalHandler {
 
         let mut errors = Vec::new();
         let mut successful_pipelines = 0;
+        let mut total_rows_indexed: u64 = 0;
         for pipeline in &self.pipelines {
-            if let Err(error) = pipeline
+            match pipeline
                 .process(params.to_json(), context.destination.as_ref(), "global")
                 .await
             {
-                error!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
-                self.metrics.pipeline_errors.add(
-                    1,
-                    &[
-                        KeyValue::new("entity", pipeline.entity_name().to_owned()),
-                        KeyValue::new("scope", "global"),
-                        KeyValue::new("error_kind", error.error_kind()),
-                    ],
-                );
-                errors.push((pipeline.entity_name().to_string(), error));
-            } else {
-                successful_pipelines += 1;
+                Ok(rows) => {
+                    successful_pipelines += 1;
+                    total_rows_indexed += rows;
+                }
+                Err(error) => {
+                    error!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
+                    self.metrics.pipeline_errors.add(
+                        1,
+                        &[
+                            KeyValue::new("entity", pipeline.entity_name().to_owned()),
+                            KeyValue::new("scope", "global"),
+                            KeyValue::new("error_kind", error.error_kind()),
+                        ],
+                    );
+                    errors.push((pipeline.entity_name().to_string(), error));
+                }
             }
         }
 
         let elapsed = started_at.elapsed();
         let handler_labels = [KeyValue::new("handler", "global-handler")];
 
-        if errors.is_empty() {
+        if errors.is_empty() && total_rows_indexed > 0 {
             self.watermark_store
                 .set_global_watermark(&payload.watermark)
                 .await
@@ -155,7 +160,9 @@ impl Handler for GlobalHandler {
                 watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
                 "global watermark updated"
             );
+        }
 
+        if errors.is_empty() {
             if let Err(error) = context.lock_service.release(global_lock_key()).await {
                 error!(%error, "failed to release global lock, will expire via TTL");
             }
@@ -197,11 +204,13 @@ impl Handler for GlobalHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::sdlc::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
+    use crate::modules::sdlc::test_fixtures::{
+        EmptyDatalake, MockWatermarkStore, NonEmptyDatalake,
+    };
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
-    use futures::stream;
     use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
     use std::collections::BTreeMap;
+    use std::sync::Mutex;
 
     fn test_metrics() -> SdlcMetrics {
         let provider = opentelemetry::global::meter_provider();
@@ -209,15 +218,33 @@ mod tests {
         SdlcMetrics::with_meter(&meter)
     }
 
-    struct MockWatermarkStore;
+    struct RecordingGlobalWatermarkStore {
+        watermark: Mutex<Option<DateTime<Utc>>>,
+    }
+
+    impl RecordingGlobalWatermarkStore {
+        fn new() -> Self {
+            Self {
+                watermark: Mutex::new(None),
+            }
+        }
+
+        fn stored_watermark(&self) -> Option<DateTime<Utc>> {
+            *self.watermark.lock().unwrap()
+        }
+    }
 
     #[async_trait]
-    impl WatermarkStore for MockWatermarkStore {
+    impl WatermarkStore for RecordingGlobalWatermarkStore {
         async fn get_global_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
             Ok(DateTime::<Utc>::UNIX_EPOCH)
         }
 
-        async fn set_global_watermark(&self, _: &DateTime<Utc>) -> Result<(), WatermarkError> {
+        async fn set_global_watermark(
+            &self,
+            watermark: &DateTime<Utc>,
+        ) -> Result<(), WatermarkError> {
+            *self.watermark.lock().unwrap() = Some(*watermark);
             Ok(())
         }
 
@@ -236,19 +263,6 @@ mod tests {
             _: &DateTime<Utc>,
         ) -> Result<(), WatermarkError> {
             Ok(())
-        }
-    }
-
-    struct MockDatalake;
-
-    #[async_trait]
-    impl DatalakeQuery for MockDatalake {
-        async fn query_arrow(
-            &self,
-            _sql: &str,
-            _params: serde_json::Value,
-        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(stream::empty()))
         }
     }
 
@@ -282,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_processes_pipelines() {
-        let datalake = Arc::new(MockDatalake);
+        let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
         let user_node = create_test_node("User", "gl_user", "siphon_users");
         let project_node = create_test_node("Project", "gl_project", "siphon_projects");
@@ -321,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn handler_releases_lock_on_success() {
-        let datalake = Arc::new(MockDatalake);
+        let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
         let user_node = create_test_node("User", "gl_user", "siphon_users");
 
@@ -354,6 +368,79 @@ mod tests {
         assert!(
             !mock_locks.is_held(global_lock_key()),
             "global lock should be released after successful processing"
+        );
+    }
+
+    #[tokio::test]
+    async fn watermark_updated_when_rows_indexed() {
+        let datalake = Arc::new(NonEmptyDatalake);
+        let ontology = Ontology::new();
+        let user_node = create_test_node("User", "gl_user", "siphon_users");
+
+        let pipelines = vec![
+            OntologyEntityPipeline::from_node(&user_node, &ontology, datalake, test_metrics())
+                .unwrap(),
+        ];
+
+        let store = Arc::new(RecordingGlobalWatermarkStore::new());
+        let handler = GlobalHandler::new(store.clone(), pipelines, test_metrics());
+
+        let payload = serde_json::json!({
+            "watermark": "2024-06-15T12:00:00Z"
+        })
+        .to_string();
+        let envelope = TestEnvelopeFactory::simple(&payload);
+
+        let destination = Arc::new(MockDestination::new());
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
+
+        handler.handle(context, envelope).await.unwrap();
+
+        let expected = "2024-06-15T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        assert_eq!(
+            store.stored_watermark(),
+            Some(expected),
+            "global watermark should be updated when rows were indexed"
+        );
+    }
+
+    #[tokio::test]
+    async fn watermark_not_updated_when_no_rows_indexed() {
+        let datalake = Arc::new(EmptyDatalake);
+        let ontology = Ontology::new();
+        let user_node = create_test_node("User", "gl_user", "siphon_users");
+
+        let pipelines = vec![
+            OntologyEntityPipeline::from_node(&user_node, &ontology, datalake, test_metrics())
+                .unwrap(),
+        ];
+
+        let store = Arc::new(RecordingGlobalWatermarkStore::new());
+        let handler = GlobalHandler::new(store.clone(), pipelines, test_metrics());
+
+        let payload = serde_json::json!({
+            "watermark": "2024-06-15T12:00:00Z"
+        })
+        .to_string();
+        let envelope = TestEnvelopeFactory::simple(&payload);
+
+        let destination = Arc::new(MockDestination::new());
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
+
+        handler.handle(context, envelope).await.unwrap();
+
+        assert_eq!(
+            store.stored_watermark(),
+            None,
+            "global watermark should not be updated when no rows were indexed"
         );
     }
 }

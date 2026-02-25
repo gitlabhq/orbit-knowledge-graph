@@ -61,7 +61,7 @@ impl OntologyEntityPipeline {
         params: Value,
         destination: &dyn Destination,
         scope: &str,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
         let labels = [
             KeyValue::new("entity", self.entity_name.clone()),
@@ -166,7 +166,7 @@ impl OntologyEntityPipeline {
             );
         }
 
-        Ok(())
+        Ok(total_rows)
     }
 
     async fn transform_and_write_batch(
@@ -306,7 +306,7 @@ impl OntologyEdgePipeline {
         params: Value,
         destination: &dyn Destination,
         scope: &str,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
         let labels = [
             KeyValue::new("entity", self.relationship_kind.clone()),
@@ -403,7 +403,7 @@ impl OntologyEdgePipeline {
             );
         }
 
-        Ok(())
+        Ok(total_rows)
     }
 
     async fn transform_and_write_batch(

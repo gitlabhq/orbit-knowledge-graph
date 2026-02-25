@@ -71,6 +71,38 @@ impl NamespaceHandler {
         }
     }
 
+    async fn advance_namespace_watermark(
+        &self,
+        namespace_id: i64,
+        entity: &str,
+        watermark: &DateTime<Utc>,
+    ) -> Result<(), HandlerError> {
+        self.watermark_store
+            .set_namespace_watermark(namespace_id, entity, watermark)
+            .await
+            .map_err(|error| {
+                error!(namespace_id, entity, %error, "failed to update namespace watermark");
+                HandlerError::Processing(format!(
+                    "failed to update namespace watermark for {entity}: {error}"
+                ))
+            })?;
+
+        let lag = Utc::now()
+            .signed_duration_since(*watermark)
+            .num_milliseconds()
+            .max(0) as f64
+            / 1000.0;
+        self.metrics.watermark_lag.record(
+            lag,
+            &[
+                KeyValue::new("entity", entity.to_owned()),
+                KeyValue::new("scope", "namespace"),
+            ],
+        );
+
+        Ok(())
+    }
+
     async fn resolve_namespace_watermark(&self, namespace_id: i64, entity: &str) -> DateTime<Utc> {
         match self
             .watermark_store
@@ -144,43 +176,30 @@ impl Handler for NamespaceHandler {
                 &payload.watermark,
             );
 
-            if let Err(error) = pipeline
+            let rows_indexed = match pipeline
                 .process(params.to_json(), context.destination.as_ref(), "namespace")
                 .await
             {
-                error!(namespace_id = payload.namespace, entity, %error, "entity pipeline failed");
-                self.metrics.pipeline_errors.add(
-                    1,
-                    &[
-                        KeyValue::new("entity", entity.to_owned()),
-                        KeyValue::new("scope", "namespace"),
-                        KeyValue::new("error_kind", error.error_kind()),
-                    ],
-                );
-                errors.push((entity.to_string(), error));
-                continue;
+                Ok(rows) => rows,
+                Err(error) => {
+                    error!(namespace_id = payload.namespace, entity, %error, "entity pipeline failed");
+                    self.metrics.pipeline_errors.add(
+                        1,
+                        &[
+                            KeyValue::new("entity", entity.to_owned()),
+                            KeyValue::new("scope", "namespace"),
+                            KeyValue::new("error_kind", error.error_kind()),
+                        ],
+                    );
+                    errors.push((entity.to_string(), error));
+                    continue;
+                }
+            };
+
+            if rows_indexed > 0 {
+                self.advance_namespace_watermark(payload.namespace, entity, &payload.watermark)
+                    .await?;
             }
-
-            self.watermark_store
-                .set_namespace_watermark(payload.namespace, entity, &payload.watermark)
-                .await
-                .map_err(|error| {
-                    error!(namespace_id = payload.namespace, entity, %error, "failed to update namespace watermark");
-                    HandlerError::Processing(format!("failed to update namespace watermark for {entity}: {error}"))
-                })?;
-
-            let lag = Utc::now()
-                .signed_duration_since(payload.watermark)
-                .num_milliseconds()
-                .max(0) as f64
-                / 1000.0;
-            self.metrics.watermark_lag.record(
-                lag,
-                &[
-                    KeyValue::new("entity", entity.to_owned()),
-                    KeyValue::new("scope", "namespace"),
-                ],
-            );
 
             successful_entity_pipelines += 1;
         }
@@ -198,43 +217,30 @@ impl Handler for NamespaceHandler {
                 &payload.watermark,
             );
 
-            if let Err(error) = edge_pipeline
+            let rows_indexed = match edge_pipeline
                 .process(params.to_json(), context.destination.as_ref(), "namespace")
                 .await
             {
-                error!(namespace_id = payload.namespace, edge = entity, %error, "edge pipeline failed");
-                self.metrics.pipeline_errors.add(
-                    1,
-                    &[
-                        KeyValue::new("entity", entity.to_owned()),
-                        KeyValue::new("scope", "namespace"),
-                        KeyValue::new("error_kind", error.error_kind()),
-                    ],
-                );
-                errors.push((entity.to_string(), error));
-                continue;
+                Ok(rows) => rows,
+                Err(error) => {
+                    error!(namespace_id = payload.namespace, edge = entity, %error, "edge pipeline failed");
+                    self.metrics.pipeline_errors.add(
+                        1,
+                        &[
+                            KeyValue::new("entity", entity.to_owned()),
+                            KeyValue::new("scope", "namespace"),
+                            KeyValue::new("error_kind", error.error_kind()),
+                        ],
+                    );
+                    errors.push((entity.to_string(), error));
+                    continue;
+                }
+            };
+
+            if rows_indexed > 0 {
+                self.advance_namespace_watermark(payload.namespace, entity, &payload.watermark)
+                    .await?;
             }
-
-            self.watermark_store
-                .set_namespace_watermark(payload.namespace, entity, &payload.watermark)
-                .await
-                .map_err(|error| {
-                    error!(namespace_id = payload.namespace, edge = entity, %error, "failed to update namespace edge watermark");
-                    HandlerError::Processing(format!("failed to update namespace watermark for {entity}: {error}"))
-                })?;
-
-            let lag = Utc::now()
-                .signed_duration_since(payload.watermark)
-                .num_milliseconds()
-                .max(0) as f64
-                / 1000.0;
-            self.metrics.watermark_lag.record(
-                lag,
-                &[
-                    KeyValue::new("entity", entity.to_owned()),
-                    KeyValue::new("scope", "namespace"),
-                ],
-            );
 
             successful_edge_pipelines += 1;
         }
@@ -294,9 +300,9 @@ impl Handler for NamespaceHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::sdlc::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
+    use crate::modules::sdlc::datalake::DatalakeQuery;
+    use crate::modules::sdlc::test_fixtures::{EmptyDatalake, FailingDatalake, NonEmptyDatalake};
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
-    use futures::stream;
     use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
     use std::collections::{BTreeMap, HashMap};
     use std::sync::Mutex;
@@ -398,32 +404,6 @@ mod tests {
         }
     }
 
-    struct MockDatalake;
-
-    #[async_trait]
-    impl DatalakeQuery for MockDatalake {
-        async fn query_arrow(
-            &self,
-            _sql: &str,
-            _params: serde_json::Value,
-        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(stream::empty()))
-        }
-    }
-
-    struct FailingDatalake;
-
-    #[async_trait]
-    impl DatalakeQuery for FailingDatalake {
-        async fn query_arrow(
-            &self,
-            _sql: &str,
-            _params: serde_json::Value,
-        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-            Err(DatalakeError::Query("simulated failure".to_string()))
-        }
-    }
-
     fn create_test_node(name: &str, destination_table: &str, source_table: &str) -> NodeEntity {
         NodeEntity {
             name: name.to_string(),
@@ -454,7 +434,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_processes_pipelines() {
-        let datalake = Arc::new(MockDatalake);
+        let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
         let group_node = create_test_node("Group", "gl_group", "groups");
         let issue_node = create_test_node("Issue", "gl_issue", "issues");
@@ -500,7 +480,7 @@ mod tests {
 
     #[tokio::test]
     async fn handler_releases_lock_on_success() {
-        let datalake = Arc::new(MockDatalake);
+        let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
         let group_node = create_test_node("Group", "gl_group", "groups");
 
@@ -546,8 +526,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn watermark_not_updated_when_no_rows_indexed() {
+        let datalake = Arc::new(EmptyDatalake);
+        let ontology = Ontology::new();
+        let group_node = create_test_node("Group", "gl_group", "groups");
+        let issue_node = create_test_node("Issue", "gl_issue", "issues");
+
+        let pipelines = vec![
+            OntologyEntityPipeline::from_node(
+                &group_node,
+                &ontology,
+                datalake.clone(),
+                test_metrics(),
+            )
+            .unwrap(),
+            OntologyEntityPipeline::from_node(&issue_node, &ontology, datalake, test_metrics())
+                .unwrap(),
+        ];
+
+        let store = Arc::new(RecordingWatermarkStore::new());
+        let handler = NamespaceHandler::new(store.clone(), pipelines, vec![], test_metrics());
+
+        let payload = serde_json::json!({
+            "organization": 1,
+            "namespace": 100,
+            "watermark": "2024-06-15T12:00:00Z"
+        })
+        .to_string();
+        let envelope = TestEnvelopeFactory::simple(&payload);
+
+        let destination = Arc::new(MockDestination::new());
+        let context = HandlerContext::new(
+            destination,
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
+
+        handler.handle(context, envelope).await.unwrap();
+
+        let stored = store.stored_watermarks();
+        assert!(
+            stored.is_empty(),
+            "watermarks should not be updated when no rows were indexed"
+        );
+    }
+
+    #[tokio::test]
     async fn watermark_updated_per_entity_on_success() {
-        let datalake = Arc::new(MockDatalake);
+        let datalake = Arc::new(NonEmptyDatalake);
         let ontology = Ontology::new();
         let group_node = create_test_node("Group", "gl_group", "groups");
         let issue_node = create_test_node("Issue", "gl_issue", "issues");
@@ -610,7 +636,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_pipeline_does_not_update_its_watermark() {
-        let ok_datalake = Arc::new(MockDatalake);
+        let ok_datalake = Arc::new(EmptyDatalake);
         let failing_datalake: Arc<dyn DatalakeQuery> = Arc::new(FailingDatalake);
         let ontology = Ontology::new();
 
@@ -671,8 +697,8 @@ mod tests {
         };
 
         assert!(
-            stored.contains_key(&group_key),
-            "Group watermark should be stored since it succeeded"
+            !stored.contains_key(&group_key),
+            "Group watermark should not be stored since no rows were indexed"
         );
         assert!(
             !stored.contains_key(&issue_key),
@@ -682,7 +708,7 @@ mod tests {
 
     #[tokio::test]
     async fn processing_continues_after_earlier_pipeline_fails() {
-        let ok_datalake = Arc::new(MockDatalake);
+        let ok_datalake = Arc::new(EmptyDatalake);
         let failing_datalake: Arc<dyn DatalakeQuery> = Arc::new(FailingDatalake);
         let ontology = Ontology::new();
 
@@ -743,14 +769,14 @@ mod tests {
             "Group watermark should not be stored since it failed"
         );
         assert!(
-            stored.contains_key(&issue_key),
-            "Issue watermark should be stored even though an earlier pipeline failed"
+            !stored.contains_key(&issue_key),
+            "Issue watermark should not be stored since no rows were indexed"
         );
     }
 
     #[tokio::test]
     async fn each_entity_resolves_its_own_watermark() {
-        let datalake = Arc::new(MockDatalake);
+        let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
         let group_node = create_test_node("Group", "gl_group", "groups");
         let issue_node = create_test_node("Issue", "gl_issue", "issues");
@@ -794,20 +820,19 @@ mod tests {
         );
 
         // The handler should resolve different watermarks per entity.
-        // Both succeed, so both get the new watermark stored.
+        // Both succeed but return zero rows, so no watermarks are stored.
         handler.handle(context, envelope).await.unwrap();
 
         let stored = store.stored_watermarks();
-        assert_eq!(
-            stored.len(),
-            2,
-            "both entities should have updated watermarks"
+        assert!(
+            stored.is_empty(),
+            "no watermarks should be updated when no rows were indexed"
         );
     }
 
     #[tokio::test]
-    async fn watermark_set_failure_returns_handler_error() {
-        let datalake = Arc::new(MockDatalake);
+    async fn zero_rows_skips_watermark_set_even_if_store_would_fail() {
+        let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
         let group_node = create_test_node("Group", "gl_group", "groups");
 
@@ -836,14 +861,8 @@ mod tests {
 
         let result = handler.handle(context, envelope).await;
         assert!(
-            result.is_err(),
-            "should propagate watermark write failure as HandlerError"
-        );
-
-        let error_message = result.unwrap_err().to_string();
-        assert!(
-            error_message.contains("failed to update namespace watermark for Group"),
-            "error should identify the entity: {error_message}"
+            result.is_ok(),
+            "should succeed because watermark set is skipped when no rows were indexed"
         );
     }
 
