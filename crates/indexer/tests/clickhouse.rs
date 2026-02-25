@@ -9,6 +9,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
 use indexer::destination::Destination;
+use indexer::metrics::EngineMetrics;
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
@@ -35,7 +36,8 @@ impl TestContext {
         let (container, host, port) = start_clickhouse_container().await;
         setup_database(&host, port).await;
         let config = create_config(&host, port);
-        let destination = ClickHouseDestination::new(config).expect("failed to create destination");
+        let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))
+            .expect("failed to create destination");
 
         Self {
             _container: container,
@@ -235,7 +237,8 @@ async fn connection_failure_returns_error() {
         password: None,
     };
 
-    let destination = ClickHouseDestination::new(config).expect("failed to create destination");
+    let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))
+        .expect("failed to create destination");
 
     let writer = destination
         .new_batch_writer(TEST_TABLE)

@@ -73,12 +73,12 @@ pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
     registry: Arc<ModuleRegistry>,
     destination: Arc<dyn Destination>,
+    metrics: Option<Arc<EngineMetrics>>,
     nats_services: Option<Arc<dyn NatsServices>>,
     lock_service: Option<Arc<dyn LockService>>,
 }
 
 impl EngineBuilder {
-    /// Creates a new engine builder with the required components.
     pub fn new(
         broker: Arc<NatsBroker>,
         registry: Arc<ModuleRegistry>,
@@ -88,28 +88,27 @@ impl EngineBuilder {
             broker,
             registry,
             destination,
+            metrics: None,
             nats_services: None,
             lock_service: None,
         }
     }
 
-    /// Sets the NATS services for handlers.
-    ///
-    /// If not called, a default `NatsServicesImpl` wrapping the broker is used.
     pub fn nats_services(mut self, nats_services: Arc<dyn NatsServices>) -> Self {
         self.nats_services = Some(nats_services);
         self
     }
 
-    /// Sets the lock service for handlers.
-    ///
-    /// If not called, a default `NatsLockService` wrapping the NATS services is used.
     pub fn lock_service(mut self, lock_service: Arc<dyn LockService>) -> Self {
         self.lock_service = Some(lock_service);
         self
     }
 
-    /// Builds the engine.
+    pub fn metrics(mut self, metrics: Arc<EngineMetrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
     pub fn build(self) -> Engine {
         let nats_services: Arc<dyn NatsServices> = self
             .nats_services
@@ -119,7 +118,9 @@ impl EngineBuilder {
             .lock_service
             .unwrap_or_else(|| Arc::new(NatsLockService::new(nats_services.clone())));
 
-        let metrics = Arc::new(EngineMetrics::new());
+        let metrics = self
+            .metrics
+            .unwrap_or_else(|| Arc::new(EngineMetrics::new()));
 
         Engine {
             broker: self.broker,

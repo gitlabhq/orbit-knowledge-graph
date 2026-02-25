@@ -28,6 +28,9 @@ pub struct EngineMetrics {
     pub(crate) permit_wait_duration: Histogram<f64>,
     pub(crate) active_permits: UpDownCounter<i64>,
     pub(crate) nats_fetch_duration: Histogram<f64>,
+    pub(crate) destination_write_duration: Histogram<f64>,
+    pub(crate) destination_rows_written: Counter<u64>,
+    pub(crate) destination_bytes_written: Counter<u64>,
 }
 
 impl EngineMetrics {
@@ -75,6 +78,24 @@ impl EngineMetrics {
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
+        let destination_write_duration = meter
+            .f64_histogram("etl.destination.write.duration")
+            .with_unit("s")
+            .with_description("Time to write a batch to ClickHouse")
+            .with_boundaries(DURATION_BUCKETS.to_vec())
+            .build();
+
+        let destination_rows_written = meter
+            .u64_counter("etl.destination.rows.written")
+            .with_description("Total rows written to ClickHouse")
+            .build();
+
+        let destination_bytes_written = meter
+            .u64_counter("etl.destination.bytes.written")
+            .with_unit("By")
+            .with_description("Total bytes written to ClickHouse")
+            .build();
+
         Self {
             messages_processed,
             message_duration,
@@ -82,6 +103,9 @@ impl EngineMetrics {
             permit_wait_duration,
             active_permits,
             nats_fetch_duration,
+            destination_write_duration,
+            destination_rows_written,
+            destination_bytes_written,
         }
     }
 }

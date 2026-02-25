@@ -142,7 +142,9 @@ pub trait Destination: Send + Sync {
 A ClickHouse destination is included:
 
 ```rust
+use std::sync::Arc;
 use indexer::clickhouse::{ClickHouseConfiguration, ClickHouseDestination};
+use indexer::metrics::EngineMetrics;
 
 let config = ClickHouseConfiguration {
     database: "analytics".to_string(),
@@ -151,7 +153,7 @@ let config = ClickHouseConfiguration {
     password: None,
 };
 
-let destination = ClickHouseDestination::new(config)?;
+let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))?;
 let writer = destination.new_batch_writer(&entity).await?;
 writer.write_batch(&batches).await?;
 ```

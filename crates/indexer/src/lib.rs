@@ -117,8 +117,13 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
         .await?;
 
+    let metrics = Arc::new(metrics::EngineMetrics::new());
+
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
-    let destination = Arc::new(ClickHouseDestination::new(config.graph.clone())?);
+    let destination = Arc::new(ClickHouseDestination::new(
+        config.graph.clone(),
+        metrics.clone(),
+    )?);
 
     info!("initializing SDLC module");
     let sdlc_module =
@@ -139,7 +144,11 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
 
     info!(topics = registry.topics().len(), "registered modules");
 
-    let engine = Arc::new(EngineBuilder::new(broker, registry, destination).build());
+    let engine = Arc::new(
+        EngineBuilder::new(broker, registry, destination)
+            .metrics(metrics)
+            .build(),
+    );
 
     let engine_handle = engine.clone();
     let shutdown_task = tokio::spawn(async move {
