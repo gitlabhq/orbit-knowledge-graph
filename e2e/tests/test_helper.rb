@@ -18,7 +18,8 @@
 
 require 'json'
 
-MANIFEST_PATH = '/tmp/e2e/manifest.json'
+E2E_POD_DIR = ENV.fetch('E2E_POD_DIR', '/tmp/e2e')
+MANIFEST_PATH = "#{E2E_POD_DIR}/manifest.json"
 
 def load_manifest!
   unless File.exist?(MANIFEST_PATH)
@@ -35,7 +36,7 @@ end
 module TestHarness
   RESULTS = []
 
-  RESULTS_PATH = '/tmp/e2e/test-results.json'
+  RESULTS_PATH = "#{E2E_POD_DIR}/test-results.json"
 
   @current_section = nil
 

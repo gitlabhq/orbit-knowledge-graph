@@ -93,6 +93,7 @@ async fn start_colima(sh: &Shell, cfg: &Config) -> Result<()> {
         &cfg.colima.memory,
         &cfg.colima.cpus,
         &cfg.colima.disk,
+        &cfg.colima.vm_type,
         &cfg.colima.k8s_version,
     )?;
 
@@ -168,8 +169,8 @@ pub(crate) async fn build_images(cfg: &Config) -> Result<()> {
     let dockerfile = cfg.cng_dir.join(c::DOCKERFILE_RAILS);
     let profile = &cfg.colima.profile;
 
-    // Build images with bounded concurrency (2 at a time to avoid
-    // overwhelming Colima's CPU/RAM while still overlapping I/O).
+    // Build images with bounded concurrency to avoid overwhelming
+    // Colima's CPU/RAM while still overlapping I/O.
     let builds: Vec<_> = cfg
         .cng
         .components
@@ -205,7 +206,7 @@ pub(crate) async fn build_images(cfg: &Config) -> Result<()> {
             Ok(t)
         }
     }))
-    .buffer_unordered(3)
+    .buffer_unordered(c::CNG_BUILD_CONCURRENCY)
     .collect()
     .await;
 
@@ -248,6 +249,7 @@ fn deploy_traefik(sh: &Shell, cfg: &Config) -> Result<()> {
         &cfg.helm.traefik.chart,
         kube_ns,
         &values_str,
+        &cfg.helm.traefik.chart_version,
         &cfg.helm.traefik.timeout,
         &docker_host,
     )?;
@@ -265,6 +267,7 @@ pub(crate) async fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     let ns = &cfg.namespaces.gitlab;
     let release = &cfg.helm.gitlab.release;
     let chart = &cfg.helm.gitlab.chart;
+    let version = &cfg.helm.gitlab.chart_version;
     let timeout = &cfg.helm.gitlab.timeout;
 
     helm::repo_add_update(
@@ -277,12 +280,55 @@ pub(crate) async fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     let values_file = cfg.cng_dir.join(c::GITLAB_VALUES_YAML);
     let values_str = values_file.to_string_lossy().to_string();
 
+    let workhorse_image = format!("{}/{}", cfg.cng.registry, cfg.cng.workhorse_component);
+    let webservice_repo = format!("{}/gitlab-webservice-ee", cfg.cng.local_prefix);
+    let sidekiq_repo = format!("{}/gitlab-sidekiq-ee", cfg.cng.local_prefix);
+    let toolbox_repo = format!("{}/gitlab-toolbox-ee", cfg.cng.local_prefix);
+
+    let sets: Vec<(&str, &str)> = vec![
+        ("gitlab.webservice.workhorse.image", &workhorse_image),
+        ("gitlab.webservice.workhorse.tag", &cfg.cng.base_tag),
+        ("gitlab.webservice.image.repository", &webservice_repo),
+        ("gitlab.webservice.image.tag", &cfg.cng.local_tag),
+        ("gitlab.sidekiq.image.repository", &sidekiq_repo),
+        ("gitlab.sidekiq.image.tag", &cfg.cng.local_tag),
+        ("gitlab.toolbox.image.repository", &toolbox_repo),
+        ("gitlab.toolbox.image.tag", &cfg.cng.local_tag),
+        ("gitlab.migrations.image.repository", &toolbox_repo),
+        ("gitlab.migrations.image.tag", &cfg.cng.local_tag),
+        ("global.psql.serviceName", &cfg.postgres.service_name),
+        ("global.psql.password.secret", &cfg.postgres.secret_name),
+        ("global.psql.password.key", &cfg.postgres.password_key),
+        ("postgresql.auth.username", &cfg.postgres.user),
+        ("postgresql.auth.database", &cfg.postgres.database),
+    ];
+
     if helm::release_exists(sh, release, ns, &docker_host) {
         ui::info("GitLab already deployed, upgrading")?;
-        helm::upgrade(sh, release, chart, ns, &values_str, timeout, &docker_host)?;
+        helm::upgrade(
+            sh,
+            release,
+            chart,
+            ns,
+            &values_str,
+            &sets,
+            version,
+            timeout,
+            &docker_host,
+        )?;
     } else {
         kube::create_namespace(ns).await?;
-        helm::install(sh, release, chart, ns, &values_str, timeout, &docker_host)?;
+        helm::install_with_sets(
+            sh,
+            release,
+            chart,
+            ns,
+            &values_str,
+            &sets,
+            version,
+            timeout,
+            &docker_host,
+        )?;
     }
 
     ui::info("GitLab deploy initiated")?;

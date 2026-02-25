@@ -1,78 +1,73 @@
 # =============================================================================
-# clickhouse.yaml -- Standalone ClickHouse for E2E
+# clickhouse.yaml.tmpl -- Standalone ClickHouse for E2E
 #
-# Deployed by setup.sh BEFORE Tilt starts, so that:
+# Rendered by template.rs from config/e2e.yaml values.
+# Deployed BEFORE the GKG Helm chart so that:
 #   1. ClickHouse is up and healthy
 #   2. gitlab:clickhouse:migrate creates datalake tables + MVs + dictionaries
 #   3. graph.sql creates GKG graph tables
-#   4. THEN Tilt starts siphon + GKG (data flows into pre-existing tables)
-#
-# This eliminates the race condition where siphon inserts data before MVs
-# exist (which causes empty hierarchy tables and wrong traversal paths).
-#
-# The service name is gkg-e2e-clickhouse -- same as the Tiltfile used to
-# create, so all Helm values (values.yaml) continue to work unchanged.
+#   4. THEN siphon + GKG start (data flows into pre-existing tables)
 # =============================================================================
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: gkg-e2e-clickhouse-init
-  namespace: default
+  name: ${INIT_CONFIGMAP}
+  namespace: ${NAMESPACE}
 data:
   init.sql: |
-    CREATE DATABASE IF NOT EXISTS `gitlab_clickhouse_development`;
-    CREATE DATABASE IF NOT EXISTS `gkg-development`;
+    CREATE DATABASE IF NOT EXISTS `${DATALAKE_DB}`;
+    CREATE DATABASE IF NOT EXISTS `${GRAPH_DB}`;
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: gkg-e2e-clickhouse
-  namespace: default
+  name: ${SERVICE_NAME}
+  namespace: ${NAMESPACE}
 spec:
   selector:
-    app: gkg-e2e-clickhouse
+    app: ${SERVICE_NAME}
   ports:
     - name: http
-      port: 8123
-      targetPort: 8123
+      port: ${HTTP_PORT}
+      targetPort: ${HTTP_PORT}
     - name: native
-      port: 9000
-      targetPort: 9000
+      port: ${NATIVE_PORT}
+      targetPort: ${NATIVE_PORT}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: gkg-e2e-clickhouse
-  namespace: default
+  name: ${SERVICE_NAME}
+  namespace: ${NAMESPACE}
 spec:
-  serviceName: gkg-e2e-clickhouse
+  serviceName: ${SERVICE_NAME}
   replicas: 1
   selector:
     matchLabels:
-      app: gkg-e2e-clickhouse
+      app: ${SERVICE_NAME}
   template:
     metadata:
       labels:
-        app: gkg-e2e-clickhouse
+        app: ${SERVICE_NAME}
     spec:
       enableServiceLinks: false
       containers:
         - name: clickhouse
-          image: clickhouse/clickhouse-server:25.1-alpine
+          image: ${IMAGE}
           ports:
-            - containerPort: 8123
+            - containerPort: ${HTTP_PORT}
               name: http
-            - containerPort: 9000
+            - containerPort: ${NATIVE_PORT}
               name: native
           env:
             - name: CLICKHOUSE_USER
-              value: default
+              value: ${CH_USER}
             - name: CLICKHOUSE_PASSWORD
               value: ""
             - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
               value: "1"
             - name: CLICKHOUSE_DB
-              value: gitlab_clickhouse_development
+              value: ${DATALAKE_DB}
           resources:
             requests:
               memory: 1Gi
@@ -83,18 +78,18 @@ spec:
           startupProbe:
             httpGet:
               path: /ping
-              port: 8123
+              port: ${HTTP_PORT}
             failureThreshold: 30
             periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /ping
-              port: 8123
+              port: ${HTTP_PORT}
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /ping
-              port: 8123
+              port: ${HTTP_PORT}
             periodSeconds: 10
           volumeMounts:
             - name: data
@@ -104,7 +99,7 @@ spec:
       volumes:
         - name: init
           configMap:
-            name: gkg-e2e-clickhouse-init
+            name: ${INIT_CONFIGMAP}
   volumeClaimTemplates:
     - metadata:
         name: data

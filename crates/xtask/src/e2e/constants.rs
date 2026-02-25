@@ -4,7 +4,7 @@
 //! These are not configurable — they define the shape of the harness itself.
 //!
 //! All configurable defaults (namespaces, timeouts, image tags, etc.)
-//! live in `e2e/config.yaml` and are loaded by `config.rs`.
+//! live in `config/e2e.yaml` and are loaded by `config.rs`.
 
 // -- Preflight: required CLI tools --------------------------------------------
 
@@ -21,7 +21,7 @@ pub const SSA_FIELD_MANAGER: &str = "xtask";
 
 // -- Config file path ---------------------------------------------------------
 
-pub const CONFIG_YAML: &str = "e2e/config.yaml";
+pub const CONFIG_YAML: &str = "config/e2e.yaml";
 
 // -- Table lists (iteration targets, not config) ------------------------------
 
@@ -75,11 +75,11 @@ pub const GKG_CHART_PATH: &str = "helm-dev/gkg";
 pub const HELM_VALUES_YAML: &str = "e2e/helm-values.yaml";
 pub const BUILD_DEV_SCRIPT: &str = "scripts/build-dev.sh";
 pub const DISPATCH_JOB_TEMPLATE: &str = "e2e/templates/dispatch-indexing-job.yaml.tmpl";
-pub const CLICK_HOUSE_YML_TEMPLATE: &str = "e2e/templates/click-house.yml.tmpl";
+pub const RAILS_CLICKHOUSE_CONFIG_TEMPLATE: &str = "e2e/templates/rails-clickhouse-config.yml.tmpl";
 
 // -- Filenames ----------------------------------------------------------------
 
-pub const CLICKHOUSE_YAML: &str = "clickhouse.yaml";
+pub const CLICKHOUSE_YAML_TEMPLATE: &str = "e2e/cng/clickhouse.yaml.tmpl";
 pub const CREATE_TEST_DATA_LOG: &str = "create-test-data.log";
 pub const MANIFEST_JSON: &str = "manifest.json";
 pub const TRAEFIK_VALUES_YAML: &str = "traefik-values.yaml";
@@ -142,3 +142,15 @@ pub const DIAGNOSTIC_LOG_TAIL_LINES: i64 = 30;
 // -- Colima docker socket path pattern ----------------------------------------
 
 pub const COLIMA_SOCKET_TEMPLATE: &str = ".colima/{}/docker.sock";
+
+// -- Rails environment --------------------------------------------------------
+
+pub const RAILS_ENV: &str = "production";
+
+// -- Docker client ------------------------------------------------------------
+
+pub const DOCKER_SOCKET_TIMEOUT: u64 = 120;
+
+// -- CNG image build concurrency ----------------------------------------------
+
+pub const CNG_BUILD_CONCURRENCY: usize = 3;

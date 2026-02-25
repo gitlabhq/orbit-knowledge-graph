@@ -21,7 +21,7 @@ fn client(colima_profile: &str) -> Result<Docker> {
         "{home}/{}",
         c::COLIMA_SOCKET_TEMPLATE.replace("{}", colima_profile)
     );
-    Docker::connect_with_socket(&socket, 120, API_DEFAULT_VERSION)
+    Docker::connect_with_socket(&socket, c::DOCKER_SOCKET_TIMEOUT, API_DEFAULT_VERSION)
         .with_context(|| format!("connecting to docker socket: {socket}"))
 }
 

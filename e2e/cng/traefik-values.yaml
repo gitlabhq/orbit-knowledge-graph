@@ -1,22 +1,6 @@
 # Traefik ingress controller for local GitLab
 #
-# Minimal config: listen on ports 80/443, serve as the default IngressClass.
-
-ingressClass:
-  enabled: true
-  isDefaultClass: true
-
-ports:
-  web:
-    expose:
-      default: true
-  websecure:
-    expose:
-      default: true
-
-# Single replica for local dev
-deployment:
-  replicas: 1
+# Only non-default overrides. Everything else uses chart defaults.
 
 resources:
   requests:
@@ -25,11 +9,6 @@ resources:
   limits:
     cpu: 200m
     memory: 128Mi
-
-# Disable dashboard in production, enable for local debug
-ingressRoute:
-  dashboard:
-    enabled: false
 
 logs:
   general:

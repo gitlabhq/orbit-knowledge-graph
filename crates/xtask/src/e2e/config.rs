@@ -1,6 +1,6 @@
 //! E2E environment configuration.
 //!
-//! Deserializes `e2e/config.yaml` directly into [`Config`].  The only env var
+//! Deserializes `config/e2e.yaml` directly into [`Config`].  The only env var
 //! is `GITLAB_SRC` — an optional, user-specific path with no YAML default,
 //! required only for commands that build CNG images (setup, rebuild --rails).
 
@@ -22,6 +22,7 @@ pub struct Colima {
     pub memory: String,
     pub cpus: String,
     pub disk: String,
+    pub vm_type: String,
     pub k8s_version: String,
 }
 
@@ -55,6 +56,8 @@ pub struct Helm {
 pub struct HelmRelease {
     pub release: String,
     pub chart: String,
+    #[serde(default)]
+    pub chart_version: String,
     pub repo_name: String,
     pub repo_url: String,
     pub timeout: String,
@@ -90,8 +93,10 @@ pub struct PodPaths {
 
 #[derive(Debug, Deserialize)]
 pub struct ClickHouse {
+    pub image: String,
     pub service_name: String,
     pub http_port: String,
+    pub native_port: String,
     pub datalake_db: String,
     pub graph_db: String,
     pub default_user: String,
@@ -178,7 +183,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load `e2e/config.yaml`, populate runtime paths, return Config.
+    /// Load `config/e2e.yaml`, populate runtime paths, return Config.
     pub fn load() -> Result<Self> {
         let gkg_root = e::workspace_root();
         let yaml_path = gkg_root.join(c::CONFIG_YAML);

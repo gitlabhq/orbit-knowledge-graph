@@ -72,9 +72,19 @@ pub async fn run(sh: &Shell, cfg: &Config) -> Result<()> {
 async fn deploy_clickhouse(cfg: &Config) -> Result<()> {
     ui::step(15, "Deploying ClickHouse")?;
 
-    let manifest = cfg.cng_dir.join(c::CLICKHOUSE_YAML);
-    let yaml =
-        fs::read_to_string(&manifest).with_context(|| format!("reading {}", manifest.display()))?;
+    let template_path = cfg.gkg_root.join(c::CLICKHOUSE_YAML_TEMPLATE);
+    let vars = HashMap::from([
+        ("NAMESPACE", cfg.namespaces.default.as_str()),
+        ("SERVICE_NAME", cfg.clickhouse.service_name.as_str()),
+        ("INIT_CONFIGMAP", cfg.clickhouse.init_configmap.as_str()),
+        ("DATALAKE_DB", cfg.clickhouse.datalake_db.as_str()),
+        ("GRAPH_DB", cfg.clickhouse.graph_db.as_str()),
+        ("HTTP_PORT", cfg.clickhouse.http_port.as_str()),
+        ("NATIVE_PORT", cfg.clickhouse.native_port.as_str()),
+        ("IMAGE", cfg.clickhouse.image.as_str()),
+        ("CH_USER", cfg.clickhouse.default_user.as_str()),
+    ]);
+    let yaml = template::render(&template_path, &vars)?;
     kube::apply_yaml(&yaml)
         .await
         .context("failed to apply clickhouse.yaml")?;
@@ -101,7 +111,7 @@ async fn run_datalake_migrations(cfg: &Config, toolbox_pod: &str) -> Result<()> 
     let ns = &cfg.namespaces.gitlab;
     let rails_root = &cfg.pod_paths.rails_root;
 
-    let tmpl_path = cfg.gkg_root.join(c::CLICK_HOUSE_YML_TEMPLATE);
+    let tmpl_path = cfg.gkg_root.join(c::RAILS_CLICKHOUSE_CONFIG_TEMPLATE);
     let ch_url = cfg.ch_url();
     let vars = HashMap::from([
         ("DATABASE", cfg.clickhouse.datalake_db.as_str()),
@@ -122,9 +132,11 @@ async fn run_datalake_migrations(cfg: &Config, toolbox_pod: &str) -> Result<()> 
     ui::info("Running gitlab:clickhouse:migrate (this may take a minute)...")?;
 
     let migrate_start = Instant::now();
-    let script = r#"cd "$0" && bundle exec rake gitlab:clickhouse:migrate RAILS_ENV=production"#;
+    let rails_env = c::RAILS_ENV;
+    let script =
+        format!(r#"cd "$0" && bundle exec rake gitlab:clickhouse:migrate RAILS_ENV={rails_env}"#);
 
-    let output = kube::exec_bash_output(ns, toolbox_pod, script, &[rails_root])
+    let output = kube::exec_bash_output(ns, toolbox_pod, &script, &[rails_root])
         .await?
         .strict("gitlab:clickhouse:migrate failed")?;
 
@@ -276,7 +288,24 @@ fn deploy_gkg_chart(sh: &Shell, cfg: &Config) -> Result<()> {
             ("postgres.port", &cfg.postgres.port),
             ("postgres.database", &cfg.postgres.database),
             ("postgres.user", &cfg.postgres.user),
+            ("clickhouse.datalake.host", &cfg.clickhouse.service_name),
+            ("clickhouse.datalake.port", &cfg.clickhouse.http_port),
+            (
+                "clickhouse.datalake.nativePort",
+                &cfg.clickhouse.native_port,
+            ),
+            ("clickhouse.datalake.database", &cfg.clickhouse.datalake_db),
+            ("clickhouse.datalake.user", &cfg.clickhouse.default_user),
+            ("clickhouse.graph.host", &cfg.clickhouse.service_name),
+            ("clickhouse.graph.port", &cfg.clickhouse.http_port),
+            ("clickhouse.graph.database", &cfg.clickhouse.graph_db),
+            ("clickhouse.graph.user", &cfg.clickhouse.default_user),
+            ("gkgServer.image.repository", &cfg.gkg.server_image),
+            ("gkgServer.image.tag", &cfg.gkg.dev_tag),
+            ("producer.publicationName", &cfg.siphon.publication),
+            ("producer.slotName", &cfg.siphon.slot),
         ],
+        "",
         timeout,
         &docker_host,
     )?;
@@ -406,7 +435,7 @@ pub(crate) async fn run_dispatch_indexing(cfg: &Config) -> Result<()> {
             cfg.timeouts.dispatch_job
         ))?;
         let label = format!("job-name={job_name}");
-        match kube::get_logs(default_ns, &label, 20).await {
+        match kube::get_logs(default_ns, &label, c::DIAGNOSTIC_LOG_TAIL_LINES).await {
             Ok(logs) => {
                 for line in logs.lines() {
                     ui::info(line)?;
@@ -588,14 +617,17 @@ pub(crate) async fn run_redaction_tests(cfg: &Config, toolbox_pod: &str) -> Resu
     let test_file = c::REDACTION_TEST_RB;
     ui::info(&format!("Running {test_file}..."))?;
 
-    let script = r#"cd "$0" && KNOWLEDGE_GRAPH_GRPC_ENDPOINT="$1" bundle exec rails runner "$2" RAILS_ENV=production"#;
+    let rails_env = c::RAILS_ENV;
+    let script = format!(
+        r#"cd "$0" && KNOWLEDGE_GRAPH_GRPC_ENDPOINT="$1" E2E_POD_DIR="$2" bundle exec rails runner "$3" RAILS_ENV={rails_env}"#
+    );
     let test_path = format!("{e2e_pod_dir}/{test_file}");
 
     let r = kube::exec_bash_output(
         ns,
         toolbox_pod,
-        script,
-        &[rails_root, grpc_endpoint, &test_path],
+        &script,
+        &[rails_root, grpc_endpoint, e2e_pod_dir, &test_path],
     )
     .await?;
 
