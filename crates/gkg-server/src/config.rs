@@ -15,7 +15,7 @@ fn default_bind_address() -> SocketAddr {
 }
 
 fn default_grpc_bind_address() -> SocketAddr {
-    "127.0.0.1:50051".parse().unwrap()
+    "127.0.0.1:50054".parse().unwrap()
 }
 
 fn default_jwt_clock_skew_secs() -> u64 {

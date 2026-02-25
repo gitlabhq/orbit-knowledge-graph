@@ -38,7 +38,7 @@ Static internal IP: `10.128.0.51` (reserved as `gkg-webserver-ip` in GCP, persis
 **Ports:**
 
 - HTTP API: `8080`
-- gRPC: `50051`
+- gRPC: `50054`
 
 Add to `gitlab_rails['env']` in `/etc/gitlab/gitlab.rb`:
 
@@ -46,7 +46,7 @@ Add to `gitlab_rails['env']` in `/etc/gitlab/gitlab.rb`:
 gitlab_rails['env'] = {
   # ... existing env vars ...
   'KNOWLEDGE_GRAPH_BASE_URL' => 'http://10.128.0.51:8080',
-  'KNOWLEDGE_GRAPH_GRPC_ENDPOINT' => '10.128.0.51:50051'
+  'KNOWLEDGE_GRAPH_GRPC_ENDPOINT' => '10.128.0.51:50054'
 }
 ```
 
