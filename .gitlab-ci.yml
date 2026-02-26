@@ -310,6 +310,14 @@ tilt-ci:
       CLICKHOUSE_PASSWORD=ci_test_password
       GKG_JWT_SECRET=ci_test_jwt_secret_at_least_32_bytes_long
       EOF
+    # The GCS key file variable lives in /tmp on the CI container, which the DinD
+    # daemon can't access for volume mounts. Copy it into the workspace (shared
+    # with DinD) so build-dev.sh can mount it into the rust-builder container.
+    - |
+      if [ -f "${SCCACHE_GCS_KEY:-}" ]; then
+        cp "${SCCACHE_GCS_KEY}" "$(pwd)/.sccache-gcs-key"
+        export SCCACHE_GCS_KEY="$(pwd)/.sccache-gcs-key"
+      fi
     - tilt ci
 
 # Build Stage
