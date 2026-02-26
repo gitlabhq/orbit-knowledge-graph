@@ -69,7 +69,7 @@ use metrics::CountErr;
 ///
 /// Validates structure, identifiers, and ontology values before generating SQL.
 /// Increments threat-model counters on each category of rejection — the error
-/// variant determines which counter fires (see [`metrics::threat_counter`]).
+/// variant determines which counter fires (see [`metrics::counter_info`]).
 #[must_use = "the compiled query should be used"]
 pub fn compile(
     json_input: &str,

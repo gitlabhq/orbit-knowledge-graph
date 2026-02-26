@@ -2,13 +2,21 @@ use query_engine::SecurityContext;
 
 use crate::auth::Claims;
 
+use super::super::error::PipelineError;
+use super::super::metrics::PipelineObserver;
+
 pub struct SecurityStage;
 
 impl SecurityStage {
-    // Important note: We handle most filtering via the user's traversal paths.
-    // If the user is not an admin, we filter by the user's group traversal paths.
-    // We must ensure that if the traversal paths are empty, we also return an empty result.
-    pub fn execute(claims: &Claims) -> Result<SecurityContext, SecurityError> {
+    pub fn execute(
+        claims: &Claims,
+        obs: &PipelineObserver,
+    ) -> Result<SecurityContext, PipelineError> {
+        let result = Self::build_context(claims);
+        obs.check(result.map_err(PipelineError::from))
+    }
+
+    fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
         let org_id = claims
             .organization_id
             .ok_or_else(|| SecurityError("missing organization_id in claims".to_string()))?
@@ -60,7 +68,7 @@ mod tests {
     #[test]
     fn admin_gets_org_wide_access() {
         let claims = make_claims(true, vec![], Some(42));
-        let ctx = SecurityStage::execute(&claims).unwrap();
+        let ctx = SecurityStage::build_context(&claims).unwrap();
 
         assert_eq!(ctx.org_id, 42);
         assert_eq!(ctx.traversal_paths, vec!["42/"]);
@@ -69,7 +77,7 @@ mod tests {
     #[test]
     fn missing_org_id_returns_error() {
         let claims = make_claims(true, vec![], None);
-        let err = SecurityStage::execute(&claims).unwrap_err();
+        let err = SecurityStage::build_context(&claims).unwrap_err();
 
         assert!(err.to_string().contains("missing organization_id"));
     }
@@ -81,7 +89,7 @@ mod tests {
             vec!["1/22/".to_string(), "1/33/".to_string()],
             Some(1),
         );
-        let ctx = SecurityStage::execute(&claims).unwrap();
+        let ctx = SecurityStage::build_context(&claims).unwrap();
 
         assert_eq!(ctx.traversal_paths, vec!["1/"]);
     }
@@ -93,7 +101,7 @@ mod tests {
             vec!["1/22/".to_string(), "1/33/".to_string()],
             Some(1),
         );
-        let ctx = SecurityStage::execute(&claims).unwrap();
+        let ctx = SecurityStage::build_context(&claims).unwrap();
 
         assert_eq!(ctx.traversal_paths, vec!["1/22/", "1/33/"]);
     }
@@ -101,7 +109,7 @@ mod tests {
     #[test]
     fn non_admin_with_empty_groups_gets_no_access() {
         let claims = make_claims(false, vec![], Some(1));
-        let ctx = SecurityStage::execute(&claims).unwrap();
+        let ctx = SecurityStage::build_context(&claims).unwrap();
 
         assert!(ctx.traversal_paths.is_empty());
     }
@@ -109,7 +117,7 @@ mod tests {
     #[test]
     fn non_admin_with_single_group_path() {
         let claims = make_claims(false, vec!["1/24/111/".to_string()], Some(1));
-        let ctx = SecurityStage::execute(&claims).unwrap();
+        let ctx = SecurityStage::build_context(&claims).unwrap();
 
         assert_eq!(ctx.traversal_paths, vec!["1/24/111/"]);
     }

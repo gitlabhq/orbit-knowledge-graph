@@ -1,5 +1,5 @@
 use arrow::record_batch::RecordBatch;
-use query_engine::ResultContext;
+use query_engine::{ParameterizedQuery, ResultContext};
 use serde_json::Value;
 
 use crate::redaction::{QueryResult, ResourceAuthorization};
@@ -7,6 +7,10 @@ use crate::redaction::{QueryResult, ResourceAuthorization};
 pub struct ExecutionOutput {
     pub batches: Vec<RecordBatch>,
     pub result_context: ResultContext,
+}
+
+pub struct CompilationOutput {
+    pub compiled_query: ParameterizedQuery,
 }
 
 pub struct ExtractionOutput {
@@ -20,6 +24,12 @@ pub struct AuthorizationOutput {
 
 pub struct RedactionOutput {
     pub query_result: QueryResult,
+    pub redacted_count: usize,
+}
+
+pub struct HydrationOutput {
+    pub query_result: QueryResult,
+    pub result_context: ResultContext,
     pub redacted_count: usize,
 }
 

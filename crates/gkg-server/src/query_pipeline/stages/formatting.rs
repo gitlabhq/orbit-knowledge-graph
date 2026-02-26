@@ -3,9 +3,8 @@ use std::sync::Arc;
 use ontology::Ontology;
 
 use super::super::formatter::ResultFormatter;
-use super::super::types::PipelineOutput;
-use crate::redaction::QueryResult;
-use query_engine::ResultContext;
+use super::super::metrics::PipelineObserver;
+use super::super::types::{CompilationOutput, HydrationOutput, PipelineOutput};
 
 pub struct FormattingStage<F: ResultFormatter> {
     formatter: F,
@@ -22,21 +21,21 @@ impl<F: ResultFormatter> FormattingStage<F> {
 
     pub fn execute(
         &self,
-        query_result: QueryResult,
-        result_context: ResultContext,
-        redacted_count: usize,
-        generated_sql: String,
+        input: HydrationOutput,
+        compiled: &CompilationOutput,
+        _obs: &PipelineObserver,
     ) -> PipelineOutput {
-        let row_count = query_result.authorized_count();
-        let formatted = self
-            .formatter
-            .format(&query_result, &result_context, &self.ontology);
+        let row_count = input.query_result.authorized_count();
+        let generated_sql = &compiled.compiled_query.sql;
+        let formatted =
+            self.formatter
+                .format(&input.query_result, &input.result_context, &self.ontology);
 
         PipelineOutput {
             formatted_result: formatted,
-            generated_sql: Some(generated_sql),
+            generated_sql: Some(generated_sql.clone()),
             row_count,
-            redacted_count,
+            redacted_count: input.redacted_count,
         }
     }
 }

@@ -25,6 +25,7 @@ clickhouse-client = { path = "../clickhouse-client" }
 health-check = { path = "../health-check" }
 indexer = { path = "../indexer" }
 ontology = { path = "../ontology" }
+opentelemetry = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 reqwest = { workspace = true }
