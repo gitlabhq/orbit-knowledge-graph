@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
                 graph: config.graph.clone(),
                 datalake: config.datalake.clone(),
                 engine: config.engine.clone(),
-                gitaly: config.gitaly.clone(),
+                gitlab: config.gitlab.clone(),
                 modules: config.modules.clone(),
             };
             indexer::run(&indexer_config, shutdown)

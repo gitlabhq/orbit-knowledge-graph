@@ -31,6 +31,7 @@ reqwest = { workspace = true }
 rustls = { workspace = true }
 parking_lot = { workspace = true }
 query-engine = { path = "../query-engine" }
+gitlab-client = { workspace = true }
 jsonwebtoken = { workspace = true }
 labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum", "metrics-grpc"] }
 serde = { workspace = true }

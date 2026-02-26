@@ -8,8 +8,10 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 
 use super::{AuthError, Claims};
 
-const ISSUER: &str = "gitlab";
-const AUDIENCE: &str = "gitlab-knowledge-graph";
+// Both sides use the same issuer/audience: Rails signs and validates
+// with iss="gitlab", aud="gitlab-knowledge-graph".
+const EXPECTED_ISSUER: &str = "gitlab";
+const EXPECTED_AUDIENCE: &str = "gitlab-knowledge-graph";
 const MIN_SECRET_LENGTH: usize = 32;
 
 #[derive(Clone)]
@@ -34,8 +36,8 @@ impl JwtValidator {
             .unwrap_or_else(|_| secret.as_bytes().to_vec());
         let decoding_key = DecodingKey::from_secret(&decoded);
         let mut validation = Validation::new(Algorithm::HS256);
-        validation.set_issuer(&[ISSUER]);
-        validation.set_audience(&[AUDIENCE]);
+        validation.set_issuer(&[EXPECTED_ISSUER]);
+        validation.set_audience(&[EXPECTED_AUDIENCE]);
         validation.leeway = clock_skew_secs;
 
         Ok(Self {
@@ -69,8 +71,8 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
         let claims = Claims {
             sub: "user".into(),
-            iss: ISSUER.into(),
-            aud: AUDIENCE.into(),
+            iss: EXPECTED_ISSUER.into(),
+            aud: EXPECTED_AUDIENCE.into(),
             iat: now,
             exp: now + 3600,
             user_id: 1,

@@ -1,13 +1,16 @@
 mod common;
 
+use std::path::Path;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::Bytes;
-use gitaly_client::{GitalyClient, GitalyRepositoryConfig, RepositorySource};
+use gitaly_client::{GitalyClient, GitalyError, GitalyRepositoryConfig, RepositorySource};
+use gitlab_client::{GitalyConnectionInfo, RepositoryInfo};
 use indexer::module::{Handler, HandlerContext};
 use indexer::modules::code::{
     ClickHouseCodeWatermarkStore, ClickHouseProjectStore, ClickHouseStaleDataCleaner,
-    CodeIndexingConfig, GitalyConfiguration, GitalyRepositoryService, PushEventHandler,
+    CodeIndexingConfig, PushEventHandler, RepositoryService,
 };
 use indexer::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
 use prost::Message;
@@ -23,6 +26,66 @@ use common::{GRAPH_SCHEMA_SQL, IndexerTestExt, SIPHON_SCHEMA_SQL, TestContext};
 const GITALY_IMAGE: &str = "registry.gitlab.com/gitlab-org/build/cng/gitaly";
 const GITALY_TAG: &str = "17-7-stable";
 const GITALY_TOKEN: &str = "secret_token";
+
+/// Test-only RepositoryService that connects directly to Gitaly using static config.
+/// Production code uses GitLabRepositoryService which fetches per-project
+/// connection details from Rails.
+struct DirectGitalyRepositoryService {
+    address: String,
+    storage: String,
+    token: Option<String>,
+}
+
+#[async_trait]
+impl RepositoryService for DirectGitalyRepositoryService {
+    async fn repository_info(&self, project_id: i64) -> Result<RepositoryInfo, GitalyError> {
+        let config = GitalyRepositoryConfig {
+            address: self.address.clone(),
+            storage: self.storage.clone(),
+            relative_path: hashed_repo_path(project_id),
+            token: self.token.clone(),
+        };
+        let client = GitalyClient::connect(config).await?;
+        let default_branch = client.find_default_branch_name().await?.ok_or_else(|| {
+            GitalyError::Config(format!("no default branch for project {project_id}"))
+        })?;
+
+        Ok(RepositoryInfo {
+            project_id,
+            default_branch,
+            gitaly_connection_info: GitalyConnectionInfo {
+                address: self.address.clone(),
+                token: self.token.clone(),
+                storage: self.storage.clone(),
+                path: hashed_repo_path(project_id),
+            },
+        })
+    }
+
+    async fn extract_repository(
+        &self,
+        repository: &RepositoryInfo,
+        target_dir: &Path,
+        commit_id: &str,
+    ) -> Result<(), GitalyError> {
+        let config = GitalyRepositoryConfig {
+            address: repository.gitaly_connection_info.address.clone(),
+            storage: repository.gitaly_connection_info.storage.clone(),
+            relative_path: repository.gitaly_connection_info.path.clone(),
+            token: repository.gitaly_connection_info.token.clone(),
+        };
+        let client = GitalyClient::connect(config).await?;
+        RepositorySource::extract_to(&client, target_dir, Some(commit_id)).await
+    }
+}
+
+fn create_direct_gitaly_service(address: &str, token: &str) -> Arc<dyn RepositoryService> {
+    Arc::new(DirectGitalyRepositoryService {
+        address: address.to_string(),
+        storage: "default".to_string(),
+        token: Some(token.to_string()),
+    })
+}
 
 #[tokio::test]
 async fn indexes_repository_from_gitaly() {
@@ -51,14 +114,10 @@ async fn indexes_repository_from_gitaly() {
         ))
         .await;
 
-    let gitaly_config = GitalyConfiguration {
-        address: gitaly_address,
-        storage: "default".to_string(),
-        token: Some(GITALY_TOKEN.to_string()),
-    };
+    let repository_service = create_direct_gitaly_service(&gitaly_address, GITALY_TOKEN);
     let clickhouse_client = Arc::new(clickhouse.config.build_client());
     let handler = PushEventHandler::new(
-        GitalyRepositoryService::create(gitaly_config),
+        repository_service,
         Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(
             &clickhouse_client,
         ))),
@@ -234,15 +293,11 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 // -- Test helpers ---------------------------------------------------------------------------------
 
 fn create_push_event_handler(gitaly_address: &str, clickhouse: &TestContext) -> PushEventHandler {
-    let gitaly_config = GitalyConfiguration {
-        address: gitaly_address.to_string(),
-        storage: "default".to_string(),
-        token: Some(GITALY_TOKEN.to_string()),
-    };
+    let repository_service = create_direct_gitaly_service(gitaly_address, GITALY_TOKEN);
     let clickhouse_client = Arc::new(clickhouse.config.build_client());
 
     PushEventHandler::new(
-        GitalyRepositoryService::create(gitaly_config),
+        repository_service,
         Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(
             &clickhouse_client,
         ))),

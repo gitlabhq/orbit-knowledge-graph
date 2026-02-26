@@ -1,5 +1,6 @@
 //! Handler for processing push events and triggering code indexing.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::module::{Handler, HandlerContext, HandlerError};
@@ -16,12 +17,13 @@ use tracing::{debug, info, warn};
 use super::arrow_converter::ArrowConverter;
 use super::config::LOCK_TTL;
 use super::config::{CodeIndexingConfig, siphon_actions, siphon_ref_types, subjects, tables};
-use super::gitaly::RepositoryService;
 use super::project_store::{ProjectInfo, ProjectStore};
+use super::repository_service::RepositoryService;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use super::stale_data_cleaner::StaleDataCleaner;
 use super::watermark_store::{CodeIndexingWatermark, CodeWatermarkStore};
 use crate::modules::sdlc::locking::project_lock_key;
+use gitlab_client::RepositoryInfo;
 
 pub struct PushEventHandler {
     repository_service: Arc<dyn RepositoryService>,
@@ -117,7 +119,20 @@ impl PushEventHandler {
 
         let project_id = event.project_id;
 
-        if !self.is_default_branch(project_id, &branch).await {
+        let repository = self
+            .repository_service
+            .repository_info(project_id)
+            .await
+            .map_err(|e| {
+                HandlerError::Processing(format!("failed to fetch repository info: {e}"))
+            })?;
+
+        let default_branch = repository
+            .default_branch
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&repository.default_branch);
+
+        if branch != default_branch {
             debug!(
                 event_id = event.event_id,
                 project_id = project_id,
@@ -144,7 +159,7 @@ impl PushEventHandler {
             "starting code indexing"
         );
 
-        self.index_with_lock(context, event, project_id, &branch, &project)
+        self.index_with_lock(context, event, project_id, &branch, &project, &repository)
             .await
     }
 
@@ -155,6 +170,7 @@ impl PushEventHandler {
         project_id: i64,
         branch: &str,
         project: &ProjectInfo,
+        repository: &RepositoryInfo,
     ) -> Result<(), HandlerError> {
         if !self.try_acquire_lock(context, project_id, branch).await? {
             debug!(
@@ -167,14 +183,23 @@ impl PushEventHandler {
         }
 
         let indexed_at = Utc::now();
+
+        let temp_dir = TempDir::new()
+            .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
+
+        self.repository_service
+            .extract_repository(repository, temp_dir.path(), &event.revision_after)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))?;
+
         let result = self
             .run_indexing(
                 context,
                 project_id,
                 branch,
-                &event.revision_after,
                 &project.traversal_path,
                 indexed_at,
+                temp_dir.path(),
             )
             .await;
 
@@ -191,19 +216,11 @@ impl PushEventHandler {
         context: &HandlerContext,
         project_id: i64,
         branch: &str,
-        commit_id: &str,
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
+        repo_dir: &Path,
     ) -> Result<(), HandlerError> {
-        let temp_dir = TempDir::new()
-            .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
-
-        self.repository_service
-            .extract_repository(project_id, temp_dir.path(), commit_id)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))?;
-
-        let repo_path = temp_dir.path().to_string_lossy().to_string();
+        let repo_path = repo_dir.to_string_lossy().to_string();
         let indexer = RepositoryIndexer::new(format!("project-{project_id}"), repo_path.clone());
         let file_source = DirectoryFileSource::new(repo_path);
 
@@ -294,30 +311,6 @@ impl PushEventHandler {
             .strip_prefix("refs/heads/")
             .unwrap_or(ref_name)
             .to_string()
-    }
-
-    // TODO: Look into what load this creates on Gitaly, we should probably cache it.
-    async fn is_default_branch(&self, project_id: i64, branch: &str) -> bool {
-        match self
-            .repository_service
-            .find_default_branch(project_id)
-            .await
-        {
-            Ok(Some(default_branch)) => {
-                let default_branch_name = default_branch
-                    .strip_prefix("refs/heads/")
-                    .unwrap_or(&default_branch);
-                branch == default_branch_name
-            }
-            Ok(None) => {
-                debug!(project_id, "repository has no default branch");
-                false
-            }
-            Err(e) => {
-                warn!(project_id, error = %e, "failed to fetch default branch");
-                false
-            }
-        }
     }
 }
 
@@ -475,9 +468,9 @@ impl PushEventPayload {
 mod tests {
     use super::*;
     use crate::module::Handler;
-    use crate::modules::code::gitaly::test_utils::MockRepositoryService;
     use crate::modules::code::project_store::ProjectInfo;
     use crate::modules::code::project_store::test_utils::MockProjectStore;
+    use crate::modules::code::repository_service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::modules::code::test_helpers::{build_replication_events, push_payload_columns};
     use crate::modules::code::watermark_store::test_utils::MockCodeWatermarkStore;
