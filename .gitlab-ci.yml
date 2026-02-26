@@ -220,6 +220,7 @@ integration-test:
     - |
       docker pull ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 &
       docker pull ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/nats:2.11-alpine &
+      docker pull registry.gitlab.com/gitlab-org/build/cng/gitaly:17-7-stable &
       wait
     - |
       docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12

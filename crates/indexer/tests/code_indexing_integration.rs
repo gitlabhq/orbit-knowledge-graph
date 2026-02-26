@@ -25,210 +25,195 @@ const GITALY_TAG: &str = "17-7-stable";
 const GITALY_TOKEN: &str = "secret_token";
 
 #[tokio::test]
-async fn indexes_repository_from_gitaly() {
-    let project_id: i64 = 1;
-
-    let clickhouse = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
-    let (gitaly_address, _container) = start_gitaly().await;
-
-    let repo_path = hashed_repo_path(project_id);
-    let commit_sha = create_test_repo(
-        &_container,
-        &repo_path,
-        "src/Main.java",
-        "public class Main {
-            public void save() { validate(); }
-            public void validate() {}
-        }",
-    )
-    .await;
-
-    clickhouse
-        .execute(&format!(
-            "INSERT INTO gl_project (id, traversal_path, full_path, _version) \
-             VALUES ({}, '/test', 'test/repo', 1)",
-            project_id
-        ))
-        .await;
-
-    let gitaly_config = GitalyConfiguration {
-        address: gitaly_address,
-        storage: "default".to_string(),
-        token: Some(GITALY_TOKEN.to_string()),
-    };
-    let clickhouse_client = Arc::new(clickhouse.config.build_client());
-    let handler = PushEventHandler::new(
-        GitalyRepositoryService::create(gitaly_config),
-        Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(
-            &clickhouse_client,
-        ))),
-        Arc::new(ClickHouseProjectStore::new(Arc::clone(&clickhouse_client))),
-        Arc::new(ClickHouseStaleDataCleaner::new(clickhouse_client)),
-        CodeIndexingConfig::default(),
-    );
-
-    let context = HandlerContext::new(
-        Arc::new(clickhouse.create_destination()),
-        Arc::new(MockNatsServices::new()),
-        Arc::new(MockLockService::new()),
-    );
-    let envelope = TestEnvelopeFactory::with_bytes(push_event_payload(project_id, &commit_sha, 1));
-
-    let result = handler.handle(context, envelope).await;
-    assert!(result.is_ok(), "handler failed: {:?}", result);
-
-    let files = clickhouse
-        .query(&format!(
-            "SELECT path FROM gl_file WHERE project_id = {}",
-            project_id
-        ))
-        .await;
-    assert!(
-        files.first().is_some_and(|b| b.num_rows() > 0),
-        "no files indexed"
-    );
-
-    let definitions = clickhouse
-        .query(&format!(
-            "SELECT name FROM gl_definition WHERE project_id = {}",
-            project_id
-        ))
-        .await;
-    assert!(
-        definitions.first().is_some_and(|b| b.num_rows() > 0),
-        "no definitions indexed"
-    );
-
-    let defines_edges = clickhouse
-        .query(
-            "SELECT source_id, target_id, relationship_kind FROM gl_edge \
-             WHERE source_kind = 'File' AND target_kind = 'Definition' \
-             AND relationship_kind = 'DEFINES'",
-        )
-        .await;
-    assert!(
-        defines_edges.first().is_some_and(|b| b.num_rows() > 0),
-        "no DEFINES edges indexed"
-    );
-
-    let file_ids = clickhouse
-        .query(&format!(
-            "SELECT id FROM gl_file WHERE project_id = {}",
-            project_id
-        ))
-        .await;
-    let definition_ids = clickhouse
-        .query(&format!(
-            "SELECT id FROM gl_definition WHERE project_id = {}",
-            project_id
-        ))
-        .await;
-
-    assert!(
-        file_ids.first().is_some_and(|b| b.num_rows() > 0),
-        "file should have an id"
-    );
-    assert!(
-        definition_ids.first().is_some_and(|b| b.num_rows() > 0),
-        "definition should have an id"
-    );
-
-    let definition_defines_edges = clickhouse
-        .query(
-            "SELECT source_id, target_id, relationship_kind FROM gl_edge \
-             WHERE source_kind = 'Definition' AND target_kind = 'Definition' \
-             AND relationship_kind = 'DEFINES'",
-        )
-        .await;
-    assert!(
-        definition_defines_edges
-            .first()
-            .is_some_and(|b| b.num_rows() > 0),
-        "no DEFINES edges (Definition → Definition) indexed"
-    );
-
-    let edge_paths = clickhouse
-        .query("SELECT DISTINCT traversal_path FROM gl_edge")
-        .await;
-    assert!(
-        edge_paths.first().is_some_and(|b| b.num_rows() > 0),
-        "edges should have traversal_path"
-    );
-    let paths = edge_paths[0]
-        .column_by_name("traversal_path")
-        .unwrap()
-        .as_any()
-        .downcast_ref::<arrow::array::StringArray>()
-        .unwrap();
-    assert_eq!(
-        paths.value(0),
-        "/test",
-        "code edge traversal_path should match the project's traversal_path"
-    );
-}
-
-/// Indexes a repo, replaces a file, re-indexes, and verifies that nodes and edges
-/// from the removed file are soft-deleted while the new file's data remains visible.
-#[tokio::test]
-async fn soft_deletes_stale_code_data_after_reindexing() {
-    let project_id: i64 = 2;
-
+async fn code_indexing() {
     let clickhouse = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
     let (gitaly_address, gitaly_container) = start_gitaly().await;
-    let repo_path = hashed_repo_path(project_id);
 
-    seed_project(&clickhouse, project_id, "/stale-test", "stale/test").await;
-    let handler = create_push_event_handler(&gitaly_address, &clickhouse);
+    // indexes_repository_from_gitaly
+    {
+        let project_id: i64 = 1;
+        let repo_path = hashed_repo_path(project_id);
+        let commit_sha = create_test_repo(
+            &gitaly_container,
+            &repo_path,
+            "src/Main.java",
+            "public class Main {
+                public void save() { validate(); }
+                public void validate() {}
+            }",
+        )
+        .await;
 
-    let first_commit = create_test_repo(
-        &gitaly_container,
-        &repo_path,
-        "src/Main.java",
-        "public class Main {
-            public void save() { validate(); }
-            public void validate() {}
-        }",
-    )
-    .await;
-    index_commit(&handler, &clickhouse, project_id, &first_commit, 1).await;
+        clickhouse
+            .execute(&format!(
+                "INSERT INTO gl_project (id, traversal_path, full_path, _version) \
+                 VALUES ({}, '/test', 'test/repo', 1)",
+                project_id
+            ))
+            .await;
 
-    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-    assert_active_definitions(
-        &clickhouse,
-        project_id,
-        "src/Main.java",
-        &["Main", "save", "validate"],
-    )
-    .await;
-    assert_eq!(
-        count_active_edges(&clickhouse, project_id, "DEFINES").await,
-        2,
-        "Main→save and Main→validate DEFINES edges should exist"
-    );
+        let handler = create_push_event_handler(&gitaly_address, &clickhouse);
 
-    let second_commit = update_repo_file(
-        &gitaly_container,
-        &repo_path,
-        "src/Main.java",
-        "src/Other.java",
-        "public class Other {
-            public void run() {}
-        }",
-    )
-    .await;
-    index_commit(&handler, &clickhouse, project_id, &second_commit, 2).await;
+        let context = HandlerContext::new(
+            Arc::new(clickhouse.create_destination()),
+            Arc::new(MockNatsServices::new()),
+            Arc::new(MockLockService::new()),
+        );
+        let envelope =
+            TestEnvelopeFactory::with_bytes(push_event_payload(project_id, &commit_sha, 1));
 
-    assert_file_not_active(&clickhouse, project_id, "src/Main.java").await;
-    assert_no_active_definitions(&clickhouse, project_id, "src/Main.java").await;
+        let result = handler.handle(context, envelope).await;
+        assert!(result.is_ok(), "handler failed: {:?}", result);
 
-    assert_file_is_active(&clickhouse, project_id, "src/Other.java").await;
-    assert_active_definitions(&clickhouse, project_id, "src/Other.java", &["Other", "run"]).await;
+        let files = clickhouse
+            .query(&format!(
+                "SELECT path FROM gl_file WHERE project_id = {}",
+                project_id
+            ))
+            .await;
+        assert!(
+            files.first().is_some_and(|b| b.num_rows() > 0),
+            "no files indexed"
+        );
 
-    assert_eq!(
-        count_active_edges(&clickhouse, project_id, "DEFINES").await,
-        1,
-        "only Other→run DEFINES edge should remain active"
-    );
+        let definitions = clickhouse
+            .query(&format!(
+                "SELECT name FROM gl_definition WHERE project_id = {}",
+                project_id
+            ))
+            .await;
+        assert!(
+            definitions.first().is_some_and(|b| b.num_rows() > 0),
+            "no definitions indexed"
+        );
+
+        let defines_edges = clickhouse
+            .query(
+                "SELECT source_id, target_id, relationship_kind FROM gl_edge \
+                 WHERE source_kind = 'File' AND target_kind = 'Definition' \
+                 AND relationship_kind = 'DEFINES'",
+            )
+            .await;
+        assert!(
+            defines_edges.first().is_some_and(|b| b.num_rows() > 0),
+            "no DEFINES edges indexed"
+        );
+
+        let file_ids = clickhouse
+            .query(&format!(
+                "SELECT id FROM gl_file WHERE project_id = {}",
+                project_id
+            ))
+            .await;
+        let definition_ids = clickhouse
+            .query(&format!(
+                "SELECT id FROM gl_definition WHERE project_id = {}",
+                project_id
+            ))
+            .await;
+
+        assert!(
+            file_ids.first().is_some_and(|b| b.num_rows() > 0),
+            "file should have an id"
+        );
+        assert!(
+            definition_ids.first().is_some_and(|b| b.num_rows() > 0),
+            "definition should have an id"
+        );
+
+        let definition_defines_edges = clickhouse
+            .query(
+                "SELECT source_id, target_id, relationship_kind FROM gl_edge \
+                 WHERE source_kind = 'Definition' AND target_kind = 'Definition' \
+                 AND relationship_kind = 'DEFINES'",
+            )
+            .await;
+        assert!(
+            definition_defines_edges
+                .first()
+                .is_some_and(|b| b.num_rows() > 0),
+            "no DEFINES edges (Definition → Definition) indexed"
+        );
+
+        let edge_paths = clickhouse
+            .query("SELECT DISTINCT traversal_path FROM gl_edge")
+            .await;
+        assert!(
+            edge_paths.first().is_some_and(|b| b.num_rows() > 0),
+            "edges should have traversal_path"
+        );
+        let paths = edge_paths[0]
+            .column_by_name("traversal_path")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        assert_eq!(
+            paths.value(0),
+            "/test",
+            "code edge traversal_path should match the project's traversal_path"
+        );
+    }
+
+    // soft_deletes_stale_code_data_after_reindexing
+    {
+        let project_id: i64 = 2;
+        let repo_path = hashed_repo_path(project_id);
+
+        seed_project(&clickhouse, project_id, "/stale-test", "stale/test").await;
+        let handler = create_push_event_handler(&gitaly_address, &clickhouse);
+
+        let first_commit = create_test_repo(
+            &gitaly_container,
+            &repo_path,
+            "src/Main.java",
+            "public class Main {
+                public void save() { validate(); }
+                public void validate() {}
+            }",
+        )
+        .await;
+        index_commit(&handler, &clickhouse, project_id, &first_commit, 1).await;
+
+        assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+        assert_active_definitions(
+            &clickhouse,
+            project_id,
+            "src/Main.java",
+            &["Main", "save", "validate"],
+        )
+        .await;
+        assert_eq!(
+            count_active_edges(&clickhouse, project_id, "DEFINES").await,
+            2,
+            "Main→save and Main→validate DEFINES edges should exist"
+        );
+
+        let second_commit = update_repo_file(
+            &gitaly_container,
+            &repo_path,
+            "src/Main.java",
+            "src/Other.java",
+            "public class Other {
+                public void run() {}
+            }",
+        )
+        .await;
+        index_commit(&handler, &clickhouse, project_id, &second_commit, 2).await;
+
+        assert_file_not_active(&clickhouse, project_id, "src/Main.java").await;
+        assert_no_active_definitions(&clickhouse, project_id, "src/Main.java").await;
+
+        assert_file_is_active(&clickhouse, project_id, "src/Other.java").await;
+        assert_active_definitions(&clickhouse, project_id, "src/Other.java", &["Other", "run"])
+            .await;
+
+        assert_eq!(
+            count_active_edges(&clickhouse, project_id, "DEFINES").await,
+            1,
+            "only Other→run DEFINES edge should remain active"
+        );
+    }
 }
 
 // -- Test helpers ---------------------------------------------------------------------------------
