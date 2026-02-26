@@ -95,7 +95,7 @@ impl Context {
         parts.push(format!("SELECT {}", select_items.join(", ")));
 
         // FROM
-        let from = self.emit_table_ref(&q.from);
+        let from = self.emit_table_ref(&q.from)?;
         parts.push(format!("FROM {}", from.sql));
 
         // WHERE
@@ -175,7 +175,7 @@ impl Context {
         parts.push(format!("SELECT {}", select_items.join(", ")));
 
         // FROM
-        let from = self.emit_table_ref(&q.from);
+        let from = self.emit_table_ref(&q.from)?;
         parts.push(format!("FROM {}", from.sql));
 
         // WHERE
@@ -273,14 +273,13 @@ impl Context {
         }
     }
 
-    fn emit_table_ref(&mut self, t: &TableRef) -> TableRefResult {
+    fn emit_table_ref(&mut self, t: &TableRef) -> Result<TableRefResult> {
         match t {
             TableRef::Scan {
                 table,
                 alias,
                 type_filter,
             } => {
-                // Type filter: single type or multiple types applied to edge table
                 let type_conditions = match type_filter {
                     Some(types) if types.len() == 1 => {
                         let param = format!("type_{alias}");
@@ -299,10 +298,10 @@ impl Context {
                     }
                     _ => vec![],
                 };
-                TableRefResult {
+                Ok(TableRefResult {
                     sql: format!("{table} AS {alias}"),
                     type_conditions,
-                }
+                })
             }
             TableRef::Join {
                 join_type,
@@ -310,8 +309,8 @@ impl Context {
                 right,
                 on,
             } => {
-                let left_res = self.emit_table_ref(left);
-                let right_res = self.emit_table_ref(right);
+                let left_res = self.emit_table_ref(left)?;
+                let right_res = self.emit_table_ref(right)?;
                 let on_expr = self.emit_expr(on);
 
                 let on_clause = if right_res.type_conditions.is_empty() {
@@ -324,7 +323,7 @@ impl Context {
                     )
                 };
 
-                TableRefResult {
+                Ok(TableRefResult {
                     sql: format!(
                         "{} {} JOIN {} ON {}",
                         left_res.sql,
@@ -333,22 +332,18 @@ impl Context {
                         on_clause
                     ),
                     type_conditions: left_res.type_conditions,
-                }
+                })
             }
             TableRef::Union { queries, alias } => {
-                // Emit each query in the union and join with UNION ALL
-                let union_parts: Vec<_> = queries
+                let union_parts: Vec<String> = queries
                     .iter()
-                    .map(|q| {
-                        // Emit each subquery
-                        self.emit_query(q).unwrap_or_default()
-                    })
-                    .collect();
+                    .map(|q| self.emit_query(q))
+                    .collect::<Result<_>>()?;
 
-                TableRefResult {
+                Ok(TableRefResult {
                     sql: format!("({}) AS {alias}", union_parts.join(" UNION ALL ")),
                     type_conditions: vec![],
-                }
+                })
             }
         }
     }

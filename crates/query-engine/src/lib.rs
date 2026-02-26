@@ -38,6 +38,7 @@ pub mod enforce;
 pub mod error;
 pub mod input;
 pub mod lower;
+pub mod metrics;
 pub mod normalize;
 pub mod security;
 pub mod validate;
@@ -52,10 +53,13 @@ pub use error::{QueryError, Result};
 pub use input::EntityAuthConfig;
 pub use input::{Input, QueryType, parse_input};
 pub use lower::lower;
+pub use metrics::{METRICS, QueryEngineMetrics};
 pub use normalize::{build_entity_auth, normalize};
 pub use ontology::{EDGE_TABLE, NODE_RESERVED_COLUMNS, Ontology, OntologyError};
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
+
+use metrics::CountErr;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -64,25 +68,25 @@ pub use validate::Validator;
 /// Compile a JSON query into parameterized SQL.
 ///
 /// Validates structure, identifiers, and ontology values before generating SQL.
+/// Increments threat-model counters on each category of rejection — the error
+/// variant determines which counter fires (see [`metrics::threat_counter`]).
 #[must_use = "the compiled query should be used"]
 pub fn compile(
     json_input: &str,
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<ParameterizedQuery> {
-    // Make sure the raw JSON input is valid and normalized.
     let v = Validator::new(ontology);
-    let value = v.check_json(json_input)?;
-    v.check_ontology(&value)?;
-    let input: Input = serde_json::from_value(value)?;
-    v.check_references(&input)?;
-    let input = normalize(input, ontology);
+    let value = v.check_json(json_input).count_err()?;
+    v.check_ontology(&value).count_err()?;
+    let input: Input = serde_json::from_value(value).count_err()?;
+    v.check_references(&input).count_err()?;
 
-    // Turn the normalized input into valid, secure, and parameterized SQL.
-    let mut node = lower(&input)?;
+    let input = normalize(input, ontology).count_err()?;
+    let mut node = lower(&input).count_err()?;
     let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx)?;
-    codegen(&node, result_context)
+    apply_security_context(&mut node, ctx).count_err()?;
+    codegen(&node, result_context).count_err()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,7 +134,7 @@ mod tests {
         v.check_ontology(&value)?;
         let input: Input = serde_json::from_value(value)?;
         v.check_references(&input)?;
-        let input = normalize::normalize(input, ontology);
+        let input = normalize::normalize(input, ontology)?;
         let node = lower::lower(&input)?;
         Ok(node)
     }

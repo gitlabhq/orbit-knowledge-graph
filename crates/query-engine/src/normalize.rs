@@ -6,6 +6,7 @@
 //! - Filter values are coerced to match ontology types
 //! - Wildcard column selections are expanded to explicit column lists
 
+use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
 use ontology::{DEFAULT_PRIMARY_KEY, EnumType, NODE_RESERVED_COLUMNS, Ontology};
 use serde_json::Value;
@@ -59,7 +60,7 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
 /// - Coerces filter values to match ontology field types (e.g., enum int → string)
 /// - Expands wildcard column selections ("*") to explicit column lists
 /// - Adds required columns for redaction (id/type) to all nodes
-pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
+pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     input.entity_auth = build_entity_auth(ontology);
 
     for node in &mut input.nodes {
@@ -67,14 +68,17 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
             continue;
         };
 
-        // Resolve entity to table name
-        if let Ok(table) = ontology.table_name(entity) {
-            node.table = Some(table);
-        }
+        node.table = Some(ontology.table_name(entity).map_err(|_| {
+            QueryError::AllowlistRejected(format!(
+                "entity '{entity}' passed schema validation but has no table mapping"
+            ))
+        })?);
 
-        let Some(node_entity) = ontology.get_node(entity) else {
-            continue;
-        };
+        let node_entity = ontology.get_node(entity).ok_or_else(|| {
+            QueryError::AllowlistRejected(format!(
+                "entity '{entity}' passed schema validation but is not in the ontology"
+            ))
+        })?;
 
         node.redaction_id_column = node_entity
             .redaction
@@ -127,7 +131,7 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Input {
             filter.value = Some(coerce_value(value, enum_values));
         }
     }
-    input
+    Ok(input)
 }
 
 fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {
@@ -157,7 +161,7 @@ mod tests {
     fn normalize_query(json: &str) -> Input {
         let input = parse_input(json).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        normalize(input, &ontology)
+        normalize(input, &ontology).unwrap()
     }
 
     #[test]
@@ -224,7 +228,6 @@ mod tests {
                     {"id": "mr", "entity": "MergeRequest", "filters": {"state": 3, "draft": false, "title": {"op": "contains", "value": "fix"}}},
                     {"id": "p", "entity": "Pipeline", "filters": {"source": 10, "failure_reason": 1}},
                     {"id": "wi", "entity": "WorkItem", "filters": {"state": 2, "work_item_type": 8}},
-                    {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}},
                     {"id": "n"}
                 ],
                 "relationships": [
@@ -282,15 +285,8 @@ mod tests {
             Some(json!("epic"))
         );
 
-        // Unknown entity: no table, filters unchanged
-        assert_eq!(result.nodes[4].table, None);
-        assert_eq!(
-            result.nodes[4].filters.get("foo").unwrap().value,
-            Some(json!(123))
-        );
-
         // Node without entity: no table
-        assert_eq!(result.nodes[5].table, None);
+        assert_eq!(result.nodes[4].table, None);
     }
 
     #[test]
@@ -326,6 +322,17 @@ mod tests {
         assert_eq!(
             r.nodes[0].filters.get("source_branch").unwrap().value,
             Some(json!(["main", "develop"]))
+        );
+
+        // Unknown entity rejected
+        let input = parse_input(
+            r#"{"query_type": "search", "node": {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}}"#,
+        ).unwrap();
+        let ontology = Ontology::load_embedded().unwrap();
+        let err = normalize(input, &ontology).unwrap_err();
+        assert!(
+            matches!(err, QueryError::AllowlistRejected(_)),
+            "unknown entity should be AllowlistRejected, got: {err}"
         );
     }
 }
