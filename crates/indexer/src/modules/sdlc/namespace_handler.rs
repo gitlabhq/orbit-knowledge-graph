@@ -92,13 +92,9 @@ impl NamespaceHandler {
             .num_milliseconds()
             .max(0) as f64
             / 1000.0;
-        self.metrics.watermark_lag.record(
-            lag,
-            &[
-                KeyValue::new("entity", entity.to_owned()),
-                KeyValue::new("scope", "namespace"),
-            ],
-        );
+        self.metrics
+            .watermark_lag
+            .record(lag, &[KeyValue::new("entity", entity.to_owned())]);
 
         Ok(())
     }
@@ -177,7 +173,7 @@ impl Handler for NamespaceHandler {
             );
 
             let rows_indexed = match pipeline
-                .process(params.to_json(), context.destination.as_ref(), "namespace")
+                .process(params.to_json(), context.destination.as_ref())
                 .await
             {
                 Ok(rows) => rows,
@@ -187,7 +183,6 @@ impl Handler for NamespaceHandler {
                         1,
                         &[
                             KeyValue::new("entity", entity.to_owned()),
-                            KeyValue::new("scope", "namespace"),
                             KeyValue::new("error_kind", error.error_kind()),
                         ],
                     );
@@ -218,7 +213,7 @@ impl Handler for NamespaceHandler {
             );
 
             let rows_indexed = match edge_pipeline
-                .process(params.to_json(), context.destination.as_ref(), "namespace")
+                .process(params.to_json(), context.destination.as_ref())
                 .await
             {
                 Ok(rows) => rows,
@@ -228,7 +223,6 @@ impl Handler for NamespaceHandler {
                         1,
                         &[
                             KeyValue::new("entity", entity.to_owned()),
-                            KeyValue::new("scope", "namespace"),
                             KeyValue::new("error_kind", error.error_kind()),
                         ],
                     );

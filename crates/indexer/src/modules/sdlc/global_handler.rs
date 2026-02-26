@@ -110,7 +110,7 @@ impl Handler for GlobalHandler {
         let mut total_rows_indexed: u64 = 0;
         for pipeline in &self.pipelines {
             match pipeline
-                .process(params.to_json(), context.destination.as_ref(), "global")
+                .process(params.to_json(), context.destination.as_ref())
                 .await
             {
                 Ok(rows) => {
@@ -123,7 +123,6 @@ impl Handler for GlobalHandler {
                         1,
                         &[
                             KeyValue::new("entity", pipeline.entity_name().to_owned()),
-                            KeyValue::new("scope", "global"),
                             KeyValue::new("error_kind", error.error_kind()),
                         ],
                     );
@@ -148,13 +147,9 @@ impl Handler for GlobalHandler {
                 .num_milliseconds()
                 .max(0) as f64
                 / 1000.0;
-            self.metrics.watermark_lag.record(
-                lag,
-                &[
-                    KeyValue::new("entity", "global"),
-                    KeyValue::new("scope", "global"),
-                ],
-            );
+            self.metrics
+                .watermark_lag
+                .record(lag, &[KeyValue::new("entity", "global")]);
 
             info!(
                 watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
