@@ -5,6 +5,7 @@ retries = 1
 [profile.ci]
 fail-fast = false
 retries = { backoff = "exponential", count = 3, delay = "1s", max-delay = "10s", jitter = true }
+slow-timeout = { period = "90s" }
 
 [profile.ci.junit]
 path = "junit.xml"

@@ -56,6 +56,13 @@ impl TestContext {
         )
     }
 
+    async fn execute(&self, sql: &str) {
+        self.create_client()
+            .execute(sql)
+            .await
+            .expect("execute failed");
+    }
+
     async fn query(&self, sql: &str) -> Vec<RecordBatch> {
         let client = self.create_client();
         client.query_arrow(sql).await.expect("query failed")
@@ -158,9 +165,10 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
     }
 }
 
-#[tokio::test]
-async fn write_batch_to_clickhouse() {
-    let context = TestContext::new().await;
+async fn write_batch_to_clickhouse(context: &TestContext) {
+    context
+        .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
+        .await;
 
     let writer = context
         .destination
@@ -181,9 +189,10 @@ async fn write_batch_to_clickhouse() {
     assert_eq!(result[0].num_rows(), 3);
 }
 
-#[tokio::test]
-async fn write_multiple_batches() {
-    let context = TestContext::new().await;
+async fn write_multiple_batches(context: &TestContext) {
+    context
+        .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
+        .await;
 
     let writer = context
         .destination
@@ -212,9 +221,10 @@ async fn write_multiple_batches() {
     assert_eq!(count_array.value(0), 5);
 }
 
-#[tokio::test]
-async fn write_empty_batch_succeeds() {
-    let context = TestContext::new().await;
+async fn write_empty_batch_succeeds(context: &TestContext) {
+    context
+        .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
+        .await;
 
     let writer = context
         .destination
@@ -226,6 +236,14 @@ async fn write_empty_batch_succeeds() {
         .write_batch(&[])
         .await
         .expect("empty write should succeed");
+}
+
+#[tokio::test]
+async fn clickhouse_destination() {
+    let context = TestContext::new().await;
+    write_batch_to_clickhouse(&context).await;
+    write_multiple_batches(&context).await;
+    write_empty_batch_succeeds(&context).await;
 }
 
 #[tokio::test]
