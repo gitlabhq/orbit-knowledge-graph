@@ -578,9 +578,12 @@ fn build_joins(
     nodes: &[InputNode],
     rels: &[InputRelationship],
 ) -> Result<(TableRef, HashMap<usize, String>)> {
-    let start = rels.first().map_or(&nodes[0], |r| {
-        nodes.iter().find(|n| n.id == r.from).unwrap_or(&nodes[0])
-    });
+    let start = match rels.first() {
+        Some(r) => find_node(nodes, &r.from)?,
+        None => nodes
+            .first()
+            .ok_or_else(|| QueryError::Lowering("no nodes in input".into()))?,
+    };
     let start_table = resolve_table(start)?;
     let mut result = TableRef::scan(&start_table, &start.id);
     let mut edge_aliases = HashMap::new();
@@ -857,7 +860,7 @@ mod tests {
         validate::Validator::new(&ontology)
             .check_references(&input)
             .unwrap();
-        normalize::normalize(input, &ontology)
+        normalize::normalize(input, &ontology).unwrap()
     }
 
     #[test]

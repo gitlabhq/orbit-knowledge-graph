@@ -1,4 +1,8 @@
-//! Error types for the query engine
+//! Error types for the query engine.
+//!
+//! Each variant maps to at most one threat-model counter in [`crate::metrics`].
+//! Adding a new variant that represents a security-relevant rejection? Update
+//! [`crate::metrics::threat_counter`] to wire it to the right instrument.
 
 use ontology::OntologyError;
 use thiserror::Error;
@@ -8,8 +12,20 @@ pub enum QueryError {
     #[error("parse error: {0}")]
     Parse(#[from] serde_json::Error),
 
-    #[error("validation error: {0}")]
+    #[error("schema violation: {0}")]
     Validation(String),
+
+    #[error("reference error: {0}")]
+    ReferenceError(String),
+
+    #[error("pagination error: {0}")]
+    PaginationError(String),
+
+    #[error("allowlist rejected: {0}")]
+    AllowlistRejected(String),
+
+    #[error("depth exceeded: {0}")]
+    DepthExceeded(String),
 
     #[error("lowering error: {0}")]
     Lowering(String),

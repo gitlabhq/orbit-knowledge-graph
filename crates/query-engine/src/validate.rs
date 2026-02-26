@@ -40,10 +40,6 @@ fn collect_schema_errors(
     }
 }
 
-fn err(msg: impl Into<String>) -> QueryError {
-    QueryError::Validation(msg.into())
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Validator
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,7 +70,10 @@ impl<'a> Validator<'a> {
         let validator = jsonschema::validator_for(&schema)
             .map_err(|e| QueryError::Validation(format!("invalid derived schema: {e}")))?;
 
-        collect_schema_errors(&validator, value)
+        collect_schema_errors(&validator, value).map_err(|e| match e {
+            QueryError::Validation(msg) => QueryError::AllowlistRejected(msg),
+            other => other,
+        })
     }
 
     /// Validate cross-node references that JSON Schema cannot express.
@@ -85,20 +84,47 @@ impl<'a> Validator<'a> {
         self.check_order_by(input)?;
         self.check_path(input)?;
         self.check_neighbors(input)?;
+        self.check_depth(input)?;
+        Ok(())
+    }
+
+    /// Defense-in-depth: reject traversal depths that exceed the hard cap.
+    /// The JSON schema already enforces max_hops <= 3 and max_depth <= 3,
+    /// so this only fires if schema validation was somehow bypassed.
+    pub fn check_depth(&self, input: &Input) -> Result<()> {
+        const MAX_HOPS_CAP: u32 = 3;
+        const MAX_DEPTH_CAP: u32 = 3;
+
+        for rel in &input.relationships {
+            if rel.max_hops > MAX_HOPS_CAP {
+                return Err(QueryError::DepthExceeded(format!(
+                    "max_hops ({}) must not exceed {MAX_HOPS_CAP}",
+                    rel.max_hops
+                )));
+            }
+        }
+        if let Some(ref path) = input.path
+            && path.max_depth > MAX_DEPTH_CAP
+        {
+            return Err(QueryError::DepthExceeded(format!(
+                "max_depth ({}) must not exceed {MAX_DEPTH_CAP}",
+                path.max_depth
+            )));
+        }
         Ok(())
     }
 
     fn check_pagination(&self, input: &Input) -> Result<()> {
         if let Some(ref range) = input.range {
             if range.end <= range.start {
-                return Err(err(format!(
+                return Err(QueryError::PaginationError(format!(
                     "range.end ({}) must be greater than range.start ({})",
                     range.end, range.start
                 )));
             }
             let window = range.end - range.start;
             if window > 1000 {
-                return Err(err(format!(
+                return Err(QueryError::PaginationError(format!(
                     "range window size ({window}) must not exceed 1000"
                 )));
             }
@@ -111,14 +137,14 @@ impl<'a> Validator<'a> {
 
         for (i, rel) in input.relationships.iter().enumerate() {
             if !node_ids.contains(&rel.from.as_str()) {
-                return Err(err(format!(
+                return Err(QueryError::ReferenceError(format!(
                     "relationship[{}] references undefined node \"{}\" in 'from'",
                     i, rel.from
                 )));
             }
 
             if !node_ids.contains(&rel.to.as_str()) {
-                return Err(err(format!(
+                return Err(QueryError::ReferenceError(format!(
                     "relationship[{}] references undefined node \"{}\" in 'to'",
                     i, rel.to
                 )));
@@ -139,7 +165,7 @@ impl<'a> Validator<'a> {
             if let Some(target) = &agg.target
                 && !node_ids.contains(&target.as_str())
             {
-                return Err(err(format!(
+                return Err(QueryError::ReferenceError(format!(
                     "aggregation[{}] references undefined node \"{}\" in 'target'",
                     i, target
                 )));
@@ -148,7 +174,7 @@ impl<'a> Validator<'a> {
             if let Some(group_by) = &agg.group_by
                 && !node_ids.contains(&group_by.as_str())
             {
-                return Err(err(format!(
+                return Err(QueryError::ReferenceError(format!(
                     "aggregation[{}] references undefined node \"{}\" in 'group_by'",
                     i, group_by
                 )));
@@ -157,10 +183,16 @@ impl<'a> Validator<'a> {
             if let (Some(prop), Some(target)) = (&agg.property, &agg.target)
                 && let Some(node) = input.nodes.iter().find(|n| n.id == *target)
             {
-                let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
-                self.ontology
-                    .validate_field(entity, prop)
-                    .map_err(|e| err(format!("invalid property in aggregation[{}]: {}", i, e)))?;
+                let entity = node
+                    .entity
+                    .as_ref()
+                    .ok_or_else(|| QueryError::ReferenceError("missing entity".into()))?;
+                self.ontology.validate_field(entity, prop).map_err(|e| {
+                    QueryError::AllowlistRejected(format!(
+                        "invalid property in aggregation[{}]: {}",
+                        i, e
+                    ))
+                })?;
             }
         }
 
@@ -177,16 +209,21 @@ impl<'a> Validator<'a> {
             .iter()
             .find(|n| n.id == order_by.node)
             .ok_or_else(|| {
-                err(format!(
+                QueryError::ReferenceError(format!(
                     "order_by references undefined node \"{}\"",
                     order_by.node
                 ))
             })?;
 
-        let entity = node.entity.as_ref().ok_or_else(|| err("missing entity"))?;
+        let entity = node
+            .entity
+            .as_ref()
+            .ok_or_else(|| QueryError::ReferenceError("missing entity".into()))?;
         self.ontology
             .validate_field(entity, &order_by.property)
-            .map_err(|e| err(format!("invalid order_by property: {}", e)))?;
+            .map_err(|e| {
+                QueryError::AllowlistRejected(format!("invalid order_by property: {}", e))
+            })?;
 
         Ok(())
     }
@@ -196,22 +233,21 @@ impl<'a> Validator<'a> {
             return Ok(());
         }
 
-        let path = input
-            .path
-            .as_ref()
-            .ok_or_else(|| err("path_finding query requires a 'path' configuration"))?;
+        let path = input.path.as_ref().ok_or_else(|| {
+            QueryError::ReferenceError("path_finding query requires a 'path' configuration".into())
+        })?;
 
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
         if !node_ids.contains(&path.from.as_str()) {
-            return Err(err(format!(
+            return Err(QueryError::ReferenceError(format!(
                 "path 'from' references undefined node \"{}\"",
                 path.from
             )));
         }
 
         if !node_ids.contains(&path.to.as_str()) {
-            return Err(err(format!(
+            return Err(QueryError::ReferenceError(format!(
                 "path 'to' references undefined node \"{}\"",
                 path.to
             )));
@@ -225,15 +261,16 @@ impl<'a> Validator<'a> {
             return Ok(());
         }
 
-        let neighbors = input
-            .neighbors
-            .as_ref()
-            .ok_or_else(|| err("neighbors query requires a 'neighbors' configuration"))?;
+        let neighbors = input.neighbors.as_ref().ok_or_else(|| {
+            QueryError::ReferenceError(
+                "neighbors query requires a 'neighbors' configuration".into(),
+            )
+        })?;
 
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
         if !node_ids.contains(&neighbors.node.as_str()) {
-            return Err(err(format!(
+            return Err(QueryError::ReferenceError(format!(
                 "neighbors 'node' references undefined node \"{}\"",
                 neighbors.node
             )));
