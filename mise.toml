@@ -34,13 +34,18 @@ run = "cargo nextest run --lib --bins"
 description = "Run unit tests with full debug symbols"
 
 [tasks."test:fast"]
-run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins"
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked CARGO_PROFILE_TEST_CODEGEN_UNITS=256 cargo nextest run --lib --bins"
 description = "Run unit tests with reduced debug info for faster builds"
 
 [tasks."test:integration"]
 run = "cargo nextest run --all-features --test '*'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run integration tests (requires Docker and `mise colima:start`)"
+
+[tasks."test:integration:fast"]
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked CARGO_PROFILE_TEST_CODEGEN_UNITS=256 cargo nextest run --all-features --test '*'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run integration tests with reduced debug info for faster builds (requires Docker and `mise colima:start`)"
 
 [tasks.clean]
 run = ["cargo clean", "rm -rf lib/*/"]

@@ -205,7 +205,7 @@ integration-test:
     - .test-template
     - .mr-and-main-rules
   tags:
-    - saas-linux-xlarge-amd64
+    - saas-linux-large-amd64
   services:
     - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:dind
       alias: docker
