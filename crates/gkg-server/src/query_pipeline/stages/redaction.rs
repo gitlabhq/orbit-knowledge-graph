@@ -1,9 +1,10 @@
+use super::super::metrics::PipelineObserver;
 use super::super::types::{AuthorizationOutput, RedactionOutput};
 
 pub struct RedactionStage;
 
 impl RedactionStage {
-    pub fn execute(mut input: AuthorizationOutput) -> RedactionOutput {
+    pub fn execute(mut input: AuthorizationOutput, _obs: &PipelineObserver) -> RedactionOutput {
         let redacted_count = input
             .query_result
             .apply_authorizations(&input.authorizations);

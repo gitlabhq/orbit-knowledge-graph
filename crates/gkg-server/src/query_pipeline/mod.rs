@@ -1,6 +1,7 @@
 mod error;
 mod formatter;
 mod helpers;
+pub(crate) mod metrics;
 mod service;
 mod stages;
 mod types;

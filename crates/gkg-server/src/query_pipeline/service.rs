@@ -4,22 +4,22 @@ use crate::auth::Claims;
 use crate::redaction::RedactionMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
-use query_engine::compile;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use super::error::PipelineError;
 use super::formatter::ResultFormatter;
+use super::metrics::PipelineObserver;
 use super::stages::{
-    AuthorizationStage, ExtractionStage, FormattingStage, HydrationStage, RedactionStage,
-    SecurityStage,
+    AuthorizationStage, CompilationStage, ExecutionStage, ExtractionStage, FormattingStage,
+    HydrationStage, RedactionStage, SecurityStage,
 };
-use super::types::{ExecutionOutput, PipelineOutput};
+use super::types::PipelineOutput;
 
 #[derive(Clone)]
 pub struct QueryPipelineService<F: ResultFormatter + Clone> {
     ontology: Arc<Ontology>,
-    client: Arc<ArrowClickHouseClient>,
+    execution: Arc<ExecutionStage>,
     hydration: Arc<HydrationStage>,
     formatter: F,
 }
@@ -30,9 +30,10 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             Arc::clone(&ontology),
             Arc::clone(&client),
         ));
+        let execution = Arc::new(ExecutionStage::new(client));
         Self {
             ontology,
-            client,
+            execution,
             hydration,
             formatter,
         }
@@ -45,45 +46,30 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
         tx: &mpsc::Sender<Result<M, Status>>,
         stream: &mut Streaming<M>,
     ) -> Result<PipelineOutput, PipelineError> {
-        let security_context = SecurityStage::execute(claims)?;
+        let mut obs = PipelineObserver::start();
 
-        let compiled = compile(query_json, &self.ontology, &security_context)
-            .map_err(|e| PipelineError::Compile(e.to_string()))?;
-        let batches = self.execute_query(&compiled).await?;
+        let security_context = SecurityStage::execute(claims, &obs)?;
 
-        let execution_output = ExecutionOutput {
-            batches,
-            result_context: compiled.result_context,
-        };
+        let compiled =
+            CompilationStage::execute(query_json, &self.ontology, &security_context, &mut obs)?;
 
-        let query_result = ExtractionStage::execute(execution_output);
-        let authorized = AuthorizationStage::execute(query_result, tx, stream).await?;
-        let redacted = RedactionStage::execute(authorized);
-        let redacted_count = redacted.redacted_count;
-        let query_result = redacted.query_result;
+        let execution_output = self.execution.execute(&compiled, &mut obs).await?;
+        let query_result = ExtractionStage::execute(execution_output, &obs);
 
-        let result_context = query_result.ctx().clone();
+        let authorized = AuthorizationStage::execute(query_result, tx, stream, &mut obs).await?;
+
+        let redacted = RedactionStage::execute(authorized, &obs);
+
         let hydrated = self
             .hydration
-            .execute(query_result, &result_context, &security_context)
+            .execute(redacted, &security_context, &mut obs)
             .await?;
 
         let formatting_stage =
             FormattingStage::new(self.formatter.clone(), Arc::clone(&self.ontology));
-        Ok(formatting_stage.execute(hydrated, result_context, redacted_count, compiled.sql))
-    }
+        let output = formatting_stage.execute(hydrated, &compiled, &obs);
+        obs.finish(&output);
 
-    async fn execute_query(
-        &self,
-        compiled: &query_engine::ParameterizedQuery,
-    ) -> Result<Vec<arrow::record_batch::RecordBatch>, PipelineError> {
-        let mut query = self.client.query(&compiled.sql);
-        for (key, value) in &compiled.params {
-            query = ArrowClickHouseClient::bind_param(query, key, value);
-        }
-        query
-            .fetch_arrow()
-            .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))
+        Ok(output)
     }
 }

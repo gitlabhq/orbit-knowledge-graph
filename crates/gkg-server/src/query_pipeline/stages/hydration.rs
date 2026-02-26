@@ -1,15 +1,18 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
-use query_engine::{QueryType, ResultContext, SecurityContext};
+use query_engine::{QueryType, SecurityContext};
 
 use crate::redaction::{ColumnValue, QueryResult};
 
 use super::super::error::PipelineError;
+use super::super::metrics::PipelineObserver;
+use super::super::types::{HydrationOutput, RedactionOutput};
 
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 
@@ -25,22 +28,41 @@ impl HydrationStage {
 
     pub async fn execute(
         &self,
-        mut result: QueryResult,
-        result_context: &ResultContext,
+        input: RedactionOutput,
         security_context: &SecurityContext,
-    ) -> Result<QueryResult, PipelineError> {
+        obs: &mut PipelineObserver,
+    ) -> Result<HydrationOutput, PipelineError> {
+        let t = Instant::now();
+        let mut query_result = input.query_result;
+        let result_context = query_result.ctx().clone();
+
         if !matches!(result_context.query_type, Some(QueryType::Neighbors)) {
-            return Ok(result);
+            obs.hydrated(t.elapsed());
+            return Ok(HydrationOutput {
+                query_result,
+                result_context,
+                redacted_count: input.redacted_count,
+            });
         }
 
-        let refs = self.extract_entity_refs(&result);
+        let refs = self.extract_entity_refs(&query_result);
         if refs.is_empty() {
-            return Ok(result);
+            obs.hydrated(t.elapsed());
+            return Ok(HydrationOutput {
+                query_result,
+                result_context,
+                redacted_count: input.redacted_count,
+            });
         }
 
-        let property_map = self.fetch_all_properties(&refs, security_context).await?;
-        self.merge_properties(&mut result, &property_map);
-        Ok(result)
+        let property_map = obs.check(self.fetch_all_properties(&refs, security_context).await)?;
+        self.merge_properties(&mut query_result, &property_map);
+        obs.hydrated(t.elapsed());
+        Ok(HydrationOutput {
+            query_result,
+            result_context,
+            redacted_count: input.redacted_count,
+        })
     }
 
     fn extract_entity_refs(&self, result: &QueryResult) -> HashMap<String, Vec<i64>> {
