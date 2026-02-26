@@ -31,6 +31,8 @@ pub struct EngineMetrics {
     pub(crate) destination_write_duration: Histogram<f64>,
     pub(crate) destination_rows_written: Counter<u64>,
     pub(crate) destination_bytes_written: Counter<u64>,
+    pub(crate) destination_write_errors: Counter<u64>,
+    pub(crate) handler_errors: Counter<u64>,
 }
 
 impl EngineMetrics {
@@ -96,6 +98,16 @@ impl EngineMetrics {
             .with_description("Total bytes written to ClickHouse")
             .build();
 
+        let destination_write_errors = meter
+            .u64_counter("etl.destination.write.errors")
+            .with_description("Total failed writes to ClickHouse")
+            .build();
+
+        let handler_errors = meter
+            .u64_counter("etl.handler.errors")
+            .with_description("Total handler errors at the engine dispatch level")
+            .build();
+
         Self {
             messages_processed,
             message_duration,
@@ -106,6 +118,8 @@ impl EngineMetrics {
             destination_write_duration,
             destination_rows_written,
             destination_bytes_written,
+            destination_write_errors,
+            handler_errors,
         }
     }
 }

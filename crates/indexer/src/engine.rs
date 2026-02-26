@@ -314,13 +314,18 @@ async fn run_handlers(
 
         runtime.metrics.handler_duration.record(
             handler_start.elapsed().as_secs_f64(),
-            &[
-                KeyValue::new("handler", handler.name().to_owned()),
-                KeyValue::new("module", module_name.to_string()),
-            ],
+            &[KeyValue::new("handler", handler.name().to_owned())],
         );
 
         if let Err(error) = result {
+            runtime.metrics.handler_errors.add(
+                1,
+                &[
+                    KeyValue::new("handler", handler.name().to_owned()),
+                    KeyValue::new("error_kind", error.error_kind()),
+                ],
+            );
+
             let module_config = runtime.configuration.modules.get(module_name.as_ref());
             let max_attempts = module_config.and_then(|c| c.max_retry_attempts);
 

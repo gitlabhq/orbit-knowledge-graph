@@ -50,10 +50,17 @@ impl BatchWriter for ClickHouseBatchWriter {
         }
 
         let start = std::time::Instant::now();
-        self.client.insert_arrow(&self.table, batches).await?;
+        let table_label = KeyValue::new("table", self.table.clone());
+
+        if let Err(error) = self.client.insert_arrow(&self.table, batches).await {
+            self.metrics
+                .destination_write_errors
+                .add(1, std::slice::from_ref(&table_label));
+            return Err(error.into());
+        }
+
         let elapsed = start.elapsed().as_secs_f64();
 
-        let table_label = KeyValue::new("table", self.table.clone());
         self.metrics
             .destination_write_duration
             .record(elapsed, std::slice::from_ref(&table_label));

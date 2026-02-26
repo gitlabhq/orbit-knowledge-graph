@@ -2,25 +2,23 @@
 
 ## Summary
 
-This document details the observability strategy for Knowledge Graph services (Indexer and Web Service). It outlines the current architecture, plans for self-managed instances, deployment considerations and logging standards. The goal is to ensure robust and actionable monitoring across all deployment environments.
+This document covers how we monitor the Knowledge Graph services (Indexer and Web Service): metrics, logs, tracing, health checks, and what operators need to do for self-managed deployments.
 
 ## How Observability Works Today (GitLab.com)
 
-On GitLab.com, the Knowledge Graph services will integrate with our existing observability stack. Our stack is composed of the following technologies:
+On GitLab.com, the Knowledge Graph services use the existing observability stack:
 
-- **Metrics and Visualization**: [Grafana](https://grafana.com/) and [Grafana Mimir](https://grafana.com/oss/mimir/)
-- **Log Aggregation and Analysis**: [Elasticsearch](https://www.elastic.co/elasticsearch/) and [Logstash](https://www.elastic.co/logstash/)
-
-These services provide a comprehensive view of the services' health and performance, which is built on the following pillars:
+- **Metrics**: [Grafana](https://grafana.com/) and [Grafana Mimir](https://grafana.com/oss/mimir/)
+- **Logs**: [Elasticsearch](https://www.elastic.co/elasticsearch/) and [Logstash](https://www.elastic.co/logstash/)
 
 ### SLIs, SLOs, and Metrics
 
-To ensure the reliability and performance of the Knowledge Graph services, we will establish clear Service Level Objectives (SLOs) and Service Level Indicators (SLIs). Our alerting strategy will be based on these.
+Alerting is based on SLOs and SLIs:
 
 - **Availability SLO**: We will adopt the Dedicated reference of ≥99.5% monthly SLO for the GKG API plane (excluding planned maintenance).
 - **Availability SLIs**: We will use error-rate and Apdex SLIs on request latency.
 
-The Knowledge Graph will expose a Prometheus `/metrics` endpoint, which allows for the collection of detailed time-series data about the services' operations. These metrics serve as our primary reliability signals. We will use LabKit where possible for instrumentation.
+Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrumentation where possible.
 
 **Reliability Signals:**
 
@@ -38,30 +36,71 @@ The Knowledge Graph will expose a Prometheus `/metrics` endpoint, which allows f
 
 **KG Indexer Service:**
 
-- Indexing success rate and duration (p50, p95, p99)
-- Code indexing per-phase (parsing, analysis, writing) durations
-- Ongoing indexing operations
-- Language-specific parsing metrics
+The indexer emits metrics under two OpenTelemetry meters: `etl_engine` for the core engine and `indexer_sdlc` for the SDLC module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
+
+*Engine metrics (`etl_engine`):*
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `etl.messages.processed` | Counter | count | `topic`, `outcome` (ack/nack) | Total messages processed |
+| `etl.message.duration` | Histogram | s | `topic` | End-to-end time per message through dispatch |
+| `etl.handler.duration` | Histogram | s | `handler` | Time inside each handler's `handle()` call |
+| `etl.handler.errors` | Counter | count | `handler`, `error_kind` | Handler errors at the engine dispatch level |
+| `etl.permit.wait.duration` | Histogram | s | `permit_kind` (global/module), `module` | Time waiting for a worker pool permit |
+| `etl.permits.active` | UpDownCounter | count | `permit_kind` | Worker permits currently held |
+| `etl.nats.fetch.duration` | Histogram | s | `outcome` (success/error) | Time to fetch a batch from NATS |
+| `etl.destination.write.duration` | Histogram | s | `table` | Time to write a batch to ClickHouse |
+| `etl.destination.rows.written` | Counter | count | `table` | Total rows written to ClickHouse |
+| `etl.destination.bytes.written` | Counter | bytes | `table` | Total bytes written to ClickHouse |
+| `etl.destination.write.errors` | Counter | count | `table` | Total failed writes to ClickHouse |
+
+*SDLC module metrics (`indexer_sdlc`):*
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `indexer.sdlc.pipeline.duration` | Histogram | s | `entity` | End-to-end duration of an entity or edge pipeline run |
+| `indexer.sdlc.pipeline.rows.processed` | Counter | count | `entity` | Total rows extracted and written |
+| `indexer.sdlc.pipeline.edges.processed` | Counter | count | `entity` | Total edges written |
+| `indexer.sdlc.pipeline.batches.processed` | Counter | count | `entity` | Total Arrow batches processed |
+| `indexer.sdlc.pipeline.errors` | Counter | count | `entity`, `error_kind` | SDLC pipeline failures |
+| `indexer.sdlc.handler.duration` | Histogram | s | `handler` | Duration of a full handler invocation |
+| `indexer.sdlc.datalake.query.duration` | Histogram | s | `entity` | Duration of ClickHouse datalake extraction queries |
+| `indexer.sdlc.transform.duration` | Histogram | s | `entity` | Duration of DataFusion SQL transform per batch |
+| `indexer.sdlc.watermark.lag` | Gauge | s | `entity` | Seconds between the current watermark and wall clock (data freshness) |
 
 **KG Web Service:**
 
 - **Query Health**: p50/p95 latency by tool (`find_nodes`, `traverse`, `explore`, `aggregate`), memory spikes, and rows/bytes read per query.
 - MCP tools latency (p50, p95, p99), usage and success rate
 
+*Query engine metrics (`query_engine`):*
+
+The query engine fires counters during compilation to track security-relevant rejections. Each counter uses a `reason` label for low-cardinality breakdown. Counters marked "server layer" are exported for the gRPC/HTTP layer to increment.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `qe.threat.validation_failed` | Counter | `reason` (parse/schema/reference/pagination) | Query rejected by structural validation |
+| `qe.threat.allowlist_rejected` | Counter | `reason` (ontology/ontology_internal) | Entity, column, or relationship not in the ontology allowlist |
+| `qe.threat.auth_filter_missing` | Counter | `reason` (security) | Security context invalid or absent (server layer) |
+| `qe.threat.timeout` | Counter | `reason` | Query compilation or execution exceeded deadline (server layer) |
+| `qe.threat.rate_limited` | Counter | `reason` | Caller throttled before compilation (server layer) |
+| `qe.threat.depth_exceeded` | Counter | `reason` (depth) | Traversal depth or hop count exceeded the hard cap |
+| `qe.internal.pipeline_invariant_violated` | Counter | `reason` (lowering/codegen) | Lowering or codegen hit a state upstream validation should have prevented |
+
 **Shared Infrastructure Metrics:**
 
 - Disk and Memory usage per container
 - Network traffic between services
 
-These metrics are collected by our central Prometheus infrastructure, stored in Grafana Mimir, and are used to populate Grafana dashboards. We will also maintain specific dashboards for our database layer (e.g., ClickHouse queries, merges, background tasks).
+Prometheus scrapes these metrics into Grafana Mimir. We also maintain dashboards for the ClickHouse layer (queries, merges, background tasks).
 
 ### Logging
 
-We use structured logging, with all logs formatted as JSON. This allows for efficient parsing, searching, and analysis in our log aggregation platform powered by Logstash and Elasticsearch. Each log entry is to include a correlation ID, which is fundamental to our observability strategy as it enables tracing of a request across multiple services.
+All logs are structured JSON, shipped to Logstash and Elasticsearch. Every log entry includes a correlation ID so you can trace a request across services.
 
 ## Logging Structure and Format
 
-A consistent and structured logging format is essential for effective observability. All log output from the Knowledge Graph services will be in JSON format. Each log entry will contain a set of standard fields, along with a payload of context-specific information.
+All log output is JSON. Each entry has standard fields plus context-specific data.
 
 **Standard Fields:**
 
@@ -87,11 +126,11 @@ A consistent and structured logging format is essential for effective observabil
 
 ### Tracing
 
-We will support distributed tracing with an OpenTelemetry integration. This allows us to follow a single request as it passes through the various components of the Knowledge Graph services and other GitLab services. This is useful for debugging complex interactions and identifying performance bottlenecks.
+Services are instrumented with OpenTelemetry for distributed tracing. A single request can be followed across GKG and other GitLab services.
 
 ### Health Checks
 
-The services expose a `/health` endpoint, which will be used by our infrastructure to manage the service lifecycle, ensuring that traffic is only routed to healthy instances.
+Services expose `/health` for liveness and readiness probes. Traffic is only routed to healthy instances.
 
 ## Self-Managed Instances
 
@@ -114,15 +153,15 @@ Operator responsibilities:
 
 ## Deployment to Omnibus-adjacent Kubernetes Environment
 
-In a Kubernetes environment, observability is highly automated:
+In Kubernetes, most of this is automatic:
 
-- **Metrics**: The Prometheus Operator will automatically discover and scrape the metrics endpoints of the Knowledge Graph services. Cluster exporters (e.g., cAdvisor, kube-state-metrics, node_exporter) should provide CPU, memory, and disk utilization metrics.
-- **Logging**: Logs written to `stdout` and `stderr` by the service containers will be automatically collected by the cluster's logging agent (e.g., Fluentd, Vector) and shipped to a central log aggregator.
-- **Health Checks**: Kubernetes will use the liveness and readiness probes to manage pod health, automatically restarting unhealthy pods and managing traffic during deployments.
+- **Metrics**: Prometheus Operator discovers and scrapes `/metrics`. Cluster exporters (cAdvisor, kube-state-metrics, node_exporter) handle CPU, memory, and disk.
+- **Logging**: Container logs go to `stdout`/`stderr` and get collected by the cluster's logging agent (Fluentd, Vector).
+- **Health Checks**: Kubernetes uses liveness and readiness probes to restart unhealthy pods and manage traffic during rollouts.
 
 ## Ownership, On-call & Escalation
 
-Clear ownership and on-call responsibilities are crucial for maintaining service health.
+Who owns what, and who gets paged.
 
 ### Service/Component Ownership
 
@@ -133,7 +172,7 @@ Clear ownership and on-call responsibilities are crucial for maintaining service
 
 - **Tier 1**: Production Engineering SRE (existing on-call rotation).
 - **Tier 2**: Analytics / Platform Insights.
-- **Knowledge Graph Services**: A dedicated on-call plan for the Knowledge Graph team will be established. During the initial launch phase, the Knowledge Graph team can help provide active monitoring of the service.
+- **Knowledge Graph Services**: Dedicated on-call rotation (TBD). During initial launch the KG team will actively monitor the service.
 
 ### Long-term Stewardship
 
@@ -141,7 +180,7 @@ Future ownership will be evaluated, for example, NATS may move under the Durabil
 
 ## Runbooks
 
-This section outlines initial runbook procedures for operating the Knowledge Graph on GitLab.com. These will be expanded and adapted for self-managed instances based on our operational experience.
+Initial runbook procedures for GitLab.com. These will grow as we learn more in production.
 
 ### Siphon
 

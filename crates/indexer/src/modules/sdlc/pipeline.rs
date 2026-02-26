@@ -60,13 +60,9 @@ impl OntologyEntityPipeline {
         &self,
         params: Value,
         destination: &dyn Destination,
-        scope: &str,
     ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
-        let labels = [
-            KeyValue::new("entity", self.entity_name.clone()),
-            KeyValue::new("scope", scope.to_owned()),
-        ];
+        let labels = [KeyValue::new("entity", self.entity_name.clone())];
 
         let entity_writer = destination
             .new_batch_writer(&self.destination_table)
@@ -305,13 +301,9 @@ impl OntologyEdgePipeline {
         &self,
         params: Value,
         destination: &dyn Destination,
-        scope: &str,
     ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
-        let labels = [
-            KeyValue::new("entity", self.relationship_kind.clone()),
-            KeyValue::new("scope", scope.to_owned()),
-        ];
+        let labels = [KeyValue::new("entity", self.relationship_kind.clone())];
 
         let edge_writer = destination
             .new_batch_writer(EDGE_TABLE)

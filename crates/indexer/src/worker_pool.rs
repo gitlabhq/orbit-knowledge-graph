@@ -108,7 +108,8 @@ impl WorkerPool {
     /// * `module_name` - The name of the module requesting capacity
     pub async fn acquire_handler_slot(&self, module_name: &str) -> Option<HandlerSlot> {
         let mut module_permit = None;
-        let mut attributes = vec![KeyValue::new("scope", "global")];
+        let module_label = KeyValue::new("module", module_name.to_owned());
+        let mut attributes = vec![KeyValue::new("permit_kind", "global")];
 
         if let Some(semaphore) = self.module_semaphores.get(module_name) {
             let module_start = Instant::now();
@@ -116,35 +117,29 @@ impl WorkerPool {
             let wait_duration = module_start.elapsed();
             self.metrics.permit_wait_duration.record(
                 wait_duration.as_secs_f64(),
-                &[
-                    KeyValue::new("scope", "module"),
-                    KeyValue::new("module", module_name.to_owned()),
-                ],
+                &[KeyValue::new("permit_kind", "module"), module_label.clone()],
             );
             debug!(
                 module = module_name,
                 wait_ms = wait_duration.as_millis() as u64,
                 "module permit acquired"
             );
-            attributes.push(KeyValue::new("scope", module_name.to_owned()));
+            attributes.push(module_label.clone());
         }
 
         let global_start = Instant::now();
         let global_permit = self.global_semaphore.clone().acquire_owned().await.ok()?;
         self.metrics.permit_wait_duration.record(
             global_start.elapsed().as_secs_f64(),
-            &[
-                KeyValue::new("scope", "global"),
-                KeyValue::new("module", module_name.to_owned()),
-            ],
+            &[KeyValue::new("permit_kind", "global"), module_label],
         );
         self.metrics
             .active_permits
-            .add(1, &[KeyValue::new("scope", "global")]);
+            .add(1, &[KeyValue::new("permit_kind", "global")]);
         if module_permit.is_some() {
             self.metrics
                 .active_permits
-                .add(1, &[KeyValue::new("scope", module_name.to_owned())]);
+                .add(1, &[KeyValue::new("permit_kind", module_name.to_owned())]);
         }
 
         Some(HandlerSlot {
