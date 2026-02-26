@@ -21,6 +21,8 @@ code-graph = { path = "../code-graph" }
 datafusion = { workspace = true }
 futures = { workspace = true }
 gitaly-client = { path = "../gitaly-client" }
+gitlab-client = { workspace = true }
+moka = { workspace = true }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
@@ -28,7 +30,6 @@ prost = { workspace = true }
 prost-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 siphon-proto = { path = "../siphon-proto" }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
@@ -40,6 +41,7 @@ uuid = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
+sha2 = { workspace = true }
 internment = { workspace = true }
 parser-core = { workspace = true }
 query-engine = { path = "../query-engine" }

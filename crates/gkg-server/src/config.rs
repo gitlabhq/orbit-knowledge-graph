@@ -1,11 +1,11 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use gitlab_client::GitlabClientConfiguration;
 use health_check::HealthCheckConfig;
 use indexer::ModulesConfig;
 use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
-use indexer::modules::code::GitalyConfiguration;
 use indexer::nats::NatsConfiguration;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub engine: EngineConfiguration,
     #[serde(default)]
-    pub gitaly: Option<GitalyConfiguration>,
+    pub gitlab: Option<GitlabClientConfiguration>,
     #[serde(default)]
     pub modules: ModulesConfig,
     #[serde(default)]

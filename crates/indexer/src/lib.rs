@@ -53,9 +53,8 @@ use clickhouse::ClickHouseConfiguration;
 use clickhouse::ClickHouseDestination;
 use configuration::EngineConfiguration;
 use engine::EngineBuilder;
-use gitaly_client::GitalyError;
+use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use module::{ModuleInitError, ModuleRegistry};
-use modules::code::GitalyConfiguration;
 use modules::code::config::CodeIndexingConfig;
 use modules::sdlc::config::SdlcIndexingConfig;
 use modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
@@ -76,7 +75,7 @@ pub struct IndexerConfig {
     #[serde(default)]
     pub engine: EngineConfiguration,
     #[serde(default)]
-    pub gitaly: Option<GitalyConfiguration>,
+    pub gitlab: Option<GitlabClientConfiguration>,
     #[serde(default)]
     pub modules: ModulesConfig,
 }
@@ -96,9 +95,6 @@ pub enum IndexerError {
 
     #[error("ClickHouse connection failed: {0}")]
     ClickHouseConnection(#[from] destination::DestinationError),
-
-    #[error("Gitaly configuration failed: {0}")]
-    GitalyConfiguration(#[from] GitalyError),
 
     #[error("Engine error: {0}")]
     Engine(#[from] engine::EngineError),
@@ -132,14 +128,16 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);
 
-    if let Some(gitaly_config) = &config.gitaly {
+    if let Some(gitlab_config) = &config.gitlab {
         info!("initializing Code module");
+        let gitlab_client =
+            Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(ModuleInitError::new)?);
         let code_module =
-            CodeModule::new(&config.graph, gitaly_config, config.modules.code.clone())
+            CodeModule::new(&config.graph, gitlab_client, config.modules.code.clone())
                 .map_err(IndexerError::ModuleInit)?;
         registry.register_module(&code_module);
     } else {
-        info!("Code module disabled (GITALY_ADDRESS not set)");
+        info!("Code module disabled (GitLab client not configured)");
     }
 
     info!(topics = registry.topics().len(), "registered modules");
@@ -161,7 +159,7 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     engine_config
         .modules
         .insert("sdlc".into(), config.modules.sdlc.engine.clone());
-    if config.gitaly.is_some() {
+    if config.gitlab.is_some() {
         engine_config
             .modules
             .insert("code".into(), config.modules.code.engine.clone());

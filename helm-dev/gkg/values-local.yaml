@@ -85,6 +85,10 @@ producer:
 consumer:
   enabled: false
 
+gitlab:
+  enabled: true
+  baseUrl: "http://host.docker.internal:3000"
+
 otel:
   enabled: true
   endpoint: "http://gkg-obs-alloy:4317"

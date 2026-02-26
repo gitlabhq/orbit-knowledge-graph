@@ -12,7 +12,6 @@ secrets:
   clickhouseSecretName: clickhouse-password
   runnerTokenSecretName: runner_authentication_token
   jwtSecretName: gkg-jwt-secret
-  gitalySecretName: gitaly-token
 
 gitlab-runner:
   enabled: true
@@ -30,13 +29,9 @@ gitlab-runner:
           image = "alpine:latest"
           helper_image = "registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:x86_64-v18.8.0"
 
-gitaly:
+gitlab:
   enabled: true
-  address: "tcp://10.128.0.4:8075"
-  storage: "default"
-  tokenSecret:
-    name: "gitaly-credentials"
-    key: "token"
+  baseUrl: "http://10.128.0.4:3000"
 
 postgres:
   host: 10.128.0.4

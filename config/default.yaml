@@ -20,10 +20,9 @@ graph:
   username: default
   # password: ""
 
-# gitaly:
-#   address: "tcp://localhost:8075"
-#   storage: default
-#   token: ""
+# gitlab:
+#   base_url: "http://localhost:3000"
+#   jwt_secret: ""
 
 engine:
   max_concurrent_workers: 16

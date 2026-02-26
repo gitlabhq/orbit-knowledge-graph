@@ -6,9 +6,9 @@
 
 mod arrow_converter;
 pub mod config;
-mod gitaly;
 mod project_store;
 mod push_event_handler;
+mod repository_service;
 mod siphon_decoder;
 mod stale_data_cleaner;
 #[cfg(test)]
@@ -19,11 +19,14 @@ use std::sync::Arc;
 
 use crate::clickhouse::ClickHouseConfiguration;
 use crate::module::{Handler, Module, ModuleInitError};
+use gitlab_client::GitlabClient;
 
 pub use config::CodeIndexingConfig;
-pub use gitaly::{GitalyConfiguration, GitalyRepositoryService, RepositoryService};
 pub use project_store::ClickHouseProjectStore;
 pub use push_event_handler::PushEventHandler;
+pub use repository_service::{
+    CachingRepositoryService, GitLabRepositoryService, RepositoryService,
+};
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 pub use watermark_store::ClickHouseCodeWatermarkStore;
 
@@ -38,13 +41,15 @@ pub struct CodeModule {
 impl CodeModule {
     pub fn new(
         clickhouse_config: &ClickHouseConfiguration,
-        gitaly_config: &GitalyConfiguration,
+        gitlab_client: Arc<GitlabClient>,
         config: CodeIndexingConfig,
     ) -> Result<Self, ModuleInitError> {
         let client = Arc::new(clickhouse_config.build_client());
 
         Ok(Self {
-            repository_service: GitalyRepositoryService::create(gitaly_config.clone()),
+            repository_service: CachingRepositoryService::create(GitLabRepositoryService::create(
+                gitlab_client,
+            )),
             watermark_store: Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(&client))),
             project_store: Arc::new(ClickHouseProjectStore::new(Arc::clone(&client))),
             stale_data_cleaner: Arc::new(stale_data_cleaner::ClickHouseStaleDataCleaner::new(

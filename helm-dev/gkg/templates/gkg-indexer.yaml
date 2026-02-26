@@ -14,10 +14,9 @@ data:
       {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
     graph:
       {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.graph) | nindent 6 }}
-    {{- if .Values.gitaly.enabled }}
-    gitaly:
-      address: {{ .Values.gitaly.address | quote }}
-      storage: {{ .Values.gitaly.storage | quote }}
+    {{- if .Values.gitlab.enabled }}
+    gitlab:
+      base_url: {{ .Values.gitlab.baseUrl | quote }}
     {{- end }}
     {{- if .Values.otel.enabled }}
     metrics:
@@ -50,7 +49,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-indexer") | nindent 8 }}
       annotations:
-        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitaly | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.engine | sha256sum }}-{{ toJson .Values.modules | sha256sum }}
+        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitlab | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.engine | sha256sum }}-{{ toJson .Values.modules | sha256sum }}
     spec:
       enableServiceLinks: false
       securityContext:
@@ -68,12 +67,12 @@ spec:
               value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
             {{- include "gkg.clickhouseSecretEnv" (dict "prefix" "DATALAKE" "secretName" "clickhouse-credentials") | nindent 12 }}
             {{- include "gkg.clickhouseSecretEnv" (dict "prefix" "GRAPH" "secretName" "clickhouse-credentials") | nindent 12 }}
-            {{- if and .Values.gitaly.enabled .Values.gitaly.tokenSecret.key }}
-            - name: GKG_GITALY__TOKEN
+            {{- if .Values.gitlab.enabled }}
+            - name: GKG_GITLAB__JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.gitaly.tokenSecret.name }}
-                  key: {{ .Values.gitaly.tokenSecret.key }}
+                  name: gkg-server-credentials
+                  key: jwt-secret
             {{- end }}
           volumeMounts:
             - name: config

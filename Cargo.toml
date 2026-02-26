@@ -19,6 +19,7 @@ members = [
   "crates/health-check",
   "crates/siphon-proto",
   "crates/datalake-generator",
+  "crates/gitlab-client",
   "crates/xtask",
   "crates/integration-testkit",
 ]
@@ -103,6 +104,7 @@ tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
 tower = "0.5.3"
 base64 = "0.22.1"
+moka = { version = "0.12", features = ["future"] }
 
 # Server dependencies
 axum = { version = "0.8.8", features = ["macros"] }
@@ -119,6 +121,7 @@ k8s-openapi = { version = "0.27", features = ["v1_31"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23.36", default-features = false, features = ["ring"] }
 health-check = { path = "crates/health-check" }
+gitlab-client = { path = "crates/gitlab-client" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
