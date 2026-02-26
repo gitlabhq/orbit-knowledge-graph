@@ -73,34 +73,42 @@ custom_build(
     deps=['crates/', 'Cargo.toml', 'Cargo.lock'],
 )
 
-# Build helm dependencies
-local('helm repo add gitlab https://charts.gitlab.io 2>/dev/null || true', quiet=True)
-local('helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true', quiet=True)
-local('helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true', quiet=True)
-local('helm repo add grafana https://grafana.github.io/helm-charts 2>/dev/null || true', quiet=True)
-local('helm dependency build ./helm-dev/gkg', quiet=True)
-local('helm dependency build ./helm-dev/observability', quiet=True)
+is_ci = os.getenv('CI', '') != ''
 
-# Install Prometheus Operator CRDs (required for kube-prometheus-stack)
-PROMETHEUS_OPERATOR_VERSION = 'v0.88.1'
-PROMETHEUS_CRDS = [
-    'alertmanagerconfigs', 'alertmanagers', 'podmonitors', 'probes',
-    'prometheusagents', 'prometheuses', 'prometheusrules', 'scrapeconfigs',
-    'servicemonitors', 'thanosrulers'
-]
-for crd in PROMETHEUS_CRDS:
+# In CI, helm repos and dependency builds are handled by the CI script concurrently
+# with kind cluster creation. Locally, we do them here.
+if not is_ci:
+    local('helm repo add gitlab https://charts.gitlab.io 2>/dev/null || true', quiet=True)
+    local('helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true', quiet=True)
+    local('helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true', quiet=True)
+    local('helm repo add grafana https://grafana.github.io/helm-charts 2>/dev/null || true', quiet=True)
+    local('helm dependency build ./helm-dev/gkg', quiet=True)
+    local('helm dependency build ./helm-dev/observability', quiet=True)
+
+# Observability stack (Prometheus, Grafana, Loki, Alloy) is skipped in CI since
+# helm-lint already validates the chart. Deploying it adds ~3-5 min of image pulls
+# and pod readiness checks with no extra coverage.
+if not is_ci:
+    PROMETHEUS_OPERATOR_VERSION = 'v0.88.1'
+    PROMETHEUS_CRDS = [
+        'alertmanagerconfigs', 'alertmanagers', 'podmonitors', 'probes',
+        'prometheusagents', 'prometheuses', 'prometheusrules', 'scrapeconfigs',
+        'servicemonitors', 'thanosrulers'
+    ]
     local(
-        'kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/{}/example/prometheus-operator-crd/monitoring.coreos.com_{}.yaml 2>/dev/null || true'.format(PROMETHEUS_OPERATOR_VERSION, crd),
-        quiet=True
+        'for crd in {crds}; do kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/{version}/example/prometheus-operator-crd/monitoring.coreos.com_$crd.yaml 2>/dev/null & done; wait'.format(
+            crds=' '.join(PROMETHEUS_CRDS),
+            version=PROMETHEUS_OPERATOR_VERSION,
+        ),
+        quiet=True,
     )
 
-# Deploy observability chart first (so OTEL endpoint is available)
-k8s_yaml(helm(
-    './helm-dev/observability',
-    name='gkg-obs',
-    namespace='default',
-    values=['./helm-dev/observability/values-local.yaml'],
-))
+    k8s_yaml(helm(
+        './helm-dev/observability',
+        name='gkg-obs',
+        namespace='default',
+        values=['./helm-dev/observability/values-local.yaml'],
+    ))
 
 # Deploy gkg chart
 k8s_yaml(helm(

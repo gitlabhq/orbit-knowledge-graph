@@ -269,14 +269,22 @@ tilt-ci:
   needs: []
   before_script:
     - apk add --no-cache curl bash sed
-    - curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-    - chmod +x kubectl && mv kubectl /usr/local/bin/
-    - curl -Lo ./kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
-    - chmod +x ./kind && mv ./kind /usr/local/bin/kind
-    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    - curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux-alpine.x86_64.tar.gz" | tar -xz -C /usr/local/bin tilt
+    - |
+      curl -Lo /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" &
+      curl -Lo /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64" &
+      curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux-alpine.x86_64.tar.gz" | tar -xz -C /usr/local/bin tilt &
+      (curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | HELM_INSTALL_DIR=/usr/local/bin USE_SUDO=false bash >/dev/null 2>&1) &
+      wait
+    - chmod +x /usr/local/bin/kubectl /usr/local/bin/kind
   script:
     - |
+      # Helm repos + dependency build run concurrently with kind cluster creation
+      (
+        helm repo add gitlab https://charts.gitlab.io
+        helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+        helm dependency build helm-dev/gkg
+      ) &
+      HELM_PID=$!
       cat <<EOF | kind create cluster --wait 5m --config=-
       kind: Cluster
       apiVersion: kind.x-k8s.io/v1alpha4
@@ -289,14 +297,8 @@ tilt-ci:
             certSANs:
               - "docker"
       EOF
+      wait $HELM_PID
     - sed -i -E 's#https://0\.0\.0\.0:#https://docker:#' ~/.kube/config
-    - helm repo add gitlab https://charts.gitlab.io
-    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    - helm repo add grafana https://grafana.github.io/helm-charts
-    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency build helm-dev/gkg
-    - helm dependency build helm-dev/observability
-    # Create dummy secrets for CI (not real credentials)
     - |
       cat <<EOF > .tilt-secrets
       POSTGRES_PASSWORD=ci_test_password
