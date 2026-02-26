@@ -278,11 +278,16 @@ tilt-ci:
     - chmod +x /usr/local/bin/kubectl /usr/local/bin/kind
   script:
     - |
-      # Helm repos + dependency build run concurrently with kind cluster creation
+      # Helm repos + dependency builds run concurrently with kind cluster creation
       (
-        helm repo add gitlab https://charts.gitlab.io
-        helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-        helm dependency build helm-dev/gkg
+        helm repo add gitlab https://charts.gitlab.io &
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts &
+        helm repo add grafana https://grafana.github.io/helm-charts &
+        helm repo add nats https://nats-io.github.io/k8s/helm/charts/ &
+        wait
+        helm dependency build helm-dev/gkg &
+        helm dependency build helm-dev/observability &
+        wait
       ) &
       HELM_PID=$!
       cat <<EOF | kind create cluster --wait 5m --config=-

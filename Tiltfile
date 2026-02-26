@@ -85,30 +85,28 @@ if not is_ci:
     local('helm dependency build ./helm-dev/gkg', quiet=True)
     local('helm dependency build ./helm-dev/observability', quiet=True)
 
-# Observability stack (Prometheus, Grafana, Loki, Alloy) is skipped in CI since
-# helm-lint already validates the chart. Deploying it adds ~3-5 min of image pulls
-# and pod readiness checks with no extra coverage.
-if not is_ci:
-    PROMETHEUS_OPERATOR_VERSION = 'v0.88.1'
-    PROMETHEUS_CRDS = [
-        'alertmanagerconfigs', 'alertmanagers', 'podmonitors', 'probes',
-        'prometheusagents', 'prometheuses', 'prometheusrules', 'scrapeconfigs',
-        'servicemonitors', 'thanosrulers'
-    ]
-    local(
-        'for crd in {crds}; do kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/{version}/example/prometheus-operator-crd/monitoring.coreos.com_$crd.yaml 2>/dev/null & done; wait'.format(
-            crds=' '.join(PROMETHEUS_CRDS),
-            version=PROMETHEUS_OPERATOR_VERSION,
-        ),
-        quiet=True,
-    )
+# Install Prometheus Operator CRDs (required for kube-prometheus-stack)
+PROMETHEUS_OPERATOR_VERSION = 'v0.88.1'
+PROMETHEUS_CRDS = [
+    'alertmanagerconfigs', 'alertmanagers', 'podmonitors', 'probes',
+    'prometheusagents', 'prometheuses', 'prometheusrules', 'scrapeconfigs',
+    'servicemonitors', 'thanosrulers'
+]
+local(
+    'for crd in {crds}; do kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/{version}/example/prometheus-operator-crd/monitoring.coreos.com_$crd.yaml 2>/dev/null & done; wait'.format(
+        crds=' '.join(PROMETHEUS_CRDS),
+        version=PROMETHEUS_OPERATOR_VERSION,
+    ),
+    quiet=True,
+)
 
-    k8s_yaml(helm(
-        './helm-dev/observability',
-        name='gkg-obs',
-        namespace='default',
-        values=['./helm-dev/observability/values-local.yaml'],
-    ))
+# Deploy observability chart first (so OTEL endpoint is available)
+k8s_yaml(helm(
+    './helm-dev/observability',
+    name='gkg-obs',
+    namespace='default',
+    values=['./helm-dev/observability/values-local.yaml'],
+))
 
 # Deploy gkg chart
 k8s_yaml(helm(
