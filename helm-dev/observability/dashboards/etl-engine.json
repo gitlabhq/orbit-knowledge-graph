@@ -9,9 +9,16 @@
   "links": [],
   "panels": [
     {
+      "title": "Overview",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
       "title": "Throughput",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 1 },
       "datasource": "Prometheus",
       "targets": [
         {
@@ -43,7 +50,7 @@
     {
       "title": "Error Rate",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 1 },
       "datasource": "Prometheus",
       "targets": [
         {
@@ -73,17 +80,17 @@
         "graphMode": "area",
         "textMode": "value_and_name"
       },
-      "description": "Percentage of messages that failed processing (nacked). Green < 1%, orange < 5%, red >= 5%."
+      "description": "Percentage of messages that failed (nacked). Green < 1%, orange < 5%, red >= 5%."
     },
     {
       "title": "Worker Pool Utilization",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
       "datasource": "Prometheus",
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "etl_permits_active{job=\"gkg-indexer\"}",
+          "expr": "etl_permits_active{job=\"gkg-indexer\", scope=\"global\"}",
           "legendFormat": "active",
           "refId": "A"
         }
@@ -106,12 +113,19 @@
         "graphMode": "area",
         "textMode": "value_and_name"
       },
-      "description": "Number of worker permits currently in use. When this stays near the configured maximum, the pool is saturated and messages will queue."
+      "description": "Worker permits currently in use. Near the configured maximum means the pool is saturated."
+    },
+    {
+      "title": "Throughput",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false,
+      "panels": []
     },
     {
       "title": "Message Throughput by Topic",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "datasource": "Prometheus",
       "targets": [
         {
@@ -137,12 +151,12 @@
         "legend": { "displayMode": "table", "placement": "right" },
         "tooltip": { "mode": "multi" }
       },
-      "description": "Rate of messages processed per minute, broken down by topic."
+      "description": "Messages processed per minute, broken down by topic."
     },
     {
       "title": "Failed Messages by Topic",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "datasource": "Prometheus",
       "targets": [
         {
@@ -171,12 +185,62 @@
         "legend": { "displayMode": "table", "placement": "right" },
         "tooltip": { "mode": "multi" }
       },
-      "description": "Rate of failed (nacked) messages per minute by topic. Sustained failures indicate a handler error or downstream dependency issue."
+      "description": "Failed (nacked) messages per minute by topic. Sustained failures indicate a handler error or downstream issue."
     },
     {
-      "title": "Processing Latency by Handler (p95)",
+      "title": "Latency",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "End-to-End Message Latency",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "Total time from message receipt to ack/nack, including queue wait, handler execution, and destination writes. This is the primary SLA metric."
+    },
+    {
+      "title": "Handler Latency p95",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
       "datasource": "Prometheus",
       "targets": [
         {
@@ -202,12 +266,19 @@
         "legend": { "displayMode": "table", "placement": "right" },
         "tooltip": { "mode": "multi" }
       },
-      "description": "Time spent inside each handler's processing logic. Use this to identify which handler is the bottleneck."
+      "description": "p95 time inside each handler's processing logic. Compare against end-to-end latency to see if the bottleneck is handler code or infrastructure."
     },
     {
-      "title": "Worker Pool Queue Time (p50 / p95 / p99)",
+      "title": "Infrastructure",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "Worker Pool Queue Time",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "datasource": "Prometheus",
       "targets": [
         {
@@ -245,12 +316,12 @@
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "multi" }
       },
-      "description": "Time messages wait for a worker pool slot before processing begins. If this grows, the worker pool is saturated — increase global or per-module concurrency limits."
+      "description": "Time messages wait for a worker pool slot. If this grows, the worker pool is saturated — increase concurrency limits."
     },
     {
-      "title": "NATS Fetch Latency (p50 / p95 / p99)",
+      "title": "NATS Fetch Latency",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
       "datasource": "Prometheus",
       "targets": [
         {
@@ -288,7 +359,76 @@
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "multi" }
       },
-      "description": "Time to pull a batch of messages from NATS JetStream. High values indicate NATS connectivity or performance issues."
+      "description": "Time to pull a batch from NATS JetStream. High values indicate NATS connectivity or performance issues."
+    },
+    {
+      "title": "ClickHouse Destination",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "Destination Write Latency p95 by Table",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum by (le, table) (rate(etl_destination_write_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "legendFormat": "{{ table }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "p95 write latency to ClickHouse per table. Drill down to individual table issues without the noise of multiple quantiles."
+    },
+    {
+      "title": "Destination Rows Written/min by Table",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (table) (rate(etl_destination_rows_written_total{job=\"gkg-indexer\"}[5m]) * 60)",
+          "legendFormat": "{{ table }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "Rows written to ClickHouse per minute by destination table."
     }
   ],
   "schemaVersion": 39,
