@@ -7,11 +7,20 @@ use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 
 pub struct EventBuilder {
     columns: Vec<(&'static str, Value)>,
+    operation: i32,
 }
 
 impl EventBuilder {
     pub fn new() -> Self {
-        Self { columns: vec![] }
+        Self {
+            columns: vec![],
+            operation: 2,
+        }
+    }
+
+    pub fn with_operation(mut self, operation: i32) -> Self {
+        self.operation = operation;
+        self
     }
 
     pub fn with_i64(mut self, name: &'static str, val: i64) -> Self {
@@ -57,7 +66,7 @@ impl EventBuilder {
             .collect();
 
         let event = ReplicationEvent {
-            operation: 2,
+            operation: self.operation,
             columns: event_columns,
         };
 

@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
 use code_graph::loading::DirectoryFileSource;
 use ontology::EDGE_TABLE;
+use siphon_proto::replication_event::Operation;
 use tempfile::TempDir;
 use tracing::{debug, info, warn};
 
@@ -78,6 +79,11 @@ impl Handler for PushEventHandler {
         let extractor = ColumnExtractor::new(&replication_events);
 
         for event in &replication_events.events {
+            if event.operation == Operation::InitialSnapshot as i32 {
+                debug!("skipping initial snapshot event");
+                continue;
+            }
+
             let Some(push_event) = PushEventPayload::extract(&extractor, event) else {
                 debug!("failed to extract push event payload, skipping");
                 continue;
@@ -620,5 +626,26 @@ mod tests {
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn skips_initial_snapshot_events() {
+        use siphon_proto::replication_event::Operation;
+
+        let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
+        let ctx = TestContext::with_repository_service(mock_repo);
+        ctx.add_project(123);
+
+        let payload = build_replication_events(vec![
+            push_payload_columns(100, 123, "refs/heads/main", "abc123")
+                .with_operation(Operation::InitialSnapshot as i32)
+                .build(),
+        ]);
+        let envelope = TestEnvelopeFactory::with_bytes(payload);
+
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok());
+        assert!(!ctx.lock_exists(123, "main"));
     }
 }
