@@ -28,12 +28,17 @@ if [ -n "$CI" ] || ! command -v cargo &> /dev/null; then
     echo "Building in Docker (CI mode) for linux/amd64"
 
     SCCACHE_ARGS=""
-    if [ -n "${SCCACHE_GCS_BUCKET}" ] && [ -f "${SCCACHE_GCS_KEY}" ]; then
+    if [ -n "${SCCACHE_GCS_BUCKET:-}" ] && [ -f "${SCCACHE_GCS_KEY:-}" ]; then
+        # Copy key into workspace so it's accessible via the -v $(pwd):/build mount.
+        # A separate -v mount for a /tmp file won't work with DinD (different filesystem).
+        cp "${SCCACHE_GCS_KEY}" "$(pwd)/.sccache-gcs-key"
         SCCACHE_ARGS="-e SCCACHE_GCS_BUCKET=${SCCACHE_GCS_BUCKET} \
-            -e SCCACHE_GCS_KEY_PATH=/gcs-key.json \
+            -e SCCACHE_GCS_KEY_PATH=/build/.sccache-gcs-key \
             -e SCCACHE_GCS_RW_MODE=READ_WRITE \
-            -e RUSTC_WRAPPER=sccache \
-            -v ${SCCACHE_GCS_KEY}:/gcs-key.json:ro"
+            -e RUSTC_WRAPPER=sccache"
+        echo "sccache: enabled (GCS bucket: ${SCCACHE_GCS_BUCKET})"
+    else
+        echo "sccache: disabled (SCCACHE_GCS_BUCKET=${SCCACHE_GCS_BUCKET:-unset}, SCCACHE_GCS_KEY file exists: $([ -f "${SCCACHE_GCS_KEY:-}" ] && echo yes || echo no))"
     fi
 
     docker run --rm \
