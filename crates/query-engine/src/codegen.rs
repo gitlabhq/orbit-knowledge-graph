@@ -126,9 +126,12 @@ impl Context {
             parts.push(format!("ORDER BY {}", orders.join(", ")));
         }
 
-        // LIMIT
+        // LIMIT / OFFSET
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
+        }
+        if let Some(offset) = q.offset {
+            parts.push(format!("OFFSET {offset}"));
         }
 
         Ok(parts.join(" "))
@@ -208,9 +211,12 @@ impl Context {
             parts.push(format!("ORDER BY {}", orders.join(", ")));
         }
 
-        // LIMIT
+        // LIMIT / OFFSET
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
+        }
+        if let Some(offset) = q.offset {
+            parts.push(format!("OFFSET {offset}"));
         }
 
         Ok(parts.join(" "))
@@ -608,5 +614,37 @@ mod tests {
         let result = codegen(&Node::Query(Box::new(q)), ctx).unwrap();
         assert_eq!(result.result_context.len(), 1);
         assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
+    }
+
+    #[test]
+    fn offset_clause() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            limit: Some(10),
+            offset: Some(40),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(result.sql, "SELECT n.id FROM nodes AS n LIMIT 10 OFFSET 40");
+
+        // limit without offset
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            limit: Some(30),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(result.sql.contains("LIMIT 30"));
+        assert!(!result.sql.contains("OFFSET"));
     }
 }

@@ -945,4 +945,99 @@ mod ontology_integration_tests {
             result.sql
         );
     }
+
+    #[test]
+    fn range_pagination() {
+        let ontology = load_test_ontology();
+        let ctx = test_ctx();
+
+        // Search: range → LIMIT + OFFSET
+        let result = compile(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "columns": ["username"]},
+                "range": {"start": 40, "end": 50}
+            }"#,
+            &ontology,
+            &ctx,
+        )
+        .unwrap();
+        assert!(result.sql.contains("LIMIT 10"), "{}", result.sql);
+        assert!(result.sql.contains("OFFSET 40"), "{}", result.sql);
+
+        // Traversal with ordering
+        let result = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "columns": ["username"]},
+                    {"id": "p", "entity": "Project", "columns": ["name"]}
+                ],
+                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
+                "range": {"start": 0, "end": 30},
+                "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
+            }"#,
+            &ontology,
+            &ctx,
+        )
+        .unwrap();
+        assert!(result.sql.contains("LIMIT 30"), "{}", result.sql);
+        assert!(result.sql.contains("OFFSET 0"), "{}", result.sql);
+        assert!(result.sql.contains("ORDER BY"));
+        assert!(result.sql.contains("DESC"));
+
+        // Mutual exclusion: limit + range rejected
+        let err = compile(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User"},
+                "limit": 10,
+                "range": {"start": 0, "end": 5}
+            }"#,
+            &ontology,
+            &ctx,
+        )
+        .unwrap_err();
+        assert!(matches!(err, QueryError::Validation(_)), "{err}");
+
+        // end == start rejected
+        let err = compile(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User"},
+                "range": {"start": 10, "end": 10}
+            }"#,
+            &ontology,
+            &ctx,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must be greater than"), "{err}");
+
+        // window > 1000 rejected
+        let err = compile(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User"},
+                "range": {"start": 0, "end": 1001}
+            }"#,
+            &ontology,
+            &ctx,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must not exceed 1000"), "{err}");
+
+        // window == 1000 accepted
+        assert!(
+            compile(
+                r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User"},
+                "range": {"start": 0, "end": 1000}
+            }"#,
+                &ontology,
+                &ctx,
+            )
+            .is_ok()
+        );
+    }
 }

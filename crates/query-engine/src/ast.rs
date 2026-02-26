@@ -199,6 +199,7 @@ pub struct Query {
     pub group_by: Vec<Expr>,
     pub order_by: Vec<OrderExpr>,
     pub limit: Option<u32>,
+    pub offset: Option<u32>,
     /// Additional queries to UNION ALL with this one (for recursive CTEs).
     pub union_all: Vec<Query>,
     /// ClickHouse SET statements prepended to the query (for recursive CTEs).
@@ -219,6 +220,7 @@ impl Default for Query {
             group_by: vec![],
             order_by: vec![],
             limit: None,
+            offset: None,
             union_all: vec![],
             set_statements: vec![],
         }
