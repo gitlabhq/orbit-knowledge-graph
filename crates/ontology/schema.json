@@ -47,10 +47,28 @@
     },
     "limit": {
       "type": "integer",
-      "description": "Maximum number of results to return",
+      "description": "Maximum number of results to return. Mutually exclusive with range.",
       "minimum": 1,
       "maximum": 1000,
       "default": 30
+    },
+    "range": {
+      "type": "object",
+      "description": "Bounded result window for pagination. Mutually exclusive with limit. Size (end - start) capped at 1000 by the server.",
+      "required": ["start", "end"],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "description": "Index of the first row to return (0-based), applied after filtering and ordering",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "description": "Index of the last row to return (exclusive). end - start must not exceed 1000.",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
     },
     "order_by": {
       "$ref": "#/$defs/OrderBy",
@@ -62,6 +80,11 @@
     }
   },
   "allOf": [
+    {
+      "not": {
+        "required": ["limit", "range"]
+      }
+    },
     {
       "if": {
         "properties": {

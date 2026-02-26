@@ -79,11 +79,30 @@ impl<'a> Validator<'a> {
 
     /// Validate cross-node references that JSON Schema cannot express.
     pub fn check_references(&self, input: &Input) -> Result<()> {
+        self.check_pagination(input)?;
         self.check_relationships(input)?;
         self.check_aggregations(input)?;
         self.check_order_by(input)?;
         self.check_path(input)?;
         self.check_neighbors(input)?;
+        Ok(())
+    }
+
+    fn check_pagination(&self, input: &Input) -> Result<()> {
+        if let Some(ref range) = input.range {
+            if range.end <= range.start {
+                return Err(err(format!(
+                    "range.end ({}) must be greater than range.start ({})",
+                    range.end, range.start
+                )));
+            }
+            let window = range.end - range.start;
+            if window > 1000 {
+                return Err(err(format!(
+                    "range window size ({window}) must not exceed 1000"
+                )));
+            }
+        }
         Ok(())
     }
 

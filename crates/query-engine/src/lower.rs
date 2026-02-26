@@ -26,6 +26,17 @@ fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
         .collect()
 }
 
+/// Derive LIMIT and OFFSET from the input's pagination fields.
+/// If `range` is set, limit = end - start and offset = start.
+/// Otherwise, limit = input.limit and offset = None.
+fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
+    if let Some(ref range) = input.range {
+        (Some(range.end - range.start), Some(range.start))
+    } else {
+        (Some(input.limit), None)
+    }
+}
+
 /// Lower validated input into an AST node.
 ///
 /// Note: Ontology-dependent transformations (wildcard expansion, enum coercion)
@@ -67,12 +78,15 @@ fn lower_traversal(input: &Input) -> Result<Node> {
         }]
     });
 
+    let (limit, offset) = pagination(input);
+
     Ok(Node::Query(Box::new(Query {
         select,
         from,
         where_clause,
         order_by,
-        limit: Some(input.limit),
+        limit,
+        offset,
         ..Default::default()
     })))
 }
@@ -140,13 +154,16 @@ fn lower_aggregation(input: &Input) -> Result<Node> {
             }]
         });
 
+    let (limit, offset) = pagination(input);
+
     Ok(Node::Query(Box::new(Query {
         select,
         from,
         where_clause,
         group_by,
         order_by,
-        limit: Some(input.limit),
+        limit,
+        offset,
         ..Default::default()
     })))
 }
@@ -190,6 +207,8 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
     let recursive_cte = Cte::recursive("paths", base);
 
+    let (limit, offset) = pagination(input);
+
     Ok(Node::Query(Box::new(Query {
         ctes: vec![recursive_cte],
         select: vec![
@@ -211,7 +230,8 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             expr: Expr::col("paths", "depth"),
             desc: false,
         }],
-        limit: Some(input.limit),
+        limit,
+        offset,
         ..Default::default()
     })))
 }
@@ -479,12 +499,15 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         }]
     });
 
+    let (limit, offset) = pagination(input);
+
     Ok(Node::Query(Box::new(Query {
         select,
         from,
         where_clause,
         order_by,
-        limit: Some(input.limit),
+        limit,
+        offset,
         ..Default::default()
     })))
 }
@@ -1454,6 +1477,7 @@ mod tests {
                 rel_types: vec![],
             }),
             limit: 10,
+            range: None,
             order_by: None,
             aggregation_sort: None,
             entity_auth: Default::default(),
