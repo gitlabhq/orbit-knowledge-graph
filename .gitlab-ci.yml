@@ -192,6 +192,8 @@ unit-test:
   extends:
     - .test-template
     - .mr-and-main-rules
+  tags:
+    - saas-linux-large-amd64
   needs: []
   script:
     - cargo nextest run --profile ci --lib --bins
@@ -203,7 +205,7 @@ integration-test:
     - .test-template
     - .mr-and-main-rules
   tags:
-    - saas-linux-large-amd64
+    - saas-linux-xlarge-amd64
   services:
     - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:dind
       alias: docker
