@@ -301,11 +301,13 @@ async fn run_handlers(
     runtime: &EngineRuntime,
 ) -> HandlersOutcome {
     for (handler, module_name) in handlers {
-        let _permit = runtime
-            .worker_pool
-            .acquire_handler_slot(module_name)
-            .await
-            .expect("worker pool semaphore closed unexpectedly");
+        let Some(_permit) = runtime.worker_pool.acquire_handler_slot(module_name).await else {
+            warn!(
+                module = %module_name,
+                "worker pool semaphore closed, skipping remaining handlers"
+            );
+            return HandlersOutcome::Failed { retry_delay: None };
+        };
 
         let handler_start = Instant::now();
         let result = handler.handle(context.clone(), envelope.clone()).await;
