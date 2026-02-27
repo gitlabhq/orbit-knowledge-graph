@@ -10,7 +10,7 @@ use gitlab_client::{GitalyConnectionInfo, RepositoryInfo};
 use indexer::module::{Handler, HandlerContext};
 use indexer::modules::code::{
     ClickHouseCodeWatermarkStore, ClickHouseProjectStore, ClickHouseStaleDataCleaner,
-    CodeIndexingConfig, PushEventHandler, RepositoryService,
+    CodeIndexingConfig, PushEventHandler, RepositoryService, metrics::CodeMetrics,
 };
 use indexer::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
 use prost::Message;
@@ -124,6 +124,7 @@ async fn indexes_repository_from_gitaly() {
         Arc::new(ClickHouseProjectStore::new(Arc::clone(&clickhouse_client))),
         Arc::new(ClickHouseStaleDataCleaner::new(clickhouse_client)),
         CodeIndexingConfig::default(),
+        CodeMetrics::new(),
     );
 
     let context = HandlerContext::new(
@@ -304,6 +305,7 @@ fn create_push_event_handler(gitaly_address: &str, clickhouse: &TestContext) -> 
         Arc::new(ClickHouseProjectStore::new(Arc::clone(&clickhouse_client))),
         Arc::new(ClickHouseStaleDataCleaner::new(clickhouse_client)),
         CodeIndexingConfig::default(),
+        CodeMetrics::new(),
     )
 }
 

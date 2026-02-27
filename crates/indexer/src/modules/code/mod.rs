@@ -6,6 +6,7 @@
 
 mod arrow_converter;
 pub mod config;
+pub mod metrics;
 mod project_store;
 mod push_event_handler;
 mod repository_service;
@@ -20,6 +21,7 @@ use std::sync::Arc;
 use crate::clickhouse::ClickHouseConfiguration;
 use crate::module::{Handler, Module, ModuleInitError};
 use gitlab_client::GitlabClient;
+use metrics::CodeMetrics;
 
 pub use config::CodeIndexingConfig;
 pub use project_store::ClickHouseProjectStore;
@@ -36,6 +38,7 @@ pub struct CodeModule {
     project_store: Arc<dyn project_store::ProjectStore>,
     stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner>,
     config: CodeIndexingConfig,
+    metrics: CodeMetrics,
 }
 
 impl CodeModule {
@@ -56,6 +59,7 @@ impl CodeModule {
                 client,
             )),
             config,
+            metrics: CodeMetrics::new(),
         })
     }
 }
@@ -72,6 +76,7 @@ impl Module for CodeModule {
             Arc::clone(&self.project_store),
             Arc::clone(&self.stale_data_cleaner),
             self.config.clone(),
+            self.metrics.clone(),
         ))]
     }
 

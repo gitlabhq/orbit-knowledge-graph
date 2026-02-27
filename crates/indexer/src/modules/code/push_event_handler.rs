@@ -2,14 +2,17 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use code_graph::analysis::types::GraphData;
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
 use code_graph::loading::DirectoryFileSource;
 use ontology::EDGE_TABLE;
+use opentelemetry::KeyValue;
 use siphon_proto::replication_event::Operation;
 use tempfile::TempDir;
 use tracing::{debug, info, warn};
@@ -17,6 +20,7 @@ use tracing::{debug, info, warn};
 use super::arrow_converter::ArrowConverter;
 use super::config::LOCK_TTL;
 use super::config::{CodeIndexingConfig, siphon_actions, siphon_ref_types, subjects, tables};
+use super::metrics::{CodeMetrics, RecordStageError};
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::repository_service::RepositoryService;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
@@ -31,6 +35,7 @@ pub struct PushEventHandler {
     project_store: Arc<dyn ProjectStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     config: CodeIndexingConfig,
+    metrics: CodeMetrics,
 }
 
 impl PushEventHandler {
@@ -40,6 +45,7 @@ impl PushEventHandler {
         project_store: Arc<dyn ProjectStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         config: CodeIndexingConfig,
+        metrics: CodeMetrics,
     ) -> Self {
         Self {
             repository_service,
@@ -47,6 +53,7 @@ impl PushEventHandler {
             project_store,
             stale_data_cleaner,
             config,
+            metrics,
         }
     }
 }
@@ -68,15 +75,13 @@ impl Handler for PushEventHandler {
         )
     }
 
-    // TODO: Add metrics around the processed events
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         debug!(message_id = %message.id.0, "received push event payload");
 
-        let replication_events =
-            decode_logical_replication_events(&message.payload).map_err(|e| {
-                warn!(message_id = %message.id.0, error = %e, "failed to decode");
-                HandlerError::Processing(e)
-            })?;
+        let replication_events = decode_logical_replication_events(&message.payload)
+            .inspect_err(|e| warn!(message_id = %message.id.0, error = %e, "failed to decode push event payload"))
+            .map_err(HandlerError::Processing)
+            .record_error_stage(&self.metrics, "decode")?;
 
         let extractor = ColumnExtractor::new(&replication_events);
 
@@ -93,13 +98,19 @@ impl Handler for PushEventHandler {
 
             debug!(
                 event_id = push_event.event_id,
-                project_id = ?push_event.project_id,
+                project_id = push_event.project_id,
                 ref_name = %push_event.ref_name,
                 "processing push event"
             );
 
             if let Err(e) = self.process_push_event(&context, &push_event).await {
-                warn!(event_id = push_event.event_id, error = %e, "failed to process");
+                warn!(
+                    event_id = push_event.event_id,
+                    project_id = push_event.project_id,
+                    ref_name = %push_event.ref_name,
+                    error = %e,
+                    "failed to process push event"
+                );
             }
         }
 
@@ -113,6 +124,8 @@ impl PushEventHandler {
         context: &HandlerContext,
         event: &PushEventPayload,
     ) -> Result<(), HandlerError> {
+        let started_at = Instant::now();
+
         let Some(branch) = self.validate_push_event(event) else {
             return Ok(());
         };
@@ -123,9 +136,8 @@ impl PushEventHandler {
             .repository_service
             .repository_info(project_id)
             .await
-            .map_err(|e| {
-                HandlerError::Processing(format!("failed to fetch repository info: {e}"))
-            })?;
+            .map_err(|e| HandlerError::Processing(format!("failed to fetch repository info: {e}")))
+            .record_error_stage(&self.metrics, "repository_fetch")?;
 
         let default_branch = repository
             .default_branch
@@ -139,16 +151,19 @@ impl PushEventHandler {
                 branch = %branch,
                 "skipping non-default branch"
             );
+            self.metrics.record_outcome("skipped_branch");
             return Ok(());
         }
 
         let Some(project) = self.lookup_project(event.event_id, project_id).await? else {
+            self.metrics.record_outcome("skipped_project_not_found");
             return Err(HandlerError::Processing(
                 "project not found in knowledge graph".into(),
             ));
         };
 
         if self.is_already_indexed(event, project_id, &branch).await {
+            self.metrics.record_outcome("skipped_watermark");
             return Ok(());
         }
 
@@ -159,8 +174,17 @@ impl PushEventHandler {
             "starting code indexing"
         );
 
-        self.index_with_lock(context, event, project_id, &branch, &project, &repository)
-            .await
+        let result = self
+            .index_with_lock(context, event, project_id, &branch, &project, &repository)
+            .await;
+
+        let outcome = if result.is_ok() { "indexed" } else { "error" };
+        self.metrics.record_outcome(outcome);
+        self.metrics
+            .handler_duration
+            .record(started_at.elapsed().as_secs_f64(), &[]);
+
+        result
     }
 
     async fn index_with_lock(
@@ -179,6 +203,7 @@ impl PushEventHandler {
                 branch = %branch,
                 "lock held by another indexer, skipping"
             );
+            self.metrics.record_outcome("skipped_lock");
             return Ok(());
         }
 
@@ -187,10 +212,15 @@ impl PushEventHandler {
         let temp_dir = TempDir::new()
             .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
 
+        let fetch_start = Instant::now();
         self.repository_service
             .extract_repository(repository, temp_dir.path(), &event.revision_after)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))
+            .record_error_stage(&self.metrics, "repository_extract")?;
+        self.metrics
+            .repository_fetch_duration
+            .record(fetch_start.elapsed().as_secs_f64(), &[]);
 
         let result = self
             .run_indexing(
@@ -224,31 +254,73 @@ impl PushEventHandler {
         let indexer = RepositoryIndexer::new(format!("project-{project_id}"), repo_path.clone());
         let file_source = DirectoryFileSource::new(repo_path);
 
+        let indexing_start = Instant::now();
         let result = indexer
             .index_files(file_source, &IndexingConfig::default())
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to index code: {e}")))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to index code: {e}")))
+            .record_error_stage(&self.metrics, "indexing")?;
+        self.metrics
+            .indexing_duration
+            .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
-        if let Some(mut graph_data) = result.graph_data {
-            // TODO: This should be done on construction of the GraphData struct.
-            graph_data.assign_node_ids(project_id, branch);
-            self.write_graph_data(
-                context,
+        self.metrics.files_processed.add(
+            result.skipped_files.len() as u64,
+            &[KeyValue::new("outcome", "skipped")],
+        );
+        self.metrics.files_processed.add(
+            result.errored_files.len() as u64,
+            &[KeyValue::new("outcome", "errored")],
+        );
+
+        if !result.errored_files.is_empty() {
+            warn!(
                 project_id,
-                branch,
-                traversal_path,
-                indexed_at,
-                &graph_data,
-            )
-            .await?;
+                branch = %branch,
+                count = result.errored_files.len(),
+                "some files failed to parse during code indexing"
+            );
         }
+
+        let Some(mut graph_data) = result.graph_data else {
+            debug!(project_id, branch = %branch, "indexing produced no graph data, skipping write");
+            return Ok(());
+        };
+
+        // TODO: This should be done on construction of the GraphData struct.
+        graph_data.assign_node_ids(project_id, branch);
+
+        self.metrics.files_processed.add(
+            graph_data.file_nodes.len() as u64,
+            &[KeyValue::new("outcome", "parsed")],
+        );
+        self.metrics.record_node_counts(&graph_data);
+
+        let write_start = Instant::now();
+        self.write_graph_data(
+            context,
+            project_id,
+            branch,
+            traversal_path,
+            indexed_at,
+            &graph_data,
+        )
+        .await?;
+        self.metrics
+            .write_duration
+            .record(write_start.elapsed().as_secs_f64(), &[]);
 
         if let Err(error) = self
             .stale_data_cleaner
             .delete_stale_data(traversal_path, project_id, branch, indexed_at)
             .await
         {
-            warn!(%error, "failed to delete stale data, will retry on next push");
+            warn!(
+                project_id,
+                branch = %branch,
+                %error,
+                "failed to delete stale data, will retry on next push"
+            );
         }
 
         Ok(())
@@ -278,13 +350,15 @@ impl PushEventHandler {
         self.watermark_store
             .set_watermark(&watermark)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to set watermark: {e}")))?;
+            .map_err(|e| HandlerError::Processing(format!("failed to set watermark: {e}")))
+            .record_error_stage(&self.metrics, "watermark")?;
 
         info!(
             project_id,
             branch = %branch,
             commit = %event.revision_after,
-            "successfully indexed code"
+            event_id = event.event_id,
+            "completed code indexing"
         );
 
         Ok(())
@@ -385,7 +459,7 @@ impl PushEventHandler {
         branch: &str,
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
-        graph_data: &code_graph::analysis::types::GraphData,
+        graph_data: &GraphData,
     ) -> Result<(), HandlerError> {
         let converter = ArrowConverter::new(
             traversal_path.to_string(),
@@ -396,7 +470,8 @@ impl PushEventHandler {
 
         let converted = converter
             .convert_all(graph_data)
-            .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))?;
+            .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
+            .record_error_stage(&self.metrics, "arrow_conversion")?;
 
         self.write_batch(ctx, tables::GL_DIRECTORY, &converted.directories)
             .await?;
@@ -425,12 +500,14 @@ impl PushEventHandler {
             .destination
             .new_batch_writer(table)
             .await
-            .map_err(|e| HandlerError::Processing(format!("writer creation failed: {e}")))?;
+            .map_err(|e| HandlerError::Processing(format!("writer creation failed: {e}")))
+            .record_error_stage(&self.metrics, "write")?;
 
         writer
             .write_batch(std::slice::from_ref(batch))
             .await
             .map_err(|e| HandlerError::Processing(format!("write to {table} failed: {e}")))
+            .record_error_stage(&self.metrics, "write")
     }
 }
 
@@ -468,6 +545,7 @@ impl PushEventPayload {
 mod tests {
     use super::*;
     use crate::module::Handler;
+    use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::project_store::ProjectInfo;
     use crate::modules::code::project_store::test_utils::MockProjectStore;
     use crate::modules::code::repository_service::test_utils::MockRepositoryService;
@@ -475,6 +553,13 @@ mod tests {
     use crate::modules::code::test_helpers::{build_replication_events, push_payload_columns};
     use crate::modules::code::watermark_store::test_utils::MockCodeWatermarkStore;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
+
+    fn test_metrics() -> CodeMetrics {
+        let provider = opentelemetry::global::meter_provider();
+        let meter = provider.meter("test");
+        CodeMetrics::with_meter(&meter)
+    }
+
     struct TestContext {
         handler: PushEventHandler,
         mock_nats: Arc<MockNatsServices>,
@@ -497,6 +582,7 @@ mod tests {
                 project_store.clone(),
                 stale_data_cleaner,
                 CodeIndexingConfig::default(),
+                test_metrics(),
             );
 
             Self {
