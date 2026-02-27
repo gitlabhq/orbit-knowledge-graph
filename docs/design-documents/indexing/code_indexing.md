@@ -97,7 +97,7 @@ graph LR
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Lightweight distributed lock store (prevents concurrent indexing of the same project) |
 | ClickHouse | Columnar OLAP database storing both the datalake and the property graph |
-| Gitaly | GitLab's Git storage service; code indexer uses `GetArchive` RPC |
+| Gitaly | GitLab Git storage service; code indexer uses `GetArchive` RPC |
 
 For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 [SDLC indexing design document](sdlc_indexing.md).
@@ -201,7 +201,7 @@ Both `code-parser` and `code-graph` define a `MINIMUM_STACK_REMAINING` constant 
 The `code-graph` crate runs a fully streaming pipeline. Files are processed as they
 are discovered; there is no upfront collection step.
 
-```text
+```plaintext
 DirectoryFileSource::stream_files()
         │
         │  mpsc channel (capacity 256)
@@ -354,7 +354,7 @@ via `clickhouse-client`'s `ArrowClickHouseClient`.
 
 #### Flow visual representation
 
-```text
+```plaintext
 Siphon CDC (push_event_payloads)
         │
         ▼
