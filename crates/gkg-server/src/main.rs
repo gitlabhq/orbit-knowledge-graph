@@ -10,7 +10,7 @@ use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use indexer::IndexerConfig;
 use indexer::dispatcher::Dispatcher;
-use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use indexer::modules::sdlc::dispatch::{DispatchMetrics, GlobalDispatcher, NamespaceDispatcher};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -36,15 +36,18 @@ async fn main() -> anyhow::Result<()> {
         Mode::DispatchIndexing => {
             let services = indexer::dispatcher::connect(&config.nats).await?;
             let datalake = config.datalake.build_client();
+            let metrics = DispatchMetrics::new();
             let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
                 Box::new(GlobalDispatcher::new(
                     services.nats.clone(),
                     services.lock_service.clone(),
+                    metrics.clone(),
                 )),
                 Box::new(NamespaceDispatcher::new(
                     services.nats,
                     services.lock_service,
                     datalake,
+                    metrics,
                 )),
             ];
             indexer::dispatcher::run(&dispatchers)
