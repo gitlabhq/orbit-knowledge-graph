@@ -29,8 +29,8 @@ output but do not own or modify it. See the
 provides durable message delivery with at-least-once semantics, meaning messages
 survive broker restarts and are redelivered if a consumer fails to acknowledge them.
 GKG also uses **NATS Key-Value (KV)** as a lightweight distributed lock store. During
-code indexing, a lock keyed by `project_id:branch` prevents multiple indexer pods from
-processing the same repository concurrently.
+code indexing, a lock keyed by `project.{project_id}.{branch}` (branch name base64url-encoded)
+prevents multiple indexer pods from processing the same repository concurrently.
 
 <!-- source: crates/gitaly-client/ — Gitaly gRPC client -->
 <!-- source: crates/indexer/src/modules/code/gitaly.rs — RepositoryService trait, extract_repository -->
@@ -51,7 +51,7 @@ and the indexed property graph. ClickHouse was chosen because it handles analyti
 queries over large datasets efficiently, supports native Arrow IPC ingestion (avoiding
 serialization overhead), and scales horizontally. The property graph is stored as
 separate node tables (`gl_directory`, `gl_file`, `gl_definition`,
-`gl_imported_symbol`) and a shared `edges` table. See the
+`gl_imported_symbol`) and a shared `gl_edge` table. See the
 [data model design document](../data_model.md) for the full schema.
 
 <!-- source: crates/indexer/src/modules/code/arrow_converter.rs — traversal_path in BaseColumnBuilders -->
@@ -359,10 +359,10 @@ categories:
 |---|---|---|
 | Directory structure | `DirContainsDir`, `DirContainsFile` | 2 |
 | File to entity | `FileDefines`, `FileImports` | 2 |
-| Definition hierarchy | `ClassToMethod`, `ModuleToClass`, `FunctionToFunction`, etc. | 30+ |
+| Definition hierarchy | `ClassToMethod`, `ModuleToClass`, `FunctionToFunction`, `DefinesImportedSymbol`, etc. | 32 |
 | Interface relationships | `InterfaceToMethod`, `InterfaceToProperty`, etc. | 6 |
 | References | `Calls`, `AmbiguouslyCalls`, `PropertyReference` | 3 |
-| Import resolution | `ImportedSymbolToDefinition`, `ImportedSymbolToFile`, etc. | 4 |
+| Import resolution | `ImportedSymbolToDefinition`, `ImportedSymbolToFile`, `ImportedSymbolToImportedSymbol` | 3 |
 
 These fine-grained types are mapped to four ontology edge labels during Arrow
 conversion:
@@ -372,7 +372,7 @@ conversion:
 | Ontology label | Mapped from |
 |---|---|
 | `CONTAINS` | `DirContainsDir`, `DirContainsFile` |
-| `DEFINES` | All definition hierarchy types (30+) |
+| `DEFINES` | `FileDefines`, `DefinesImportedSymbol`, definition hierarchy types (31), interface types (6) |
 | `IMPORTS` | `FileImports`, `ImportedSymbolTo*` |
 | `CALLS` | `Calls`, `AmbiguouslyCalls`, `PropertyReference` |
 
@@ -508,7 +508,7 @@ The converter produces five `RecordBatch` objects written to five ClickHouse tab
 | `gl_file` | Files | `path`, `name`, `extension`, `language` |
 | `gl_definition` | Definitions | `file_path`, `fqn`, `name`, `definition_type`, `start_line`, `end_line`, `start_byte`, `end_byte` |
 | `gl_imported_symbol` | Imported symbols | `file_path`, `import_type`, `import_path`, `identifier_name`, `identifier_alias`, `start_line`, `end_line`, `start_byte`, `end_byte` |
-| `edges` | Relationships | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind` (shared with SDLC edges) |
+| `gl_edge` | Relationships | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind` (shared with SDLC edges) |
 
 ### ClickHouse write path
 
