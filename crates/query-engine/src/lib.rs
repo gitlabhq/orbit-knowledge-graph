@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! JSON → Schema Validate → Parse → Validate → Lower → Codegen → SQL
+//! JSON → Schema Validate → Parse → Validate → Lower → Security → Check → Codegen → SQL
 //! ```
 //!
 //! # Example
@@ -32,6 +32,7 @@
 //! ```
 
 pub mod ast;
+pub mod check;
 pub mod codegen;
 pub mod constants;
 pub mod enforce;
@@ -44,6 +45,7 @@ pub mod security;
 pub mod validate;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+pub use check::check_ast;
 pub use codegen::{ParameterizedQuery, codegen};
 pub use constants::{
     NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
@@ -84,8 +86,10 @@ pub fn compile(
 
     let input = normalize(input, ontology).count_err()?;
     let mut node = lower(&input).count_err()?;
+
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx).count_err()?;
+    check_ast(&node, ctx).count_err()?;
     codegen(&node, result_context).count_err()
 }
 

@@ -144,7 +144,7 @@ fn starts_with_expr(alias: &str, path: &str) -> Expr {
     )
 }
 
-fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
+pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
     match table_ref {
         TableRef::Scan { table, alias, .. } if should_apply_security_filter(table) => {
             vec![alias.clone()]
