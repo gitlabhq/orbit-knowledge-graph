@@ -206,5 +206,9 @@ gkgServer:
         cpu: 200m
         memory: 128Mi
 
+gitlab:
+  enabled: true
+  baseUrl: "http://gitlab-webservice-default.gitlab.svc.cluster.local:8181"
+
 otel:
   enabled: false
