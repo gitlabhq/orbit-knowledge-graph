@@ -60,6 +60,9 @@ spec:
           imagePullPolicy: {{ .Values.gkgServer.image.pullPolicy }}
           args:
             - "--mode=indexer"
+          ports:
+            - name: health
+              containerPort: 4202
           env:
             - name: LOG_FORMAT
               value: "json"
@@ -82,6 +85,18 @@ spec:
               mountPath: /tmp
           securityContext:
             {{- include "gkg.securityContext" . | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 4202
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 4202
+            initialDelaySeconds: 5
+            periodSeconds: 5
           resources:
             {{- toYaml .Values.gkgServer.indexer.resources | nindent 12 }}
       volumes:

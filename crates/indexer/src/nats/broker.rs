@@ -35,6 +35,7 @@ use super::message::{NatsMessage, NatsSubscription};
 ///
 /// Call [`shutdown`](Self::shutdown) for graceful termination of subscription tasks.
 pub struct NatsBroker {
+    client: async_nats::Client,
     jetstream: Context,
     config: NatsConfiguration,
     streams: RwLock<HashMap<Arc<str>, Stream>>,
@@ -52,9 +53,10 @@ impl NatsBroker {
             .await
             .map_err(map_connect_error)?;
 
-        let jetstream = async_nats::jetstream::new(client);
+        let jetstream = async_nats::jetstream::new(client.clone());
 
         Ok(Self {
+            client,
             jetstream,
             config: config.clone(),
             streams: RwLock::new(HashMap::new()),
@@ -71,6 +73,10 @@ impl NatsBroker {
         for handle in handles {
             let _ = handle.await;
         }
+    }
+
+    pub fn nats_client(&self) -> &async_nats::Client {
+        &self.client
     }
 
     fn build_connect_options(config: &NatsConfiguration) -> async_nats::ConnectOptions {

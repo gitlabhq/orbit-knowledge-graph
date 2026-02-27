@@ -18,6 +18,10 @@ fn default_grpc_bind_address() -> SocketAddr {
     "127.0.0.1:50054".parse().unwrap()
 }
 
+fn default_indexer_health_bind_address() -> SocketAddr {
+    "0.0.0.0:4202".parse().unwrap()
+}
+
 fn default_jwt_clock_skew_secs() -> u64 {
     60
 }
@@ -48,6 +52,8 @@ pub struct AppConfig {
     pub modules: ModulesConfig,
     #[serde(default)]
     pub health_check: HealthCheckConfig,
+    #[serde(default = "default_indexer_health_bind_address")]
+    pub indexer_health_bind_address: SocketAddr,
     #[serde(default)]
     pub metrics: MetricsConfig,
 }
