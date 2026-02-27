@@ -35,6 +35,7 @@ pub mod dispatcher;
 pub mod engine;
 pub mod entities;
 pub(crate) mod env;
+pub mod health;
 pub mod locking;
 pub mod metrics;
 pub mod module;
@@ -47,6 +48,7 @@ pub mod worker_pool;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use clickhouse::ClickHouseConfiguration;
@@ -54,6 +56,7 @@ use clickhouse::ClickHouseDestination;
 use configuration::EngineConfiguration;
 use engine::EngineBuilder;
 use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use health::{HealthState, run_health_server};
 use module::{ModuleInitError, ModuleRegistry};
 use modules::code::config::CodeIndexingConfig;
 use modules::sdlc::config::SdlcIndexingConfig;
@@ -63,6 +66,10 @@ use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+
+fn default_health_bind_address() -> SocketAddr {
+    "0.0.0.0:4202".parse().unwrap()
+}
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct IndexerConfig {
@@ -78,6 +85,8 @@ pub struct IndexerConfig {
     pub gitlab: Option<GitlabClientConfiguration>,
     #[serde(default)]
     pub modules: ModulesConfig,
+    #[serde(default = "default_health_bind_address")]
+    pub health_bind_address: SocketAddr,
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
@@ -101,6 +110,9 @@ pub enum IndexerError {
 
     #[error("Module initialization failed: {0}")]
     ModuleInit(#[from] ModuleInitError),
+
+    #[error("Health server failed: {0}")]
+    Health(#[from] std::io::Error),
 }
 
 /// Runs the indexer until completion or until the token is cancelled.
@@ -142,6 +154,12 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
 
     info!(topics = registry.topics().len(), "registered modules");
 
+    let health_state = HealthState {
+        nats_client: broker.nats_client().clone(),
+        graph_client: config.graph.build_client(),
+        datalake_client: config.datalake.build_client(),
+    };
+
     let engine = Arc::new(
         EngineBuilder::new(broker, registry, destination)
             .metrics(metrics)
@@ -166,10 +184,18 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     }
 
     info!("indexer started");
-    let result = engine.run(&engine_config).await;
+    let result = tokio::select! {
+        result = engine.run(&engine_config) => result.map_err(IndexerError::from),
+        result = run_health_server(config.health_bind_address, health_state) => {
+            let error = result.err().unwrap_or_else(|| std::io::Error::other(
+                "health server exited unexpectedly",
+            ));
+            Err(IndexerError::Health(error))
+        }
+    };
 
     shutdown_task.abort();
 
     info!("indexer stopped");
-    result.map_err(Into::into)
+    result
 }

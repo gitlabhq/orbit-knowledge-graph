@@ -38,6 +38,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
