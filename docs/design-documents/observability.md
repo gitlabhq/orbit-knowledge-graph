@@ -36,7 +36,7 @@ Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrum
 
 **KG Indexer Service:**
 
-The indexer emits metrics under three OpenTelemetry meters: `etl_engine` for the core engine, `indexer_sdlc` for the SDLC module, and `indexer_code` for the code indexing module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
+The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the core engine, `indexer_dispatch` for the dispatch scheduling loop, `indexer_sdlc` for the SDLC module, and `indexer_code` for the code indexing module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
 
 *Engine metrics (`etl_engine`):*
 
@@ -53,6 +53,17 @@ The indexer emits metrics under three OpenTelemetry meters: `etl_engine` for the
 | `etl.destination.rows.written` | Counter | count | `table` | Total rows written to ClickHouse |
 | `etl.destination.bytes.written` | Counter | bytes | `table` | Total bytes written to ClickHouse |
 | `etl.destination.write.errors` | Counter | count | `table` | Total failed writes to ClickHouse |
+
+*Dispatch metrics (`indexer_dispatch`):*
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `indexer.dispatch.runs` | Counter | count | `dispatcher`, `outcome` (success/error) | Total dispatch runs by dispatcher |
+| `indexer.dispatch.duration` | Histogram | s | `dispatcher` | End-to-end duration of a dispatch cycle |
+| `indexer.dispatch.requests.published` | Counter | count | `dispatcher` | Namespace/global requests successfully published |
+| `indexer.dispatch.requests.skipped` | Counter | count | `dispatcher` | Requests skipped due to lock contention |
+| `indexer.dispatch.query.duration` | Histogram | s | | Duration of the enabled-namespaces ClickHouse query |
+| `indexer.dispatch.errors` | Counter | count | `dispatcher`, `stage` (lock/publish/query) | Dispatch errors by stage |
 
 *SDLC module metrics (`indexer_sdlc`):*
 

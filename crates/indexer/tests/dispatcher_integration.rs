@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
 use indexer::dispatcher::Dispatcher;
-use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use indexer::modules::sdlc::dispatch::{DispatchMetrics, GlobalDispatcher, NamespaceDispatcher};
 use indexer::nats::NatsConfiguration;
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT};
 use serde::Deserialize;
@@ -186,15 +186,18 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         .await
         .unwrap();
     let datalake = context.clickhouse.config.build_client();
+    let metrics = DispatchMetrics::new();
     let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
             services.lock_service.clone(),
+            metrics.clone(),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats,
             services.lock_service,
             datalake,
+            metrics,
         )),
     ];
 

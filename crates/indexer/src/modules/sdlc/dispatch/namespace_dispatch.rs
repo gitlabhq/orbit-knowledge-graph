@@ -1,9 +1,11 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use tracing::{debug, info};
 
+use super::metrics::DispatchMetrics;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::dispatcher::extract::FromArrowColumn;
 use crate::dispatcher::{DispatchError, Dispatcher};
@@ -24,6 +26,7 @@ pub struct NamespaceDispatcher {
     nats: Arc<dyn NatsServices>,
     lock_service: Arc<dyn LockService>,
     datalake: ArrowClickHouseClient,
+    metrics: DispatchMetrics,
 }
 
 impl NamespaceDispatcher {
@@ -31,11 +34,13 @@ impl NamespaceDispatcher {
         nats: Arc<dyn NatsServices>,
         lock_service: Arc<dyn LockService>,
         datalake: ArrowClickHouseClient,
+        metrics: DispatchMetrics,
     ) -> Self {
         Self {
             nats,
             lock_service,
             datalake,
+            metrics,
         }
     }
 }
@@ -47,12 +52,32 @@ impl Dispatcher for NamespaceDispatcher {
     }
 
     async fn dispatch(&self) -> Result<(), DispatchError> {
+        let start = Instant::now();
+
+        let result = self.dispatch_inner().await;
+
+        let duration = start.elapsed().as_secs_f64();
+        let outcome = if result.is_ok() { "success" } else { "error" };
+        self.metrics.record_run(self.name(), outcome, duration);
+
+        result
+    }
+}
+
+impl NamespaceDispatcher {
+    async fn dispatch_inner(&self) -> Result<(), DispatchError> {
+        let query_start = Instant::now();
         let arrow_batches = self
             .datalake
             .query(ENABLED_NAMESPACE_QUERY)
             .fetch_arrow()
             .await
-            .map_err(DispatchError::new)?;
+            .map_err(|error| {
+                self.metrics.record_error(self.name(), "query");
+                DispatchError::new(error)
+            })?;
+        self.metrics
+            .record_query_duration(query_start.elapsed().as_secs_f64());
 
         let namespace_ids = i64::extract_column(&arrow_batches, 0).map_err(DispatchError::new)?;
         let organization_ids =
@@ -64,8 +89,8 @@ impl Dispatcher for NamespaceDispatcher {
         );
 
         let watermark = Utc::now();
-        let mut dispatched = 0;
-        let mut skipped = 0;
+        let mut dispatched: u64 = 0;
+        let mut skipped: u64 = 0;
 
         for (namespace_id, organization_id) in namespace_ids.iter().zip(organization_ids.iter()) {
             let lock_key = namespace_lock_key(*organization_id, *namespace_id);
@@ -73,7 +98,10 @@ impl Dispatcher for NamespaceDispatcher {
                 .lock_service
                 .try_acquire(&lock_key, LOCK_TTL)
                 .await
-                .map_err(DispatchError::new)?;
+                .map_err(|error| {
+                    self.metrics.record_error(self.name(), "lock");
+                    DispatchError::new(error)
+                })?;
 
             if !acquired {
                 skipped += 1;
@@ -90,12 +118,18 @@ impl Dispatcher for NamespaceDispatcher {
                 namespace: *namespace_id,
                 watermark,
             })
-            .map_err(DispatchError::new)?;
+            .map_err(|error| {
+                self.metrics.record_error(self.name(), "publish");
+                DispatchError::new(error)
+            })?;
 
             self.nats
                 .publish(&NamespaceIndexingRequest::topic(), &envelope)
                 .await
-                .map_err(DispatchError::new)?;
+                .map_err(|error| {
+                    self.metrics.record_error(self.name(), "publish");
+                    DispatchError::new(error)
+                })?;
 
             dispatched += 1;
             debug!(
@@ -104,6 +138,10 @@ impl Dispatcher for NamespaceDispatcher {
                 "dispatched namespace indexing request"
             );
         }
+
+        self.metrics
+            .record_requests_published(self.name(), dispatched);
+        self.metrics.record_requests_skipped(self.name(), skipped);
 
         info!(
             dispatched,
