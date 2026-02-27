@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 
@@ -92,6 +94,58 @@ impl SdlcMetrics {
             transform_duration,
             watermark_lag,
         }
+    }
+}
+
+impl SdlcMetrics {
+    pub(super) fn record_pipeline_error(&self, entity: &str, error_kind: &str) {
+        self.pipeline_errors.add(
+            1,
+            &[
+                KeyValue::new("entity", entity.to_owned()),
+                KeyValue::new("error_kind", error_kind.to_owned()),
+            ],
+        );
+    }
+
+    pub(super) fn record_pipeline_completion(
+        &self,
+        entity: &str,
+        duration: f64,
+        rows: u64,
+        edges: u64,
+        batches: u64,
+    ) {
+        let labels = [KeyValue::new("entity", entity.to_owned())];
+        self.pipeline_duration.record(duration, &labels);
+        self.pipeline_rows_processed.add(rows, &labels);
+        self.pipeline_edges_processed.add(edges, &labels);
+        self.pipeline_batches_processed.add(batches, &labels);
+    }
+
+    pub(super) fn record_datalake_query_duration(&self, entity: &str, duration: f64) {
+        self.datalake_query_duration
+            .record(duration, &[KeyValue::new("entity", entity.to_owned())]);
+    }
+
+    pub(super) fn record_transform_duration(&self, entity: &str, duration: f64) {
+        self.transform_duration
+            .record(duration, &[KeyValue::new("entity", entity.to_owned())]);
+    }
+
+    pub(super) fn record_handler_duration(&self, handler: &'static str, duration: f64) {
+        self.handler_duration
+            .record(duration, &[KeyValue::new("handler", handler)]);
+    }
+
+    pub(super) fn record_watermark_lag(&self, entity: &str, watermark: &DateTime<Utc>) {
+        let lag = Utc::now()
+            .signed_duration_since(*watermark)
+            .num_milliseconds()
+            .max(0) as f64
+            / 1000.0;
+        self.watermark_lag
+            .record(lag, &[KeyValue::new("entity", entity.to_owned())]);
     }
 }
 

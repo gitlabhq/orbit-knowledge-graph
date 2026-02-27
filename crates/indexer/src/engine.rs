@@ -286,14 +286,12 @@ async fn process_message(
         }
     };
 
-    runtime.metrics.messages_processed.add(
-        1,
-        &[topic_label.clone(), KeyValue::new("outcome", outcome_label)],
-    );
-    runtime.metrics.message_duration.record(
-        message_start.elapsed().as_secs_f64(),
-        std::slice::from_ref(&topic_label),
-    );
+    runtime
+        .metrics
+        .record_message_outcome(&topic_label, outcome_label);
+    runtime
+        .metrics
+        .record_message_duration(&topic_label, message_start.elapsed().as_secs_f64());
 }
 
 async fn run_handlers(
@@ -312,19 +310,14 @@ async fn run_handlers(
         let handler_start = Instant::now();
         let result = handler.handle(context.clone(), envelope.clone()).await;
 
-        runtime.metrics.handler_duration.record(
-            handler_start.elapsed().as_secs_f64(),
-            &[KeyValue::new("handler", handler.name().to_owned())],
-        );
+        runtime
+            .metrics
+            .record_handler_duration(handler.name(), handler_start.elapsed().as_secs_f64());
 
         if let Err(error) = result {
-            runtime.metrics.handler_errors.add(
-                1,
-                &[
-                    KeyValue::new("handler", handler.name().to_owned()),
-                    KeyValue::new("error_kind", error.error_kind()),
-                ],
-            );
+            runtime
+                .metrics
+                .record_handler_error(handler.name(), error.error_kind());
 
             let module_config = runtime.configuration.modules.get(module_name.as_ref());
             let max_attempts = module_config.and_then(|c| c.max_retry_attempts);

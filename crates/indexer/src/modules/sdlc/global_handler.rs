@@ -9,7 +9,6 @@ use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use opentelemetry::KeyValue;
 use serde::Serialize;
 use tracing::{debug, error, info};
 
@@ -119,20 +118,14 @@ impl Handler for GlobalHandler {
                 }
                 Err(error) => {
                     error!(entity = pipeline.entity_name(), %error, "pipeline processing failed");
-                    self.metrics.pipeline_errors.add(
-                        1,
-                        &[
-                            KeyValue::new("entity", pipeline.entity_name().to_owned()),
-                            KeyValue::new("error_kind", error.error_kind()),
-                        ],
-                    );
+                    self.metrics
+                        .record_pipeline_error(pipeline.entity_name(), error.error_kind());
                     errors.push((pipeline.entity_name().to_string(), error));
                 }
             }
         }
 
         let elapsed = started_at.elapsed();
-        let handler_labels = [KeyValue::new("handler", "global-handler")];
 
         if errors.is_empty() && total_rows_indexed > 0 {
             self.watermark_store
@@ -142,14 +135,8 @@ impl Handler for GlobalHandler {
                     HandlerError::Processing(format!("failed to update global watermark: {e}"))
                 })?;
 
-            let lag = Utc::now()
-                .signed_duration_since(payload.watermark)
-                .num_milliseconds()
-                .max(0) as f64
-                / 1000.0;
             self.metrics
-                .watermark_lag
-                .record(lag, &[KeyValue::new("entity", "global")]);
+                .record_watermark_lag("global", &payload.watermark);
 
             info!(
                 watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
@@ -170,8 +157,7 @@ impl Handler for GlobalHandler {
         }
 
         self.metrics
-            .handler_duration
-            .record(elapsed.as_secs_f64(), &handler_labels);
+            .record_handler_duration("global-handler", elapsed.as_secs_f64());
 
         if !errors.is_empty() {
             let failed_count = errors.len();

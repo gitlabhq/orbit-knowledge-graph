@@ -95,6 +95,11 @@ impl CodeMetrics {
             .add(1, &[KeyValue::new("outcome", outcome)]);
     }
 
+    pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {
+        self.files_processed
+            .add(count, &[KeyValue::new("outcome", outcome)]);
+    }
+
     pub(super) fn record_node_counts(&self, graph_data: &GraphData) {
         self.nodes_indexed.add(
             graph_data.directory_nodes.len() as u64,

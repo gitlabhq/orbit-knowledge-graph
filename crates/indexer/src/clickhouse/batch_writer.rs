@@ -17,7 +17,6 @@ use std::sync::Arc;
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use clickhouse_client::ArrowClickHouseClient;
-use opentelemetry::KeyValue;
 
 use crate::destination::{BatchWriter, DestinationError};
 use crate::metrics::EngineMetrics;
@@ -50,33 +49,20 @@ impl BatchWriter for ClickHouseBatchWriter {
         }
 
         let start = std::time::Instant::now();
-        let table_label = KeyValue::new("table", self.table.clone());
 
         if let Err(error) = self.client.insert_arrow(&self.table, batches).await {
-            self.metrics
-                .destination_write_errors
-                .add(1, std::slice::from_ref(&table_label));
+            self.metrics.record_write_error(&self.table);
             return Err(error.into());
         }
 
         let elapsed = start.elapsed().as_secs_f64();
-
-        self.metrics
-            .destination_write_duration
-            .record(elapsed, std::slice::from_ref(&table_label));
-
         let total_rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-        self.metrics
-            .destination_rows_written
-            .add(total_rows, std::slice::from_ref(&table_label));
-
         let total_bytes: u64 = batches
             .iter()
             .map(|b| b.get_array_memory_size() as u64)
             .sum();
         self.metrics
-            .destination_bytes_written
-            .add(total_bytes, std::slice::from_ref(&table_label));
+            .record_write_success(&self.table, elapsed, total_rows, total_bytes);
 
         Ok(())
     }
