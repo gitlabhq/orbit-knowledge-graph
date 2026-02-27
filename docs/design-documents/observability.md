@@ -86,6 +86,25 @@ The indexer emits metrics under three OpenTelemetry meters: `etl_engine` for the
 - **Query Health**: p50/p95 latency by tool (`find_nodes`, `traverse`, `explore`, `aggregate`), memory spikes, and rows/bytes read per query.
 - MCP tools latency (p50, p95, p99), usage and success rate
 
+*Query pipeline metrics (`query_pipeline`):*
+
+The query pipeline instruments end-to-end query execution from security check through formatted output. All histograms and counters carry a `query_type` label (for example, `find_nodes`, `traverse`, `explore`, `aggregate`).
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `qp.queries_total` | Counter | `query_type`, `status` (ok / error code) | Total queries processed through the pipeline |
+| `qp.pipeline_duration_ms` | Histogram | `query_type`, `status` | End-to-end pipeline duration from security check to formatted output |
+| `qp.compile_duration_ms` | Histogram | `query_type` | Time spent compiling a query from JSON to parameterized SQL |
+| `qp.execute_duration_ms` | Histogram | `query_type` | Time spent executing the compiled query against ClickHouse |
+| `qp.authorization_duration_ms` | Histogram | `query_type` | Time spent on authorization exchange with Rails |
+| `qp.hydration_duration_ms` | Histogram | `query_type` | Time spent hydrating neighbor properties from ClickHouse |
+| `qp.result_set_size` | Histogram | `query_type` | Number of rows returned after formatting |
+| `qp.node_count` | Histogram | `query_type` | Number of Arrow record batches returned from ClickHouse |
+| `qp.redacted_count` | Histogram | `query_type` | Number of rows redacted per query |
+| `qp.error.security_rejected` | Counter | `reason` (security) | Pipeline rejected due to invalid or missing security context |
+| `qp.error.execution_failed` | Counter | `reason` (execution) | ClickHouse query execution failed |
+| `qp.error.authorization_failed` | Counter | `reason` (authorization) | Authorization exchange with Rails failed |
+
 *Query engine metrics (`query_engine`):*
 
 The query engine fires counters during compilation to track security-relevant rejections. Each counter uses a `reason` label for low-cardinality breakdown. Counters marked "server layer" are exported for the gRPC/HTTP layer to increment.
