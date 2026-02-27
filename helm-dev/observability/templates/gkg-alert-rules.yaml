@@ -1,0 +1,204 @@
+{{- if and (index .Values "kube-prometheus-stack" "enabled") .Values.alerting.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "obs.fullname" . }}-gkg-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "obs.labels" . | nindent 4 }}
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    # ── Security alerts ──────────────────────────────────────────────
+    # These fire on authorization and compiler-integrity failures.
+    # Any non-zero value is considered anomalous.
+    - name: gkg-security
+      rules:
+        - alert: GKGAuthFilterMissing
+          expr: increase(qe_threat_auth_filter_missing_total[5m]) > {{ .Values.alerting.rules.authFilterMissing.threshold }}
+          for: {{ .Values.alerting.rules.authFilterMissing.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.authFilterMissing.severity }}
+            service: gkg
+            domain: security
+          annotations:
+            summary: Query processed without authorization filter
+            description: >-
+              {{ "{{" }} $value {{ "}}" }} queries were processed without a valid
+              security context in the last 5 minutes. This means authorization
+              filtering was bypassed — investigate immediately.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgauthfiltermissing-critical
+
+        - alert: GKGPipelineInvariantViolated
+          expr: increase(qe_internal_pipeline_invariant_violated_total[5m]) > {{ .Values.alerting.rules.pipelineInvariantViolated.threshold }}
+          for: {{ .Values.alerting.rules.pipelineInvariantViolated.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.pipelineInvariantViolated.severity }}
+            service: gkg
+            domain: security
+          annotations:
+            summary: Query compiler internal invariant violated
+            description: >-
+              {{ "{{" }} $value {{ "}}" }} pipeline invariant violations detected
+              (reason={{ "{{" }} $labels.reason {{ "}}" }}). The query compiler
+              reached a state that upstream validation should have prevented.
+              This may indicate a compiler bug producing incorrect SQL.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgpipelineinvariantviolated-critical
+
+        - alert: GKGSecurityRejected
+          expr: increase(qp_error_security_rejected_total[5m]) > {{ .Values.alerting.rules.securityRejected.threshold }}
+          for: {{ .Values.alerting.rules.securityRejected.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.securityRejected.severity }}
+            service: gkg
+            domain: security
+          annotations:
+            summary: Pipeline rejected requests due to invalid security context
+            description: >-
+              {{ "{{" }} $value {{ "}}" }} requests rejected at the pipeline
+              security gate. Sustained rejections may indicate a misconfigured
+              client or credential expiry.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgsecurityrejected-warning
+
+    # ── Query health alerts ──────────────────────────────────────────
+    # These fire on sustained error rates or latency degradation.
+    - name: gkg-query-health
+      rules:
+        - alert: GKGQueryingErrorRateHigh
+          expr: >-
+            (
+              rate(qp_queries_total_total{status!="ok"}[5m])
+              / on() rate(qp_queries_total_total[5m])
+            ) > {{ .Values.alerting.rules.errorRate.threshold }}
+            and rate(qp_queries_total_total[5m]) > 0
+          for: {{ .Values.alerting.rules.errorRate.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.errorRate.severity }}
+            service: gkg
+            domain: availability
+          annotations:
+            summary: "Overall query error rate exceeds {{ .Values.alerting.rules.errorRate.threshold }} ({{ "{{" }} $value | humanizePercentage {{ "}}" }})"
+            description: >-
+              {{ "{{" }} $value | humanizePercentage {{ "}}" }} of all queries are
+              failing across all error categories. This is the aggregate
+              availability SLI — check individual alerts for root cause.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgqueryingerrorratehigh-warning
+
+        - alert: GKGQueryTimeoutRateHigh
+          expr: >-
+            (
+              rate(qe_threat_timeout_total[5m])
+              / on() rate(qp_queries_total_total[5m])
+            ) > {{ .Values.alerting.rules.timeoutRate.threshold }}
+            and rate(qp_queries_total_total[5m]) > 0
+          for: {{ .Values.alerting.rules.timeoutRate.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.timeoutRate.severity }}
+            service: gkg
+            domain: performance
+          annotations:
+            summary: "Query timeout rate exceeds {{ .Values.alerting.rules.timeoutRate.threshold }} ({{ "{{" }} $value | humanizePercentage {{ "}}" }})"
+            description: >-
+              {{ "{{" }} $value | humanizePercentage {{ "}}" }} of queries are
+              timing out over the last 5 minutes. This may indicate ClickHouse
+              saturation, pathological queries, or an undersized deadline.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgquerytimeoutratehigh-warning
+
+        - alert: GKGValidationFailedBurst
+          expr: rate(qe_threat_validation_failed_total[5m]) * 60 > {{ .Values.alerting.rules.validationFailed.threshold }}
+          for: {{ .Values.alerting.rules.validationFailed.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.validationFailed.severity }}
+            service: gkg
+            domain: query
+          annotations:
+            summary: Sustained burst of query validation failures
+            description: >-
+              {{ "{{" }} $value | humanize {{ "}}" }} validation failures/min
+              (reason={{ "{{" }} $labels.reason {{ "}}" }}). A sustained burst may
+              indicate a broken client integration or probing attack.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgvalidationfailedburst-warning
+
+        - alert: GKGAllowlistRejectedBurst
+          expr: rate(qe_threat_allowlist_rejected_total[5m]) * 60 > {{ .Values.alerting.rules.allowlistRejected.threshold }}
+          for: {{ .Values.alerting.rules.allowlistRejected.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.allowlistRejected.severity }}
+            service: gkg
+            domain: query
+          annotations:
+            summary: Sustained burst of ontology allowlist rejections
+            description: >-
+              {{ "{{" }} $value | humanize {{ "}}" }} allowlist rejections/min
+              (reason={{ "{{" }} $labels.reason {{ "}}" }}). May indicate schema
+              drift between client and server, or an enumeration attempt.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgallowlistrejectedburst-warning
+
+        - alert: GKGExecutionFailureRate
+          expr: rate(qp_error_execution_failed_total[5m]) * 60 > {{ .Values.alerting.rules.executionFailed.threshold }}
+          for: {{ .Values.alerting.rules.executionFailed.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.executionFailed.severity }}
+            service: gkg
+            domain: backend
+          annotations:
+            summary: ClickHouse query execution failures detected
+            description: >-
+              {{ "{{" }} $value | humanize {{ "}}" }} ClickHouse execution
+              failures/min. Check ClickHouse cluster health, query complexity
+              limits, and resource quotas.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgexecutionfailurerate-warning
+
+        - alert: GKGAuthorizationFailureRate
+          expr: rate(qp_error_authorization_failed_total[5m]) * 60 > {{ .Values.alerting.rules.authorizationFailed.threshold }}
+          for: {{ .Values.alerting.rules.authorizationFailed.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.authorizationFailed.severity }}
+            service: gkg
+            domain: backend
+          annotations:
+            summary: Rails authorization exchange failures detected
+            description: >-
+              {{ "{{" }} $value | humanize {{ "}}" }} authorization exchange
+              failures/min. The redaction exchange with Rails is failing —
+              check Rails gRPC connectivity, certificate validity, and Rails
+              service health.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgauthorizationfailurerate-warning
+
+        - alert: GKGPipelineLatencyP95High
+          expr: >-
+            histogram_quantile(0.95,
+              sum(rate(qp_pipeline_duration_ms_bucket[5m])) by (le)
+            ) > {{ .Values.alerting.rules.pipelineLatencyP95.threshold }}
+          for: {{ .Values.alerting.rules.pipelineLatencyP95.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.pipelineLatencyP95.severity }}
+            service: gkg
+            domain: performance
+          annotations:
+            summary: "Pipeline p95 latency exceeds threshold ({{ "{{" }} $value | humanize {{ "}}" }}ms)"
+            description: >-
+              p95 end-to-end pipeline latency is {{ "{{" }} $value | humanize {{ "}}" }}ms.
+              Break down by stage (compile, execute, authorization, hydration)
+              to identify the bottleneck.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgpipelinelatencyp95high-warning
+
+    # ── Capacity alerts ──────────────────────────────────────────────
+    - name: gkg-capacity
+      rules:
+        - alert: GKGRateLimitedHigh
+          expr: rate(qe_threat_rate_limited_total[5m]) * 60 > {{ .Values.alerting.rules.rateLimited.threshold }}
+          for: {{ .Values.alerting.rules.rateLimited.for }}
+          labels:
+            severity: {{ .Values.alerting.rules.rateLimited.severity }}
+            service: gkg
+            domain: capacity
+          annotations:
+            summary: High rate of throttled callers
+            description: >-
+              {{ "{{" }} $value | humanize {{ "}}" }} callers/min are being rate
+              limited. This may indicate legitimate traffic growth requiring
+              capacity scaling, or a traffic spike from a single consumer.
+            runbook_url: {{ .Values.alerting.runbookBaseUrl }}.md#gkgratelimitedhigh-warning
+{{- end }}

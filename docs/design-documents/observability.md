@@ -107,6 +107,38 @@ The query engine fires counters during compilation to track security-relevant re
 
 Prometheus scrapes these metrics into Grafana Mimir. We also maintain dashboards for the ClickHouse layer (queries, merges, background tasks).
 
+### Alert Rules
+
+Alert rules are defined as a `PrometheusRule` CRD in `helm-dev/observability/templates/gkg-alert-rules.yaml`, automatically discovered by the Prometheus Operator. Thresholds are configurable via Helm values (`alerting.rules.*`). Alerts are disabled by default and enabled per environment (currently active in sandbox).
+
+Metrics flow through OTel SDK → OTLP → Alloy → Prometheus remote\_write. The OTel-to-Prometheus conversion replaces dots with underscores and appends `_total` for counters (e.g., `qe.threat.auth_filter_missing` → `qe_threat_auth_filter_missing_total`).
+
+**Security alerts** (any non-zero count is anomalous):
+
+| Alert | Metric | Default Threshold | Severity | `for` | Fires when |
+|---|---|---|---|---|---|
+| `GKGAuthFilterMissing` | `qe_threat_auth_filter_missing_total` | > 0 in 5m | critical | 1m | A query was processed without a valid security context, meaning authorization filtering was bypassed |
+| `GKGPipelineInvariantViolated` | `qe_internal_pipeline_invariant_violated_total` | > 0 in 5m | critical | 1m | The query compiler reached a state that upstream validation should have prevented — may produce incorrect SQL |
+| `GKGSecurityRejected` | `qp_error_security_rejected_total` | > 0 in 5m | warning | 5m | Pipeline rejected a request due to invalid or missing security context |
+
+**Query health alerts** (sustained error rates or latency degradation):
+
+| Alert | Metric | Default Threshold | Severity | `for` | Fires when |
+|---|---|---|---|---|---|
+| `GKGQueryingErrorRateHigh` | `qp_queries_total_total{status!="ok"}` / `qp_queries_total_total` | > 5% | warning | 5m | Aggregate error rate across all failure modes exceeds threshold — the availability SLI |
+| `GKGQueryTimeoutRateHigh` | `qe_threat_timeout_total` / `qp_queries_total_total` | > 5% | warning | 5m | More than 5% of queries time out, indicating ClickHouse saturation or pathological queries |
+| `GKGValidationFailedBurst` | `qe_threat_validation_failed_total` | > 10/min | warning | 5m | Sustained burst of structural validation failures (broken client or probing) |
+| `GKGAllowlistRejectedBurst` | `qe_threat_allowlist_rejected_total` | > 5/min | warning | 5m | Sustained ontology violations (schema drift or enumeration attempt) |
+| `GKGExecutionFailureRate` | `qp_error_execution_failed_total` | > 1/min | warning | 5m | ClickHouse query execution is failing |
+| `GKGAuthorizationFailureRate` | `qp_error_authorization_failed_total` | > 1/min | warning | 5m | Rails authorization exchange is failing |
+| `GKGPipelineLatencyP95High` | `qp_pipeline_duration_ms` (histogram) | > 5000ms | warning | 10m | p95 end-to-end pipeline latency exceeds threshold |
+
+**Capacity alerts** (traffic and limit pressure):
+
+| Alert | Metric | Default Threshold | Severity | `for` | Fires when |
+|---|---|---|---|---|---|
+| `GKGRateLimitedHigh` | `qe_threat_rate_limited_total` | > 10/min | warning | 5m | High rate of throttled callers — may need capacity scaling |
+
 ### Logging
 
 All logs are structured JSON, shipped to Logstash and Elasticsearch. Every log entry includes a correlation ID so you can trace a request across services.

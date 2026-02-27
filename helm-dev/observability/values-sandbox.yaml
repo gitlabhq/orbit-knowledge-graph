@@ -1,5 +1,8 @@
 # Sandbox environment values for observability chart
 
+alerting:
+  enabled: true
+
 gcp:
   project: gl-knowledgegraph-prj-f2eec59d
   region: us-central1
