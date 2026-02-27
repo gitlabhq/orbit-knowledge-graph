@@ -299,6 +299,128 @@ kubectl logs -n gkg deployment/gkg-gitlab-runner --tail=50
 kubectl get pods -n gkg | grep runner-
 ```
 
+## Alert Response
+
+Alert rules are deployed via the `PrometheusRule` CRD in the observability Helm chart.
+Check active alerts in Grafana (Alerting → Alert rules) or query Alertmanager directly:
+
+```shell
+kubectl port-forward -n gkg svc/gkg-obs-kube-prometheus-st-alertmanager 9093:9093
+# then open http://localhost:9093
+```
+
+### Security Alerts
+
+#### GKGAuthFilterMissing (Critical)
+
+A query was processed without a valid security context — authorization filtering was bypassed.
+
+1. Check which pod emitted the metric: search Loki for `auth_filter_missing` or `security context` errors
+2. Determine whether the query returned data (check ClickHouse query log for the correlation ID)
+3. If data was returned without authorization, assess the scope of exposure
+4. Investigate the caller: check the request's JWT claims, source IP, and gRPC metadata
+5. Escalate to the security team if unauthorized data access is confirmed
+
+#### GKGPipelineInvariantViolated (Critical)
+
+The query compiler reached a state that upstream validation should have prevented — the generated SQL may be incorrect or unsafe.
+
+1. Check the `reason` label (`lowering` or `codegen`) to identify the compiler stage
+2. Search Loki for the correlation ID to find the full query JSON and error details
+3. Reproduce with the query JSON against a local instance to confirm the bug
+4. If the invariant violation could produce unsafe SQL (missing WHERE clauses, wrong joins), consider temporarily blocking the query pattern at the validation layer
+5. File a bug with the query JSON and compiler error attached
+
+#### GKGSecurityRejected (Warning)
+
+The pipeline rejected a request because the security context was invalid or missing.
+
+1. Check whether the rejections come from a single caller or are widespread
+2. If single caller: likely a misconfigured integration — check their JWT token validity
+3. If widespread: check whether the JWT signing key was rotated without updating GKG config
+4. Review the `reason` label in Prometheus for specifics
+
+### Query Health Alerts
+
+#### GKGQueryingErrorRateHigh (Warning)
+
+More than 5% of all queries are failing across all error categories.
+
+1. This is the aggregate availability signal — check which individual alerts are also firing
+2. Break down by `status` label in Prometheus: `rate(qp_queries_total_total{status!="ok"}[5m])` grouped by `status`
+3. If a single status dominates, follow the corresponding alert's runbook entry
+4. If errors are spread across multiple statuses, check for a shared root cause (network partition, resource exhaustion, deployment rollout)
+5. If no individual alert is firing, the errors are distributed below each threshold — investigate the long tail
+
+#### GKGQueryTimeoutRateHigh (Warning)
+
+More than 5% of queries are timing out.
+
+1. Check which query types are timing out (use `query_type` label on `qp.pipeline_duration_ms`)
+2. Check ClickHouse system tables for slow queries: `SELECT * FROM system.query_log WHERE query_duration_ms > 5000 ORDER BY event_time DESC LIMIT 20`
+3. Look for pathological query patterns (large traversals, unselective filters)
+4. Check ClickHouse resource utilization (CPU, memory, merge queue depth)
+5. If ClickHouse is healthy, the timeout deadline may need adjustment
+
+#### GKGValidationFailedBurst (Warning)
+
+Sustained burst of structural validation failures.
+
+1. Check the `reason` label breakdown (parse, schema, reference, pagination)
+2. If `parse`: a client is sending malformed JSON — identify the caller
+3. If `schema`/`reference`: a client is using outdated entity names — check whether the ontology was recently updated
+4. If distributed across reasons: possible probing or fuzzing attempt — check source IPs
+
+#### GKGAllowlistRejectedBurst (Warning)
+
+Sustained rate of ontology allowlist rejections.
+
+1. Check the `reason` label (ontology vs ontology_internal)
+2. If `ontology`: a client is requesting entities/columns not in the ontology — likely schema drift after an ontology update
+3. If `ontology_internal`: a bug in the ontology loader — check recent ontology YAML changes
+4. Notify affected consumers if an ontology change removed previously valid entities
+
+#### GKGExecutionFailureRate (Warning)
+
+ClickHouse query execution is failing.
+
+1. Check ClickHouse health: `SELECT * FROM system.errors ORDER BY last_error_time DESC LIMIT 10`
+2. Check for resource exhaustion: `SELECT * FROM system.metrics WHERE metric LIKE '%Memory%'`
+3. Check if the GKG role's quotas were hit (`max_memory_usage`, `max_rows_to_read`)
+4. Review recent schema migrations — a missing table or column will cause execution failures
+5. If ClickHouse is unreachable, check network connectivity and DNS resolution
+
+#### GKGAuthorizationFailureRate (Warning)
+
+The redaction exchange with Rails is failing.
+
+1. Check Rails gRPC endpoint health from the GKG pod: `grpcurl -plaintext <rails-host>:<port> grpc.health.v1.Health/Check`
+2. Check for certificate expiry if TLS is enabled
+3. Check Loki for `RedactionExchangeError` details (timeout vs connection refused vs protocol error)
+4. If Rails is healthy but GKG can't reach it, check NetworkPolicy and DNS resolution
+5. Sustained failures mean query results are not being redacted — assess whether to pause the query service
+
+#### GKGPipelineLatencyP95High (Warning)
+
+p95 end-to-end pipeline latency exceeds threshold.
+
+1. Break down by stage using Grafana: compile, execute, authorization, hydration durations
+2. If `execute` is the bottleneck: ClickHouse performance issue (see GKGExecutionFailureRate)
+3. If `authorization` is the bottleneck: Rails latency issue (see GKGAuthorizationFailureRate)
+4. If `compile` is the bottleneck: unusually complex queries — check recent query patterns
+5. If `hydration` is the bottleneck: check neighbor property lookups and ClickHouse read performance
+
+### Capacity Alerts
+
+#### GKGRateLimitedHigh (Warning)
+
+High rate of throttled callers.
+
+1. Check whether a single consumer is responsible (check caller labels if available)
+2. If legitimate traffic growth: scale the webserver deployment or increase rate limits
+3. If a traffic spike from one consumer: contact the consumer team
+4. Review whether the rate limit configuration matches the current capacity
+
 ## Secrets
 
 ### GCP Secret Manager
