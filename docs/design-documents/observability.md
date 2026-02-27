@@ -36,7 +36,7 @@ Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrum
 
 **KG Indexer Service:**
 
-The indexer emits metrics under two OpenTelemetry meters: `etl_engine` for the core engine and `indexer_sdlc` for the SDLC module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
+The indexer emits metrics under three OpenTelemetry meters: `etl_engine` for the core engine, `indexer_sdlc` for the SDLC module, and `indexer_code` for the code indexing module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
 
 *Engine metrics (`etl_engine`):*
 
@@ -67,6 +67,19 @@ The indexer emits metrics under two OpenTelemetry meters: `etl_engine` for the c
 | `indexer.sdlc.datalake.query.duration` | Histogram | s | `entity` | Duration of ClickHouse datalake extraction queries |
 | `indexer.sdlc.transform.duration` | Histogram | s | `entity` | Duration of DataFusion SQL transform per batch |
 | `indexer.sdlc.watermark.lag` | Gauge | s | `entity` | Seconds between the current watermark and wall clock (data freshness) |
+
+*Code module metrics (`indexer_code`):*
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_branch, skipped_watermark, skipped_lock, skipped_project_not_found, error) | Total push events processed by the code handler |
+| `indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single push event |
+| `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of fetching and extracting a repository from Gitaly |
+| `indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
+| `indexer.code.write.duration` | Histogram | s | | Duration of writing all graph tables to ClickHouse |
+| `indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
+| `indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
+| `indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, repository_extract, indexing, arrow_conversion, write, watermark) | Code indexing errors by pipeline stage |
 
 **KG Web Service:**
 
