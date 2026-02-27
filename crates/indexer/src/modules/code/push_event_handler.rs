@@ -12,7 +12,6 @@ use code_graph::analysis::types::GraphData;
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
 use code_graph::loading::DirectoryFileSource;
 use ontology::EDGE_TABLE;
-use opentelemetry::KeyValue;
 use siphon_proto::replication_event::Operation;
 use tempfile::TempDir;
 use tracing::{debug, info, warn};
@@ -264,14 +263,10 @@ impl PushEventHandler {
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
-        self.metrics.files_processed.add(
-            result.skipped_files.len() as u64,
-            &[KeyValue::new("outcome", "skipped")],
-        );
-        self.metrics.files_processed.add(
-            result.errored_files.len() as u64,
-            &[KeyValue::new("outcome", "errored")],
-        );
+        self.metrics
+            .record_files_processed(result.skipped_files.len() as u64, "skipped");
+        self.metrics
+            .record_files_processed(result.errored_files.len() as u64, "errored");
 
         if !result.errored_files.is_empty() {
             warn!(
@@ -290,10 +285,8 @@ impl PushEventHandler {
         // TODO: This should be done on construction of the GraphData struct.
         graph_data.assign_node_ids(project_id, branch);
 
-        self.metrics.files_processed.add(
-            graph_data.file_nodes.len() as u64,
-            &[KeyValue::new("outcome", "parsed")],
-        );
+        self.metrics
+            .record_files_processed(graph_data.file_nodes.len() as u64, "parsed");
         self.metrics.record_node_counts(&graph_data);
 
         let write_start = Instant::now();

@@ -9,7 +9,6 @@ use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use opentelemetry::KeyValue;
 use serde::Serialize;
 use tracing::{debug, error, info};
 
@@ -87,14 +86,7 @@ impl NamespaceHandler {
                 ))
             })?;
 
-        let lag = Utc::now()
-            .signed_duration_since(*watermark)
-            .num_milliseconds()
-            .max(0) as f64
-            / 1000.0;
-        self.metrics
-            .watermark_lag
-            .record(lag, &[KeyValue::new("entity", entity.to_owned())]);
+        self.metrics.record_watermark_lag(entity, watermark);
 
         Ok(())
     }
@@ -179,13 +171,8 @@ impl Handler for NamespaceHandler {
                 Ok(rows) => rows,
                 Err(error) => {
                     error!(namespace_id = payload.namespace, entity, %error, "entity pipeline failed");
-                    self.metrics.pipeline_errors.add(
-                        1,
-                        &[
-                            KeyValue::new("entity", entity.to_owned()),
-                            KeyValue::new("error_kind", error.error_kind()),
-                        ],
-                    );
+                    self.metrics
+                        .record_pipeline_error(entity, error.error_kind());
                     errors.push((entity.to_string(), error));
                     continue;
                 }
@@ -219,13 +206,8 @@ impl Handler for NamespaceHandler {
                 Ok(rows) => rows,
                 Err(error) => {
                     error!(namespace_id = payload.namespace, edge = entity, %error, "edge pipeline failed");
-                    self.metrics.pipeline_errors.add(
-                        1,
-                        &[
-                            KeyValue::new("entity", entity.to_owned()),
-                            KeyValue::new("error_kind", error.error_kind()),
-                        ],
-                    );
+                    self.metrics
+                        .record_pipeline_error(entity, error.error_kind());
                     errors.push((entity.to_string(), error));
                     continue;
                 }
@@ -240,7 +222,6 @@ impl Handler for NamespaceHandler {
         }
 
         let elapsed = started_at.elapsed();
-        let handler_labels = [KeyValue::new("handler", "namespace-handler")];
 
         if errors.is_empty() {
             let lock_key = namespace_lock_key(payload.organization, payload.namespace);
@@ -263,8 +244,7 @@ impl Handler for NamespaceHandler {
         }
 
         self.metrics
-            .handler_duration
-            .record(elapsed.as_secs_f64(), &handler_labels);
+            .record_handler_duration("namespace-handler", elapsed.as_secs_f64());
 
         if !errors.is_empty() {
             let failed_count = errors.len();

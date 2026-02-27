@@ -9,7 +9,6 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use futures::StreamExt;
 use ontology::{EDGE_TABLE, EdgeSourceEtlConfig, NodeEntity, Ontology};
-use opentelemetry::KeyValue;
 use serde_json::Value;
 use tracing::{debug, info};
 
@@ -62,7 +61,6 @@ impl OntologyEntityPipeline {
         destination: &dyn Destination,
     ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
-        let labels = [KeyValue::new("entity", self.entity_name.clone())];
 
         let entity_writer = destination
             .new_batch_writer(&self.destination_table)
@@ -98,10 +96,8 @@ impl OntologyEntityPipeline {
             .map_err(|e| {
                 HandlerError::Processing(format!("failed to query {} data: {e}", self.entity_name))
             })?;
-        self.metrics.datalake_query_duration.record(
-            query_start.elapsed().as_secs_f64(),
-            &[KeyValue::new("entity", self.entity_name.clone())],
-        );
+        self.metrics
+            .record_datalake_query_duration(&self.entity_name, query_start.elapsed().as_secs_f64());
 
         let mut batch_count: u64 = 0;
         let mut total_rows: u64 = 0;
@@ -132,18 +128,13 @@ impl OntologyEntityPipeline {
 
         let elapsed = started_at.elapsed();
 
-        self.metrics
-            .pipeline_duration
-            .record(elapsed.as_secs_f64(), &labels);
-        self.metrics
-            .pipeline_rows_processed
-            .add(total_rows, &labels);
-        self.metrics
-            .pipeline_edges_processed
-            .add(total_edges, &labels);
-        self.metrics
-            .pipeline_batches_processed
-            .add(batch_count, &labels);
+        self.metrics.record_pipeline_completion(
+            &self.entity_name,
+            elapsed.as_secs_f64(),
+            total_rows,
+            total_edges,
+            batch_count,
+        );
 
         if total_rows == 0 {
             debug!(
@@ -220,10 +211,8 @@ impl OntologyEntityPipeline {
             }
         }
 
-        self.metrics.transform_duration.record(
-            transform_start.elapsed().as_secs_f64(),
-            &[KeyValue::new("entity", self.entity_name.clone())],
-        );
+        self.metrics
+            .record_transform_duration(&self.entity_name, transform_start.elapsed().as_secs_f64());
 
         Ok(edges_written)
     }
@@ -303,7 +292,6 @@ impl OntologyEdgePipeline {
         destination: &dyn Destination,
     ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
-        let labels = [KeyValue::new("entity", self.relationship_kind.clone())];
 
         let edge_writer = destination
             .new_batch_writer(EDGE_TABLE)
@@ -332,9 +320,9 @@ impl OntologyEdgePipeline {
                     self.relationship_kind
                 ))
             })?;
-        self.metrics.datalake_query_duration.record(
+        self.metrics.record_datalake_query_duration(
+            &self.relationship_kind,
             query_start.elapsed().as_secs_f64(),
-            &[KeyValue::new("entity", self.relationship_kind.clone())],
         );
 
         let mut batch_count: u64 = 0;
@@ -365,18 +353,13 @@ impl OntologyEdgePipeline {
 
         let elapsed = started_at.elapsed();
 
-        self.metrics
-            .pipeline_duration
-            .record(elapsed.as_secs_f64(), &labels);
-        self.metrics
-            .pipeline_rows_processed
-            .add(total_rows, &labels);
-        self.metrics
-            .pipeline_edges_processed
-            .add(total_edges_written, &labels);
-        self.metrics
-            .pipeline_batches_processed
-            .add(batch_count, &labels);
+        self.metrics.record_pipeline_completion(
+            &self.relationship_kind,
+            elapsed.as_secs_f64(),
+            total_rows,
+            total_edges_written,
+            batch_count,
+        );
 
         if total_rows == 0 {
             debug!(
@@ -439,9 +422,9 @@ impl OntologyEdgePipeline {
             );
         }
 
-        self.metrics.transform_duration.record(
+        self.metrics.record_transform_duration(
+            &self.relationship_kind,
             transform_start.elapsed().as_secs_f64(),
-            &[KeyValue::new("entity", self.relationship_kind.clone())],
         );
 
         Ok(edges_count)

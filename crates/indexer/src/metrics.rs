@@ -7,6 +7,7 @@
 //! no-ops — zero overhead in production until you opt in via
 //! `opentelemetry::global::set_meter_provider()`.
 
+use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 
@@ -121,6 +122,53 @@ impl EngineMetrics {
             destination_write_errors,
             handler_errors,
         }
+    }
+}
+
+impl EngineMetrics {
+    pub(crate) fn record_message_outcome(&self, topic: &KeyValue, outcome: &'static str) {
+        self.messages_processed
+            .add(1, &[topic.clone(), KeyValue::new("outcome", outcome)]);
+    }
+
+    pub(crate) fn record_handler_error(&self, handler: &str, error_kind: &'static str) {
+        self.handler_errors.add(
+            1,
+            &[
+                KeyValue::new("handler", handler.to_owned()),
+                KeyValue::new("error_kind", error_kind),
+            ],
+        );
+    }
+
+    pub(crate) fn record_handler_duration(&self, handler: &str, duration: f64) {
+        self.handler_duration
+            .record(duration, &[KeyValue::new("handler", handler.to_owned())]);
+    }
+
+    pub(crate) fn record_message_duration(&self, topic: &KeyValue, duration: f64) {
+        self.message_duration
+            .record(duration, std::slice::from_ref(topic));
+    }
+
+    pub(crate) fn record_nats_fetch_duration(&self, duration: f64, outcome: &'static str) {
+        self.nats_fetch_duration
+            .record(duration, &[KeyValue::new("outcome", outcome)]);
+    }
+
+    pub(crate) fn record_write_success(&self, table: &str, duration: f64, rows: u64, bytes: u64) {
+        let label = KeyValue::new("table", table.to_owned());
+        self.destination_write_duration
+            .record(duration, std::slice::from_ref(&label));
+        self.destination_rows_written
+            .add(rows, std::slice::from_ref(&label));
+        self.destination_bytes_written
+            .add(bytes, std::slice::from_ref(&label));
+    }
+
+    pub(crate) fn record_write_error(&self, table: &str) {
+        self.destination_write_errors
+            .add(1, &[KeyValue::new("table", table.to_owned())]);
     }
 }
 

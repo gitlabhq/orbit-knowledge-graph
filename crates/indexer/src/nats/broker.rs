@@ -314,19 +314,16 @@ impl NatsBroker {
                     Ok(batch) => batch,
                     Err(e) => {
                         warn!(error = %e, "fetch batch error");
-                        metrics.nats_fetch_duration.record(
+                        metrics.record_nats_fetch_duration(
                             fetch_start.elapsed().as_secs_f64(),
-                            &[opentelemetry::KeyValue::new("outcome", "error")],
+                            "error",
                         );
                         let _ = sender.send(Err(map_subscribe_error(e))).await;
                         tokio::time::sleep(FETCH_RETRY_DELAY).await;
                         continue;
                     }
                 };
-                metrics.nats_fetch_duration.record(
-                    fetch_start.elapsed().as_secs_f64(),
-                    &[opentelemetry::KeyValue::new("outcome", "success")],
-                );
+                metrics.record_nats_fetch_duration(fetch_start.elapsed().as_secs_f64(), "success");
 
                 tokio::pin!(batch);
 
