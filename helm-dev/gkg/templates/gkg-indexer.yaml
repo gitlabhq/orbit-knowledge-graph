@@ -10,6 +10,7 @@ data:
   default.yaml: |
     nats:
       url: {{ include "gkg.natsUrl" . | quote }}
+      consumer_name: {{ .Values.nats.consumerName | default "gkg-indexer" | quote }}
     datalake:
       {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
     graph:
