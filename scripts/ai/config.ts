@@ -104,6 +104,7 @@ async function generate() {
     permission: {
       read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny" },
       bash: { "*": "allow", "*/proc/*/environ*": "deny" },
+      external_directory: { "/home/agent/*": "allow" },
       webfetch: "allow",
     },
     agent: agents,
