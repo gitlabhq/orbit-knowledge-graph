@@ -388,16 +388,10 @@ build-ai-proxy:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
-        - scripts/ai/Dockerfile
-        - scripts/ai/proxy.ts
-        - scripts/ai/sanitize.ts
-        - scripts/ai/package.json
+        - scripts/ai/**/*
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
-        - scripts/ai/Dockerfile
-        - scripts/ai/proxy.ts
-        - scripts/ai/sanitize.ts
-        - scripts/ai/package.json
+        - scripts/ai/**/*
       when: manual
       allow_failure: true
   script:
