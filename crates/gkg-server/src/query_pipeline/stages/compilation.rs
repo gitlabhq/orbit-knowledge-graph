@@ -25,6 +25,7 @@ impl CompilationStage {
         )?;
 
         let query_type: &'static str = compiled
+            .base
             .result_context
             .query_type
             .ok_or_else(|| PipelineError::Compile("query_type not set by enforce_return".into()))

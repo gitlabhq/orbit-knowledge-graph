@@ -1,5 +1,5 @@
 use arrow::record_batch::RecordBatch;
-use query_engine::{ParameterizedQuery, ResultContext};
+use query_engine::{CompiledQuery, ResultContext};
 use serde_json::Value;
 
 use crate::redaction::{QueryResult, ResourceAuthorization};
@@ -10,7 +10,7 @@ pub struct ExecutionOutput {
 }
 
 pub struct CompilationOutput {
-    pub compiled_query: ParameterizedQuery,
+    pub compiled_query: CompiledQuery,
 }
 
 pub struct ExtractionOutput {

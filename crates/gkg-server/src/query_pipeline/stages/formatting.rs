@@ -26,7 +26,7 @@ impl<F: ResultFormatter> FormattingStage<F> {
         _obs: &PipelineObserver,
     ) -> PipelineOutput {
         let row_count = input.query_result.authorized_count();
-        let generated_sql = &compiled.compiled_query.sql;
+        let generated_sql = &compiled.compiled_query.base.sql;
         let formatted =
             self.formatter
                 .format(&input.query_result, &input.result_context, &self.ontology);
@@ -46,7 +46,7 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::{ParameterizedQuery, ResultContext};
+    use query_engine::{CompiledQuery, HydrationPlan, ParameterizedQuery, ResultContext};
     use serde_json::{Value, json};
     use std::collections::HashMap;
 
@@ -87,10 +87,13 @@ mod tests {
             redacted_count: 1,
         };
         let compiled = CompilationOutput {
-            compiled_query: ParameterizedQuery {
-                sql: "SELECT 1".to_string(),
-                params: HashMap::new(),
-                result_context: ResultContext::new(),
+            compiled_query: CompiledQuery {
+                base: ParameterizedQuery {
+                    sql: "SELECT 1".to_string(),
+                    params: HashMap::new(),
+                    result_context: ResultContext::new(),
+                },
+                hydration: HydrationPlan::None,
             },
         };
 

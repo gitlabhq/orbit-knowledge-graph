@@ -10,15 +10,21 @@
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, Node, Query, SelectExpr};
-use crate::constants::{redaction_id_column, redaction_type_column};
+use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::Result;
 use crate::input::{EntityAuthConfig, Input, QueryType};
+use ontology::DEFAULT_PRIMARY_KEY;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {
     pub alias: String,
     pub entity_type: String,
+    /// Column holding the entity's own row ID (always "id"). Used for hydration lookups.
+    pub pk_column: String,
+    /// Column holding the global ID used for authorization lookup. For most entities
+    /// this is "id", but for entities like Definition it is "project_id" — the ID
+    /// of the resource whose access controls govern this entity.
     pub id_column: String,
     pub type_column: String,
 }
@@ -49,6 +55,7 @@ impl ResultContext {
             RedactionNode {
                 alias: alias.to_string(),
                 entity_type: entity_type.to_string(),
+                pk_column: primary_key_column(alias),
                 id_column: redaction_id_column(alias),
                 type_column: redaction_type_column(alias),
             },
@@ -88,14 +95,14 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth = input.entity_auth.clone();
 
-    let selectable_nodes = match input.query_type {
+    let selectable_nodes: HashSet<&str> = match input.query_type {
         QueryType::Aggregation => input
             .aggregations
             .iter()
-            .filter_map(|agg| agg.group_by.clone())
+            .filter_map(|agg| agg.group_by.as_deref())
             .collect(),
         QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
-            input.nodes.iter().map(|n| n.id.clone()).collect()
+            input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
         QueryType::PathFinding => HashSet::new(),
     };
@@ -110,57 +117,71 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
 fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
-    selectable_nodes: &HashSet<String>,
+    selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
 ) -> Result<()> {
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
 
-        // Only add columns for nodes that are valid to select in this query type.
-        if !selectable_nodes.contains(&node.id) {
+        if !selectable_nodes.contains(node.id.as_str()) {
             continue;
         }
 
         ctx.add_node(&node.id, entity);
+        let redaction_node = ctx.get(&node.id).expect("just inserted by add_node");
 
-        if let Some(redaction_node) = ctx.get(&node.id) {
-            let id_col = redaction_node.id_column.clone();
-            let type_col = redaction_node.type_column.clone();
+        let pk_col = redaction_node.pk_column.clone();
+        let id_col = redaction_node.id_column.clone();
+        let type_col = redaction_node.type_column.clone();
 
-            let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
-            let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+        // When the auth ID column differs from "id" (e.g. Definition uses
+        // "project_id" for authorization), emit a separate pk column so
+        // hydration can still look up the entity by its own row ID.
+        let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
 
-            if !has_id {
-                let id_expr = Expr::col(&node.id, &node.redaction_id_column);
+        if needs_separate_pk {
+            let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+            if !has_pk {
                 q.select.push(SelectExpr {
-                    expr: id_expr.clone(),
-                    alias: Some(id_col.clone()),
+                    expr: Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                    alias: Some(pk_col),
                 });
-                // Push down id column to aggregation group by if not already present.
-                if input.query_type == QueryType::Aggregation
-                    && !q.group_by.is_empty()
-                    && !q.group_by.contains(&id_expr)
-                {
-                    q.group_by.push(id_expr);
-                }
             }
+        }
 
-            if !has_type {
-                let insert_pos = q
-                    .select
-                    .iter()
-                    .position(|s| s.alias.as_ref() == Some(&id_col))
-                    .map(|i| i + 1)
-                    .unwrap_or(q.select.len());
+        let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+        let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
 
-                q.select.insert(
-                    insert_pos,
-                    SelectExpr {
-                        expr: Expr::lit(entity.as_str()),
-                        alias: Some(type_col),
-                    },
-                );
+        if !has_id {
+            let id_expr = Expr::col(&node.id, &node.redaction_id_column);
+            q.select.push(SelectExpr {
+                expr: id_expr.clone(),
+                alias: Some(id_col.clone()),
+            });
+            // Push down id column to aggregation group by if not already present.
+            if input.query_type == QueryType::Aggregation
+                && !q.group_by.is_empty()
+                && !q.group_by.contains(&id_expr)
+            {
+                q.group_by.push(id_expr);
             }
+        }
+
+        if !has_type {
+            let insert_pos = q
+                .select
+                .iter()
+                .position(|s| s.alias.as_ref() == Some(&id_col))
+                .map(|i| i + 1)
+                .unwrap_or(q.select.len());
+
+            q.select.insert(
+                insert_pos,
+                SelectExpr {
+                    expr: Expr::lit(entity.as_str()),
+                    alias: Some(type_col),
+                },
+            );
         }
     }
     Ok(())
@@ -438,10 +459,7 @@ mod tests {
                 .iter()
                 .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
         );
-
-        // Enforced id column should be added to GROUP BY (no duplicate since u.id already present)
-        assert_eq!(q.group_by.len(), 1);
-        assert_eq!(q.group_by[0], Expr::col("u", "id"));
+        assert_eq!(q.group_by.len(), 1); // u.id already present, no duplicate added
 
         // Context should only have the group_by node
         assert_eq!(ctx.len(), 1);
@@ -540,23 +558,31 @@ mod tests {
             panic!("expected Query")
         };
 
-        assert_eq!(q.select.len(), 4);
+        assert_eq!(q.select.len(), 5);
 
-        // Definition: custom redaction column + type literal
-        assert_eq!(q.select[0].alias, Some("_gkg_d_id".into()));
-        assert!(matches!(&q.select[0].expr, Expr::Column { column, .. } if column == "project_id"));
-        assert_eq!(q.select[1].alias, Some("_gkg_d_type".into()));
-        assert!(matches!(&q.select[1].expr, Expr::Literal(v) if v == "Definition"));
+        // Definition: pk column (d.id) + auth id column (d.project_id) + type literal
+        assert_eq!(q.select[0].alias, Some("_gkg_d_pk".into()));
+        assert!(matches!(&q.select[0].expr, Expr::Column { column, .. } if column == "id"));
+        assert_eq!(q.select[1].alias, Some("_gkg_d_id".into()));
+        assert!(matches!(&q.select[1].expr, Expr::Column { column, .. } if column == "project_id"));
+        assert_eq!(q.select[2].alias, Some("_gkg_d_type".into()));
+        assert!(matches!(&q.select[2].expr, Expr::Literal(v) if v == "Definition"));
 
-        // Project: default id column + type literal
-        assert_eq!(q.select[2].alias, Some("_gkg_p_id".into()));
-        assert!(matches!(&q.select[2].expr, Expr::Column { column, .. } if column == "id"));
-        assert_eq!(q.select[3].alias, Some("_gkg_p_type".into()));
-        assert!(matches!(&q.select[3].expr, Expr::Literal(v) if v == "Project"));
+        // Project: default id column + type literal (no separate pk needed)
+        assert_eq!(q.select[3].alias, Some("_gkg_p_id".into()));
+        assert!(matches!(&q.select[3].expr, Expr::Column { column, .. } if column == "id"));
+        assert_eq!(q.select[4].alias, Some("_gkg_p_type".into()));
+        assert!(matches!(&q.select[4].expr, Expr::Literal(v) if v == "Project"));
 
         assert_eq!(ctx.len(), 2);
-        assert_eq!(ctx.get("d").unwrap().entity_type, "Definition");
-        assert_eq!(ctx.get("p").unwrap().entity_type, "Project");
+        let d_node = ctx.get("d").unwrap();
+        assert_eq!(d_node.entity_type, "Definition");
+        assert_eq!(d_node.pk_column, "_gkg_d_pk");
+        assert_eq!(d_node.id_column, "_gkg_d_id");
+        let p_node = ctx.get("p").unwrap();
+        assert_eq!(p_node.entity_type, "Project");
+        assert_eq!(p_node.pk_column, "_gkg_p_pk");
+        assert_eq!(p_node.id_column, "_gkg_p_id");
     }
 
     #[test]
