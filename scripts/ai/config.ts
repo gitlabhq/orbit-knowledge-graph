@@ -48,11 +48,6 @@ interface AgentConfig {
   permission: Record<string, PermissionValue>;
 }
 
-const proxyDenyBash = {
-  "*localhost:808*": "deny",
-  "*127.0.0.1:808*": "deny",
-};
-
 const AGENT_DIR = join(import.meta.dir, "../../.opencode/agent");
 
 function stripFrontmatter(content: string): string {
@@ -108,7 +103,7 @@ async function generate() {
     },
     permission: {
       read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny" },
-      bash: { "*": "allow", ...proxyDenyBash, "*/proc/*/environ*": "deny" },
+      bash: { "*": "allow", "*/proc/*/environ*": "deny" },
       webfetch: "allow",
     },
     agent: agents,
