@@ -53,6 +53,10 @@ function sanitizeNoteBody(raw: string): string {
 function stripResponseHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
   for (const h of SENSITIVE_RESPONSE_HEADERS) headers.delete(h);
+  // Bun's fetch auto-decompresses but keeps content-encoding header,
+  // causing the client to double-decompress. Strip it.
+  headers.delete("content-encoding");
+  headers.delete("content-length");
   return new Response(res.body, {
     status: res.status,
     statusText: res.statusText,
@@ -75,6 +79,7 @@ function forward(
   headers.delete("private-token");
   headers.delete("x-api-key");
   headers.delete("authorization");
+  headers.delete("accept-encoding");
   headers.set("host", target);
   for (const [k, v] of Object.entries(authHeader)) headers.set(k, v);
 
@@ -115,7 +120,7 @@ async function handle(
 Bun.serve({
   port: 8080,
   fetch: (req) =>
-    handle(req, "api.anthropic.com", { "x-api-key": ANTHROPIC_KEY }, "/v1/"),
+    handle(req, "api.anthropic.com", { "x-api-key": ANTHROPIC_KEY }, "/"),
   error: () => new Response("proxy error", { status: 500 }),
 });
 

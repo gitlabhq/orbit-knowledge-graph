@@ -105,7 +105,7 @@ async function generate() {
     provider: {
       anthropic: {
         options: {
-          baseURL: "http://api-proxy:8080",
+          baseURL: "http://api-proxy:8080/v1",
         },
       },
     },
