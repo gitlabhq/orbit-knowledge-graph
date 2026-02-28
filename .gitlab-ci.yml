@@ -332,11 +332,10 @@ tilt-ci:
     - apt-get update -qq && apt-get install -yqq unzip > /dev/null
     - curl -fsSL https://bun.sh/install | bash
     - export PATH="$HOME/.bun/bin:$PATH"
-    # Make bun accessible to the agent user and provide `node` symlink
-    # (opencode's shebang is #!/usr/bin/env node)
-    - chmod -R a+rx "$HOME/.bun"
-    - ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/bun
-    - ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/node
+    # Install bun and node symlink to /usr/local/bin so the agent user can access them.
+    # opencode's shebang is #!/usr/bin/env node — bun is node-compatible.
+    - cp "$HOME/.bun/bin/bun" /usr/local/bin/bun
+    - ln -sf /usr/local/bin/bun /usr/local/bin/node
     - scripts/glab/install.sh "$GLAB_VERSION"
     # Install workspace deps (opencode-ai, SDK, sanitization libs)
     - cd scripts/ai && bun install --frozen-lockfile && cd ../..
