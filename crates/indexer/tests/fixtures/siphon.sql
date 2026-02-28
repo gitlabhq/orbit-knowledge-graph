@@ -926,3 +926,23 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild', index_granularity = 8192;
+
+-- Siphon source tables for push events
+CREATE TABLE IF NOT EXISTS siphon_push_event_payloads (
+    commit_count Int64,
+    action Int16,
+    ref_type Int16,
+    commit_from Nullable(String),
+    commit_to Nullable(String),
+    ref Nullable(String),
+    commit_title Nullable(String),
+    ref_count Nullable(Int64),
+    event_id Int64,
+    project_id Int64,
+    _siphon_replicated_at DateTime64(6, 'UTC') DEFAULT now(),
+    _siphon_deleted Bool DEFAULT FALSE
+) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (project_id, event_id)
+ORDER BY (project_id, event_id);
+
+

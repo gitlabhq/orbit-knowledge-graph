@@ -7,13 +7,13 @@ use tracing::{debug, info};
 
 use super::metrics::DispatchMetrics;
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::dispatcher::extract::FromArrowColumn;
 use crate::dispatcher::{DispatchError, Dispatcher};
 use crate::locking::LockService;
 use crate::modules::sdlc::locking::{LOCK_TTL, namespace_lock_key};
 use crate::nats::NatsServices;
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::{Envelope, Event};
+use clickhouse_client::FromArrowColumn;
 
 const ENABLED_NAMESPACE_QUERY: &str = r#"
 SELECT root_namespace_id, organization_id

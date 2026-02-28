@@ -6,6 +6,7 @@ pub const INDEXER_STREAM: &str = "GKG_INDEXER";
 
 pub const GLOBAL_INDEXING_SUBJECT: &str = "sdlc.global.indexing.requested";
 pub const NAMESPACE_INDEXING_SUBJECT: &str = "sdlc.namespace.indexing.requested";
+pub const PROJECT_CODE_INDEXING_SUBJECT: &str = "code.project.indexing.requested";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalIndexingRequest {
@@ -28,5 +29,16 @@ pub struct NamespaceIndexingRequest {
 impl Event for NamespaceIndexingRequest {
     fn topic() -> Topic {
         Topic::new(INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectCodeIndexingRequest {
+    pub project_id: i64,
+}
+
+impl Event for ProjectCodeIndexingRequest {
+    fn topic() -> Topic {
+        Topic::new(INDEXER_STREAM, PROJECT_CODE_INDEXING_SUBJECT)
     }
 }

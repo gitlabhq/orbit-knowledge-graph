@@ -444,3 +444,4 @@ CREATE TABLE IF NOT EXISTS project_code_indexing_watermark (
     _version UInt64
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (project_id, branch);
+
