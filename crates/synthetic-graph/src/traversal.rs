@@ -321,6 +321,8 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    // ---- EntityContext tests ----
+
     #[test]
     fn test_entity_context_root_group() {
         let ctx = EntityContext::root_group(1, 100);
@@ -332,23 +334,52 @@ mod tests {
     fn test_entity_context_subgroup() {
         let parent = EntityContext::root_group(1, 100);
         let child = EntityContext::subgroup(&parent, 101);
+        assert_eq!(child.id, 101);
         assert_eq!(child.traversal_path, "1/100/101/");
+
+        let grandchild = EntityContext::subgroup(&child, 102);
+        assert_eq!(grandchild.id, 102);
+        assert_eq!(grandchild.traversal_path, "1/100/101/102/");
     }
 
     #[test]
     fn test_entity_context_child_inherits() {
         let group = EntityContext::root_group(1, 100);
         let project = EntityContext::child(&group, 500);
+
+        assert_eq!(project.id, 500);
         assert_eq!(project.traversal_path, "1/100/");
+
+        // MR also inherits the same traversal path
+        let mr = EntityContext::child(&project, 1000);
+        assert_eq!(mr.id, 1000);
+        assert_eq!(mr.traversal_path, "1/100/");
     }
+
+    // ---- EntityRegistry tests ----
 
     #[test]
     fn test_registry_add_and_get() {
         let mut registry = EntityRegistry::new(1);
+
         registry.add("Group", EntityContext::root_group(1, 100));
         registry.add("Group", EntityContext::root_group(1, 101));
+        registry.add(
+            "Project",
+            EntityContext::child(&EntityContext::root_group(1, 100), 500),
+        );
+
         assert_eq!(registry.count("Group"), 2);
-        assert_eq!(registry.get_ids("Group"), vec![100, 101]);
+        assert_eq!(registry.count("Project"), 1);
+        assert_eq!(registry.count("MergeRequest"), 0);
+
+        let groups = registry.get("Group").unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].traversal_path, "1/100/");
+        assert_eq!(groups[1].traversal_path, "1/101/");
+
+        let group_ids = registry.get_ids("Group");
+        assert_eq!(group_ids, vec![100, 101]);
     }
 
     #[test]
@@ -363,6 +394,26 @@ mod tests {
     }
 
     #[test]
+    fn test_registry_namespace_counter() {
+        let registry = EntityRegistry::new(1);
+        // Namespace counter starts at org_id + 1
+        assert_eq!(registry.next_namespace_id(), 2);
+        assert_eq!(registry.next_namespace_id(), 3);
+        assert_eq!(registry.next_namespace_id(), 4);
+    }
+
+    #[test]
+    fn test_registry_entity_counter() {
+        let registry = EntityRegistry::new(1);
+        // Entity counter starts at 1
+        assert_eq!(registry.next_entity_id(), 1);
+        assert_eq!(registry.next_entity_id(), 2);
+        assert_eq!(registry.next_entity_id(), 3);
+    }
+
+    // ---- TraversalPathGenerator / trie property tests ----
+
+    #[test]
     fn test_traversal_path_generator() {
         let tpg = TraversalPathGenerator::new(1, 10, 4);
         assert_eq!(tpg.len(), 10);
@@ -370,5 +421,150 @@ mod tests {
 
         let unique: HashSet<_> = tpg.paths().iter().collect();
         assert_eq!(unique.len(), 10);
+    }
+
+    #[test]
+    fn test_generate_trie_basic() {
+        let generator = TraversalPathGenerator::new(1, 10, 4);
+
+        assert_eq!(generator.len(), 10);
+
+        for path in generator.paths() {
+            assert!(
+                path.starts_with("1"),
+                "Path {} should start with org_id",
+                path
+            );
+        }
+
+        assert_eq!(generator.paths()[0], "1/");
+    }
+
+    #[test]
+    fn test_all_paths_unique() {
+        let generator = TraversalPathGenerator::new(42, 100, 5);
+
+        let unique: HashSet<_> = generator.paths().iter().collect();
+        assert_eq!(
+            unique.len(),
+            generator.len(),
+            "All traversal paths should be unique"
+        );
+    }
+
+    #[test]
+    fn test_paths_are_valid() {
+        let generator = TraversalPathGenerator::new(1, 50, 4);
+
+        for path in generator.paths() {
+            for part in path.split('/').filter(|s| !s.is_empty()) {
+                assert!(
+                    part.parse::<u64>().is_ok(),
+                    "Each path component should be a number: {}",
+                    part
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_monotonically_increasing_ids() {
+        let generator = TraversalPathGenerator::new(1, 20, 4);
+
+        let mut all_ids: Vec<u64> = generator
+            .paths()
+            .iter()
+            .flat_map(|path| {
+                path.split('/')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.parse::<u64>().unwrap())
+            })
+            .collect();
+
+        all_ids.sort();
+        all_ids.dedup();
+
+        for (i, &id) in all_ids.iter().enumerate() {
+            assert_eq!(
+                id,
+                1 + i as u64,
+                "IDs should be contiguous: expected {}, got {}",
+                1 + i as u64,
+                id
+            );
+        }
+    }
+
+    #[test]
+    fn test_parent_paths_exist() {
+        let generator = TraversalPathGenerator::new(1, 100, 5);
+        let path_set: HashSet<_> = generator.paths().iter().map(|s| s.as_str()).collect();
+
+        for path in generator.paths() {
+            let path_without_trailing = path.trim_end_matches('/');
+            if let Some(last_slash) = path_without_trailing.rfind('/') {
+                let parent = format!("{}/", &path_without_trailing[..last_slash]);
+                assert!(
+                    path_set.contains(parent.as_str()),
+                    "Parent path {} should exist for {}",
+                    parent,
+                    path
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_no_cyclic_path_components() {
+        let generator = TraversalPathGenerator::new(1, 100, 5);
+
+        for path in generator.paths() {
+            let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+            let unique_parts: HashSet<&str> = parts.iter().copied().collect();
+
+            assert_eq!(
+                parts.len(),
+                unique_parts.len(),
+                "Path should not have repeated components: {}",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn test_depth_respected() {
+        let max_depth = 3;
+        let generator = TraversalPathGenerator::new(1, 50, max_depth);
+
+        for path in generator.paths() {
+            let depth = path.split('/').filter(|s| !s.is_empty()).count();
+            assert!(
+                depth <= max_depth,
+                "Depth {} exceeds max_depth {} for {}",
+                depth,
+                max_depth,
+                path
+            );
+        }
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test -p synthetic-graph -- --ignored --nocapture
+    fn test_print_example_traversal_paths() {
+        println!("\n=== Example traversal paths (org_id=1, count=20, max_depth=4) ===");
+        let generator = TraversalPathGenerator::new(1, 20, 4);
+        for (i, path) in generator.paths().iter().enumerate() {
+            let depth = path.split('/').filter(|s| !s.is_empty()).count();
+            let indent = "  ".repeat(depth - 1);
+            println!("{:3}. {}{}", i + 1, indent, path);
+        }
+
+        println!("\n=== Example traversal paths (org_id=42, count=15, max_depth=5) ===");
+        let generator = TraversalPathGenerator::new(42, 15, 5);
+        for (i, path) in generator.paths().iter().enumerate() {
+            let depth = path.split('/').filter(|s| !s.is_empty()).count();
+            let indent = "  ".repeat(depth - 1);
+            println!("{:3}. {}{}", i + 1, indent, path);
+        }
     }
 }

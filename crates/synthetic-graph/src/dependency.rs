@@ -135,7 +135,10 @@ impl DependencyGraph {
         Ok(())
     }
 
-    fn is_parent_to_child(edge_type: &str) -> bool {
+    /// Returns `true` when the edge type flows from parent to child
+    /// (e.g., CONTAINS, HAS_STAGE). `false` for child-to-parent edges
+    /// like IN_PROJECT.
+    pub(crate) fn is_parent_to_child(edge_type: &str) -> bool {
         matches!(
             edge_type,
             "CONTAINS"
@@ -235,6 +238,22 @@ mod tests {
     }
 
     #[test]
+    fn test_is_parent_to_child() {
+        assert!(DependencyGraph::is_parent_to_child("CONTAINS"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_STAGE"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_JOB"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_FILE"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_NOTE"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_LABEL"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_FINDING"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_IDENTIFIER"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_DIFF"));
+        assert!(!DependencyGraph::is_parent_to_child("IN_PROJECT"));
+        assert!(!DependencyGraph::is_parent_to_child("IN_GROUP"));
+        assert!(!DependencyGraph::is_parent_to_child("AUTHORED"));
+    }
+
+    #[test]
     fn test_dependency_graph_basic() {
         let ontology = test_ontology();
         let config = GenerationConfig {
@@ -265,6 +284,87 @@ mod tests {
 
         assert!(group_pos < project_pos);
         assert!(project_pos < mr_pos);
+    }
+
+    #[test]
+    fn test_topological_sort_linear_chain() {
+        let ontology = test_ontology();
+        let config = GenerationConfig {
+            organizations: 1,
+            roots: [("Group".to_string(), 1)].into(),
+            relationships: RelationshipConfig {
+                edges: [
+                    (
+                        "CONTAINS".to_string(),
+                        [("Group -> Project".to_string(), EdgeRatio::Count(1))].into(),
+                    ),
+                    (
+                        "IN_PROJECT".to_string(),
+                        [("MergeRequest -> Project".to_string(), EdgeRatio::Count(1))].into(),
+                    ),
+                ]
+                .into(),
+            },
+            ..default_gen_config()
+        };
+
+        let graph = DependencyGraph::build(&config, &ontology).unwrap();
+        let order = graph.generation_order();
+
+        let pos_g = order.iter().position(|n| n == "Group").unwrap();
+        let pos_p = order.iter().position(|n| n == "Project").unwrap();
+        let pos_m = order.iter().position(|n| n == "MergeRequest").unwrap();
+
+        assert!(pos_g < pos_p, "Group must come before Project");
+        assert!(pos_p < pos_m, "Project must come before MergeRequest");
+    }
+
+    #[test]
+    fn test_topological_sort_cycle_detection() {
+        use ontology::EdgeEntity;
+
+        // Create ontology with a cycle: A -> B and B -> A
+        let mut ontology = Ontology::new().with_nodes(["A", "B"]);
+        ontology.add_edge(EdgeEntity {
+            relationship_kind: "CONTAINS".to_string(),
+            source: "source_id".to_string(),
+            source_kind: "A".to_string(),
+            target: "target_id".to_string(),
+            target_kind: "B".to_string(),
+        });
+        ontology.add_edge(EdgeEntity {
+            relationship_kind: "CONTAINS".to_string(),
+            source: "source_id".to_string(),
+            source_kind: "B".to_string(),
+            target: "target_id".to_string(),
+            target_kind: "A".to_string(),
+        });
+
+        let config = GenerationConfig {
+            organizations: 1,
+            roots: HashMap::new(),
+            relationships: RelationshipConfig {
+                edges: [(
+                    "CONTAINS".to_string(),
+                    [
+                        ("A -> B".to_string(), EdgeRatio::Count(1)),
+                        ("B -> A".to_string(), EdgeRatio::Count(1)),
+                    ]
+                    .into(),
+                )]
+                .into(),
+            },
+            ..default_gen_config()
+        };
+
+        let result = DependencyGraph::build(&config, &ontology);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Cycle") || err_msg.contains("cycle"),
+            "Error should mention cycle: {}",
+            err_msg
+        );
     }
 
     fn default_gen_config() -> GenerationConfig {

@@ -1,13 +1,15 @@
 //! Dynamic Arrow schema generation from ontology entities.
 //!
-//! Provides the `ToArrowSchema` extension trait used throughout the simulator,
-//! delegating to [`synthetic_graph::batch::arrow_schema`] for the actual conversion.
+//! Provides extension traits used throughout the simulator for converting
+//! ontology types to Arrow schemas. Core conversion logic is delegated
+//! to [`synthetic_graph::batch::arrow_schema`].
 
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
 use ontology::{DataType, Field, NodeEntity};
 
 /// Extension trait to convert ontology types to Arrow types.
 pub trait ToArrowSchema {
+    /// Convert to an Arrow schema, prepending traversal_path.
     fn to_arrow_schema(&self) -> Schema;
 }
 
@@ -19,6 +21,7 @@ impl ToArrowSchema for NodeEntity {
 
 /// Extension trait to convert ontology Field to Arrow Field.
 pub trait ToArrowField {
+    /// Convert to an Arrow field.
     fn to_arrow_field(&self) -> ArrowField;
 }
 
@@ -31,6 +34,7 @@ impl ToArrowField for Field {
 
 /// Extension trait to convert ontology DataType to Arrow DataType.
 pub trait ToArrowType {
+    /// Convert to Arrow DataType.
     fn to_arrow_type(&self) -> ArrowDataType;
 }
 
@@ -41,6 +45,14 @@ impl ToArrowType for DataType {
 }
 
 /// Create the Arrow schema for the unified edges table.
+///
+/// Matches `EdgeEntity` from ontology:
+/// - traversal_path: Utf8 (hierarchical namespace path)
+/// - relationship_kind: Utf8 (e.g., "AUTHORED", "CONTAINS")
+/// - source_id: Int64 (source node ID)
+/// - source_kind: Utf8 (e.g., "User", "Group")
+/// - target_id: Int64 (target node ID)
+/// - target_kind: Utf8 (e.g., "MergeRequest", "Project")
 pub fn edge_schema() -> Schema {
     synthetic_graph::batch::arrow_schema::edge_schema()
 }
@@ -84,7 +96,7 @@ fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> Strin
         ArrowDataType::Date32 => "Date",
         ArrowDataType::Date64 => "DateTime64(6, 'UTC')",
         ArrowDataType::Timestamp(_, _) => "DateTime64(6, 'UTC')",
-        _ => "String",
+        _ => "String", // Fallback
     };
 
     if nullable {
