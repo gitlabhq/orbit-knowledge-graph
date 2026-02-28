@@ -406,12 +406,10 @@ ai:review:
       when: manual
       allow_failure: true
   script:
-    - |
-      scripts/ai/run-agent.sh opencode run --agent review \
-        --file .mr-diff.txt --file .mr-context.json --file .mr-discussions.json \
-        "Review MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
-        ${REVIEW_FOCUS:+Focus: $REVIEW_FOCUS}
-        Post your findings as inline MR comments using glab."
+    - >-
+      scripts/ai/run-agent.sh opencode run --agent review
+      --file .mr-diff.txt --file .mr-context.json --file .mr-discussions.json
+      "Review MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}. ${REVIEW_FOCUS:+Focus: $REVIEW_FOCUS} Post your findings as inline MR comments using glab."
 
 ai:security:
   extends: .opencode-base
@@ -421,12 +419,10 @@ ai:security:
       when: manual
       allow_failure: true
   script:
-    - |
-      scripts/ai/run-agent.sh opencode run --agent security \
-        --file .mr-diff.txt --file .mr-context.json --file .mr-discussions.json \
-        "Security review for MR !${CI_MERGE_REQUEST_IID}.
-        ${REVIEW_FOCUS:+Focus: $REVIEW_FOCUS}
-        Post your findings as inline MR comments using glab."
+    - >-
+      scripts/ai/run-agent.sh opencode run --agent security
+      --file .mr-diff.txt --file .mr-context.json --file .mr-discussions.json
+      "Security review for MR !${CI_MERGE_REQUEST_IID}. ${REVIEW_FOCUS:+Focus: $REVIEW_FOCUS} Post your findings as inline MR comments using glab."
 
 # Build Stage
 
