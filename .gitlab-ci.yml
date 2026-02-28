@@ -341,8 +341,10 @@ tilt-ci:
     - cd scripts/ai && bun install --frozen-lockfile && cd ../..
     - echo "127.0.0.1 169.254.169.254" >> /etc/hosts
     - echo "127.0.0.1 100.100.100.200" >> /etc/hosts
+    - git fetch origin ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME} --depth=1 2>/dev/null || true
     - git diff ${CI_MERGE_REQUEST_DIFF_BASE_SHA}...HEAD > .mr-diff.txt 2>/dev/null
-      || git diff origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD > .mr-diff.txt
+      || git diff origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD > .mr-diff.txt 2>/dev/null
+      || echo "diff unavailable" > .mr-diff.txt
     - glab config set --global skip_tls_verify true
     # Serialize MR context (discussions, SHAs) for the agent — uses CI_JOB_TOKEN before we scrub it
     - |
