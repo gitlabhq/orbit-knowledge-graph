@@ -37,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
             let services = indexer::dispatcher::connect(&config.nats).await?;
             let datalake = config.datalake.build_client();
             let metrics = DispatchMetrics::new();
+            let lock_service = services.lock_service.clone();
             let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
                 Box::new(GlobalDispatcher::new(
                     services.nats.clone(),
@@ -50,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
                     metrics,
                 )),
             ];
-            indexer::dispatcher::run(&dispatchers)
+            indexer::dispatcher::run(&dispatchers, &*lock_service, &config.modules.dispatch)
                 .await
                 .map_err(Into::into)
         }

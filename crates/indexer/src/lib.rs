@@ -54,6 +54,7 @@ use std::sync::Arc;
 use clickhouse::ClickHouseConfiguration;
 use clickhouse::ClickHouseDestination;
 use configuration::EngineConfiguration;
+use dispatcher::DispatchConfig;
 use engine::EngineBuilder;
 use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use health::{HealthState, run_health_server};
@@ -95,6 +96,8 @@ pub struct ModulesConfig {
     pub sdlc: SdlcIndexingConfig,
     #[serde(default)]
     pub code: CodeIndexingConfig,
+    #[serde(default)]
+    pub dispatch: DispatchConfig,
 }
 
 #[derive(Debug, Error)]

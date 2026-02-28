@@ -119,6 +119,8 @@ modules:
     max_retry_attempts: 5
     retry_interval_secs: 60
     events_stream_name: siphon_stream_main_db
+  dispatch:
+    intervals: {}
 
 gkgServer:
   image:
