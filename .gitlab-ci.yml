@@ -13,7 +13,6 @@ stages:
   - lint
   - security
   - test
-  - ai:build
   - ai
   - build
   - publish
@@ -387,26 +386,6 @@ tilt-ci:
       GITLAB_REVIEW_TOKEN ANTHROPIC_API_KEY
   after_script:
     - rm -f .mr-diff.txt .mr-context.json .mr-discussions.json
-
-build-ai-proxy:
-  stage: ai:build
-  image: docker:29
-  tags:
-    - saas-linux-small-amd64
-  needs: []
-  services:
-    - docker:29-dind
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - scripts/ai/**/*
-  script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - docker build -t "${CI_REGISTRY_IMAGE}/ai-proxy:latest" scripts/ai
-    - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:latest"
 
 ai:review:
   extends: .opencode-base

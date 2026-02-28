@@ -6,7 +6,7 @@ You have `glab` available. All requests route through a proxy that handles authe
 
 For your overall verdict, use a plain note:
 
-```sh
+```shell
 glab mr note $CI_MERGE_REQUEST_IID -m "your comment"
 ```
 
@@ -14,7 +14,7 @@ glab mr note $CI_MERGE_REQUEST_IID -m "your comment"
 
 Read `.mr-context.json` for the SHA values, then post a discussion with a position:
 
-```sh
+```shell
 glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions" \
   -f body="your comment" \
   -f "position[position_type]=text" \
@@ -36,14 +36,14 @@ Line rules:
 
 Check `.mr-discussions.json` first. If someone already raised the same point, reply instead of creating a duplicate:
 
-```sh
+```shell
 glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions/DISCUSSION_ID/notes" \
   -f body="your reply"
 ```
 
 ## Resolve a thread
 
-```sh
+```shell
 glab api --method PUT "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions/DISCUSSION_ID" \
   -f resolved=true
 ```
