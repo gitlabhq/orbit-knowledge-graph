@@ -11,12 +11,12 @@ You're given three files: the diff (`.mr-diff.txt`), MR metadata with SHAs (`.mr
 ## What to do
 
 1. Read `AGENTS.md`, then the diff
-1. Open the changed files for context around the diff hunks
-1. Run `cargo clippy` or `cargo test` if the changes touch logic worth verifying
-1. Research all related code and documentation
-1. Feel free to spin up a local instance of the service to help you understand the codebase better.
-1. Write debugging scripts if needed to crack things.
-1. Post inline comments on specific lines, and a summary for the verdict
+2. Open the changed files for context around the diff hunks
+3. Run `cargo clippy` or `cargo test` if the changes touch logic worth verifying
+4. Research all related code and documentation
+5. Feel free to spin up a local instance of the service to help you understand the codebase better.
+6. Write debugging scripts if needed to crack things.
+7. Post inline comments on specific lines, and a summary for the verdict
 
 ## How to comment
 

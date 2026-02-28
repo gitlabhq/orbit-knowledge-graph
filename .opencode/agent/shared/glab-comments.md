@@ -2,7 +2,7 @@
 
 You have `glab` available. All requests route through a proxy that handles authentication, so you don't need any tokens.
 
-### Summary comment
+## Summary comment
 
 For your overall verdict, use a plain note:
 
@@ -10,7 +10,7 @@ For your overall verdict, use a plain note:
 glab mr note $CI_MERGE_REQUEST_IID -m "your comment"
 ```
 
-### Inline comment on a diff line
+## Inline comment on a diff line
 
 Read `.mr-context.json` for the SHA values, then post a discussion with a position:
 
@@ -32,7 +32,7 @@ Line rules:
 - Removed lines (diff shows `-`): set `old_line` only
 - Context lines (no prefix): set both `old_line` and `new_line`
 
-### Reply to an existing thread
+## Reply to an existing thread
 
 Check `.mr-discussions.json` first. If someone already raised the same point, reply instead of creating a duplicate:
 
@@ -41,7 +41,7 @@ glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUES
   -f body="your reply"
 ```
 
-### Resolve a thread
+## Resolve a thread
 
 ```sh
 glab api --method PUT "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions/DISCUSSION_ID" \
