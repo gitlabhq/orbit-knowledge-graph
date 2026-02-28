@@ -9,7 +9,6 @@
 //
 // Usage: OPENCODE_CONFIG_CONTENT=$(bun scripts/ai/config.ts)
 
-import { ALLOWED_HOSTS } from "./sanitize";
 import { readdir } from "fs/promises";
 import { join, basename } from "path";
 
@@ -49,11 +48,10 @@ interface AgentConfig {
   permission: Record<string, PermissionValue>;
 }
 
-const proxyDeny = {
-  "http://api-proxy*": "deny",
-  "https://api-proxy*": "deny",
-  "http://localhost*": "deny",
-  "http://127.0.0.1*": "deny",
+const proxyDenyBash = {
+  "*api-proxy*": "deny",
+  "*localhost:808*": "deny",
+  "*127.0.0.1:808*": "deny",
 };
 
 const AGENT_DIR = join(import.meta.dir, "../../.opencode/agent");
@@ -111,8 +109,8 @@ async function generate() {
     },
     permission: {
       read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny" },
-      bash: { "*": "allow", "*api-proxy*": "deny", "*/proc/*/environ*": "deny" },
-      webfetch: { "*": "allow", ...proxyDeny },
+      bash: { "*": "allow", ...proxyDenyBash, "*/proc/*/environ*": "deny" },
+      webfetch: "allow",
     },
     agent: agents,
   };
