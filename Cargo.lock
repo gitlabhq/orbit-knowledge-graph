@@ -6564,6 +6564,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "synthetic-graph"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "chrono",
+ "flate2",
+ "ontology",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tracing",
+]
+
+[[package]]
 name = "sysinfo"
 version = "0.38.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

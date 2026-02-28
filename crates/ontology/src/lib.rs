@@ -24,7 +24,7 @@ pub use entities::{
     EnumType, Field, NodeEntity, NodeStyle, RedactionConfig,
 };
 pub use etl::{
-    DELETED_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope,
+    EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, DELETED_COLUMN,
     TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 
@@ -163,6 +163,14 @@ impl Ontology {
             self.edges.insert(name.into(), vec![]);
         }
         self
+    }
+
+    /// Add a fully-specified edge entity variant.
+    pub fn add_edge(&mut self, edge: EdgeEntity) {
+        self.edges
+            .entry(edge.relationship_kind.clone())
+            .or_default()
+            .push(edge);
     }
 
     /// Add fields to an existing node.

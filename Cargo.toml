@@ -19,6 +19,7 @@ members = [
   "crates/health-check",
   "crates/siphon-proto",
   "crates/datalake-generator",
+  "crates/synthetic-graph",
   "crates/gitlab-client",
   "crates/xtask",
   "crates/integration-testkit",
