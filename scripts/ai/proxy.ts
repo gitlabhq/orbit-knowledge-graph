@@ -32,22 +32,22 @@ const SENSITIVE_RESPONSE_HEADERS = [
   "x-forwarded-for",
 ];
 
-function sanitizeNoteBody(raw: string): string {
-  try {
-    const params = new URLSearchParams(raw);
-    if (params.has("body")) {
-      params.set("body", sanitize(params.get("body")!));
-      return params.toString();
-    }
-  } catch {}
+function sanitizeRequestBody(raw: string): string {
   try {
     const json = JSON.parse(raw);
-    if (json.body) {
-      json.body = sanitize(json.body);
-      return JSON.stringify(json);
+    for (const key of Object.keys(json)) {
+      if (typeof json[key] === "string") json[key] = sanitize(json[key]);
     }
+    return JSON.stringify(json);
   } catch {}
-  return raw;
+  try {
+    const params = new URLSearchParams(raw);
+    for (const key of params.keys()) {
+      params.set(key, sanitize(params.get(key)!));
+    }
+    return params.toString();
+  } catch {}
+  return sanitize(raw);
 }
 
 function stripResponseHeaders(res: Response): Response {
@@ -128,14 +128,13 @@ Bun.serve({
   port: 8083,
   tls: { key: Bun.file("/tmp/k.pem"), cert: Bun.file("/tmp/c.pem") },
   fetch: (req) => {
-    const isNote =
-      req.method === "POST" && new URL(req.url).pathname.includes("/notes");
+    const hasBody = req.method === "POST" || req.method === "PUT" || req.method === "PATCH";
     return handle(
       req,
       "gitlab.com",
       { "PRIVATE-TOKEN": GITLAB_TOKEN },
       "/api/",
-      isNote ? sanitizeNoteBody : undefined,
+      hasBody ? sanitizeRequestBody : undefined,
     );
   },
   error: () => new Response("proxy error", { status: 500 }),
