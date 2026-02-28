@@ -52,6 +52,24 @@ pub struct Input {
     pub entity_auth: HashMap<String, EntityAuthConfig>,
 }
 
+impl Default for Input {
+    fn default() -> Self {
+        Self {
+            query_type: QueryType::Traversal,
+            nodes: vec![],
+            relationships: vec![],
+            aggregations: vec![],
+            path: None,
+            neighbors: None,
+            limit: default_limit(),
+            range: None,
+            order_by: None,
+            aggregation_sort: None,
+            entity_auth: HashMap::new(),
+        }
+    }
+}
+
 fn deserialize_nodes_or_node<'de, D>(deserializer: D) -> Result<Vec<InputNode>, D::Error>
 where
     D: Deserializer<'de>,
