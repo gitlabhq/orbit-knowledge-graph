@@ -187,6 +187,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         .unwrap();
     let datalake = context.clickhouse.config.build_client();
     let metrics = DispatchMetrics::new();
+    let lock_service = services.lock_service.clone();
     let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
@@ -201,8 +202,11 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         )),
     ];
 
+    let dispatch_config = indexer::dispatcher::DispatchConfig::default();
     let before = Utc::now();
-    indexer::dispatcher::run(&dispatchers).await.unwrap();
+    indexer::dispatcher::run(&dispatchers, &*lock_service, &dispatch_config)
+        .await
+        .unwrap();
     let after = Utc::now();
 
     // Global indexing request

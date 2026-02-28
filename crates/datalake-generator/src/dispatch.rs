@@ -26,6 +26,7 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
 
     let datalake = datalake_config.build_client();
     let metrics = DispatchMetrics::new();
+    let lock_service = services.lock_service.clone();
     let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
@@ -40,7 +41,8 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
         )),
     ];
 
-    indexer::dispatcher::run(&dispatchers)
+    let dispatch_config = indexer::dispatcher::DispatchConfig::default();
+    indexer::dispatcher::run(&dispatchers, &*lock_service, &dispatch_config)
         .await
         .context("dispatch indexing failed")?;
 
