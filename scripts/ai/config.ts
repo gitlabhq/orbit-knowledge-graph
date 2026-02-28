@@ -49,7 +49,6 @@ interface AgentConfig {
 }
 
 const proxyDenyBash = {
-  "*api-proxy*": "deny",
   "*localhost:808*": "deny",
   "*127.0.0.1:808*": "deny",
 };
@@ -103,7 +102,7 @@ async function generate() {
     provider: {
       anthropic: {
         options: {
-          baseURL: "http://api-proxy:8080/v1",
+          baseURL: "http://localhost:8080/v1",
         },
       },
     },

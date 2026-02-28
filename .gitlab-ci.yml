@@ -322,12 +322,6 @@ tilt-ci:
     - saas-linux-medium-amd64
   timeout: 15 minutes
   needs: []
-  services:
-    - name: ${CI_REGISTRY_IMAGE}/ai-proxy:latest
-      alias: api-proxy
-      variables:
-        ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
-        GITLAB_REVIEW_TOKEN: $GITLAB_REVIEW_TOKEN
   variables:
     GLAB_VERSION: "1.86.0"
   before_script:
@@ -335,12 +329,9 @@ tilt-ci:
     - apt-get update -qq && apt-get install -yqq unzip > /dev/null
     - curl -fsSL https://bun.sh/install | bash
     - export PATH="$HOME/.bun/bin:$PATH"
-    # Install bun and node symlink to /usr/local/bin so the agent user can access them.
-    # opencode's shebang is #!/usr/bin/env node — bun is node-compatible.
     - cp "$HOME/.bun/bin/bun" /usr/local/bin/bun
     - ln -sf /usr/local/bin/bun /usr/local/bin/node
     - scripts/glab/install.sh "$GLAB_VERSION"
-    # Install workspace deps (opencode-ai, SDK, sanitization libs)
     - cd scripts/ai && bun install --frozen-lockfile && cd ../..
     - echo "127.0.0.1 169.254.169.254" >> /etc/hosts
     - echo "127.0.0.1 100.100.100.200" >> /etc/hosts
@@ -349,7 +340,6 @@ tilt-ci:
       || git diff origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD > .mr-diff.txt 2>/dev/null
       || echo "diff unavailable" > .mr-diff.txt
     - glab config set --global skip_tls_verify true
-    # Serialize MR context (discussions, SHAs) for the agent — uses CI_JOB_TOKEN before we scrub it
     - |
       HEAD_SHA=$(git rev-parse HEAD)
       START_SHA=$(git merge-base HEAD "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" 2>/dev/null || echo "$CI_MERGE_REQUEST_DIFF_BASE_SHA")
@@ -366,35 +356,30 @@ tilt-ci:
         "start_sha": "$START_SHA"
       }
       CTXEOF
-    # Generate unified config
+    # Start proxy as background process (same container = same env vars)
+    - |
+      openssl req -x509 -nodes -newkey rsa:2048 \
+        -keyout /tmp/k.pem -out /tmp/c.pem \
+        -days 1 -subj '/CN=localhost' \
+        -addext 'subjectAltName=DNS:localhost' 2>/dev/null
+      bun scripts/ai/proxy.ts &
+      PROXY_PID=$!
+      sleep 1
+      echo "Proxy started (pid $PROXY_PID)"
+    # Verify proxy forwards to Anthropic correctly
+    - |
+      PROXY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/v1/messages \
+        -H "content-type: application/json" \
+        -H "anthropic-version: 2023-06-01" \
+        -d '{"model":"claude-opus-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
+      echo "Proxy health check: $PROXY_STATUS"
+      if [ "$PROXY_STATUS" != "200" ]; then echo "ERROR: proxy check failed ($PROXY_STATUS)"; exit 1; fi
     - export OPENCODE_CONFIG_CONTENT=$(bun scripts/ai/config.ts)
-    # Point git remote at proxy so glab routes through it
-    - git remote set-url origin "https://api-proxy:8083/${CI_PROJECT_PATH}.git"
-    # Isolated agent user
+    - git remote set-url origin "https://localhost:8083/${CI_PROJECT_PATH}.git"
     - useradd -m -s /bin/sh agent
     - cp -r /root/.config /home/agent/.config 2>/dev/null || true
     - cp -r /root/.bun /home/agent/.bun 2>/dev/null || true
     - chown -R agent:agent /home/agent .
-    # Verify proxy is reachable and has valid credentials
-    - |
-      echo "ANTHROPIC_API_KEY length: ${#ANTHROPIC_API_KEY}"
-      echo "Direct Anthropic test..."
-      DIRECT=$(curl -s -o /dev/null -w "%{http_code}" -X POST https://api.anthropic.com/v1/messages \
-        -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
-        -H "content-type: application/json" \
-        -d '{"model":"claude-opus-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
-      echo "Direct Anthropic returned: $DIRECT"
-      echo "Proxy test..."
-      PROXY_RESP=$(curl -s -w "\n%{http_code}" -X POST http://api-proxy:8080/v1/messages \
-        -H "content-type: application/json" \
-        -H "anthropic-version: 2023-06-01" \
-        -d '{"model":"claude-opus-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
-      PROXY_STATUS=$(echo "$PROXY_RESP" | tail -1)
-      PROXY_BODY=$(echo "$PROXY_RESP" | head -n -1)
-      echo "Proxy Anthropic returned: $PROXY_STATUS"
-      if [ "$PROXY_STATUS" != "200" ]; then echo "Response: $PROXY_BODY"; echo "ERROR: proxy check failed (direct=$DIRECT proxy=$PROXY_STATUS)"; exit 1; fi
-      echo "Proxy check passed"
     - >-
       unset CI_JOB_TOKEN CI_REGISTRY_PASSWORD CI_REGISTRY_USER
       CI_DEPLOY_USER CI_DEPLOY_PASSWORD RUNNER_TOKEN

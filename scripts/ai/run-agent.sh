@@ -5,7 +5,7 @@
 #   2. env -i            → clean /proc/self/environ, only allowlisted vars
 #
 # The agent can use `glab` to post MR comments — requests route through
-# the proxy (api-proxy:8083) which injects the real PRIVATE-TOKEN.
+# the proxy (localhost:8083) which injects the real PRIVATE-TOKEN.
 # GITLAB_TOKEN=proxy-handled is a dummy; the proxy replaces it.
 #
 # Usage: scripts/ai/run-agent.sh opencode run --agent review ...
