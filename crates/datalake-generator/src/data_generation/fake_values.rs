@@ -2,6 +2,7 @@ use arrow::array::StringBuilder;
 use chrono::Utc;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use synthetic_graph::fake_values::FieldKind;
 
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 const NULL_THRESHOLD: u64 = 26;
@@ -16,74 +17,6 @@ const MAX_ID_IN_LIST: u64 = 9999;
 fn push_hex(buf: &mut String, value: u64) {
     use std::fmt::Write;
     let _ = write!(buf, "{value:x}");
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ColumnKind {
-    Id,
-    Name,
-    Email,
-    Url,
-    Path,
-    Sha,
-    Description,
-    Status,
-    State,
-    Branch,
-    GenericString,
-    Iid,
-    IdList,
-    DateTime,
-    Uuid,
-}
-
-impl ColumnKind {
-    pub fn classify(column_name: &str) -> Self {
-        let lower = column_name.to_ascii_lowercase();
-
-        if lower.ends_with("_ids") {
-            return ColumnKind::IdList;
-        }
-        if lower == "id" || lower.ends_with("_id") {
-            return ColumnKind::Id;
-        }
-        if lower == "iid" {
-            return ColumnKind::Iid;
-        }
-        if lower == "uuid" || lower.ends_with("_uuid") {
-            return ColumnKind::Uuid;
-        }
-
-        if lower.contains("email") {
-            return ColumnKind::Email;
-        }
-        if lower.contains("url") {
-            return ColumnKind::Url;
-        }
-        if lower.contains("sha") || lower.contains("fingerprint") || lower.contains("hash") {
-            return ColumnKind::Sha;
-        }
-        if lower.contains("path") {
-            return ColumnKind::Path;
-        }
-        if lower.contains("name") || lower.contains("title") || lower.contains("username") {
-            return ColumnKind::Name;
-        }
-        if lower.contains("description") || lower.contains("body") || lower.contains("note") {
-            return ColumnKind::Description;
-        }
-        if lower.contains("status") {
-            return ColumnKind::Status;
-        }
-        if lower.contains("state") {
-            return ColumnKind::State;
-        }
-        if lower.contains("ref") || lower.contains("branch") {
-            return ColumnKind::Branch;
-        }
-
-        ColumnKind::GenericString
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -127,7 +60,7 @@ impl SiphonFakeValueGenerator {
         random_bits ^ self.counter.wrapping_mul(GOLDEN_RATIO_HASH)
     }
 
-    pub fn generate_string(&mut self, kind: ColumnKind, nullable: bool) -> SiphonValue {
+    pub fn generate_string(&mut self, kind: FieldKind, nullable: bool) -> SiphonValue {
         let bits = self.next_random();
 
         if nullable && (bits & 0xff) < NULL_THRESHOLD {
@@ -138,11 +71,9 @@ impl SiphonFakeValueGenerator {
         SiphonValue::String(self.buf.clone())
     }
 
-    // Generates a string and appends it directly to the StringBuilder,
-    // avoiding the intermediate String allocation from generate_string.
     pub fn generate_string_into(
         &mut self,
-        kind: ColumnKind,
+        kind: FieldKind,
         nullable: bool,
         builder: &mut StringBuilder,
     ) {
@@ -157,20 +88,20 @@ impl SiphonFakeValueGenerator {
         builder.append_value(&self.buf);
     }
 
-    fn write_string_to_buf(&mut self, kind: ColumnKind, bits: u64) {
+    fn write_string_to_buf(&mut self, kind: FieldKind, bits: u64) {
         let low = bits as u32;
         let high = (bits >> 32) as u32;
 
         self.buf.clear();
         match kind {
-            ColumnKind::Name => {
+            FieldKind::NameOrTitle => {
                 const PREFIXES: [&str; 8] = [
                     "alpha_", "beta_", "gamma_", "delta_", "epsilon_", "zeta_", "theta_", "omega_",
                 ];
                 self.buf.push_str(PREFIXES[low as usize % PREFIXES.len()]);
                 push_hex(&mut self.buf, bits);
             }
-            ColumnKind::Email => {
+            FieldKind::Email => {
                 const DOMAINS: [&str; 5] = [
                     "@example.com",
                     "@test.org",
@@ -182,13 +113,13 @@ impl SiphonFakeValueGenerator {
                 push_hex(&mut self.buf, bits & 0xffffff);
                 self.buf.push_str(DOMAINS[low as usize % DOMAINS.len()]);
             }
-            ColumnKind::Url => {
+            FieldKind::Url => {
                 self.buf.push_str("https://example.com/");
                 push_hex(&mut self.buf, bits);
                 self.buf.push('/');
                 push_hex(&mut self.buf, high as u64);
             }
-            ColumnKind::Path => {
+            FieldKind::Path => {
                 self.buf.push_str("/p");
                 push_hex(&mut self.buf, bits & 0xff);
                 self.buf.push_str("/d");
@@ -196,7 +127,7 @@ impl SiphonFakeValueGenerator {
                 self.buf.push('/');
                 push_hex(&mut self.buf, high as u64);
             }
-            ColumnKind::Sha => {
+            FieldKind::ShaOrHash => {
                 self.buf.reserve(40);
                 let extra = self.next_random();
                 let parts: [u64; 3] = [bits, low as u64, extra];
@@ -207,7 +138,7 @@ impl SiphonFakeValueGenerator {
                     self.buf.push(HEX_DIGITS[nibble] as char);
                 }
             }
-            ColumnKind::Description => {
+            FieldKind::DescriptionOrBody => {
                 const WORDS: [&str; 12] = [
                     "Lorem",
                     "ipsum",
@@ -230,15 +161,15 @@ impl SiphonFakeValueGenerator {
                 self.buf.push(' ');
                 push_hex(&mut self.buf, bits & 0xffff);
             }
-            ColumnKind::Status => {
+            FieldKind::Status => {
                 const STATUSES: [&str; 5] = ["open", "closed", "merged", "pending", "active"];
                 self.buf.push_str(STATUSES[low as usize % STATUSES.len()]);
             }
-            ColumnKind::State => {
+            FieldKind::State => {
                 const STATES: [&str; 5] = ["pending", "running", "success", "failed", "canceled"];
                 self.buf.push_str(STATES[low as usize % STATES.len()]);
             }
-            ColumnKind::Branch => {
+            FieldKind::RefOrBranch => {
                 const PREFIXES: [&str; 6] = [
                     "feature/branch-",
                     "fix/branch-",
@@ -250,7 +181,7 @@ impl SiphonFakeValueGenerator {
                 self.buf.push_str(PREFIXES[low as usize % PREFIXES.len()]);
                 push_hex(&mut self.buf, bits & 0xffff);
             }
-            ColumnKind::Uuid => {
+            FieldKind::Uuid => {
                 self.buf.reserve(36);
                 let bits2 = self.next_random();
                 let bytes = [
@@ -279,7 +210,7 @@ impl SiphonFakeValueGenerator {
                     self.buf.push(HEX_DIGITS[(*byte & 0xf) as usize] as char);
                 }
             }
-            ColumnKind::IdList => {
+            FieldKind::IdList => {
                 use std::fmt::Write;
                 let count = (low % MAX_LIST_LENGTH as u32) as usize;
                 for j in 0..count {
@@ -298,7 +229,7 @@ impl SiphonFakeValueGenerator {
         }
     }
 
-    pub fn generate_int64(&mut self, kind: ColumnKind, nullable: bool) -> SiphonValue {
+    pub fn generate_int64(&mut self, kind: FieldKind, nullable: bool) -> SiphonValue {
         let bits = self.next_random();
 
         if nullable && (bits & 0xff) < NULL_THRESHOLD {
@@ -308,9 +239,9 @@ impl SiphonFakeValueGenerator {
         let low = bits as u32;
 
         match kind {
-            ColumnKind::Id => SiphonValue::Int64((low % MAX_GENERATED_ID + 1) as i64),
-            ColumnKind::Iid => SiphonValue::Int64((low % MAX_IID + 1) as i64),
-            ColumnKind::DateTime => {
+            FieldKind::Id => SiphonValue::Int64((low % MAX_GENERATED_ID + 1) as i64),
+            FieldKind::Iid => SiphonValue::Int64((low % MAX_IID + 1) as i64),
+            FieldKind::DateTime => {
                 let days_ago = ((bits >> 16) % MAX_DAYS_AGO) as i64;
                 let hour_offset = ((bits >> 8) % 24) as i64;
                 let micros = (days_ago * 86400 + hour_offset * 3600) * 1_000_000;

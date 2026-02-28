@@ -8,7 +8,9 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Schema, TimeUnit};
 
-use super::fake_values::{ColumnKind, SiphonFakeValueGenerator, SiphonValue};
+use synthetic_graph::fake_values::FieldKind;
+
+use super::fake_values::{SiphonFakeValueGenerator, SiphonValue};
 
 pub enum FieldStrategy<'a> {
     System(SiphonValue),
@@ -19,7 +21,7 @@ pub enum FieldStrategy<'a> {
 pub struct GenerateStrategy {
     data_type: DataType,
     nullable: bool,
-    kind: ColumnKind,
+    kind: FieldKind,
     is_datetime: bool,
 }
 
@@ -59,11 +61,11 @@ fn build_field_strategies<'a>(
                 return FieldStrategy::Pool(pool.as_slice());
             }
 
-            let kind = ColumnKind::classify(field_name);
+            let kind = FieldKind::classify_column(field_name);
             let is_datetime = matches!(
                 field.data_type(),
                 DataType::Int64 | DataType::Timestamp(TimeUnit::Microsecond, _)
-            ) && (kind == ColumnKind::DateTime
+            ) && (kind == FieldKind::DateTime
                 || field_name.ends_with("_at")
                 || field_name == "created_at"
                 || field_name == "updated_at");
