@@ -1,0 +1,22 @@
+{
+  "name": "@gkg/ai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "proxy": "bun run proxy.ts",
+    "sanitize": "bun run sanitize.ts"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.2.0",
+    "@types/linkify-it": "^5.0.0",
+    "@types/marked": "^6.0.0",
+    "bun-types": "^1.3.10"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.2.15",
+    "isomorphic-dompurify": "^3.0.0",
+    "linkify-it": "^5.0.0",
+    "marked": "^17.0.3",
+    "opencode-ai": "^1.2.15"
+  }
+}

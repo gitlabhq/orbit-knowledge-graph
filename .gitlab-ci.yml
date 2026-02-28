@@ -13,6 +13,7 @@ stages:
   - lint
   - security
   - test
+  - ai
   - build
   - publish
   - deploy
@@ -295,6 +296,136 @@ tilt-ci:
       GKG_JWT_SECRET=ci_test_jwt_secret_at_least_32_bytes_long
       EOF
     - tilt ci
+
+# AI Review Stage
+#
+# Manually-triggered AI agents for MR review. Each agent is defined in
+# .opencode/agent/<name>.md with its own system prompt and permissions.
+#
+# All tokens are isolated in a proxy service — the job container never
+# holds a real token. The proxy also sanitizes review content, stripping
+# non-allowlisted URLs and secret patterns before they reach GitLab.
+#
+# Required CI/CD variables (Settings > CI/CD > Variables):
+#   ANTHROPIC_API_KEY    — Masked + Protected (+ Hidden if available)
+#   GITLAB_REVIEW_TOKEN  — Masked + Protected + Hidden
+#                          Granular PAT (gitlab-org/-/work_items/18555) scoped
+#                          to this project with only merge_request:write.
+#
+# To pass custom review instructions, add a REVIEW_FOCUS variable when triggering
+# the job manually (e.g., "Focus on ClickHouse query safety").
+
+.opencode-base:
+  image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
+  tags:
+    - saas-linux-medium-amd64
+  timeout: 15 minutes
+  needs: []
+  services:
+    - name: ${CI_REGISTRY_IMAGE}/ai-proxy:latest
+      alias: api-proxy
+  variables:
+    GLAB_VERSION: "1.52.1"
+  before_script:
+    - mise install
+    - curl -fsSL https://bun.sh/install | bash
+    - export PATH="$HOME/.bun/bin:$PATH"
+    - curl -fsSLo /tmp/glab.deb "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.deb"
+    - dpkg -i /tmp/glab.deb && rm /tmp/glab.deb
+    # Install workspace deps (opencode-ai, SDK, sanitization libs)
+    - cd scripts/ai && bun install --frozen-lockfile && cd ../..
+    - echo "127.0.0.1 169.254.169.254" >> /etc/hosts
+    - echo "127.0.0.1 100.100.100.200" >> /etc/hosts
+    - git diff ${CI_MERGE_REQUEST_DIFF_BASE_SHA}...HEAD > .mr-diff.txt 2>/dev/null
+      || git diff origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD > .mr-diff.txt
+    - glab config set --global skip_tls_verify true
+    # Serialize MR context (discussions, SHAs) for the agent — uses CI_JOB_TOKEN before we scrub it
+    - |
+      HEAD_SHA=$(git rev-parse HEAD)
+      START_SHA=$(git merge-base HEAD "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" 2>/dev/null || echo "$CI_MERGE_REQUEST_DIFF_BASE_SHA")
+      GITLAB_TOKEN=$CI_JOB_TOKEN glab api "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions" > .mr-discussions.json 2>/dev/null || echo "[]" > .mr-discussions.json
+      cat > .mr-context.json << CTXEOF
+      {
+        "mr_iid": "$CI_MERGE_REQUEST_IID",
+        "project_id": "$CI_PROJECT_ID",
+        "project_path": "$CI_PROJECT_PATH",
+        "source_branch": "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME",
+        "target_branch": "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+        "diff_base_sha": "$CI_MERGE_REQUEST_DIFF_BASE_SHA",
+        "head_sha": "$HEAD_SHA",
+        "start_sha": "$START_SHA"
+      }
+      CTXEOF
+    # Generate unified config
+    - export OPENCODE_CONFIG_CONTENT=$(bun scripts/ai/config.ts)
+    # Point git remote at proxy so glab routes through it
+    - git remote set-url origin "https://api-proxy:8083/${CI_PROJECT_PATH}.git"
+    # Isolated agent user
+    - useradd -m -s /bin/sh agent
+    - cp -r /root/.config /home/agent/.config 2>/dev/null || true
+    - cp -r /root/.bun /home/agent/.bun 2>/dev/null || true
+    - chown -R agent:agent /home/agent .
+    - >-
+      unset CI_JOB_TOKEN CI_REGISTRY_PASSWORD CI_REGISTRY_USER
+      CI_DEPLOY_USER CI_DEPLOY_PASSWORD RUNNER_TOKEN
+      CI_DEPENDENCY_PROXY_PASSWORD DOCKER_AUTH_CONFIG
+      GITLAB_REVIEW_TOKEN ANTHROPIC_API_KEY
+  after_script:
+    - rm -f .mr-diff.txt .mr-context.json .mr-discussions.json
+
+build-ai-proxy:
+  stage: build
+  image: docker:29
+  tags:
+    - saas-linux-small-amd64
+  services:
+    - docker:29-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - scripts/ai/**/*
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - scripts/ai/**/*
+      when: manual
+      allow_failure: true
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker build -t "${CI_REGISTRY_IMAGE}/ai-proxy:latest" scripts/ai
+    - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:latest"
+
+ai:review:
+  extends: .opencode-base
+  stage: ai
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  script:
+    - |
+      scripts/ai/run-agent.sh opencode run --agent review \
+        --file .mr-diff.txt --file .mr-context.json --file .mr-discussions.json \
+        "Review MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
+        ${REVIEW_FOCUS:+Focus: $REVIEW_FOCUS}
+        Post your findings as inline MR comments using glab."
+
+ai:security:
+  extends: .opencode-base
+  stage: ai
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  script:
+    - |
+      scripts/ai/run-agent.sh opencode run --agent security \
+        --file .mr-diff.txt --file .mr-context.json --file .mr-discussions.json \
+        "Security review for MR !${CI_MERGE_REQUEST_IID}.
+        ${REVIEW_FOCUS:+Focus: $REVIEW_FOCUS}
+        Post your findings as inline MR comments using glab."
 
 # Build Stage
 
