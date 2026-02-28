@@ -8,7 +8,7 @@
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
-use ontology::{DEFAULT_PRIMARY_KEY, EnumType, NODE_RESERVED_COLUMNS, Ontology};
+use ontology::{DEFAULT_PRIMARY_KEY, EnumType, Ontology};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
@@ -59,7 +59,6 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
 /// - Resolves entity names to ClickHouse table names
 /// - Coerces filter values to match ontology field types (e.g., enum int → string)
 /// - Expands wildcard column selections ("*") to explicit column lists
-/// - Adds required columns for redaction (id/type) to all nodes
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     input.entity_auth = build_entity_auth(ontology);
 
@@ -86,30 +85,17 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .map(|r| r.id_column.clone())
             .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
 
-        // "id" must always be retained, for a list, wildcard, and empty selection.
+        // Expand wildcard/empty column selections to explicit lists for lowering.
+        // Redaction columns (_gkg_*) are added separately by enforce.rs.
         match &mut node.columns {
             Some(ColumnSelection::All) => {
-                let mut columns: Vec<String> = NODE_RESERVED_COLUMNS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect();
-                columns.extend(node_entity.fields.iter().map(|f| f.name.clone()));
+                let columns: Vec<String> =
+                    node_entity.fields.iter().map(|f| f.name.clone()).collect();
                 node.columns = Some(ColumnSelection::List(columns));
             }
-            Some(ColumnSelection::List(cols)) => {
-                for reserved in NODE_RESERVED_COLUMNS {
-                    if !cols.contains(&reserved.to_string()) {
-                        cols.push(reserved.to_string());
-                    }
-                }
-            }
+            Some(ColumnSelection::List(_)) => {}
             None => {
-                node.columns = Some(ColumnSelection::List(
-                    NODE_RESERVED_COLUMNS
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                ));
+                node.columns = Some(ColumnSelection::List(Vec::new()));
             }
         }
 

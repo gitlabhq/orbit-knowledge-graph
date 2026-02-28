@@ -517,12 +517,12 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Build a UNION ALL subquery for multi-hop traversal (1 to max_hops).
-fn build_hop_union(rel: &InputRelationship, alias: &str) -> TableRef {
+fn build_hop_union_all(rel: &InputRelationship, alias: &str) -> TableRef {
     let rel_type_filter = type_filter(&rel.types);
     let queries = (1..=rel.max_hops)
         .map(|depth| build_hop_arm(depth, &rel_type_filter, rel.direction))
         .collect();
-    TableRef::union(queries, alias)
+    TableRef::union_all(queries, alias)
 }
 
 /// Build one arm of the union: a chain of edge joins for a specific depth.
@@ -593,11 +593,11 @@ fn build_joins(
         let target_table = resolve_table(target)?;
 
         if rel.max_hops > 1 {
-            // Multi-hop: UNION subquery
+            // Multi-hop: UNION ALL subquery
             let alias = format!("hop_e{i}");
             edge_aliases.insert(i, alias.clone());
 
-            let union = build_hop_union(rel, &alias);
+            let union = build_hop_union_all(rel, &alias);
             let (from_col, to_col) = rel.direction.union_columns();
 
             result = TableRef::join(
@@ -882,8 +882,8 @@ mod tests {
         };
         println!("{:?}", q);
         assert_eq!(q.limit, Some(25));
-        // 2 node columns + 6 edge columns (path, type, src, src_type, dst, dst_type)
-        assert_eq!(q.select.len(), 8);
+        // 0 node columns (no columns specified) + 6 edge columns
+        assert_eq!(q.select.len(), 6);
     }
 
     #[test]
@@ -891,7 +891,7 @@ mod tests {
         let input = validated_input(
             r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User"}],
+            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User", "columns": ["username"]}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
             "limit": 10
@@ -901,7 +901,6 @@ mod tests {
         let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
-        println!("{:?}", q);
         assert!(!q.group_by.is_empty());
         assert!(
             q.select
@@ -931,8 +930,7 @@ mod tests {
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
 
-        // Should have group-by node columns: u_id, u_username, u_state
-        assert!(aliases.contains(&&"u_id".to_string()));
+        // Should have group-by node columns: u_username, u_state
         assert!(aliases.contains(&&"u_username".to_string()));
         assert!(aliases.contains(&&"u_state".to_string()));
 
@@ -943,7 +941,7 @@ mod tests {
         assert!(!aliases.contains(&&"mr_id".to_string()));
 
         // GROUP BY should include all selected columns from group-by node
-        assert_eq!(q.group_by.len(), 3); // id, username, state
+        assert_eq!(q.group_by.len(), 2); // username, state
     }
 
     #[test]
@@ -968,7 +966,6 @@ mod tests {
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
 
         // Should have all user columns from ontology
-        assert!(aliases.contains(&&"u_id".to_string()));
         assert!(aliases.contains(&&"u_username".to_string()));
         assert!(aliases.contains(&&"u_state".to_string()));
         assert!(aliases.contains(&&"u_created_at".to_string()));
@@ -977,7 +974,7 @@ mod tests {
         assert!(aliases.contains(&&"note_count".to_string()));
 
         // GROUP BY should include all entity columns
-        assert!(q.group_by.len() >= 4); // id + 3 fields from ontology
+        assert!(q.group_by.len() >= 3); // 3 fields from ontology
     }
 
     #[test]
@@ -1241,7 +1238,7 @@ mod tests {
         println!("{:?}", q);
 
         assert_eq!(q.limit, Some(10));
-        assert_eq!(q.select.len(), 1);
+        assert_eq!(q.select.len(), 0);
         assert!(q.where_clause.is_some());
         assert!(q.group_by.is_empty());
         assert_eq!(count_unions(&q.from), 0);
@@ -1265,7 +1262,7 @@ mod tests {
         };
 
         assert_eq!(q.limit, Some(50));
-        assert_eq!(q.select.len(), 1);
+        assert_eq!(q.select.len(), 0);
     }
 
     #[test]
@@ -1286,11 +1283,9 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Should have: u_id (always), u_username, u_state
-        assert_eq!(q.select.len(), 3);
+        assert_eq!(q.select.len(), 2);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_id".to_string()));
         assert!(aliases.contains(&&"u_username".to_string()));
         assert!(aliases.contains(&&"u_state".to_string()));
     }
@@ -1313,11 +1308,10 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Should have id + all fields from ontology (username, state, created_at)
-        assert!(q.select.len() >= 4);
+        // All fields from ontology (username, state, created_at)
+        assert!(q.select.len() >= 3);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_id".to_string()));
         assert!(aliases.contains(&&"u_username".to_string()));
         assert!(aliases.contains(&&"u_state".to_string()));
         assert!(aliases.contains(&&"u_created_at".to_string()));
@@ -1341,13 +1335,11 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Should have: u_id, u_username, n_id, n_confidential + 6 edge columns
-        assert_eq!(q.select.len(), 10);
+        // u_username, n_confidential + 6 edge columns
+        assert_eq!(q.select.len(), 8);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_id".to_string()));
         assert!(aliases.contains(&&"u_username".to_string()));
-        assert!(aliases.contains(&&"n_id".to_string()));
         assert!(aliases.contains(&&"n_confidential".to_string()));
         // Edge columns
         assert!(aliases.contains(&&"e0_type".to_string()));
@@ -1355,7 +1347,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lower_no_columns_only_id() {
+    fn test_lower_no_columns_empty_select() {
         let input = validated_input(
             r#"{
             "query_type": "search",
@@ -1371,9 +1363,7 @@ mod tests {
             panic!("expected Query");
         };
 
-        // No columns specified - should only have id
-        assert_eq!(q.select.len(), 1);
-        assert_eq!(q.select[0].alias, Some("u_id".to_string()));
+        assert_eq!(q.select.len(), 0);
     }
 
     #[test]

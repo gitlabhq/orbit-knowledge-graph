@@ -331,7 +331,7 @@ impl TableRef {
         }
     }
 
-    pub fn union(queries: Vec<Query>, alias: impl Into<String>) -> Self {
+    pub fn union_all(queries: Vec<Query>, alias: impl Into<String>) -> Self {
         TableRef::Union {
             queries,
             alias: alias.into(),
