@@ -370,6 +370,16 @@ tilt-ci:
     - cp -r /root/.config /home/agent/.config 2>/dev/null || true
     - cp -r /root/.bun /home/agent/.bun 2>/dev/null || true
     - chown -R agent:agent /home/agent .
+    # Verify proxy is reachable and has valid credentials
+    - |
+      echo "Checking proxy health..."
+      PROXY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://api-proxy:8080/v1/messages \
+        -H "content-type: application/json" \
+        -d '{"model":"claude-opus-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null || echo "000")
+      echo "Proxy Anthropic endpoint returned: $PROXY_STATUS"
+      if [ "$PROXY_STATUS" = "000" ]; then echo "ERROR: proxy not reachable"; exit 1; fi
+      if [ "$PROXY_STATUS" = "401" ]; then echo "ERROR: ANTHROPIC_API_KEY is invalid or missing"; exit 1; fi
+      echo "Proxy check passed"
     - >-
       unset CI_JOB_TOKEN CI_REGISTRY_PASSWORD CI_REGISTRY_USER
       CI_DEPLOY_USER CI_DEPLOY_PASSWORD RUNNER_TOKEN
