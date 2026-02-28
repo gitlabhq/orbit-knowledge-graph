@@ -1,4 +1,4 @@
-## How to post MR comments
+# How to post MR comments
 
 You have `glab` available. All requests route through a proxy that handles authentication, so you don't need any tokens.
 
@@ -27,6 +27,7 @@ glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUES
 ```
 
 Line rules:
+
 - Added lines (diff shows `+`): set `new_line` only
 - Removed lines (diff shows `-`): set `old_line` only
 - Context lines (no prefix): set both `old_line` and `new_line`
