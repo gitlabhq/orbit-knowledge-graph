@@ -15,7 +15,8 @@ use crate::data_generation::fake_values::SiphonFakeValueGenerator;
 use crate::data_generation::row_builder::DirectBatchBuilder;
 use crate::dispatch::run_dispatch_indexing;
 use crate::seeding::catalog;
-use crate::state::HierarchyState;
+use crate::state::GraphState;
+use synthetic_graph::state::ContinuousResult;
 
 /// Separate seed from initial generation to produce different sequences in continuous mode.
 const CONTINUOUS_SEED: u64 = 99;
@@ -23,7 +24,7 @@ const CONTINUOUS_SEED: u64 = 99;
 pub async fn run_continuous(
     config: &SimulatorConfig,
     registry: Arc<SchemaRegistry>,
-    state: HierarchyState,
+    state: GraphState,
 ) -> Result<()> {
     let state = Arc::new(RwLock::new(state));
     let mut generator = ContinuousGenerator::new(config.clone(), registry, Arc::clone(&state));
@@ -49,8 +50,8 @@ struct ProjectRef {
 struct ContinuousGenerator {
     config: SimulatorConfig,
     seeder: ClickHouseWriter,
-    registry: Arc<SchemaRegistry>,
-    state: Arc<RwLock<HierarchyState>>,
+        registry: Arc<SchemaRegistry>,
+        state: Arc<RwLock<GraphState>>,
     rng: SmallRng,
     value_generator: SiphonFakeValueGenerator,
 }
@@ -61,19 +62,11 @@ enum DmlKind {
     Delete,
 }
 
-#[derive(Debug, Default)]
-struct ContinuousResult {
-    cycles_completed: usize,
-    total_inserts: usize,
-    total_updates: usize,
-    total_deletes: usize,
-}
-
 impl ContinuousGenerator {
     fn new(
         config: SimulatorConfig,
         registry: Arc<SchemaRegistry>,
-        state: Arc<RwLock<HierarchyState>>,
+    state: Arc<RwLock<GraphState>>,
     ) -> Self {
         Self {
             seeder: ClickHouseWriter::new(&config.datalake, 10_000),
@@ -252,7 +245,7 @@ fn set_entity_fields(
     project: &ProjectRef,
     builder: &mut DirectBatchBuilder<'_>,
     entity_id: i64,
-    state: &HierarchyState,
+    state: &GraphState,
     rng: &mut SmallRng,
 ) {
     match entity_type {
@@ -302,7 +295,7 @@ fn set_entity_fields(
 fn build_insert_rows(
     entity_type: &str,
     count: usize,
-    state: &HierarchyState,
+    state: &GraphState,
     project_indices: &[usize],
     rng: &mut SmallRng,
     builder: &mut DirectBatchBuilder<'_>,
@@ -329,7 +322,7 @@ fn build_insert_rows(
 fn build_existing_entity_rows(
     entity_type: &str,
     count: usize,
-    state: &HierarchyState,
+    state: &GraphState,
     project_indices: &[usize],
     rng: &mut SmallRng,
     builder: &mut DirectBatchBuilder<'_>,
@@ -367,7 +360,7 @@ fn build_existing_entity_rows(
 }
 
 fn pick_random_project(
-    state: &HierarchyState,
+    state: &GraphState,
     project_indices: &[usize],
     rng: &mut SmallRng,
 ) -> Option<ProjectRef> {
@@ -384,7 +377,7 @@ fn pick_random_project(
     })
 }
 
-fn project_entry_indices(state: &HierarchyState) -> Vec<usize> {
+fn project_entry_indices(state: &GraphState) -> Vec<usize> {
     state
         .path_entries
         .iter()
@@ -394,18 +387,18 @@ fn project_entry_indices(state: &HierarchyState) -> Vec<usize> {
         .collect()
 }
 
-fn random_user_id(state: &HierarchyState, rng: &mut SmallRng) -> i64 {
+fn random_user_id(state: &GraphState, rng: &mut SmallRng) -> i64 {
     random_entity_id(state, rng, "User")
 }
 
-fn random_entity_id(state: &HierarchyState, rng: &mut SmallRng, entity_type: &str) -> i64 {
+fn random_entity_id(state: &GraphState, rng: &mut SmallRng, entity_type: &str) -> i64 {
     match state.metadata.entity_ranges.get(entity_type) {
         Some(range) if range.count > 0 => range.sample(rng),
         _ => 1,
     }
 }
 
-fn random_organization_id(state: &HierarchyState, rng: &mut SmallRng) -> i64 {
+fn random_organization_id(state: &GraphState, rng: &mut SmallRng) -> i64 {
     if state.metadata.enabled_namespaces.is_empty() {
         return 1;
     }

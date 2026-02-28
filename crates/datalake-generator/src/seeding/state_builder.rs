@@ -2,18 +2,16 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 
-use crate::state::{
-    EnabledNamespaceRef, HierarchyMetadata, HierarchyPathEntry, HierarchyState, IdRange,
-};
+use crate::state::{EnabledNamespaceRef, GraphMetadata, GraphState, IdRange, PathEntry};
 
 use crate::domain::foundation::Foundation;
-use crate::domain::layout::{ProjectEntityLayout, table_base_id};
+use crate::domain::layout::{table_base_id, ProjectEntityLayout};
 use crate::seeding::catalog;
 
 pub fn build_state_for_continuous(
     foundation: &Foundation,
     layout: ProjectEntityLayout,
-) -> HierarchyState {
+) -> GraphState {
     let mut entity_ranges = HashMap::new();
     if let Some(first) = foundation.users.first() {
         entity_ranges.insert(
@@ -59,7 +57,6 @@ pub fn build_state_for_continuous(
 
     let max_rows_per_project = layout.max_rows_per_project().max(1);
     let block_size = (project_count * max_rows_per_project + 1) as i64;
-    // Move the next ID past all table blocks reserved during initial seeding.
     let next_entity_id = foundation.next_entity_id
         + (catalog::project_table_names_in_order().len() as i64 * block_size);
 
@@ -74,7 +71,7 @@ pub fn build_state_for_continuous(
 
     let mut path_entries = Vec::with_capacity(foundation.groups.len() + foundation.projects.len());
     for group in &foundation.groups {
-        path_entries.push(HierarchyPathEntry {
+        path_entries.push(PathEntry {
             entity_type: "Group".to_string(),
             id: group.id,
             traversal_path: group.traversal_path.clone(),
@@ -82,7 +79,7 @@ pub fn build_state_for_continuous(
         });
     }
     for project in &foundation.projects {
-        path_entries.push(HierarchyPathEntry {
+        path_entries.push(PathEntry {
             entity_type: "Project".to_string(),
             id: project.id,
             traversal_path: project.traversal_path.clone(),
@@ -90,8 +87,8 @@ pub fn build_state_for_continuous(
         });
     }
 
-    HierarchyState {
-        metadata: HierarchyMetadata {
+    GraphState {
+        metadata: GraphMetadata {
             next_entity_id,
             next_namespace_id: foundation.next_namespace_id,
             last_watermark: Utc::now(),

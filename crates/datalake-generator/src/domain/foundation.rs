@@ -1,4 +1,5 @@
 use crate::config::GenerationConfig;
+use synthetic_graph::ids::SeqIdAllocator;
 
 #[derive(Clone)]
 pub struct UserSeed {
@@ -33,34 +34,9 @@ pub struct Foundation {
     pub next_namespace_id: i64,
 }
 
-struct IdAllocator {
-    next_entity_id: i64,
-    next_namespace_id: i64,
-}
-
-impl IdAllocator {
-    fn new() -> Self {
-        Self {
-            next_entity_id: 1,
-            next_namespace_id: 1,
-        }
-    }
-
-    fn entity(&mut self) -> i64 {
-        let id = self.next_entity_id;
-        self.next_entity_id += 1;
-        id
-    }
-
-    fn namespace(&mut self) -> i64 {
-        let id = self.next_namespace_id;
-        self.next_namespace_id += 1;
-        id
-    }
-}
-
 pub fn build_foundation(config: &GenerationConfig) -> Foundation {
-    let mut ids = IdAllocator::new();
+    let mut entity_ids = SeqIdAllocator::new(1);
+    let mut namespace_ids = SeqIdAllocator::new(1);
     let mut users = Vec::with_capacity(config.users);
     let mut groups = Vec::new();
     let mut projects = Vec::new();
@@ -68,14 +44,16 @@ pub fn build_foundation(config: &GenerationConfig) -> Foundation {
     let organization_id = config.organizations as i64;
 
     for _ in 0..config.users {
-        users.push(UserSeed { id: ids.entity() });
+        users.push(UserSeed {
+            id: entity_ids.allocate(),
+        });
     }
 
     for _ in 0..config.groups {
-        let root_namespace_id = ids.namespace();
+        let root_namespace_id = namespace_ids.allocate();
         let root_path = format!("{}/{}/", organization_id, root_namespace_id);
         groups.push(GroupSeed {
-            id: ids.entity(),
+            id: entity_ids.allocate(),
             namespace_id: root_namespace_id,
             traversal_path: root_path.clone(),
             parent_namespace_id: None,
@@ -83,7 +61,8 @@ pub fn build_foundation(config: &GenerationConfig) -> Foundation {
         });
         root_group_namespace_ids.push(root_namespace_id);
         append_subgroups(
-            &mut ids,
+            &mut entity_ids,
+            &mut namespace_ids,
             &mut groups,
             &root_path,
             root_namespace_id,
@@ -96,8 +75,8 @@ pub fn build_foundation(config: &GenerationConfig) -> Foundation {
 
     for group in &groups {
         for _ in 0..config.per_group.projects {
-            let project_namespace_id = ids.namespace();
-            let project_id = ids.entity();
+            let project_namespace_id = namespace_ids.allocate();
+            let project_id = entity_ids.allocate();
             projects.push(ProjectSeed {
                 id: project_id,
                 namespace_id: project_namespace_id,
@@ -113,14 +92,15 @@ pub fn build_foundation(config: &GenerationConfig) -> Foundation {
         groups,
         projects,
         root_group_namespace_ids,
-        next_entity_id: ids.next_entity_id,
-        next_namespace_id: ids.next_namespace_id,
+        next_entity_id: entity_ids.current(),
+        next_namespace_id: namespace_ids.current(),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn append_subgroups(
-    ids: &mut IdAllocator,
+    entity_ids: &mut SeqIdAllocator,
+    namespace_ids: &mut SeqIdAllocator,
     groups: &mut Vec<GroupSeed>,
     parent_path: &str,
     parent_namespace_id: i64,
@@ -134,17 +114,18 @@ fn append_subgroups(
     }
 
     for _ in 0..per_group {
-        let namespace_id = ids.namespace();
+        let namespace_id = namespace_ids.allocate();
         let path = format!("{}{}/", parent_path, namespace_id);
         groups.push(GroupSeed {
-            id: ids.entity(),
+            id: entity_ids.allocate(),
             namespace_id,
             traversal_path: path.clone(),
             parent_namespace_id: Some(parent_namespace_id),
             organization_id,
         });
         append_subgroups(
-            ids,
+            entity_ids,
+            namespace_ids,
             groups,
             &path,
             namespace_id,

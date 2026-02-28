@@ -38,7 +38,7 @@ pub async fn run(config: &SimulatorConfig, skip_seeding: bool) -> Result<()> {
 
     let state = if skip_seeding {
         info!(dir = %config.state.dir, "loading saved state (seeding skipped)");
-        state::HierarchyState::load(Path::new(&config.state.dir))?
+        state::GraphState::load(Path::new(&config.state.dir))?
     } else {
         let writer = Arc::new(ClickHouseWriter::new(
             &config.datalake,

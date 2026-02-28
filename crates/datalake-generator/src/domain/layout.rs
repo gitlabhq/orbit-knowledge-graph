@@ -2,6 +2,8 @@ use crate::config::PerProjectConfig;
 use crate::domain::foundation::Foundation;
 use crate::seeding::catalog;
 
+pub use synthetic_graph::ids::{map_child_to_parent_index, synthetic_row_id};
+
 #[derive(Copy, Clone)]
 pub struct ProjectEntityLayout {
     pub merge_requests: usize,
@@ -72,29 +74,11 @@ pub fn table_base_id(
 ) -> i64 {
     let project_count = foundation.projects.len();
     let max_rows_per_project = layout.max_rows_per_project().max(1);
-    let block_size = (project_count * max_rows_per_project + 1) as i64;
-    let table_position = catalog::project_table_position(table_name).unwrap_or(0) as i64;
-    foundation.next_entity_id + table_position * block_size
-}
-
-pub fn synthetic_row_id(
-    table_id_base: i64,
-    rows_per_project: usize,
-    project_index: usize,
-    entity_index: usize,
-) -> i64 {
-    table_id_base + (project_index * rows_per_project + entity_index) as i64
-}
-
-pub fn map_child_to_parent_index(
-    child_index: usize,
-    child_count: usize,
-    parent_count: usize,
-) -> usize {
-    if child_count == 0 || parent_count == 0 {
-        return 0;
-    }
-    // Spread children across parents in a stable, repeatable way.
-    let mapped = child_index.saturating_mul(parent_count) / child_count.max(1);
-    mapped.min(parent_count.saturating_sub(1))
+    let table_position = catalog::project_table_position(table_name).unwrap_or(0);
+    synthetic_graph::ids::table_block_base(
+        foundation.next_entity_id,
+        table_position,
+        project_count,
+        max_rows_per_project,
+    )
 }
