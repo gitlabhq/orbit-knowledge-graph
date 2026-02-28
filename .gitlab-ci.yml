@@ -375,16 +375,22 @@ tilt-ci:
     # Verify proxy is reachable and has valid credentials
     - |
       echo "ANTHROPIC_API_KEY length: ${#ANTHROPIC_API_KEY}"
-      echo "ANTHROPIC_API_KEY prefix: ${ANTHROPIC_API_KEY:0:10}..."
-      echo "Checking proxy health..."
+      echo "Direct Anthropic test..."
+      DIRECT=$(curl -s -o /dev/null -w "%{http_code}" -X POST https://api.anthropic.com/v1/messages \
+        -H "x-api-key: $ANTHROPIC_API_KEY" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d '{"model":"claude-opus-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
+      echo "Direct Anthropic returned: $DIRECT"
+      echo "Proxy test..."
       PROXY_RESP=$(curl -s -w "\n%{http_code}" -X POST http://api-proxy:8080/v1/messages \
         -H "content-type: application/json" \
         -H "anthropic-version: 2023-06-01" \
-        -d '{"model":"claude-opus-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null || echo "000")
+        -d '{"model":"claude-opus-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
       PROXY_STATUS=$(echo "$PROXY_RESP" | tail -1)
       PROXY_BODY=$(echo "$PROXY_RESP" | head -n -1)
-      echo "Proxy Anthropic endpoint returned: $PROXY_STATUS"
-      if [ "$PROXY_STATUS" != "200" ]; then echo "Response: $PROXY_BODY"; echo "ERROR: proxy check failed (status $PROXY_STATUS)"; exit 1; fi
+      echo "Proxy Anthropic returned: $PROXY_STATUS"
+      if [ "$PROXY_STATUS" != "200" ]; then echo "Response: $PROXY_BODY"; echo "ERROR: proxy check failed (direct=$DIRECT proxy=$PROXY_STATUS)"; exit 1; fi
       echo "Proxy check passed"
     - >-
       unset CI_JOB_TOKEN CI_REGISTRY_PASSWORD CI_REGISTRY_USER
