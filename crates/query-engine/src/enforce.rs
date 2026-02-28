@@ -131,10 +131,18 @@ fn enforce_return_columns(
             let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
 
             if !has_id {
+                let id_expr = Expr::col(&node.id, &node.redaction_id_column);
                 q.select.push(SelectExpr {
-                    expr: Expr::col(&node.id, &node.redaction_id_column),
+                    expr: id_expr.clone(),
                     alias: Some(id_col.clone()),
                 });
+                // Push down id column to aggregation group by if not already present.
+                if input.query_type == QueryType::Aggregation
+                    && !q.group_by.is_empty()
+                    && !q.group_by.contains(&id_expr)
+                {
+                    q.group_by.push(id_expr);
+                }
             }
 
             if !has_type {
@@ -455,10 +463,139 @@ mod tests {
                 .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
         );
 
+        // Enforced id column should be added to GROUP BY (no duplicate since u.id already present)
+        assert_eq!(q.group_by.len(), 1);
+        assert_eq!(q.group_by[0], Expr::col("u", "id"));
+
         // Context should only have the group_by node
         assert_eq!(ctx.len(), 1);
         assert!(ctx.get("u").is_some());
         assert!(ctx.get("n").is_none());
+    }
+
+    #[test]
+    fn aggregation_adds_redaction_id_to_group_by() {
+        use crate::input::{AggFunction, InputAggregation};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "u".to_string(),
+                    entity: Some("User".to_string()),
+                    table: Some("gl_user".to_string()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".to_string(),
+                    entity: Some("MergeRequest".to_string()),
+                    table: Some("gl_merge_request".to_string()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![],
+            aggregations: vec![InputAggregation {
+                function: AggFunction::Count,
+                target: Some("mr".to_string()),
+                group_by: Some("u".to_string()),
+                property: None,
+                alias: Some("mr_count".to_string()),
+            }],
+            path: None,
+            neighbors: None,
+            limit: 10,
+            range: None,
+            order_by: None,
+            aggregation_sort: None,
+            entity_auth: Default::default(),
+        };
+
+        let query = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "username"),
+                alias: Some("u_username".into()),
+            }],
+            from: TableRef::scan("gl_user", "u"),
+            group_by: vec![Expr::col("u", "username")],
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let mut node = Node::Query(Box::new(query));
+        enforce_return(&mut node, &input).unwrap();
+
+        let Node::Query(q) = node else {
+            panic!("expected Query")
+        };
+
+        assert!(
+            q.group_by.contains(&Expr::col("u", "id")),
+            "redaction id column must be in GROUP BY: {:?}",
+            q.group_by
+        );
+        assert_eq!(q.group_by.len(), 2); // username + id
+    }
+
+    #[test]
+    fn uses_correct_redaction_id_column_per_node() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![],
+            from: TableRef::scan("gl_definition", "d"),
+            limit: Some(10),
+            ..Default::default()
+        }));
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "d".to_string(),
+                    entity: Some("Definition".to_string()),
+                    table: Some("gl_definition".to_string()),
+                    redaction_id_column: "project_id".to_string(),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".to_string(),
+                    entity: Some("Project".to_string()),
+                    table: Some("gl_project".to_string()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![],
+            aggregations: vec![],
+            path: None,
+            neighbors: None,
+            limit: 10,
+            range: None,
+            order_by: None,
+            aggregation_sort: None,
+            entity_auth: Default::default(),
+        };
+
+        let ctx = enforce_return(&mut node, &input).unwrap();
+
+        let Node::Query(q) = node else {
+            panic!("expected Query")
+        };
+
+        assert_eq!(q.select.len(), 4);
+
+        // Definition: custom redaction column + type literal
+        assert_eq!(q.select[0].alias, Some("_gkg_d_id".into()));
+        assert!(matches!(&q.select[0].expr, Expr::Column { column, .. } if column == "project_id"));
+        assert_eq!(q.select[1].alias, Some("_gkg_d_type".into()));
+        assert!(matches!(&q.select[1].expr, Expr::Literal(v) if v == "Definition"));
+
+        // Project: default id column + type literal
+        assert_eq!(q.select[2].alias, Some("_gkg_p_id".into()));
+        assert!(matches!(&q.select[2].expr, Expr::Column { column, .. } if column == "id"));
+        assert_eq!(q.select[3].alias, Some("_gkg_p_type".into()));
+        assert!(matches!(&q.select[3].expr, Expr::Literal(v) if v == "Project"));
+
+        assert_eq!(ctx.len(), 2);
+        assert_eq!(ctx.get("d").unwrap().entity_type, "Definition");
+        assert_eq!(ctx.get("p").unwrap().entity_type, "Project");
     }
 
     #[test]
