@@ -326,7 +326,7 @@ tilt-ci:
     - name: ${CI_REGISTRY_IMAGE}/ai-proxy:latest
       alias: api-proxy
   variables:
-    GLAB_VERSION: "1.52.1"
+    GLAB_VERSION: "1.86.0"
   before_script:
     - mise install
     - apt-get update -qq && apt-get install -yqq unzip > /dev/null
