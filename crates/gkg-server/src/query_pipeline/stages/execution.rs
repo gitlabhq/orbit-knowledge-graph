@@ -22,8 +22,8 @@ impl ExecutionStage {
         obs: &mut PipelineObserver,
     ) -> Result<ExecutionOutput, PipelineError> {
         let t = Instant::now();
-        let sql = &compiled.compiled_query.sql;
-        let params = &compiled.compiled_query.params;
+        let sql = &compiled.compiled_query.base.sql;
+        let params = &compiled.compiled_query.base.params;
 
         let mut query = self.client.query(sql);
         for (key, value) in params.iter() {
@@ -39,7 +39,7 @@ impl ExecutionStage {
             obs.executed(t.elapsed(), batches.len());
             return Ok(ExecutionOutput {
                 batches: batches.clone(),
-                result_context: compiled.compiled_query.result_context.clone(),
+                result_context: compiled.compiled_query.base.result_context.clone(),
             });
         }
         Err(PipelineError::Execution("No batches returned".into()))

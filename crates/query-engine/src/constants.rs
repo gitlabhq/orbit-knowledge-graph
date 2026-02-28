@@ -22,7 +22,12 @@ pub const RELATIONSHIP_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "relatio
 /// TODO!!! : This table name needs to be derived directly from the ontology.
 pub const SKIP_SECURITY_FILTER_TABLES: &[&str] = &[concatcp!(GL_TABLE_PREFIX, "user")];
 
-// _gkg_{alias}_id
+// _gkg_{alias}_pk  — always the entity's primary key (for hydration lookups)
+pub fn primary_key_column(alias: &str) -> String {
+    format!("{GKG_COLUMN_PREFIX}{alias}_pk")
+}
+
+// _gkg_{alias}_id  — the authorization ID (may differ from pk for indirect-auth entities)
 pub fn redaction_id_column(alias: &str) -> String {
     format!("{GKG_COLUMN_PREFIX}{alias}_id")
 }

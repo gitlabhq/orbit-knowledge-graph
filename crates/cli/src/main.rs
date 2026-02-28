@@ -344,8 +344,8 @@ fn run_query(
                 results.push(QueryOutput::Success(QueryResult {
                     label,
                     input,
-                    sql: result.sql,
-                    params: result.params,
+                    sql: result.base.sql,
+                    params: result.base.params,
                 }));
             }
             Err(e) => {
