@@ -13,6 +13,7 @@ stages:
   - lint
   - security
   - test
+  - ai:build
   - ai
   - build
   - publish
@@ -374,10 +375,11 @@ tilt-ci:
     - rm -f .mr-diff.txt .mr-context.json .mr-discussions.json
 
 build-ai-proxy:
-  stage: build
+  stage: ai:build
   image: docker:29
   tags:
     - saas-linux-small-amd64
+  needs: []
   services:
     - docker:29-dind
   variables:
@@ -386,10 +388,16 @@ build-ai-proxy:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
-        - scripts/ai/**/*
+        - scripts/ai/Dockerfile
+        - scripts/ai/proxy.ts
+        - scripts/ai/sanitize.ts
+        - scripts/ai/package.json
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
-        - scripts/ai/**/*
+        - scripts/ai/Dockerfile
+        - scripts/ai/proxy.ts
+        - scripts/ai/sanitize.ts
+        - scripts/ai/package.json
       when: manual
       allow_failure: true
   script:
