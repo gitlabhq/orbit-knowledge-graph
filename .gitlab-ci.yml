@@ -331,8 +331,7 @@ tilt-ci:
     - mise install
     - curl -fsSL https://bun.sh/install | bash
     - export PATH="$HOME/.bun/bin:$PATH"
-    - curl -fsSLo /tmp/glab.deb "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.deb"
-    - dpkg -i /tmp/glab.deb && rm /tmp/glab.deb
+    - scripts/glab/install.sh "$GLAB_VERSION"
     # Install workspace deps (opencode-ai, SDK, sanitization libs)
     - cd scripts/ai && bun install --frozen-lockfile && cd ../..
     - echo "127.0.0.1 169.254.169.254" >> /etc/hosts
