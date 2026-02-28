@@ -1,37 +1,24 @@
 //! Dynamic Arrow schema generation from ontology entities.
+//!
+//! Provides the `ToArrowSchema` extension trait used throughout the simulator,
+//! delegating to [`synthetic_graph::batch::arrow_schema`] for the actual conversion.
 
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
 use ontology::{DataType, Field, NodeEntity};
 
 /// Extension trait to convert ontology types to Arrow types.
 pub trait ToArrowSchema {
-    /// Convert to an Arrow schema, prepending traversal_path.
     fn to_arrow_schema(&self) -> Schema;
 }
 
 impl ToArrowSchema for NodeEntity {
     fn to_arrow_schema(&self) -> Schema {
-        let mut fields = vec![ArrowField::new(
-            "traversal_path",
-            ArrowDataType::Utf8,
-            false,
-        )];
-
-        for field in &self.fields {
-            // Skip traversal_path if defined in ontology - it's a system column
-            if field.name == "traversal_path" {
-                continue;
-            }
-            fields.push(field.to_arrow_field());
-        }
-
-        Schema::new(fields)
+        synthetic_graph::batch::arrow_schema::node_to_arrow_schema(self)
     }
 }
 
 /// Extension trait to convert ontology Field to Arrow Field.
 pub trait ToArrowField {
-    /// Convert to an Arrow field.
     fn to_arrow_field(&self) -> ArrowField;
 }
 
@@ -44,40 +31,18 @@ impl ToArrowField for Field {
 
 /// Extension trait to convert ontology DataType to Arrow DataType.
 pub trait ToArrowType {
-    /// Convert to Arrow DataType.
     fn to_arrow_type(&self) -> ArrowDataType;
 }
 
 impl ToArrowType for DataType {
     fn to_arrow_type(&self) -> ArrowDataType {
-        match self {
-            DataType::String | DataType::Enum | DataType::Uuid => ArrowDataType::Utf8,
-            DataType::Int => ArrowDataType::Int64,
-            DataType::Float => ArrowDataType::Float64,
-            DataType::Bool => ArrowDataType::Boolean,
-            DataType::Date => ArrowDataType::Date32,
-            DataType::DateTime => ArrowDataType::Int64, // Unix timestamp in millis
-        }
+        synthetic_graph::batch::arrow_schema::ontology_to_arrow_type(self)
     }
 }
 
 /// Create the Arrow schema for the unified edges table.
-///
-/// Matches `EdgeEntity` from ontology:
-/// - relationship_kind: Utf8 (e.g., "AUTHORED", "CONTAINS")
-/// - source_id: Int64 (source node ID)
-/// - source_kind: Utf8 (e.g., "User", "Group")
-/// - target_id: Int64 (target node ID)
-/// - target_kind: Utf8 (e.g., "MergeRequest", "Project")
 pub fn edge_schema() -> Schema {
-    Schema::new(vec![
-        ArrowField::new("traversal_path", ArrowDataType::Utf8, false),
-        ArrowField::new("relationship_kind", ArrowDataType::Utf8, false),
-        ArrowField::new("source_id", ArrowDataType::Int64, false),
-        ArrowField::new("source_kind", ArrowDataType::Utf8, false),
-        ArrowField::new("target_id", ArrowDataType::Int64, false),
-        ArrowField::new("target_kind", ArrowDataType::Utf8, false),
-    ])
+    synthetic_graph::batch::arrow_schema::edge_schema()
 }
 
 /// Convert Arrow schema to ClickHouse CREATE TABLE statement.
@@ -119,7 +84,7 @@ fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> Strin
         ArrowDataType::Date32 => "Date",
         ArrowDataType::Date64 => "DateTime64(6, 'UTC')",
         ArrowDataType::Timestamp(_, _) => "DateTime64(6, 'UTC')",
-        _ => "String", // Fallback
+        _ => "String",
     };
 
     if nullable {

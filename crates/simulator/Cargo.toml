@@ -29,6 +29,7 @@ tabled = "0.20"
 clickhouse-client = { path = "../clickhouse-client" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
+synthetic-graph = { path = "../synthetic-graph" }
 
 
 [[bin]]

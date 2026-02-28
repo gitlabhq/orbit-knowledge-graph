@@ -657,6 +657,84 @@ impl Default for OutputConfig {
     }
 }
 
+impl GenerationConfig {
+    /// Convert to synthetic-graph's GenerationConfig.
+    pub fn to_synthetic_graph_config(&self) -> synthetic_graph::config::GenerationConfig {
+        synthetic_graph::config::GenerationConfig {
+            organizations: self.organizations,
+            roots: self.roots.clone(),
+            relationships: synthetic_graph::config::RelationshipConfig {
+                edges: self
+                    .relationships
+                    .edges
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.clone(),
+                            v.iter()
+                                .map(|(vk, ratio)| (vk.clone(), convert_edge_ratio(ratio)))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            },
+            associations: synthetic_graph::config::AssociationConfig {
+                edges: self
+                    .associations
+                    .edges
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.clone(),
+                            v.iter()
+                                .map(|(vk, val)| (vk.clone(), convert_association_value(val)))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            },
+            subgroups: synthetic_graph::config::SubgroupConfig {
+                max_depth: self.subgroups.max_depth,
+                per_group: self.subgroups.per_group,
+            },
+            batch_size: self.batch_size,
+            seed: self.seed.unwrap_or(42),
+        }
+    }
+}
+
+fn convert_edge_ratio(ratio: &EdgeRatio) -> synthetic_graph::config::EdgeRatio {
+    match ratio {
+        EdgeRatio::Count(n) => synthetic_graph::config::EdgeRatio::Count(*n),
+        EdgeRatio::Probability(p) => synthetic_graph::config::EdgeRatio::Probability(*p),
+    }
+}
+
+fn convert_association_value(
+    val: &AssociationEdgeValue,
+) -> synthetic_graph::config::AssociationEdgeValue {
+    match val {
+        AssociationEdgeValue::Simple(ratio) => {
+            synthetic_graph::config::AssociationEdgeValue::Simple(convert_edge_ratio(ratio))
+        }
+        AssociationEdgeValue::Extended(ext) => {
+            synthetic_graph::config::AssociationEdgeValue::Extended(
+                synthetic_graph::config::AssociationEdgeExtended {
+                    ratio: convert_edge_ratio(&ext.ratio),
+                    iterate: match ext.per {
+                        IterationDirection::Target => {
+                            synthetic_graph::config::IterationDirection::Target
+                        }
+                        IterationDirection::Source => {
+                            synthetic_graph::config::IterationDirection::Source
+                        }
+                    },
+                },
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

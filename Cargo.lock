@@ -6148,6 +6148,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sqlformat",
+ "synthetic-graph",
  "tabled",
  "tokio",
  "tracing",
