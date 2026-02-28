@@ -6,6 +6,7 @@
 
 mod arrow_converter;
 pub mod config;
+pub mod dispatch;
 pub mod metrics;
 mod project_store;
 mod push_event_handler;
