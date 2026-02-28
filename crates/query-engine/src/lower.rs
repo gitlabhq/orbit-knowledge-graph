@@ -1461,19 +1461,13 @@ mod tests {
                 node_ids: vec![123],
                 ..Default::default()
             }],
-            relationships: vec![],
-            aggregations: vec![],
-            path: None,
             neighbors: Some(InputNeighbors {
                 node: "u".to_string(),
                 direction: Direction::Outgoing,
                 rel_types: vec![],
             }),
             limit: 10,
-            range: None,
-            order_by: None,
-            aggregation_sort: None,
-            entity_auth: Default::default(),
+            ..Input::default()
         };
 
         let Node::Query(q) = lower(&input).unwrap() else {

@@ -175,7 +175,6 @@ mod tests {
 
     fn test_input() -> Input {
         Input {
-            query_type: QueryType::Traversal,
             nodes: vec![
                 InputNode {
                     id: "u".to_string(),
@@ -190,15 +189,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            relationships: vec![],
-            aggregations: vec![],
-            path: None,
-            neighbors: None,
-            limit: 30,
-            range: None,
-            order_by: None,
-            aggregation_sort: None,
-            entity_auth: Default::default(),
+            ..Input::default()
         }
     }
 
@@ -324,20 +315,11 @@ mod tests {
     #[test]
     fn skips_nodes_without_entity() {
         let input = Input {
-            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "n".to_string(),
                 ..Default::default()
             }],
-            relationships: vec![],
-            aggregations: vec![],
-            path: None,
-            neighbors: None,
-            limit: 30,
-            range: None,
-            order_by: None,
-            aggregation_sort: None,
-            entity_auth: Default::default(),
+            ..Input::default()
         };
 
         let query = Query {
@@ -405,7 +387,6 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            relationships: vec![],
             aggregations: vec![InputAggregation {
                 function: AggFunction::Count,
                 target: Some("n".to_string()),
@@ -413,13 +394,8 @@ mod tests {
                 property: None,
                 alias: Some("note_count".to_string()),
             }],
-            path: None,
-            neighbors: None,
             limit: 10,
-            range: None,
-            order_by: None,
-            aggregation_sort: None,
-            entity_auth: Default::default(),
+            ..Input::default()
         };
 
         let query = Query {
@@ -493,7 +469,6 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            relationships: vec![],
             aggregations: vec![InputAggregation {
                 function: AggFunction::Count,
                 target: Some("mr".to_string()),
@@ -501,13 +476,7 @@ mod tests {
                 property: None,
                 alias: Some("mr_count".to_string()),
             }],
-            path: None,
-            neighbors: None,
-            limit: 10,
-            range: None,
-            order_by: None,
-            aggregation_sort: None,
-            entity_auth: Default::default(),
+            ..Input::default()
         };
 
         let query = Query {
@@ -546,7 +515,6 @@ mod tests {
         }));
 
         let input = Input {
-            query_type: QueryType::Traversal,
             nodes: vec![
                 InputNode {
                     id: "d".to_string(),
@@ -562,15 +530,8 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            relationships: vec![],
-            aggregations: vec![],
-            path: None,
-            neighbors: None,
             limit: 10,
-            range: None,
-            order_by: None,
-            aggregation_sort: None,
-            entity_auth: Default::default(),
+            ..Input::default()
         };
 
         let ctx = enforce_return(&mut node, &input).unwrap();
@@ -621,8 +582,6 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            relationships: vec![],
-            aggregations: vec![],
             path: Some(InputPath {
                 path_type: crate::input::PathType::Shortest,
                 from: "start".to_string(),
@@ -630,12 +589,7 @@ mod tests {
                 max_depth: 3,
                 rel_types: vec![],
             }),
-            neighbors: None,
-            limit: 30,
-            range: None,
-            order_by: None,
-            aggregation_sort: None,
-            entity_auth: Default::default(),
+            ..Input::default()
         };
 
         // Path finding generates a Query with unrolled CTEs
