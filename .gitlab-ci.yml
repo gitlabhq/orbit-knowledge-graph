@@ -325,6 +325,9 @@ tilt-ci:
   services:
     - name: ${CI_REGISTRY_IMAGE}/ai-proxy:latest
       alias: api-proxy
+      variables:
+        ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+        GITLAB_REVIEW_TOKEN: $GITLAB_REVIEW_TOKEN
   variables:
     GLAB_VERSION: "1.86.0"
   before_script:
