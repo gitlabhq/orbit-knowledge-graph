@@ -32,22 +32,26 @@ const SENSITIVE_RESPONSE_HEADERS = [
   "x-forwarded-for",
 ];
 
+const CONTENT_FIELDS = new Set(["note", "body", "description", "title"]);
+
 function sanitizeRequestBody(raw: string): string {
   try {
     const json = JSON.parse(raw);
     for (const key of Object.keys(json)) {
-      if (typeof json[key] === "string") json[key] = sanitize(json[key]);
+      if (typeof json[key] === "string" && CONTENT_FIELDS.has(key))
+        json[key] = sanitize(json[key]);
     }
     return JSON.stringify(json);
   } catch {}
   try {
     const params = new URLSearchParams(raw);
     for (const key of params.keys()) {
-      params.set(key, sanitize(params.get(key)!));
+      if (CONTENT_FIELDS.has(key))
+        params.set(key, sanitize(params.get(key)!));
     }
     return params.toString();
   } catch {}
-  return sanitize(raw);
+  return raw;
 }
 
 function stripResponseHeaders(res: Response): Response {

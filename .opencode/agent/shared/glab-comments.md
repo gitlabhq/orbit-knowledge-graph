@@ -53,42 +53,51 @@ glab api "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/versions
   | jq '.[0] | {base_commit_sha, head_commit_sha, start_commit_sha}'
 ```
 
-Create a draft note for your summary:
+Create a general draft note (not attached to a diff line):
 
 ```shell
 glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes" \
   -f note="your summary comment"
 ```
 
-Create a draft inline comment on a specific diff line:
+Create an inline draft note on a specific diff line. You MUST use JSON body with the Content-Type header for the position to attach correctly:
 
 ```shell
-glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes" \
-  -f note="your comment" \
-  -f "position[position_type]=text" \
-  -f "position[base_sha]=BASE_SHA" \
-  -f "position[head_sha]=HEAD_SHA" \
-  -f "position[start_sha]=START_SHA" \
-  -f "position[new_path]=path/to/file.rs" \
-  -f "position[old_path]=path/to/file.rs" \
-  -f "position[new_line]=42"
+glab api --method POST \
+  "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes" \
+  -H "Content-Type: application/json" \
+  --input <(echo '{
+    "note": "your comment here",
+    "position": {
+      "position_type": "text",
+      "base_sha": "BASE_SHA",
+      "head_sha": "HEAD_SHA",
+      "start_sha": "START_SHA",
+      "old_path": "path/to/file.rs",
+      "new_path": "path/to/file.rs",
+      "new_line": 42
+    }
+  }')
 ```
 
-Line rules:
+Do NOT use `-f` flags for inline draft notes — the nested position object will not serialize correctly and the comment will appear as a general comment instead of inline on the diff.
 
-- Added lines (diff `+`): set `new_line` only
-- Removed lines (diff `-`): set `old_line` only
+Line rules for the position object:
+
+- Added lines (diff `+`): set `new_line` only, omit `old_line`
+- Removed lines (diff `-`): set `old_line` only, omit `new_line`
 - Context lines (no prefix): set both `old_line` and `new_line`
 
 After creating all your draft notes, publish them as a single review:
 
 ```shell
-glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes/bulk_publish"
+glab api --method POST \
+  "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes/bulk_publish"
 ```
 
 ## Code suggestions
 
-When you want to propose a specific code change, use GitLab's suggestion syntax inside the draft note body. GitLab renders this with an "Apply suggestion" button the author can click.
+When you want to propose a specific code change, use GitLab's suggestion syntax inside the note body. GitLab renders this with an "Apply suggestion" button.
 
 For a single-line replacement, comment on that line and use:
 
@@ -98,24 +107,23 @@ replacement code here
 ```
 ````
 
-To replace a range of lines, adjust the offsets. `-N` includes N lines above the commented line, `+N` includes N lines below:
+To replace a range of lines, adjust the offsets. `-N` includes N lines above, `+N` includes N lines below:
 
 ````text
 ```suggestion:-2+1
-all three replacement lines here
+all replacement lines here
 ```
 ````
 
-This replaces the commented line plus 2 above and 1 below (4 lines total). The suggestion block must contain the full replacement text for that range.
-
-Use suggestions when you have a concrete fix. Use plain text comments when you're raising a question or pointing out a pattern.
+Use suggestions when you have a concrete fix. Use plain text comments for questions or patterns.
 
 ## Replying and resolving
 
-Reply to an existing thread instead of creating a duplicate:
+Reply to an existing thread via a draft note:
 
 ```shell
-glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes" \
+glab api --method POST \
+  "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes" \
   -f note="your reply" \
   -f in_reply_to_discussion_id="DISCUSSION_ID"
 ```
@@ -123,6 +131,7 @@ glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUES
 Resolve a thread:
 
 ```shell
-glab api --method PUT "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions/DISCUSSION_ID" \
+glab api --method PUT \
+  "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions/DISCUSSION_ID" \
   -f resolved=true
 ```

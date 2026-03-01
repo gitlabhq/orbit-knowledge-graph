@@ -99,21 +99,8 @@ const SECRET_PATTERNS: RegExp[] = [
   // Generic password/secret assignments
   /(?:password|passwd|secret|token|apikey|api_key)\s*[:=]\s*['"][^'"]{8,}['"]/gi,
 
-  // Hex secrets (40, 64 chars)
-  /[a-f0-9]{64}/g,
-  /(?<![a-f0-9])[a-f0-9]{40}(?![a-f0-9])/g,
-
-  // Base64 blocks
-  /[A-Za-z0-9+\/]{40,}={1,2}/g,
-
   // IP:port patterns
   /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}\b/g,
-
-  // Internal hostnames
-  /[\w-]+\.internal(?:\.[\w-]+)*/gi,
-  /[\w-]+\.local(?:\.[\w-]+)*/gi,
-  /[\w-]+\.corp(?:\.[\w-]+)*/gi,
-  /[\w-]+\.priv(?:\.[\w-]+)*/gi,
 ];
 
 function isAllowedUrl(raw: string): boolean {
@@ -177,8 +164,6 @@ export function sanitize(text: string): string {
       return `${bracket}${label}] [link redacted]`;
     },
   );
-
-  text = DOMPurify.sanitize(text, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
 
   if (n) console.log(`sanitized ${n} item(s)`);
   return text;
