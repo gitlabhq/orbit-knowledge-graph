@@ -338,8 +338,16 @@ tilt-ci:
     - cd scripts/ai && bun install --frozen-lockfile && cd ../..
     - echo "127.0.0.1 169.254.169.254" >> /etc/hosts
     - echo "127.0.0.1 100.100.100.200" >> /etc/hosts
+    - iptables -A OUTPUT -d 169.254.169.254 -j DROP 2>/dev/null || true
+    - iptables -A OUTPUT -d 100.100.100.200 -j DROP 2>/dev/null || true
     - glab config set --global skip_tls_verify true
     - echo "proxy-handled" | glab auth login --hostname api-proxy:8083 --stdin 2>/dev/null || true
+    # Wait for proxy service to be ready
+    - |
+      for i in $(seq 1 30); do
+        curl -sf http://api-proxy:8080/ >/dev/null 2>&1 && break
+        sleep 1
+      done
     # Send tokens to the proxy service via stdin (keeps secrets out of /proc/pid/cmdline)
     - |
       INIT_STATUS=$(printf '{"anthropic_key":"%s","gitlab_token":"%s"}' "$ANTHROPIC_API_KEY" "$GITLAB_REVIEW_TOKEN" \
@@ -362,9 +370,11 @@ tilt-ci:
     - cp -r /root/.bun /home/agent/.bun 2>/dev/null || true
     - chown -R agent:agent /home/agent .
     - >-
-      unset CI_JOB_TOKEN CI_REGISTRY_PASSWORD CI_REGISTRY_USER
+      unset CI_JOB_TOKEN CI_JOB_JWT CI_JOB_JWT_V2
+      CI_REGISTRY_PASSWORD CI_REGISTRY_USER
       CI_DEPLOY_USER CI_DEPLOY_PASSWORD RUNNER_TOKEN
       CI_DEPENDENCY_PROXY_PASSWORD DOCKER_AUTH_CONFIG
+      KUBECONFIG GOOGLE_APPLICATION_CREDENTIALS
       GITLAB_REVIEW_TOKEN ANTHROPIC_API_KEY
 build-ai-proxy:
   stage: ai:build

@@ -42,10 +42,15 @@ const CONTENT_FIELDS = new Set(["note", "body", "description", "title"]);
 function sanitizeRequestBody(raw: string): string {
   try {
     const json = JSON.parse(raw);
-    for (const key of Object.keys(json)) {
-      if (typeof json[key] === "string" && CONTENT_FIELDS.has(key))
-        json[key] = sanitize(json[key]);
-    }
+    const walk = (obj: Record<string, unknown>) => {
+      for (const key of Object.keys(obj)) {
+        if (typeof obj[key] === "string" && CONTENT_FIELDS.has(key))
+          obj[key] = sanitize(obj[key] as string);
+        else if (typeof obj[key] === "object" && obj[key] !== null && !Array.isArray(obj[key]))
+          walk(obj[key] as Record<string, unknown>);
+      }
+    };
+    walk(json);
     return JSON.stringify(json);
   } catch {}
   try {
@@ -155,7 +160,8 @@ Bun.serve({
   fetch: (req) => {
     const path = new URL(req.url).pathname;
     if (path === "/_init" && req.method === "POST") return handleInit(req);
-    return handle(req, "api.anthropic.com", { "x-api-key": anthropicKey! }, "/v1/");
+    if (!anthropicKey) return new Response("proxy not initialized", { status: 503 });
+    return handle(req, "api.anthropic.com", { "x-api-key": anthropicKey }, "/v1/");
   },
   error: () => new Response("proxy error", { status: 500 }),
 });
@@ -164,11 +170,12 @@ Bun.serve({
   port: 8083,
   tls: { key: Bun.file("/tmp/k.pem"), cert: Bun.file("/tmp/c.pem") },
   fetch: (req) => {
+    if (!gitlabToken) return new Response("proxy not initialized", { status: 503 });
     const hasBody = req.method === "POST" || req.method === "PUT" || req.method === "PATCH";
     return handle(
       req,
       "gitlab.com",
-      { "PRIVATE-TOKEN": gitlabToken! },
+      { "PRIVATE-TOKEN": gitlabToken },
       "/api/",
       hasBody ? sanitizeRequestBody : undefined,
     );

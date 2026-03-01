@@ -15,7 +15,7 @@ WORKSPACE_BIN="$(cd "$(dirname "$0")" && pwd)/node_modules/.bin"
 
 exec runuser -u agent -- env -i \
   HOME=/home/agent \
-  PATH="${WORKSPACE_BIN}:/home/agent/.bun/bin:${PATH}" \
+  PATH="${WORKSPACE_BIN}:/home/agent/.bun/bin:/usr/local/bin:/usr/bin:/bin" \
   USER=agent \
   SHELL=/bin/sh \
   TERM="${TERM:-dumb}" \
