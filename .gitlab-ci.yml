@@ -344,10 +344,12 @@ tilt-ci:
     - echo "proxy-handled" | glab auth login --hostname api-proxy:8083 --stdin 2>/dev/null || true
     # Wait for proxy service to be ready
     - |
+      PROXY_READY=false
       for i in $(seq 1 30); do
-        curl -sf http://api-proxy:8080/ >/dev/null 2>&1 && break
+        if curl -sf http://api-proxy:8080/ >/dev/null 2>&1; then PROXY_READY=true; break; fi
         sleep 1
       done
+      if [ "$PROXY_READY" = "false" ]; then echo "ERROR: proxy not reachable after 30s"; exit 1; fi
     # Send tokens to the proxy service via stdin (keeps secrets out of /proc/pid/cmdline)
     - |
       INIT_STATUS=$(printf '{"anthropic_key":"%s","gitlab_token":"%s"}' "$ANTHROPIC_API_KEY" "$GITLAB_REVIEW_TOKEN" \
@@ -388,11 +390,14 @@ build-ai-proxy:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
   rules:
-    - changes:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
         - scripts/ai/**/*
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - docker build -t "${CI_REGISTRY_IMAGE}/ai-proxy:latest" scripts/ai
+    - docker build -t "${CI_REGISTRY_IMAGE}/ai-proxy:${CI_COMMIT_SHA}" scripts/ai
+    - docker tag "${CI_REGISTRY_IMAGE}/ai-proxy:${CI_COMMIT_SHA}" "${CI_REGISTRY_IMAGE}/ai-proxy:latest"
+    - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:${CI_COMMIT_SHA}"
     - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:latest"
 
 ai:review:

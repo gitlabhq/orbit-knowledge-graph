@@ -24,6 +24,7 @@ import { sanitize } from "./sanitize";
 
 let anthropicKey: string | null = null;
 let gitlabToken: string | null = null;
+let locked = false;
 let initialized = false;
 
 const SENSITIVE_RESPONSE_HEADERS = [
@@ -42,12 +43,14 @@ const CONTENT_FIELDS = new Set(["note", "body", "description", "title"]);
 function sanitizeRequestBody(raw: string): string {
   try {
     const json = JSON.parse(raw);
-    const walk = (obj: Record<string, unknown>) => {
-      for (const key of Object.keys(obj)) {
-        if (typeof obj[key] === "string" && CONTENT_FIELDS.has(key))
-          obj[key] = sanitize(obj[key] as string);
-        else if (typeof obj[key] === "object" && obj[key] !== null && !Array.isArray(obj[key]))
-          walk(obj[key] as Record<string, unknown>);
+    const walk = (obj: unknown): void => {
+      if (Array.isArray(obj)) { for (const item of obj) walk(item); return; }
+      if (typeof obj !== "object" || obj === null) return;
+      const rec = obj as Record<string, unknown>;
+      for (const key of Object.keys(rec)) {
+        if (typeof rec[key] === "string" && CONTENT_FIELDS.has(key))
+          rec[key] = sanitize(rec[key] as string);
+        else walk(rec[key]);
       }
     };
     walk(json);
@@ -134,23 +137,20 @@ async function handle(
 }
 
 async function handleInit(req: Request): Promise<Response> {
-  if (initialized)
-    return new Response("already initialized", { status: 403 });
-  initialized = true;
+  if (locked) return new Response("already initialized", { status: 403 });
+  locked = true;
 
   try {
     const { anthropic_key, gitlab_token } = await req.json();
-    if (!anthropic_key || !gitlab_token) {
-      initialized = false;
+    if (!anthropic_key || !gitlab_token)
       return new Response("missing keys", { status: 400 });
-    }
 
     anthropicKey = anthropic_key;
     gitlabToken = gitlab_token;
+    initialized = true;
     console.log("proxy initialized with tokens");
     return new Response("ok");
   } catch {
-    initialized = false;
     return new Response("invalid body", { status: 400 });
   }
 }
@@ -171,7 +171,7 @@ Bun.serve({
   tls: { key: Bun.file("/tmp/k.pem"), cert: Bun.file("/tmp/c.pem") },
   fetch: (req) => {
     if (!gitlabToken) return new Response("proxy not initialized", { status: 503 });
-    const hasBody = req.method === "POST" || req.method === "PUT" || req.method === "PATCH";
+    const hasBody = req.method === "POST" || req.method === "PUT" || req.method === "PATCH" || req.method === "DELETE";
     return handle(
       req,
       "gitlab.com",
