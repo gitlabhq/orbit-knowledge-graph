@@ -132,10 +132,14 @@ impl NatsBroker {
         module_name: &str,
         error: &str,
     ) {
+        let original_payload = serde_json::from_slice(&envelope.payload).unwrap_or_else(|_| {
+            serde_json::Value::String(String::from_utf8_lossy(&envelope.payload).into_owned())
+        });
+
         let dead_letter = DeadLetterEnvelope {
             original_subject: original_topic.subject.to_string(),
             original_stream: original_topic.stream.to_string(),
-            original_payload: envelope.payload.clone(),
+            original_payload,
             original_message_id: envelope.id.0.to_string(),
             original_timestamp: envelope.timestamp,
             failed_at: chrono::Utc::now(),

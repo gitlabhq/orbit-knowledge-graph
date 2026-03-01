@@ -6,7 +6,6 @@
 //!
 //! Subject format: `dlq.<original_stream>.<original_subject>`
 
-use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -20,8 +19,7 @@ pub const DEAD_LETTER_SUBJECT_PREFIX: &str = "dlq";
 pub struct DeadLetterEnvelope {
     pub original_subject: String,
     pub original_stream: String,
-    #[serde(with = "bytes_base64")]
-    pub original_payload: Bytes,
+    pub original_payload: serde_json::Value,
     pub original_message_id: String,
     pub original_timestamp: DateTime<Utc>,
     pub failed_at: DateTime<Utc>,
@@ -45,25 +43,6 @@ pub fn dead_letter_subject(topic: &Topic) -> String {
 /// Returns a [`Topic`] pointing to the DLQ stream and subject for the given original topic.
 pub fn dead_letter_topic(topic: &Topic) -> Topic {
     Topic::new(DEAD_LETTER_STREAM, dead_letter_subject(topic))
-}
-
-mod bytes_base64 {
-    use base64::Engine as _;
-    use base64::engine::general_purpose::STANDARD;
-    use bytes::Bytes;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&STANDARD.encode(bytes))
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Bytes, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        STANDARD
-            .decode(&s)
-            .map(Bytes::from)
-            .map_err(serde::de::Error::custom)
-    }
 }
 
 #[cfg(test)]
@@ -92,7 +71,7 @@ mod tests {
         let envelope = DeadLetterEnvelope {
             original_subject: "tables.users".into(),
             original_stream: "siphon_db".into(),
-            original_payload: Bytes::from(r#"{"user_id": 42}"#),
+            original_payload: serde_json::json!({"user_id": 42}),
             original_message_id: "msg-123".into(),
             original_timestamp: Utc::now(),
             failed_at: Utc::now(),
