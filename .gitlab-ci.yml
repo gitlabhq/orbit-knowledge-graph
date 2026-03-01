@@ -13,6 +13,7 @@ stages:
   - lint
   - security
   - test
+  - ai:build
   - ai
   - build
   - publish
@@ -321,6 +322,9 @@ tilt-ci:
     - saas-linux-medium-amd64
   timeout: 20 minutes
   needs: []
+  services:
+    - name: ${CI_REGISTRY_IMAGE}/ai-proxy:latest
+      alias: api-proxy
   variables:
     GLAB_VERSION: "1.86.0"
   before_script:
@@ -335,28 +339,24 @@ tilt-ci:
     - echo "127.0.0.1 169.254.169.254" >> /etc/hosts
     - echo "127.0.0.1 100.100.100.200" >> /etc/hosts
     - glab config set --global skip_tls_verify true
-    # Register proxy as a glab host so the agent can use glab through it
-    - echo "proxy-handled" | glab auth login --hostname localhost:8083 --stdin 2>/dev/null || true
-    # Start proxy as background process (same container = same env vars)
+    - echo "proxy-handled" | glab auth login --hostname api-proxy:8083 --stdin 2>/dev/null || true
+    # Send tokens to the proxy service (avoids CI variable inheritance issues)
     - |
-      openssl req -x509 -nodes -newkey rsa:2048 \
-        -keyout /tmp/k.pem -out /tmp/c.pem \
-        -days 1 -subj '/CN=localhost' \
-        -addext 'subjectAltName=DNS:localhost' 2>/dev/null
-      bun scripts/ai/proxy.ts &
-      PROXY_PID=$!
-      sleep 1
-      echo "Proxy started (pid $PROXY_PID)"
+      INIT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://api-proxy:8080/_init \
+        -H "Content-Type: application/json" \
+        -d "{\"anthropic_key\":\"$ANTHROPIC_API_KEY\",\"gitlab_token\":\"$GITLAB_REVIEW_TOKEN\"}")
+      echo "Proxy init: $INIT_STATUS"
+      if [ "$INIT_STATUS" != "200" ]; then echo "ERROR: proxy init failed"; exit 1; fi
     # Verify proxy forwards to Anthropic correctly
     - |
-      PROXY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/v1/messages \
+      PROXY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://api-proxy:8080/v1/messages \
         -H "content-type: application/json" \
         -H "anthropic-version: 2023-06-01" \
         -d '{"model":"claude-opus-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
       echo "Proxy health check: $PROXY_STATUS"
       if [ "$PROXY_STATUS" != "200" ]; then echo "ERROR: proxy check failed ($PROXY_STATUS)"; exit 1; fi
     - export OPENCODE_CONFIG_CONTENT=$(bun scripts/ai/config.ts)
-    - git remote set-url origin "https://localhost:8083/${CI_PROJECT_PATH}.git"
+    - git remote set-url origin "https://api-proxy:8083/${CI_PROJECT_PATH}.git"
     - useradd -m -s /bin/sh agent
     - cp -r /root/.config /home/agent/.config 2>/dev/null || true
     - cp -r /root/.bun /home/agent/.bun 2>/dev/null || true
@@ -366,6 +366,26 @@ tilt-ci:
       CI_DEPLOY_USER CI_DEPLOY_PASSWORD RUNNER_TOKEN
       CI_DEPENDENCY_PROXY_PASSWORD DOCKER_AUTH_CONFIG
       GITLAB_REVIEW_TOKEN ANTHROPIC_API_KEY
+build-ai-proxy:
+  stage: ai:build
+  image: docker:29
+  tags:
+    - saas-linux-small-amd64
+  needs: []
+  services:
+    - docker:29-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - scripts/ai/**/*
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker build -t "${CI_REGISTRY_IMAGE}/ai-proxy:latest" scripts/ai
+    - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:latest"
+
 ai:review:
   extends: .opencode-base
   stage: ai

@@ -1,29 +1,30 @@
 #!/usr/bin/env bun
 //
 // Reverse proxy for CI agent isolation.
-// Runs as a background process — holds real API tokens so the agent process never sees them.
+// Runs as a GitLab CI service — holds real API tokens so the job container never sees them.
 // Sanitizes outbound review content (note/body/description fields) before it reaches GitLab.
 //
-// Port 8080 (HTTP):  Anthropic API — injects x-api-key, streams through
+// Port 8080 (HTTP):  Anthropic API — injects x-api-key
 // Port 8083 (HTTPS): GitLab API   — injects PRIVATE-TOKEN, sanitizes note bodies
 //
-// Security:
-//   - Only allows exact upstream paths (Anthropic: /v1/*, GitLab: /api/v4/*)
-//   - Strips all auth-related headers from responses (prevents reflection)
-//   - Generic error responses (no stack traces, no env vars)
-//   - Sanitizes note bodies via DOMPurify + linkify-it before forwarding
+// Tokens are injected at runtime via POST /_init from the job container.
+// This avoids reliance on CI variable inheritance in service containers.
+// The /_init endpoint accepts one call, then locks permanently.
 //
-// Requires: ANTHROPIC_API_KEY, GITLAB_REVIEW_TOKEN env vars
-//           /tmp/k.pem, /tmp/c.pem (self-signed TLS cert for port 8083)
+// Security:
+//   - Tokens only exist in proxy memory (never in env or on disk)
+//   - Only allows exact upstream paths (Anthropic: /v1/*, GitLab: /api/*)
+//   - Strips all auth-related headers from responses (prevents reflection)
+//   - Sanitizes note/body/description/title fields via linkify-it + DOMPurify
+//   - /_init endpoint locks after first call (one-time use)
+//
+// Requires: /tmp/k.pem, /tmp/c.pem (self-signed TLS cert for port 8083)
 
 import { sanitize } from "./sanitize";
 
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const GITLAB_TOKEN = process.env.GITLAB_REVIEW_TOKEN;
-if (!ANTHROPIC_KEY || !GITLAB_TOKEN) {
-  console.error("fatal: ANTHROPIC_API_KEY and GITLAB_REVIEW_TOKEN must be set");
-  process.exit(1);
-}
+let anthropicKey: string | null = null;
+let gitlabToken: string | null = null;
+let initialized = false;
 
 const SENSITIVE_RESPONSE_HEADERS = [
   "x-api-key",
@@ -61,8 +62,6 @@ function sanitizeRequestBody(raw: string): string {
 function stripResponseHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
   for (const h of SENSITIVE_RESPONSE_HEADERS) headers.delete(h);
-  // Bun's fetch auto-decompresses but keeps content-encoding header,
-  // causing the client to double-decompress. Strip it.
   headers.delete("content-encoding");
   headers.delete("content-length");
   return new Response(res.body, {
@@ -105,6 +104,9 @@ async function handle(
   if (!path.startsWith(allowedPrefix))
     return new Response("not found", { status: 404 });
 
+  if (!initialized)
+    return new Response("proxy not initialized", { status: 503 });
+
   try {
     if (transform) {
       const body = await req.text();
@@ -126,10 +128,32 @@ async function handle(
   }
 }
 
+async function handleInit(req: Request): Promise<Response> {
+  if (initialized)
+    return new Response("already initialized", { status: 403 });
+
+  try {
+    const { anthropic_key, gitlab_token } = await req.json();
+    if (!anthropic_key || !gitlab_token)
+      return new Response("missing keys", { status: 400 });
+
+    anthropicKey = anthropic_key;
+    gitlabToken = gitlab_token;
+    initialized = true;
+    console.log("proxy initialized with tokens");
+    return new Response("ok");
+  } catch {
+    return new Response("invalid body", { status: 400 });
+  }
+}
+
 Bun.serve({
   port: 8080,
-  fetch: (req) =>
-    handle(req, "api.anthropic.com", { "x-api-key": ANTHROPIC_KEY }, "/v1/"),
+  fetch: (req) => {
+    const path = new URL(req.url).pathname;
+    if (path === "/_init" && req.method === "POST") return handleInit(req);
+    return handle(req, "api.anthropic.com", { "x-api-key": anthropicKey! }, "/v1/");
+  },
   error: () => new Response("proxy error", { status: 500 }),
 });
 
@@ -141,7 +165,7 @@ Bun.serve({
     return handle(
       req,
       "gitlab.com",
-      { "PRIVATE-TOKEN": GITLAB_TOKEN },
+      { "PRIVATE-TOKEN": gitlabToken! },
       "/api/",
       hasBody ? sanitizeRequestBody : undefined,
     );
@@ -149,4 +173,4 @@ Bun.serve({
   error: () => new Response("proxy error", { status: 500 }),
 });
 
-console.log("proxy: anthropic=:8080 gitlab=:8083");
+console.log("proxy: anthropic=:8080 gitlab=:8083 (waiting for /_init)");
