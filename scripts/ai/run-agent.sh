@@ -27,5 +27,6 @@ exec runuser -u agent -- env -i \
   CI_MERGE_REQUEST_SOURCE_BRANCH_NAME="$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" \
   ANTHROPIC_API_KEY=proxy-handled \
   GITLAB_TOKEN=proxy-handled \
+  GITLAB_HOST=api-proxy:8083 \
   OPENCODE_CONFIG_CONTENT="$OPENCODE_CONFIG_CONTENT" \
   "$@"
