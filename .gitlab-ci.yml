@@ -343,7 +343,7 @@ tilt-ci:
     - |
       PROXY_READY=false
       for i in $(seq 1 30); do
-        if curl -sf http://api-proxy:8080/ >/dev/null 2>&1; then PROXY_READY=true; break; fi
+        if curl -so /dev/null http://api-proxy:8080/ 2>/dev/null; then PROXY_READY=true; break; fi
         sleep 1
       done
       if [ "$PROXY_READY" = "false" ]; then echo "ERROR: proxy not reachable after 30s"; exit 1; fi
