@@ -177,7 +177,6 @@ impl Engine {
 
         let configuration = Arc::new(configuration.clone());
         let runtime = Arc::new(EngineRuntime {
-            broker: Some(self.broker.clone()),
             worker_pool: WorkerPool::new(&configuration, self.metrics.clone()),
             metrics: self.metrics.clone(),
             configuration,
@@ -210,6 +209,7 @@ impl Engine {
                         message,
                         self.registry.handlers_for(&topic),
                         HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone()),
+                        self.broker.clone(),
                         runtime.clone(),
                         topic.clone(),
                         topic_name.clone(),
@@ -251,7 +251,6 @@ enum HandlersOutcome {
 }
 
 struct EngineRuntime {
-    broker: Option<Arc<NatsBroker>>,
     worker_pool: WorkerPool,
     metrics: Arc<EngineMetrics>,
     configuration: Arc<EngineConfiguration>,
@@ -261,6 +260,7 @@ async fn process_message(
     message: NatsMessage,
     handlers: Vec<(Arc<dyn Handler>, Arc<str>)>,
     context: HandlerContext,
+    broker: Arc<NatsBroker>,
     runtime: Arc<EngineRuntime>,
     topic: Topic,
     topic_name: String,
@@ -301,17 +301,15 @@ async fn process_message(
             module_name,
             error,
         } => {
-            if let Some(broker) = &runtime.broker {
-                broker
-                    .publish_dead_letter(
-                        &topic,
-                        &message.envelope,
-                        &handler_name,
-                        &module_name,
-                        &error,
-                    )
-                    .await;
-            }
+            broker
+                .publish_dead_letter(
+                    &topic,
+                    &message.envelope,
+                    &handler_name,
+                    &module_name,
+                    &error,
+                )
+                .await;
             if let Err(error) = message.ack().await {
                 warn!(%error, %message_id, "failed to ack exhausted message");
             }
@@ -404,7 +402,6 @@ mod tests {
     fn test_runtime(configuration: &EngineConfiguration) -> EngineRuntime {
         let metrics = Arc::new(EngineMetrics::new());
         EngineRuntime {
-            broker: None,
             worker_pool: WorkerPool::new(configuration, metrics.clone()),
             metrics,
             configuration: Arc::new(configuration.clone()),
