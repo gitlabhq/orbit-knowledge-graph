@@ -61,7 +61,7 @@ async function loadShared(): Promise<string> {
       if (!file.endsWith(".md")) continue;
       parts.push((await Bun.file(join(dir, file)).text()).trim());
     }
-  } catch {}
+  } catch (e) { console.error("failed to load shared instructions:", e); }
   return parts.join("\n\n");
 }
 
@@ -74,7 +74,7 @@ async function loadPrompts(shared: string): Promise<Record<string, string>> {
       const content = stripFrontmatter(await Bun.file(join(AGENT_DIR, file)).text()).trim();
       prompts[name] = shared ? `${content}\n\n${shared}` : content;
     }
-  } catch {}
+  } catch (e) { console.error("failed to load agent prompts:", e); process.exit(1); }
   return prompts;
 }
 

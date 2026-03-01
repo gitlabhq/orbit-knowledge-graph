@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 //
 // Reverse proxy for CI agent isolation.
-// Runs as a GitLab CI service — holds real API tokens so the job container never sees them.
-// Sanitizes outbound review content before it reaches GitLab.
+// Runs as a background process — holds real API tokens so the agent process never sees them.
+// Sanitizes outbound review content (note/body/description fields) before it reaches GitLab.
 //
 // Port 8080 (HTTP):  Anthropic API — injects x-api-key, streams through
 // Port 8083 (HTTPS): GitLab API   — injects PRIVATE-TOKEN, sanitizes note bodies
@@ -18,8 +18,12 @@
 
 import { sanitize } from "./sanitize";
 
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY!;
-const GITLAB_TOKEN = process.env.GITLAB_REVIEW_TOKEN!;
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+const GITLAB_TOKEN = process.env.GITLAB_REVIEW_TOKEN;
+if (!ANTHROPIC_KEY || !GITLAB_TOKEN) {
+  console.error("fatal: ANTHROPIC_API_KEY and GITLAB_REVIEW_TOKEN must be set");
+  process.exit(1);
+}
 
 const SENSITIVE_RESPONSE_HEADERS = [
   "x-api-key",
@@ -103,12 +107,13 @@ async function handle(
 
   try {
     if (transform) {
+      const body = await req.text();
       const fwd = forward(target, authHeader, req);
       const res = await fetch(
         new Request(fwd.url, {
           method: fwd.method,
           headers: fwd.headers,
-          body: transform(await req.text()),
+          body: transform(body),
         }),
       );
       return stripResponseHeaders(res);
@@ -124,7 +129,7 @@ async function handle(
 Bun.serve({
   port: 8080,
   fetch: (req) =>
-    handle(req, "api.anthropic.com", { "x-api-key": ANTHROPIC_KEY }, "/"),
+    handle(req, "api.anthropic.com", { "x-api-key": ANTHROPIC_KEY }, "/v1/"),
   error: () => new Response("proxy error", { status: 500 }),
 });
 

@@ -1,4 +1,5 @@
 #!/bin/sh
+set -eu
 # Install the glab CLI from GitLab releases.
 # Usage: scripts/glab/install.sh [version]
 

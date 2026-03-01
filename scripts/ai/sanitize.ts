@@ -73,7 +73,7 @@ const SECRET_PATTERNS: RegExp[] = [
   /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
 
   // PEM blocks
-  /-----BEGIN [A-Z ]+(PRIVATE KEY|CERTIFICATE|RSA|DSA|EC)-----/g,
+  /-----BEGIN [A-Z ]+(PRIVATE KEY|CERTIFICATE|RSA|DSA|EC)-----[\s\S]*?-----END [A-Z ]+-----/g,
 
   // Bearer/auth headers
   /Bearer\s+[\w.\/-]{20,}/gi,

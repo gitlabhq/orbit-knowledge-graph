@@ -1,4 +1,5 @@
 #!/bin/sh
+set -eu
 #
 # Launches an opencode agent with full process isolation:
 #   1. runuser -u agent  → different UID, can't read root's /proc/*/environ
