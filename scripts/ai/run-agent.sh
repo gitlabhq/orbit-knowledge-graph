@@ -18,7 +18,7 @@ exec runuser -u agent -- env -i \
   PATH="${WORKSPACE_BIN}:/home/agent/.bun/bin:${PATH}" \
   USER=agent \
   SHELL=/bin/sh \
-  TERM="$TERM" \
+  TERM="${TERM:-dumb}" \
   LANG="${LANG:-C.UTF-8}" \
   CI_PROJECT_ID="$CI_PROJECT_ID" \
   CI_PROJECT_NAME="$CI_PROJECT_NAME" \
