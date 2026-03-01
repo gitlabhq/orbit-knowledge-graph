@@ -1,18 +1,48 @@
-# How to post MR comments
+# Using glab
 
-You have `glab` available. All requests route through a proxy that handles authentication, so you don't need any tokens.
+You have `glab` configured to talk to GitLab through a proxy. Authentication is handled for you — no tokens needed. The env vars `$CI_PROJECT_ID` and `$CI_MERGE_REQUEST_IID` are set.
 
-## Summary comment
+## Fetching MR data
 
-For your overall verdict, use a plain note:
+Get the MR diff (the list of changes in this MR):
+
+```shell
+glab api "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/changes?access_raw_diffs=true"
+```
+
+The response has a `changes` array. Each entry has `old_path`, `new_path`, `diff` (unified diff text), `new_file`, `deleted_file`, and `renamed_file` fields.
+
+Get existing discussions and comments:
+
+```shell
+glab api "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions"
+```
+
+Returns an array of discussion threads. Each thread has `id` and a `notes` array with `body`, `author`, `resolved`, and position info.
+
+Get MR metadata (title, description, SHAs, labels):
+
+```shell
+glab mr view $CI_MERGE_REQUEST_IID --output json
+```
+
+Get diff versions (for SHA values needed by inline comments):
+
+```shell
+glab api "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/versions"
+```
+
+The first entry is the latest version. Use its `base_commit_sha`, `head_commit_sha`, and `start_commit_sha` for inline comment positions.
+
+## Posting comments
+
+Summary comment (your overall verdict):
 
 ```shell
 glab mr note $CI_MERGE_REQUEST_IID -m "your comment"
 ```
 
-## Inline comment on a diff line
-
-Read `.mr-context.json` for the SHA values, then post a discussion with a position:
+Inline comment on a diff line — get the SHAs from the versions endpoint first:
 
 ```shell
 glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions" \
@@ -28,20 +58,20 @@ glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUES
 
 Line rules:
 
-- Added lines (diff shows `+`): set `new_line` only
-- Removed lines (diff shows `-`): set `old_line` only
+- Added lines (diff `+`): set `new_line` only
+- Removed lines (diff `-`): set `old_line` only
 - Context lines (no prefix): set both `old_line` and `new_line`
 
-## Reply to an existing thread
+## Replying and resolving
 
-Check `.mr-discussions.json` first. If someone already raised the same point, reply instead of creating a duplicate:
+Reply to an existing thread instead of creating duplicates:
 
 ```shell
 glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions/DISCUSSION_ID/notes" \
   -f body="your reply"
 ```
 
-## Resolve a thread
+Resolve a thread:
 
 ```shell
 glab api --method PUT "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions/DISCUSSION_ID" \
