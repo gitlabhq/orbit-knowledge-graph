@@ -394,16 +394,6 @@ build-ai-proxy:
     - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:${CI_COMMIT_SHA}"
     - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:latest"
 
-.clone-refs:
-  script:
-    - mkdir -p /tmp/refs
-    - |
-      git clone --depth=1 https://gitlab.com/gitlab-org/gitlab.git /tmp/refs/gitlab &
-      git clone --depth=1 https://github.com/ClickHouse/clickhouse-docs.git /tmp/refs/clickhouse-docs &
-      git clone --depth=1 https://gitlab.com/gitlab-org/analytics-section/siphon.git /tmp/refs/siphon &
-      wait
-    - chown -R agent:agent /tmp/refs
-
 ai:performance:
   extends: .opencode-base
   stage: ai
@@ -415,7 +405,13 @@ ai:performance:
     name: ai-review
     action: access
   script:
-    - !reference [.clone-refs, script]
+    - mkdir -p /tmp/refs
+    - |
+      git clone --depth=1 https://gitlab.com/gitlab-org/gitlab.git /tmp/refs/gitlab &
+      git clone --depth=1 https://github.com/ClickHouse/clickhouse-docs.git /tmp/refs/clickhouse-docs &
+      git clone --depth=1 https://gitlab.com/gitlab-org/analytics-section/siphon.git /tmp/refs/siphon &
+      wait
+    - chown -R agent:agent /tmp/refs
     - >-
       scripts/ai/run-agent.sh opencode run --agent performance
       -- "Performance review for MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
@@ -433,7 +429,13 @@ ai:security:
     name: ai-review
     action: access
   script:
-    - !reference [.clone-refs, script]
+    - mkdir -p /tmp/refs
+    - |
+      git clone --depth=1 https://gitlab.com/gitlab-org/gitlab.git /tmp/refs/gitlab &
+      git clone --depth=1 https://github.com/ClickHouse/clickhouse-docs.git /tmp/refs/clickhouse-docs &
+      git clone --depth=1 https://gitlab.com/gitlab-org/analytics-section/siphon.git /tmp/refs/siphon &
+      wait
+    - chown -R agent:agent /tmp/refs
     - >-
       scripts/ai/run-agent.sh opencode run --agent security
       -- "Security review for MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
