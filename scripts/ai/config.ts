@@ -19,7 +19,6 @@ const AGENTS: Record<string, Omit<AgentConfig, "prompt">> = {
     mode: "primary",
     model: MODEL,
     temperature: 0.2,
-    steps: 50,
     description: "Code review agent",
     permission: {
       edit: "deny",
@@ -29,7 +28,6 @@ const AGENTS: Record<string, Omit<AgentConfig, "prompt">> = {
     mode: "primary",
     model: MODEL,
     temperature: 0.1,
-    steps: 12,
     description: "Security review agent",
     permission: {
       edit: "deny",
