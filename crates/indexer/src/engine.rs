@@ -301,7 +301,7 @@ async fn process_message(
             module_name,
             error,
         } => {
-            broker
+            let dlq_result = broker
                 .publish_dead_letter(
                     &topic,
                     &message.envelope,
@@ -310,10 +310,26 @@ async fn process_message(
                     &error,
                 )
                 .await;
-            if let Err(error) = message.ack().await {
-                warn!(%error, %message_id, "failed to ack exhausted message");
+
+            match dlq_result {
+                Ok(()) => {
+                    if let Err(error) = message.ack().await {
+                        warn!(%error, %message_id, "failed to ack exhausted message");
+                    }
+                    "dead_letter"
+                }
+                Err(dlq_error) => {
+                    warn!(
+                        %dlq_error,
+                        %message_id,
+                        "failed to publish to dead letter queue, nacking for redelivery"
+                    );
+                    if let Err(error) = message.nack().await {
+                        warn!(%error, %message_id, "failed to nack message after DLQ failure");
+                    }
+                    "nack"
+                }
             }
-            "dead_letter"
         }
     };
 

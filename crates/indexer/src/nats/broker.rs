@@ -131,7 +131,7 @@ impl NatsBroker {
         handler_name: &str,
         module_name: &str,
         error: &str,
-    ) {
+    ) -> Result<(), NatsError> {
         let original_payload = serde_json::from_slice(&envelope.payload).unwrap_or_else(|_| {
             serde_json::Value::String(String::from_utf8_lossy(&envelope.payload).into_owned())
         });
@@ -149,26 +149,23 @@ impl NatsBroker {
             module_name: module_name.to_string(),
         };
 
-        let payload = match serde_json::to_vec(&dead_letter) {
-            Ok(bytes) => Bytes::from(bytes),
-            Err(error) => {
-                warn!(
-                    %error,
-                    message_id = %envelope.id.0,
-                    "failed to serialize dead letter envelope"
-                );
-                return;
-            }
-        };
+        let payload = serde_json::to_vec(&dead_letter)
+            .map(Bytes::from)
+            .map_err(|error| {
+                NatsError::Publish(format!("failed to serialize dead letter: {error}"))
+            })?;
 
         let subject = dead_letter_subject(original_topic);
-        if let Err(error) = self.jetstream.publish(subject, payload).await {
-            warn!(
-                %error,
-                message_id = %envelope.id.0,
-                "failed to publish dead letter"
-            );
-        }
+        self.jetstream
+            .publish(subject.clone(), payload)
+            .await
+            .map_err(|error| {
+                NatsError::Publish(format!(
+                    "failed to publish dead letter to '{subject}': {error}"
+                ))
+            })?;
+
+        Ok(())
     }
 
     pub async fn ensure_kv_bucket_exists(
