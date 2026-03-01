@@ -19,7 +19,10 @@ impl Default for SdlcIndexingConfig {
     fn default() -> Self {
         Self {
             datalake_batch_size: default_datalake_batch_size(),
-            engine: ModuleConfiguration::default(),
+            engine: ModuleConfiguration {
+                dead_letter_enabled: false,
+                ..Default::default()
+            },
         }
     }
 }

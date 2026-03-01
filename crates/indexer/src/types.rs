@@ -138,7 +138,6 @@ impl Envelope {
     pub fn to_event<T: Event>(&self) -> Result<T, SerializationError> {
         Ok(serde_json::from_slice(&self.payload)?)
     }
-
 }
 
 #[cfg(test)]

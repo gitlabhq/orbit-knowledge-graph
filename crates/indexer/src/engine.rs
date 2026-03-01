@@ -240,8 +240,13 @@ impl Engine {
 #[derive(Debug)]
 enum HandlersOutcome {
     Success,
-    Failed { retry_delay: Option<Duration> },
-    Exhausted { error: String },
+    Failed {
+        retry_delay: Option<Duration>,
+    },
+    Exhausted {
+        error: String,
+        module_name: Arc<str>,
+    },
 }
 
 struct EngineRuntime {
@@ -290,10 +295,24 @@ async fn process_message(
             }
             "nack"
         }
-        HandlersOutcome::Exhausted { error } => {
-            match message.to_dlq(&broker, &topic, &error).await {
-                DlqResult::Published => "dead_letter",
-                DlqResult::Nacked => "nack",
+        HandlersOutcome::Exhausted { error, module_name } => {
+            let dead_letter_enabled = runtime
+                .configuration
+                .modules
+                .get(module_name.as_ref())
+                .is_none_or(|c| c.dead_letter_enabled);
+
+            if dead_letter_enabled {
+                match message.to_dlq(&broker, &topic, &error).await {
+                    DlqResult::Published => "dead_letter",
+                    DlqResult::Nacked => "nack",
+                }
+            } else {
+                warn!(%message_id, topic = %topic_name, "exhausted message discarded (dead letter disabled)");
+                if let Err(ack_error) = message.ack().await {
+                    warn!(%ack_error, %message_id, "failed to ack discarded message");
+                }
+                "discarded"
             }
         }
     };
@@ -350,6 +369,7 @@ async fn run_handlers(
                 );
                 return HandlersOutcome::Exhausted {
                     error: error.to_string(),
+                    module_name: module_name.clone(),
                 };
             }
 
@@ -439,7 +459,7 @@ mod tests {
         let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
 
         match outcome {
-            HandlersOutcome::Exhausted { error } => {
+            HandlersOutcome::Exhausted { error, .. } => {
                 assert!(error.contains("boom"));
             }
             other => panic!("expected Exhausted, got {other:?}"),
@@ -477,7 +497,7 @@ mod tests {
         let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
 
         match outcome {
-            HandlersOutcome::Exhausted { error } => {
+            HandlersOutcome::Exhausted { error, .. } => {
                 assert!(error.contains("db connection refused"));
             }
             other => panic!("expected Exhausted, got {other:?}"),
