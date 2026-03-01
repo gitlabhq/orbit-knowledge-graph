@@ -378,6 +378,7 @@ tilt-ci:
       CI_RUNNER_SHORT_TOKEN DOCKER_AUTH_CONFIG
       KUBECONFIG GOOGLE_APPLICATION_CREDENTIALS
       GITLAB_REVIEW_TOKEN ANTHROPIC_API_KEY
+
 build-ai-proxy:
   stage: ai:build
   image: docker:29
