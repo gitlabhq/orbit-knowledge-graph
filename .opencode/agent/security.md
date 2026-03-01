@@ -18,12 +18,12 @@ You're given the diff (`.mr-diff.txt`), MR metadata with SHAs (`.mr-context.json
 
 ## What to do
 
-1. Read `AGENTS.md` and `docs/design-documents/security.md`, then the diff
+1. Read `AGENTS.md` and `docs/design-documents/security.md`, then skim the diff
 2. Walk through each changed file against the list above
-3. Research all related code and documentation
-4. Feel free to spin up a local instance of the service to help you understand the codebase better.
-5. Write debugging scripts if needed to crack things.
-6. Post inline comments on specific lines, and a summary for the verdict
+3. Post inline comments as you find issues — don't batch them for the end
+4. After reviewing all changes, post a summary comment with your verdict
+
+Post comments early and often. You have limited steps, so don't spend them all on research — start posting findings as soon as you have them.
 
 ## How to comment
 
