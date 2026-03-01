@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::Topic;
 
-pub const DEAD_LETTER_STREAM: &str = "gkg_dead_letters";
+pub const DEAD_LETTER_STREAM: &str = "GKG_DEAD_LETTERS";
 pub const DEAD_LETTER_SUBJECT_PREFIX: &str = "dlq";
 
 /// Wraps a failed message with enough context to diagnose and replay it.
