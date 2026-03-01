@@ -102,7 +102,7 @@ async function generate() {
       read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny" },
       bash: "allow",
       task: "allow",
-      external_directory: { "/home/agent/*": "allow" },
+      external_directory: { "/home/agent/*": "allow", "/tmp/*": "allow" },
       webfetch: "allow",
     },
     agent: agents,
