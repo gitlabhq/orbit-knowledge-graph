@@ -945,4 +945,29 @@ CREATE TABLE IF NOT EXISTS siphon_push_event_payloads (
 PRIMARY KEY (project_id, event_id)
 ORDER BY (project_id, event_id);
 
+CREATE TABLE IF NOT EXISTS push_event_branch_latest (
+    event_id Int64,
+    project_id Int64,
+    ref String,
+    commit_to String,
+    _siphon_replicated_at DateTime64(6, 'UTC'),
+    _siphon_deleted Bool DEFAULT FALSE
+) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+ORDER BY (project_id, ref, event_id);
 
+CREATE MATERIALIZED VIEW IF NOT EXISTS push_event_branch_latest_mv
+TO push_event_branch_latest AS
+SELECT 
+    event_id, 
+    project_id, 
+    ref, 
+    commit_to, 
+    _siphon_replicated_at, 
+    _siphon_deleted
+FROM siphon_push_event_payloads
+WHERE 
+    ref_type = 0 
+    AND action = 2 
+    AND ref IS NOT NULL 
+    AND commit_to IS NOT NULL
+    AND _siphon_deleted = false;

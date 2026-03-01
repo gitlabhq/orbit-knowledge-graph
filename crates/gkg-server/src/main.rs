@@ -52,7 +52,12 @@ async fn main() -> anyhow::Result<()> {
                     datalake.clone(),
                     metrics.clone(),
                 )),
-                Box::new(ProjectCodeDispatcher::new(services.nats, graph, metrics)),
+                Box::new(ProjectCodeDispatcher::new(
+                    services.nats,
+                    graph,
+                    metrics,
+                    config.modules.code.dispatch_batch_size,
+                )),
             ];
             indexer::dispatcher::run(&dispatchers, &*lock_service, &config.modules.dispatch)
                 .await

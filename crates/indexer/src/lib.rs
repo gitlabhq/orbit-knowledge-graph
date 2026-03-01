@@ -147,9 +147,13 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
         info!("initializing Code module");
         let gitlab_client =
             Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(ModuleInitError::new)?);
-        let code_module =
-            CodeModule::new(&config.graph, gitlab_client, config.modules.code.clone())
-                .map_err(IndexerError::ModuleInit)?;
+        let code_module = CodeModule::new(
+            &config.graph,
+            &config.datalake,
+            gitlab_client,
+            config.modules.code.clone(),
+        )
+        .map_err(IndexerError::ModuleInit)?;
         registry.register_module(&code_module);
     } else {
         info!("Code module disabled (GitLab client not configured)");

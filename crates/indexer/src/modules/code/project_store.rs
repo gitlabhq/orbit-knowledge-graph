@@ -29,8 +29,6 @@ pub struct ProjectInfo {
 /// Trait for querying project information.
 #[async_trait]
 pub trait ProjectStore: Send + Sync {
-    /// Get project information by ID.
-    /// Returns None if the project doesn't exist.
     async fn get_project(&self, project_id: i64) -> Result<Option<ProjectInfo>, ProjectStoreError>;
 }
 
