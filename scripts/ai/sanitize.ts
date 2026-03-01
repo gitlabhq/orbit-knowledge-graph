@@ -100,8 +100,8 @@ const SECRET_PATTERNS: RegExp[] = [
   // Generic password/secret assignments
   /(?:password|passwd|secret|token|apikey|api_key)\s*[:=]\s*['"][^'"]{8,}['"]/gi,
 
-  // IP:port patterns
-  /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}\b/g,
+  // IP:port patterns (excludes loopback and RFC1918)
+  /\b(?!127\.)(?!10\.)(?!172\.(?:1[6-9]|2\d|3[01])\.)(?!192\.168\.)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}\b/g,
 ];
 
 function isAllowedUrl(raw: string): boolean {

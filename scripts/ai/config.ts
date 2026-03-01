@@ -99,7 +99,7 @@ async function generate() {
       },
     },
     permission: {
-      read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny" },
+      read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny", "/etc/shadow": "deny", "/var/run/secrets/*": "deny" },
       bash: "allow",
       task: "allow",
       external_directory: { "/home/agent/*": "allow", "/tmp/*": "allow" },

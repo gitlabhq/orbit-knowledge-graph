@@ -312,9 +312,6 @@ tilt-ci:
 #   GITLAB_REVIEW_TOKEN  — Masked + Protected + Hidden
 #                          Granular PAT (gitlab-org/-/work_items/18555) scoped
 #                          to this project with only merge_request:write.
-#
-# To pass custom review instructions, add a REVIEW_FOCUS variable when triggering
-# the job manually (e.g., "Focus on ClickHouse query safety").
 
 .opencode-base:
   image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
@@ -411,7 +408,6 @@ ai:review:
     - >-
       scripts/ai/run-agent.sh opencode run --agent review
       -- "Review MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
-      ${REVIEW_FOCUS:+Focus: $REVIEW_FOCUS}
       Fetch the MR diff and discussions using glab, then post your findings as inline comments."
 
 ai:security:
@@ -425,7 +421,6 @@ ai:security:
     - >-
       scripts/ai/run-agent.sh opencode run --agent security
       -- "Security review for MR !${CI_MERGE_REQUEST_IID}.
-      ${REVIEW_FOCUS:+Focus: $REVIEW_FOCUS}
       Fetch the MR diff and discussions using glab, then post your findings as inline comments."
 
 # Build Stage

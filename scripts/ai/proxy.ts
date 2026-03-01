@@ -56,14 +56,6 @@ function sanitizeRequestBody(raw: string): string {
     walk(json);
     return JSON.stringify(json);
   } catch {}
-  try {
-    const params = new URLSearchParams(raw);
-    for (const key of params.keys()) {
-      if (CONTENT_FIELDS.has(key))
-        params.set(key, sanitize(params.get(key)!));
-    }
-    return params.toString();
-  } catch {}
   return raw;
 }
 
