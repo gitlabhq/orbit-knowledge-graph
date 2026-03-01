@@ -21,6 +21,9 @@ use tokio_util::sync::CancellationToken;
 
 use tracing::{debug, info, warn};
 
+use crate::dead_letter::{
+    DEAD_LETTER_STREAM, DEAD_LETTER_SUBJECT_PREFIX, DeadLetterEnvelope, dead_letter_subject,
+};
 use crate::metrics::EngineMetrics;
 use crate::types::{Envelope, MessageId, Topic};
 
@@ -108,7 +111,60 @@ impl NatsBroker {
             self.get_or_create_stream(stream_name, subjects).await?;
         }
 
+        self.ensure_dead_letter_stream().await?;
+
         Ok(())
+    }
+
+    async fn ensure_dead_letter_stream(&self) -> Result<(), NatsError> {
+        let stream_name: Arc<str> = Arc::from(DEAD_LETTER_STREAM);
+        let subject = format!("{}.>", DEAD_LETTER_SUBJECT_PREFIX);
+        self.get_or_create_stream(&stream_name, vec![subject])
+            .await?;
+        Ok(())
+    }
+
+    pub async fn publish_dead_letter(
+        &self,
+        original_topic: &Topic,
+        envelope: &Envelope,
+        handler_name: &str,
+        module_name: &str,
+        error: &str,
+    ) {
+        let dead_letter = DeadLetterEnvelope {
+            original_subject: original_topic.subject.to_string(),
+            original_stream: original_topic.stream.to_string(),
+            original_payload: envelope.payload.clone(),
+            original_message_id: envelope.id.0.to_string(),
+            original_timestamp: envelope.timestamp,
+            failed_at: chrono::Utc::now(),
+            attempts: envelope.attempt,
+            last_error: error.to_string(),
+            handler_name: handler_name.to_string(),
+            module_name: module_name.to_string(),
+        };
+
+        let payload = match serde_json::to_vec(&dead_letter) {
+            Ok(bytes) => Bytes::from(bytes),
+            Err(error) => {
+                warn!(
+                    %error,
+                    message_id = %envelope.id.0,
+                    "failed to serialize dead letter envelope"
+                );
+                return;
+            }
+        };
+
+        let subject = dead_letter_subject(original_topic);
+        if let Err(error) = self.jetstream.publish(subject, payload).await {
+            warn!(
+                %error,
+                message_id = %envelope.id.0,
+                "failed to publish dead letter"
+            );
+        }
     }
 
     pub async fn ensure_kv_bucket_exists(

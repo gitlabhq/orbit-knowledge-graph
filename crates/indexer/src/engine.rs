@@ -177,6 +177,7 @@ impl Engine {
 
         let configuration = Arc::new(configuration.clone());
         let runtime = Arc::new(EngineRuntime {
+            broker: Some(self.broker.clone()),
             worker_pool: WorkerPool::new(&configuration, self.metrics.clone()),
             metrics: self.metrics.clone(),
             configuration,
@@ -210,6 +211,7 @@ impl Engine {
                         self.registry.handlers_for(&topic),
                         HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone()),
                         runtime.clone(),
+                        topic.clone(),
                         topic_name.clone(),
                     ));
                 }
@@ -235,12 +237,21 @@ impl Engine {
     }
 }
 
+#[derive(Debug)]
 enum HandlersOutcome {
     Success,
-    Failed { retry_delay: Option<Duration> },
+    Failed {
+        retry_delay: Option<Duration>,
+    },
+    Exhausted {
+        handler_name: String,
+        module_name: String,
+        error: String,
+    },
 }
 
 struct EngineRuntime {
+    broker: Option<Arc<NatsBroker>>,
     worker_pool: WorkerPool,
     metrics: Arc<EngineMetrics>,
     configuration: Arc<EngineConfiguration>,
@@ -251,6 +262,7 @@ async fn process_message(
     handlers: Vec<(Arc<dyn Handler>, Arc<str>)>,
     context: HandlerContext,
     runtime: Arc<EngineRuntime>,
+    topic: Topic,
     topic_name: String,
 ) {
     let message_id = message.envelope.id.0.clone();
@@ -283,6 +295,27 @@ async fn process_message(
                 warn!(%error, %message_id, "failed to nack message");
             }
             "nack"
+        }
+        HandlersOutcome::Exhausted {
+            handler_name,
+            module_name,
+            error,
+        } => {
+            if let Some(broker) = &runtime.broker {
+                broker
+                    .publish_dead_letter(
+                        &topic,
+                        &message.envelope,
+                        &handler_name,
+                        &module_name,
+                        &error,
+                    )
+                    .await;
+            }
+            if let Err(error) = message.ack().await {
+                warn!(%error, %message_id, "failed to ack exhausted message");
+            }
+            "dead_letter"
         }
     };
 
@@ -329,13 +362,18 @@ async fn run_handlers(
             {
                 warn!(
                     module = %module_name,
+                    handler = handler.name(),
                     message_id = %envelope.id.0,
                     attempt = envelope.attempt,
                     %max_attempts,
                     %error,
-                    "retry attempts exhausted, skipping handler"
+                    "retry attempts exhausted, sending to dead letter queue"
                 );
-                continue;
+                return HandlersOutcome::Exhausted {
+                    handler_name: handler.name().to_string(),
+                    module_name: module_name.to_string(),
+                    error: error.to_string(),
+                };
             }
 
             let retry_delay = module_config.and_then(|c| c.retry_interval());
@@ -366,6 +404,7 @@ mod tests {
     fn test_runtime(configuration: &EngineConfiguration) -> EngineRuntime {
         let metrics = Arc::new(EngineMetrics::new());
         EngineRuntime {
+            broker: None,
             worker_pool: WorkerPool::new(configuration, metrics.clone()),
             metrics,
             configuration: Arc::new(configuration.clone()),
@@ -401,7 +440,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handler_failure_at_retry_limit_returns_success() {
+    async fn handler_failure_at_retry_limit_returns_exhausted() {
         let configuration = EngineConfiguration {
             modules: HashMap::from([(
                 "test-module".to_string(),
@@ -423,7 +462,18 @@ mod tests {
         let runtime = test_runtime(&configuration);
         let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
 
-        assert!(matches!(outcome, HandlersOutcome::Success));
+        match outcome {
+            HandlersOutcome::Exhausted {
+                handler_name,
+                module_name,
+                error,
+            } => {
+                assert_eq!(handler_name, "mock-handler-stream:subject");
+                assert_eq!(module_name, "test-module");
+                assert!(error.contains("boom"));
+            }
+            other => panic!("expected Exhausted, got {other:?}"),
+        }
     }
 
     #[tokio::test]

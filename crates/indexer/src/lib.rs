@@ -30,6 +30,7 @@
 pub mod clickhouse;
 pub mod configuration;
 pub mod constants;
+pub mod dead_letter;
 pub mod destination;
 pub mod dispatcher;
 pub mod engine;
