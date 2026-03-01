@@ -112,34 +112,11 @@ fn build_hydration_plan(input: &Input) -> HydrationPlan {
     match input.query_type {
         QueryType::Aggregation => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
-        QueryType::Traversal | QueryType::Search => {
-            let mut templates = Vec::new();
-
-            for node in &input.nodes {
-                let Some(entity) = &node.entity else {
-                    continue;
-                };
-
-                let hydration_json = serde_json::json!({
-                    "query_type": "search",
-                    "node": {
-                        "id": node.id,
-                        "entity": entity,
-                        "columns": "*"
-                    },
-                    "limit": 1000
-                })
-                .to_string();
-
-                templates.push(HydrationTemplate {
-                    entity_type: entity.clone(),
-                    node_alias: node.id.clone(),
-                    query_json: hydration_json,
-                });
-            }
-
-            HydrationPlan::Static(templates)
-        }
+        // TODO: Static hydration for Traversal/Search requires the base query
+        // in lower.rs to emit only ID/type columns (slim SELECT). Until that
+        // refactor lands, Traversal/Search results already carry all requested
+        // columns from the base query, so no hydration pass is needed.
+        QueryType::Traversal | QueryType::Search => HydrationPlan::None,
     }
 }
 
@@ -701,14 +678,8 @@ mod ontology_integration_tests {
         assert!(result.base.sql.contains("_gkg_u_type"));
         assert!(result.base.sql.contains("u_username"));
 
-        // Hydration plan should have a template for User
-        let HydrationPlan::Static(templates) = &result.hydration else {
-            panic!("expected Static hydration plan");
-        };
-        assert_eq!(templates.len(), 1);
-        assert_eq!(templates[0].entity_type, "User");
-        assert_eq!(templates[0].node_alias, "u");
-        assert!(templates[0].query_json.contains("User"));
+        // Static hydration disabled — base query already carries all columns
+        assert!(matches!(result.hydration, HydrationPlan::None));
     }
 
     #[test]
@@ -730,13 +701,8 @@ mod ontology_integration_tests {
         assert!(result.base.sql.contains("_gkg_u_id"));
         assert!(result.base.sql.contains("_gkg_u_type"));
 
-        // Hydration plan should have a template for User
-        let HydrationPlan::Static(templates) = &result.hydration else {
-            panic!("expected Static hydration plan");
-        };
-        assert_eq!(templates.len(), 1);
-        assert_eq!(templates[0].entity_type, "User");
-        assert!(templates[0].query_json.contains("User"));
+        // Static hydration disabled — base query already carries all columns
+        assert!(matches!(result.hydration, HydrationPlan::None));
     }
 
     #[test]
@@ -761,14 +727,8 @@ mod ontology_integration_tests {
         assert!(result.base.sql.contains("_gkg_p_type"));
         assert!(result.base.sql.contains("u_username"));
 
-        // Hydration plan should have templates for both nodes
-        let HydrationPlan::Static(templates) = &result.hydration else {
-            panic!("expected Static hydration plan");
-        };
-        assert_eq!(templates.len(), 2);
-        let entity_types: Vec<_> = templates.iter().map(|t| t.entity_type.as_str()).collect();
-        assert!(entity_types.contains(&"User"));
-        assert!(entity_types.contains(&"Project"));
+        // Static hydration disabled — base query already carries all columns
+        assert!(matches!(result.hydration, HydrationPlan::None));
     }
 
     #[test]
