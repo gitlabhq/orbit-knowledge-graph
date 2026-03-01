@@ -335,13 +335,22 @@ tilt-ci:
     - echo "127.0.0.1 169.254.169.254" >> /etc/hosts
     - echo "127.0.0.1 100.100.100.200" >> /etc/hosts
     - git fetch origin ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME} --depth=1 2>/dev/null || true
-    - git diff ${CI_MERGE_REQUEST_DIFF_BASE_SHA}...HEAD > .mr-diff.txt 2>/dev/null
-      || git diff origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD > .mr-diff.txt 2>/dev/null
-      || echo "diff unavailable" > .mr-diff.txt
     - glab config set --global skip_tls_verify true
+    # Register proxy as a glab host so the agent can use glab through it
+    - echo "proxy-handled" | glab auth login --hostname localhost:8083 --stdin 2>/dev/null || true
+    # Fetch MR diff and context via API (scoped exactly to MR, not git history)
     - |
       HEAD_SHA=$(git rev-parse HEAD)
       START_SHA=$(git merge-base HEAD "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" 2>/dev/null || echo "$CI_MERGE_REQUEST_DIFF_BASE_SHA")
+      GITLAB_TOKEN=$CI_JOB_TOKEN glab api "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/changes?access_raw_diffs=true" 2>/dev/null \
+        | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+for c in data.get('changes',[]):
+    print(f'--- a/{c[\"old_path\"]}')
+    print(f'+++ b/{c[\"new_path\"]}')
+    print(c.get('diff',''))
+" > .mr-diff.txt 2>/dev/null || git diff ${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD > .mr-diff.txt 2>/dev/null || echo "diff unavailable" > .mr-diff.txt
       GITLAB_TOKEN=$CI_JOB_TOKEN glab api "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/discussions" > .mr-discussions.json 2>/dev/null || echo "[]" > .mr-discussions.json
       cat > .mr-context.json << CTXEOF
       {
