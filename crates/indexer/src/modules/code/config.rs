@@ -30,10 +30,15 @@ pub mod tables {
 
 use crate::configuration::ModuleConfiguration;
 
+pub const DEFAULT_DISPATCH_BATCH_SIZE: u64 = 1000;
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct CodeIndexingConfig {
     #[serde(default = "default_events_stream_name")]
     pub events_stream_name: String,
+
+    #[serde(default = "default_dispatch_batch_size")]
+    pub dispatch_batch_size: u64,
 
     #[serde(flatten)]
     pub engine: ModuleConfiguration,
@@ -43,10 +48,15 @@ fn default_events_stream_name() -> String {
     "siphon_stream_main_db".to_string()
 }
 
+const fn default_dispatch_batch_size() -> u64 {
+    DEFAULT_DISPATCH_BATCH_SIZE
+}
+
 impl Default for CodeIndexingConfig {
     fn default() -> Self {
         Self {
             events_stream_name: "siphon_stream_main_db".to_string(),
+            dispatch_batch_size: DEFAULT_DISPATCH_BATCH_SIZE,
             engine: ModuleConfiguration::default(),
         }
     }

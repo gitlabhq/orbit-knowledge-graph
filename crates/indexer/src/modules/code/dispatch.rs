@@ -12,21 +12,20 @@ use crate::topic::ProjectCodeIndexingRequest;
 use crate::types::{Envelope, Event};
 use clickhouse_client::FromArrowColumn;
 
-// Capped at 1000 per cycle so we don't flood NATS after a large backfill.
-// The backlog drains over successive hourly runs.
 const PENDING_PROJECTS_QUERY: &str = r#"
 SELECT project.id AS project_id
 FROM gl_project AS project
 LEFT ANTI JOIN (SELECT project_id FROM project_code_indexing_watermark FINAL) AS watermark
   ON project.id = watermark.project_id
 WHERE project._deleted = false
-LIMIT 1000
+LIMIT {batch_size:UInt64}
 "#;
 
 pub struct ProjectCodeDispatcher {
     nats: Arc<dyn NatsServices>,
     graph: ArrowClickHouseClient,
     metrics: DispatchMetrics,
+    batch_size: u64,
 }
 
 impl ProjectCodeDispatcher {
@@ -34,11 +33,13 @@ impl ProjectCodeDispatcher {
         nats: Arc<dyn NatsServices>,
         graph: ArrowClickHouseClient,
         metrics: DispatchMetrics,
+        batch_size: u64,
     ) -> Self {
         Self {
             nats,
             graph,
             metrics,
+            batch_size,
         }
     }
 }
@@ -50,7 +51,7 @@ impl Dispatcher for ProjectCodeDispatcher {
     }
 
     fn interval(&self) -> Option<Duration> {
-        Some(Duration::from_secs(3600))
+        Some(Duration::from_secs(1800))
     }
 
     async fn dispatch(&self) -> Result<(), DispatchError> {
@@ -115,6 +116,7 @@ impl ProjectCodeDispatcher {
         let batches = self
             .graph
             .query(PENDING_PROJECTS_QUERY)
+            .param("batch_size", self.batch_size)
             .fetch_arrow()
             .await
             .map_err(|error| {
@@ -132,6 +134,7 @@ impl ProjectCodeDispatcher {
 mod tests {
     use super::*;
     use crate::clickhouse::ClickHouseConfiguration;
+    use crate::modules::code::config::DEFAULT_DISPATCH_BATCH_SIZE;
     use crate::testkit::MockNatsServices;
     use std::sync::Arc;
 
@@ -148,16 +151,26 @@ mod tests {
     #[test]
     fn dispatcher_name_is_code_project() {
         let nats = Arc::new(MockNatsServices::new());
-        let dispatcher = ProjectCodeDispatcher::new(nats, test_client(), test_metrics());
+        let dispatcher = ProjectCodeDispatcher::new(
+            nats,
+            test_client(),
+            test_metrics(),
+            DEFAULT_DISPATCH_BATCH_SIZE,
+        );
 
         assert_eq!(dispatcher.name(), "code.project");
     }
 
     #[test]
-    fn defaults_to_one_hour_interval() {
+    fn defaults_to_thirty_minute_interval() {
         let nats = Arc::new(MockNatsServices::new());
-        let dispatcher = ProjectCodeDispatcher::new(nats, test_client(), test_metrics());
+        let dispatcher = ProjectCodeDispatcher::new(
+            nats,
+            test_client(),
+            test_metrics(),
+            DEFAULT_DISPATCH_BATCH_SIZE,
+        );
 
-        assert_eq!(dispatcher.interval(), Some(Duration::from_secs(3600)));
+        assert_eq!(dispatcher.interval(), Some(Duration::from_secs(1800)));
     }
 }
