@@ -12,17 +12,29 @@ use query_engine::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct NodeRef {
     pub id: i64,
     pub entity_type: String,
+    /// Hydrated entity properties, populated after redaction.
+    /// Empty until the hydration stage fetches full properties for this node.
+    pub properties: HashMap<String, ColumnValue>,
 }
+
+impl PartialEq for NodeRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.entity_type == other.entity_type
+    }
+}
+
+impl Eq for NodeRef {}
 
 impl NodeRef {
     pub fn new(id: i64, entity_type: impl Into<String>) -> Self {
         Self {
             id,
             entity_type: entity_type.into(),
+            properties: HashMap::new(),
         }
     }
 }
@@ -138,6 +150,10 @@ impl QueryResultRow {
 
     pub fn dynamic_nodes(&self) -> &[NodeRef] {
         &self.dynamic_nodes
+    }
+
+    pub fn dynamic_nodes_mut(&mut self) -> &mut [NodeRef] {
+        &mut self.dynamic_nodes
     }
 
     pub fn is_authorized(&self) -> bool {

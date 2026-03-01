@@ -12,5 +12,7 @@ pub use helpers::{
     QueryRequest, ToolRequest, receive_query_request, receive_tool_request, send_query_error,
     send_tool_executor_error, send_tool_pipeline_error,
 };
+pub use metrics::PipelineObserver;
 pub use service::QueryPipelineService;
-pub use types::PipelineOutput;
+pub use stages::HydrationStage;
+pub use types::{HydrationOutput, PipelineOutput, RedactionOutput};

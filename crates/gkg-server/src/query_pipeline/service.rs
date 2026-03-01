@@ -62,7 +62,12 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
 
         let hydrated = self
             .hydration
-            .execute(redacted, &security_context, &mut obs)
+            .execute(
+                redacted,
+                &compiled.compiled_query.hydration,
+                &security_context,
+                &mut obs,
+            )
             .await?;
 
         let formatting_stage =
