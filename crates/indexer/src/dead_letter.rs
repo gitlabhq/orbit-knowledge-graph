@@ -24,8 +24,6 @@ pub struct DeadLetterEnvelope {
     pub failed_at: DateTime<Utc>,
     pub attempts: u32,
     pub last_error: String,
-    pub handler_name: String,
-    pub module_name: String,
 }
 
 pub fn dead_letter_subject(topic: &Topic) -> String {
@@ -71,8 +69,6 @@ mod tests {
             failed_at: Utc::now(),
             attempts: 5,
             last_error: "connection refused".into(),
-            handler_name: "user-handler".into(),
-            module_name: "sdlc".into(),
         };
 
         let json = serde_json::to_string(&envelope).expect("serialize");
@@ -87,7 +83,5 @@ mod tests {
         );
         assert_eq!(deserialized.attempts, envelope.attempts);
         assert_eq!(deserialized.last_error, envelope.last_error);
-        assert_eq!(deserialized.handler_name, envelope.handler_name);
-        assert_eq!(deserialized.module_name, envelope.module_name);
     }
 }

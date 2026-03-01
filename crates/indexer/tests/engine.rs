@@ -517,7 +517,5 @@ async fn exhausted_message_lands_in_dead_letter_queue() {
         dead_letter.original_payload,
         serde_json::json!({"id": 42, "name": "doomed"})
     );
-    assert_eq!(dead_letter.handler_name, "always-failing-handler");
-    assert_eq!(dead_letter.module_name, "always-failing-module");
     assert!(dead_letter.last_error.contains("simulated failure"));
 }

@@ -40,7 +40,7 @@ use crate::destination::Destination;
 use crate::locking::{LockService, NatsLockService};
 use crate::metrics::EngineMetrics;
 use crate::module::{Handler, HandlerContext, HandlerError, ModuleRegistry};
-use crate::nats::{NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
+use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
 use crate::types::{Envelope, Topic};
 use crate::worker_pool::WorkerPool;
 
@@ -240,14 +240,8 @@ impl Engine {
 #[derive(Debug)]
 enum HandlersOutcome {
     Success,
-    Failed {
-        retry_delay: Option<Duration>,
-    },
-    Exhausted {
-        handler_name: String,
-        module_name: String,
-        error: String,
-    },
+    Failed { retry_delay: Option<Duration> },
+    Exhausted { error: String },
 }
 
 struct EngineRuntime {
@@ -296,39 +290,10 @@ async fn process_message(
             }
             "nack"
         }
-        HandlersOutcome::Exhausted {
-            handler_name,
-            module_name,
-            error,
-        } => {
-            let dlq_result = broker
-                .publish_dead_letter(
-                    &topic,
-                    &message.envelope,
-                    &handler_name,
-                    &module_name,
-                    &error,
-                )
-                .await;
-
-            match dlq_result {
-                Ok(()) => {
-                    if let Err(error) = message.ack().await {
-                        warn!(%error, %message_id, "failed to ack exhausted message");
-                    }
-                    "dead_letter"
-                }
-                Err(dlq_error) => {
-                    warn!(
-                        %dlq_error,
-                        %message_id,
-                        "failed to publish to dead letter queue, nacking for redelivery"
-                    );
-                    if let Err(error) = message.nack().await {
-                        warn!(%error, %message_id, "failed to nack message after DLQ failure");
-                    }
-                    "nack"
-                }
+        HandlersOutcome::Exhausted { error } => {
+            match message.to_dlq(&broker, &topic, &error).await {
+                DlqResult::Published => "dead_letter",
+                DlqResult::Nacked => "nack",
             }
         }
     };
@@ -384,8 +349,6 @@ async fn run_handlers(
                     "retry attempts exhausted, sending to dead letter queue"
                 );
                 return HandlersOutcome::Exhausted {
-                    handler_name: handler.name().to_string(),
-                    module_name: module_name.to_string(),
                     error: error.to_string(),
                 };
             }
@@ -476,13 +439,7 @@ mod tests {
         let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
 
         match outcome {
-            HandlersOutcome::Exhausted {
-                handler_name,
-                module_name,
-                error,
-            } => {
-                assert_eq!(handler_name, "mock-handler-stream:subject");
-                assert_eq!(module_name, "test-module");
+            HandlersOutcome::Exhausted { error } => {
                 assert!(error.contains("boom"));
             }
             other => panic!("expected Exhausted, got {other:?}"),
@@ -520,13 +477,7 @@ mod tests {
         let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
 
         match outcome {
-            HandlersOutcome::Exhausted {
-                handler_name,
-                module_name,
-                error,
-            } => {
-                assert_eq!(handler_name, "failing-handler");
-                assert_eq!(module_name, "test-module");
+            HandlersOutcome::Exhausted { error } => {
                 assert!(error.contains("db connection refused"));
             }
             other => panic!("expected Exhausted, got {other:?}"),

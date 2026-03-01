@@ -128,8 +128,6 @@ impl NatsBroker {
         &self,
         original_topic: &Topic,
         envelope: &Envelope,
-        handler_name: &str,
-        module_name: &str,
         error: &str,
     ) -> Result<(), NatsError> {
         let original_payload = serde_json::from_slice(&envelope.payload).unwrap_or_else(|_| {
@@ -145,8 +143,6 @@ impl NatsBroker {
             failed_at: chrono::Utc::now(),
             attempts: envelope.attempt,
             last_error: error.to_string(),
-            handler_name: handler_name.to_string(),
-            module_name: module_name.to_string(),
         };
 
         let payload = serde_json::to_vec(&dead_letter)

@@ -43,5 +43,5 @@ pub use broker::NatsBroker;
 pub use configuration::NatsConfiguration;
 pub use error::NatsError;
 pub use kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
-pub use message::{NatsMessage, NatsSubscription};
+pub use message::{DlqResult, NatsMessage, NatsSubscription};
 pub use services::{NatsServices, NatsServicesImpl};
