@@ -411,8 +411,10 @@ build-ai-proxy:
   environment:
     name: ai-review
     action: access
-  before_script:
-    - !reference [.opencode-base, before_script]
+
+ai:performance:
+  extends: .ai-review-job
+  script:
     - mkdir -p /tmp/refs
     - |
       git clone --depth=1 https://gitlab.com/gitlab-org/gitlab.git /tmp/refs/gitlab &
@@ -420,10 +422,6 @@ build-ai-proxy:
       git clone --depth=1 https://gitlab.com/gitlab-org/analytics-section/siphon.git /tmp/refs/siphon &
       wait
     - chown -R agent:agent /tmp/refs
-
-ai:performance:
-  extends: .ai-review-job
-  script:
     - >-
       scripts/ai/run-agent.sh opencode run --agent performance
       -- "Performance review for MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
@@ -433,11 +431,18 @@ ai:performance:
 ai:security:
   extends: .ai-review-job
   script:
+    - mkdir -p /tmp/refs
+    - |
+      git clone --depth=1 https://gitlab.com/gitlab-org/gitlab.git /tmp/refs/gitlab &
+      git clone --depth=1 https://github.com/ClickHouse/clickhouse-docs.git /tmp/refs/clickhouse-docs &
+      git clone --depth=1 https://gitlab.com/gitlab-org/analytics-section/siphon.git /tmp/refs/siphon &
+      wait
+    - chown -R agent:agent /tmp/refs
     - >-
       scripts/ai/run-agent.sh opencode run --agent security
       -- "Security review for MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
       Fetch the MR diff and discussions using glab, then post your findings as inline comments.
-      Reference repos are available at /tmp/refs/gitlab, /tmp/refs/clickhouse-docs, /tmp/refs/siphon."
+      Reference repos are at /tmp/refs/gitlab, /tmp/refs/clickhouse-docs, /tmp/refs/siphon."
 
 # Build Stage
 
