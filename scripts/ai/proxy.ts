@@ -149,12 +149,16 @@ async function handleInit(req: Request): Promise<Response> {
   }
 }
 
+const ANTHROPIC_ALLOWED_PATHS = new Set(["/v1/messages"]);
+
 Bun.serve({
   port: 8080,
   fetch: (req) => {
     const path = new URL(req.url).pathname;
     if (path === "/_init" && req.method === "POST") return handleInit(req);
     if (!anthropicKey) return new Response("proxy not initialized", { status: 503 });
+    if (!ANTHROPIC_ALLOWED_PATHS.has(path))
+      return new Response("endpoint not allowed", { status: 403 });
     return handle(req, "api.anthropic.com", { "x-api-key": anthropicKey }, "/v1/");
   },
   error: () => new Response("proxy error", { status: 500 }),
