@@ -477,6 +477,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exhausted_retries_returns_exhausted_and_skips_remaining_handlers() {
+        let configuration = EngineConfiguration {
+            modules: HashMap::from([(
+                "test-module".to_string(),
+                ModuleConfiguration {
+                    max_retry_attempts: Some(3),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+
+        let failing_handler = Arc::new(
+            MockHandler::new("stream", "subject")
+                .with_name("failing-handler")
+                .with_error(HandlerError::Processing("db connection refused".into())),
+        );
+        let skipped_handler =
+            Arc::new(MockHandler::new("stream", "subject").with_name("skipped-handler"));
+
+        let handlers: Vec<(Arc<dyn Handler>, Arc<str>)> = vec![
+            (failing_handler.clone(), Arc::from("test-module")),
+            (skipped_handler.clone(), Arc::from("test-module")),
+        ];
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
+        let runtime = test_runtime(&configuration);
+        let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+
+        match outcome {
+            HandlersOutcome::Exhausted {
+                handler_name,
+                module_name,
+                error,
+            } => {
+                assert_eq!(handler_name, "failing-handler");
+                assert_eq!(module_name, "test-module");
+                assert!(error.contains("db connection refused"));
+            }
+            other => panic!("expected Exhausted, got {other:?}"),
+        }
+        assert_eq!(
+            skipped_handler.invocation_count(),
+            0,
+            "remaining handlers should not run after exhaustion"
+        );
+    }
+
+    #[tokio::test]
     async fn handler_failure_without_retry_config_returns_failed_no_delay() {
         let configuration = EngineConfiguration::default();
 

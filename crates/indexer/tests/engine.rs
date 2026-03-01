@@ -3,6 +3,7 @@
 //! These tests verify the full message flow: NATS -> Handler -> ClickHouse.
 //! They require a Docker-compatible runtime (Docker, Colima, etc).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,8 +11,10 @@ use arrow::array::{Int32Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use futures::StreamExt;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
-use indexer::configuration::EngineConfiguration;
+use indexer::configuration::{EngineConfiguration, ModuleConfiguration};
+use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::entities::Entity;
 use indexer::metrics::EngineMetrics;
@@ -309,12 +312,17 @@ impl TestContext {
 }
 
 async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
+    run_engine_with_config(engine, EngineConfiguration::default(), duration).await;
+}
+
+async fn run_engine_with_config(
+    engine: Arc<Engine>,
+    config: EngineConfiguration,
+    duration: Duration,
+) {
     let engine_handle = engine.clone();
     let task = tokio::spawn(async move {
-        engine_handle
-            .run(&EngineConfiguration::default())
-            .await
-            .expect("engine failed");
+        engine_handle.run(&config).await.expect("engine failed");
     });
 
     tokio::time::sleep(duration).await;
@@ -379,4 +387,133 @@ async fn multiple_handlers_receive_same_message() {
     run_engine_for(engine, Duration::from_secs(2)).await;
 
     assert_eq!(context.query_count().await, 2);
+}
+
+struct AlwaysFailingHandler;
+
+#[async_trait]
+impl Handler for AlwaysFailingHandler {
+    fn name(&self) -> &str {
+        "always-failing-handler"
+    }
+
+    fn topic(&self) -> Topic {
+        test_topic()
+    }
+
+    async fn handle(
+        &self,
+        _context: HandlerContext,
+        _message: Envelope,
+    ) -> Result<(), HandlerError> {
+        Err(HandlerError::Processing("simulated failure".into()))
+    }
+}
+
+struct AlwaysFailingModule;
+
+impl Module for AlwaysFailingModule {
+    fn name(&self) -> &str {
+        "always-failing-module"
+    }
+
+    fn handlers(&self) -> Vec<Box<dyn Handler>> {
+        vec![Box::new(AlwaysFailingHandler)]
+    }
+
+    fn entities(&self) -> Vec<Entity> {
+        vec![]
+    }
+}
+
+#[tokio::test]
+async fn exhausted_message_lands_in_dead_letter_queue() {
+    // Start NATS only — no ClickHouse needed since the handler never writes
+    let (_nats_container, nats_url) = TestContext::start_nats().await;
+    TestContext::create_nats_stream(&nats_url).await;
+
+    // Wire up an engine whose only handler always fails
+    let broker = Arc::new(
+        NatsBroker::connect(&NatsConfiguration {
+            url: nats_url.clone(),
+            ..Default::default()
+        })
+        .await
+        .expect("failed to connect to NATS"),
+    );
+    let registry = Arc::new(ModuleRegistry::default());
+    registry.register_module(&AlwaysFailingModule);
+    let destination = Arc::new(indexer::testkit::mocks::MockDestination::new());
+    let engine = Arc::new(EngineBuilder::new(broker.clone(), registry, destination).build());
+
+    // Publish one message that will fail on every attempt
+    let event = TestEvent {
+        id: 42,
+        name: "doomed".to_string(),
+    };
+    broker
+        .publish(&test_topic(), &Envelope::new(&event).unwrap())
+        .await
+        .expect("failed to publish event");
+
+    // Run the engine with max_retry_attempts=1 so the first attempt exhausts retries
+    let config = EngineConfiguration {
+        modules: HashMap::from([(
+            "always-failing-module".to_string(),
+            ModuleConfiguration {
+                max_retry_attempts: Some(1),
+                ..Default::default()
+            },
+        )]),
+        ..Default::default()
+    };
+    run_engine_with_config(engine, config, Duration::from_secs(3)).await;
+
+    // Read the DLQ stream and verify the dead letter envelope
+    let nats_client = async_nats::connect(format!("nats://{nats_url}"))
+        .await
+        .expect("failed to connect to NATS");
+    let jetstream = async_nats::jetstream::new(nats_client);
+    let mut dlq_stream = jetstream
+        .get_stream(DEAD_LETTER_STREAM)
+        .await
+        .expect("DLQ stream should have been created by ensure_streams");
+
+    let dlq_info = dlq_stream
+        .info()
+        .await
+        .expect("failed to get DLQ stream info");
+    assert!(
+        dlq_info.state.messages >= 1,
+        "expected at least 1 dead letter, got {}",
+        dlq_info.state.messages,
+    );
+
+    let consumer = dlq_stream
+        .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            filter_subject: format!("dlq.{STREAM}.{SUBJECT}"),
+            ..Default::default()
+        })
+        .await
+        .expect("failed to create DLQ consumer");
+    let mut messages = consumer
+        .fetch()
+        .max_messages(1)
+        .messages()
+        .await
+        .expect("failed to fetch from DLQ");
+    let raw = messages
+        .next()
+        .await
+        .expect("DLQ should contain a message")
+        .expect("failed to read DLQ message");
+
+    let dead_letter: DeadLetterEnvelope =
+        serde_json::from_slice(&raw.payload).expect("DLQ payload should be valid JSON");
+
+    assert_eq!(dead_letter.original_stream, STREAM);
+    assert_eq!(dead_letter.original_subject, SUBJECT);
+    assert_eq!(dead_letter.handler_name, "always-failing-handler");
+    assert_eq!(dead_letter.module_name, "always-failing-module");
+    assert!(dead_letter.last_error.contains("simulated failure"));
 }
