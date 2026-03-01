@@ -16,17 +16,19 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
+pub mod constants;
 mod entities;
 pub mod etl;
 
+pub use constants::{
+    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
+    NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+};
 pub use entities::{
     DataType, DomainInfo, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig,
     EnumType, Field, NodeEntity, NodeStyle, RedactionConfig,
 };
-pub use etl::{
-    DELETED_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope,
-    TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
-};
+pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
 use rust_embed::Embed;
 use serde::Deserialize;
@@ -39,25 +41,6 @@ use std::path::Path;
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../fixtures/ontology/"]
 struct EmbeddedOntology;
-
-/// Primary key field name used by default.
-pub const DEFAULT_PRIMARY_KEY: &str = "id";
-
-/// Reserved columns that exist on all nodes.
-pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];
-
-/// Reserved columns on the edge table (matches EdgeEntity schema).
-pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
-    "traversal_path",
-    "relationship_kind",
-    "source_id",
-    "source_kind",
-    "target_id",
-    "target_kind",
-];
-
-/// Edge table name in ClickHouse.
-pub const EDGE_TABLE: &str = "gl_edge";
 
 /// Errors that can occur when loading or validating an ontology.
 #[derive(Debug)]

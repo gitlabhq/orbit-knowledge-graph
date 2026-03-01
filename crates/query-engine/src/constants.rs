@@ -2,9 +2,10 @@
 
 use const_format::concatcp;
 
+// Re-export so existing `crate::constants::` paths keep working.
+pub use ontology::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
+
 pub const GKG_COLUMN_PREFIX: &str = "_gkg_";
-pub const GL_TABLE_PREFIX: &str = "gl_";
-pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 
 /// Column name for the typed path array in path finding queries.
 /// Contains Array(Tuple(Int64, String)) with (node_id, entity_type) for each step.

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::future::try_join_all;
-use ontology::EDGE_TABLE;
+use ontology::constants::EDGE_TABLE;
 use thiserror::Error;
 use tracing::debug;
 

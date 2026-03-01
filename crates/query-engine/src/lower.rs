@@ -9,7 +9,7 @@ use crate::input::{
     ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
     InputRelationship, OrderDirection, QueryType,
 };
-use ontology::{DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, EDGE_TABLE};
+use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, EDGE_TABLE};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
