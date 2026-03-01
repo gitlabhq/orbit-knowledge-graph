@@ -28,6 +28,7 @@ export const ALLOWED_HOSTS = [
   "github.com",
   "clickhouse.com",
   "nats.io",
+  "anthropic.com",
 ];
 
 const ALLOWED_URI_REGEXP = new RegExp(
