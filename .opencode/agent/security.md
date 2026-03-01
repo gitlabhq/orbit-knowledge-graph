@@ -12,10 +12,11 @@ Don't try to load everything at once. API responses can be large and will get tr
 
 1. Fetch the list of changed files via glab (just filenames, not full diffs)
 2. Read `AGENTS.md` and `docs/design-documents/security.md`
-3. Pick a file, fetch its diff, review against the checklist below
-4. If you find something, post the inline comment right away
-5. Move to the next file and repeat
-6. When done, post a summary comment with your verdict
+3. Fetch existing discussions — always prefer the latest comments; earlier threads may be resolved or outdated
+4. Pick a file, fetch its diff, review against the checklist below
+5. If you find something, create a draft note with the finding. Use code suggestions when you have a concrete fix.
+6. Move to the next file and repeat
+7. When done, create a draft summary note with your verdict, then bulk publish all drafts as a single review
 
 The shared glab instructions explain every API call you need.
 
