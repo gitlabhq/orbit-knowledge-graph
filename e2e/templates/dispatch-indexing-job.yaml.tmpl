@@ -23,6 +23,11 @@ spec:
                   name: ${CH_SECRET}
                   key: ${CH_SECRET_KEY}
                   optional: true
+            - name: GKG_GITLAB__JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ${GKG_CREDENTIALS_SECRET}
+                  key: ${GKG_CREDENTIALS_JWT_KEY}
           volumeMounts:
             - name: config
               mountPath: /app/config

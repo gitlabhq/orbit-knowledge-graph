@@ -193,15 +193,21 @@ async fn drop_stale_siphon_state(cfg: &Config) -> Result<()> {
     .await?;
 
     let slot = &cfg.siphon.slot;
-    let count_sql = format!("SELECT count(*) FROM pg_replication_slots WHERE slot_name='{slot}';");
-    let slot_count = utils::pg_superuser(cfg, &pg_superpass, &count_sql, true).await?;
+    let active_sql = format!("SELECT active FROM pg_replication_slots WHERE slot_name='{slot}';");
+    let active_result = utils::pg_superuser(cfg, &pg_superpass, &active_sql, true).await?;
 
-    if slot_count.trim() == "1" {
-        let drop_sql = format!("SELECT pg_drop_replication_slot('{slot}');");
-        utils::pg_superuser(cfg, &pg_superpass, &drop_sql, false).await?;
-        ui::info("Dropped stale replication slot")?;
-    } else {
-        ui::info("No stale replication slot found")?;
+    match active_result.trim() {
+        "t" => {
+            ui::info("Replication slot is active (siphon-producer running), skipping drop")?;
+        }
+        "f" => {
+            let drop_sql = format!("SELECT pg_drop_replication_slot('{slot}');");
+            utils::pg_superuser(cfg, &pg_superpass, &drop_sql, false).await?;
+            ui::info("Dropped stale replication slot")?;
+        }
+        _ => {
+            ui::info("No replication slot found")?;
+        }
     }
 
     let publication = &cfg.siphon.publication;
@@ -419,6 +425,14 @@ pub(crate) async fn run_dispatch_indexing(cfg: &Config) -> Result<()> {
         ("CH_SECRET", cfg.clickhouse.credentials_secret.as_str()),
         ("CH_SECRET_KEY", cfg.clickhouse.credentials_key.as_str()),
         ("CONFIGMAP", configmap.as_str()),
+        (
+            "GKG_CREDENTIALS_SECRET",
+            cfg.gkg.server_credentials_secret.as_str(),
+        ),
+        (
+            "GKG_CREDENTIALS_JWT_KEY",
+            cfg.gkg.server_credentials_jwt_key.as_str(),
+        ),
     ]);
     let job_yaml = template::render(&tmpl_path, &vars)?;
 
