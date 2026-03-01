@@ -60,24 +60,35 @@ glab api --method POST "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUES
   -f note="your summary comment"
 ```
 
-Create an inline draft note on a specific diff line. You MUST use JSON body with the Content-Type header for the position to attach correctly:
+Create an inline draft note on a specific diff line. You MUST pipe JSON with Content-Type header for the position to attach correctly. Do NOT use `-f` flags or `<(...)` process substitution (not available in sh):
 
 ```shell
+echo '{"note":"your comment","position":{"position_type":"text","base_sha":"BASE_SHA","head_sha":"HEAD_SHA","start_sha":"START_SHA","old_path":"path/to/file.rs","new_path":"path/to/file.rs","new_line":42}}' \
+  | glab api --method POST \
+    "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes" \
+    -H "Content-Type: application/json" --input -
+```
+
+For multi-line notes, write JSON to a temp file first:
+
+```shell
+cat > /tmp/draft.json << 'DRAFT'
+{
+  "note": "your comment here",
+  "position": {
+    "position_type": "text",
+    "base_sha": "BASE_SHA",
+    "head_sha": "HEAD_SHA",
+    "start_sha": "START_SHA",
+    "old_path": "path/to/file.rs",
+    "new_path": "path/to/file.rs",
+    "new_line": 42
+  }
+}
+DRAFT
 glab api --method POST \
   "/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/draft_notes" \
-  -H "Content-Type: application/json" \
-  --input <(echo '{
-    "note": "your comment here",
-    "position": {
-      "position_type": "text",
-      "base_sha": "BASE_SHA",
-      "head_sha": "HEAD_SHA",
-      "start_sha": "START_SHA",
-      "old_path": "path/to/file.rs",
-      "new_path": "path/to/file.rs",
-      "new_line": 42
-    }
-  }')
+  -H "Content-Type: application/json" --input /tmp/draft.json
 ```
 
 Do NOT use `-f` flags for inline draft notes — the nested position object will not serialize correctly and the comment will appear as a general comment instead of inline on the diff.

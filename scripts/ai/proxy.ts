@@ -131,18 +131,21 @@ async function handle(
 async function handleInit(req: Request): Promise<Response> {
   if (initialized)
     return new Response("already initialized", { status: 403 });
+  initialized = true;
 
   try {
     const { anthropic_key, gitlab_token } = await req.json();
-    if (!anthropic_key || !gitlab_token)
+    if (!anthropic_key || !gitlab_token) {
+      initialized = false;
       return new Response("missing keys", { status: 400 });
+    }
 
     anthropicKey = anthropic_key;
     gitlabToken = gitlab_token;
-    initialized = true;
     console.log("proxy initialized with tokens");
     return new Response("ok");
   } catch {
+    initialized = false;
     return new Response("invalid body", { status: 400 });
   }
 }

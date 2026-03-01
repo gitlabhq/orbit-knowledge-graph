@@ -340,11 +340,11 @@ tilt-ci:
     - echo "127.0.0.1 100.100.100.200" >> /etc/hosts
     - glab config set --global skip_tls_verify true
     - echo "proxy-handled" | glab auth login --hostname api-proxy:8083 --stdin 2>/dev/null || true
-    # Send tokens to the proxy service (avoids CI variable inheritance issues)
+    # Send tokens to the proxy service via stdin (keeps secrets out of /proc/pid/cmdline)
     - |
-      INIT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://api-proxy:8080/_init \
-        -H "Content-Type: application/json" \
-        -d "{\"anthropic_key\":\"$ANTHROPIC_API_KEY\",\"gitlab_token\":\"$GITLAB_REVIEW_TOKEN\"}")
+      INIT_STATUS=$(printf '{"anthropic_key":"%s","gitlab_token":"%s"}' "$ANTHROPIC_API_KEY" "$GITLAB_REVIEW_TOKEN" \
+        | curl -s -o /dev/null -w "%{http_code}" -X POST http://api-proxy:8080/_init \
+          -H "Content-Type: application/json" --data-binary @-)
       echo "Proxy init: $INIT_STATUS"
       if [ "$INIT_STATUS" != "200" ]; then echo "ERROR: proxy init failed"; exit 1; fi
     # Verify proxy forwards to Anthropic correctly
