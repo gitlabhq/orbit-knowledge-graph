@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "description": "Disable updates for 0.x crates with frequent breaking changes — require manual migration",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "jsonschema",
+        "opentelemetry*",
+        "tracing-opentelemetry",
+        "async-nats",
+        "clickhouse"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Disable updates for tonic/prost family — tightly coupled, must be bumped together manually",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "tonic",
+        "tonic-build",
+        "tonic-prost",
+        "tonic-prost-build",
+        "prost",
+        "prost-build",
+        "prost-types"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Disable updates for Arrow ecosystem — arrow, parquet, and datafusion versions are coordinated",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "arrow",
+        "arrow-ipc",
+        "parquet",
+        "datafusion"
+      ],
+      "enabled": false
+    }
+  ]
+}
