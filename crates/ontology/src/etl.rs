@@ -5,9 +5,7 @@
 
 use std::collections::BTreeMap;
 
-pub const VERSION_COLUMN: &str = "_version";
-pub const DELETED_COLUMN: &str = "_deleted";
-pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
+use crate::constants::{DELETED_COLUMN, VERSION_COLUMN};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EtlScope {

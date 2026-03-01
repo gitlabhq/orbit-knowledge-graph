@@ -8,7 +8,8 @@ use arrow::record_batch::RecordBatch;
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use futures::StreamExt;
-use ontology::{EDGE_TABLE, EdgeSourceEtlConfig, NodeEntity, Ontology};
+use ontology::constants::EDGE_TABLE;
+use ontology::{EdgeSourceEtlConfig, NodeEntity, Ontology};
 use serde_json::Value;
 use tracing::{debug, info};
 

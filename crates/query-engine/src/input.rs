@@ -2,7 +2,7 @@
 //!
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::DEFAULT_PRIMARY_KEY;
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::HashMap;

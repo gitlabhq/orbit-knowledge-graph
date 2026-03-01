@@ -13,7 +13,7 @@ use crate::ast::{Expr, Node, Query, SelectExpr};
 use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::Result;
 use crate::input::{EntityAuthConfig, Input, QueryType};
-use ontology::DEFAULT_PRIMARY_KEY;
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

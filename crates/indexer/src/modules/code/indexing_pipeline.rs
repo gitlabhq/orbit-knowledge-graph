@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use code_graph::analysis::types::GraphData;
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
 use code_graph::loading::DirectoryFileSource;
-use ontology::EDGE_TABLE;
+use ontology::constants::EDGE_TABLE;
 use tempfile::TempDir;
 use tracing::{debug, info, warn};
 

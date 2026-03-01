@@ -181,7 +181,7 @@ fn should_apply_security_filter(table: &str) -> bool {
 mod tests {
     use super::*;
     use crate::ast::{JoinType, SelectExpr};
-    use ontology::EDGE_TABLE;
+    use ontology::constants::EDGE_TABLE;
 
     fn simple_query() -> Node {
         Node::Query(Box::new(Query {

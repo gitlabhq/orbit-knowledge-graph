@@ -57,7 +57,8 @@ pub use input::{Input, QueryType, parse_input};
 pub use lower::lower;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use normalize::{build_entity_auth, normalize};
-pub use ontology::{EDGE_TABLE, Ontology, OntologyError};
+pub use ontology::constants::EDGE_TABLE;
+pub use ontology::{Ontology, OntologyError};
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
 

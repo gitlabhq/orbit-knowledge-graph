@@ -3,7 +3,8 @@
 use crate::arrow_schema::{ToArrowSchema, edge_schema};
 use crate::config::SchemaConfig;
 use arrow::datatypes::{DataType as ArrowDataType, Schema};
-use ontology::{EDGE_TABLE, Ontology};
+use ontology::Ontology;
+use ontology::constants::EDGE_TABLE;
 
 /// Generates ClickHouse DDL statements from ontology and config.
 pub struct SchemaGenerator<'a> {
