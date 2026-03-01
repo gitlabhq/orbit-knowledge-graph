@@ -40,7 +40,6 @@ interface AgentConfig {
   mode: string;
   model: string;
   temperature: number;
-  steps: number;
   description: string;
   prompt?: string;
   permission: Record<string, PermissionValue>;
@@ -102,6 +101,7 @@ async function generate() {
     permission: {
       read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny" },
       bash: { "*": "allow", "*/proc/*/environ*": "deny" },
+      task: "allow",
       external_directory: { "/home/agent/*": "allow" },
       webfetch: "allow",
     },

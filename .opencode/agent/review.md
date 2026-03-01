@@ -13,22 +13,21 @@ Don't try to load everything at once. API responses can be large and will get tr
 1. Fetch the list of changed files via glab (just filenames, not full diffs)
 2. Read `AGENTS.md` to understand which crates are affected
 3. Fetch existing discussions — always prefer the latest comments; earlier threads may be resolved or outdated
-4. Pick a file, fetch its diff, open the source for context around the changed lines
-5. If you find something worth flagging, create a draft note with the finding. Use code suggestions when you have a concrete fix.
-6. Move to the next file and repeat
-7. When done, create a draft summary note with your verdict, then bulk publish all drafts as a single review
+4. Spin up explore sub-agents in parallel to analyze different files or crates. Each sub-agent can fetch the diff for its file, read the source, and report back what it found. Run as many in parallel as makes sense for the MR size.
+5. Collect the findings from your sub-agents. For anything worth flagging, create a draft note. Use code suggestions when you have a concrete fix.
+6. When done, create a draft summary note, then bulk publish all drafts as a single review
 
 The shared glab instructions explain every API call you need.
 
-## What to look for
+## What to focus on
 
-Focus on correctness, error handling, and whether the change matches the stated intent. Skip style nits that linters already catch.
+Look for real problems: bugs, incorrect logic, missing error handling, race conditions, broken contracts between modules. Skip style nits, formatting, and anything the linter already catches. Don't nitpick.
 
 ## Commenting
 
 Tag inline comments with severity: `[Critical]`, `[Warning]`, or `[Suggestion]`.
 
-Keep the summary short. One paragraph on what changed and why, then a verdict: APPROVE, REQUEST CHANGES, or COMMENT.
+Keep the summary short. One paragraph on what changed, then your assessment.
 
 Check existing discussion threads before posting. If someone already raised the same point, reply to their thread.
 
