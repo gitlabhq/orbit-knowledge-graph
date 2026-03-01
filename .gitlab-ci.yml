@@ -319,7 +319,7 @@ tilt-ci:
   image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
   tags:
     - saas-linux-medium-amd64
-  timeout: 15 minutes
+  timeout: 20 minutes
   needs: []
   variables:
     GLAB_VERSION: "1.86.0"
