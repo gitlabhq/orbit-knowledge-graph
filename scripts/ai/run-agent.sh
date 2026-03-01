@@ -9,7 +9,7 @@ set -eu
 # the proxy (localhost:8083) which injects the real PRIVATE-TOKEN.
 # GITLAB_TOKEN=proxy-handled is a dummy; the proxy replaces it.
 #
-# Usage: scripts/ai/run-agent.sh opencode run --agent review ...
+# Usage: scripts/ai/run-agent.sh opencode run --agent performance ...
 
 WORKSPACE_BIN="$(cd "$(dirname "$0")" && pwd)/node_modules/.bin"
 

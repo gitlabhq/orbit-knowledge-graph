@@ -1,7 +1,7 @@
 FROM oven/bun:alpine
 RUN apk add --no-cache openssl
 WORKDIR /app
-COPY package.json *.ts ./
+COPY package.json bun.lock* *.ts ./
 RUN bun install --production
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh

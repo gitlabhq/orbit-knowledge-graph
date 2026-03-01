@@ -55,8 +55,10 @@ function sanitizeRequestBody(raw: string): string {
     };
     walk(json);
     return JSON.stringify(json);
-  } catch {}
-  return raw;
+  } catch {
+    console.warn("sanitize: rejecting non-JSON body");
+    return JSON.stringify({ error: "only JSON bodies are allowed" });
+  }
 }
 
 function stripResponseHeaders(res: Response): Response {
@@ -130,13 +132,13 @@ async function handle(
 
 async function handleInit(req: Request): Promise<Response> {
   if (locked) return new Response("already initialized", { status: 403 });
-  locked = true;
 
   try {
     const { anthropic_key, gitlab_token } = await req.json();
     if (!anthropic_key || !gitlab_token)
       return new Response("missing keys", { status: 400 });
 
+    locked = true;
     anthropicKey = anthropic_key;
     gitlabToken = gitlab_token;
     initialized = true;

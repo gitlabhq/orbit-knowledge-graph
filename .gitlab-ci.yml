@@ -326,7 +326,7 @@ tilt-ci:
     GLAB_VERSION: "1.86.0"
   before_script:
     - mise install
-    - apt-get update -qq && apt-get install -yqq unzip > /dev/null
+    - apt-get update -qq && apt-get install -yqq jq unzip > /dev/null
     - curl -fsSL https://bun.sh/install | bash
     - export PATH="$HOME/.bun/bin:$PATH"
     - cp "$HOME/.bun/bin/bun" /usr/local/bin/bun
@@ -349,7 +349,8 @@ tilt-ci:
       if [ "$PROXY_READY" = "false" ]; then echo "ERROR: proxy not reachable after 30s"; exit 1; fi
     # Send tokens to the proxy service via stdin (keeps secrets out of /proc/pid/cmdline)
     - |
-      INIT_STATUS=$(printf '{"anthropic_key":"%s","gitlab_token":"%s"}' "$ANTHROPIC_API_KEY" "$GITLAB_REVIEW_TOKEN" \
+      INIT_STATUS=$(jq -n --arg k "$ANTHROPIC_API_KEY" --arg t "$GITLAB_REVIEW_TOKEN" \
+        '{anthropic_key: $k, gitlab_token: $t}' \
         | curl -s -o /dev/null -w "%{http_code}" -X POST http://api-proxy:8080/_init \
           -H "Content-Type: application/json" --data-binary @-)
       echo "Proxy init: $INIT_STATUS"
@@ -363,7 +364,6 @@ tilt-ci:
       echo "Proxy health check: $PROXY_STATUS"
       if [ "$PROXY_STATUS" != "200" ]; then echo "ERROR: proxy check failed ($PROXY_STATUS)"; exit 1; fi
     - export OPENCODE_CONFIG_CONTENT=$(bun scripts/ai/config.ts)
-    - git remote set-url origin "https://api-proxy:8083/${CI_PROJECT_PATH}.git"
     - useradd -m -s /bin/sh agent
     - cp -r /root/.config /home/agent/.config 2>/dev/null || true
     - cp -r /root/.bun /home/agent/.bun 2>/dev/null || true
@@ -392,36 +392,49 @@ build-ai-proxy:
         - scripts/ai/**/*
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - cp bun.lock scripts/ai/bun.lock 2>/dev/null || true
     - docker build -t "${CI_REGISTRY_IMAGE}/ai-proxy:${CI_COMMIT_SHA}" scripts/ai
     - docker tag "${CI_REGISTRY_IMAGE}/ai-proxy:${CI_COMMIT_SHA}" "${CI_REGISTRY_IMAGE}/ai-proxy:latest"
     - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:${CI_COMMIT_SHA}"
     - docker push "${CI_REGISTRY_IMAGE}/ai-proxy:latest"
 
-ai:review:
+.ai-review-job:
   extends: .opencode-base
   stage: ai
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
+  environment:
+    name: ai-review
+    action: access
+  before_script:
+    - !reference [.opencode-base, before_script]
+    - mkdir -p /tmp/refs
+    - |
+      git clone --depth=1 https://gitlab.com/gitlab-org/gitlab.git /tmp/refs/gitlab &
+      git clone --depth=1 https://github.com/ClickHouse/clickhouse-docs.git /tmp/refs/clickhouse-docs &
+      git clone --depth=1 https://gitlab.com/gitlab-org/analytics-section/siphon.git /tmp/refs/siphon &
+      wait
+    - chown -R agent:agent /tmp/refs
+
+ai:performance:
+  extends: .ai-review-job
   script:
     - >-
-      scripts/ai/run-agent.sh opencode run --agent review
-      -- "Review MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
-      Fetch the MR diff and discussions using glab, then post your findings as inline comments."
+      scripts/ai/run-agent.sh opencode run --agent performance
+      -- "Performance review for MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
+      Fetch the MR diff and discussions using glab, then post your findings as inline comments.
+      Reference repos are at /tmp/refs/gitlab, /tmp/refs/clickhouse-docs, /tmp/refs/siphon."
 
 ai:security:
-  extends: .opencode-base
-  stage: ai
-  rules:
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      when: manual
-      allow_failure: true
+  extends: .ai-review-job
   script:
     - >-
       scripts/ai/run-agent.sh opencode run --agent security
-      -- "Security review for MR !${CI_MERGE_REQUEST_IID}.
-      Fetch the MR diff and discussions using glab, then post your findings as inline comments."
+      -- "Security review for MR !${CI_MERGE_REQUEST_IID} on branch ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}.
+      Fetch the MR diff and discussions using glab, then post your findings as inline comments.
+      Reference repos are available at /tmp/refs/gitlab, /tmp/refs/clickhouse-docs, /tmp/refs/siphon."
 
 # Build Stage
 

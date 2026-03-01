@@ -15,11 +15,11 @@ import { join, basename } from "path";
 const MODEL = "anthropic/claude-opus-4-6";
 
 const AGENTS: Record<string, Omit<AgentConfig, "prompt">> = {
-  review: {
+  performance: {
     mode: "primary",
     model: MODEL,
     temperature: 0.2,
-    description: "Code review agent",
+    description: "Performance review agent",
     permission: {
       edit: "deny",
     },
@@ -84,6 +84,7 @@ async function generate() {
 
   const agents: Record<string, AgentConfig> = {};
   for (const [name, config] of Object.entries(AGENTS)) {
+    if (!prompts[name]) { console.error(`missing prompt for agent: ${name}`); process.exit(1); }
     agents[name] = { ...config, prompt: prompts[name] };
   }
 
@@ -99,10 +100,10 @@ async function generate() {
       },
     },
     permission: {
-      read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny", "/etc/shadow": "deny", "/var/run/secrets/*": "deny" },
+      read: { "*": "allow", "/proc/*": "deny", "/sys/*": "deny", "/etc/shadow": "deny", "/var/run/secrets/*": "deny", "/tmp/k.pem": "deny", "/home/agent/.config/glab-cli/*": "deny" },
       bash: "allow",
       task: "allow",
-      external_directory: { "/home/agent/*": "allow", "/tmp/*": "allow" },
+      external_directory: { "/home/agent/*": "allow", "/tmp/*": "allow", "/tmp/refs/*": "allow" },
       webfetch: "allow",
     },
     agent: agents,
