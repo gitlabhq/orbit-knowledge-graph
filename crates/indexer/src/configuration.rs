@@ -23,7 +23,7 @@ pub struct EngineConfiguration {
 }
 
 /// Per-module configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModuleConfiguration {
     /// Maximum concurrent handlers for this module, independent of the global limit.
     #[serde(default)]
@@ -40,27 +40,6 @@ pub struct ModuleConfiguration {
     /// When absent, nacks use immediate redelivery.
     #[serde(default)]
     pub retry_interval_secs: Option<u64>,
-
-    /// Whether exhausted messages are sent to the dead letter queue.
-    /// Defaults to `true`. Set to `false` for modules whose messages are
-    /// ephemeral and will be regenerated (e.g. dispatcher-created indexing requests).
-    #[serde(default = "default_dead_letter_enabled")]
-    pub dead_letter_enabled: bool,
-}
-
-fn default_dead_letter_enabled() -> bool {
-    true
-}
-
-impl Default for ModuleConfiguration {
-    fn default() -> Self {
-        Self {
-            max_concurrency: None,
-            max_retry_attempts: None,
-            retry_interval_secs: None,
-            dead_letter_enabled: true,
-        }
-    }
 }
 
 impl ModuleConfiguration {
