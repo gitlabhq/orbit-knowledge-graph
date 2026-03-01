@@ -28,10 +28,6 @@ pub struct DeadLetterEnvelope {
     pub module_name: String,
 }
 
-/// Builds the DLQ subject for a given original topic.
-///
-/// Example: topic `siphon_db` / `tables.merge_requests`
-/// becomes `dlq.siphon_db.tables.merge_requests`.
 pub fn dead_letter_subject(topic: &Topic) -> String {
     format!(
         "{}.{}.{}",
@@ -39,7 +35,6 @@ pub fn dead_letter_subject(topic: &Topic) -> String {
     )
 }
 
-/// Returns a [`Topic`] pointing to the DLQ stream and subject for the given original topic.
 pub fn dead_letter_topic(topic: &Topic) -> Topic {
     Topic::new(DEAD_LETTER_STREAM, dead_letter_subject(topic))
 }
