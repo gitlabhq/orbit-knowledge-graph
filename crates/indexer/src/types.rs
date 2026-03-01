@@ -139,11 +139,6 @@ impl Envelope {
         Ok(serde_json::from_slice(&self.payload)?)
     }
 
-    /// Increments the attempt counter for retry tracking.
-    pub fn retry(&mut self) -> &mut Self {
-        self.attempt += 1;
-        self
-    }
 }
 
 #[cfg(test)]
@@ -176,19 +171,6 @@ mod tests {
 
         let deserialized: TestEvent = envelope.to_event().unwrap();
         assert_eq!(deserialized, event);
-    }
-
-    #[test]
-    fn envelope_retry_increments_attempt() {
-        let mut envelope = Envelope::new(&TestEvent {
-            id: "test".into(),
-            value: 1,
-        })
-        .unwrap();
-
-        assert_eq!(envelope.attempt, 1);
-        envelope.retry();
-        assert_eq!(envelope.attempt, 2);
     }
 
     #[test]
