@@ -8,11 +8,14 @@ workflow:
 
 include:
   - template: Jobs/SAST.gitlab-ci.yml
+  - project: 'gitlab-org/orbit/experiments/ai-review-bot'
+    file: '/template.yml'
 
 stages:
   - lint
   - security
   - test
+  - ai
   - build
   - publish
   - deploy
@@ -571,3 +574,50 @@ release-manifest:
         -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
+
+# AI Review Stage
+#
+# Manually-triggered AI agents for MR review. Uses the shared
+# ai-review-bot framework from gitlab-org/orbit/experiments/ai-review-bot.
+#
+# Required CI/CD variables (Settings > CI/CD > Variables):
+#   GITLAB_REVIEW_TOKEN  — Masked + Hidden
+#   AI_PROXY_INIT_TOKEN  — Masked + Hidden
+#   GOOGLE_CLOUD_PROJECT — GCP project ID for Vertex AI
+#   VERTEX_SA_KEY_B64    — Masked + Hidden
+
+ai:performance:
+  extends: .ai-review-base
+  stage: ai
+  timeout: 30 minutes
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  environment:
+    name: ai-review
+    action: access
+  variables:
+    AI_AGENT: performance
+    AI_MODEL_OVERRIDE: "google-vertex-anthropic/claude-opus-4-6@default"
+    GOOGLE_CLOUD_LOCATION: "global"
+    AI_REFS: "https://gitlab.com/gitlab-org/gitlab.git,https://github.com/ClickHouse/clickhouse-docs.git,https://gitlab.com/gitlab-org/analytics-section/siphon.git"
+
+ai:security:
+  extends: .ai-review-base
+  stage: ai
+  timeout: 30 minutes
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  environment:
+    name: ai-review
+    action: access
+  variables:
+    AI_AGENT: security
+    AI_MODEL_OVERRIDE: "google-vertex-anthropic/claude-opus-4-6@default"
+    GOOGLE_CLOUD_LOCATION: "global"
+    AI_REFS: "https://gitlab.com/gitlab-org/gitlab.git,https://github.com/ClickHouse/clickhouse-docs.git,https://gitlab.com/gitlab-org/analytics-section/siphon.git"
