@@ -103,7 +103,7 @@ impl NatsConfiguration {
     }
 
     fn default_ack_wait_secs() -> u64 {
-        30
+        3600
     }
 
     fn default_max_deliver() -> Option<u32> {
