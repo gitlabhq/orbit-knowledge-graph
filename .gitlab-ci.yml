@@ -327,7 +327,7 @@ tilt-ci:
   before_script:
     - mise install
     - apt-get update -qq && apt-get install -yqq jq unzip > /dev/null
-    - curl -fsSL https://bun.sh/install | bash
+    - curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.10"
     - export PATH="$HOME/.bun/bin:$PATH"
     - cp "$HOME/.bun/bin/bun" /usr/local/bin/bun
     - ln -sf /usr/local/bin/bun /usr/local/bin/node
@@ -335,8 +335,9 @@ tilt-ci:
     - cd scripts/ai && bun install --frozen-lockfile && cd ../..
     - echo "127.0.0.1 169.254.169.254" >> /etc/hosts
     - echo "127.0.0.1 100.100.100.200" >> /etc/hosts
-    - iptables -A OUTPUT -d 169.254.169.254 -j DROP 2>/dev/null || true
-    - iptables -A OUTPUT -d 100.100.100.200 -j DROP 2>/dev/null || true
+    - iptables -A OUTPUT -d 169.254.169.254 -j DROP
+    - iptables -A OUTPUT -d 100.100.100.200 -j DROP
+    - iptables -L OUTPUT -n | grep -q "169.254.169.254" || { echo "FATAL: metadata block not active"; exit 1; }
     - glab config set --global skip_tls_verify true
     - echo "proxy-handled" | glab auth login --hostname api-proxy:8083 --stdin 2>/dev/null || true
     # Wait for proxy service to be ready
@@ -370,9 +371,11 @@ tilt-ci:
     - chown -R agent:agent /home/agent .
     - >-
       unset CI_JOB_TOKEN CI_JOB_JWT CI_JOB_JWT_V2
+      CI_BUILD_TOKEN CI_REPOSITORY_URL
       CI_REGISTRY_PASSWORD CI_REGISTRY_USER
       CI_DEPLOY_USER CI_DEPLOY_PASSWORD RUNNER_TOKEN
-      CI_DEPENDENCY_PROXY_PASSWORD DOCKER_AUTH_CONFIG
+      CI_DEPENDENCY_PROXY_PASSWORD CI_DEPENDENCY_PROXY_USER
+      CI_RUNNER_SHORT_TOKEN DOCKER_AUTH_CONFIG
       KUBECONFIG GOOGLE_APPLICATION_CREDENTIALS
       GITLAB_REVIEW_TOKEN ANTHROPIC_API_KEY
 build-ai-proxy:

@@ -166,6 +166,21 @@ export function sanitize(text: string): string {
     },
   );
 
+  text = text.replace(
+    /^\[([^\]]+)\]:\s+(\S+)(.*)$/gm,
+    (match, label, url, rest) => {
+      if (isAllowedUrl(url)) return match;
+      n++;
+      return `[${label}]: [link redacted]${rest}`;
+    },
+  );
+
+  text = text.replace(/<(https?:\/\/[^>]+)>/g, (match, url) => {
+    if (isAllowedUrl(url)) return match;
+    n++;
+    return "[link redacted]";
+  });
+
   if (n) console.log(`sanitized ${n} item(s)`);
   return text;
 }

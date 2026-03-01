@@ -132,13 +132,15 @@ async function handle(
 
 async function handleInit(req: Request): Promise<Response> {
   if (locked) return new Response("already initialized", { status: 403 });
+  locked = true;
 
   try {
     const { anthropic_key, gitlab_token } = await req.json();
-    if (!anthropic_key || !gitlab_token)
+    if (!anthropic_key || !gitlab_token) {
+      locked = false;
       return new Response("missing keys", { status: 400 });
+    }
 
-    locked = true;
     anthropicKey = anthropic_key;
     gitlabToken = gitlab_token;
     initialized = true;
