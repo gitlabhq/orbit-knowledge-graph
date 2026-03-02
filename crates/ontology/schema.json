@@ -229,7 +229,7 @@
         },
         "columns": {
           "$ref": "#/$defs/ColumnSelection",
-          "description": "Columns to return for this node. Use '*' for all columns, or specify an array of column names. Mandatory columns (id, type) are always included for redaction."
+          "description": "Columns to return for this node. Use '*' for all columns, or specify an array of column names. If omitted, the node's default_columns from the ontology are returned. Mandatory columns (id, type) are always included for redaction."
         },
         "filters": {
           "type": "object",

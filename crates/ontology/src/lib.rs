@@ -188,6 +188,33 @@ impl Ontology {
             .unwrap_or_else(|e| panic!("{e}"))
     }
 
+    /// Set `default_columns` for an existing node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node doesn't exist or if any column name is not a declared field.
+    #[must_use]
+    pub fn with_default_columns(
+        mut self,
+        node_name: &str,
+        columns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let node = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"));
+        node.default_columns = columns.into_iter().map(Into::into).collect();
+        let field_names: std::collections::HashSet<&str> =
+            node.fields.iter().map(|f| f.name.as_str()).collect();
+        for col in &node.default_columns {
+            assert!(
+                field_names.contains(col.as_str()),
+                "default_columns entry '{col}' is not a declared field of node '{node_name}'"
+            );
+        }
+        self
+    }
+
     /// Load ontology from a directory containing schema.yaml and referenced files.
     ///
     /// # Errors

@@ -820,6 +820,7 @@ mod tests {
                     ("created_at", DataType::DateTime),
                 ],
             )
+            .with_default_columns("User", ["username", "state"])
             .with_fields(
                 "Note",
                 [
@@ -827,7 +828,9 @@ mod tests {
                     ("created_at", DataType::DateTime),
                 ],
             )
+            .with_default_columns("Note", ["confidential"])
             .with_fields("Project", [("name", DataType::String)])
+            .with_default_columns("Project", ["name"])
     }
 
     fn validated_input(json: &str) -> Input {
@@ -841,6 +844,10 @@ mod tests {
 
     #[test]
     fn test_lower_simple_traversal() {
+        let ontology = test_ontology();
+        let note_defaults = ontology.get_node("Note").unwrap().default_columns.len();
+        let user_defaults = ontology.get_node("User").unwrap().default_columns.len();
+
         let input = validated_input(
             r#"{
             "query_type": "traversal",
@@ -856,10 +863,9 @@ mod tests {
         let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
-        println!("{:?}", q);
         assert_eq!(q.limit, Some(25));
-        // 0 node columns (no columns specified) + 6 edge columns
-        assert_eq!(q.select.len(), 6);
+        let edge_columns = 6;
+        assert_eq!(q.select.len(), note_defaults + user_defaults + edge_columns,);
     }
 
     #[test]
@@ -1214,7 +1220,12 @@ mod tests {
         println!("{:?}", q);
 
         assert_eq!(q.limit, Some(10));
-        assert_eq!(q.select.len(), 0);
+        let user_defaults = test_ontology()
+            .get_node("User")
+            .unwrap()
+            .default_columns
+            .len();
+        assert_eq!(q.select.len(), user_defaults);
         assert!(q.where_clause.is_some());
         assert!(q.group_by.is_empty());
         assert_eq!(count_unions(&q.from), 0);
@@ -1238,7 +1249,12 @@ mod tests {
         };
 
         assert_eq!(q.limit, Some(50));
-        assert_eq!(q.select.len(), 0);
+        let project_defaults = test_ontology()
+            .get_node("Project")
+            .unwrap()
+            .default_columns
+            .len();
+        assert_eq!(q.select.len(), project_defaults);
     }
 
     #[test]
@@ -1323,7 +1339,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lower_no_columns_empty_select() {
+    fn test_lower_no_columns_uses_defaults() {
         let input = validated_input(
             r#"{
             "query_type": "search",
@@ -1339,7 +1355,16 @@ mod tests {
             panic!("expected Query");
         };
 
-        assert_eq!(q.select.len(), 0);
+        let user_defaults = test_ontology()
+            .get_node("User")
+            .unwrap()
+            .default_columns
+            .len();
+        assert_eq!(q.select.len(), user_defaults);
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(aliases.contains(&&"u_state".to_string()));
     }
 
     #[test]
