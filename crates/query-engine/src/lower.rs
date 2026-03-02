@@ -457,7 +457,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         ),
     };
 
-    let mut select = vec![
+    let select = vec![
         SelectExpr::new(neighbor_id_expr, NEIGHBOR_ID_COLUMN),
         SelectExpr::new(neighbor_type_expr, NEIGHBOR_TYPE_COLUMN),
         SelectExpr::new(
@@ -465,7 +465,6 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
             RELATIONSHIP_TYPE_COLUMN,
         ),
     ];
-    select.extend(edge_select_exprs(edge_alias));
 
     let where_clause = id_filter(&center_node.id, DEFAULT_PRIMARY_KEY, &center_node.node_ids);
 
@@ -1460,13 +1459,10 @@ mod tests {
         assert!(aliases.contains(&&"_gkg_neighbor_type".to_string()));
         assert!(aliases.contains(&&"_gkg_relationship_type".to_string()));
 
-        // Should have edge columns from edge_select_exprs
-        assert!(aliases.contains(&&"e_path".to_string()));
-        assert!(aliases.contains(&&"e_type".to_string()));
-        assert!(aliases.contains(&&"e_src".to_string()));
-        assert!(aliases.contains(&&"e_src_type".to_string()));
-        assert!(aliases.contains(&&"e_dst".to_string()));
-        assert!(aliases.contains(&&"e_dst_type".to_string()));
+        // Should NOT have raw edge columns (indirect auth uses static/dynamic nodes instead)
+        assert!(!aliases.contains(&&"e_path".to_string()));
+        assert!(!aliases.contains(&&"e_src".to_string()));
+        assert!(!aliases.contains(&&"e_dst".to_string()));
     }
 
     #[test]
