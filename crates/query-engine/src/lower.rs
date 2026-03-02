@@ -1032,8 +1032,7 @@ mod tests {
         fn count_joins(t: &TableRef) -> usize {
             match t {
                 TableRef::Join { left, right, .. } => 1 + count_joins(left) + count_joins(right),
-                TableRef::Scan { .. } => 0,
-                TableRef::Union { .. } => 0,
+                TableRef::Scan { .. } | TableRef::Union { .. } | TableRef::Subquery { .. } => 0,
             }
         }
         assert!(count_joins(&q.from) >= 4);
@@ -1044,7 +1043,7 @@ mod tests {
         match table_ref {
             TableRef::Union { .. } => 1,
             TableRef::Join { left, right, .. } => count_unions(left) + count_unions(right),
-            TableRef::Scan { .. } => 0,
+            TableRef::Scan { .. } | TableRef::Subquery { .. } => 0,
         }
     }
 
@@ -1055,7 +1054,7 @@ mod tests {
             TableRef::Join { left, right, .. } => {
                 find_union_alias(left, alias) || find_union_alias(right, alias)
             }
-            TableRef::Scan { .. } => false,
+            TableRef::Scan { .. } | TableRef::Subquery { .. } => false,
         }
     }
 
@@ -1529,7 +1528,7 @@ mod tests {
                 TableRef::Join { left, right, .. } => {
                     extract_edge_type_filter(left).or_else(|| extract_edge_type_filter(right))
                 }
-                TableRef::Union { .. } => None,
+                TableRef::Union { .. } | TableRef::Subquery { .. } => None,
             }
         }
 

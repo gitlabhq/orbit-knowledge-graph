@@ -155,9 +155,7 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
             aliases.extend(collect_node_aliases(right));
             aliases
         }
-        TableRef::Union { .. } => {
-            // Union subqueries are derived from edges, not entity tables
-            // They don't have traversal_path columns
+        TableRef::Union { .. } | TableRef::Subquery { .. } => {
             vec![]
         }
     }
