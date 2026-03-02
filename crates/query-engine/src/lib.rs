@@ -52,6 +52,7 @@ pub use constants::{
     EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
     RELATIONSHIP_TYPE_COLUMN,
 };
+pub use deduplicate::deduplicate;
 pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
 pub use input::EntityAuthConfig;
@@ -61,7 +62,6 @@ pub use metrics::{METRICS, QueryEngineMetrics};
 pub use normalize::{build_entity_auth, normalize};
 pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
-pub use deduplicate::deduplicate;
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
 
@@ -95,7 +95,7 @@ pub fn compile(
     let input = validated_input(json_input, ontology).count_err()?;
 
     let mut node = lower(&input).count_err()?;
-    deduplicate(&mut node).count_err()?;
+    deduplicate::deduplicate(&mut node, ontology).count_err()?;
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx).count_err()?;
     check_ast(&node, ctx).count_err()?;

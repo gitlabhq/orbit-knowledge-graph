@@ -17,34 +17,35 @@ use std::collections::HashMap;
 use crate::ast::{Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::GL_TABLE_PREFIX;
 use crate::error::Result;
-use ontology::constants::{DELETED_COLUMN, EDGE_TABLE, VERSION_COLUMN};
+use ontology::Ontology;
+use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 
-pub fn deduplicate(node: &mut Node) -> Result<()> {
+pub fn deduplicate(node: &mut Node, ontology: &Ontology) -> Result<()> {
     match node {
         Node::Query(q) => {
             for cte in &mut q.ctes {
-                deduplicate_query(&mut cte.query);
+                deduplicate_query(&mut cte.query, ontology);
             }
-            deduplicate_query(q);
+            deduplicate_query(q, ontology);
         }
     }
     Ok(())
 }
 
-fn deduplicate_query(q: &mut Query) {
+fn deduplicate_query(q: &mut Query, ontology: &Ontology) {
     let scans = collect_scan_aliases(&q.from);
     if scans.is_empty() {
         return;
     }
 
     if q.group_by.is_empty() {
-        deduplicate_inline(q, &scans);
+        deduplicate_inline(q, &scans, ontology);
     } else {
-        deduplicate_with_subqueries(q, &scans);
+        deduplicate_with_subqueries(q, &scans, ontology);
     }
 
     for union_q in &mut q.union_all {
-        deduplicate_query(union_q);
+        deduplicate_query(union_q, ontology);
     }
 }
 
@@ -52,7 +53,7 @@ fn deduplicate_query(q: &mut Query) {
 // Path 1: inline argMax wrapping (non-aggregation queries)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn deduplicate_inline(q: &mut Query, scans: &HashMap<String, String>) {
+fn deduplicate_inline(q: &mut Query, scans: &HashMap<String, String>, ontology: &Ontology) {
     for sel in &mut q.select {
         sel.expr = wrap_expr(&sel.expr, scans);
     }
@@ -62,7 +63,10 @@ fn deduplicate_inline(q: &mut Query, scans: &HashMap<String, String>) {
     }
 
     for (alias, table) in scans {
-        for key in dedup_key_columns(table) {
+        let keys = ontology
+            .sort_key_for_table(table)
+            .expect("gl_* table must have sort_key in ontology");
+        for key in keys {
             let key_expr = Expr::col(alias, key);
             if !q.group_by.contains(&key_expr) {
                 q.group_by.push(key_expr);
@@ -115,7 +119,11 @@ fn wrap_expr(expr: &Expr, scans: &HashMap<String, String>) -> Expr {
 // Path 2: subquery wrapping (aggregation queries with existing GROUP BY)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn deduplicate_with_subqueries(q: &mut Query, scans: &HashMap<String, String>) {
+fn deduplicate_with_subqueries(
+    q: &mut Query,
+    scans: &HashMap<String, String>,
+    ontology: &Ontology,
+) {
     let old = std::mem::replace(
         &mut q.from,
         TableRef::Scan {
@@ -124,14 +132,18 @@ fn deduplicate_with_subqueries(q: &mut Query, scans: &HashMap<String, String>) {
             type_filter: None,
         },
     );
-    q.from = wrap_scans(old, scans);
+    q.from = wrap_scans(old, scans, ontology);
 }
 
-fn wrap_scans(table_ref: TableRef, scans: &HashMap<String, String>) -> TableRef {
+fn wrap_scans(
+    table_ref: TableRef,
+    scans: &HashMap<String, String>,
+    ontology: &Ontology,
+) -> TableRef {
     let needs_wrap =
         matches!(&table_ref, TableRef::Scan { alias, .. } if scans.contains_key(alias));
     if needs_wrap {
-        return build_dedup_subquery(table_ref);
+        return build_dedup_subquery(table_ref, ontology);
     }
 
     match table_ref {
@@ -143,13 +155,13 @@ fn wrap_scans(table_ref: TableRef, scans: &HashMap<String, String>) -> TableRef 
             on,
         } => TableRef::Join {
             join_type,
-            left: Box::new(wrap_scans(*left, scans)),
-            right: Box::new(wrap_scans(*right, scans)),
+            left: Box::new(wrap_scans(*left, scans, ontology)),
+            right: Box::new(wrap_scans(*right, scans, ontology)),
             on,
         },
         TableRef::Union { mut queries, alias } => {
             for uq in &mut queries {
-                deduplicate_query(uq);
+                deduplicate_query(uq, ontology);
             }
             TableRef::Union { queries, alias }
         }
@@ -189,7 +201,7 @@ fn wrap_scans(table_ref: TableRef, scans: &HashMap<String, String>) -> TableRef 
 /// Since the outer query's column references are already known (they're in
 /// q.select, q.where_clause, q.group_by, etc.), we collect them per alias
 /// and build a targeted inner SELECT.
-fn build_dedup_subquery(scan: TableRef) -> TableRef {
+fn build_dedup_subquery(scan: TableRef, ontology: &Ontology) -> TableRef {
     let TableRef::Scan {
         table,
         alias,
@@ -200,7 +212,9 @@ fn build_dedup_subquery(scan: TableRef) -> TableRef {
     };
 
     let inner_alias = format!("_d_{alias}");
-    let keys = dedup_key_columns(&table);
+    let keys = ontology
+        .sort_key_for_table(&table)
+        .expect("gl_* table must have sort_key in ontology");
 
     // Build inner SELECT: key columns pass through, _deleted via argMax.
     // For aggregation subqueries we select key columns only — the outer
@@ -210,7 +224,7 @@ fn build_dedup_subquery(scan: TableRef) -> TableRef {
     // groups by this table's key.
     let mut select: Vec<SelectExpr> = keys
         .iter()
-        .map(|&k| SelectExpr::new(Expr::col(&inner_alias, k), k))
+        .map(|k| SelectExpr::new(Expr::col(&inner_alias, k), k))
         .collect();
 
     // Always expose _deleted via argMax for HAVING filter.
@@ -225,7 +239,7 @@ fn build_dedup_subquery(scan: TableRef) -> TableRef {
         DELETED_COLUMN,
     ));
 
-    let group_by: Vec<Expr> = keys.iter().map(|&k| Expr::col(&inner_alias, k)).collect();
+    let group_by: Vec<Expr> = keys.iter().map(|k| Expr::col(&inner_alias, k)).collect();
 
     let having = Some(Expr::eq(
         Expr::func(
@@ -284,41 +298,15 @@ fn collect_scan_aliases_inner(table_ref: &TableRef, map: &mut HashMap<String, St
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dedup key mapping (from graph.sql ORDER BY clauses)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const CODE_TABLES: &[&str] = &[
-    "gl_directory",
-    "gl_file",
-    "gl_definition",
-    "gl_imported_symbol",
-];
-
-fn dedup_key_columns(table: &str) -> Vec<&'static str> {
-    if table == "gl_user" {
-        vec!["id"]
-    } else if table == EDGE_TABLE {
-        vec![
-            "traversal_path",
-            "source_id",
-            "source_kind",
-            "relationship_kind",
-            "target_id",
-            "target_kind",
-        ]
-    } else if CODE_TABLES.contains(&table) {
-        vec!["traversal_path", "project_id", "branch", "id"]
-    } else {
-        vec!["traversal_path", "id"]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::{JoinType, OrderExpr};
     use ontology::constants::EDGE_TABLE;
+
+    fn test_ontology() -> Ontology {
+        Ontology::load_embedded().expect("embedded ontology")
+    }
 
     fn assert_has_group_by(q: &Query) {
         assert!(!q.group_by.is_empty(), "expected GROUP BY");
@@ -348,7 +336,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         // Both columns should be wrapped in argMax
@@ -375,7 +363,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         assert!(
@@ -395,7 +383,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         // WHERE should still reference p.name directly (not argMax)
@@ -410,7 +398,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         // gl_project: (traversal_path, id)
@@ -427,7 +415,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         assert_eq!(q.group_by.len(), 1);
@@ -442,7 +430,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         assert_eq!(q.group_by.len(), 6);
@@ -456,7 +444,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         assert_eq!(q.group_by.len(), 4);
@@ -485,7 +473,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         // GROUP BY should have keys for all 3 tables: u(1) + e(6) + p(2)
@@ -501,7 +489,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         assert!(q.group_by.is_empty());
@@ -519,7 +507,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         // First: argMax. Second: still a literal.
@@ -543,7 +531,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         // CTE inner query should have dedup
@@ -581,7 +569,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         // Base CTE query: gl_project should get dedup
@@ -618,7 +606,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         // Outer GROUP BY should be untouched (still just u.id)
@@ -658,7 +646,7 @@ mod tests {
             ..Default::default()
         }));
 
-        deduplicate(&mut node).unwrap();
+        deduplicate(&mut node, &test_ontology()).unwrap();
 
         let Node::Query(q) = &node;
         let inner = assert_is_subquery(&q.from);

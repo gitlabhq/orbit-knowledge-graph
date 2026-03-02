@@ -207,7 +207,8 @@ mod tests {
     fn passes_after_security_injection() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::deduplicate::deduplicate(&mut node).unwrap();
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        crate::deduplicate::deduplicate(&mut node, &ontology).unwrap();
         crate::security::apply_security_context(&mut node, &ctx).unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
@@ -243,7 +244,8 @@ mod tests {
     fn accepts_lowest_common_prefix() {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::deduplicate::deduplicate(&mut node).unwrap();
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        crate::deduplicate::deduplicate(&mut node, &ontology).unwrap();
         crate::security::apply_security_context(&mut node, &ctx).unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
@@ -273,7 +275,8 @@ mod tests {
             ..Default::default()
         }));
 
-        crate::deduplicate::deduplicate(&mut node).unwrap();
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        crate::deduplicate::deduplicate(&mut node, &ontology).unwrap();
         let Node::Query(q) = &node;
         check_dedup_query(q).unwrap();
     }
@@ -290,7 +293,8 @@ mod tests {
             ..Default::default()
         }));
 
-        crate::deduplicate::deduplicate(&mut node).unwrap();
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        crate::deduplicate::deduplicate(&mut node, &ontology).unwrap();
         let Node::Query(q) = &node;
         check_dedup_query(q).unwrap();
     }
