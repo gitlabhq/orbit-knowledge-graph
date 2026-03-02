@@ -57,10 +57,10 @@ async fn main() -> anyhow::Result<()> {
                     services.nats,
                     graph,
                     metrics,
-                    config.modules.code.dispatch_batch_size,
+                    config.dispatch.batch_size,
                 )),
             ];
-            indexer::dispatcher::run(&dispatchers, &*lock_service, &config.modules.dispatch)
+            indexer::dispatcher::run(&dispatchers, &*lock_service, &config.dispatch)
                 .await
                 .map_err(Into::into)
         }
@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
                 datalake: config.datalake.clone(),
                 engine: config.engine.clone(),
                 gitlab: config.gitlab.clone(),
-                modules: config.modules.clone(),
+                dispatch: config.dispatch.clone(),
                 health_bind_address: config.indexer_health_bind_address,
             };
             indexer::run(&indexer_config, shutdown)

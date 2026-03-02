@@ -9,8 +9,9 @@ use gitlab_client::{GitalyConnectionInfo, RepositoryInfo};
 use indexer::module::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeWatermarkStore, ClickHouseProjectStore, ClickHousePushEventStore,
-    ClickHouseStaleDataCleaner, CodeIndexingConfig, CodeIndexingPipeline,
-    ProjectCodeIndexingHandler, PushEventHandler, RepositoryService, metrics::CodeMetrics,
+    ClickHouseStaleDataCleaner, CodeIndexingPipeline, ProjectCodeIndexingHandler,
+    ProjectCodeIndexingHandlerConfig, PushEventHandler, PushEventHandlerConfig, RepositoryService,
+    metrics::CodeMetrics,
 };
 use indexer::testkit::{MockLockService, MockNatsServices};
 use integration_testkit::TestContext;
@@ -69,7 +70,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.watermark_store) as _,
             Arc::clone(&self.project_store) as _,
             self.metrics.clone(),
-            CodeIndexingConfig::default(),
+            PushEventHandlerConfig::default(),
         )
     }
 
@@ -81,6 +82,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.project_store) as _,
             Arc::clone(&self.push_event_store) as _,
             self.metrics.clone(),
+            ProjectCodeIndexingHandlerConfig::default(),
         )
     }
 }

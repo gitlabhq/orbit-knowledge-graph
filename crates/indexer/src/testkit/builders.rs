@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::configuration::{EngineConfiguration, ModuleConfiguration};
+use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
 use crate::module::{Module, ModuleRegistry};
@@ -14,17 +14,6 @@ use super::mocks::{MockDestination, MockNatsServices};
 ///
 /// The engine requires a real NATS broker. For integration tests,
 /// use testcontainers to start a NATS container.
-///
-/// # Example
-///
-/// ```ignore
-/// let config = NatsConfiguration { url: "localhost:4222".into(), ..Default::default() };
-/// let broker = Arc::new(NatsBroker::connect(&config).await?);
-///
-/// let (engine, config) = TestEngineBuilder::new(broker)
-///     .with_module(&MyModule)
-///     .build();
-/// ```
 pub struct TestEngineBuilder {
     broker: Arc<NatsBroker>,
     destination: Option<Arc<dyn Destination>>,
@@ -64,14 +53,10 @@ impl TestEngineBuilder {
         self
     }
 
-    pub fn with_module_concurrency(mut self, module: &str, max: usize) -> Self {
-        self.configuration.modules.insert(
-            module.to_string(),
-            ModuleConfiguration {
-                max_concurrency: Some(max),
-                ..Default::default()
-            },
-        );
+    pub fn with_concurrency_group(mut self, group: &str, limit: usize) -> Self {
+        self.configuration
+            .concurrency_groups
+            .insert(group.to_string(), limit);
         self
     }
 

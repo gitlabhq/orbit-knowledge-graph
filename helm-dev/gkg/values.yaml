@@ -107,20 +107,30 @@ consumer:
 
 engine:
   max_concurrent_workers: 16
+  concurrency_groups:
+    sdlc: 12
+    code: 4
+  handlers:
+    global-handler:
+      concurrency_group: sdlc
+      max_attempts: 1  # re-dispatched every minute, no need to retry
+      retry_interval_secs: 60
+    namespace-handler:
+      concurrency_group: sdlc
+      max_attempts: 1  # re-dispatched every minute, no need to retry
+      retry_interval_secs: 60
+    code-push-event:
+      concurrency_group: code
+      max_attempts: 5  # event-driven, must retry to avoid data loss
+      retry_interval_secs: 60
+      events_stream_name: siphon_stream_main_db
+    code-project-reconciliation:
+      concurrency_group: code
+      max_attempts: 1  # re-dispatched every 30 minutes, no need to retry
 
-modules:
-  sdlc:
-    max_concurrency: 8
-    max_retry_attempts: 5
-    retry_interval_secs: 60
-    datalake_batch_size: 1000000
-  code:
-    max_concurrency: 4
-    max_retry_attempts: 5
-    retry_interval_secs: 60
-    events_stream_name: siphon_stream_main_db
-  dispatch:
-    intervals: {}
+dispatch:
+  intervals: {}
+  batch_size: 1000
 
 gkgServer:
   image:

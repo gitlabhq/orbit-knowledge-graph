@@ -34,8 +34,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use thiserror::Error;
+use tracing::info;
 
 use crate::{
+    configuration::HandlerConfiguration,
     destination::Destination,
     entities::Entity,
     locking::LockService,
@@ -83,6 +85,28 @@ impl ModuleInitError {
     }
 }
 
+/// Deserializes a handler's config from the raw handler configs map.
+///
+/// Logs at info level when a handler key is missing and falls back to defaults.
+/// Returns an error if the key exists but deserialization fails (invalid config).
+pub fn deserialize_handler_config<T: serde::de::DeserializeOwned + Default>(
+    handler_configs: &HashMap<String, serde_json::Value>,
+    handler_name: &str,
+) -> Result<T, ModuleInitError> {
+    match handler_configs.get(handler_name) {
+        Some(value) => serde_json::from_value(value.clone()).map_err(|e| {
+            ModuleInitError::new(HandlerCreationError {
+                handler_name: handler_name.to_string(),
+                reason: e.to_string(),
+            })
+        }),
+        None => {
+            info!(handler = handler_name, "no config found, using defaults");
+            Ok(T::default())
+        }
+    }
+}
+
 /// Context provided to handlers during message processing.
 ///
 /// Contains shared resources that handlers need to process messages
@@ -117,56 +141,29 @@ impl HandlerContext {
 /// A message handler that processes events from a specific topic.
 ///
 /// Each handler subscribes to one topic and processes incoming messages.
-///
-/// # Example
-///
-/// ```ignore
-/// use etl_engine::module::{Handler, HandlerContext, HandlerError};
-/// use etl_engine::types::{Envelope, Topic};
-/// use async_trait::async_trait;
-///
-/// struct OrderHandler;
-///
-/// #[async_trait]
-/// impl Handler for OrderHandler {
-///     fn name(&self) -> &str {
-///         "order-handler"
-///     }
-///
-///     fn topic(&self) -> Topic {
-///         Topic::new("orders", "orders.placed")
-///     }
-///
-///     async fn handle(&self, ctx: HandlerContext, msg: Envelope) -> Result<(), HandlerError> {
-///         let order: Order = msg.to_event()
-///             .map_err(|e| HandlerError::Processing(e.to_string()))?;
-///
-///         // Process order and write to destination
-///         Ok(())
-///     }
-/// }
-/// ```
+/// Engine behavior (retries, concurrency group) is configured per-handler
+/// via [`HandlerConfiguration`], accessed through [`engine_config()`](Handler::engine_config).
 #[async_trait]
 pub trait Handler: Send + Sync {
     /// Returns the unique name of this handler.
     ///
-    /// Used for metrics labeling and debugging. Should be a stable identifier.
+    /// Used for metrics labeling, config lookup, and debugging. Should be a stable identifier.
     fn name(&self) -> &str;
 
     /// Returns the topic this handler subscribes to.
     fn topic(&self) -> Topic;
 
+    /// Returns the engine configuration for this handler (retry policy, concurrency group).
+    ///
+    /// The engine calls this directly — no HashMap lookup needed.
+    fn engine_config(&self) -> &HandlerConfiguration;
+
     /// Processes a message from the subscribed topic.
-    ///
-    /// # Arguments
-    ///
-    /// * `context` - Shared resources for processing (e.g., destination writers, NATS services)
-    /// * `message` - The message envelope containing the payload
     ///
     /// # Errors
     ///
     /// Returns a [`HandlerError`] if processing fails. The engine will
-    /// nack the message, allowing it to be retried.
+    /// retry or ack based on `engine_config()`.
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError>;
 }
 
@@ -216,68 +213,34 @@ pub trait Module: Send + Sync {
     fn entities(&self) -> Vec<Entity>;
 }
 
-struct RegisteredHandler {
-    handler: Arc<dyn Handler>,
-    module_name: Arc<str>,
-}
-
 /// A registry for managing modules and their handlers.
 ///
 /// The registry collects handlers from registered modules and provides
 /// lookup functionality for the engine to dispatch messages.
-///
-/// # Example
-///
-/// ```ignore
-/// use etl_engine::module::ModuleRegistry;
-/// use std::sync::Arc;
-///
-/// let registry = Arc::new(ModuleRegistry::default());
-///
-/// registry.register_module(&MyModule);
-/// registry.register_module(&AnotherModule);
-///
-/// // Pass to engine
-/// let engine = Engine::new(broker, registry, destination);
-/// ```
 #[derive(Default)]
 pub struct ModuleRegistry {
-    handlers_by_topic: RwLock<HashMap<Topic, Vec<RegisteredHandler>>>,
+    handlers_by_topic: RwLock<HashMap<Topic, Vec<Arc<dyn Handler>>>>,
 }
 
 impl ModuleRegistry {
     /// Registers a module, adding its handlers to the registry.
-    ///
-    /// All handlers from the module will be associated with the module's name
-    /// for concurrency control purposes.
     pub fn register_module(&self, module: &dyn Module) {
-        let module_name: Arc<str> = module.name().into();
-
         let mut handlers_by_topic = self.handlers_by_topic.write();
         for handler in module.handlers() {
             let topic = handler.topic();
-            let registered = RegisteredHandler {
-                handler: Arc::from(handler),
-                module_name: module_name.clone(),
-            };
-            handlers_by_topic.entry(topic).or_default().push(registered);
+            handlers_by_topic
+                .entry(topic)
+                .or_default()
+                .push(Arc::from(handler));
         }
     }
 
     /// Returns all handlers registered for a given topic.
-    ///
-    /// Each handler is returned with its associated module name for
-    /// worker pool permit acquisition.
-    pub fn handlers_for(&self, topic: &Topic) -> Vec<(Arc<dyn Handler>, Arc<str>)> {
+    pub fn handlers_for(&self, topic: &Topic) -> Vec<Arc<dyn Handler>> {
         self.handlers_by_topic
             .read()
             .get(topic)
-            .map(|handlers| {
-                handlers
-                    .iter()
-                    .map(|h| (h.handler.clone(), h.module_name.clone()))
-                    .collect()
-            })
+            .cloned()
             .unwrap_or_default()
     }
 
@@ -306,7 +269,6 @@ mod tests {
         let topic = Topic::new("stream1", "subject1");
         let handlers = registry.handlers_for(&topic);
         assert_eq!(handlers.len(), 2);
-        assert_eq!(&*handlers[0].1, "m1");
 
         let unknown = Topic::new("unknown", "unknown");
         assert!(registry.handlers_for(&unknown).is_empty());

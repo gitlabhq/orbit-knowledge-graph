@@ -7,8 +7,9 @@ use indexer::clickhouse::ClickHouseDestination;
 use indexer::metrics::EngineMetrics;
 use indexer::module::{Handler, HandlerContext, Module};
 use indexer::modules::SdlcModule;
-use indexer::modules::sdlc::config::SdlcIndexingConfig;
+use indexer::modules::sdlc::GlobalHandlerConfig;
 use indexer::testkit::{MockLockService, MockNatsServices};
+use std::collections::HashMap;
 
 pub use integration_testkit::{
     TestContext, get_boolean_column, get_int64_column, get_string_column, get_uint64_column,
@@ -62,11 +63,17 @@ impl IndexerTestExt for TestContext {
     }
 
     async fn get_namespace_handler(&self) -> Box<dyn Handler> {
-        let sdlc_config = SdlcIndexingConfig {
-            datalake_batch_size: 1,
-            ..Default::default()
-        };
-        let sdlc_module = SdlcModule::new(&self.config, &self.config, &sdlc_config)
+        let handler_configs = HashMap::from([
+            (
+                "global-handler".to_string(),
+                serde_json::json!({ "datalake_batch_size": 1 }),
+            ),
+            (
+                "namespace-handler".to_string(),
+                serde_json::json!({ "datalake_batch_size": 1 }),
+            ),
+        ]);
+        let sdlc_module = SdlcModule::new(&self.config, &self.config, &handler_configs)
             .await
             .expect("failed to create SDLC module");
         let handlers = sdlc_module.handlers();
@@ -77,11 +84,17 @@ impl IndexerTestExt for TestContext {
     }
 
     async fn get_global_handler(&self) -> Box<dyn Handler> {
-        let sdlc_config = SdlcIndexingConfig {
-            datalake_batch_size: 1,
-            ..Default::default()
-        };
-        let sdlc_module = SdlcModule::new(&self.config, &self.config, &sdlc_config)
+        let handler_configs = HashMap::from([
+            (
+                "global-handler".to_string(),
+                serde_json::json!({ "datalake_batch_size": 1 }),
+            ),
+            (
+                "namespace-handler".to_string(),
+                serde_json::json!({ "datalake_batch_size": 1 }),
+            ),
+        ]);
+        let sdlc_module = SdlcModule::new(&self.config, &self.config, &handler_configs)
             .await
             .expect("failed to create SDLC module");
         let handlers = sdlc_module.handlers();

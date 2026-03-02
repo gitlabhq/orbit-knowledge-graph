@@ -4,6 +4,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
 
+use serde::Deserialize;
+
 use super::config::LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::metrics::{CodeMetrics, RecordStageError};
@@ -11,10 +13,17 @@ use super::project_store::ProjectStore;
 use super::push_event_store::PushEventStore;
 use super::repository_service::RepositoryService;
 use super::watermark_store::CodeWatermarkStore;
+use crate::configuration::HandlerConfiguration;
 use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::locking::project_lock_key;
 use crate::topic::ProjectCodeIndexingRequest;
 use crate::types::{Envelope, Event, Topic};
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ProjectCodeIndexingHandlerConfig {
+    #[serde(flatten)]
+    pub engine: HandlerConfiguration,
+}
 
 pub struct ProjectCodeIndexingHandler {
     pipeline: Arc<CodeIndexingPipeline>,
@@ -23,6 +32,7 @@ pub struct ProjectCodeIndexingHandler {
     project_store: Arc<dyn ProjectStore>,
     push_event_store: Arc<dyn PushEventStore>,
     metrics: CodeMetrics,
+    config: ProjectCodeIndexingHandlerConfig,
 }
 
 impl ProjectCodeIndexingHandler {
@@ -33,6 +43,7 @@ impl ProjectCodeIndexingHandler {
         project_store: Arc<dyn ProjectStore>,
         push_event_store: Arc<dyn PushEventStore>,
         metrics: CodeMetrics,
+        config: ProjectCodeIndexingHandlerConfig,
     ) -> Self {
         Self {
             pipeline,
@@ -41,6 +52,7 @@ impl ProjectCodeIndexingHandler {
             project_store,
             push_event_store,
             metrics,
+            config,
         }
     }
 }
@@ -53,6 +65,10 @@ impl Handler for ProjectCodeIndexingHandler {
 
     fn topic(&self) -> Topic {
         ProjectCodeIndexingRequest::topic()
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        &self.config.engine
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
@@ -243,6 +259,7 @@ mod tests {
                 project_store.clone(),
                 push_event_store.clone(),
                 metrics,
+                ProjectCodeIndexingHandlerConfig::default(),
             );
 
             Self {

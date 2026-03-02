@@ -9,12 +9,29 @@ use crate::locking::{LockService, NatsLockService};
 use crate::modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
 use crate::nats::{KvBucketConfig, NatsBroker, NatsConfiguration, NatsServices, NatsServicesImpl};
 
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+fn default_batch_size() -> u64 {
+    1000
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct DispatchConfig {
     /// Per-dispatcher interval overrides, keyed by dispatcher name.
     /// Value is the interval in seconds.
     #[serde(default)]
     pub intervals: HashMap<String, u64>,
+
+    /// Batch size for dispatchers that query pending work.
+    #[serde(default = "default_batch_size")]
+    pub batch_size: u64,
+}
+
+impl Default for DispatchConfig {
+    fn default() -> Self {
+        Self {
+            intervals: HashMap::new(),
+            batch_size: default_batch_size(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -210,6 +227,7 @@ mod tests {
         let lock_service = MockLockService::new();
         let config = DispatchConfig {
             intervals: HashMap::from([("slow".into(), 7200)]),
+            ..Default::default()
         };
         let dispatcher = Arc::new(StubDispatcher::new("slow", Some(Duration::from_secs(60))));
         let dispatchers: Vec<Box<dyn Dispatcher>> = vec![Box::new(Arc::clone(&dispatcher))];
@@ -230,6 +248,7 @@ mod tests {
         let lock_service = MockLockService::new();
         let config = DispatchConfig {
             intervals: HashMap::from([("no-default".into(), 3600)]),
+            ..Default::default()
         };
         let dispatcher = Arc::new(StubDispatcher::new("no-default", None));
         let dispatchers: Vec<Box<dyn Dispatcher>> = vec![Box::new(Arc::clone(&dispatcher))];

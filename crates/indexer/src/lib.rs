@@ -59,8 +59,6 @@ use engine::EngineBuilder;
 use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use health::{HealthState, run_health_server};
 use module::{ModuleInitError, ModuleRegistry};
-use modules::code::config::CodeIndexingConfig;
-use modules::sdlc::config::SdlcIndexingConfig;
 use modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
 use modules::{CodeModule, SdlcModule};
 use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
@@ -85,19 +83,9 @@ pub struct IndexerConfig {
     #[serde(default)]
     pub gitlab: Option<GitlabClientConfiguration>,
     #[serde(default)]
-    pub modules: ModulesConfig,
+    pub dispatch: DispatchConfig,
     #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
-}
-
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-pub struct ModulesConfig {
-    #[serde(default)]
-    pub sdlc: SdlcIndexingConfig,
-    #[serde(default)]
-    pub code: CodeIndexingConfig,
-    #[serde(default)]
-    pub dispatch: DispatchConfig,
 }
 
 #[derive(Debug, Error)]
@@ -138,7 +126,7 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
 
     info!("initializing SDLC module");
     let sdlc_module =
-        SdlcModule::new(&config.datalake, &config.graph, &config.modules.sdlc).await?;
+        SdlcModule::new(&config.datalake, &config.graph, &config.engine.handlers).await?;
 
     let registry = Arc::new(ModuleRegistry::default());
     registry.register_module(&sdlc_module);
@@ -151,7 +139,7 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
             &config.graph,
             &config.datalake,
             gitlab_client,
-            config.modules.code.clone(),
+            &config.engine.handlers,
         )
         .map_err(IndexerError::ModuleInit)?;
         registry.register_module(&code_module);
@@ -180,19 +168,9 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
         engine_handle.stop();
     });
 
-    let mut engine_config = config.engine.clone();
-    engine_config
-        .modules
-        .insert("sdlc".into(), config.modules.sdlc.engine.clone());
-    if config.gitlab.is_some() {
-        engine_config
-            .modules
-            .insert("code".into(), config.modules.code.engine.clone());
-    }
-
     info!("indexer started");
     let result = tokio::select! {
-        result = engine.run(&engine_config) => result.map_err(IndexerError::from),
+        result = engine.run(&config.engine) => result.map_err(IndexerError::from),
         result = run_health_server(config.health_bind_address, health_state) => {
             let error = result.err().unwrap_or_else(|| std::io::Error::other(
                 "health server exited unexpectedly",

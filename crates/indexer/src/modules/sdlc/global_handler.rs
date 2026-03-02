@@ -5,11 +5,12 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::configuration::HandlerConfiguration;
 use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 use super::locking::global_lock_key;
@@ -37,6 +38,28 @@ impl GlobalQueryParams {
     }
 }
 
+fn default_datalake_batch_size() -> u64 {
+    1_000_000
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GlobalHandlerConfig {
+    #[serde(flatten)]
+    pub engine: HandlerConfiguration,
+
+    #[serde(default = "default_datalake_batch_size")]
+    pub datalake_batch_size: u64,
+}
+
+impl Default for GlobalHandlerConfig {
+    fn default() -> Self {
+        Self {
+            engine: HandlerConfiguration::default(),
+            datalake_batch_size: default_datalake_batch_size(),
+        }
+    }
+}
+
 /// Handles entities without namespace ownership.
 ///
 /// These are instance-wide records like User or Organization that exist outside
@@ -45,6 +68,7 @@ pub struct GlobalHandler {
     watermark_store: Arc<dyn WatermarkStore>,
     pipelines: Vec<OntologyEntityPipeline>,
     metrics: SdlcMetrics,
+    config: GlobalHandlerConfig,
 }
 
 impl GlobalHandler {
@@ -52,11 +76,13 @@ impl GlobalHandler {
         watermark_store: Arc<dyn WatermarkStore>,
         pipelines: Vec<OntologyEntityPipeline>,
         metrics: SdlcMetrics,
+        config: GlobalHandlerConfig,
     ) -> Self {
         Self {
             watermark_store,
             pipelines,
             metrics,
+            config,
         }
     }
 }
@@ -69,6 +95,10 @@ impl Handler for GlobalHandler {
 
     fn topic(&self) -> Topic {
         GlobalIndexingRequest::topic()
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        &self.config.engine
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
@@ -294,7 +324,12 @@ mod tests {
                 .unwrap(),
         ];
 
-        let handler = GlobalHandler::new(Arc::new(MockWatermarkStore), pipelines, test_metrics());
+        let handler = GlobalHandler::new(
+            Arc::new(MockWatermarkStore),
+            pipelines,
+            test_metrics(),
+            GlobalHandlerConfig::default(),
+        );
 
         let payload = serde_json::json!({
             "watermark": "2024-01-21T00:00:00Z"
@@ -325,7 +360,12 @@ mod tests {
                 .unwrap(),
         ];
 
-        let handler = GlobalHandler::new(Arc::new(MockWatermarkStore), pipelines, test_metrics());
+        let handler = GlobalHandler::new(
+            Arc::new(MockWatermarkStore),
+            pipelines,
+            test_metrics(),
+            GlobalHandlerConfig::default(),
+        );
 
         let payload = serde_json::json!({
             "watermark": "2024-01-21T00:00:00Z"
@@ -364,7 +404,12 @@ mod tests {
         ];
 
         let store = Arc::new(RecordingGlobalWatermarkStore::new());
-        let handler = GlobalHandler::new(store.clone(), pipelines, test_metrics());
+        let handler = GlobalHandler::new(
+            store.clone(),
+            pipelines,
+            test_metrics(),
+            GlobalHandlerConfig::default(),
+        );
 
         let payload = serde_json::json!({
             "watermark": "2024-06-15T12:00:00Z"
@@ -401,7 +446,12 @@ mod tests {
         ];
 
         let store = Arc::new(RecordingGlobalWatermarkStore::new());
-        let handler = GlobalHandler::new(store.clone(), pipelines, test_metrics());
+        let handler = GlobalHandler::new(
+            store.clone(),
+            pipelines,
+            test_metrics(),
+            GlobalHandlerConfig::default(),
+        );
 
         let payload = serde_json::json!({
             "watermark": "2024-06-15T12:00:00Z"
