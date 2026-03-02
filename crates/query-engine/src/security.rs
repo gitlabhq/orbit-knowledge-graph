@@ -165,7 +165,7 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
 
 /// Determines if a table should have traversal path security filters applied.
 fn should_apply_security_filter(table: &str) -> bool {
-    // Only apply to actual node tables and edge table (gl_ prefix)
+    // Only apply to actual node tables and edge table (GL_TABLE_PREFIX)
     // This excludes CTEs like "path_cte" which don't have traversal_path
     if !table.starts_with(GL_TABLE_PREFIX) {
         return false;

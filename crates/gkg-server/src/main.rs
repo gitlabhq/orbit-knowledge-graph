@@ -25,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
     let config = AppConfig::load()?;
+    ontology::constants::validate_ontology_constants();
 
     let _metrics = labkit_rs::metrics::try_init_with_config(config.metrics.clone()).ok();
 

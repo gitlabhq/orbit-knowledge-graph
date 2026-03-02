@@ -1,4 +1,8 @@
 //! Centralized constants for the ontology crate.
+//!
+//! `GL_TABLE_PREFIX` is a compile-time constant whose value is validated
+//! against the embedded ontology YAML by [`validate_ontology_constants`].
+//! `EDGE_TABLE` is derived from it via `concatcp!` and also validated.
 
 use const_format::concatcp;
 
@@ -32,3 +36,35 @@ pub const DELETED_COLUMN: &str = "_deleted";
 
 /// Traversal path column name for namespace scoping.
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
+
+/// Panics if compile-time constants diverge from the embedded ontology YAML.
+///
+/// Call this at startup and in a `#[test]` so CI catches stale constants.
+pub fn validate_ontology_constants() {
+    let ontology = crate::Ontology::load_embedded().expect("embedded ontology must be valid");
+
+    assert_eq!(
+        ontology.table_prefix(),
+        GL_TABLE_PREFIX,
+        "GL_TABLE_PREFIX const (\"{GL_TABLE_PREFIX}\") doesn't match \
+         embedded ontology (\"{}\") — update the const in constants.rs",
+        ontology.table_prefix(),
+    );
+
+    let expected_edge = format!("{}edge", ontology.table_prefix());
+    assert_eq!(
+        EDGE_TABLE, expected_edge,
+        "EDGE_TABLE const (\"{EDGE_TABLE}\") doesn't match \
+         expected (\"{expected_edge}\") — update the const in constants.rs",
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ontology_constants_match_yaml() {
+        validate_ontology_constants();
+    }
+}
