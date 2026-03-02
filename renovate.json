@@ -1,9 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "osvVulnerabilityAlerts": true,
   "packageRules": [
     {
-      "description": "Disable updates for 0.x crates with frequent breaking changes — require manual migration",
+      "description": "Unstable 0.x crates — require manual approval before MR is opened",
       "matchManagers": ["cargo"],
       "matchPackageNames": [
         "jsonschema",
@@ -12,10 +13,10 @@
         "async-nats",
         "clickhouse"
       ],
-      "enabled": false
+      "dependencyDashboardApproval": true
     },
     {
-      "description": "Disable updates for tonic/prost family — tightly coupled, must be bumped together manually",
+      "description": "Group tonic/prost family into one MR, require manual approval",
       "matchManagers": ["cargo"],
       "matchPackageNames": [
         "tonic",
@@ -26,10 +27,11 @@
         "prost-build",
         "prost-types"
       ],
-      "enabled": false
+      "groupName": "tonic/prost family",
+      "dependencyDashboardApproval": true
     },
     {
-      "description": "Disable updates for Arrow ecosystem — arrow, parquet, and datafusion versions are coordinated",
+      "description": "Group Arrow ecosystem into one MR, require manual approval",
       "matchManagers": ["cargo"],
       "matchPackageNames": [
         "arrow",
@@ -37,7 +39,8 @@
         "parquet",
         "datafusion"
       ],
-      "enabled": false
+      "groupName": "Arrow ecosystem",
+      "dependencyDashboardApproval": true
     }
   ]
 }
