@@ -5,6 +5,7 @@ domain: source_code
 description: A directory within a repository's file structure
 label: path
 destination_table: gl_directory
+default_columns: [id, path, name]
 
 style:
   size: 26

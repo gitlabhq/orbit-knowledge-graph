@@ -5,6 +5,7 @@ domain: ci
 description: A CI/CD job that executes scripts within a pipeline stage
 label: name
 destination_table: gl_job
+default_columns: [id, name, status, ref]
 
 style:
   size: 24

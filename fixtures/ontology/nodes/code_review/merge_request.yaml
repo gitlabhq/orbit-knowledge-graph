@@ -5,6 +5,7 @@ domain: code_review
 description: A merge request for code review and merging changes into a target branch
 label: title
 destination_table: gl_merge_request
+default_columns: [id, iid, title, state, source_branch, target_branch]
 
 style:
   size: 28

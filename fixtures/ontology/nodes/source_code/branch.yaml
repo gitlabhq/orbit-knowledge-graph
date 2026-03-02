@@ -5,6 +5,7 @@ domain: source_code
 description: A Git branch in a repository
 label: name
 destination_table: gl_branch
+default_columns: [id, name, protected, default]
 
 style:
   size: 28

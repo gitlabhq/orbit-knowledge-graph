@@ -5,6 +5,7 @@ domain: code_review
 description: A file changed in a merge request diff
 label: new_path
 destination_table: gl_merge_request_diff_file
+default_columns: [id, new_path, old_path, new_file, deleted_file]
 
 style:
   size: 20

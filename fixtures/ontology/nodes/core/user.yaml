@@ -5,6 +5,7 @@ domain: core
 description: A GitLab user account
 label: username
 destination_table: gl_user
+default_columns: [id, username, name, state]
 
 style:
   size: 32

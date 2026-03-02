@@ -5,6 +5,7 @@ domain: code_review
 description: A snapshot of changes (commits and file diffs) associated with a merge request at a point in time
 label: id
 destination_table: gl_merge_request_diff
+default_columns: [id, merge_request_id, state]
 
 style:
   size: 22

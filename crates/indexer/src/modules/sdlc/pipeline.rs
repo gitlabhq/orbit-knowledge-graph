@@ -497,7 +497,6 @@ mod tests {
         NodeEntity {
             name: "User".to_string(),
             domain: "core".to_string(),
-            description: String::new(),
             label: "username".to_string(),
             fields: vec![
                 Field {
@@ -517,7 +516,6 @@ mod tests {
                     enum_type: ontology::EnumType::default(),
                 },
             ],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_user".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Global,
@@ -526,8 +524,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges: BTreeMap::new(),
             }),
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         }
     }
 
@@ -548,15 +545,8 @@ mod tests {
     fn from_node_returns_none_without_etl() {
         let node = NodeEntity {
             name: "NoEtl".to_string(),
-            domain: String::new(),
-            description: String::new(),
-            label: String::new(),
-            fields: vec![],
-            primary_keys: vec!["id".to_string()],
             destination_table: "test".to_string(),
-            etl: None,
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         };
         let ontology = Ontology::new();
         let datalake = Arc::new(MockDatalake);

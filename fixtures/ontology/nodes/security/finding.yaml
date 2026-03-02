@@ -5,6 +5,7 @@ domain: security
 description: A security scan finding (occurrence) that may be linked to a vulnerability
 label: uuid
 destination_table: gl_finding
+default_columns: [id, uuid, name, severity]
 
 style:
   size: 26

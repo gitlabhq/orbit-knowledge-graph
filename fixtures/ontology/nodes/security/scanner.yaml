@@ -5,6 +5,7 @@ domain: security
 description: A security scanner that detects vulnerabilities in projects
 label: name
 destination_table: gl_vulnerability_scanner
+default_columns: [id, name, vendor]
 
 style:
   size: 24

@@ -536,10 +536,6 @@ mod tests {
         let node = NodeEntity {
             name: "Group".to_string(),
             domain: "core".to_string(),
-            description: String::new(),
-            label: String::new(),
-            fields: vec![],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_group".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
@@ -548,8 +544,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges,
             }),
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
@@ -578,10 +573,6 @@ mod tests {
         let node = NodeEntity {
             name: "Note".to_string(),
             domain: "core".to_string(),
-            description: String::new(),
-            label: String::new(),
-            fields: vec![],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_note".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
@@ -590,8 +581,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges,
             }),
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();

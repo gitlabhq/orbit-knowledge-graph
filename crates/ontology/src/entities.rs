@@ -2,6 +2,7 @@
 
 use std::{collections::BTreeMap, fmt};
 
+use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::etl::EtlConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,12 +57,33 @@ pub struct NodeEntity {
     pub primary_keys: Vec<String>,
     /// The destination table name for this entity.
     pub destination_table: String,
+    /// Columns returned by default when this node appears in dynamic query results.
+    /// If empty, all columns are returned.
+    pub default_columns: Vec<String>,
     /// ETL configuration for indexing this entity.
     pub etl: Option<EtlConfig>,
     /// Redaction configuration for permission checks.
     /// If `None`, this entity does not require redaction validation.
     pub redaction: Option<RedactionConfig>,
     pub style: NodeStyle,
+}
+
+impl Default for NodeEntity {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            domain: String::new(),
+            description: String::new(),
+            label: String::new(),
+            fields: vec![],
+            primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
+            default_columns: vec![],
+            destination_table: String::new(),
+            etl: None,
+            redaction: None,
+            style: NodeStyle::default(),
+        }
+    }
 }
 
 impl fmt::Display for NodeEntity {

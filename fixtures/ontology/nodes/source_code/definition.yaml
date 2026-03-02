@@ -5,6 +5,7 @@ domain: source_code
 description: A code definition such as a class, function, method, or module
 label: name
 destination_table: gl_definition
+default_columns: [id, name, fqn, definition_type, file_path]
 
 style:
   size: 26

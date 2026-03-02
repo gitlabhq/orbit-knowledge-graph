@@ -5,6 +5,7 @@ domain: core
 description: A GitLab project/repository
 label: name
 destination_table: gl_project
+default_columns: [id, name, full_path, visibility_level]
 
 style:
   size: 40
