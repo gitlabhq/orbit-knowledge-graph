@@ -91,6 +91,10 @@ pub struct Ontology {
     table_prefix: String,
     /// ClickHouse table name for all graph edges (e.g., `"gl_edge"`).
     edge_table: String,
+    /// Default ORDER BY columns for node tables (dedup key for ReplacingMergeTree).
+    default_sort_key: Vec<String>,
+    /// ORDER BY columns for the edge table (dedup key for ReplacingMergeTree).
+    edge_sort_key: Vec<String>,
     domains: BTreeMap<String, DomainInfo>,
     nodes: BTreeMap<String, NodeEntity>,
     edges: BTreeMap<String, Vec<EdgeEntity>>,
@@ -113,6 +117,14 @@ impl Ontology {
             schema_version: String::new(),
             table_prefix: GL_TABLE_PREFIX.to_string(),
             edge_table: EDGE_TABLE.to_string(),
+            default_sort_key: vec![
+                TRAVERSAL_PATH_COLUMN.to_string(),
+                DEFAULT_PRIMARY_KEY.to_string(),
+            ],
+            edge_sort_key: EDGE_RESERVED_COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
             domains: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
@@ -131,6 +143,7 @@ impl Ontology {
                 NodeEntity {
                     name: name.clone(),
                     destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
+                    sort_key: self.default_sort_key.clone(),
                     ..Default::default()
                 },
             );
@@ -255,6 +268,8 @@ impl Ontology {
         ontology.schema_version = schema.schema_version.unwrap_or_default();
         ontology.table_prefix = schema.settings.table_prefix;
         ontology.edge_table = schema.settings.edge_table;
+        ontology.default_sort_key = schema.settings.default_sort_key;
+        ontology.edge_sort_key = schema.settings.edge_sort_key;
 
         if !ontology.edge_table.starts_with(&ontology.table_prefix) {
             return Err(OntologyError::Validation(format!(
@@ -277,7 +292,7 @@ impl Ontology {
                 let content = reader.read(node_path)?;
                 let node_def: NodeYaml = parse_yaml(&content, node_path)?;
 
-                let entity = node_def.into_entity(node_name.clone())?;
+                let entity = node_def.into_entity(node_name.clone(), &ontology.default_sort_key)?;
 
                 if !entity.destination_table.starts_with(&ontology.table_prefix) {
                     return Err(OntologyError::Validation(format!(
@@ -485,6 +500,33 @@ impl Ontology {
     #[must_use]
     pub fn edge_table(&self) -> &str {
         &self.edge_table
+    }
+
+    /// Default ORDER BY / dedup key columns for node tables.
+    #[must_use]
+    pub fn default_sort_key(&self) -> &[String] {
+        &self.default_sort_key
+    }
+
+    /// ORDER BY / dedup key columns for the edge table.
+    #[must_use]
+    pub fn edge_sort_key(&self) -> &[String] {
+        &self.edge_sort_key
+    }
+
+    /// Look up the dedup key (ORDER BY columns) for a ClickHouse table name.
+    ///
+    /// Returns the node's `sort_key` for node tables, the `edge_sort_key` for
+    /// the edge table, or `None` if the table is unknown.
+    #[must_use]
+    pub fn sort_key_for_table(&self, table: &str) -> Option<&[String]> {
+        if table == self.edge_table {
+            return Some(&self.edge_sort_key);
+        }
+        self.nodes
+            .values()
+            .find(|n| n.destination_table == table)
+            .map(|n| n.sort_key.as_slice())
     }
 
     pub fn domains(&self) -> impl Iterator<Item = &DomainInfo> {
@@ -815,6 +857,8 @@ struct SchemaYaml {
 struct SettingsYaml {
     table_prefix: String,
     edge_table: String,
+    default_sort_key: Vec<String>,
+    edge_sort_key: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -839,6 +883,8 @@ struct NodeYaml {
     properties: BTreeMap<String, PropertyYaml>,
     #[serde(default)]
     default_columns: Vec<String>,
+    #[serde(default)]
+    sort_key: Option<Vec<String>>,
     #[serde(default)]
     etl: Option<EtlYaml>,
     #[serde(default)]
@@ -976,7 +1022,11 @@ struct EdgeEndpointYaml {
 // --- Conversion implementations ---
 
 impl NodeYaml {
-    fn into_entity(self, name: String) -> Result<NodeEntity, OntologyError> {
+    fn into_entity(
+        self,
+        name: String,
+        default_sort_key: &[String],
+    ) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
 
         let fields: Result<Vec<Field>, OntologyError> = self
@@ -1039,6 +1089,8 @@ impl NodeYaml {
             }
         }
 
+        let sort_key = self.sort_key.unwrap_or_else(|| default_sort_key.to_vec());
+
         // Convert ETL config
         let etl = self.etl.map(|e| e.into_config()).transpose()?;
 
@@ -1061,6 +1113,7 @@ impl NodeYaml {
             fields,
             primary_keys,
             default_columns: self.default_columns,
+            sort_key,
             destination_table: self.destination_table,
             etl,
             redaction,
@@ -1741,6 +1794,8 @@ schema_version: "1.0"
 settings:
   table_prefix: "kg_"
   edge_table: "kg_edge"
+  default_sort_key: [traversal_path, id]
+  edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
 domains:
   core:
     nodes:
@@ -1901,7 +1956,10 @@ properties:
     description: "Name"
 "#;
         let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
-        let err = node_def.into_entity("TestNode".to_string()).unwrap_err();
+        let default_sk = vec!["traversal_path".to_string(), "id".to_string()];
+        let err = node_def
+            .into_entity("TestNode".to_string(), &default_sk)
+            .unwrap_err();
         assert!(
             err.to_string().contains("nonexistent_field"),
             "error should mention the bad column name, got: {err}"
@@ -1933,9 +1991,11 @@ properties:
     description: "Name"
 "#;
         let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let default_sk = vec!["traversal_path".to_string(), "id".to_string()];
         let entity = node_def
-            .into_entity("TestNode".to_string())
+            .into_entity("TestNode".to_string(), &default_sk)
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
+        assert_eq!(entity.sort_key, default_sk);
     }
 }

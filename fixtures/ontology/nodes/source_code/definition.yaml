@@ -6,6 +6,7 @@ description: A code definition such as a class, function, method, or module
 label: name
 destination_table: gl_definition
 default_columns: [id, name, fqn, definition_type, file_path]
+sort_key: [traversal_path, project_id, branch, id]
 
 style:
   size: 26

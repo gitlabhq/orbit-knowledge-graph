@@ -12,6 +12,8 @@ description: >
 settings:
   table_prefix: "gl_"
   edge_table: "gl_edge"
+  default_sort_key: [traversal_path, id]
+  edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
 
 domains:
   core:

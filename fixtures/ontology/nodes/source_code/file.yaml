@@ -6,6 +6,7 @@ description: A source code file within a repository
 label: path
 destination_table: gl_file
 default_columns: [id, path, name, language]
+sort_key: [traversal_path, project_id, branch, id]
 
 style:
   size: 24

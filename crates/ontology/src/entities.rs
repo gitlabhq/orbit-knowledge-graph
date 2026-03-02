@@ -60,6 +60,9 @@ pub struct NodeEntity {
     /// Columns returned by default when this node appears in dynamic query results.
     /// If empty, all columns are returned.
     pub default_columns: Vec<String>,
+    /// ClickHouse ORDER BY columns for this node's destination table.
+    /// Used as the deduplication key for ReplacingMergeTree.
+    pub sort_key: Vec<String>,
     /// ETL configuration for indexing this entity.
     pub etl: Option<EtlConfig>,
     /// Redaction configuration for permission checks.
@@ -78,6 +81,7 @@ impl Default for NodeEntity {
             fields: vec![],
             primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
             default_columns: vec![],
+            sort_key: vec![],
             destination_table: String::new(),
             etl: None,
             redaction: None,
