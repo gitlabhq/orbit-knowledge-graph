@@ -84,7 +84,7 @@ The kinds of things that go wrong (not exhaustive, use your judgment):
 
 ## Commenting
 
-Tag inline comments with severity: **Critical:**, **Warning:**, or **Suggestion:**.
+Tag inline comments with severity: **Critical:**, **Warning:**, or **Suggestion:**. Consider how you can combine multiple related inline comments into a single comment to avoid spamming the reviewer.
 
 When flagging query performance issues, include the reconstructed SQL and your analysis of the query plan.
 

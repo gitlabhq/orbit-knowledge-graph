@@ -70,7 +70,7 @@ Things that must hold true:
 
 ## Commenting
 
-Tag inline comments with severity and CWE where it applies: **Critical:**, **Warning:**, or **Suggestion:**.
+Tag inline comments with severity and CWE where it applies: **Critical:**, **Warning:**, or **Suggestion:**. Consider how you can combine multiple related inline comments into a single comment to avoid spamming the reviewer.
 
 Summary: one paragraph on what's security-relevant, then your assessment.
 
