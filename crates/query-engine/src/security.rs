@@ -82,21 +82,33 @@ pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<
 }
 
 fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
-    // Apply security to the main query
     let aliases = collect_node_aliases(&q.from);
-    if aliases.is_empty() {
-        return Ok(());
+    if !aliases.is_empty() {
+        let security_conds = aliases
+            .iter()
+            .map(|a| build_path_filter(a, &ctx.traversal_paths));
+        q.where_clause = Expr::and_all(
+            security_conds
+                .map(Some)
+                .chain(std::iter::once(q.where_clause.take())),
+        );
     }
-    let security_conds = aliases
-        .iter()
-        .map(|a| build_path_filter(a, &ctx.traversal_paths));
-    // Note: Security predicates always applied first for short-circuit filtering
-    q.where_clause = Expr::and_all(
-        security_conds
-            .map(Some)
-            .chain(std::iter::once(q.where_clause.take())),
-    );
-    Ok(())
+    apply_to_subqueries_in_from(&mut q.from, ctx)
+}
+
+/// Recurse into derived-table subqueries in the FROM tree and inject
+/// security filters into their inner queries. This is needed because
+/// the dedup phase may wrap `gl_*` scans in subqueries that don't yet
+/// have traversal_path filters.
+fn apply_to_subqueries_in_from(table_ref: &mut TableRef, ctx: &SecurityContext) -> Result<()> {
+    match table_ref {
+        TableRef::Subquery { query, .. } => apply_to_query(query, ctx),
+        TableRef::Join { left, right, .. } => {
+            apply_to_subqueries_in_from(left, ctx)?;
+            apply_to_subqueries_in_from(right, ctx)
+        }
+        TableRef::Scan { .. } | TableRef::Union { .. } => Ok(()),
+    }
 }
 
 fn build_path_filter(alias: &str, paths: &[String]) -> Expr {
