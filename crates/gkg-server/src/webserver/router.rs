@@ -8,6 +8,7 @@ use serde::Serialize;
 use tower_http::trace::TraceLayer;
 
 use crate::cluster_health::ClusterHealthChecker;
+use crate::proto::{ResponseFormat, get_cluster_health_response};
 use crate::webserver::JwtValidator;
 
 #[derive(Clone)]
@@ -51,16 +52,31 @@ async fn health() -> Json<HealthResponse> {
 }
 
 async fn cluster_health(State(state): State<AppState>) -> Json<ClusterHealthResponse> {
-    let health = state.cluster_health.get_cluster_health().await;
+    let health = state
+        .cluster_health
+        .get_cluster_health(ResponseFormat::Raw as i32)
+        .await;
 
-    let status = match health.status {
+    let structured = match health.content {
+        Some(get_cluster_health_response::Content::Structured(s)) => s,
+        _ => {
+            return Json(ClusterHealthResponse {
+                status: "unknown".to_string(),
+                timestamp: String::new(),
+                version: String::new(),
+                components: vec![],
+            });
+        }
+    };
+
+    let status = match structured.status {
         1 => "healthy",
         2 => "degraded",
         3 => "unhealthy",
         _ => "unknown",
     };
 
-    let components = health
+    let components = structured
         .components
         .into_iter()
         .map(|c| {
@@ -85,8 +101,8 @@ async fn cluster_health(State(state): State<AppState>) -> Json<ClusterHealthResp
 
     Json(ClusterHealthResponse {
         status: status.to_string(),
-        timestamp: health.timestamp,
-        version: health.version,
+        timestamp: structured.timestamp,
+        version: structured.version,
         components,
     })
 }

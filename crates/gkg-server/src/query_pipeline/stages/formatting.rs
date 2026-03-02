@@ -23,7 +23,7 @@ impl<F: ResultFormatter> FormattingStage<F> {
         &self,
         input: HydrationOutput,
         compiled: &CompilationOutput,
-        _obs: &PipelineObserver,
+        obs: &PipelineObserver,
     ) -> PipelineOutput {
         let row_count = input.query_result.authorized_count();
         let generated_sql = &compiled.compiled_query.base.sql;
@@ -36,6 +36,7 @@ impl<F: ResultFormatter> FormattingStage<F> {
             generated_sql: Some(generated_sql.clone()),
             row_count,
             redacted_count: input.redacted_count,
+            execution_time_ms: obs.elapsed_ms(),
         }
     }
 }
@@ -104,5 +105,6 @@ mod tests {
         assert_eq!(output.generated_sql.as_deref(), Some("SELECT 1"));
         assert_eq!(output.row_count, 2); // 3 total - 1 redacted
         assert_eq!(output.redacted_count, 1);
+        assert!(output.execution_time_ms >= 0.0);
     }
 }

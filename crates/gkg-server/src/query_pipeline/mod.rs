@@ -8,10 +8,7 @@ mod types;
 
 pub use error::PipelineError;
 pub use formatter::{ContextEngineFormatter, RawRowFormatter, ResultFormatter, row_to_json};
-pub use helpers::{
-    QueryRequest, ToolRequest, receive_query_request, receive_tool_request, send_query_error,
-    send_tool_executor_error, send_tool_pipeline_error,
-};
+pub use helpers::{QueryRequest, receive_query_request, send_query_error};
 pub use metrics::PipelineObserver;
 pub use service::QueryPipelineService;
 pub use stages::HydrationStage;

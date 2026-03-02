@@ -38,4 +38,5 @@ pub struct PipelineOutput {
     pub generated_sql: Option<String>,
     pub row_count: usize,
     pub redacted_count: usize,
+    pub execution_time_ms: f64,
 }

@@ -3,9 +3,13 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use health_check::HealthStatus;
+use toon_format::{EncodeOptions, encode};
 use tracing::warn;
 
-use crate::proto::{ClusterStatus, ComponentHealth, GetClusterHealthResponse, ReplicaStatus};
+use crate::proto::{
+    ClusterStatus, ComponentHealth, GetClusterHealthResponse, ReplicaStatus, ResponseFormat,
+    StructuredClusterHealth, get_cluster_health_response,
+};
 use crate::webserver::InfrastructureHealthClient;
 
 pub struct ClusterHealthChecker {
@@ -29,12 +33,23 @@ impl ClusterHealthChecker {
         Arc::new(self)
     }
 
-    pub async fn get_cluster_health(&self) -> GetClusterHealthResponse {
-        match &self.health_client {
+    pub async fn get_cluster_health(&self, format: i32) -> GetClusterHealthResponse {
+        let structured = match &self.health_client {
             Some(client) => self.fetch_real_health(client).await,
             None => {
                 warn!("No health-check service configured, returning stubbed data");
                 self.stubbed_cluster_health()
+            }
+        };
+
+        if format == ResponseFormat::Llm as i32 {
+            let text = Self::format_health_as_toon(&structured);
+            GetClusterHealthResponse {
+                content: Some(get_cluster_health_response::Content::FormattedText(text)),
+            }
+        } else {
+            GetClusterHealthResponse {
+                content: Some(get_cluster_health_response::Content::Structured(structured)),
             }
         }
     }
@@ -42,12 +57,12 @@ impl ClusterHealthChecker {
     async fn fetch_real_health(
         &self,
         client: &InfrastructureHealthClient,
-    ) -> GetClusterHealthResponse {
+    ) -> StructuredClusterHealth {
         let health_status = client.check_or_unavailable().await;
         self.convert_health_status(health_status)
     }
 
-    fn convert_health_status(&self, status: HealthStatus) -> GetClusterHealthResponse {
+    fn convert_health_status(&self, status: HealthStatus) -> StructuredClusterHealth {
         let cluster_status = match status.status {
             health_check::Status::Healthy => ClusterStatus::Healthy,
             health_check::Status::Unhealthy => ClusterStatus::Unhealthy,
@@ -91,7 +106,7 @@ impl ClusterHealthChecker {
             metrics: clickhouse_metrics,
         });
 
-        GetClusterHealthResponse {
+        StructuredClusterHealth {
             status: cluster_status.into(),
             timestamp: Utc::now().to_rfc3339(),
             version: self.version.clone(),
@@ -99,8 +114,8 @@ impl ClusterHealthChecker {
         }
     }
 
-    fn stubbed_cluster_health(&self) -> GetClusterHealthResponse {
-        GetClusterHealthResponse {
+    fn stubbed_cluster_health(&self) -> StructuredClusterHealth {
+        StructuredClusterHealth {
             status: ClusterStatus::Healthy.into(),
             timestamp: Utc::now().to_rfc3339(),
             version: self.version.clone(),
@@ -132,6 +147,59 @@ impl ClusterHealthChecker {
             ],
         }
     }
+
+    fn format_health_as_toon(health: &StructuredClusterHealth) -> String {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct HealthToon {
+            status: String,
+            timestamp: String,
+            version: String,
+            components: Vec<ComponentToon>,
+        }
+
+        #[derive(Serialize)]
+        struct ComponentToon {
+            name: String,
+            status: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            replicas: Option<String>,
+            #[serde(skip_serializing_if = "HashMap::is_empty")]
+            metrics: HashMap<String, String>,
+        }
+
+        fn status_name(val: i32) -> String {
+            match ClusterStatus::try_from(val) {
+                Ok(ClusterStatus::Healthy) => "healthy".to_string(),
+                Ok(ClusterStatus::Degraded) => "degraded".to_string(),
+                Ok(ClusterStatus::Unhealthy) => "unhealthy".to_string(),
+                _ => "unknown".to_string(),
+            }
+        }
+
+        let toon = HealthToon {
+            status: status_name(health.status),
+            timestamp: health.timestamp.clone(),
+            version: health.version.clone(),
+            components: health
+                .components
+                .iter()
+                .map(|c| ComponentToon {
+                    name: c.name.clone(),
+                    status: status_name(c.status),
+                    replicas: c
+                        .replicas
+                        .as_ref()
+                        .map(|r| format!("{}/{}", r.ready, r.desired)),
+                    metrics: c.metrics.clone(),
+                })
+                .collect(),
+        };
+
+        let options = EncodeOptions::default();
+        encode(&toon, &options).unwrap_or_else(|_| format!("status:{}", toon.status))
+    }
 }
 
 impl Default for ClusterHealthChecker {
@@ -145,27 +213,51 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_stubbed_health_returns_healthy() {
+    async fn test_stubbed_health_returns_healthy_structured() {
         let checker = ClusterHealthChecker::new(None);
-        let response = checker.get_cluster_health().await;
+        let response = checker.get_cluster_health(ResponseFormat::Raw as i32).await;
 
-        assert_eq!(response.status, ClusterStatus::Healthy as i32);
-        assert!(!response.version.is_empty());
-        assert!(!response.timestamp.is_empty());
+        match response.content {
+            Some(get_cluster_health_response::Content::Structured(s)) => {
+                assert_eq!(s.status, ClusterStatus::Healthy as i32);
+                assert!(!s.version.is_empty());
+                assert!(!s.timestamp.is_empty());
+            }
+            _ => panic!("Expected structured response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stubbed_health_returns_formatted_text_for_llm() {
+        let checker = ClusterHealthChecker::new(None);
+        let response = checker.get_cluster_health(ResponseFormat::Llm as i32).await;
+
+        match response.content {
+            Some(get_cluster_health_response::Content::FormattedText(text)) => {
+                assert!(text.contains("healthy"));
+                assert!(text.contains("webserver"));
+            }
+            _ => panic!("Expected formatted text response"),
+        }
     }
 
     #[tokio::test]
     async fn test_stubbed_includes_mode_metric() {
         let checker = ClusterHealthChecker::new(None);
-        let response = checker.get_cluster_health().await;
+        let response = checker.get_cluster_health(ResponseFormat::Raw as i32).await;
 
-        for component in &response.components {
-            assert_eq!(
-                component.metrics.get("mode"),
-                Some(&"stubbed".to_string()),
-                "Component {} should have mode=stubbed",
-                component.name
-            );
+        match response.content {
+            Some(get_cluster_health_response::Content::Structured(s)) => {
+                for component in &s.components {
+                    assert_eq!(
+                        component.metrics.get("mode"),
+                        Some(&"stubbed".to_string()),
+                        "Component {} should have mode=stubbed",
+                        component.name
+                    );
+                }
+            }
+            _ => panic!("Expected structured response"),
         }
     }
 

@@ -1,79 +1,135 @@
 // Knowledge Graph gRPC service definition
-// Supports bidirectional streaming for tool execution with redaction flow
+// Supports bidirectional streaming for query execution with redaction flow
 
 syntax = "proto3";
 
 package gkg.v1;
 
-// Knowledge Graph service for tool execution and raw queries
+enum ResponseFormat {
+  RESPONSE_FORMAT_RAW = 0;
+  RESPONSE_FORMAT_LLM = 1;
+}
+
 service KnowledgeGraphService {
-  // List all available tools with their schemas
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
-
-  // Execute a tool with bidirectional streaming for redaction:
-  // 1. Client sends ExecuteToolRequest
-  // 2. Server sends RedactionExchange.required with resources to check
-  // 3. Client sends RedactionExchange.response with authorized resources
-  // 4. Server sends ToolResult with redacted, context-engineered response
-  rpc ExecuteTool(stream ExecuteToolMessage) returns (stream ExecuteToolMessage);
-
-  // Execute a raw query with bidirectional streaming for redaction:
-  // Same redaction flow as ExecuteTool but returns raw filtered result
-  // (no context-engine processing) for the query playground
   rpc ExecuteQuery(stream ExecuteQueryMessage) returns (stream ExecuteQueryMessage);
-
-  // Returns the complete ontology schema (nodes, edges, domains)
-  rpc GetOntology(GetOntologyRequest) returns (GetOntologyResponse);
-
-  // Returns cluster health status for the Orbit dashboard
+  rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
 }
 
-// --- List Tools ---
-
-message ListToolsRequest {
-  // Empty - user context comes from JWT
+// --- ExecuteQuery ---
+message ExecuteQueryMessage {
+  oneof content {
+    ExecuteQueryRequest request = 1;
+    RedactionExchange redaction = 2;
+    ExecuteQueryResult result = 3;
+    ExecuteQueryError error = 4;
+  }
 }
 
-message ListToolsResponse {
-  repeated ToolDefinition tools = 1;
+enum QueryType {
+  QUERY_TYPE_JSON = 0;
 }
 
-message ToolDefinition {
+message ExecuteQueryRequest {
+  string query = 1;
+  ResponseFormat format = 2;
+  QueryType query_type = 3;
+}
+
+message ExecuteQueryResult {
+  string result_json = 1;
+  string generated_sql = 2;
+  int32 row_count = 3;
+  int32 redacted_count = 4;
+  double execution_time_ms = 5;
+}
+
+message ExecuteQueryError {
+  string message = 1;
+  string code = 2;
+}
+
+// --- GetGraphSchema ---
+message GetGraphSchemaRequest {
+  repeated string expand_nodes = 1;
+  ResponseFormat format = 2;
+}
+
+message GetGraphSchemaResponse {
+  oneof content {
+    StructuredSchema structured = 1;
+    string formatted_text = 2;
+  }
+}
+
+message StructuredSchema {
+  string schema_version = 1;
+  repeated SchemaDomain domains = 2;
+  repeated SchemaNode nodes = 3;
+  repeated SchemaEdge edges = 4;
+}
+
+message SchemaDomain {
   string name = 1;
   string description = 2;
-  string parameters_json_schema = 3;
+  repeated string node_names = 3;
 }
 
-// --- Shared Types ---
-
-// Shared error type for all RPCs
-message Error {
-  string code = 1;
-  string message = 2;
+message SchemaNode {
+  string name = 1;
+  string domain = 2;
+  string description = 3;
+  string primary_key = 4;
+  string label_field = 5;
+  repeated SchemaProperty properties = 6;
+  SchemaNodeStyle style = 7;
+  repeated string outgoing_edges = 8;
+  repeated string incoming_edges = 9;
 }
 
-// Shared redaction exchange - encapsulates the authorization back-and-forth
+message SchemaProperty {
+  string name = 1;
+  string data_type = 2;
+  bool nullable = 3;
+  repeated string enum_values = 4;
+}
+
+message SchemaEdge {
+  string name = 1;
+  string description = 2;
+  repeated SchemaEdgeVariant variants = 3;
+}
+
+message SchemaEdgeVariant {
+  string source_type = 1;
+  string target_type = 2;
+}
+
+message SchemaNodeStyle {
+  int32 size = 1;
+  string color = 2;
+}
+
+// --- Redaction (shared) ---
 message RedactionExchange {
-  oneof exchange {
+  oneof content {
     RedactionRequired required = 1;
     RedactionResponse response = 2;
   }
 }
 
-// Server -> Client: Resources needing authorization checks
 message RedactionRequired {
   string result_id = 1;
-  repeated ResourceCheck resources = 2;
+  repeated ResourceToAuthorize resources = 2;
 }
 
-message ResourceCheck {
+message ResourceToAuthorize {
   string resource_type = 1;
-  repeated int64 ids = 2;
-  string ability = 3;
+  repeated int64 resource_ids = 2;
+  repeated string abilities = 3;
 }
 
-// Client -> Server: Authorization results from Rails
 message RedactionResponse {
   string result_id = 1;
   repeated ResourceAuthorization authorizations = 2;
@@ -84,105 +140,49 @@ message ResourceAuthorization {
   map<int64, bool> authorized = 2;
 }
 
-// --- Execute Tool ---
+// --- ListTools ---
+message ListToolsRequest {}
 
-message ExecuteToolMessage {
-  oneof message {
-    ExecuteToolRequest request = 1;
-    RedactionExchange redaction = 2;
-    ToolResult result = 3;
-    Error error = 4;
-  }
+message ListToolsResponse {
+  repeated ToolDefinition tools = 1;
 }
 
-message ExecuteToolRequest {
-  string tool_name = 1;
-  string arguments_json = 2;
-}
-
-message ToolResult {
-  string result_json = 1;
-}
-
-// --- Execute Query ---
-
-message ExecuteQueryMessage {
-  oneof message {
-    ExecuteQueryRequest request = 1;
-    RedactionExchange redaction = 2;
-    QueryResult result = 3;
-    Error error = 4;
-  }
-}
-
-message ExecuteQueryRequest {
-  string query_json = 1;
-}
-
-message QueryResult {
-  string result_json = 1;
-  string generated_sql = 2;
-}
-
-// --- Get Ontology ---
-
-message GetOntologyRequest {
-  // Empty for now, could add filters in the future
-}
-
-message GetOntologyResponse {
-  string schema_version = 1;
-  repeated NodeDefinition nodes = 2;
-  repeated EdgeDefinition edges = 3;
-  repeated DomainDefinition domains = 4;
-}
-
-message DomainDefinition {
+message ToolDefinition {
   string name = 1;
   string description = 2;
-  repeated string node_names = 3;
+  string parameters_json_schema = 3;
+  ToolRouting routing = 4;
 }
 
-message NodeDefinition {
-  string name = 1;
-  string domain = 2;
-  string description = 3;
-  string primary_key = 4;
-  string label_field = 5;
-  repeated PropertyDefinition properties = 6;
-  NodeStyle style = 7;
+message ToolRouting {
+  string rpc_method = 1;
+  repeated ToolArgumentMapping argument_mappings = 2;
 }
 
-message PropertyDefinition {
-  string name = 1;
-  string data_type = 2;
-  bool nullable = 3;
-  repeated string enum_values = 4;
+message ToolArgumentMapping {
+  string tool_argument = 1;
+  string rpc_parameter = 2;
+  ArgumentTransform transform = 3;
 }
 
-message NodeStyle {
-  int32 size = 1;
-  string color = 2;
+enum ArgumentTransform {
+  ARGUMENT_TRANSFORM_NONE = 0;
+  ARGUMENT_TRANSFORM_TO_JSON = 1;
 }
 
-message EdgeDefinition {
-  string name = 1;
-  string description = 2;
-  repeated EdgeVariant variants = 3;
-}
-
-message EdgeVariant {
-  string source_type = 1;
-  string target_type = 2;
-}
-
-// --- Cluster Health ---
-
+// --- ClusterHealth ---
 message GetClusterHealthRequest {
-  // Empty for now
+  ResponseFormat format = 1;
 }
 
 message GetClusterHealthResponse {
+  oneof content {
+    StructuredClusterHealth structured = 1;
+    string formatted_text = 2;
+  }
+}
+
+message StructuredClusterHealth {
   ClusterStatus status = 1;
   string timestamp = 2;
   string version = 3;

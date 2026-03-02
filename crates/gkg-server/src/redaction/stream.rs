@@ -5,8 +5,8 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::proto::{
-    ExecuteQueryMessage, ExecuteToolMessage, RedactionExchange, RedactionRequired,
-    ResourceCheck as ProtoResourceCheck, execute_query_message, execute_tool_message,
+    ExecuteQueryMessage, RedactionExchange, RedactionRequired,
+    ResourceToAuthorize as ProtoResourceToAuthorize, execute_query_message,
     redaction_exchange,
 };
 
@@ -50,43 +50,17 @@ pub trait RedactionMessage: Sized + Send {
     fn unwrap_redaction(self) -> Result<RedactionExchange, RedactionExchangeError>;
 }
 
-impl RedactionMessage for ExecuteToolMessage {
-    fn wrap_redaction(exchange: RedactionExchange) -> Self {
-        Self {
-            message: Some(execute_tool_message::Message::Redaction(exchange)),
-        }
-    }
-
-    fn unwrap_redaction(self) -> Result<RedactionExchange, RedactionExchangeError> {
-        match self.message {
-            Some(execute_tool_message::Message::Redaction(r)) => Ok(r),
-            Some(execute_tool_message::Message::Error(e)) => {
-                Err(RedactionExchangeError::ClientError {
-                    code: e.code,
-                    message: e.message,
-                })
-            }
-            _ => {
-                warn!("Expected RedactionExchange");
-                Err(RedactionExchangeError::InvalidMessage(
-                    "Expected RedactionExchange",
-                ))
-            }
-        }
-    }
-}
-
 impl RedactionMessage for ExecuteQueryMessage {
     fn wrap_redaction(exchange: RedactionExchange) -> Self {
         Self {
-            message: Some(execute_query_message::Message::Redaction(exchange)),
+            content: Some(execute_query_message::Content::Redaction(exchange)),
         }
     }
 
     fn unwrap_redaction(self) -> Result<RedactionExchange, RedactionExchangeError> {
-        match self.message {
-            Some(execute_query_message::Message::Redaction(r)) => Ok(r),
-            Some(execute_query_message::Message::Error(e)) => {
+        match self.content {
+            Some(execute_query_message::Content::Redaction(r)) => Ok(r),
+            Some(execute_query_message::Content::Error(e)) => {
                 Err(RedactionExchangeError::ClientError {
                     code: e.code,
                     message: e.message,
@@ -112,12 +86,12 @@ impl RedactionService {
     ) -> Result<RedactionExchangeResult, RedactionExchangeError> {
         let result_id = Uuid::new_v4().to_string();
 
-        let proto_resources: Vec<ProtoResourceCheck> = resources
+        let proto_resources: Vec<ProtoResourceToAuthorize> = resources
             .iter()
-            .map(|r| ProtoResourceCheck {
+            .map(|r| ProtoResourceToAuthorize {
                 resource_type: r.resource_type.clone(),
-                ids: r.ids.clone(),
-                ability: r.ability.clone(),
+                resource_ids: r.ids.clone(),
+                abilities: vec![r.ability.clone()],
             })
             .collect();
 
@@ -128,7 +102,7 @@ impl RedactionService {
         );
 
         let redaction_required = RedactionExchange {
-            exchange: Some(redaction_exchange::Exchange::Required(RedactionRequired {
+            content: Some(redaction_exchange::Content::Required(RedactionRequired {
                 result_id: result_id.clone(),
                 resources: proto_resources,
             })),
@@ -150,8 +124,8 @@ impl RedactionService {
 
         let redaction_exchange = redaction_msg.unwrap_redaction()?;
 
-        let redaction_response = match redaction_exchange.exchange {
-            Some(redaction_exchange::Exchange::Response(r)) => r,
+        let redaction_response = match redaction_exchange.content {
+            Some(redaction_exchange::Content::Response(r)) => r,
             _ => {
                 warn!("Expected RedactionResponse in exchange");
                 return Err(RedactionExchangeError::InvalidMessage(
