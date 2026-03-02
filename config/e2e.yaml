@@ -8,9 +8,9 @@
 # -- Colima / k8s --------------------------------------------------------------
 colima:
   profile: cng
-  memory: "12"              # GB
+  memory: "16"              # GB
   cpus: "4"
-  disk: "60"                # GB
+  disk: "100"               # GB
   vm_type: vz                 # vz (macOS Virtualization.framework) or qemu
   k8s_version: v1.31.5+k3s1
 
@@ -22,7 +22,7 @@ namespaces:
 
 # -- CNG image settings -------------------------------------------------------
 cng:
-  base_tag: v18.8.1
+  base_tag: v18.9.0
   registry: registry.gitlab.com/gitlab-org/build/cng
   local_prefix: gkg-e2e
   local_tag: local
@@ -45,7 +45,7 @@ helm:
   gitlab:
     release: gitlab
     chart: gitlab/gitlab
-    chart_version: "9.8.1"    # must match cng.base_tag (v18.8.1 → chart 9.8.1)
+    chart_version: "9.9.0"    # must match cng.base_tag (v18.9.0 → chart 9.9.0)
     repo_name: gitlab
     repo_url: https://charts.gitlab.io
     timeout: 15m
@@ -111,6 +111,16 @@ gkg:
   server_credentials_secret: gkg-server-credentials
   server_credentials_jwt_key: jwt-secret
   indexer_label: app.kubernetes.io/component=gkg-indexer
+
+# -- Port-forwards (cargo xtask e2e serve) -------------------------------------
+gitlab_ui:
+  service: gitlab-webservice-default
+  service_port: "8181"              # workhorse port (serves static assets)
+  local_port: "8929"
+  gkg_service: gkg-webserver
+  gkg_service_port: "8080"
+  gkg_local_port: "8930"
+  root_password: "G1tL4b_e2e_t3st!"    # must pass GitLab password complexity rules
 
 # -- Label selectors -----------------------------------------------------------
 labels:
