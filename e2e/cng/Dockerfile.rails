@@ -4,13 +4,12 @@
 # Usage:
 #   docker build \
 #     --build-arg BASE_IMAGE=registry.gitlab.com/gitlab-org/build/CNG-mirror/gitlab-webservice-ee \
-#     --build-arg BASE_TAG=v18.8.1 \
+#     --build-arg BASE_TAG=v18.9.0 \
 #     -f Dockerfile.rails \
 #     -t gkg-e2e/gitlab-webservice-ee:local \
-#     /path/to/gitlab-source
+#     /path/to/staged-gitlab-source
 #
-# The build context should be the root of the GitLab Rails source tree
-# (the feature branch checkout).
+# The build context should be the staged GitLab Rails source tree.
 #
 # This works for all three CNG components since they all inherit from
 # gitlab-rails-ee and keep Rails code at /srv/gitlab/:
@@ -20,10 +19,14 @@
 #
 # Layer ordering: Gemfile/gems are copied before app code so that the
 # expensive bundle install layer is cached on code-only changes.
+#
+# Webpack assets (public/assets/webpack/) are pre-compiled on the host
+# and copied in. Only the webservice image needs them -- sidekiq and
+# toolbox skip this (the directory simply won't be in the staging dir).
 # =============================================================================
 
 ARG BASE_IMAGE=registry.gitlab.com/gitlab-org/build/cng/gitlab-webservice-ee
-ARG BASE_TAG=v18.8.1
+ARG BASE_TAG=v18.9.0
 
 FROM ${BASE_IMAGE}:${BASE_TAG}
 
@@ -33,7 +36,7 @@ USER root
 # (e.g. feature flags that moved between base release and feature branch,
 # or vendored gems with new methods/APIs).
 #
-# Preserve CNG-specific puma.rb (webservice only) — the feature branch
+# Preserve CNG-specific puma.rb (webservice only) -- the feature branch
 # copy is GDK-specific with local machine paths.
 RUN cp /srv/gitlab/config/puma.rb /tmp/puma.rb.cng 2>/dev/null || true && \
     rm -rf /srv/gitlab/app/ /srv/gitlab/config/ /srv/gitlab/db/ \
@@ -55,7 +58,7 @@ RUN apt-get update -qq && \
     apt-get purge -y --auto-remove build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# --- App code layer (changes frequently → fast rebuild) -----------------------
+# --- App code layer (changes frequently -> fast rebuild) ----------------------
 COPY --chown=git:git app/           /srv/gitlab/app/
 COPY --chown=git:git config/        /srv/gitlab/config/
 
@@ -70,5 +73,10 @@ COPY --chown=git:git db/            /srv/gitlab/db/
 COPY --chown=git:git ee/            /srv/gitlab/ee/
 COPY --chown=git:git lib/           /srv/gitlab/lib/
 COPY --chown=git:git locale/        /srv/gitlab/locale/
+
+# --- Pre-built webpack assets (webservice only) -------------------------------
+# Compiled on the host via `yarn webpack-prod` and staged by xtask.
+# The COPY is a no-op when the directory is absent (sidekiq/toolbox builds).
+COPY --chown=git:git public/assets/webpack/ /srv/gitlab/public/assets/webpack/
 
 USER git

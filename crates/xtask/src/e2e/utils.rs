@@ -4,6 +4,8 @@
 //! here so that `kube.rs` stays a pure k8s primitive library.
 
 use anyhow::{Context, Result, anyhow};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 
 use crate::e2e::{config::Config, constants as c, infra::kube, ui};
 
@@ -170,9 +172,15 @@ pub async fn ch_row_counts<'a>(
 /// namespace using idempotent apply.
 pub async fn create_k8s_secrets(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     let jwt_path = &cfg.pod_paths.jwt_secret_path;
-    let jwt_secret = toolbox_exec(cfg, toolbox_pod, &["cat", jwt_path])
+    let jwt_raw = toolbox_exec(cfg, toolbox_pod, &["cat", jwt_path])
         .await
         .context("failed to read JWT secret from toolbox pod")?;
+
+    // GKG's JwtValidator base64-decodes the secret before use (to match
+    // Rails' JwtAuthenticatable convention). The shell secret file contains
+    // a raw token string, so we base64-encode it here so that GKG decodes
+    // it back to the original value that Rails signs with.
+    let jwt_secret = STANDARD.encode(jwt_raw.trim());
 
     let pg_pass = kube::read_secret(
         &cfg.namespaces.gitlab,

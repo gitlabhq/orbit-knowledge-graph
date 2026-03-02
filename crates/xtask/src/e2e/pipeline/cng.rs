@@ -24,7 +24,7 @@ use crate::e2e::{
 };
 
 /// Run all CNG deploy steps.
-pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
+pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool, skip_webpack: bool) -> Result<()> {
     ui::banner("CNG Deploy: Cluster + GitLab")?;
     ui::detail("GKG root    ", &cfg.gkg_root.display().to_string())?;
     ui::detail("GitLab src  ", &cfg.gitlab_src()?.display().to_string())?;
@@ -36,6 +36,7 @@ pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
         ),
     )?;
     ui::detail("Skip build  ", &skip_build.to_string())?;
+    ui::detail("Skip webpack", &skip_webpack.to_string())?;
 
     validate_prerequisites(cfg, skip_build)?;
     start_colima(sh, cfg).await?;
@@ -43,12 +44,13 @@ pub async fn run(sh: &Shell, cfg: &Config, skip_build: bool) -> Result<()> {
     if skip_build {
         ui::step(3, "Skipping CNG image build (--skip-build)")?;
     } else {
-        build_images(cfg).await?;
+        build_images(sh, cfg, skip_webpack).await?;
     }
     deploy_traefik(sh, cfg)?;
     deploy_gitlab(sh, cfg).await?;
     wait_for_pods(cfg).await?;
 
+    ui::info("Run `cargo xtask e2e serve` to access the GitLab UI")?;
     ui::outro("CNG deploy complete")?;
     Ok(())
 }
@@ -127,16 +129,22 @@ async fn prepull_workhorse(cfg: &Config) -> Result<()> {
 
 // -- Step 3: Build CNG images -------------------------------------------------
 
-pub(crate) async fn build_images(cfg: &Config) -> Result<()> {
+pub(crate) async fn build_images(sh: &Shell, cfg: &Config, skip_webpack: bool) -> Result<()> {
     ui::step(3, "Building custom CNG images")?;
     let gitlab_src = cfg.gitlab_src()?;
     ui::info(&format!("Source: {}", gitlab_src.display()))?;
     ui::info(&format!("Base tag: {}", cfg.cng.base_tag))?;
 
-    // Stage Rails code to a temp directory (avoids GitLab's restrictive .dockerignore).
+    // -- Webpack (host) -------------------------------------------------------
+    if skip_webpack {
+        ui::info("Webpack: skip (--skip-webpack)")?;
+    } else {
+        compile_webpack_on_host(sh, gitlab_src)?;
+    }
+
+    // -- Stage Rails code -----------------------------------------------------
     let staging_dir = tempfile::tempdir().context("creating staging directory")?;
     let staging = staging_dir.path();
-
     ui::info(&format!("Staging Rails code to {}", staging.display()))?;
 
     for dir in &cfg.cng.staging_dirs {
@@ -157,20 +165,35 @@ pub(crate) async fn build_images(cfg: &Config) -> Result<()> {
 
     // Gemfile + Gemfile.lock
     ui::detail_item("Copying Gemfile, Gemfile.lock")?;
-    fs::copy(gitlab_src.join("Gemfile"), staging.join("Gemfile"))?;
+    fs::copy(gitlab_src.join("Gemfile"), staging.join("Gemfile"))
+        .with_context(|| format!("copying Gemfile from {}", gitlab_src.display()))?;
     fs::copy(
         gitlab_src.join("Gemfile.lock"),
         staging.join("Gemfile.lock"),
+    )
+    .with_context(|| format!("copying Gemfile.lock from {}", gitlab_src.display()))?;
+
+    // Pre-built webpack assets (compiled on host above, or from a previous run).
+    let webpack_src = gitlab_src.join("public/assets/webpack");
+    if webpack_src.join("manifest.json").exists() {
+        ui::detail_item("Copying public/assets/webpack/")?;
+        let webpack_dst = staging.join("public/assets/webpack");
+        copy_dir_recursive(&webpack_src, &webpack_dst)
+            .context("copying webpack assets to staging")?;
+    } else {
+        ui::info("No pre-built webpack assets found, skipping")?;
+    }
+
+    // Create a permissive .dockerignore.
+    fs::write(
+        staging.join(".dockerignore"),
+        ".git\n**/node_modules\ntmp/\n",
     )?;
 
-    // Create a permissive .dockerignore
-    fs::write(staging.join(".dockerignore"), ".git\n")?;
-
+    // -- Docker builds --------------------------------------------------------
     let dockerfile = cfg.cng_dir.join(c::DOCKERFILE_RAILS);
     let profile = &cfg.colima.profile;
 
-    // Build images with bounded concurrency to avoid overwhelming
-    // Colima's CPU/RAM while still overlapping I/O.
     let builds: Vec<_> = cfg
         .cng
         .components
@@ -187,7 +210,7 @@ pub(crate) async fn build_images(cfg: &Config) -> Result<()> {
 
     for (tag, base_image) in &builds {
         ui::info(&format!(
-            "Queued: {tag} (base: {base_image}:{}",
+            "Queued: {tag} (base: {base_image}:{})",
             cfg.cng.base_tag
         ))?;
     }
@@ -202,7 +225,7 @@ pub(crate) async fn build_images(cfg: &Config) -> Result<()> {
         let p = profile;
         let t = tag.clone();
         async move {
-            docker::build_image(p, s, df, &t, &build_args).await?;
+            docker::build_image(p, s, df, &t, &build_args, false).await?;
             Ok(t)
         }
     }))
@@ -215,7 +238,82 @@ pub(crate) async fn build_images(cfg: &Config) -> Result<()> {
         ui::detail_item(&format!("Built: {tag}"))?;
     }
 
+    // Build custom workhorse image with feature-branch webpack assets.
+    // Workhorse serves static files, so it needs the same webpack output.
+    let workhorse_df = cfg.cng_dir.join(c::DOCKERFILE_WORKHORSE);
+    let workhorse_tag = format!(
+        "{}/{}:{}",
+        cfg.cng.local_prefix, cfg.cng.workhorse_component, cfg.cng.local_tag
+    );
+    let workhorse_base = format!("{}/{}", cfg.cng.registry, cfg.cng.workhorse_component);
+    ui::info(&format!(
+        "Building workhorse: {workhorse_tag} (base: {workhorse_base}:{})",
+        cfg.cng.base_tag
+    ))?;
+    let wh_build_args = HashMap::from([
+        ("BASE_IMAGE", workhorse_base.as_str()),
+        ("BASE_TAG", cfg.cng.base_tag.as_str()),
+    ]);
+    docker::build_image(
+        profile,
+        staging,
+        &workhorse_df,
+        &workhorse_tag,
+        &wh_build_args,
+        false,
+    )
+    .await?;
+    ui::detail_item(&format!("Built: {workhorse_tag}"))?;
+
     ui::done("All images built")?;
+    Ok(())
+}
+
+/// Run `webpack --config config/webpack.config.js` inside GITLAB_SRC on the host.
+///
+/// Reuses the host's existing `node_modules` and webpack cache for speed.
+/// Produces `public/assets/webpack/manifest.json` which is then staged
+/// into the Docker build context.
+fn compile_webpack_on_host(sh: &Shell, gitlab_src: &Path) -> Result<()> {
+    ui::info("Webpack: compiling on host")?;
+
+    let manifest = gitlab_src.join("public/assets/webpack/manifest.json");
+    if manifest.exists() {
+        ui::info("manifest.json already exists, skipping webpack build")?;
+        return Ok(());
+    }
+
+    let webpack_bin = gitlab_src.join("node_modules/.bin/webpack");
+    if !webpack_bin.exists() {
+        bail!(
+            "node_modules/.bin/webpack not found in {}.\n\
+             Run `yarn install` in your GitLab checkout first.",
+            gitlab_src.display()
+        );
+    }
+
+    let webpack = webpack_bin.to_string_lossy().into_owned();
+    let config_str = gitlab_src
+        .join("config/webpack.config.js")
+        .to_string_lossy()
+        .into_owned();
+
+    let _dir = sh.push_dir(gitlab_src);
+    xshell::cmd!(
+        sh,
+        "env NODE_ENV=production NODE_OPTIONS=--max-old-space-size=8192 {webpack} --config {config_str}"
+    )
+    .run()
+    .context("webpack compilation failed")?;
+
+    if !manifest.exists() {
+        bail!(
+            "webpack completed but manifest.json was not created at {}",
+            manifest.display()
+        );
+    }
+
+    ui::done("Webpack compiled")?;
     Ok(())
 }
 
@@ -280,14 +378,14 @@ pub(crate) async fn deploy_gitlab(sh: &Shell, cfg: &Config) -> Result<()> {
     let values_file = cfg.cng_dir.join(c::GITLAB_VALUES_YAML);
     let values_str = values_file.to_string_lossy().to_string();
 
-    let workhorse_image = format!("{}/{}", cfg.cng.registry, cfg.cng.workhorse_component);
+    let workhorse_repo = format!("{}/{}", cfg.cng.local_prefix, cfg.cng.workhorse_component);
     let webservice_repo = format!("{}/gitlab-webservice-ee", cfg.cng.local_prefix);
     let sidekiq_repo = format!("{}/gitlab-sidekiq-ee", cfg.cng.local_prefix);
     let toolbox_repo = format!("{}/gitlab-toolbox-ee", cfg.cng.local_prefix);
 
     let sets: Vec<(&str, &str)> = vec![
-        ("gitlab.webservice.workhorse.image", &workhorse_image),
-        ("gitlab.webservice.workhorse.tag", &cfg.cng.base_tag),
+        ("gitlab.webservice.workhorse.image", &workhorse_repo),
+        ("gitlab.webservice.workhorse.tag", &cfg.cng.local_tag),
         ("gitlab.webservice.image.repository", &webservice_repo),
         ("gitlab.webservice.image.tag", &cfg.cng.local_tag),
         ("gitlab.sidekiq.image.repository", &sidekiq_repo),
@@ -356,14 +454,21 @@ pub(crate) async fn wait_for_pods(cfg: &Config) -> Result<()> {
 
 // -- Helpers ------------------------------------------------------------------
 
-/// Recursively copy a directory.
+/// Directories skipped during staging (GDK artifacts, not needed in the image).
+const STAGING_SKIP_DIRS: &[&str] = &["node_modules", "tmp"];
+
+/// Recursively copy a directory, skipping entries in [`STAGING_SKIP_DIRS`].
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
+        let name = entry.file_name();
         let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
+        let dst_path = dst.join(&name);
         if src_path.is_dir() {
+            if STAGING_SKIP_DIRS.iter().any(|s| *s == name) {
+                continue;
+            }
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
             fs::copy(&src_path, &dst_path)?;

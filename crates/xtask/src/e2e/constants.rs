@@ -85,6 +85,7 @@ pub const MANIFEST_JSON: &str = "manifest.json";
 pub const TRAEFIK_VALUES_YAML: &str = "traefik-values.yaml";
 pub const GITLAB_VALUES_YAML: &str = "gitlab-values.yaml";
 pub const DOCKERFILE_RAILS: &str = "Dockerfile.rails";
+pub const DOCKERFILE_WORKHORSE: &str = "Dockerfile.workhorse";
 pub const COLIMA_START_LOG: &str = "colima-start.log";
 pub const CH_MIGRATE_LOG: &str = "clickhouse-migrate.log";
 pub const REDACTION_TEST_RB: &str = "redaction_test.rb";

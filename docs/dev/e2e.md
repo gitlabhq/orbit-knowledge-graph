@@ -27,6 +27,11 @@ cargo xtask e2e test
 cargo xtask e2e teardown
 ```
 
+```shell
+# Port-forward GitLab UI + GKG webserver
+cargo xtask e2e serve
+```
+
 Mise aliases: `mise e2e:setup`, `mise e2e:test`, `mise e2e:teardown`, `mise e2e:rebuild:gkg`, `mise e2e:rebuild:rails`, `mise e2e:rebuild:all`.
 
 ## Commands
@@ -43,6 +48,7 @@ Provisions the full environment. By default runs phases 1-2 (CNG deploy + CNG se
 | `--cng` | 1 | CNG deploy only (cluster + GitLab) |
 | `--cng-setup` | 2 | CNG setup only (PostgreSQL creds, migrations, test data) |
 | `--skip-build` | - | Reuse previously built CNG images |
+| `--skip-webpack` | - | Skip webpack asset compilation during CNG image build (faster Ruby-only rebuilds) |
 
 ### `test`
 
@@ -56,8 +62,20 @@ Fast iteration loop. Requires at least one flag.
 |------|------|--------------|
 | `--gkg` | ~2-3 min | Rebuilds GKG server image, rollout restarts all GKG deployments |
 | `--rails` | ~5-8 min | Rebuilds CNG images from `GITLAB_SRC`, runs `helm upgrade` on GitLab |
+| `--skip-webpack` | - | Skip webpack asset compilation during Rails rebuild |
 
 Flags can be combined. Migrations and test data persist across rebuilds.
+
+### `serve`
+
+Port-forwards the GitLab UI and GKG webserver to localhost. Runs in the foreground — Ctrl+C to stop.
+
+| Service | Local URL |
+|---------|-----------|
+| GitLab UI | `http://localhost:8929` |
+| GKG webserver | `http://localhost:8930` |
+
+Login with `root` / password from `config/e2e.yaml` (`gitlab_ui.root_password`).
 
 ### `teardown`
 
@@ -69,25 +87,27 @@ Flags can be combined. Migrations and test data persist across rebuilds.
 
 ## Pipeline walkthrough
 
-The setup pipeline runs 25 numbered steps across three phases.
+The setup pipeline runs numbered steps across three phases.
 
 ### Phase 1: CNG deploy (steps 1-6)
 
 1. Start Colima VM with k3s
 2. Pre-pull workhorse image from the CNG registry
-3. Build custom CNG images (webservice, sidekiq, toolbox) by overlaying Rails code from `GITLAB_SRC` onto upstream CNG base images
+3. Build custom CNG images (webservice, sidekiq, toolbox) by overlaying Rails code from `GITLAB_SRC` onto upstream CNG base images, including webpack asset compilation (use `--skip-webpack` to skip)
 4. Deploy Traefik ingress controller
 5. Deploy GitLab via Helm chart (pinned version, with `--set` overrides for image repos/tags and PostgreSQL config)
 6. Wait for all GitLab pods to be ready
 
-### Phase 2: CNG setup (steps 8-13)
+### Phase 2: CNG setup (steps 7-14)
 
 1. Bridge PostgreSQL credentials from the `gitlab` namespace to `default` *(step 8)*
 2. Grant `REPLICATION` privilege to the `gitlab` PostgreSQL user (required for siphon) *(step 9)*
 3. Run Rails `db:migrate` *(step 10)*
 4. Enable the `:knowledge_graph` feature flag *(step 11)*
-5. Copy test scripts to the toolbox pod *(step 12)*
-6. Create test data (users, groups, projects, MRs, work items, notes) via `create_test_data.rb` *(step 13)*
+5. Patch webservice ConfigMap to enable Knowledge Graph in `gitlab.yml.erb`, restart webservice *(step 7)*
+6. Copy test scripts to the toolbox pod *(step 12)*
+7. Create test data (users, groups, projects, MRs, work items, notes) via `create_test_data.rb` *(step 13)*
+8. Set root user password for UI access *(step 14)*
 
 ### Phase 3: GKG stack (steps 15-25)
 
@@ -117,6 +137,7 @@ All configurable values live in [`config/e2e.yaml`](../../config/e2e.yaml):
 | `clickhouse` | Image, service name, ports, database names, credentials |
 | `siphon` | Publication/slot names, poll timeout |
 | `gkg` | Server image, dispatch job name, gRPC endpoint |
+| `gitlab_ui` | Port-forward services/ports, root password for `serve` command |
 | `pod_readiness` | Label selectors and timeouts for GitLab and GKG pod readiness |
 | `timeouts` | ClickHouse pod, GKG chart, dispatch job, indexer poll |
 
