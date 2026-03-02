@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::destination::{BatchWriter, Destination};
-use crate::module::HandlerError;
+use crate::handler::HandlerError;
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use datafusion::datasource::MemTable;

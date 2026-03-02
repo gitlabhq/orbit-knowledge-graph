@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
-use crate::module::{Module, ModuleRegistry};
+use crate::handler::{Handler, HandlerRegistry};
 use crate::nats::{NatsBroker, NatsServices};
 
 use super::mocks::{MockDestination, MockNatsServices};
@@ -18,7 +18,7 @@ pub struct TestEngineBuilder {
     broker: Arc<NatsBroker>,
     destination: Option<Arc<dyn Destination>>,
     nats_services: Option<Arc<dyn NatsServices>>,
-    registry: Arc<ModuleRegistry>,
+    registry: Arc<HandlerRegistry>,
     configuration: EngineConfiguration,
 }
 
@@ -28,13 +28,13 @@ impl TestEngineBuilder {
             broker,
             destination: None,
             nats_services: None,
-            registry: Arc::new(ModuleRegistry::default()),
+            registry: Arc::new(HandlerRegistry::default()),
             configuration: EngineConfiguration::default(),
         }
     }
 
-    pub fn with_module(self, module: &dyn Module) -> Self {
-        self.registry.register_module(module);
+    pub fn with_handler(self, handler: Box<dyn Handler>) -> Self {
+        self.registry.register_handler(handler);
         self
     }
 

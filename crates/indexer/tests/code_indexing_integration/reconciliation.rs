@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use indexer::module::Handler;
+use indexer::handler::Handler;
 use indexer::testkit::TestEnvelopeFactory;
 use indexer::topic::ProjectCodeIndexingRequest;
 

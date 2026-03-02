@@ -28,7 +28,7 @@ let shutdown = CancellationToken::new();
 run(&config, shutdown).await?;
 ```
 
-The `run()` function connects to NATS and ClickHouse, initializes the SDLC and Code modules, and runs the engine.
+The `run()` function connects to NATS and ClickHouse, creates SDLC and Code handlers, registers them, and runs the engine.
 
 ## Domain modules
 
@@ -44,15 +44,23 @@ Indexes git repositories via Gitaly. Fetches archives on push events, runs the c
 
 ### Handlers
 
-A handler listens to one topic and processes messages from it. Return `Ok(())` to ack, return an error to nack (the message gets redelivered).
+A handler listens to one topic and processes messages from it. Return `Ok(())` to ack, return an error to nack (the message gets redelivered). Each handler provides its own `engine_config()` controlling retry policy and concurrency group.
 
 ```rust
 pub struct UserCreatedHandler;
 
 #[async_trait]
 impl Handler for UserCreatedHandler {
-    fn topic(&self) -> &str {
-        "user-events"
+    fn name(&self) -> &str {
+        "user-created"
+    }
+
+    fn topic(&self) -> Topic {
+        Topic::new("users", "user.created")
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        &self.config.engine
     }
 
     async fn handle(
@@ -62,48 +70,19 @@ impl Handler for UserCreatedHandler {
     ) -> Result<(), HandlerError> {
         let event: UserCreatedEvent = envelope.to_event()?;
 
-        let writer = context.destination.new_batch_writer(&self.entity()).await?;
-        writer.write_batch(&[self.to_record_batch(&event)?]).await?;
+        let writer = context.destination.new_batch_writer("users").await?;
+        writer.write_batch(&[to_record_batch(&event)?]).await?;
 
         Ok(())
     }
 }
 ```
 
-### Modules
-
-Modules group handlers together. They also declare what entities (tables) the handlers produce.
+Handlers are registered directly in a `HandlerRegistry`:
 
 ```rust
-pub struct UserModule;
-
-impl Module for UserModule {
-    fn name(&self) -> &str {
-        "user-module"
-    }
-
-    fn handlers(&self) -> Vec<Box<dyn Handler>> {
-        vec![
-            Box::new(UserCreatedHandler),
-            Box::new(UserUpdatedHandler),
-            Box::new(UserDeletedHandler),
-        ]
-    }
-
-    fn entities(&self) -> Vec<Entity> {
-        vec![
-            Entity::Node {
-                name: "users".to_string(),
-                fields: vec![
-                    Field::new("id", DataType::String, false),
-                    Field::new("email", DataType::String, false),
-                    Field::new("created_at", DataType::DateTime, false),
-                ],
-                primary_keys: vec!["id".to_string()],
-            },
-        ]
-    }
-}
+let registry = HandlerRegistry::default();
+registry.register_handler(Box::new(UserCreatedHandler::new(config)));
 ```
 
 ### Envelopes
@@ -133,7 +112,7 @@ pub trait BatchWriter: Send + Sync {
 
 #[async_trait]
 pub trait Destination: Send + Sync {
-    async fn new_batch_writer(&self, entity: &Entity) -> Result<Box<dyn BatchWriter>, DestinationError>;
+    async fn new_batch_writer(&self, table: &str) -> Result<Box<dyn BatchWriter>, DestinationError>;
 }
 ```
 
@@ -154,7 +133,7 @@ let config = ClickHouseConfiguration {
 };
 
 let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))?;
-let writer = destination.new_batch_writer(&entity).await?;
+let writer = destination.new_batch_writer("users").await?;
 writer.write_batch(&batches).await?;
 ```
 
@@ -168,60 +147,37 @@ pub struct IndexerConfig {
     pub graph: ClickHouseConfiguration,
     pub datalake: ClickHouseConfiguration,
     pub engine: EngineConfiguration,
-    pub gitaly: Option<GitalyConfiguration>,
-    pub code_indexing: CodeIndexingConfig,
+    pub gitlab: Option<GitlabClientConfiguration>,
 }
 ```
 
-`EngineConfiguration` controls concurrency limits. It implements `Serialize` and `Deserialize`, so you can load it from a config file.
+`EngineConfiguration` controls concurrency and per-handler settings:
 
 ```toml
 # config.toml
-max_concurrent_workers = 32
+max_concurrent_workers = 16
 
-[modules.heavy-processing-module]
-max_concurrency = 4
+[concurrency_groups]
+sdlc = 12
+code = 4
+
+[handlers.global-handler]
+concurrency_group = "sdlc"
+max_attempts = 1
+
+[handlers.code-push-event]
+concurrency_group = "code"
+max_attempts = 5
+retry_interval_secs = 60
 ```
 
-### Why two concurrency limits?
+### Why two concurrency levels?
 
-The global limit caps total concurrency across the engine, protecting shared resources like CPU and database connections.
+The global limit (`max_concurrent_workers`) caps total concurrency across the engine, protecting shared resources like CPU and database connections.
 
-Per-module limits let you run multiple indexers in a single pod without one starving the others. For example, give the SDLC and Code modules each a limit of 4 with a global limit of 6. Neither module can monopolize all workers, but both can burst when the other is idle.
+Per-handler concurrency groups let you run multiple handler types in a single pod without one starving the others. For example, give the SDLC and Code handlers each a group limit so neither can monopolize all workers, but both can burst when the other is idle.
 
-If you only need a global limit, skip the per-module config.
-
-## Entities
-
-Entities describe what handlers produce. There are two kinds:
-
-`Node` is a standalone record (like a ClickHouse table):
-
-```rust
-Entity::Node {
-    name: "users".to_string(),
-    fields: vec![
-        Field::new("id", DataType::String, false),
-        Field::new("email", DataType::String, false),
-        Field::new("age", DataType::Int, true), // nullable
-    ],
-    primary_keys: vec!["id".to_string()],
-}
-```
-
-`Edge` is a relationship between nodes:
-
-```rust
-Entity::Edge {
-    source: "user_id".to_string(),
-    source_type: "users".to_string(),
-    target: "org_id".to_string(),
-    target_type: "organizations".to_string(),
-    relationship_type: "belongs_to".to_string(),
-}
-```
-
-Supported types: `String`, `Int`, `Float`, `Bool`, `DateTime`.
+If you only need a global limit, skip the concurrency group config.
 
 ## Errors
 
@@ -231,9 +187,9 @@ Three error types, nested:
 - `HandlerError` has `Processing(String)` and `Deserialization(serde_json::Error)`
 - `BrokerError` has variants for publish, subscribe, ack, nack, connection issues, etc.
 
-When a handler returns an error, the engine nacks the message so the broker can redeliver it.
+When a handler returns an error, the engine nacks the message so the broker can redeliver it (if retries are configured for that handler).
 
-`IndexerError` wraps top-level failures: NATS connection, ClickHouse connection, Gitaly configuration, engine errors, and module initialization.
+`IndexerError` wraps top-level failures: NATS connection, ClickHouse connection, engine errors, and handler initialization.
 
 ## Testing
 
@@ -241,7 +197,6 @@ The `testkit` module has mocks for everything:
 
 ```rust
 use indexer::testkit::{
-    MockMessageBroker,
     MockDestination,
     TestEngineBuilder,
     TestEnvelopeFactory,
@@ -249,24 +204,11 @@ use indexer::testkit::{
 
 #[tokio::test]
 async fn test_user_handler() {
-    let broker = MockMessageBroker::new();
-    let destination = MockDestination::new();
-
-    let envelope = TestEnvelopeFactory::new()
-        .with_payload(serde_json::to_vec(&UserCreatedEvent { id: "123" }).unwrap())
-        .build();
-    broker.queue_message("user-events", envelope);
-
-    let engine = TestEngineBuilder::new()
-        .with_broker(broker)
-        .with_destination(destination.clone())
-        .with_module(UserModule)
+    let (engine, config) = TestEngineBuilder::new(broker)
+        .with_handler(Box::new(UserCreatedHandler::new()))
         .build();
 
-    engine.run_once().await.unwrap();
-
-    let writes = destination.get_writes("users");
-    assert_eq!(writes.len(), 1);
+    // publish message, run engine, assert writes...
 }
 ```
 

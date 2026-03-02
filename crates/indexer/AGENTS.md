@@ -15,7 +15,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 | Component | File | Purpose |
 |-----------|------|---------|
 | Engine | `engine.rs` | Message dispatch and lifecycle |
-| ModuleRegistry | `module.rs` | Handler-to-topic routing |
+| HandlerRegistry | `handler.rs` | Handler-to-topic routing |
 | NatsBroker | `nats/broker.rs` | JetStream connection |
 | WorkerPool | `worker_pool.rs` | Concurrency control |
 | Destination | `destination.rs` | Output abstraction |
@@ -25,19 +25,18 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 | Module | Directory | Purpose |
 |--------|-----------|---------|
-| CodeModule | `modules/code/` | Git repository indexing via Gitaly, call graph extraction |
-| SdlcModule | `modules/sdlc/` | SDLC entity indexing (projects, MRs, CI, issues, etc.) |
+| `create_code_handlers` | `modules/code/` | Git repository indexing via Gitaly, call graph extraction |
+| `create_sdlc_handlers` | `modules/sdlc/` | SDLC entity indexing (projects, MRs, CI, issues, etc.) |
 
 ### Traits
 
-- **Handler**: Message processor (`name`, `topic`, `handle`)
-- **Module**: Groups handlers and entities
+- **Handler**: Message processor (`name`, `topic`, `engine_config`, `handle`)
 - **Destination**: Provides BatchWriter or StreamWriter
 - **Event**: Type-safe message serialization
 
 ### Entry point
 
-The `run()` function in `lib.rs` wires everything together: connects to NATS and ClickHouse, initializes domain modules, builds the engine, and runs until shutdown.
+The `run()` function in `lib.rs` wires everything together: connects to NATS and ClickHouse, creates handlers via `create_sdlc_handlers()` and `create_code_handlers()`, registers them in a `HandlerRegistry`, builds the engine, and runs until shutdown.
 
 `IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, Gitaly, code indexing).
 
@@ -66,16 +65,10 @@ Located in `testkit/`:
 ### Adding a handler
 
 1. Define event type implementing `Event`
-2. Create handler implementing `Handler`
-3. Register in a module's `handlers()` method
-
-### Adding a module
-
-1. Implement `Module` trait
-2. Return handlers via `handlers()`
-3. Register with `ModuleRegistry::register()`
+2. Create handler implementing `Handler` (including `engine_config()`)
+3. Register in `create_sdlc_handlers()` or `create_code_handlers()`
 
 ### Concurrency
 
 - `max_concurrent_workers`: Global limit (default 16)
-- Per-module limits configurable via `EngineConfiguration`
+- Per-handler concurrency groups configurable via `EngineConfiguration`

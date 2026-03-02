@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use indexer::module::Handler;
+use indexer::handler::Handler;
 use indexer::modules::code::PushEventHandler;
 use indexer::testkit::TestEnvelopeFactory;
 use prost::Message;

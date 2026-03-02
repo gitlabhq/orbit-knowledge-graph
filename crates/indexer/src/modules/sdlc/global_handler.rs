@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::configuration::HandlerConfiguration;
-use crate::module::{Handler, HandlerContext, HandlerError};
+use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};

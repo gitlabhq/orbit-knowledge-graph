@@ -5,7 +5,7 @@
 //!
 //! # Usage
 //!
-//! Handlers receive `NatsServices` via [`HandlerContext`](crate::module::HandlerContext):
+//! Handlers receive `NatsServices` via [`HandlerContext`](crate::handler::HandlerContext):
 //!
 //! ```ignore
 //! async fn handle(&self, ctx: HandlerContext, envelope: Envelope) -> Result<(), HandlerError> {
