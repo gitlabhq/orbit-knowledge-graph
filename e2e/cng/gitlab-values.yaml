@@ -14,16 +14,14 @@
 
 global:
   hosts:
-    domain: gitlab.test
+    domain: localhost
     https: false
     gitlab:
-      name: gitlab.gitlab.test
+      name: localhost
 
   ingress:
+    enabled: false
     configureCertmanager: false
-    class: traefik
-    tls:
-      enabled: false
 
   kas:
     enabled: false
@@ -49,6 +47,7 @@ global:
   # config and prevents pods from starting.
   extraEnv:
     SKIP_CLICKHOUSE_SCHEMA_VERSION_CHECK: "YesReally"
+    KNOWLEDGE_GRAPH_GRPC_ENDPOINT: "dns:///gkg-webserver.default.svc.cluster.local:50054"
 
   appConfig:
     enableUsagePing: false
@@ -93,10 +92,10 @@ gitlab:
       repository: gkg-e2e/gitlab-webservice-ee
       tag: local
       pullPolicy: Never
-    workhorse:  # overridden by --set from config.yaml cng.base_tag
-      image: registry.gitlab.com/gitlab-org/build/cng/gitlab-workhorse-ee
-      tag: v18.8.1
-      pullPolicy: IfNotPresent
+    workhorse:  # overridden by --set from xtask (custom image with webpack assets)
+      image: gkg-e2e/gitlab-workhorse-ee
+      tag: local
+      pullPolicy: Never
     resources:
       requests:
         cpu: 100m

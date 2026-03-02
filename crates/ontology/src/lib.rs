@@ -89,6 +89,8 @@ pub struct Ontology {
     schema_version: String,
     /// Prefix for all ClickHouse graph table names (e.g., `"gl_"`).
     table_prefix: String,
+    /// ClickHouse table name for all graph edges (e.g., `"gl_edge"`).
+    edge_table: String,
     domains: BTreeMap<String, DomainInfo>,
     nodes: BTreeMap<String, NodeEntity>,
     edges: BTreeMap<String, Vec<EdgeEntity>>,
@@ -110,6 +112,7 @@ impl Ontology {
         Self {
             schema_version: String::new(),
             table_prefix: GL_TABLE_PREFIX.to_string(),
+            edge_table: EDGE_TABLE.to_string(),
             domains: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
@@ -251,6 +254,14 @@ impl Ontology {
         let mut ontology = Ontology::new();
         ontology.schema_version = schema.schema_version.unwrap_or_default();
         ontology.table_prefix = schema.settings.table_prefix;
+        ontology.edge_table = schema.settings.edge_table;
+
+        if !ontology.edge_table.starts_with(&ontology.table_prefix) {
+            return Err(OntologyError::Validation(format!(
+                "edge_table '{}' does not start with table_prefix '{}'",
+                ontology.edge_table, ontology.table_prefix
+            )));
+        }
 
         for (domain_name, domain) in &schema.domains {
             let mut node_names = Vec::new();
@@ -468,6 +479,12 @@ impl Ontology {
     #[must_use]
     pub fn table_prefix(&self) -> &str {
         &self.table_prefix
+    }
+
+    /// ClickHouse table name for all graph edges.
+    #[must_use]
+    pub fn edge_table(&self) -> &str {
+        &self.edge_table
     }
 
     pub fn domains(&self) -> impl Iterator<Item = &DomainInfo> {
@@ -797,6 +814,7 @@ struct SchemaYaml {
 #[derive(Debug, Deserialize)]
 struct SettingsYaml {
     table_prefix: String,
+    edge_table: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1722,6 +1740,7 @@ mod tests {
 schema_version: "1.0"
 settings:
   table_prefix: "kg_"
+  edge_table: "kg_edge"
 domains:
   core:
     nodes:

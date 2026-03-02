@@ -277,7 +277,7 @@ mod tests {
         }
     }
 
-    fn create_test_node(name: &str, destination_table: &str, source: &str) -> NodeEntity {
+    fn create_test_node(name: &str, source: &str) -> NodeEntity {
         NodeEntity {
             name: name.to_string(),
             fields: vec![Field {
@@ -288,7 +288,11 @@ mod tests {
                 enum_values: None,
                 enum_type: ontology::EnumType::default(),
             }],
-            destination_table: destination_table.to_string(),
+            destination_table: format!(
+                "{}{}",
+                ontology::constants::GL_TABLE_PREFIX,
+                name.to_lowercase()
+            ),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Global,
                 source: source.to_string(),
@@ -304,8 +308,8 @@ mod tests {
     async fn handle_processes_pipelines() {
         let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
-        let user_node = create_test_node("User", "gl_user", "siphon_users");
-        let project_node = create_test_node("Project", "gl_project", "siphon_projects");
+        let user_node = create_test_node("User", "siphon_users");
+        let project_node = create_test_node("Project", "siphon_projects");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(
@@ -348,7 +352,7 @@ mod tests {
     async fn handler_releases_lock_on_success() {
         let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
-        let user_node = create_test_node("User", "gl_user", "siphon_users");
+        let user_node = create_test_node("User", "siphon_users");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(&user_node, &ontology, datalake, test_metrics())
@@ -391,7 +395,7 @@ mod tests {
     async fn watermark_updated_when_rows_indexed() {
         let datalake = Arc::new(NonEmptyDatalake);
         let ontology = Ontology::new();
-        let user_node = create_test_node("User", "gl_user", "siphon_users");
+        let user_node = create_test_node("User", "siphon_users");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(&user_node, &ontology, datalake, test_metrics())
@@ -433,7 +437,7 @@ mod tests {
     async fn watermark_not_updated_when_no_rows_indexed() {
         let datalake = Arc::new(EmptyDatalake);
         let ontology = Ontology::new();
-        let user_node = create_test_node("User", "gl_user", "siphon_users");
+        let user_node = create_test_node("User", "siphon_users");
 
         let pipelines = vec![
             OntologyEntityPipeline::from_node(&user_node, &ontology, datalake, test_metrics())

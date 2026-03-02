@@ -61,8 +61,9 @@ impl IndexerTestExt for TestContext {
 
     async fn get_namespace_handler(&self) -> Arc<dyn Handler> {
         let indexer_config = create_test_indexer_config(&self.config);
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let registry = HandlerRegistry::default();
-        indexer::modules::sdlc::register_handlers(&registry, &indexer_config)
+        indexer::modules::sdlc::register_handlers(&registry, &indexer_config, &ontology)
             .await
             .expect("failed to create SDLC handlers");
         registry
@@ -72,8 +73,9 @@ impl IndexerTestExt for TestContext {
 
     async fn get_global_handler(&self) -> Arc<dyn Handler> {
         let indexer_config = create_test_indexer_config(&self.config);
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let registry = HandlerRegistry::default();
-        indexer::modules::sdlc::register_handlers(&registry, &indexer_config)
+        indexer::modules::sdlc::register_handlers(&registry, &indexer_config, &ontology)
             .await
             .expect("failed to create SDLC handlers");
         registry

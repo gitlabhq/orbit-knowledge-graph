@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use crate::IndexerConfig;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
 pub use project_code_indexing_handler::ProjectCodeIndexingHandlerConfig;
@@ -43,6 +44,7 @@ pub use watermark_store::ClickHouseCodeWatermarkStore;
 pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
+    ontology: &ontology::Ontology,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
         tracing::info!("Code handlers disabled (GitLab client not configured)");
@@ -52,9 +54,11 @@ pub fn register_handlers(
     let push_event_config = config.engine.handlers.code_push_event.clone();
     let project_reconciliation_config = config.engine.handlers.code_project_reconciliation.clone();
 
+    let table_names =
+        Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
+
     let gitlab_client =
         Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
-
     let client = Arc::new(config.graph.build_client());
 
     let repository_service: Arc<dyn RepositoryService> =
@@ -63,8 +67,9 @@ pub fn register_handlers(
         Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(&client)));
     let project_store: Arc<dyn project_store::ProjectStore> =
         Arc::new(ClickHouseProjectStore::new(Arc::clone(&client)));
-    let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> =
-        Arc::new(stale_data_cleaner::ClickHouseStaleDataCleaner::new(client));
+    let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
+        stale_data_cleaner::ClickHouseStaleDataCleaner::new(client, &table_names),
+    );
     let push_event_store: Arc<dyn push_event_store::PushEventStore> = Arc::new(
         push_event_store::ClickHousePushEventStore::new(config.datalake.build_client()),
     );
@@ -75,6 +80,7 @@ pub fn register_handlers(
         Arc::clone(&watermark_store),
         stale_data_cleaner,
         metrics.clone(),
+        table_names,
     ));
 
     registry.register_handler(Box::new(PushEventHandler::new(

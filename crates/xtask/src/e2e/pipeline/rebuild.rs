@@ -23,7 +23,13 @@ use super::{cng, gkg};
 /// helm upgrade of GitLab.
 /// When `gkg` is true, rebuilds the GKG server image and rollout restarts
 /// all GKG deployments.
-pub async fn run(sh: &Shell, cfg: &Config, gkg: bool, rails: bool) -> Result<()> {
+pub async fn run(
+    sh: &Shell,
+    cfg: &Config,
+    gkg: bool,
+    rails: bool,
+    skip_webpack: bool,
+) -> Result<()> {
     let label = match (rails, gkg) {
         (true, true) => "Rails + GKG Rebuild",
         (true, false) => "Rails Rebuild",
@@ -33,7 +39,7 @@ pub async fn run(sh: &Shell, cfg: &Config, gkg: bool, rails: bool) -> Result<()>
     ui::banner(label)?;
 
     if rails {
-        cng::build_images(cfg).await?;
+        cng::build_images(sh, cfg, skip_webpack).await?;
         cng::deploy_gitlab(sh, cfg).await?;
         cng::wait_for_pods(cfg).await?;
     }
