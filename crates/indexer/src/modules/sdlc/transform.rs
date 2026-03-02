@@ -148,7 +148,7 @@ mod tests {
     use crate::modules::sdlc::prepare::PreparedEtlConfig;
     use ontology::{
         DataType, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, Field, NodeEntity,
-        Ontology,
+        Ontology, constants::GL_TABLE_PREFIX,
     };
     use std::collections::BTreeMap;
 
@@ -194,7 +194,7 @@ mod tests {
                     enum_type: ontology::EnumType::Int,
                 },
             ],
-            destination_table: "gl_user".to_string(),
+            destination_table: format!("{GL_TABLE_PREFIX}user"),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Global,
                 source: "siphon_users".to_string(),
@@ -251,7 +251,7 @@ mod tests {
         let node = NodeEntity {
             name: "Group".to_string(),
             domain: "core".to_string(),
-            destination_table: "gl_group".to_string(),
+            destination_table: format!("{GL_TABLE_PREFIX}group"),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
                 source: "siphon_groups".to_string(),
@@ -290,7 +290,7 @@ mod tests {
         let node = NodeEntity {
             name: "Note".to_string(),
             domain: "core".to_string(),
-            destination_table: "gl_note".to_string(),
+            destination_table: format!("{GL_TABLE_PREFIX}note"),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
                 source: "siphon_notes".to_string(),
@@ -329,7 +329,7 @@ mod tests {
         let node = NodeEntity {
             name: "WorkItem".to_string(),
             domain: "plan".to_string(),
-            destination_table: "gl_work_item".to_string(),
+            destination_table: format!("{GL_TABLE_PREFIX}work_item"),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
                 source: "hierarchy_work_items".to_string(),
@@ -370,7 +370,7 @@ mod tests {
         let node = NodeEntity {
             name: "WorkItem".to_string(),
             domain: "plan".to_string(),
-            destination_table: "gl_work_item".to_string(),
+            destination_table: format!("{GL_TABLE_PREFIX}work_item"),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
                 source: "hierarchy_work_items".to_string(),

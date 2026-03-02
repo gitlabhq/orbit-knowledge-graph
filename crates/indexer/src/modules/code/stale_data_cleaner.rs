@@ -3,11 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::future::try_join_all;
-use ontology::constants::EDGE_TABLE;
 use thiserror::Error;
 use tracing::debug;
 
-use super::config::tables;
+use super::config::CodeTableNames;
 use crate::clickhouse::ArrowClickHouseClient;
 
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.6f";
@@ -41,21 +40,24 @@ pub enum StaleDataCleanerError {
 
 pub struct ClickHouseStaleDataCleaner {
     client: Arc<ArrowClickHouseClient>,
-    node_queries: Vec<(&'static str, String)>,
+    node_queries: Vec<(String, String)>,
+    edge_table: String,
     edge_query: String,
 }
 
 impl ClickHouseStaleDataCleaner {
-    pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        let node_queries = tables::all()
+    pub fn new(client: Arc<ArrowClickHouseClient>, table_names: &CodeTableNames) -> Self {
+        let node_queries = table_names
+            .node_tables()
             .iter()
-            .map(|table| (*table, Self::build_node_delete_query(table)))
+            .map(|table| (table.to_string(), Self::build_node_delete_query(table)))
             .collect();
 
         Self {
             client,
             node_queries,
-            edge_query: Self::build_edge_delete_query(),
+            edge_table: table_names.edge.clone(),
+            edge_query: Self::build_edge_delete_query(&table_names.edge),
         }
     }
 
@@ -79,7 +81,7 @@ impl ClickHouseStaleDataCleaner {
         )
     }
 
-    fn build_edge_delete_query() -> String {
+    fn build_edge_delete_query(edge_table: &str) -> String {
         let source_kinds = CODE_EDGE_SOURCE_KINDS
             .iter()
             .map(|k| format!("'{k}'"))
@@ -88,7 +90,7 @@ impl ClickHouseStaleDataCleaner {
 
         format!(
             r#"
-            INSERT INTO {EDGE_TABLE}
+            INSERT INTO {edge_table}
                 (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _deleted)
             SELECT
                 traversal_path,
@@ -98,7 +100,7 @@ impl ClickHouseStaleDataCleaner {
                 target_id,
                 target_kind,
                 true AS _deleted
-            FROM {EDGE_TABLE}
+            FROM {edge_table}
             WHERE traversal_path = {{traversal_path:String}}
               AND source_kind IN ({source_kinds})
             GROUP BY traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind
@@ -152,7 +154,7 @@ impl ClickHouseStaleDataCleaner {
             .execute()
             .await
             .map_err(|e| StaleDataCleanerError::Query {
-                table: EDGE_TABLE.to_string(),
+                table: self.edge_table.clone(),
                 traversal_path: traversal_path.to_string(),
                 project_id: 0,
                 branch: String::new(),

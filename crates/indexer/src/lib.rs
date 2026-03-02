@@ -28,7 +28,6 @@
 //!
 pub mod clickhouse;
 pub mod configuration;
-pub mod constants;
 pub mod destination;
 pub mod dispatcher;
 pub mod engine;
@@ -137,11 +136,14 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
 
     let registry = Arc::new(HandlerRegistry::default());
 
+    info!("loading embedded ontology");
+    let ontology = ontology::Ontology::load_embedded().map_err(HandlerInitError::new)?;
+
     info!("initializing SDLC handlers");
-    modules::sdlc::register_handlers(&registry, config).await?;
+    modules::sdlc::register_handlers(&registry, config, &ontology).await?;
 
     info!("initializing Code handlers");
-    modules::code::register_handlers(&registry, config)?;
+    modules::code::register_handlers(&registry, config, &ontology)?;
 
     info!(topics = registry.topics().len(), "registered handlers");
 

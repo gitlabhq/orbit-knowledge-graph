@@ -8,7 +8,6 @@ use arrow::record_batch::RecordBatch;
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use futures::StreamExt;
-use ontology::constants::EDGE_TABLE;
 use ontology::{EdgeSourceEtlConfig, NodeEntity, Ontology};
 use serde_json::Value;
 use tracing::{debug, info};
@@ -23,6 +22,7 @@ use super::transform::{
 pub struct OntologyEntityPipeline {
     entity_name: String,
     destination_table: String,
+    edge_table: String,
     extract_query: String,
     transform_sql: String,
     edge_transforms: Vec<String>,
@@ -44,6 +44,7 @@ impl OntologyEntityPipeline {
         Some(Self {
             entity_name: config.node_kind,
             destination_table: config.destination_table,
+            edge_table: ontology.edge_table().to_string(),
             extract_query: config.extract_query,
             transform_sql,
             edge_transforms,
@@ -74,7 +75,7 @@ impl OntologyEntityPipeline {
             })?;
 
         let edge_writer = destination
-            .new_batch_writer(EDGE_TABLE)
+            .new_batch_writer(&self.edge_table)
             .await
             .map_err(|e| {
                 HandlerError::Processing(format!(
@@ -257,6 +258,7 @@ impl OntologyEntityPipeline {
 /// Unlike `OntologyEntityPipeline`, this only produces edges (no nodes).
 pub struct OntologyEdgePipeline {
     relationship_kind: String,
+    edge_table: String,
     extract_query: String,
     transform_sql: String,
     datalake: Arc<dyn DatalakeQuery>,
@@ -276,6 +278,7 @@ impl OntologyEdgePipeline {
 
         Self {
             relationship_kind: relationship_kind.to_string(),
+            edge_table: ontology.edge_table().to_string(),
             extract_query: prepared.extract_query,
             transform_sql,
             datalake,
@@ -295,7 +298,7 @@ impl OntologyEdgePipeline {
         let started_at = Instant::now();
 
         let edge_writer = destination
-            .new_batch_writer(EDGE_TABLE)
+            .new_batch_writer(&self.edge_table)
             .await
             .map_err(|e| {
                 HandlerError::Processing(format!(
@@ -471,7 +474,7 @@ mod tests {
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream};
     use async_trait::async_trait;
     use futures::stream;
-    use ontology::{DataType, EtlConfig, EtlScope, Field};
+    use ontology::{DataType, EtlConfig, EtlScope, Field, constants::GL_TABLE_PREFIX};
     use std::collections::BTreeMap;
 
     fn test_metrics() -> SdlcMetrics {
@@ -516,7 +519,7 @@ mod tests {
                     enum_type: ontology::EnumType::default(),
                 },
             ],
-            destination_table: "gl_user".to_string(),
+            destination_table: format!("{GL_TABLE_PREFIX}user"),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Global,
                 source: "siphon_users".to_string(),

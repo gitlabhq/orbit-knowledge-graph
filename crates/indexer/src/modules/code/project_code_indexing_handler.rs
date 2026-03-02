@@ -245,11 +245,18 @@ mod tests {
 
             let watermark_store: Arc<dyn CodeWatermarkStore> = mock_watermarks.clone();
 
+            let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+            let table_names = Arc::new(
+                crate::modules::code::config::CodeTableNames::from_ontology(&ontology)
+                    .expect("code tables must resolve"),
+            );
+
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 Arc::clone(&repository_service),
                 Arc::clone(&watermark_store),
                 stale_data_cleaner,
                 metrics.clone(),
+                table_names,
             ));
 
             let handler = ProjectCodeIndexingHandler::new(
