@@ -5,6 +5,7 @@ domain: core
 description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
 label: id
 destination_table: gl_note
+default_columns: [id, noteable_type, noteable_id, created_at]
 
 style:
   size: 24

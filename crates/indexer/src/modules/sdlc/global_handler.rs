@@ -280,9 +280,6 @@ mod tests {
     fn create_test_node(name: &str, destination_table: &str, source: &str) -> NodeEntity {
         NodeEntity {
             name: name.to_string(),
-            domain: String::new(),
-            description: String::new(),
-            label: String::new(),
             fields: vec![Field {
                 name: "id".to_string(),
                 source: "id".to_string(),
@@ -291,7 +288,6 @@ mod tests {
                 enum_values: None,
                 enum_type: ontology::EnumType::default(),
             }],
-            primary_keys: vec!["id".to_string()],
             destination_table: destination_table.to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Global,
@@ -300,8 +296,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges: BTreeMap::new(),
             }),
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         }
     }
 

@@ -5,6 +5,7 @@ domain: security
 description: A security scan execution that produces findings within a CI/CD pipeline
 label: id
 destination_table: gl_security_scan
+default_columns: [id, scan_type, status]
 
 style:
   size: 26

@@ -5,6 +5,7 @@ domain: security
 description: A specific occurrence of a vulnerability detected in a project
 label: uuid
 destination_table: gl_vulnerability_occurrence
+default_columns: [id, uuid, name, severity, report_type]
 
 style:
   size: 28

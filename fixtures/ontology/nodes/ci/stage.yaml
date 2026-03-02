@@ -5,6 +5,7 @@ domain: ci
 description: A stage within a CI/CD pipeline that groups related jobs (e.g., build, test, deploy)
 label: name
 destination_table: gl_stage
+default_columns: [id, name, status]
 
 style:
   size: 26

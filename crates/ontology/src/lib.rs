@@ -33,7 +33,7 @@ pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 use rust_embed::Embed;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::path::Path;
 
@@ -127,15 +127,8 @@ impl Ontology {
                 name.clone(),
                 NodeEntity {
                     name: name.clone(),
-                    domain: String::new(),
-                    description: String::new(),
-                    label: String::new(),
-                    fields: vec![],
-                    primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
                     destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
-                    etl: None,
-                    redaction: None,
-                    style: NodeStyle::default(),
+                    ..Default::default()
                 },
             );
         }
@@ -800,6 +793,8 @@ struct NodeYaml {
     #[serde(default)]
     properties: BTreeMap<String, PropertyYaml>,
     #[serde(default)]
+    default_columns: Vec<String>,
+    #[serde(default)]
     etl: Option<EtlYaml>,
     #[serde(default)]
     redaction: Option<RedactionYaml>,
@@ -988,6 +983,17 @@ impl NodeYaml {
             }
         }
 
+        // Validate default_columns reference declared properties
+        let field_names: HashSet<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+        for col in &self.default_columns {
+            if !field_names.contains(col.as_str()) {
+                return Err(OntologyError::Validation(format!(
+                    "default_columns entry '{}' is not a declared property of node '{}'",
+                    col, name
+                )));
+            }
+        }
+
         // Convert ETL config
         let etl = self.etl.map(|e| e.into_config()).transpose()?;
 
@@ -1009,6 +1015,7 @@ impl NodeYaml {
             label: self.label,
             fields,
             primary_keys,
+            default_columns: self.default_columns,
             destination_table: self.destination_table,
             etl,
             redaction,
@@ -1497,7 +1504,6 @@ mod tests {
         let node = NodeEntity {
             name: "User".to_string(),
             domain: "core".to_string(),
-            description: String::new(),
             label: "username".to_string(),
             fields: vec![Field {
                 name: "status".to_string(),
@@ -1507,11 +1513,8 @@ mod tests {
                 enum_values: Some(enum_values),
                 enum_type: EnumType::Int,
             }],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_user".to_string(),
-            etl: None,
-            redaction: None,
-            style: NodeStyle::default(),
+            ..Default::default()
         };
 
         let mut ontology = Ontology::new();
@@ -1776,5 +1779,117 @@ style:
                 "{entity} should require redaction"
             );
         }
+    }
+
+    // --- default_columns tests ---
+
+    #[test]
+    fn default_columns_loaded_from_ontology() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        let user = ontology.get_node("User").expect("User should exist");
+        assert_eq!(
+            user.default_columns,
+            vec!["id", "username", "name", "state"]
+        );
+
+        let mr = ontology
+            .get_node("MergeRequest")
+            .expect("MergeRequest should exist");
+        assert_eq!(
+            mr.default_columns,
+            vec![
+                "id",
+                "iid",
+                "title",
+                "state",
+                "source_branch",
+                "target_branch"
+            ]
+        );
+
+        let label = ontology.get_node("Label").expect("Label should exist");
+        assert_eq!(label.default_columns, vec!["id", "title", "color"]);
+
+        let definition = ontology
+            .get_node("Definition")
+            .expect("Definition should exist");
+        assert_eq!(
+            definition.default_columns,
+            vec!["id", "name", "fqn", "definition_type", "file_path"]
+        );
+    }
+
+    #[test]
+    fn all_nodes_have_default_columns() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        for node in ontology.nodes() {
+            assert!(
+                !node.default_columns.is_empty(),
+                "{} should have default_columns defined",
+                node.name
+            );
+        }
+    }
+
+    #[test]
+    fn default_columns_rejects_unknown_property() {
+        let yaml = r#"
+node_type: TestNode
+domain: test
+description: A test node
+label: name
+destination_table: gl_test
+default_columns: [id, nonexistent_field]
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "ID"
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Name"
+"#;
+        let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let err = node_def.into_entity("TestNode".to_string()).unwrap_err();
+        assert!(
+            err.to_string().contains("nonexistent_field"),
+            "error should mention the bad column name, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("not a declared property"),
+            "error should explain the validation failure, got: {err}"
+        );
+    }
+
+    #[test]
+    fn default_columns_empty_is_valid() {
+        let yaml = r#"
+node_type: TestNode
+domain: test
+description: A test node
+label: name
+destination_table: gl_test
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "ID"
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Name"
+"#;
+        let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let entity = node_def
+            .into_entity("TestNode".to_string())
+            .expect("should succeed");
+        assert!(entity.default_columns.is_empty());
     }
 }

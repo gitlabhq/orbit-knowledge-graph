@@ -281,6 +281,13 @@
           "description": "Property definitions for this node.",
           "additionalProperties": { "$ref": "#/definitions/propertyDefinition" }
         },
+        "default_columns": {
+          "type": "array",
+          "description": "Columns returned by default when this node appears in dynamic query results (e.g., path finding, neighbors). If omitted, all columns are returned.",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
         "etl": { "$ref": "#/definitions/etlConfig" },
         "redaction": {
           "oneOf": [
@@ -290,7 +297,7 @@
           "description": "Redaction configuration for access control. Set to null if not yet configured."
         }
       },
-      "required": ["node_type", "domain", "description", "label", "destination_table", "style", "properties", "redaction"],
+      "required": ["node_type", "domain", "description", "label", "destination_table", "default_columns", "style", "properties", "redaction"],
       "additionalProperties": false
     },
 

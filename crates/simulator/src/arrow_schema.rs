@@ -166,11 +166,8 @@ mod tests {
                     enum_type: ontology::EnumType::default(),
                 },
             ],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_user".to_string(),
-            style: Default::default(),
-            etl: None,
-            redaction: None,
+            ..Default::default()
         };
 
         let schema = node.to_arrow_schema();

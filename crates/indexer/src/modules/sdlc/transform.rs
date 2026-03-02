@@ -153,7 +153,6 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn create_user_node() -> NodeEntity {
-        use ontology::NodeStyle;
         let mut enum_values = BTreeMap::new();
         enum_values.insert(0, "human".to_string());
         enum_values.insert(1, "bot".to_string());
@@ -161,8 +160,6 @@ mod tests {
         NodeEntity {
             name: "User".to_string(),
             domain: "core".to_string(),
-            description: String::new(),
-            label: String::new(),
             fields: vec![
                 Field {
                     name: "id".to_string(),
@@ -197,7 +194,6 @@ mod tests {
                     enum_type: ontology::EnumType::Int,
                 },
             ],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_user".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Global,
@@ -206,8 +202,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges: BTreeMap::new(),
             }),
-            redaction: None,
-            style: NodeStyle::default(),
+            ..Default::default()
         }
     }
 
@@ -256,10 +251,6 @@ mod tests {
         let node = NodeEntity {
             name: "Group".to_string(),
             domain: "core".to_string(),
-            description: String::new(),
-            label: String::new(),
-            fields: vec![],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_group".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
@@ -268,8 +259,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges,
             }),
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
@@ -300,10 +290,6 @@ mod tests {
         let node = NodeEntity {
             name: "Note".to_string(),
             domain: "core".to_string(),
-            description: String::new(),
-            label: String::new(),
-            fields: vec![],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_note".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
@@ -312,8 +298,7 @@ mod tests {
                 deleted: "_siphon_deleted".to_string(),
                 edges,
             }),
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
@@ -344,10 +329,6 @@ mod tests {
         let node = NodeEntity {
             name: "WorkItem".to_string(),
             domain: "plan".to_string(),
-            description: String::new(),
-            label: String::new(),
-            fields: vec![],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_work_item".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
@@ -356,8 +337,7 @@ mod tests {
                 deleted: "deleted".to_string(),
                 edges,
             }),
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();
@@ -390,10 +370,6 @@ mod tests {
         let node = NodeEntity {
             name: "WorkItem".to_string(),
             domain: "plan".to_string(),
-            description: String::new(),
-            label: String::new(),
-            fields: vec![],
-            primary_keys: vec!["id".to_string()],
             destination_table: "gl_work_item".to_string(),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
@@ -402,8 +378,7 @@ mod tests {
                 deleted: "deleted".to_string(),
                 edges,
             }),
-            redaction: None,
-            style: ontology::NodeStyle::default(),
+            ..Default::default()
         };
 
         let config = PreparedEtlConfig::from_node(&node, &ontology).unwrap();

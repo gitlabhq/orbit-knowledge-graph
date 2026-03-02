@@ -5,6 +5,7 @@ domain: plan
 description: A label for categorizing and filtering work items
 label: title
 destination_table: gl_label
+default_columns: [id, title, color]
 
 style:
   size: 22

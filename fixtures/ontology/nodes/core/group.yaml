@@ -5,6 +5,7 @@ domain: core
 description: A GitLab group (top-level group or subgroup)
 label: name
 destination_table: gl_group
+default_columns: [id, name, full_path, visibility_level]
 
 style:
   size: 45
