@@ -621,3 +621,20 @@ ai:security:
     AI_MODEL_OVERRIDE: "google-vertex-anthropic/claude-opus-4-6@default"
     GOOGLE_CLOUD_LOCATION: "global"
     AI_REFS: "https://gitlab.com/gitlab-org/gitlab.git,https://github.com/ClickHouse/clickhouse-docs.git,https://gitlab.com/gitlab-org/analytics-section/siphon.git"
+
+ai:docs:
+  extends: .ai-review-base
+  stage: ai
+  timeout: 15 minutes
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  environment:
+    name: ai-review
+    action: access
+  variables:
+    AI_AGENT: docs
+    AI_MODEL_OVERRIDE: "google-vertex-anthropic/claude-opus-4-6@default"
+    GOOGLE_CLOUD_LOCATION: "global"
