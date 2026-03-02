@@ -151,23 +151,6 @@ message ToolDefinition {
   string name = 1;
   string description = 2;
   string parameters_json_schema = 3;
-  ToolRouting routing = 4;
-}
-
-message ToolRouting {
-  string rpc_method = 1;
-  repeated ToolArgumentMapping argument_mappings = 2;
-}
-
-message ToolArgumentMapping {
-  string tool_argument = 1;
-  string rpc_parameter = 2;
-  ArgumentTransform transform = 3;
-}
-
-enum ArgumentTransform {
-  ARGUMENT_TRANSFORM_NONE = 0;
-  ARGUMENT_TRANSFORM_TO_JSON = 1;
 }
 
 // --- ClusterHealth ---

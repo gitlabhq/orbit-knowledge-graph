@@ -6,33 +6,11 @@ use serde_json::json;
 
 use super::schema::condensed_query_schema;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
-pub enum ArgumentTransformKind {
-    None = 0,
-    ToJson = 1,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolArgumentMapping {
-    pub tool_argument: String,
-    pub rpc_parameter: String,
-    pub transform: ArgumentTransformKind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolRouting {
-    pub rpc_method: String,
-    pub argument_mappings: Vec<ToolArgumentMapping>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
     pub parameters: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub routing: Option<ToolRouting>,
 }
 
 pub struct ToolRegistry;
@@ -69,14 +47,6 @@ impl ToolRegistry {
                 },
                 "additionalProperties": false
             }),
-            routing: Some(ToolRouting {
-                rpc_method: "ExecuteQuery".to_string(),
-                argument_mappings: vec![ToolArgumentMapping {
-                    tool_argument: "query".to_string(),
-                    rpc_parameter: "query".to_string(),
-                    transform: ArgumentTransformKind::ToJson,
-                }],
-            }),
         }
     }
 
@@ -97,14 +67,6 @@ impl ToolRegistry {
                     }
                 },
                 "additionalProperties": false
-            }),
-            routing: Some(ToolRouting {
-                rpc_method: "GetGraphSchema".to_string(),
-                argument_mappings: vec![ToolArgumentMapping {
-                    tool_argument: "expand_nodes".to_string(),
-                    rpc_parameter: "expand_nodes".to_string(),
-                    transform: ArgumentTransformKind::None,
-                }],
             }),
         }
     }
@@ -232,33 +194,5 @@ mod tests {
             !desc.contains("AUTHORED"),
             "Description should not contain relationship types (use get_graph_schema)"
         );
-    }
-
-    #[test]
-    fn test_tools_have_routing() {
-        let ontology = test_ontology();
-        let tools = ToolRegistry::get_all_tools(&ontology);
-
-        for tool in &tools {
-            assert!(
-                tool.routing.is_some(),
-                "Tool {} should have routing metadata",
-                tool.name
-            );
-        }
-
-        let query_graph = tools.iter().find(|t| t.name == "query_graph").unwrap();
-        let routing = query_graph.routing.as_ref().unwrap();
-        assert_eq!(routing.rpc_method, "ExecuteQuery");
-        assert_eq!(routing.argument_mappings.len(), 1);
-        assert_eq!(routing.argument_mappings[0].tool_argument, "query");
-        assert_eq!(
-            routing.argument_mappings[0].transform,
-            ArgumentTransformKind::ToJson
-        );
-
-        let get_schema = tools.iter().find(|t| t.name == "get_graph_schema").unwrap();
-        let routing = get_schema.routing.as_ref().unwrap();
-        assert_eq!(routing.rpc_method, "GetGraphSchema");
     }
 }

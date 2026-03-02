@@ -19,8 +19,7 @@ use crate::proto::{
     GetClusterHealthResponse, GetGraphSchemaRequest, GetGraphSchemaResponse, ListToolsRequest,
     ListToolsResponse, ResponseFormat, SchemaEdge, SchemaEdgeVariant, SchemaDomain, SchemaNode,
     SchemaNodeStyle, SchemaProperty, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition, ToolRouting as ProtoToolRouting,
-    ToolArgumentMapping as ProtoToolArgumentMapping,
+    ToolDefinition as ProtoToolDefinition,
     execute_query_message, get_graph_schema_response,
 };
 use crate::query_pipeline::{
@@ -91,26 +90,10 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
                     let tools = ToolRegistry::get_all_tools(&self.ontology)
                         .into_iter()
-                        .map(|t| {
-                            let routing = t.routing.map(|r| ProtoToolRouting {
-                                rpc_method: r.rpc_method,
-                                argument_mappings: r
-                                    .argument_mappings
-                                    .into_iter()
-                                    .map(|m| ProtoToolArgumentMapping {
-                                        tool_argument: m.tool_argument,
-                                        rpc_parameter: m.rpc_parameter,
-                                        transform: m.transform as i32,
-                                    })
-                                    .collect(),
-                            });
-
-                            ProtoToolDefinition {
-                                name: t.name,
-                                description: t.description,
-                                parameters_json_schema: t.parameters.to_string(),
-                                routing,
-                            }
+                        .map(|t| ProtoToolDefinition {
+                            name: t.name,
+                            description: t.description,
+                            parameters_json_schema: t.parameters.to_string(),
                         })
                         .collect();
 

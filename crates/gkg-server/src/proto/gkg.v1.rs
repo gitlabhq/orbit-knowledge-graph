@@ -200,7 +200,7 @@ pub struct ListToolsResponse {
     #[prost(message, repeated, tag = "1")]
     pub tools: ::prost::alloc::vec::Vec<ToolDefinition>,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ToolDefinition {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
@@ -208,24 +208,6 @@ pub struct ToolDefinition {
     pub description: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub parameters_json_schema: ::prost::alloc::string::String,
-    #[prost(message, optional, tag = "4")]
-    pub routing: ::core::option::Option<ToolRouting>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ToolRouting {
-    #[prost(string, tag = "1")]
-    pub rpc_method: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag = "2")]
-    pub argument_mappings: ::prost::alloc::vec::Vec<ToolArgumentMapping>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ToolArgumentMapping {
-    #[prost(string, tag = "1")]
-    pub tool_argument: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub rpc_parameter: ::prost::alloc::string::String,
-    #[prost(enumeration = "ArgumentTransform", tag = "3")]
-    pub transform: i32,
 }
 /// --- ClusterHealth ---
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -325,32 +307,6 @@ impl QueryType {
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "QUERY_TYPE_JSON" => Some(Self::Json),
-            _ => None,
-        }
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum ArgumentTransform {
-    None = 0,
-    ToJson = 1,
-}
-impl ArgumentTransform {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            Self::None => "ARGUMENT_TRANSFORM_NONE",
-            Self::ToJson => "ARGUMENT_TRANSFORM_TO_JSON",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "ARGUMENT_TRANSFORM_NONE" => Some(Self::None),
-            "ARGUMENT_TRANSFORM_TO_JSON" => Some(Self::ToJson),
             _ => None,
         }
     }
