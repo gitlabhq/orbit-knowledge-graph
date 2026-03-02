@@ -6,6 +6,7 @@ description: An imported symbol or module reference within a source file
 label: identifier_name
 destination_table: gl_imported_symbol
 default_columns: [id, identifier_name, import_path, import_type, file_path]
+sort_key: [traversal_path, project_id, branch, id]
 
 style:
   size: 22

@@ -199,9 +199,23 @@
           "type": "string",
           "pattern": "^[a-z_]+$",
           "description": "ClickHouse table name for all graph edges (e.g., 'gl_edge')."
+        },
+        "default_entity_sort_key": {
+          "type": "array",
+          "description": "Default ClickHouse ORDER BY columns for node tables. Individual nodes inherit this unless they override with their own sort_key.",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "edge_sort_key": {
+          "type": "array",
+          "description": "ClickHouse ORDER BY columns for the edge table. Used as the deduplication key for ReplacingMergeTree.",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
         }
       },
-      "required": ["table_prefix", "edge_table"],
+      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key"],
       "additionalProperties": false
     },
 
@@ -289,6 +303,13 @@
         "default_columns": {
           "type": "array",
           "description": "Columns returned by default when this node appears in dynamic query results (e.g., path finding, neighbors). If omitted, all columns are returned.",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "sort_key": {
+          "type": "array",
+          "description": "ClickHouse ORDER BY columns for this node's destination table. Used as the deduplication key for ReplacingMergeTree.",
           "items": { "type": "string" },
           "minItems": 1,
           "uniqueItems": true

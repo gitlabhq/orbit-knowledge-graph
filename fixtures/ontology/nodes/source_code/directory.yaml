@@ -6,6 +6,7 @@ description: A directory within a repository's file structure
 label: path
 destination_table: gl_directory
 default_columns: [id, path, name]
+sort_key: [traversal_path, project_id, branch, id]
 
 style:
   size: 26
