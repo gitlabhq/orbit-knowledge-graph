@@ -84,7 +84,7 @@ clickhouse = { version = "0.14", features = ["inserter"] }
 testcontainers = "0.27.1"
 testcontainers-modules = { version = "0.15.0", features = ["nats", "clickhouse"] }
 # Query engine dependencies
-jsonschema = "0.42.0"
+jsonschema = "0.44.0"
 const_format = "0.2.35"
 
 # Gitaly client dependencies
