@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::warn;
 
 use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
@@ -115,7 +116,7 @@ impl HydrationStage {
             .iter()
             .filter(|(_, ids)| !ids.is_empty())
             .map(|(entity_type, ids)| {
-                let query_json = build_dynamic_search_query(entity_type, ids);
+                let query_json = build_dynamic_search_query(entity_type, ids, &self.ontology);
                 self.compile_and_fetch(entity_type, query_json, security_context)
             })
             .collect();
@@ -220,13 +221,30 @@ fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap
 
 /// Build a search query JSON from scratch for dynamic hydration.
 /// Only used when entity types are discovered at runtime (PathFinding, Neighbors).
-fn build_dynamic_search_query(entity_type: &str, ids: &[i64]) -> String {
+/// Uses `default_columns` from the ontology when available, falling back to `"*"`.
+fn build_dynamic_search_query(
+    entity_type: &str,
+    ids: &[i64],
+    ontology: &ontology::Ontology,
+) -> String {
+    let node = ontology.get_node(entity_type);
+    if node.is_none() {
+        warn!(
+            entity_type,
+            "entity type not found in ontology during dynamic hydration, falling back to all columns"
+        );
+    }
+    let columns: serde_json::Value = node
+        .filter(|n| !n.default_columns.is_empty())
+        .map(|n| serde_json::json!(n.default_columns))
+        .unwrap_or_else(|| serde_json::json!("*"));
+
     serde_json::json!({
         "query_type": "search",
         "node": {
             "id": "n",
             "entity": entity_type,
-            "columns": "*",
+            "columns": columns,
             "node_ids": ids
         },
         "limit": 1000

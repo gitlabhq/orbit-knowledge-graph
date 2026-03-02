@@ -96,7 +96,12 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             }
             Some(ColumnSelection::List(_)) => {}
             None => {
-                node.columns = Some(ColumnSelection::List(Vec::new()));
+                let columns = if node_entity.default_columns.is_empty() {
+                    node_entity.fields.iter().map(|f| f.name.clone()).collect()
+                } else {
+                    node_entity.default_columns.clone()
+                };
+                node.columns = Some(ColumnSelection::List(columns));
             }
         }
 
