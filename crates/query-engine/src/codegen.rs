@@ -151,6 +151,11 @@ impl Context {
             parts.push(format!("GROUP BY {}", groups.join(", ")));
         }
 
+        // HAVING
+        if let Some(h) = &q.having {
+            parts.push(format!("HAVING {}", self.emit_expr(h)));
+        }
+
         // ORDER BY
         if !q.order_by.is_empty() {
             let orders: Vec<_> = q
@@ -229,6 +234,11 @@ impl Context {
         if !q.group_by.is_empty() {
             let groups: Vec<_> = q.group_by.iter().map(|g| self.emit_expr(g)).collect();
             parts.push(format!("GROUP BY {}", groups.join(", ")));
+        }
+
+        // HAVING
+        if let Some(h) = &q.having {
+            parts.push(format!("HAVING {}", self.emit_expr(h)));
         }
 
         // UNION ALL (for recursive CTEs)
@@ -382,6 +392,13 @@ impl Context {
 
                 Ok(TableRefResult {
                     sql: format!("({}) AS {alias}", union_parts.join(" UNION ALL ")),
+                    type_conditions: vec![],
+                })
+            }
+            TableRef::Subquery { query, alias } => {
+                let inner_sql = self.emit_query(query)?;
+                Ok(TableRefResult {
+                    sql: format!("({inner_sql}) AS {alias}"),
                     type_conditions: vec![],
                 })
             }
@@ -681,5 +698,131 @@ mod tests {
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert!(result.sql.contains("LIMIT 30"));
         assert!(!result.sql.contains("OFFSET"));
+    }
+
+    #[test]
+    fn having_clause() {
+        let q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("n", "label"), "type"),
+                SelectExpr::new(Expr::func("COUNT", vec![Expr::col("n", "id")]), "count"),
+            ],
+            from: TableRef::scan("nodes", "n"),
+            group_by: vec![Expr::col("n", "label")],
+            having: Some(Expr::binary(
+                Op::Gt,
+                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::lit(5),
+            )),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label HAVING (COUNT(n.id) > {p0:Int64})"
+        );
+    }
+
+    #[test]
+    fn having_without_group_by() {
+        let q = Query {
+            select: vec![SelectExpr::new(
+                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                "total",
+            )],
+            from: TableRef::scan("nodes", "n"),
+            having: Some(Expr::binary(
+                Op::Gt,
+                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::lit(0),
+            )),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(result.sql.contains("HAVING"));
+        assert!(!result.sql.contains("GROUP BY"));
+    }
+
+    #[test]
+    fn subquery_in_from() {
+        let inner = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "id"), "id"),
+                SelectExpr::new(Expr::col("p", "name"), "name"),
+            ],
+            from: TableRef::scan("gl_project", "p"),
+            where_clause: Some(Expr::eq(Expr::col("p", "name"), Expr::lit("test"))),
+            ..Default::default()
+        };
+
+        let outer = Query {
+            select: vec![SelectExpr::new(Expr::col("sub", "id"), "id")],
+            from: TableRef::subquery(inner, "sub"),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("(SELECT"),
+            "expected subquery: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains(") AS sub"),
+            "expected alias: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("gl_project AS p"),
+            "expected inner table: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn subquery_in_join() {
+        let inner = Query {
+            select: vec![SelectExpr::new(Expr::col("e", "source_id"), "source_id")],
+            from: TableRef::scan("gl_edge", "e"),
+            group_by: vec![Expr::col("e", "source_id")],
+            having: Some(Expr::eq(
+                Expr::func(
+                    "argMax",
+                    vec![Expr::col("e", "_deleted"), Expr::col("e", "_version")],
+                ),
+                Expr::lit(false),
+            )),
+            ..Default::default()
+        };
+
+        let outer = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::subquery(inner, "deduped_e"),
+                Expr::eq(Expr::col("u", "id"), Expr::col("deduped_e", "source_id")),
+            ),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("INNER JOIN (SELECT"),
+            "expected join with subquery: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("HAVING"),
+            "expected HAVING in subquery: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains(") AS deduped_e ON"),
+            "expected subquery alias: {}",
+            result.sql
+        );
     }
 }

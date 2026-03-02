@@ -41,6 +41,8 @@ The planner emits ClickHouse SQL similar to these patterns:
 - Reverse hops: use the destination‑ordered projection or a reversed view produced on the fly.
 - Alternate relationship types: `UNION ALL` of the participating edge tables inside a single `edges_all` CTE, then join once per hop.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results.
+- HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
+- Derived‑table subqueries: `(SELECT ... GROUP BY ... HAVING ...) AS alias` in FROM/JOIN positions for deduplication patterns (e.g., `argMax(_deleted, _version)`).
 
 These choices preserve factorization: each hop operates on a compact frontier and prunes the next edge scan via semi‑joins, mirroring Kùzu’s accumulate → semijoin → probe execution.
 
