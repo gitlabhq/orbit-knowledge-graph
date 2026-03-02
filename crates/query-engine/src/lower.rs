@@ -197,8 +197,11 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         .as_deref()
         .ok_or_else(|| QueryError::Lowering("start node has no entity".into()))?;
 
-    // Recursive CTE with full path/edges materialization.
+    // Recursive CTE with path materialization.
     // Limited to 1000 paths to prevent memory explosion in dense graphs.
+    // The CTE carries a slim edge_kinds Array(String) per hop instead of
+    // the full edge tuple — enough to reconstruct edges when combined with
+    // the typed node path.
     let mut base = path_base_query(&start.node_ids, &start_table, &start.id, start_entity);
     let forward = path_recursive_branch(path.max_depth, true, &end.node_ids, &path.rel_types);
     let reverse = path_recursive_branch(path.max_depth, false, &end.node_ids, &path.rel_types);
@@ -213,7 +216,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         ctes: vec![recursive_cte],
         select: vec![
             SelectExpr::new(Expr::col("paths", "path"), "_gkg_path"),
-            SelectExpr::new(Expr::col("paths", "edges"), "_gkg_edges"),
+            SelectExpr::new(Expr::col("paths", "edge_kinds"), "_gkg_edge_kinds"),
             SelectExpr::new(Expr::col("paths", "depth"), "depth"),
         ],
         from: TableRef::join(
@@ -236,23 +239,24 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     })))
 }
 
-/// Base query for path finding with full materialization.
+/// Base query for path finding CTE.
 fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_entity: &str) -> Query {
     let start_id = Expr::col(start_alias, DEFAULT_PRIMARY_KEY);
     let start_tuple = Expr::func("tuple", vec![start_id.clone(), Expr::lit(start_entity)]);
+
+    // Empty Array(String) — typed via arrayResize so ClickHouse infers the schema.
+    // The start node has no incoming edge, so the array starts empty.
+    let empty_string_array = Expr::func(
+        "arrayResize",
+        vec![Expr::func("array", vec![Expr::lit("")]), Expr::lit(0)],
+    );
 
     Query {
         select: vec![
             SelectExpr::new(start_id.clone(), "node_id"),
             SelectExpr::new(Expr::func("array", vec![start_id]), "path_ids"),
             SelectExpr::new(Expr::func("array", vec![start_tuple]), "path"),
-            SelectExpr::new(
-                Expr::func(
-                    "arrayResize",
-                    vec![path_edge_tuple_template(), Expr::lit(0)],
-                ),
-                "edges",
-            ),
+            SelectExpr::new(empty_string_array, "edge_kinds"),
             SelectExpr::new(Expr::lit(0), "depth"),
         ],
         from: TableRef::scan(table, start_alias),
@@ -261,24 +265,7 @@ fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_enti
     }
 }
 
-/// Empty edge tuple template for initializing edges array.
-fn path_edge_tuple_template() -> Expr {
-    Expr::func(
-        "array",
-        vec![Expr::func(
-            "tuple",
-            vec![
-                Expr::lit(""),
-                Expr::lit(0i64),
-                Expr::lit(""),
-                Expr::lit(0i64),
-                Expr::lit(""),
-            ],
-        )],
-    )
-}
-
-/// Recursive branch with full path/edges materialization.
+/// Recursive branch for path finding CTE.
 /// Includes depth limit, cycle detection, early termination, and edge type filtering.
 fn path_recursive_branch(
     max_depth: u32,
@@ -301,16 +288,6 @@ fn path_recursive_branch(
     let next_tuple = Expr::func(
         "tuple",
         vec![next_node_id.clone(), Expr::col("e", next_type_col)],
-    );
-    let edge_tuple = Expr::func(
-        "tuple",
-        vec![
-            Expr::col("e", "relationship_kind"),
-            Expr::col("e", "source_id"),
-            Expr::col("e", "source_kind"),
-            Expr::col("e", "target_id"),
-            Expr::col("e", "target_kind"),
-        ],
     );
 
     // depth < max_depth
@@ -391,11 +368,11 @@ fn path_recursive_branch(
                 Expr::func(
                     "arrayConcat",
                     vec![
-                        Expr::col("p", "edges"),
-                        Expr::func("array", vec![edge_tuple]),
+                        Expr::col("p", "edge_kinds"),
+                        Expr::func("array", vec![Expr::col("e", "relationship_kind")]),
                     ],
                 ),
-                "edges",
+                "edge_kinds",
             ),
             SelectExpr::new(
                 Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::lit(1i64)),
@@ -1408,7 +1385,7 @@ mod tests {
     }
 
     #[test]
-    fn test_path_finding_full_materialization() {
+    fn test_path_finding_cte_structure() {
         let input = validated_input(
             r#"{
             "query_type": "path_finding",
@@ -1424,13 +1401,14 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Final select should have _gkg_path, _gkg_edges, and depth
+        // Final select: _gkg_path + _gkg_edge_kinds + depth
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"_gkg_path".to_string()));
-        assert!(aliases.contains(&&"_gkg_edges".to_string()));
+        assert!(aliases.contains(&&"_gkg_edge_kinds".to_string()));
         assert!(aliases.contains(&&"depth".to_string()));
+        assert!(!aliases.contains(&&"_gkg_edges".to_string()));
 
-        // CTE should have full columns including path and edges
+        // CTE columns: node_id, path_ids, path, edge_kinds, depth
         assert!(!q.ctes.is_empty());
         let cte_select: Vec<_> = q.ctes[0]
             .query
@@ -1441,8 +1419,9 @@ mod tests {
         assert!(cte_select.contains(&&"node_id".to_string()));
         assert!(cte_select.contains(&&"path_ids".to_string()));
         assert!(cte_select.contains(&&"path".to_string()));
-        assert!(cte_select.contains(&&"edges".to_string()));
+        assert!(cte_select.contains(&&"edge_kinds".to_string()));
         assert!(cte_select.contains(&&"depth".to_string()));
+        assert!(!cte_select.contains(&&"edges".to_string()));
 
         // CTE should have a limit to prevent memory explosion
         assert_eq!(q.ctes[0].query.limit, Some(1000));

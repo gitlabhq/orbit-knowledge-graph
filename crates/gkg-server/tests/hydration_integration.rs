@@ -158,6 +158,20 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
                 "Group node should have hydrated properties"
             );
         }
+
+        // Edge kinds should match the number of hops (nodes - 1)
+        let edge_kinds = row.edge_kinds();
+        assert_eq!(
+            edge_kinds.len(),
+            path_nodes.len() - 1,
+            "edge_kinds should have one entry per hop"
+        );
+
+        // User(1) --MEMBER_OF--> Group(100) --CONTAINS--> Project(1000)
+        if path_nodes.len() == 3 {
+            assert_eq!(edge_kinds[0], "MEMBER_OF");
+            assert_eq!(edge_kinds[1], "CONTAINS");
+        }
     }
 
     // Formatter should emit a "path" array with properties
@@ -180,6 +194,19 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
         "path node should have properties beyond id/entity_type, keys: {:?}",
         first.keys().collect::<Vec<_>>()
     );
+
+    // Edges: flat array of relationship kinds, positional with path
+    let edges = obj
+        .get("edges")
+        .expect("PathFinding JSON should have 'edges' key")
+        .as_array()
+        .expect("'edges' should be an array");
+    assert_eq!(edges.len(), path.len() - 1, "one edge per hop");
+
+    if edges.len() == 2 {
+        assert_eq!(edges[0].as_str().unwrap(), "MEMBER_OF");
+        assert_eq!(edges[1].as_str().unwrap(), "CONTAINS");
+    }
 
     // ── Neighbors: Dynamic hydration ────────────────────────────────────
     // User 1's outgoing neighbors → Group 100
