@@ -11,6 +11,7 @@ description: >
 
 settings:
   table_prefix: "gl_"
+  edge_table: "gl_edge"
 
 domains:
   core:

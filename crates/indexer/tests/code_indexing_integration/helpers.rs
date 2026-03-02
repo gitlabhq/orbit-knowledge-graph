@@ -11,7 +11,7 @@ use indexer::modules::code::{
     ClickHouseCodeWatermarkStore, ClickHouseProjectStore, ClickHousePushEventStore,
     ClickHouseStaleDataCleaner, CodeIndexingPipeline, ProjectCodeIndexingHandler,
     ProjectCodeIndexingHandlerConfig, PushEventHandler, PushEventHandlerConfig, RepositoryService,
-    metrics::CodeMetrics,
+    config::CodeTableNames, metrics::CodeMetrics,
 };
 use indexer::testkit::{MockLockService, MockNatsServices};
 use integration_testkit::TestContext;
@@ -40,7 +40,12 @@ impl CodeIndexingDeps {
         let watermark_store =
             Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(&graph_client)));
         let project_store = Arc::new(ClickHouseProjectStore::new(Arc::clone(&graph_client)));
-        let stale_data_cleaner = Arc::new(ClickHouseStaleDataCleaner::new(graph_client));
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let table_names =
+            Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
+
+        let stale_data_cleaner =
+            Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
         let push_event_store = Arc::new(ClickHousePushEventStore::new(
             clickhouse.config.build_client(),
         ));
@@ -51,6 +56,7 @@ impl CodeIndexingDeps {
             Arc::clone(&watermark_store) as _,
             stale_data_cleaner,
             metrics.clone(),
+            table_names,
         ));
 
         Self {
