@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use indexer::dispatcher::Dispatcher;
-use indexer::modules::sdlc::dispatch::{DispatchMetrics, GlobalDispatcher, NamespaceDispatcher};
+use indexer::modules::sdlc::dispatch::{
+    DispatchMetrics, GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher,
+    NamespaceDispatcherConfig,
+};
 use tracing::info;
 
 use crate::config::SimulatorConfig;
@@ -32,17 +35,18 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
             services.nats.clone(),
             services.lock_service.clone(),
             metrics.clone(),
+            GlobalDispatcherConfig::default(),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats,
             services.lock_service,
             datalake,
             metrics,
+            NamespaceDispatcherConfig::default(),
         )),
     ];
 
-    let dispatch_config = indexer::dispatcher::DispatchConfig::default();
-    indexer::dispatcher::run(&dispatchers, &*lock_service, &dispatch_config)
+    indexer::dispatcher::run(&dispatchers, &*lock_service)
         .await
         .context("dispatch indexing failed")?;
 

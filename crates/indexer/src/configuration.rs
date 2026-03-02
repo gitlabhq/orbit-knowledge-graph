@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::modules::code::dispatch::ProjectCodeDispatcherConfig;
 use crate::modules::code::{ProjectCodeIndexingHandlerConfig, PushEventHandlerConfig};
+use crate::modules::sdlc::dispatch::{GlobalDispatcherConfig, NamespaceDispatcherConfig};
 use crate::modules::sdlc::{GlobalHandlerConfig, NamespaceHandlerConfig};
 
 /// Per-handler engine configuration (retry policy, concurrency group).
@@ -55,6 +57,35 @@ pub struct HandlersConfiguration {
     pub code_push_event: PushEventHandlerConfig,
     #[serde(default)]
     pub code_project_reconciliation: ProjectCodeIndexingHandlerConfig,
+}
+
+/// Per-dispatcher configuration (cadence interval).
+///
+/// Each dispatcher embeds this via `#[serde(flatten)]` in its own typed config struct.
+/// The dispatcher loop reads it via `dispatcher.dispatcher_config()`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DispatcherConfiguration {
+    /// Interval in seconds between dispatch runs.
+    /// When absent, the dispatcher runs every cycle.
+    #[serde(default)]
+    pub interval_secs: Option<u64>,
+}
+
+impl DispatcherConfiguration {
+    pub fn interval(&self) -> Option<Duration> {
+        self.interval_secs.map(Duration::from_secs)
+    }
+}
+
+/// Typed per-dispatcher configuration for all registered dispatchers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DispatchersConfiguration {
+    #[serde(default)]
+    pub global: GlobalDispatcherConfig,
+    #[serde(default)]
+    pub namespace: NamespaceDispatcherConfig,
+    #[serde(default)]
+    pub project_code: ProjectCodeDispatcherConfig,
 }
 
 /// ETL engine configuration.
