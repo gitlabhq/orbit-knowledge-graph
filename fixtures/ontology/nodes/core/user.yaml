@@ -6,6 +6,7 @@ description: A GitLab user account
 label: username
 destination_table: gl_user
 default_columns: [id, username, name, state]
+sort_key: [id]
 
 style:
   size: 32
