@@ -104,6 +104,9 @@ pub enum TableRef {
     /// Union of queries as a derived table → `(SELECT ... UNION ALL SELECT ...) AS alias`
     /// Used for multi-hop traversals with unrolled joins.
     Union { queries: Vec<Query>, alias: String },
+    /// Derived table from a subquery → `(SELECT ...) AS alias`
+    /// Used internally for deduplication of aggregation queries.
+    Subquery { query: Box<Query>, alias: String },
 }
 
 /// SQL JOIN types.
@@ -186,7 +189,7 @@ impl Cte {
 /// Complete SQL query:
 /// ```sql
 /// WITH cte1 AS (...), cte2 AS (...)
-/// SELECT ... FROM ... WHERE ... GROUP BY ... ORDER BY ... LIMIT ...
+/// SELECT ... FROM ... WHERE ... GROUP BY ... HAVING ... ORDER BY ... LIMIT ...
 /// UNION ALL SELECT ...
 /// SETTINGS key = value
 /// ```
@@ -197,6 +200,7 @@ pub struct Query {
     pub from: TableRef,
     pub where_clause: Option<Expr>,
     pub group_by: Vec<Expr>,
+    pub having: Option<Expr>,
     pub order_by: Vec<OrderExpr>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
@@ -218,6 +222,7 @@ impl Default for Query {
             },
             where_clause: None,
             group_by: vec![],
+            having: None,
             order_by: vec![],
             limit: None,
             offset: None,
@@ -334,6 +339,13 @@ impl TableRef {
     pub fn union_all(queries: Vec<Query>, alias: impl Into<String>) -> Self {
         TableRef::Union {
             queries,
+            alias: alias.into(),
+        }
+    }
+
+    pub fn subquery(query: Query, alias: impl Into<String>) -> Self {
+        TableRef::Subquery {
+            query: Box::new(query),
             alias: alias.into(),
         }
     }
