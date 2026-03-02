@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::GL_TABLE_PREFIX;
 use crate::error::Result;
 use ontology::constants::{DELETED_COLUMN, EDGE_TABLE, VERSION_COLUMN};
@@ -312,111 +312,6 @@ fn dedup_key_columns(table: &str) -> Vec<&'static str> {
     } else {
         vec!["traversal_path", "id"]
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dedup validation (called from check.rs)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Verify that all `gl_*` table aliases have deduplication applied.
-///
-/// For inline dedup (Path 1): checks that GROUP BY contains the dedup key
-/// columns and HAVING references `argMax(_deleted, _version)`.
-///
-/// For subquery dedup (Path 2): checks that the alias comes from a
-/// `TableRef::Subquery` whose inner query has the above.
-pub fn check_dedup(node: &Node) -> crate::error::Result<()> {
-    match node {
-        Node::Query(q) => {
-            for cte in &q.ctes {
-                check_dedup_query(&cte.query)?;
-            }
-            check_dedup_query(q)
-        }
-    }
-}
-
-fn check_dedup_query(q: &Query) -> crate::error::Result<()> {
-    let scans = collect_scan_aliases(&q.from);
-    if scans.is_empty() {
-        return Ok(());
-    }
-
-    // Path 1: inline dedup — verify HAVING has argMax(_deleted) per alias
-    if !q.group_by.is_empty() && q.having.is_some() {
-        for alias in scans.keys() {
-            if !has_deleted_filter(q.having.as_ref(), alias) {
-                return Err(crate::error::QueryError::Security(format!(
-                    "dedup check failed: alias '{alias}' missing argMax(_deleted) in HAVING"
-                )));
-            }
-        }
-        return Ok(());
-    }
-
-    // Path 2: subquery dedup — verify each gl_* alias comes from a Subquery
-    // with proper inner dedup
-    let subquery_aliases = collect_subquery_aliases(&q.from);
-    for alias in scans.keys() {
-        if subquery_aliases.contains(alias) {
-            continue;
-        }
-        return Err(crate::error::QueryError::Security(format!(
-            "dedup check failed: alias '{alias}' has no deduplication"
-        )));
-    }
-
-    Ok(())
-}
-
-fn collect_subquery_aliases(table_ref: &TableRef) -> Vec<String> {
-    match table_ref {
-        TableRef::Subquery { alias, query } => {
-            // Verify the inner query actually has dedup (GROUP BY + HAVING)
-            if query.having.is_some() && !query.group_by.is_empty() {
-                vec![alias.clone()]
-            } else {
-                vec![]
-            }
-        }
-        TableRef::Join { left, right, .. } => {
-            let mut v = collect_subquery_aliases(left);
-            v.extend(collect_subquery_aliases(right));
-            v
-        }
-        _ => vec![],
-    }
-}
-
-/// Check whether a HAVING expression contains `argMax(alias._deleted, ...) = false`.
-fn has_deleted_filter(expr: Option<&Expr>, alias: &str) -> bool {
-    let Some(expr) = expr else { return false };
-    match expr {
-        Expr::BinaryOp {
-            op: Op::Eq,
-            left,
-            right,
-        } => {
-            is_argmax_deleted(left, alias)
-                && matches!(right.as_ref(), Expr::Literal(v) if v == &serde_json::Value::Bool(false))
-        }
-        Expr::BinaryOp {
-            op: Op::And,
-            left,
-            right,
-        } => has_deleted_filter(Some(left), alias) || has_deleted_filter(Some(right), alias),
-        _ => false,
-    }
-}
-
-fn is_argmax_deleted(expr: &Expr, alias: &str) -> bool {
-    matches!(
-        expr,
-        Expr::FuncCall { name, args }
-            if name == "argMax"
-            && args.len() == 2
-            && matches!(&args[0], Expr::Column { table, column } if table == alias && column == DELETED_COLUMN)
-    )
 }
 
 #[cfg(test)]
@@ -772,58 +667,5 @@ mod tests {
         } else {
             panic!("expected inner Scan");
         }
-    }
-
-    // ── Validation ──────────────────────────────────────────────────────
-
-    #[test]
-    fn check_dedup_passes_after_inline() {
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
-            from: TableRef::scan("gl_project", "p"),
-            ..Default::default()
-        }));
-
-        deduplicate(&mut node).unwrap();
-        check_dedup(&node).unwrap();
-    }
-
-    #[test]
-    fn check_dedup_passes_after_subquery() {
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr::new(
-                Expr::func("COUNT", vec![Expr::col("p", "id")]),
-                "cnt",
-            )],
-            from: TableRef::scan("gl_project", "p"),
-            group_by: vec![Expr::col("p", "name")],
-            ..Default::default()
-        }));
-
-        deduplicate(&mut node).unwrap();
-        check_dedup(&node).unwrap();
-    }
-
-    #[test]
-    fn check_dedup_fails_without_dedup() {
-        let node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
-            from: TableRef::scan("gl_project", "p"),
-            ..Default::default()
-        }));
-
-        let err = check_dedup(&node).unwrap_err();
-        assert!(err.to_string().contains("dedup check failed"));
-    }
-
-    #[test]
-    fn check_dedup_skips_non_gl_tables() {
-        let node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr::new(Expr::col("c", "id"), "id")],
-            from: TableRef::scan("custom_table", "c"),
-            ..Default::default()
-        }));
-
-        check_dedup(&node).unwrap();
     }
 }

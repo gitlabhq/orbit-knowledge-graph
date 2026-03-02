@@ -98,7 +98,6 @@ pub fn compile(
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx).count_err()?;
     check_ast(&node, ctx).count_err()?;
-    deduplicate::check_dedup(&node).count_err()?;
     let base = codegen(&node, result_context).count_err()?;
 
     let hydration = build_hydration_plan(&input);
