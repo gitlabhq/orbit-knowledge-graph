@@ -10,16 +10,15 @@
 //! You provide:
 //! - A [`NatsBroker`](nats::NatsBroker) for message streaming
 //! - A [`Destination`](destination::Destination) (database, data lake, etc.)
-//! - One or more [`Module`](module::Module)s containing [`Handler`](module::Handler)s
+//! - One or more [`Handler`](handler::Handler)s registered in a [`HandlerRegistry`](handler::HandlerRegistry)
 //!
 //! ```text
 //! NatsBroker ──▶ Engine ──▶ Destination
 //!                  │
 //!                  ▼
-//!            ModuleRegistry
-//!              └─ Module
-//!                  └─ Handler
-//!                  └─ Handler
+//!            HandlerRegistry
+//!              └─ Handler
+//!              └─ Handler
 //! ```
 //!
 //! ## Domain modules
@@ -33,12 +32,11 @@ pub mod constants;
 pub mod destination;
 pub mod dispatcher;
 pub mod engine;
-pub mod entities;
 pub(crate) mod env;
+pub mod handler;
 pub mod health;
 pub mod locking;
 pub mod metrics;
-pub mod module;
 pub mod modules;
 pub mod nats;
 pub mod topic;
@@ -57,10 +55,10 @@ use configuration::EngineConfiguration;
 use dispatcher::DispatchConfig;
 use engine::EngineBuilder;
 use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
-use module::{ModuleInitError, ModuleRegistry};
 use modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
-use modules::{CodeModule, SdlcModule};
+use modules::{create_code_handlers, create_sdlc_handlers};
 use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -99,8 +97,8 @@ pub enum IndexerError {
     #[error("Engine error: {0}")]
     Engine(#[from] engine::EngineError),
 
-    #[error("Module initialization failed: {0}")]
-    ModuleInit(#[from] ModuleInitError),
+    #[error("Handler initialization failed: {0}")]
+    HandlerInit(#[from] HandlerInitError),
 
     #[error("Health server failed: {0}")]
     Health(#[from] std::io::Error),
@@ -124,30 +122,32 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
         metrics.clone(),
     )?);
 
-    info!("initializing SDLC module");
-    let sdlc_module =
-        SdlcModule::new(&config.datalake, &config.graph, &config.engine.handlers).await?;
+    let registry = Arc::new(HandlerRegistry::default());
 
-    let registry = Arc::new(ModuleRegistry::default());
-    registry.register_module(&sdlc_module);
+    info!("initializing SDLC handlers");
+    for handler in
+        create_sdlc_handlers(&config.datalake, &config.graph, &config.engine.handlers).await?
+    {
+        registry.register_handler(handler);
+    }
 
     if let Some(gitlab_config) = &config.gitlab {
-        info!("initializing Code module");
+        info!("initializing Code handlers");
         let gitlab_client =
-            Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(ModuleInitError::new)?);
-        let code_module = CodeModule::new(
+            Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
+        for handler in create_code_handlers(
             &config.graph,
             &config.datalake,
             gitlab_client,
             &config.engine.handlers,
-        )
-        .map_err(IndexerError::ModuleInit)?;
-        registry.register_module(&code_module);
+        )? {
+            registry.register_handler(handler);
+        }
     } else {
-        info!("Code module disabled (GitLab client not configured)");
+        info!("Code handlers disabled (GitLab client not configured)");
     }
 
-    info!(topics = registry.topics().len(), "registered modules");
+    info!(topics = registry.topics().len(), "registered handlers");
 
     let health_state = HealthState {
         nats_client: broker.nats_client().clone(),

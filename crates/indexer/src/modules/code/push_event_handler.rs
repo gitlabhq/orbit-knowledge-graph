@@ -18,7 +18,7 @@ use super::repository_service::RepositoryService;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use super::watermark_store::CodeWatermarkStore;
 use crate::configuration::HandlerConfiguration;
-use crate::module::{Handler, HandlerContext, HandlerError};
+use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::locking::project_lock_key;
 use crate::types::{Envelope, Topic};
 
@@ -372,7 +372,7 @@ impl PushEventPayload {
 mod tests {
     use super::PushEventHandlerConfig;
     use super::*;
-    use crate::module::Handler;
+    use crate::handler::Handler;
     use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::project_store::ProjectInfo;
     use crate::modules::code::project_store::test_utils::MockProjectStore;

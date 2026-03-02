@@ -13,9 +13,8 @@ use async_trait::async_trait;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
 use indexer::configuration::{EngineConfiguration, HandlerConfiguration};
 use indexer::engine::{Engine, EngineBuilder};
-use indexer::entities::Entity;
+use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
-use indexer::module::{Handler, HandlerContext, HandlerError, Module, ModuleRegistry};
 use indexer::nats::{NatsBroker, NatsConfiguration};
 use indexer::types::{Envelope, Event, Topic};
 use serde::{Deserialize, Serialize};
@@ -36,14 +35,6 @@ const DATABASE: &str = "test";
 
 fn test_topic() -> Topic {
     Topic::new(STREAM, SUBJECT)
-}
-
-fn test_entity() -> Entity {
-    Entity::Node {
-        name: TABLE.to_string(),
-        fields: vec![],
-        primary_keys: vec!["id".to_string()],
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -110,38 +101,6 @@ impl Handler for TestHandler {
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
         Ok(())
-    }
-}
-
-struct TestModule;
-
-impl Module for TestModule {
-    fn name(&self) -> &str {
-        "test-module"
-    }
-
-    fn handlers(&self) -> Vec<Box<dyn Handler>> {
-        vec![Box::new(TestHandler)]
-    }
-
-    fn entities(&self) -> Vec<Entity> {
-        vec![test_entity()]
-    }
-}
-
-struct SecondModule;
-
-impl Module for SecondModule {
-    fn name(&self) -> &str {
-        "second-module"
-    }
-
-    fn handlers(&self) -> Vec<Box<dyn Handler>> {
-        vec![Box::new(TestHandler)]
-    }
-
-    fn entities(&self) -> Vec<Entity> {
-        vec![]
     }
 }
 
@@ -334,10 +293,10 @@ async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
 fn create_engine(
     broker: Arc<NatsBroker>,
     destination: Arc<ClickHouseDestination>,
-    module: &dyn Module,
+    handler: Box<dyn Handler>,
 ) -> Arc<Engine> {
-    let registry = Arc::new(ModuleRegistry::default());
-    registry.register_module(module);
+    let registry = Arc::new(HandlerRegistry::default());
+    registry.register_handler(handler);
     Arc::new(EngineBuilder::new(broker, registry, destination).build())
 }
 
@@ -346,7 +305,7 @@ async fn single_message_flows_through_engine() {
     let context = TestContext::new().await;
     let broker = context.create_broker().await;
     let destination = context.create_destination().await;
-    let engine = create_engine(broker.clone(), destination, &TestModule);
+    let engine = create_engine(broker.clone(), destination, Box::new(TestHandler));
 
     context.publish_event(&broker, 1, "alice").await;
     run_engine_for(engine, Duration::from_secs(2)).await;
@@ -359,7 +318,7 @@ async fn multiple_messages_processed() {
     let context = TestContext::new().await;
     let broker = context.create_broker().await;
     let destination = context.create_destination().await;
-    let engine = create_engine(broker.clone(), destination, &TestModule);
+    let engine = create_engine(broker.clone(), destination, Box::new(TestHandler));
 
     for i in 1..=5 {
         context
@@ -378,9 +337,9 @@ async fn multiple_handlers_receive_same_message() {
     let broker = context.create_broker().await;
     let destination = context.create_destination().await;
 
-    let registry = Arc::new(ModuleRegistry::default());
-    registry.register_module(&TestModule);
-    registry.register_module(&SecondModule);
+    let registry = Arc::new(HandlerRegistry::default());
+    registry.register_handler(Box::new(TestHandler));
+    registry.register_handler(Box::new(TestHandler));
 
     let engine = Arc::new(EngineBuilder::new(broker.clone(), registry, destination).build());
 

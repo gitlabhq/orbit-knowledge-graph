@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use gitaly_client::{GitalyClient, GitalyError, GitalyRepositoryConfig, RepositorySource};
 use gitlab_client::{GitalyConnectionInfo, RepositoryInfo};
-use indexer::module::HandlerContext;
+use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeWatermarkStore, ClickHouseProjectStore, ClickHousePushEventStore,
     ClickHouseStaleDataCleaner, CodeIndexingPipeline, ProjectCodeIndexingHandler,

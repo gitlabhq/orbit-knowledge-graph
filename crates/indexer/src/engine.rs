@@ -4,7 +4,7 @@
 //!
 //! ```ignore
 //! use etl_engine::engine::EngineBuilder;
-//! use etl_engine::module::ModuleRegistry;
+//! use etl_engine::handler::HandlerRegistry;
 //! use etl_engine::nats::{NatsBroker, NatsConfiguration, NatsServicesImpl};
 //! use etl_engine::configuration::EngineConfiguration;
 //! use std::sync::Arc;
@@ -13,8 +13,8 @@
 //! let broker = Arc::new(NatsBroker::connect(&config).await?);
 //! let nats_services = Arc::new(NatsServicesImpl::new(broker.clone()));
 //!
-//! let registry = Arc::new(ModuleRegistry::default());
-//! registry.register_module(&my_module);
+//! let registry = Arc::new(HandlerRegistry::default());
+//! registry.register_handler(Box::new(my_handler));
 //!
 //! let engine = EngineBuilder::new(broker, registry, Arc::new(my_destination))
 //!     .nats_services(nats_services)
@@ -37,9 +37,9 @@ use tracing::{debug, info, warn};
 
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
+use crate::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use crate::locking::{LockService, NatsLockService};
 use crate::metrics::EngineMetrics;
-use crate::module::{Handler, HandlerContext, HandlerError, ModuleRegistry};
 use crate::nats::{NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
 use crate::types::{Envelope, Topic};
 use crate::worker_pool::WorkerPool;
@@ -75,7 +75,7 @@ pub enum EngineError {
 /// ```
 pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
-    registry: Arc<ModuleRegistry>,
+    registry: Arc<HandlerRegistry>,
     destination: Arc<dyn Destination>,
     metrics: Option<Arc<EngineMetrics>>,
     nats_services: Option<Arc<dyn NatsServices>>,
@@ -85,7 +85,7 @@ pub struct EngineBuilder {
 impl EngineBuilder {
     pub fn new(
         broker: Arc<NatsBroker>,
-        registry: Arc<ModuleRegistry>,
+        registry: Arc<HandlerRegistry>,
         destination: Arc<dyn Destination>,
     ) -> Self {
         Self {
@@ -159,7 +159,7 @@ impl EngineBuilder {
 /// 3. Stop with [`Engine::stop`]
 pub struct Engine {
     broker: Arc<NatsBroker>,
-    registry: Arc<ModuleRegistry>,
+    registry: Arc<HandlerRegistry>,
     destination: Arc<dyn Destination>,
     metrics: Arc<EngineMetrics>,
     nats_services: Arc<dyn NatsServices>,

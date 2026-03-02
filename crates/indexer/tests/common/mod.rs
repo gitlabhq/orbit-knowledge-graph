@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use indexer::clickhouse::ClickHouseDestination;
+use indexer::handler::{Handler, HandlerContext};
 use indexer::metrics::EngineMetrics;
-use indexer::module::{Handler, HandlerContext, Module};
-use indexer::modules::SdlcModule;
+use indexer::modules::create_sdlc_handlers;
 use indexer::modules::sdlc::GlobalHandlerConfig;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use std::collections::HashMap;
@@ -73,10 +73,9 @@ impl IndexerTestExt for TestContext {
                 serde_json::json!({ "datalake_batch_size": 1 }),
             ),
         ]);
-        let sdlc_module = SdlcModule::new(&self.config, &self.config, &handler_configs)
+        let handlers = create_sdlc_handlers(&self.config, &self.config, &handler_configs)
             .await
-            .expect("failed to create SDLC module");
-        let handlers = sdlc_module.handlers();
+            .expect("failed to create SDLC handlers");
         handlers
             .into_iter()
             .find(|h| h.name() == "namespace-handler")
@@ -94,10 +93,9 @@ impl IndexerTestExt for TestContext {
                 serde_json::json!({ "datalake_batch_size": 1 }),
             ),
         ]);
-        let sdlc_module = SdlcModule::new(&self.config, &self.config, &handler_configs)
+        let handlers = create_sdlc_handlers(&self.config, &self.config, &handler_configs)
             .await
-            .expect("failed to create SDLC module");
-        let handlers = sdlc_module.handlers();
+            .expect("failed to create SDLC handlers");
         handlers
             .into_iter()
             .find(|h| h.name() == "global-handler")

@@ -16,7 +16,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository_service::RepositoryService;
 use super::stale_data_cleaner::StaleDataCleaner;
 use super::watermark_store::{CodeIndexingWatermark, CodeWatermarkStore};
-use crate::module::{HandlerContext, HandlerError};
+use crate::handler::{HandlerContext, HandlerError};
 use gitlab_client::RepositoryInfo;
 
 pub struct IndexingRequest {

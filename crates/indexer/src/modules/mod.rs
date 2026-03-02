@@ -1,5 +1,5 @@
 pub mod code;
 pub mod sdlc;
 
-pub use code::CodeModule;
-pub use sdlc::SdlcModule;
+pub use code::create_code_handlers;
+pub use sdlc::create_sdlc_handlers;

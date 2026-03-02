@@ -14,9 +14,8 @@ use uuid::Uuid;
 
 use crate::configuration::HandlerConfiguration;
 use crate::destination::{BatchWriter, Destination, DestinationError};
-use crate::entities::Entity;
+use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
-use crate::module::{Handler, HandlerContext, HandlerError, Module};
 use crate::nats::{KvEntry, KvPutOptions, KvPutResult, NatsError, NatsServices};
 use crate::types::{Envelope, MessageId, Topic};
 
@@ -266,71 +265,6 @@ impl Handler for MockHandler {
         }
 
         Ok(())
-    }
-}
-
-/// Mock module for testing.
-pub struct MockModule {
-    name: String,
-    handlers: Vec<Arc<dyn Handler>>,
-    entities: Vec<Entity>,
-}
-
-impl MockModule {
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            handlers: Vec::new(),
-            entities: Vec::new(),
-        }
-    }
-
-    pub fn with_handler<H: Handler + 'static>(mut self, handler: H) -> Self {
-        self.handlers.push(Arc::new(handler));
-        self
-    }
-
-    pub fn with_entity(mut self, entity: Entity) -> Self {
-        self.entities.push(entity);
-        self
-    }
-}
-
-impl Module for MockModule {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn handlers(&self) -> Vec<Box<dyn Handler>> {
-        self.handlers
-            .iter()
-            .map(|h| Box::new(HandlerWrapper(h.clone())) as Box<dyn Handler>)
-            .collect()
-    }
-
-    fn entities(&self) -> Vec<Entity> {
-        self.entities.clone()
-    }
-}
-
-struct HandlerWrapper(Arc<dyn Handler>);
-
-#[async_trait]
-impl Handler for HandlerWrapper {
-    fn name(&self) -> &str {
-        self.0.name()
-    }
-
-    fn topic(&self) -> Topic {
-        self.0.topic()
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        self.0.engine_config()
-    }
-
-    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
-        self.0.handle(context, message).await
     }
 }
 
