@@ -129,8 +129,12 @@ engine:
       max_attempts: 1  # re-dispatched every 30 minutes, no need to retry
 
 dispatch:
-  intervals: {}
-  batch_size: 1000
+  dispatchers:
+    global: {}
+    namespace: {}
+    project_code:
+      interval_secs: 1800
+      batch_size: 1000
 
 gkgServer:
   image:

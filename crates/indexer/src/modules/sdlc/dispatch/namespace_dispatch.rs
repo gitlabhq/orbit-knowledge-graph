@@ -3,10 +3,12 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use super::metrics::DispatchMetrics;
 use crate::clickhouse::ArrowClickHouseClient;
+use crate::configuration::DispatcherConfiguration;
 use crate::dispatcher::{DispatchError, Dispatcher};
 use crate::locking::LockService;
 use crate::modules::sdlc::locking::{LOCK_TTL, namespace_lock_key};
@@ -22,11 +24,18 @@ INNER JOIN siphon_namespaces on siphon_knowledge_graph_enabled_namespaces.root_n
 WHERE _siphon_deleted = false
 "#;
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NamespaceDispatcherConfig {
+    #[serde(flatten)]
+    pub dispatcher: DispatcherConfiguration,
+}
+
 pub struct NamespaceDispatcher {
     nats: Arc<dyn NatsServices>,
     lock_service: Arc<dyn LockService>,
     datalake: ArrowClickHouseClient,
     metrics: DispatchMetrics,
+    config: NamespaceDispatcherConfig,
 }
 
 impl NamespaceDispatcher {
@@ -35,12 +44,14 @@ impl NamespaceDispatcher {
         lock_service: Arc<dyn LockService>,
         datalake: ArrowClickHouseClient,
         metrics: DispatchMetrics,
+        config: NamespaceDispatcherConfig,
     ) -> Self {
         Self {
             nats,
             lock_service,
             datalake,
             metrics,
+            config,
         }
     }
 }
@@ -49,6 +60,10 @@ impl NamespaceDispatcher {
 impl Dispatcher for NamespaceDispatcher {
     fn name(&self) -> &str {
         "sdlc.namespace"
+    }
+
+    fn dispatcher_config(&self) -> &DispatcherConfiguration {
+        &self.config.dispatcher
     }
 
     async fn dispatch(&self) -> Result<(), DispatchError> {

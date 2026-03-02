@@ -8,7 +8,10 @@ use chrono::{DateTime, Utc};
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
 use indexer::dispatcher::Dispatcher;
-use indexer::modules::sdlc::dispatch::{DispatchMetrics, GlobalDispatcher, NamespaceDispatcher};
+use indexer::modules::sdlc::dispatch::{
+    DispatchMetrics, GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher,
+    NamespaceDispatcherConfig,
+};
 use indexer::nats::NatsConfiguration;
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT};
 use serde::Deserialize;
@@ -193,18 +196,19 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
             services.nats.clone(),
             services.lock_service.clone(),
             metrics.clone(),
+            GlobalDispatcherConfig::default(),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats,
             services.lock_service,
             datalake,
             metrics,
+            NamespaceDispatcherConfig::default(),
         )),
     ];
 
-    let dispatch_config = indexer::dispatcher::DispatchConfig::default();
     let before = Utc::now();
-    indexer::dispatcher::run(&dispatchers, &*lock_service, &dispatch_config)
+    indexer::dispatcher::run(&dispatchers, &*lock_service)
         .await
         .unwrap();
     let after = Utc::now();

@@ -1,10 +1,12 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use crate::clickhouse::ArrowClickHouseClient;
+use crate::configuration::DispatcherConfiguration;
 use crate::dispatcher::{DispatchError, Dispatcher};
 use crate::modules::sdlc::dispatch::DispatchMetrics;
 use crate::nats::NatsServices;
@@ -21,11 +23,39 @@ WHERE project._deleted = false
 LIMIT {batch_size:UInt64}
 "#;
 
+fn default_batch_size() -> u64 {
+    1000
+}
+
+fn default_interval_secs() -> Option<u64> {
+    Some(1800)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectCodeDispatcherConfig {
+    #[serde(flatten)]
+    pub dispatcher: DispatcherConfiguration,
+
+    #[serde(default = "default_batch_size")]
+    pub batch_size: u64,
+}
+
+impl Default for ProjectCodeDispatcherConfig {
+    fn default() -> Self {
+        Self {
+            dispatcher: DispatcherConfiguration {
+                interval_secs: default_interval_secs(),
+            },
+            batch_size: default_batch_size(),
+        }
+    }
+}
+
 pub struct ProjectCodeDispatcher {
     nats: Arc<dyn NatsServices>,
     graph: ArrowClickHouseClient,
     metrics: DispatchMetrics,
-    batch_size: u64,
+    config: ProjectCodeDispatcherConfig,
 }
 
 impl ProjectCodeDispatcher {
@@ -33,13 +63,13 @@ impl ProjectCodeDispatcher {
         nats: Arc<dyn NatsServices>,
         graph: ArrowClickHouseClient,
         metrics: DispatchMetrics,
-        batch_size: u64,
+        config: ProjectCodeDispatcherConfig,
     ) -> Self {
         Self {
             nats,
             graph,
             metrics,
-            batch_size,
+            config,
         }
     }
 }
@@ -50,8 +80,8 @@ impl Dispatcher for ProjectCodeDispatcher {
         "code.project"
     }
 
-    fn interval(&self) -> Option<Duration> {
-        Some(Duration::from_secs(1800))
+    fn dispatcher_config(&self) -> &DispatcherConfiguration {
+        &self.config.dispatcher
     }
 
     async fn dispatch(&self) -> Result<(), DispatchError> {
@@ -116,7 +146,7 @@ impl ProjectCodeDispatcher {
         let batches = self
             .graph
             .query(PENDING_PROJECTS_QUERY)
-            .param("batch_size", self.batch_size)
+            .param("batch_size", self.config.batch_size)
             .fetch_arrow()
             .await
             .map_err(|error| {
@@ -132,11 +162,12 @@ impl ProjectCodeDispatcher {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use super::*;
     use crate::clickhouse::ClickHouseConfiguration;
-    use crate::modules::code::config::DEFAULT_DISPATCH_BATCH_SIZE;
     use crate::testkit::MockNatsServices;
-    use std::sync::Arc;
 
     fn test_metrics() -> DispatchMetrics {
         let provider = opentelemetry::global::meter_provider();
@@ -155,7 +186,7 @@ mod tests {
             nats,
             test_client(),
             test_metrics(),
-            DEFAULT_DISPATCH_BATCH_SIZE,
+            ProjectCodeDispatcherConfig::default(),
         );
 
         assert_eq!(dispatcher.name(), "code.project");
@@ -163,14 +194,18 @@ mod tests {
 
     #[test]
     fn defaults_to_thirty_minute_interval() {
-        let nats = Arc::new(MockNatsServices::new());
-        let dispatcher = ProjectCodeDispatcher::new(
-            nats,
-            test_client(),
-            test_metrics(),
-            DEFAULT_DISPATCH_BATCH_SIZE,
-        );
+        let config = ProjectCodeDispatcherConfig::default();
 
-        assert_eq!(dispatcher.interval(), Some(Duration::from_secs(1800)));
+        assert_eq!(
+            config.dispatcher.interval(),
+            Some(Duration::from_secs(1800))
+        );
+    }
+
+    #[test]
+    fn defaults_to_batch_size_1000() {
+        let config = ProjectCodeDispatcherConfig::default();
+
+        assert_eq!(config.batch_size, 1000);
     }
 }

@@ -46,21 +46,23 @@ async fn main() -> anyhow::Result<()> {
                     services.nats.clone(),
                     services.lock_service.clone(),
                     metrics.clone(),
+                    config.dispatch.dispatchers.global.clone(),
                 )),
                 Box::new(NamespaceDispatcher::new(
                     services.nats.clone(),
                     services.lock_service.clone(),
                     datalake.clone(),
                     metrics.clone(),
+                    config.dispatch.dispatchers.namespace.clone(),
                 )),
                 Box::new(ProjectCodeDispatcher::new(
                     services.nats,
                     graph,
                     metrics,
-                    config.dispatch.batch_size,
+                    config.dispatch.dispatchers.project_code.clone(),
                 )),
             ];
-            indexer::dispatcher::run(&dispatchers, &*lock_service, &config.dispatch)
+            indexer::dispatcher::run(&dispatchers, &*lock_service)
                 .await
                 .map_err(Into::into)
         }

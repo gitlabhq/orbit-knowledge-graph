@@ -27,5 +27,3 @@ pub mod tables {
         vec![GL_DIRECTORY, GL_FILE, GL_DEFINITION, GL_IMPORTED_SYMBOL]
     }
 }
-
-pub const DEFAULT_DISPATCH_BATCH_SIZE: u64 = 1000;

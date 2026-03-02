@@ -3,9 +3,11 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use super::metrics::DispatchMetrics;
+use crate::configuration::DispatcherConfiguration;
 use crate::dispatcher::{DispatchError, Dispatcher};
 use crate::locking::LockService;
 use crate::modules::sdlc::locking::{LOCK_TTL, global_lock_key};
@@ -13,10 +15,17 @@ use crate::nats::NatsServices;
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GlobalDispatcherConfig {
+    #[serde(flatten)]
+    pub dispatcher: DispatcherConfiguration,
+}
+
 pub struct GlobalDispatcher {
     nats: Arc<dyn NatsServices>,
     lock_service: Arc<dyn LockService>,
     metrics: DispatchMetrics,
+    config: GlobalDispatcherConfig,
 }
 
 impl GlobalDispatcher {
@@ -24,11 +33,13 @@ impl GlobalDispatcher {
         nats: Arc<dyn NatsServices>,
         lock_service: Arc<dyn LockService>,
         metrics: DispatchMetrics,
+        config: GlobalDispatcherConfig,
     ) -> Self {
         Self {
             nats,
             lock_service,
             metrics,
+            config,
         }
     }
 }
@@ -37,6 +48,10 @@ impl GlobalDispatcher {
 impl Dispatcher for GlobalDispatcher {
     fn name(&self) -> &str {
         "sdlc.global"
+    }
+
+    fn dispatcher_config(&self) -> &DispatcherConfiguration {
+        &self.config.dispatcher
     }
 
     async fn dispatch(&self) -> Result<(), DispatchError> {
