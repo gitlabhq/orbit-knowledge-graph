@@ -37,6 +37,13 @@ enum E2eCommand {
         #[arg(long)]
         skip_build: bool,
 
+        /// Skip webpack asset compilation.
+        ///
+        /// The base CNG image's pre-built webpack assets are kept unchanged.
+        /// Use this for faster Ruby-only rebuilds when JS hasn't changed.
+        #[arg(long)]
+        skip_webpack: bool,
+
         /// Run only CNG deploy (cluster + GitLab).
         #[arg(long)]
         cng: bool,
@@ -72,7 +79,15 @@ enum E2eCommand {
         /// Rebuild Rails CNG images from GITLAB_SRC and helm upgrade GitLab.
         #[arg(long)]
         rails: bool,
+
+        /// Skip webpack asset compilation during Rails rebuild.
+        #[arg(long)]
+        skip_webpack: bool,
     },
+    /// Port-forward GitLab and GKG services to localhost.
+    ///
+    /// Runs in the foreground. Ctrl+C to stop.
+    Serve,
     /// Tear down the E2E environment.
     ///
     /// By default, tears down everything (GKG + GitLab + Traefik + Colima).
@@ -106,6 +121,7 @@ async fn main() -> Result<()> {
             match command {
                 E2eCommand::Setup {
                     skip_build,
+                    skip_webpack,
                     cng,
                     cng_setup,
                     gkg,
@@ -113,17 +129,13 @@ async fn main() -> Result<()> {
                 } => {
                     let cfg = e2e::config::Config::load()?;
 
-                    // Resolve which phases to run.
-                    // --gkg implies all. --gkg-only runs just phase 3.
-                    // Individual flags run just that phase.
-                    // No flags = CNG + CNG-setup (default).
                     let explicit = cng || cng_setup || gkg || gkg_only;
                     let run_cng = !explicit || cng || gkg;
                     let run_cng_setup = !explicit || cng_setup || gkg;
                     let run_gkg_stack = gkg || gkg_only;
 
                     if run_cng {
-                        e2e::pipeline::cng::run(&sh, &cfg, skip_build).await?;
+                        e2e::pipeline::cng::run(&sh, &cfg, skip_build, skip_webpack).await?;
                     }
                     if run_cng_setup {
                         e2e::pipeline::cngsetup::run(&cfg).await?;
@@ -138,12 +150,20 @@ async fn main() -> Result<()> {
                     let cfg = e2e::config::Config::load()?;
                     e2e::pipeline::test::run(&cfg).await
                 }
-                E2eCommand::Rebuild { gkg, rails } => {
+                E2eCommand::Serve => {
+                    let cfg = e2e::config::Config::load()?;
+                    e2e::pipeline::serve::run(&cfg).await
+                }
+                E2eCommand::Rebuild {
+                    gkg,
+                    rails,
+                    skip_webpack,
+                } => {
                     if !gkg && !rails {
                         anyhow::bail!("rebuild requires at least one of --gkg or --rails");
                     }
                     let cfg = e2e::config::Config::load()?;
-                    e2e::pipeline::rebuild::run(&sh, &cfg, gkg, rails).await
+                    e2e::pipeline::rebuild::run(&sh, &cfg, gkg, rails, skip_webpack).await
                 }
                 E2eCommand::Teardown {
                     keep_colima,

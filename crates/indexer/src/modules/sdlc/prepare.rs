@@ -411,7 +411,7 @@ fn build_type_filter(type_column: &str, allowed_types: &[String]) -> Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::{EdgeMapping, EtlConfig, EtlScope};
+    use ontology::{EdgeMapping, EtlConfig, EtlScope, constants::GL_TABLE_PREFIX};
     use std::collections::BTreeMap;
 
     #[test]
@@ -536,7 +536,7 @@ mod tests {
         let node = NodeEntity {
             name: "Group".to_string(),
             domain: "core".to_string(),
-            destination_table: "gl_group".to_string(),
+            destination_table: format!("{GL_TABLE_PREFIX}group"),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
                 source: "siphon_groups".to_string(),
@@ -573,7 +573,7 @@ mod tests {
         let node = NodeEntity {
             name: "Note".to_string(),
             domain: "core".to_string(),
-            destination_table: "gl_note".to_string(),
+            destination_table: format!("{GL_TABLE_PREFIX}note"),
             etl: Some(EtlConfig::Table {
                 scope: EtlScope::Namespaced,
                 source: "siphon_notes".to_string(),

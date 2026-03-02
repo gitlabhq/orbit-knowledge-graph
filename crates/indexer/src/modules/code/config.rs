@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use ontology::{Ontology, OntologyError};
+
 pub const LOCK_TTL: Duration = Duration::from_secs(60);
 
 pub mod siphon_actions {
@@ -16,14 +18,32 @@ pub mod subjects {
     pub const PUSH_EVENT_PAYLOADS: &str = "push_event_payloads";
 }
 
-// TODO: Should be derived from the ontology
-pub mod tables {
-    pub const GL_DIRECTORY: &str = "gl_directory";
-    pub const GL_FILE: &str = "gl_file";
-    pub const GL_DEFINITION: &str = "gl_definition";
-    pub const GL_IMPORTED_SYMBOL: &str = "gl_imported_symbol";
+/// ClickHouse table names for code graph entities, derived from the ontology.
+pub struct CodeTableNames {
+    pub directory: String,
+    pub file: String,
+    pub definition: String,
+    pub imported_symbol: String,
+    pub edge: String,
+}
 
-    pub fn all() -> Vec<&'static str> {
-        vec![GL_DIRECTORY, GL_FILE, GL_DEFINITION, GL_IMPORTED_SYMBOL]
+impl CodeTableNames {
+    pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
+        Ok(Self {
+            directory: ontology.table_name("Directory")?,
+            file: ontology.table_name("File")?,
+            definition: ontology.table_name("Definition")?,
+            imported_symbol: ontology.table_name("ImportedSymbol")?,
+            edge: ontology.edge_table().to_string(),
+        })
+    }
+
+    pub fn node_tables(&self) -> Vec<&str> {
+        vec![
+            &self.directory,
+            &self.file,
+            &self.definition,
+            &self.imported_symbol,
+        ]
     }
 }

@@ -7,8 +7,10 @@
 //!   9.  Grant REPLICATION privilege to gitlab PG user (for Siphon WAL sender)
 //!  10.  Run Rails db:migrate
 //!  11.  Enable :knowledge_graph feature flag
-//!  12.  Copy test scripts into toolbox pod
-//!  13.  Create test data (users, groups, projects, MRs)
+//!  12.  Configure Knowledge Graph in webservice ConfigMap
+//!  13.  Copy test scripts into toolbox pod
+//!  14.  Create test data (users, groups, projects, MRs)
+//!  15.  Set root password
 
 use std::fs;
 
@@ -29,8 +31,10 @@ pub async fn run(cfg: &Config) -> Result<()> {
     grant_replication(cfg).await?;
     run_db_migrate(cfg, &toolbox_pod).await?;
     enable_feature_flag(cfg, &toolbox_pod).await?;
+    configure_knowledge_graph(cfg).await?;
     copy_test_scripts(cfg, &toolbox_pod).await?;
     create_test_data(cfg, &toolbox_pod).await?;
+    set_root_password(cfg, &toolbox_pod).await?;
 
     ui::outro("CNG setup complete")?;
     Ok(())
@@ -116,10 +120,10 @@ async fn enable_feature_flag(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     Ok(())
 }
 
-// -- Step 12: Copy test scripts -----------------------------------------------
+// -- Step 13: Copy test scripts -----------------------------------------------
 
 async fn copy_test_scripts(cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    ui::step(12, "Copying test scripts to toolbox pod")?;
+    ui::step(13, "Copying test scripts to toolbox pod")?;
 
     let count = utils::copy_test_scripts(cfg, toolbox_pod).await?;
     if count == 0 {
@@ -131,10 +135,73 @@ async fn copy_test_scripts(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     Ok(())
 }
 
-// -- Step 13: Create test data ------------------------------------------------
+// -- Step 15: Set root password -----------------------------------------------
+
+async fn set_root_password(cfg: &Config, toolbox_pod: &str) -> Result<()> {
+    let password = &cfg.gitlab_ui.root_password;
+    ui::step(15, "Setting root user password")?;
+
+    let escaped_password = password.replace('\\', "\\\\").replace('\'', "\\'");
+    let ruby = format!(
+        r#"u = User.find_by(username: 'root'); u.password = '{escaped_password}'; u.password_confirmation = '{escaped_password}'; u.save!; puts 'ok'"#
+    );
+    utils::toolbox_rails_eval(cfg, toolbox_pod, &ruby).await?;
+
+    ui::done(&format!("Root password set (root / {password})"))?;
+    Ok(())
+}
+
+// -- Step 12: Configure Knowledge Graph in gitlab.yml.erb ---------------------
+
+async fn configure_knowledge_graph(cfg: &Config) -> Result<()> {
+    ui::step(12, "Configuring Knowledge Graph in webservice ConfigMap")?;
+
+    let ns = &cfg.namespaces.gitlab;
+    let cm_name = format!("{}-webservice", cfg.helm.gitlab.release);
+    let key = "gitlab.yml.erb";
+
+    let content = kube::read_configmap_field(ns, &cm_name, key).await?;
+
+    if content.contains("knowledge_graph:") {
+        ui::done("knowledge_graph already configured — skipping")?;
+        return Ok(());
+    }
+
+    let grpc_endpoint = &cfg.gkg.grpc_endpoint;
+    let kg_block = format!(
+        "\n  knowledge_graph:\n    enabled: true\n    grpc_endpoint: \"dns:///{grpc_endpoint}\"\n"
+    );
+
+    // Insert after the `production:` line (first line matching `production:`)
+    let patched = if let Some(pos) = content.find("production:") {
+        let line_end = content[pos..]
+            .find('\n')
+            .map(|i| pos + i)
+            .unwrap_or(content.len());
+        let mut out = content[..line_end + 1].to_string();
+        out.push_str(&kg_block);
+        out.push_str(&content[line_end + 1..]);
+        out
+    } else {
+        anyhow::bail!("could not find 'production:' in {key} — unexpected ConfigMap format");
+    };
+
+    kube::patch_configmap_field(ns, &cm_name, key, &patched).await?;
+
+    ui::info("Restarting webservice deployment to pick up config change")?;
+    let deploy_name = format!("{}-webservice-default", cfg.helm.gitlab.release);
+    kube::rollout_restart(ns, &deploy_name).await?;
+
+    kube::wait_for_pod("app=webservice", ns, "600s").await?;
+
+    ui::done("Knowledge Graph configured in gitlab.yml.erb")?;
+    Ok(())
+}
+
+// -- Step 14: Create test data ------------------------------------------------
 
 async fn create_test_data(cfg: &Config, toolbox_pod: &str) -> Result<()> {
-    ui::step(13, "Creating test data")?;
+    ui::step(14, "Creating test data")?;
 
     let ns = &cfg.namespaces.gitlab;
     let rails_root = &cfg.pod_paths.rails_root;

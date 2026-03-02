@@ -2,7 +2,7 @@
 //!
 //! Replaces all `docker` CLI shell-outs except Helm's DOCKER_HOST usage.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -66,12 +66,17 @@ pub async fn pull_image(colima_profile: &str, image: &str) -> Result<()> {
 ///
 /// The Dockerfile (which may live outside `context_dir`) is included in the
 /// tar archive sent to the daemon. `build_args` maps ARG names to values.
+///
+/// When `verbose` is true, every line of Docker build output is printed to
+/// stderr. When false, output is silently captured and only the last 50
+/// lines are shown on error.
 pub async fn build_image(
     colima_profile: &str,
     context_dir: &Path,
     dockerfile: &Path,
     tag: &str,
     build_args: &HashMap<&str, &str>,
+    verbose: bool,
 ) -> Result<()> {
     let docker = client(colima_profile)?;
 
@@ -99,12 +104,26 @@ pub async fn build_image(
         .build();
 
     let mut stream = docker.build_image(opts, None, Some(body));
+    let mut last_lines: VecDeque<String> = VecDeque::new();
     while let Some(msg) = stream.next().await {
         let info = msg.with_context(|| format!("building image {tag}"))?;
+        if let Some(line) = &info.stream {
+            let trimmed = line.trim_end();
+            if !trimmed.is_empty() {
+                if verbose {
+                    eprintln!("{trimmed}");
+                }
+                last_lines.push_back(trimmed.to_string());
+                if last_lines.len() > 50 {
+                    last_lines.pop_front();
+                }
+            }
+        }
         if let Some(detail) = &info.error_detail
             && let Some(err) = &detail.message
         {
-            anyhow::bail!("docker build failed for {tag}: {err}");
+            let context = Vec::from(last_lines).join("\n");
+            anyhow::bail!("docker build failed for {tag}: {err}\n\nLast build output:\n{context}");
         }
     }
     Ok(())

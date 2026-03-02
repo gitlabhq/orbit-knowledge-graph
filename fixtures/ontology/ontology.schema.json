@@ -194,9 +194,14 @@
           "type": "string",
           "pattern": "^[a-z_]+$",
           "description": "Prefix applied to all ClickHouse graph table names (e.g., 'gl_')."
+        },
+        "edge_table": {
+          "type": "string",
+          "pattern": "^[a-z_]+$",
+          "description": "ClickHouse table name for all graph edges (e.g., 'gl_edge')."
         }
       },
-      "required": ["table_prefix"],
+      "required": ["table_prefix", "edge_table"],
       "additionalProperties": false
     },
 

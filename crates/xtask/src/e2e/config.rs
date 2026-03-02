@@ -137,6 +137,17 @@ pub struct PodReadiness {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct GitlabUi {
+    pub service: String,
+    pub service_port: String,
+    pub local_port: String,
+    pub gkg_service: String,
+    pub gkg_service_port: String,
+    pub gkg_local_port: String,
+    pub root_password: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Timeouts {
     pub ch_pod: String,
     pub gkg_chart: String,
@@ -166,6 +177,7 @@ pub struct Config {
     pub clickhouse: ClickHouse,
     pub siphon: Siphon,
     pub gkg: Gkg,
+    pub gitlab_ui: GitlabUi,
     pub labels: Labels,
     pub pod_readiness: Vec<PodReadiness>,
     pub gkg_pod_readiness: Vec<PodReadiness>,

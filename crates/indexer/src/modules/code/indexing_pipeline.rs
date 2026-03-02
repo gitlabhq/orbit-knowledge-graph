@@ -6,12 +6,11 @@ use chrono::{DateTime, Utc};
 use code_graph::analysis::types::GraphData;
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
 use code_graph::loading::DirectoryFileSource;
-use ontology::constants::EDGE_TABLE;
 use tempfile::TempDir;
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::ArrowConverter;
-use super::config::tables;
+use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository_service::RepositoryService;
 use super::stale_data_cleaner::StaleDataCleaner;
@@ -33,6 +32,7 @@ pub struct CodeIndexingPipeline {
     watermark_store: Arc<dyn CodeWatermarkStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
+    table_names: Arc<CodeTableNames>,
 }
 
 impl CodeIndexingPipeline {
@@ -41,12 +41,14 @@ impl CodeIndexingPipeline {
         watermark_store: Arc<dyn CodeWatermarkStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
+        table_names: Arc<CodeTableNames>,
     ) -> Self {
         Self {
             repository_service,
             watermark_store,
             stale_data_cleaner,
             metrics,
+            table_names,
         }
     }
 
@@ -222,15 +224,20 @@ impl CodeIndexingPipeline {
             .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
             .record_error_stage(&self.metrics, "arrow_conversion")?;
 
-        self.write_batch(ctx, tables::GL_DIRECTORY, &converted.directories)
+        self.write_batch(ctx, &self.table_names.directory, &converted.directories)
             .await?;
-        self.write_batch(ctx, tables::GL_FILE, &converted.files)
+        self.write_batch(ctx, &self.table_names.file, &converted.files)
             .await?;
-        self.write_batch(ctx, tables::GL_DEFINITION, &converted.definitions)
+        self.write_batch(ctx, &self.table_names.definition, &converted.definitions)
             .await?;
-        self.write_batch(ctx, tables::GL_IMPORTED_SYMBOL, &converted.imported_symbols)
+        self.write_batch(
+            ctx,
+            &self.table_names.imported_symbol,
+            &converted.imported_symbols,
+        )
+        .await?;
+        self.write_batch(ctx, &self.table_names.edge, &converted.edges)
             .await?;
-        self.write_batch(ctx, EDGE_TABLE, &converted.edges).await?;
 
         Ok(())
     }

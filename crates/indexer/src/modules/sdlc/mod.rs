@@ -27,6 +27,7 @@ use watermark_store::{ClickHouseWatermarkStore, WatermarkStore};
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
+    ontology: &Ontology,
 ) -> Result<(), HandlerInitError> {
     let global_handler_config = config.engine.handlers.global_handler.clone();
     let namespace_handler_config = config.engine.handlers.namespace_handler.clone();
@@ -35,13 +36,12 @@ pub async fn register_handlers(
 
     let datalake_client = Arc::new(config.datalake.build_client());
     let graph_client = Arc::new(config.graph.build_client());
-    let ontology = Ontology::load_embedded().map_err(HandlerInitError::new)?;
 
     let datalake: Arc<dyn DatalakeQuery> =
         Arc::new(Datalake::new(datalake_client, datalake_batch_size));
     let watermark_store: Arc<dyn WatermarkStore> =
         Arc::new(ClickHouseWatermarkStore::new(graph_client));
-    let ontology = Arc::new(ontology);
+    let ontology = Arc::new(ontology.clone());
     let metrics = SdlcMetrics::new();
 
     register_global_handler(

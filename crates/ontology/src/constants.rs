@@ -51,11 +51,12 @@ pub fn validate_ontology_constants() {
         ontology.table_prefix(),
     );
 
-    let expected_edge = format!("{}edge", ontology.table_prefix());
     assert_eq!(
-        EDGE_TABLE, expected_edge,
+        EDGE_TABLE,
+        ontology.edge_table(),
         "EDGE_TABLE const (\"{EDGE_TABLE}\") doesn't match \
-         expected (\"{expected_edge}\") — update the const in constants.rs",
+         embedded ontology (\"{}\") — update the const in constants.rs",
+        ontology.edge_table(),
     );
 }
 

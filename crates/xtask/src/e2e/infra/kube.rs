@@ -21,7 +21,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use k8s_openapi::ByteString;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{Namespace, Pod, Secret};
+use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, Secret};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::Client;
 use kube::api::{
@@ -209,6 +209,42 @@ pub async fn apply_secret(ns: &str, name: &str, key: &str, value: &str) -> Resul
         .patch(name, &pp, &Patch::Apply(&secret))
         .await
         .with_context(|| format!("applying secret {name}"))?;
+    Ok(())
+}
+
+// =============================================================================
+// ConfigMaps
+// =============================================================================
+
+/// Read a ConfigMap data field.
+pub async fn read_configmap_field(ns: &str, name: &str, key: &str) -> Result<String> {
+    let client = client().await?;
+    let cms: Api<ConfigMap> = Api::namespaced(client, ns);
+    let cm = cms
+        .get(name)
+        .await
+        .with_context(|| format!("reading configmap {name} in {ns}"))?;
+
+    cm.data
+        .as_ref()
+        .and_then(|d| d.get(key).cloned())
+        .ok_or_else(|| anyhow!("key {key} not found in configmap {name}"))
+}
+
+/// Patch a single data field in a ConfigMap using a strategic merge patch.
+pub async fn patch_configmap_field(ns: &str, name: &str, key: &str, value: &str) -> Result<()> {
+    let client = client().await?;
+    let cms: Api<ConfigMap> = Api::namespaced(client, ns);
+
+    let patch = serde_json::json!({
+        "data": {
+            key: value
+        }
+    });
+
+    cms.patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+        .await
+        .with_context(|| format!("patching configmap {name} key {key} in {ns}"))?;
     Ok(())
 }
 
