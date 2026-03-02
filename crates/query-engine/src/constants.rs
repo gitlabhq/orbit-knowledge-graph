@@ -26,7 +26,6 @@ pub const RELATIONSHIP_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "relatio
 /// Tables that should NOT have traversal path security filters applied.
 /// These are entities whose visibility is determined through relationships
 /// (e.g., MEMBER_OF) rather than direct path hierarchy.
-/// TODO!!! : This table name needs to be derived directly from the ontology.
 pub const SKIP_SECURITY_FILTER_TABLES: &[&str] = &[concatcp!(GL_TABLE_PREFIX, "user")];
 
 // _gkg_{alias}_pk  — always the entity's primary key (for hydration lookups)

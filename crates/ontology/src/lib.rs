@@ -87,6 +87,8 @@ impl fmt::Display for OntologyError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
     schema_version: String,
+    /// Prefix for all ClickHouse graph table names (e.g., `"gl_"`).
+    table_prefix: String,
     domains: BTreeMap<String, DomainInfo>,
     nodes: BTreeMap<String, NodeEntity>,
     edges: BTreeMap<String, Vec<EdgeEntity>>,
@@ -107,6 +109,7 @@ impl Ontology {
     pub fn new() -> Self {
         Self {
             schema_version: String::new(),
+            table_prefix: GL_TABLE_PREFIX.to_string(),
             domains: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
@@ -129,7 +132,7 @@ impl Ontology {
                     label: String::new(),
                     fields: vec![],
                     primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
-                    destination_table: format!("gl_{}", name.to_lowercase()),
+                    destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
                     etl: None,
                     redaction: None,
                     style: NodeStyle::default(),
@@ -227,6 +230,7 @@ impl Ontology {
 
         let mut ontology = Ontology::new();
         ontology.schema_version = schema.schema_version.unwrap_or_default();
+        ontology.table_prefix = schema.settings.table_prefix;
 
         for (domain_name, domain) in &schema.domains {
             let mut node_names = Vec::new();
@@ -243,6 +247,15 @@ impl Ontology {
                 let node_def: NodeYaml = parse_yaml(&content, node_path)?;
 
                 let entity = node_def.into_entity(node_name.clone())?;
+
+                if !entity.destination_table.starts_with(&ontology.table_prefix) {
+                    return Err(OntologyError::Validation(format!(
+                        "node '{}' has destination_table '{}' which does not start with \
+                         table_prefix '{}'",
+                        node_name, entity.destination_table, ontology.table_prefix
+                    )));
+                }
+
                 ontology.nodes.insert(node_name.clone(), entity);
                 node_names.push(node_name.clone());
             }
@@ -429,6 +442,12 @@ impl Ontology {
     #[must_use]
     pub fn schema_version(&self) -> &str {
         &self.schema_version
+    }
+
+    /// Table name prefix for all ClickHouse graph tables.
+    #[must_use]
+    pub fn table_prefix(&self) -> &str {
+        &self.table_prefix
     }
 
     pub fn domains(&self) -> impl Iterator<Item = &DomainInfo> {
@@ -748,10 +767,16 @@ fn parse_data_type(s: &str, field_name: &str) -> Result<DataType, OntologyError>
 struct SchemaYaml {
     #[serde(default)]
     schema_version: Option<String>,
+    settings: SettingsYaml,
     #[serde(default)]
     domains: BTreeMap<String, DomainYaml>,
     #[serde(default)]
     edges: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SettingsYaml {
+    table_prefix: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1643,6 +1668,74 @@ mod tests {
             "project",
             "project_id",
             "read_code",
+        );
+    }
+
+    #[test]
+    fn destination_table_must_match_table_prefix() {
+        use std::collections::HashMap;
+
+        struct MockReader(HashMap<String, String>);
+        impl ReadOntologyFile for MockReader {
+            fn read(&self, path: &str) -> Result<String, OntologyError> {
+                self.0.get(path).cloned().ok_or_else(|| OntologyError::Io {
+                    path: path.to_string(),
+                    source: std::io::Error::new(std::io::ErrorKind::NotFound, "not found"),
+                })
+            }
+        }
+
+        let mut files = HashMap::new();
+        files.insert(
+            "schema.yaml".to_string(),
+            r#"
+schema_version: "1.0"
+settings:
+  table_prefix: "kg_"
+domains:
+  core:
+    nodes:
+      User: nodes/core/user.yaml
+edges: {}
+"#
+            .to_string(),
+        );
+        files.insert(
+            "nodes/core/user.yaml".to_string(),
+            r##"
+node_type: User
+domain: core
+description: A user
+label: username
+destination_table: gl_user
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "ID"
+  username:
+    type: string
+    source: username
+    nullable: false
+    description: "Username"
+primary_keys: [id]
+redaction:
+  resource_type: user
+  id_column: id
+  ability: read_user
+style:
+  size: 30
+  color: "#6B7280"
+"##
+            .to_string(),
+        );
+
+        let err = Ontology::load_with(&MockReader(files)).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("gl_user") && msg.contains("kg_"),
+            "error should mention both the bad table and expected prefix, got: {msg}"
         );
     }
 

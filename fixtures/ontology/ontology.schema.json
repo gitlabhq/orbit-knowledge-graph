@@ -186,6 +186,20 @@
       "additionalProperties": false
     },
 
+    "settingsDefinition": {
+      "type": "object",
+      "description": "Global settings for the ontology.",
+      "properties": {
+        "table_prefix": {
+          "type": "string",
+          "pattern": "^[a-z_]+$",
+          "description": "Prefix applied to all ClickHouse graph table names (e.g., 'gl_')."
+        }
+      },
+      "required": ["table_prefix"],
+      "additionalProperties": false
+    },
+
     "domainDefinition": {
       "type": "object",
       "description": "A domain grouping related entities.",
@@ -220,6 +234,10 @@
           "type": "string",
           "description": "Overall description of the ontology."
         },
+        "settings": {
+          "$ref": "#/definitions/settingsDefinition",
+          "description": "Global ontology settings."
+        },
         "domains": {
           "type": "object",
           "description": "Domain definitions containing node references.",
@@ -232,7 +250,7 @@
           "additionalProperties": { "type": "string" }
         }
       },
-      "required": ["type", "schema_version", "domains", "edges"],
+      "required": ["type", "schema_version", "settings", "domains", "edges"],
       "additionalProperties": false
     },
 

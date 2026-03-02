@@ -75,7 +75,6 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
 mod tests {
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
-
     fn project_query(where_clause: Option<Expr>) -> Node {
         Node::Query(Box::new(Query {
             select: vec![SelectExpr {

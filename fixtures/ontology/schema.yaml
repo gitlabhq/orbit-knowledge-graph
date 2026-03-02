@@ -8,7 +8,10 @@ description: >
   - This schema is not intended to be a 1:1 mapping of GitLab database tables.
   - This schema is intended to exposed to the LLM for understanding the Knowledge Graph
   data model (ontology) and to help generate queries via the Knowledge Graph DSL (LLM Cypher JSON).
-  
+
+settings:
+  table_prefix: "gl_"
+
 domains:
   core:
     description: "Entities which represent the structure of a GitLab instance."
