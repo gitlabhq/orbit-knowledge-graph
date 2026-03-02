@@ -48,7 +48,8 @@ pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use check::check_ast;
 pub use codegen::{CompiledQuery, HydrationPlan, HydrationTemplate, ParameterizedQuery, codegen};
 pub use constants::{
-    NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
+    RELATIONSHIP_TYPE_COLUMN,
 };
 pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
@@ -57,7 +58,8 @@ pub use input::{Input, QueryType, parse_input};
 pub use lower::lower;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use normalize::{build_entity_auth, normalize};
-pub use ontology::{EDGE_TABLE, Ontology, OntologyError};
+pub use ontology::constants::EDGE_TABLE;
+pub use ontology::{Ontology, OntologyError};
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
 

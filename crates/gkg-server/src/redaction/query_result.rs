@@ -7,7 +7,9 @@ use arrow::array::{
     TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt64Array,
 };
 use arrow::record_batch::RecordBatch;
-use query_engine::constants::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN};
+use query_engine::constants::{
+    EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
+};
 use query_engine::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
@@ -105,14 +107,23 @@ pub struct QueryResultRow {
     columns: HashMap<String, ColumnValue>,
     /// Nodes discovered dynamically at query time that need redaction checks (e.g nodes where their entity type is not known ahead of time).
     dynamic_nodes: Vec<NodeRef>,
+    /// Relationship kinds for each hop in a path finding query.
+    /// `edge_kinds[i]` is the relationship that connects `dynamic_nodes[i]` to `dynamic_nodes[i+1]`.
+    /// Empty for non-path-finding queries.
+    edge_kinds: Vec<String>,
     authorized: bool,
 }
 
 impl QueryResultRow {
-    fn new(columns: HashMap<String, ColumnValue>, dynamic_nodes: Vec<NodeRef>) -> Self {
+    fn new(
+        columns: HashMap<String, ColumnValue>,
+        dynamic_nodes: Vec<NodeRef>,
+        edge_kinds: Vec<String>,
+    ) -> Self {
         Self {
             columns,
             dynamic_nodes,
+            edge_kinds,
             authorized: true,
         }
     }
@@ -154,6 +165,10 @@ impl QueryResultRow {
 
     pub fn dynamic_nodes_mut(&mut self) -> &mut [NodeRef] {
         &mut self.dynamic_nodes
+    }
+
+    pub fn edge_kinds(&self) -> &[String] {
+        &self.edge_kinds
     }
 
     pub fn is_authorized(&self) -> bool {
@@ -212,7 +227,13 @@ impl QueryResult {
                     Vec::new()
                 };
 
-                rows.push(QueryResultRow::new(columns, dynamic_nodes));
+                let edge_kinds = if is_path_finding {
+                    extract_edge_kinds(batch, row_idx)
+                } else {
+                    Vec::new()
+                };
+
+                rows.push(QueryResultRow::new(columns, dynamic_nodes, edge_kinds));
             }
         }
 
@@ -291,7 +312,12 @@ impl QueryResult {
                     continue;
                 };
                 let auth_id = if let Some(ref owner) = auth.owner_entity {
-                    get_edge_id_for_entity(row, owner).unwrap_or(node_ref.id)
+                    // If owner can't be found, skip — apply_authorizations will
+                    // fail-closed since no auth result will exist for this entity.
+                    let Some(id) = find_owner_id(row, owner, &self.ctx) else {
+                        continue;
+                    };
+                    id
                 } else {
                     node_ref.id
                 };
@@ -349,8 +375,9 @@ impl QueryResult {
             if row.authorized {
                 for node_ref in &row.dynamic_nodes {
                     let mut node_ref = node_ref.clone();
-                    resolve_dynamic_auth_id(row, &mut node_ref, &self.ctx);
-                    if !is_authorized(&node_ref, authorizations, &self.ctx) {
+                    if !resolve_dynamic_auth_id(row, &mut node_ref, &self.ctx)
+                        || !is_authorized(&node_ref, authorizations, &self.ctx)
+                    {
                         row.set_unauthorized();
                         redacted_count += 1;
                         break;
@@ -393,30 +420,58 @@ fn is_authorized(
 }
 
 /// For indirect-auth entities (owner_entity is set in EntityAuthConfig), rewrite
-/// node_ref.id to the owner entity's ID from edge columns so is_authorized can use it directly.
-fn resolve_dynamic_auth_id(row: &QueryResultRow, node_ref: &mut NodeRef, ctx: &ResultContext) {
+/// node_ref.id to the owner entity's ID so is_authorized can use it directly.
+/// Returns false if the entity requires owner resolution but the owner cannot be
+/// found — the caller must deny the row (fail-closed).
+fn resolve_dynamic_auth_id(
+    row: &QueryResultRow,
+    node_ref: &mut NodeRef,
+    ctx: &ResultContext,
+) -> bool {
     let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
-        return;
+        return true;
     };
     let Some(ref owner) = auth_config.owner_entity else {
-        return;
+        return true;
     };
-    if let Some(owner_id) = get_edge_id_for_entity(row, owner) {
-        node_ref.id = owner_id;
+    match find_owner_id(row, owner, ctx) {
+        Some(owner_id) => {
+            node_ref.id = owner_id;
+            true
+        }
+        None => false,
     }
 }
 
-fn get_edge_id_for_entity(row: &QueryResultRow, entity_type: &str) -> Option<i64> {
-    if let Some(src_type) = row.get("e_src_type").and_then(|v| v.as_str())
-        && src_type == entity_type
-    {
-        return row.get("e_src").and_then(|v| v.as_i64());
+/// Find the ID of an owner entity in a row by searching static and dynamic nodes.
+fn find_owner_id(row: &QueryResultRow, owner_type: &str, ctx: &ResultContext) -> Option<i64> {
+    // Check static nodes for a direct match (entity IS the owner type).
+    // Also check for an indirect match: a static node that is itself an
+    // indirect-auth entity with the same owner_entity already holds the
+    // owner's ID in its _gkg_*_id column (enforce.rs emits it from the
+    // auth id column, e.g. `project_id` for File/Definition).
+    for redaction_node in ctx.nodes() {
+        if let Some(nr) = row.node_ref(redaction_node) {
+            if nr.entity_type == owner_type {
+                return Some(nr.id);
+            }
+            if let Some(auth) = ctx.get_entity_auth(&nr.entity_type)
+                && auth.owner_entity.as_deref() == Some(owner_type)
+            {
+                return Some(nr.id);
+            }
+        }
     }
-    if let Some(dst_type) = row.get("e_dst_type").and_then(|v| v.as_str())
-        && dst_type == entity_type
-    {
-        return row.get("e_dst").and_then(|v| v.as_i64());
+
+    // Check dynamic nodes in the row (e.g. adjacent path nodes).
+    // Only direct entity_type match — dynamic nodes hold their own ID,
+    // not the owner's.
+    for other in row.dynamic_nodes() {
+        if other.entity_type == owner_type {
+            return Some(other.id);
+        }
     }
+
     None
 }
 
@@ -490,6 +545,29 @@ fn extract_path_nodes(batch: &RecordBatch, row_idx: usize) -> Vec<NodeRef> {
             .map(|i| NodeRef::new(ids.value(i), types.value(i)))
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+/// Extract the relationship kinds array from the `_gkg_edge_kinds` column.
+/// Returns one String per hop — `edge_kinds[i]` connects `path[i]` to `path[i+1]`.
+fn extract_edge_kinds(batch: &RecordBatch, row_idx: usize) -> Vec<String> {
+    let col_idx = match batch.schema().index_of(EDGE_KINDS_COLUMN) {
+        Ok(i) => i,
+        Err(_) => return Vec::new(),
+    };
+
+    let list = match batch.column(col_idx).as_any().downcast_ref::<ListArray>() {
+        Some(l) if !l.is_null(row_idx) => l,
+        _ => return Vec::new(),
+    };
+
+    let values = list.value(row_idx);
+    match values.as_any().downcast_ref::<StringArray>() {
+        Some(arr) => (0..arr.len())
+            .filter(|&i| !arr.is_null(i))
+            .map(|i| arr.value(i).to_string())
+            .collect(),
+        None => Vec::new(),
     }
 }
 
@@ -1090,6 +1168,167 @@ mod tests {
             let redacted = result.apply_authorizations(&full_auth());
             assert_eq!(redacted, 0);
             assert_eq!(result.authorized_count(), 2);
+        }
+
+        #[test]
+        fn fail_closed_dynamic_node_unresolvable_owner() {
+            // Simulates a dynamic node (e.g. Definition) that requires indirect auth
+            // via an owner entity (Project), but the owner isn't in the row.
+            // Must deny even if the entity's own ID collides with an authorized
+            // project ID.
+            let batch = make_batch(vec![
+                ("_gkg_u_id", Arc::new(Int64Array::from(vec![1]))),
+                ("_gkg_u_type", Arc::new(StringArray::from(vec!["User"]))),
+            ]);
+
+            let mut ctx = ResultContext::new();
+            ctx.add_node("u", "User");
+            ctx.add_entity_auth(
+                "User",
+                EntityAuthConfig {
+                    resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
+                    auth_id_column: "id".to_string(),
+                    owner_entity: None,
+                },
+            );
+            ctx.add_entity_auth(
+                "Definition",
+                EntityAuthConfig {
+                    resource_type: "project".to_string(),
+                    ability: "read_code".to_string(),
+                    auth_id_column: "project_id".to_string(),
+                    owner_entity: Some("Project".to_string()),
+                },
+            );
+
+            let mut result = QueryResult::from_batches(&[batch], &ctx);
+
+            // Manually inject a dynamic node: Definition with ID 1000.
+            // No Project node exists in the row, so find_owner_id will return None.
+            result.rows_mut()[0].dynamic_nodes = vec![NodeRef::new(1000, "Definition")];
+
+            // Authorize user 1 AND project 1000 — the ID collision scenario.
+            let authorizations = vec![
+                ResourceAuthorization {
+                    resource_type: "user".to_string(),
+                    authorized: [(1, true)].into_iter().collect(),
+                },
+                ResourceAuthorization {
+                    resource_type: "project".to_string(),
+                    authorized: [(1000, true)].into_iter().collect(),
+                },
+            ];
+
+            let redacted = result.apply_authorizations(&authorizations);
+
+            assert_eq!(
+                redacted, 1,
+                "row must be denied: Definition's owner (Project) is not in the row"
+            );
+            assert_eq!(result.authorized_count(), 0);
+        }
+
+        #[test]
+        fn dynamic_node_with_resolvable_owner_passes() {
+            // Same setup as above, but now the owner Project IS in the row
+            // as a static node. The Definition should resolve its auth via
+            // the Project and pass.
+            let batch = make_batch(vec![
+                ("_gkg_p_id", Arc::new(Int64Array::from(vec![1000]))),
+                ("_gkg_p_type", Arc::new(StringArray::from(vec!["Project"]))),
+            ]);
+
+            let mut ctx = ResultContext::new();
+            ctx.add_node("p", "Project");
+            ctx.add_entity_auth(
+                "Project",
+                EntityAuthConfig {
+                    resource_type: "project".to_string(),
+                    ability: "read_code".to_string(),
+                    auth_id_column: "id".to_string(),
+                    owner_entity: None,
+                },
+            );
+            ctx.add_entity_auth(
+                "Definition",
+                EntityAuthConfig {
+                    resource_type: "project".to_string(),
+                    ability: "read_code".to_string(),
+                    auth_id_column: "project_id".to_string(),
+                    owner_entity: Some("Project".to_string()),
+                },
+            );
+
+            let mut result = QueryResult::from_batches(&[batch], &ctx);
+
+            // Inject a Definition neighbor — owner Project 1000 IS in the row.
+            result.rows_mut()[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
+
+            let authorizations = vec![ResourceAuthorization {
+                resource_type: "project".to_string(),
+                authorized: [(1000, true)].into_iter().collect(),
+            }];
+
+            let redacted = result.apply_authorizations(&authorizations);
+
+            assert_eq!(
+                redacted, 0,
+                "Definition should pass: owner Project 1000 is authorized"
+            );
+            assert_eq!(result.authorized_count(), 1);
+        }
+
+        #[test]
+        fn dynamic_node_resolves_owner_via_sibling_indirect_static_node() {
+            // Center node is File (indirect auth, owner: Project).
+            // enforce.rs emits _gkg_f_id = project_id (1000), _gkg_f_type = "File".
+            // Dynamic neighbor is Definition (also indirect auth, owner: Project).
+            // find_owner_id should recognize that File's _gkg_f_id IS the
+            // Project owner's ID because File's auth config has
+            // owner_entity == Some("Project").
+            let batch = make_batch(vec![
+                ("_gkg_f_id", Arc::new(Int64Array::from(vec![1000]))),
+                ("_gkg_f_type", Arc::new(StringArray::from(vec!["File"]))),
+            ]);
+
+            let mut ctx = ResultContext::new();
+            ctx.add_node("f", "File");
+            ctx.add_entity_auth(
+                "File",
+                EntityAuthConfig {
+                    resource_type: "project".to_string(),
+                    ability: "read_code".to_string(),
+                    auth_id_column: "project_id".to_string(),
+                    owner_entity: Some("Project".to_string()),
+                },
+            );
+            ctx.add_entity_auth(
+                "Definition",
+                EntityAuthConfig {
+                    resource_type: "project".to_string(),
+                    ability: "read_code".to_string(),
+                    auth_id_column: "project_id".to_string(),
+                    owner_entity: Some("Project".to_string()),
+                },
+            );
+
+            let mut result = QueryResult::from_batches(&[batch], &ctx);
+            result.rows_mut()[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
+
+            let authorizations = vec![ResourceAuthorization {
+                resource_type: "project".to_string(),
+                authorized: [(1000, true)].into_iter().collect(),
+            }];
+
+            let redacted = result.apply_authorizations(&authorizations);
+
+            assert_eq!(
+                redacted, 0,
+                "Definition should pass: File's _gkg_f_id (project_id=1000) \
+                 resolves as the shared Project owner"
+            );
+            assert_eq!(result.authorized_count(), 1);
         }
 
         #[test]

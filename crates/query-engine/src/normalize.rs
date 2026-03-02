@@ -8,7 +8,8 @@
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
-use ontology::{DEFAULT_PRIMARY_KEY, EnumType, Ontology};
+use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::{EnumType, Ontology};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 

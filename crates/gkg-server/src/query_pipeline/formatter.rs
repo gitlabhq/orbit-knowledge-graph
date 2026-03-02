@@ -71,6 +71,12 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
             Some(QueryType::PathFinding) => {
                 let path: Vec<Value> = dynamic_nodes.iter().map(node_ref_to_json).collect();
                 obj.insert("path".to_string(), Value::Array(path));
+
+                let edge_kinds = row.edge_kinds();
+                if !edge_kinds.is_empty() {
+                    let edges: Vec<Value> = edge_kinds.iter().map(|k| json!(k)).collect();
+                    obj.insert("edges".to_string(), Value::Array(edges));
+                }
             }
             Some(QueryType::Neighbors) => {
                 if let Some(neighbor) = dynamic_nodes.first() {
@@ -285,6 +291,63 @@ mod tests {
             second.get("entity_type").unwrap().as_str().unwrap(),
             "MergeRequest"
         );
+    }
+
+    #[test]
+    fn row_to_json_path_finding_includes_edges_from_edge_kinds() {
+        let ids = Int64Array::from(vec![3, 47, 1020]);
+        let types = StringArray::from(vec!["Project", "MergeRequest", "Note"]);
+
+        let struct_fields = vec![
+            Arc::new(Field::new("1", DataType::Int64, false)),
+            Arc::new(Field::new("2", DataType::Utf8, false)),
+        ];
+        let struct_array = StructArray::new(
+            struct_fields.into(),
+            vec![Arc::new(ids) as _, Arc::new(types) as _],
+            None,
+        );
+
+        let path_field = Arc::new(Field::new("item", struct_array.data_type().clone(), true));
+        let path_offsets = OffsetBuffer::new(vec![0i32, 3].into());
+        let path_list = ListArray::new(path_field, path_offsets, Arc::new(struct_array), None);
+
+        // edge_kinds: Array(String) with 2 hops
+        let edge_values = StringArray::from(vec!["IN_PROJECT", "HAS_NOTE"]);
+        let edge_field = Arc::new(Field::new("item", DataType::Utf8, true));
+        let edge_offsets = OffsetBuffer::new(vec![0i32, 2].into());
+        let edge_list = ListArray::new(edge_field, edge_offsets, Arc::new(edge_values), None);
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("_gkg_path", path_list.data_type().clone(), true),
+            Field::new("_gkg_edge_kinds", edge_list.data_type().clone(), true),
+            Field::new("depth", DataType::Int64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(path_list) as _,
+                Arc::new(edge_list) as _,
+                Arc::new(Int64Array::from(vec![2])) as _,
+            ],
+        )
+        .unwrap();
+
+        let ctx = ResultContext::new().with_query_type(QueryType::PathFinding);
+        let result = QueryResult::from_batches(&[batch], &ctx);
+
+        let json = row_to_json(&result.rows()[0], &ctx);
+        let obj = json.as_object().unwrap();
+
+        // Path nodes present
+        let path = obj.get("path").unwrap().as_array().unwrap();
+        assert_eq!(path.len(), 3);
+
+        // Edges: flat array of relationship kinds, positional with path
+        let edges = obj.get("edges").unwrap().as_array().unwrap();
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].as_str().unwrap(), "IN_PROJECT");
+        assert_eq!(edges[1].as_str().unwrap(), "HAS_NOTE");
     }
 
     #[test]

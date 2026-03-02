@@ -5,7 +5,8 @@ use crate::config::ClickHouseConfig;
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
-use ontology::{EDGE_TABLE, Ontology};
+use ontology::Ontology;
+use ontology::constants::EDGE_TABLE;
 use std::path::Path;
 use std::process::Command;
 
