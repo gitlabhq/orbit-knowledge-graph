@@ -54,6 +54,10 @@ pub enum EngineError {
     /// An error from a message handler.
     #[error("handler error: {0}")]
     Handler(#[from] HandlerError),
+
+    /// Invalid engine configuration.
+    #[error("invalid config: {0}")]
+    InvalidConfig(String),
 }
 
 /// Builder for constructing an [`Engine`].
@@ -173,13 +177,13 @@ impl Engine {
             return Ok(());
         }
 
+        self.validate_concurrency_groups(configuration)?;
+
         self.broker.ensure_streams(&topics).await?;
 
-        let configuration = Arc::new(configuration.clone());
         let runtime = Arc::new(EngineRuntime {
-            worker_pool: WorkerPool::new(&configuration, self.metrics.clone()),
+            worker_pool: WorkerPool::new(configuration, self.metrics.clone()),
             metrics: self.metrics.clone(),
-            configuration,
         });
         let tasks: Vec<_> = topics
             .into_iter()
@@ -227,6 +231,25 @@ impl Engine {
         Ok(())
     }
 
+    fn validate_concurrency_groups(
+        &self,
+        configuration: &EngineConfiguration,
+    ) -> Result<(), EngineError> {
+        for topic in &self.registry.topics() {
+            for handler in self.registry.handlers_for(topic) {
+                if let Some(group) = &handler.engine_config().concurrency_group
+                    && !configuration.concurrency_groups.contains_key(group)
+                {
+                    return Err(EngineError::InvalidConfig(format!(
+                        "handler '{}' references unknown concurrency group '{group}'",
+                        handler.name(),
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Signals the engine to stop processing.
     ///
     /// In-flight messages will complete before shutdown.
@@ -243,12 +266,11 @@ enum HandlersOutcome {
 struct EngineRuntime {
     worker_pool: WorkerPool,
     metrics: Arc<EngineMetrics>,
-    configuration: Arc<EngineConfiguration>,
 }
 
 async fn process_message(
     message: NatsMessage,
-    handlers: Vec<(Arc<dyn Handler>, Arc<str>)>,
+    handlers: Vec<Arc<dyn Handler>>,
     context: HandlerContext,
     runtime: Arc<EngineRuntime>,
     topic_name: String,
@@ -295,15 +317,22 @@ async fn process_message(
 }
 
 async fn run_handlers(
-    handlers: &[(Arc<dyn Handler>, Arc<str>)],
+    handlers: &[Arc<dyn Handler>],
     context: &HandlerContext,
     envelope: &Envelope,
     runtime: &EngineRuntime,
 ) -> HandlersOutcome {
-    for (handler, module_name) in handlers {
-        let Some(_permit) = runtime.worker_pool.acquire_handler_slot(module_name).await else {
+    for handler in handlers {
+        let handler_config = handler.engine_config();
+        let concurrency_group = handler_config.concurrency_group.as_deref();
+
+        let Some(_permit) = runtime
+            .worker_pool
+            .acquire_handler_slot(concurrency_group)
+            .await
+        else {
             warn!(
-                module = %module_name,
+                handler = handler.name(),
                 "worker pool semaphore closed, skipping remaining handlers"
             );
             return HandlersOutcome::Failed { retry_delay: None };
@@ -321,25 +350,33 @@ async fn run_handlers(
                 .metrics
                 .record_handler_error(handler.name(), error.error_kind());
 
-            let module_config = runtime.configuration.modules.get(module_name.as_ref());
-            let max_attempts = module_config.and_then(|c| c.max_retry_attempts);
+            let max_attempts = handler_config.max_attempts;
 
-            if let Some(max_attempts) = max_attempts
-                && envelope.attempt >= max_attempts
-            {
-                warn!(
-                    module = %module_name,
-                    message_id = %envelope.id.0,
-                    attempt = envelope.attempt,
-                    %max_attempts,
-                    %error,
-                    "retry attempts exhausted, skipping handler"
-                );
-                continue;
+            if let Some(max_attempts) = max_attempts {
+                if envelope.attempt >= max_attempts {
+                    warn!(
+                        handler = handler.name(),
+                        message_id = %envelope.id.0,
+                        attempt = envelope.attempt,
+                        %max_attempts,
+                        %error,
+                        "max attempts reached, acking message"
+                    );
+                    continue;
+                }
+
+                let retry_delay = handler_config.retry_interval();
+                return HandlersOutcome::Failed { retry_delay };
             }
 
-            let retry_delay = module_config.and_then(|c| c.retry_interval());
-            return HandlersOutcome::Failed { retry_delay };
+            // No retry config: ack the message (retries are opt-in)
+            warn!(
+                handler = handler.name(),
+                message_id = %envelope.id.0,
+                %error,
+                "handler failed with no retry config, acking message"
+            );
+            continue;
         }
     }
     HandlersOutcome::Success
@@ -347,10 +384,8 @@ async fn run_handlers(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
-    use crate::configuration::ModuleConfiguration;
+    use crate::configuration::HandlerConfiguration;
     use crate::testkit::mocks::{
         MockDestination, MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
@@ -368,28 +403,21 @@ mod tests {
         EngineRuntime {
             worker_pool: WorkerPool::new(configuration, metrics.clone()),
             metrics,
-            configuration: Arc::new(configuration.clone()),
         }
     }
 
     #[tokio::test]
     async fn handler_failure_under_retry_limit_returns_failed() {
-        let configuration = EngineConfiguration {
-            modules: HashMap::from([(
-                "test-module".to_string(),
-                ModuleConfiguration {
-                    max_retry_attempts: Some(3),
-                    retry_interval_secs: Some(5),
-                    ..Default::default()
-                },
-            )]),
-            ..Default::default()
-        };
+        let configuration = EngineConfiguration::default();
 
         let handler = MockHandler::new("stream", "subject")
-            .with_error(HandlerError::Processing("boom".into()));
-        let handlers: Vec<(Arc<dyn Handler>, Arc<str>)> =
-            vec![(Arc::new(handler), Arc::from("test-module"))];
+            .with_error(HandlerError::Processing("boom".into()))
+            .with_engine_config(HandlerConfiguration {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                ..Default::default()
+            });
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
         let runtime = test_runtime(&configuration);
@@ -402,22 +430,16 @@ mod tests {
 
     #[tokio::test]
     async fn handler_failure_at_retry_limit_returns_success() {
-        let configuration = EngineConfiguration {
-            modules: HashMap::from([(
-                "test-module".to_string(),
-                ModuleConfiguration {
-                    max_retry_attempts: Some(3),
-                    retry_interval_secs: Some(5),
-                    ..Default::default()
-                },
-            )]),
-            ..Default::default()
-        };
+        let configuration = EngineConfiguration::default();
 
         let handler = MockHandler::new("stream", "subject")
-            .with_error(HandlerError::Processing("boom".into()));
-        let handlers: Vec<(Arc<dyn Handler>, Arc<str>)> =
-            vec![(Arc::new(handler), Arc::from("test-module"))];
+            .with_error(HandlerError::Processing("boom".into()))
+            .with_engine_config(HandlerConfiguration {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                ..Default::default()
+            });
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
         let runtime = test_runtime(&configuration);
@@ -427,20 +449,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handler_failure_without_retry_config_returns_failed_no_delay() {
+    async fn handler_failure_without_retry_config_acks() {
         let configuration = EngineConfiguration::default();
 
         let handler = MockHandler::new("stream", "subject")
             .with_error(HandlerError::Processing("boom".into()));
-        let handlers: Vec<(Arc<dyn Handler>, Arc<str>)> =
-            vec![(Arc::new(handler), Arc::from("test-module"))];
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
         let runtime = test_runtime(&configuration);
         let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
 
         assert!(
-            matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay.is_none())
+            matches!(outcome, HandlersOutcome::Success),
+            "handler failure without retry config should ack (retries are opt-in)"
         );
     }
 }

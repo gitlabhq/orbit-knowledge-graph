@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use gitlab_client::GitlabClientConfiguration;
 use health_check::HealthCheckConfig;
-use indexer::ModulesConfig;
 use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
+use indexer::dispatcher::DispatchConfig;
 use indexer::nats::NatsConfiguration;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub gitlab: Option<GitlabClientConfiguration>,
     #[serde(default)]
-    pub modules: ModulesConfig,
+    pub dispatch: DispatchConfig,
     #[serde(default)]
     pub health_check: HealthCheckConfig,
     #[serde(default = "default_indexer_health_bind_address")]

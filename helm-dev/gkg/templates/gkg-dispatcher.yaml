@@ -12,9 +12,9 @@ data:
       url: {{ include "gkg.natsUrl" . | quote }}
     datalake:
       {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
-    {{- if .Values.modules }}
-    modules:
-      {{- toYaml .Values.modules | nindent 6 }}
+    {{- if .Values.dispatch }}
+    dispatch:
+      {{- toYaml .Values.dispatch | nindent 6 }}
     {{- end }}
     {{- if .Values.otel.enabled }}
     metrics:
@@ -42,7 +42,7 @@ spec:
           labels:
             {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-dispatcher") | nindent 12 }}
           annotations:
-            checksum/config: {{ toJson .Values.clickhouse.datalake | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.modules | sha256sum }}
+            checksum/config: {{ toJson .Values.clickhouse.datalake | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.dispatch | sha256sum }}
         spec:
           restartPolicy: Never
           securityContext:

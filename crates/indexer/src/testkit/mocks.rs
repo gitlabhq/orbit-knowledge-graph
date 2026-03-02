@@ -12,6 +12,7 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
+use crate::configuration::HandlerConfiguration;
 use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::entities::Entity;
 use crate::locking::{LockError, LockService};
@@ -195,6 +196,7 @@ pub struct MockHandler {
     topic: Topic,
     delay: Option<Duration>,
     error: Option<HandlerError>,
+    engine_config: HandlerConfiguration,
     invocations: Arc<AtomicUsize>,
     received: Arc<Mutex<Vec<Envelope>>>,
 }
@@ -206,6 +208,7 @@ impl MockHandler {
             topic: Topic::new(stream, subject),
             delay: None,
             error: None,
+            engine_config: HandlerConfiguration::default(),
             invocations: Arc::new(AtomicUsize::new(0)),
             received: Arc::new(Mutex::new(Vec::new())),
         }
@@ -225,6 +228,11 @@ impl MockHandler {
         self.error = Some(error);
         self
     }
+
+    pub fn with_engine_config(mut self, config: HandlerConfiguration) -> Self {
+        self.engine_config = config;
+        self
+    }
 }
 
 #[async_trait]
@@ -235,6 +243,10 @@ impl Handler for MockHandler {
 
     fn topic(&self) -> Topic {
         self.topic.clone()
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        &self.engine_config
     }
 
     async fn handle(
@@ -311,6 +323,10 @@ impl Handler for HandlerWrapper {
 
     fn topic(&self) -> Topic {
         self.0.topic()
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        self.0.engine_config()
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {

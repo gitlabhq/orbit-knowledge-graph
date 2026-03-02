@@ -7,17 +7,42 @@ use async_trait::async_trait;
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
 
+use serde::Deserialize;
+
 use super::config::LOCK_TTL;
-use super::config::{CodeIndexingConfig, siphon_actions, siphon_ref_types, subjects};
+use super::config::{siphon_actions, siphon_ref_types, subjects};
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::repository_service::RepositoryService;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use super::watermark_store::CodeWatermarkStore;
+use crate::configuration::HandlerConfiguration;
 use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::locking::project_lock_key;
 use crate::types::{Envelope, Topic};
+
+fn default_events_stream_name() -> String {
+    "siphon_stream_main_db".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PushEventHandlerConfig {
+    #[serde(flatten)]
+    pub engine: HandlerConfiguration,
+
+    #[serde(default = "default_events_stream_name")]
+    pub events_stream_name: String,
+}
+
+impl Default for PushEventHandlerConfig {
+    fn default() -> Self {
+        Self {
+            engine: HandlerConfiguration::default(),
+            events_stream_name: default_events_stream_name(),
+        }
+    }
+}
 
 pub struct PushEventHandler {
     pipeline: Arc<CodeIndexingPipeline>,
@@ -25,7 +50,7 @@ pub struct PushEventHandler {
     watermark_store: Arc<dyn CodeWatermarkStore>,
     project_store: Arc<dyn ProjectStore>,
     metrics: CodeMetrics,
-    config: CodeIndexingConfig,
+    config: PushEventHandlerConfig,
 }
 
 impl PushEventHandler {
@@ -35,7 +60,7 @@ impl PushEventHandler {
         watermark_store: Arc<dyn CodeWatermarkStore>,
         project_store: Arc<dyn ProjectStore>,
         metrics: CodeMetrics,
-        config: CodeIndexingConfig,
+        config: PushEventHandlerConfig,
     ) -> Self {
         Self {
             pipeline,
@@ -63,6 +88,10 @@ impl Handler for PushEventHandler {
                 subjects::PUSH_EVENT_PAYLOADS
             ),
         )
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        &self.config.engine
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
@@ -341,6 +370,7 @@ impl PushEventPayload {
 
 #[cfg(test)]
 mod tests {
+    use super::PushEventHandlerConfig;
     use super::*;
     use crate::module::Handler;
     use crate::modules::code::metrics::CodeMetrics;
@@ -394,7 +424,7 @@ mod tests {
                 Arc::clone(&watermark_store),
                 project_store.clone(),
                 metrics,
-                CodeIndexingConfig::default(),
+                PushEventHandlerConfig::default(),
             );
 
             Self {

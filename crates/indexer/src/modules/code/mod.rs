@@ -20,14 +20,16 @@ mod stale_data_cleaner;
 mod test_helpers;
 mod watermark_store;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::clickhouse::ClickHouseConfiguration;
-use crate::module::{Handler, Module, ModuleInitError};
+use crate::module::{Handler, Module, ModuleInitError, deserialize_handler_config};
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
+pub use project_code_indexing_handler::ProjectCodeIndexingHandlerConfig;
+pub use push_event_handler::PushEventHandlerConfig;
 
-pub use config::CodeIndexingConfig;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use project_code_indexing_handler::ProjectCodeIndexingHandler;
 pub use project_store::ClickHouseProjectStore;
@@ -46,7 +48,8 @@ pub struct CodeModule {
     project_store: Arc<dyn project_store::ProjectStore>,
     push_event_store: Arc<dyn push_event_store::PushEventStore>,
     metrics: CodeMetrics,
-    config: CodeIndexingConfig,
+    push_event_config: PushEventHandlerConfig,
+    project_reconciliation_config: ProjectCodeIndexingHandlerConfig,
 }
 
 impl CodeModule {
@@ -54,8 +57,14 @@ impl CodeModule {
         graph_config: &ClickHouseConfiguration,
         datalake_config: &ClickHouseConfiguration,
         gitlab_client: Arc<GitlabClient>,
-        config: CodeIndexingConfig,
+        handler_configs: &HashMap<String, serde_json::Value>,
     ) -> Result<Self, ModuleInitError> {
+        let push_event_config: PushEventHandlerConfig =
+            deserialize_handler_config(handler_configs, "code-push-event")?;
+
+        let project_reconciliation_config: ProjectCodeIndexingHandlerConfig =
+            deserialize_handler_config(handler_configs, "code-project-reconciliation")?;
+
         let client = Arc::new(graph_config.build_client());
 
         let repository_service: Arc<dyn RepositoryService> =
@@ -85,7 +94,8 @@ impl CodeModule {
             project_store,
             push_event_store,
             metrics,
-            config,
+            push_event_config,
+            project_reconciliation_config,
         })
     }
 }
@@ -103,7 +113,7 @@ impl Module for CodeModule {
                 Arc::clone(&self.watermark_store),
                 Arc::clone(&self.project_store),
                 self.metrics.clone(),
-                self.config.clone(),
+                self.push_event_config.clone(),
             )),
             Box::new(
                 project_code_indexing_handler::ProjectCodeIndexingHandler::new(
@@ -113,6 +123,7 @@ impl Module for CodeModule {
                     Arc::clone(&self.project_store),
                     Arc::clone(&self.push_event_store),
                     self.metrics.clone(),
+                    self.project_reconciliation_config.clone(),
                 ),
             ),
         ]

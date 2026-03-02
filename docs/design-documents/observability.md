@@ -46,8 +46,8 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 | `etl.message.duration` | Histogram | s | `topic` | End-to-end time per message through dispatch |
 | `etl.handler.duration` | Histogram | s | `handler` | Time inside each handler's `handle()` call |
 | `etl.handler.errors` | Counter | count | `handler`, `error_kind` | Handler errors at the engine dispatch level |
-| `etl.permit.wait.duration` | Histogram | s | `permit_kind` (global/module), `module` | Time waiting for a worker pool permit |
-| `etl.permits.active` | UpDownCounter | count | `permit_kind` | Worker permits currently held |
+| `etl.permit.wait.duration` | Histogram | s | `permit_kind` (global/group), `group` | Time waiting for a worker pool permit |
+| `etl.permits.active` | UpDownCounter | count | `permit_kind` | Worker permits currently held (global or per concurrency group) |
 | `etl.nats.fetch.duration` | Histogram | s | `outcome` (success/error) | Time to fetch a batch from NATS |
 | `etl.destination.write.duration` | Histogram | s | `table` | Time to write a batch to ClickHouse |
 | `etl.destination.rows.written` | Counter | count | `table` | Total rows written to ClickHouse |

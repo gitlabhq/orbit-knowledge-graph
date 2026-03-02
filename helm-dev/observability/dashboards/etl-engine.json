@@ -90,7 +90,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "etl_permits_active{job=\"gkg-indexer\", scope=\"global\"}",
+          "expr": "etl_permits_active{job=\"gkg-indexer\", permit_kind=\"global\"}",
           "legendFormat": "active",
           "refId": "A"
         }

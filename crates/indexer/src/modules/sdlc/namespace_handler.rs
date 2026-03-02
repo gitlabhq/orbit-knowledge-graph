@@ -5,11 +5,12 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::configuration::HandlerConfiguration;
 use crate::module::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 use super::locking::namespace_lock_key;
@@ -44,6 +45,28 @@ impl NamespaceQueryParams {
     }
 }
 
+fn default_datalake_batch_size() -> u64 {
+    1_000_000
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NamespaceHandlerConfig {
+    #[serde(flatten)]
+    pub engine: HandlerConfiguration,
+
+    #[serde(default = "default_datalake_batch_size")]
+    pub datalake_batch_size: u64,
+}
+
+impl Default for NamespaceHandlerConfig {
+    fn default() -> Self {
+        Self {
+            engine: HandlerConfiguration::default(),
+            datalake_batch_size: default_datalake_batch_size(),
+        }
+    }
+}
+
 /// Handles entities owned by a namespace.
 ///
 /// These are records like Project, Issue, or Pipeline that live under a namespace
@@ -53,6 +76,7 @@ pub struct NamespaceHandler {
     pipelines: Vec<OntologyEntityPipeline>,
     edge_pipelines: Vec<OntologyEdgePipeline>,
     metrics: SdlcMetrics,
+    config: NamespaceHandlerConfig,
 }
 
 impl NamespaceHandler {
@@ -61,12 +85,14 @@ impl NamespaceHandler {
         pipelines: Vec<OntologyEntityPipeline>,
         edge_pipelines: Vec<OntologyEdgePipeline>,
         metrics: SdlcMetrics,
+        config: NamespaceHandlerConfig,
     ) -> Self {
         Self {
             watermark_store,
             pipelines,
             edge_pipelines,
             metrics,
+            config,
         }
     }
 
@@ -129,6 +155,10 @@ impl Handler for NamespaceHandler {
 
     fn topic(&self) -> Topic {
         NamespaceIndexingRequest::topic()
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        &self.config.engine
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
@@ -430,6 +460,7 @@ mod tests {
             pipelines,
             vec![],
             test_metrics(),
+            NamespaceHandlerConfig::default(),
         );
 
         let payload = serde_json::json!({
@@ -468,6 +499,7 @@ mod tests {
             pipelines,
             vec![],
             test_metrics(),
+            NamespaceHandlerConfig::default(),
         );
 
         let namespace_id = 42i64;
@@ -519,7 +551,13 @@ mod tests {
         ];
 
         let store = Arc::new(RecordingWatermarkStore::new());
-        let handler = NamespaceHandler::new(store.clone(), pipelines, vec![], test_metrics());
+        let handler = NamespaceHandler::new(
+            store.clone(),
+            pipelines,
+            vec![],
+            test_metrics(),
+            NamespaceHandlerConfig::default(),
+        );
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -565,7 +603,13 @@ mod tests {
         ];
 
         let store = Arc::new(RecordingWatermarkStore::new());
-        let handler = NamespaceHandler::new(store.clone(), pipelines, vec![], test_metrics());
+        let handler = NamespaceHandler::new(
+            store.clone(),
+            pipelines,
+            vec![],
+            test_metrics(),
+            NamespaceHandlerConfig::default(),
+        );
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -636,6 +680,7 @@ mod tests {
             vec![group_pipeline, issue_pipeline],
             vec![],
             test_metrics(),
+            NamespaceHandlerConfig::default(),
         );
 
         let payload = serde_json::json!({
@@ -707,6 +752,7 @@ mod tests {
             vec![group_pipeline, issue_pipeline],
             vec![],
             test_metrics(),
+            NamespaceHandlerConfig::default(),
         );
 
         let payload = serde_json::json!({
@@ -776,7 +822,13 @@ mod tests {
                 .with_watermark(100, "Issue", issue_watermark),
         );
 
-        let handler = NamespaceHandler::new(store.clone(), pipelines, vec![], test_metrics());
+        let handler = NamespaceHandler::new(
+            store.clone(),
+            pipelines,
+            vec![],
+            test_metrics(),
+            NamespaceHandlerConfig::default(),
+        );
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -816,7 +868,13 @@ mod tests {
         ];
 
         let store = Arc::new(RecordingWatermarkStore::new().with_set_failure(100, "Group"));
-        let handler = NamespaceHandler::new(store, pipelines, vec![], test_metrics());
+        let handler = NamespaceHandler::new(
+            store,
+            pipelines,
+            vec![],
+            test_metrics(),
+            NamespaceHandlerConfig::default(),
+        );
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -861,6 +919,7 @@ mod tests {
             pipelines,
             vec![],
             test_metrics(),
+            NamespaceHandlerConfig::default(),
         );
 
         let namespace_id = 42i64;

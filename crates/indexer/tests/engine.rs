@@ -11,7 +11,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
-use indexer::configuration::EngineConfiguration;
+use indexer::configuration::{EngineConfiguration, HandlerConfiguration};
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::entities::Entity;
 use indexer::metrics::EngineMetrics;
@@ -68,6 +68,15 @@ impl Handler for TestHandler {
 
     fn topic(&self) -> Topic {
         test_topic()
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        static CONFIG: HandlerConfiguration = HandlerConfiguration {
+            concurrency_group: None,
+            max_attempts: None,
+            retry_interval_secs: None,
+        };
+        &CONFIG
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {

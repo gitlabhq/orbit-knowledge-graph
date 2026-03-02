@@ -1,4 +1,3 @@
-pub mod config;
 mod datalake;
 pub mod dispatch;
 mod global_handler;
@@ -10,14 +9,17 @@ mod prepare;
 mod transform;
 mod watermark_store;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::clickhouse::ClickHouseConfiguration;
-use crate::module::{Handler, Module, ModuleInitError};
+use crate::module::{Handler, Module, ModuleInitError, deserialize_handler_config};
 use datalake::{Datalake, DatalakeQuery};
 use global_handler::GlobalHandler;
+pub use global_handler::GlobalHandlerConfig;
 use metrics::SdlcMetrics;
 use namespace_handler::NamespaceHandler;
+pub use namespace_handler::NamespaceHandlerConfig;
 use ontology::{EtlScope, NodeEntity, Ontology};
 use pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
 use tracing::{debug, error, info};
@@ -28,23 +30,35 @@ pub struct SdlcModule {
     watermark_store: Arc<dyn WatermarkStore>,
     ontology: Arc<Ontology>,
     metrics: SdlcMetrics,
+    global_handler_config: GlobalHandlerConfig,
+    namespace_handler_config: NamespaceHandlerConfig,
 }
 
 impl SdlcModule {
     pub async fn new(
         datalake_config: &ClickHouseConfiguration,
         graph_config: &ClickHouseConfiguration,
-        config: &config::SdlcIndexingConfig,
+        handler_configs: &HashMap<String, serde_json::Value>,
     ) -> Result<Self, ModuleInitError> {
+        let global_handler_config: GlobalHandlerConfig =
+            deserialize_handler_config(handler_configs, "global-handler")?;
+
+        let namespace_handler_config: NamespaceHandlerConfig =
+            deserialize_handler_config(handler_configs, "namespace-handler")?;
+
+        let datalake_batch_size = global_handler_config.datalake_batch_size;
+
         let datalake_client = Arc::new(datalake_config.build_client());
         let graph_client = Arc::new(graph_config.build_client());
         let ontology = Ontology::load_embedded().map_err(ModuleInitError::new)?;
 
         Ok(Self {
-            datalake: Arc::new(Datalake::new(datalake_client, config.datalake_batch_size)),
+            datalake: Arc::new(Datalake::new(datalake_client, datalake_batch_size)),
             watermark_store: Arc::new(ClickHouseWatermarkStore::new(graph_client)),
             ontology: Arc::new(ontology),
             metrics: SdlcMetrics::new(),
+            global_handler_config,
+            namespace_handler_config,
         })
     }
 
@@ -59,6 +73,8 @@ impl SdlcModule {
             watermark_store,
             ontology: Arc::new(ontology),
             metrics: SdlcMetrics::new(),
+            global_handler_config: GlobalHandlerConfig::default(),
+            namespace_handler_config: NamespaceHandlerConfig::default(),
         }
     }
 
@@ -147,6 +163,7 @@ impl Module for SdlcModule {
                 Arc::clone(&self.watermark_store),
                 global_pipelines,
                 self.metrics.clone(),
+                self.global_handler_config.clone(),
             )));
         }
 
@@ -156,6 +173,7 @@ impl Module for SdlcModule {
                 namespace_pipelines,
                 namespace_edge_pipelines,
                 self.metrics.clone(),
+                self.namespace_handler_config.clone(),
             )));
         }
 
