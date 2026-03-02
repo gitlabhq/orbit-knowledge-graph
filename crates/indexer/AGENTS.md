@@ -25,8 +25,8 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 | Module | Directory | Purpose |
 |--------|-----------|---------|
-| `create_code_handlers` | `modules/code/` | Git repository indexing via Gitaly, call graph extraction |
-| `create_sdlc_handlers` | `modules/sdlc/` | SDLC entity indexing (projects, MRs, CI, issues, etc.) |
+| `code::register_handlers` | `modules/code/` | Git repository indexing via Gitaly, call graph extraction |
+| `sdlc::register_handlers` | `modules/sdlc/` | SDLC entity indexing (projects, MRs, CI, issues, etc.) |
 
 ### Traits
 
@@ -36,9 +36,9 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 ### Entry point
 
-The `run()` function in `lib.rs` wires everything together: connects to NATS and ClickHouse, creates handlers via `create_sdlc_handlers()` and `create_code_handlers()`, registers them in a `HandlerRegistry`, builds the engine, and runs until shutdown.
+The `run()` function in `lib.rs` wires everything together: connects to NATS and ClickHouse, registers handlers via `sdlc::register_handlers()` and `code::register_handlers()`, builds the engine, and runs until shutdown.
 
-`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, Gitaly, code indexing).
+`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, Gitaly). Handler configs are typed via `HandlersConfiguration` in `configuration.rs` — no string-keyed lookups.
 
 ## Development
 
@@ -66,7 +66,8 @@ Located in `testkit/`:
 
 1. Define event type implementing `Event`
 2. Create handler implementing `Handler` (including `engine_config()`)
-3. Register in `create_sdlc_handlers()` or `create_code_handlers()`
+3. Add a typed config field to `HandlersConfiguration` in `configuration.rs`
+4. Register in `sdlc::register_handlers()` or `code::register_handlers()`
 
 ### Concurrency
 

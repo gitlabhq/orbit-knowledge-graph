@@ -26,7 +26,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use thiserror::Error;
-use tracing::info;
 
 use crate::{
     configuration::HandlerConfiguration,
@@ -57,13 +56,6 @@ impl HandlerError {
     }
 }
 
-#[derive(Debug, Clone, Error)]
-#[error("failed to create handler '{handler_name}': {reason}")]
-pub struct HandlerCreationError {
-    pub handler_name: String,
-    pub reason: String,
-}
-
 /// Errors that can occur during handler initialization.
 #[derive(Debug, Error)]
 #[error("{0}")]
@@ -73,28 +65,6 @@ impl HandlerInitError {
     /// Creates a new handler initialization error from any error type.
     pub fn new<E: std::error::Error + Send + Sync + 'static>(error: E) -> Self {
         Self(Box::new(error))
-    }
-}
-
-/// Deserializes a handler's config from the raw handler configs map.
-///
-/// Logs at info level when a handler key is missing and falls back to defaults.
-/// Returns an error if the key exists but deserialization fails (invalid config).
-pub fn deserialize_handler_config<T: serde::de::DeserializeOwned + Default>(
-    handler_configs: &HashMap<String, serde_json::Value>,
-    handler_name: &str,
-) -> Result<T, HandlerInitError> {
-    match handler_configs.get(handler_name) {
-        Some(value) => serde_json::from_value(value.clone()).map_err(|e| {
-            HandlerInitError::new(HandlerCreationError {
-                handler_name: handler_name.to_string(),
-                reason: e.to_string(),
-            })
-        }),
-        None => {
-            info!(handler = handler_name, "no config found, using defaults");
-            Ok(T::default())
-        }
     }
 }
 
@@ -192,6 +162,16 @@ impl HandlerRegistry {
         let mut topics: Vec<_> = self.handlers_by_topic.read().keys().cloned().collect();
         topics.sort_by(|a, b| (&*a.stream, &*a.subject).cmp(&(&*b.stream, &*b.subject)));
         topics
+    }
+
+    /// Finds a handler by name across all topics.
+    pub fn find_by_name(&self, name: &str) -> Option<Arc<dyn Handler>> {
+        self.handlers_by_topic
+            .read()
+            .values()
+            .flatten()
+            .find(|handler| handler.name() == name)
+            .cloned()
     }
 }
 

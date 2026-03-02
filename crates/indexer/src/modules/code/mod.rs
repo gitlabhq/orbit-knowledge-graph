@@ -20,11 +20,10 @@ mod stale_data_cleaner;
 mod test_helpers;
 mod watermark_store;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::clickhouse::ClickHouseConfiguration;
-use crate::handler::{Handler, HandlerInitError, deserialize_handler_config};
+use crate::IndexerConfig;
+use crate::handler::{HandlerInitError, HandlerRegistry};
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
 pub use project_code_indexing_handler::ProjectCodeIndexingHandlerConfig;
@@ -41,19 +40,22 @@ pub use repository_service::{
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 pub use watermark_store::ClickHouseCodeWatermarkStore;
 
-pub fn create_code_handlers(
-    graph_config: &ClickHouseConfiguration,
-    datalake_config: &ClickHouseConfiguration,
-    gitlab_client: Arc<GitlabClient>,
-    handler_configs: &HashMap<String, serde_json::Value>,
-) -> Result<Vec<Box<dyn Handler>>, HandlerInitError> {
-    let push_event_config: PushEventHandlerConfig =
-        deserialize_handler_config(handler_configs, "code-push-event")?;
+pub fn register_handlers(
+    registry: &HandlerRegistry,
+    config: &IndexerConfig,
+) -> Result<(), HandlerInitError> {
+    let Some(gitlab_config) = &config.gitlab else {
+        tracing::info!("Code handlers disabled (GitLab client not configured)");
+        return Ok(());
+    };
 
-    let project_reconciliation_config: ProjectCodeIndexingHandlerConfig =
-        deserialize_handler_config(handler_configs, "code-project-reconciliation")?;
+    let push_event_config = config.engine.handlers.code_push_event.clone();
+    let project_reconciliation_config = config.engine.handlers.code_project_reconciliation.clone();
 
-    let client = Arc::new(graph_config.build_client());
+    let gitlab_client =
+        Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
+
+    let client = Arc::new(config.graph.build_client());
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(GitLabRepositoryService::create(gitlab_client));
@@ -64,7 +66,7 @@ pub fn create_code_handlers(
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> =
         Arc::new(stale_data_cleaner::ClickHouseStaleDataCleaner::new(client));
     let push_event_store: Arc<dyn push_event_store::PushEventStore> = Arc::new(
-        push_event_store::ClickHousePushEventStore::new(datalake_config.build_client()),
+        push_event_store::ClickHousePushEventStore::new(config.datalake.build_client()),
     );
     let metrics = CodeMetrics::new();
 
@@ -75,25 +77,26 @@ pub fn create_code_handlers(
         metrics.clone(),
     ));
 
-    Ok(vec![
-        Box::new(PushEventHandler::new(
+    registry.register_handler(Box::new(PushEventHandler::new(
+        Arc::clone(&pipeline),
+        Arc::clone(&repository_service),
+        Arc::clone(&watermark_store),
+        Arc::clone(&project_store),
+        metrics.clone(),
+        push_event_config,
+    )));
+
+    registry.register_handler(Box::new(
+        project_code_indexing_handler::ProjectCodeIndexingHandler::new(
             Arc::clone(&pipeline),
             Arc::clone(&repository_service),
             Arc::clone(&watermark_store),
             Arc::clone(&project_store),
+            Arc::clone(&push_event_store),
             metrics.clone(),
-            push_event_config,
-        )),
-        Box::new(
-            project_code_indexing_handler::ProjectCodeIndexingHandler::new(
-                Arc::clone(&pipeline),
-                Arc::clone(&repository_service),
-                Arc::clone(&watermark_store),
-                Arc::clone(&project_store),
-                Arc::clone(&push_event_store),
-                metrics.clone(),
-                project_reconciliation_config,
-            ),
+            project_reconciliation_config,
         ),
-    ])
+    ));
+
+    Ok(())
 }

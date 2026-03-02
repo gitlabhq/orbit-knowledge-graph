@@ -4,12 +4,9 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use indexer::clickhouse::ClickHouseDestination;
-use indexer::handler::{Handler, HandlerContext};
+use indexer::handler::{Handler, HandlerContext, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
-use indexer::modules::create_sdlc_handlers;
-use indexer::modules::sdlc::GlobalHandlerConfig;
-use indexer::testkit::{MockLockService, MockNatsServices};
-use std::collections::HashMap;
+use indexer::testkit::{MockLockService, MockNatsServices, create_test_indexer_config};
 
 pub use integration_testkit::{
     TestContext, get_boolean_column, get_int64_column, get_string_column, get_uint64_column,
@@ -21,8 +18,8 @@ pub const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../fixtures/schema/gra
 pub trait IndexerTestExt {
     fn create_destination(&self) -> ClickHouseDestination;
     fn create_handler_context(&self) -> HandlerContext;
-    async fn get_namespace_handler(&self) -> Box<dyn Handler>;
-    async fn get_global_handler(&self) -> Box<dyn Handler>;
+    async fn get_namespace_handler(&self) -> Arc<dyn Handler>;
+    async fn get_global_handler(&self) -> Arc<dyn Handler>;
     async fn assert_edge_count(
         &self,
         relationship_kind: &str,
@@ -62,44 +59,26 @@ impl IndexerTestExt for TestContext {
         )
     }
 
-    async fn get_namespace_handler(&self) -> Box<dyn Handler> {
-        let handler_configs = HashMap::from([
-            (
-                "global-handler".to_string(),
-                serde_json::json!({ "datalake_batch_size": 1 }),
-            ),
-            (
-                "namespace-handler".to_string(),
-                serde_json::json!({ "datalake_batch_size": 1 }),
-            ),
-        ]);
-        let handlers = create_sdlc_handlers(&self.config, &self.config, &handler_configs)
+    async fn get_namespace_handler(&self) -> Arc<dyn Handler> {
+        let indexer_config = create_test_indexer_config(&self.config);
+        let registry = HandlerRegistry::default();
+        indexer::modules::sdlc::register_handlers(&registry, &indexer_config)
             .await
             .expect("failed to create SDLC handlers");
-        handlers
-            .into_iter()
-            .find(|h| h.name() == "namespace-handler")
-            .expect("namespace-handler not found")
+        registry
+            .find_by_name("namespace_handler")
+            .expect("namespace_handler not found")
     }
 
-    async fn get_global_handler(&self) -> Box<dyn Handler> {
-        let handler_configs = HashMap::from([
-            (
-                "global-handler".to_string(),
-                serde_json::json!({ "datalake_batch_size": 1 }),
-            ),
-            (
-                "namespace-handler".to_string(),
-                serde_json::json!({ "datalake_batch_size": 1 }),
-            ),
-        ]);
-        let handlers = create_sdlc_handlers(&self.config, &self.config, &handler_configs)
+    async fn get_global_handler(&self) -> Arc<dyn Handler> {
+        let indexer_config = create_test_indexer_config(&self.config);
+        let registry = HandlerRegistry::default();
+        indexer::modules::sdlc::register_handlers(&registry, &indexer_config)
             .await
             .expect("failed to create SDLC handlers");
-        handlers
-            .into_iter()
-            .find(|h| h.name() == "global-handler")
-            .expect("global-handler not found")
+        registry
+            .find_by_name("global_handler")
+            .expect("global_handler not found")
     }
 
     async fn assert_edge_count(

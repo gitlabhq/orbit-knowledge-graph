@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::modules::code::{ProjectCodeIndexingHandlerConfig, PushEventHandlerConfig};
+use crate::modules::sdlc::{GlobalHandlerConfig, NamespaceHandlerConfig};
+
 /// Per-handler engine configuration (retry policy, concurrency group).
 ///
 /// Each handler embeds this via `#[serde(flatten)]` in its own typed config struct.
@@ -41,13 +44,26 @@ impl HandlerConfiguration {
     }
 }
 
+/// Typed per-handler configuration for all registered handlers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HandlersConfiguration {
+    #[serde(default)]
+    pub global_handler: GlobalHandlerConfig,
+    #[serde(default)]
+    pub namespace_handler: NamespaceHandlerConfig,
+    #[serde(default)]
+    pub code_push_event: PushEventHandlerConfig,
+    #[serde(default)]
+    pub code_project_reconciliation: ProjectCodeIndexingHandlerConfig,
+}
+
 /// ETL engine configuration.
 ///
 /// # Defaults
 ///
 /// - `max_concurrent_workers`: 16
 /// - `concurrency_groups`: empty
-/// - `handlers`: empty
+/// - `handlers`: defaults for all handlers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineConfiguration {
     /// Maximum concurrent message handlers across all modules. Defaults to 16.
@@ -59,10 +75,9 @@ pub struct EngineConfiguration {
     #[serde(default)]
     pub concurrency_groups: HashMap<String, usize>,
 
-    /// Per-handler configuration, keyed by handler name.
-    /// Each value is raw JSON that modules deserialize into their typed config structs.
+    /// Per-handler configuration.
     #[serde(default)]
-    pub handlers: HashMap<String, serde_json::Value>,
+    pub handlers: HandlersConfiguration,
 }
 
 impl Default for EngineConfiguration {
@@ -70,7 +85,7 @@ impl Default for EngineConfiguration {
         EngineConfiguration {
             max_concurrent_workers: Self::default_max_concurrent_workers(),
             concurrency_groups: HashMap::new(),
-            handlers: HashMap::new(),
+            handlers: HandlersConfiguration::default(),
         }
     }
 }

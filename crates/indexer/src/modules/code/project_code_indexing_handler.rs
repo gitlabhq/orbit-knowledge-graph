@@ -4,7 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::config::LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
@@ -19,7 +19,7 @@ use crate::modules::sdlc::locking::project_lock_key;
 use crate::topic::ProjectCodeIndexingRequest;
 use crate::types::{Envelope, Event, Topic};
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ProjectCodeIndexingHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
@@ -60,7 +60,7 @@ impl ProjectCodeIndexingHandler {
 #[async_trait]
 impl Handler for ProjectCodeIndexingHandler {
     fn name(&self) -> &str {
-        "code-project-reconciliation"
+        "code_project_reconciliation"
     }
 
     fn topic(&self) -> Topic {
@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn handler_name() {
         let ctx = TestContext::new();
-        assert_eq!(ctx.handler.name(), "code-project-reconciliation");
+        assert_eq!(ctx.handler.name(), "code_project_reconciliation");
     }
 
     #[test]

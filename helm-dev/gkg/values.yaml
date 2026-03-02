@@ -111,20 +111,20 @@ engine:
     sdlc: 12
     code: 4
   handlers:
-    global-handler:
+    global_handler:
       concurrency_group: sdlc
       max_attempts: 1  # re-dispatched every minute, no need to retry
       retry_interval_secs: 60
-    namespace-handler:
+    namespace_handler:
       concurrency_group: sdlc
       max_attempts: 1  # re-dispatched every minute, no need to retry
       retry_interval_secs: 60
-    code-push-event:
+    code_push_event:
       concurrency_group: code
       max_attempts: 5  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
       events_stream_name: siphon_stream_main_db
-    code-project-reconciliation:
+    code_project_reconciliation:
       concurrency_group: code
       max_attempts: 1  # re-dispatched every 30 minutes, no need to retry
 

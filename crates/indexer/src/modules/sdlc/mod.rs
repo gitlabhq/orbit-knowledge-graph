@@ -9,11 +9,10 @@ mod prepare;
 mod transform;
 mod watermark_store;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::clickhouse::ClickHouseConfiguration;
-use crate::handler::{Handler, HandlerInitError, deserialize_handler_config};
+use crate::IndexerConfig;
+use crate::handler::{HandlerInitError, HandlerRegistry};
 use datalake::{Datalake, DatalakeQuery};
 use global_handler::GlobalHandler;
 pub use global_handler::GlobalHandlerConfig;
@@ -22,24 +21,20 @@ use namespace_handler::NamespaceHandler;
 pub use namespace_handler::NamespaceHandlerConfig;
 use ontology::{EtlScope, NodeEntity, Ontology};
 use pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use watermark_store::{ClickHouseWatermarkStore, WatermarkStore};
 
-pub async fn create_sdlc_handlers(
-    datalake_config: &ClickHouseConfiguration,
-    graph_config: &ClickHouseConfiguration,
-    handler_configs: &HashMap<String, serde_json::Value>,
-) -> Result<Vec<Box<dyn Handler>>, HandlerInitError> {
-    let global_handler_config: GlobalHandlerConfig =
-        deserialize_handler_config(handler_configs, "global-handler")?;
-
-    let namespace_handler_config: NamespaceHandlerConfig =
-        deserialize_handler_config(handler_configs, "namespace-handler")?;
+pub async fn register_handlers(
+    registry: &HandlerRegistry,
+    config: &IndexerConfig,
+) -> Result<(), HandlerInitError> {
+    let global_handler_config = config.engine.handlers.global_handler.clone();
+    let namespace_handler_config = config.engine.handlers.namespace_handler.clone();
 
     let datalake_batch_size = global_handler_config.datalake_batch_size;
 
-    let datalake_client = Arc::new(datalake_config.build_client());
-    let graph_client = Arc::new(graph_config.build_client());
+    let datalake_client = Arc::new(config.datalake.build_client());
+    let graph_client = Arc::new(config.graph.build_client());
     let ontology = Ontology::load_embedded().map_err(HandlerInitError::new)?;
 
     let datalake: Arc<dyn DatalakeQuery> =
@@ -49,68 +44,80 @@ pub async fn create_sdlc_handlers(
     let ontology = Arc::new(ontology);
     let metrics = SdlcMetrics::new();
 
-    create_handlers(
+    register_global_handler(
+        registry,
         &datalake,
         &watermark_store,
         &ontology,
         &metrics,
         global_handler_config,
+    );
+    register_namespace_handler(
+        registry,
+        &datalake,
+        &watermark_store,
+        &ontology,
+        &metrics,
         namespace_handler_config,
-    )
+    );
+
+    Ok(())
 }
 
-fn create_handlers(
+fn register_global_handler(
+    registry: &HandlerRegistry,
     datalake: &Arc<dyn DatalakeQuery>,
     watermark_store: &Arc<dyn WatermarkStore>,
     ontology: &Arc<Ontology>,
     metrics: &SdlcMetrics,
-    global_handler_config: GlobalHandlerConfig,
-    namespace_handler_config: NamespaceHandlerConfig,
-) -> Result<Vec<Box<dyn Handler>>, HandlerInitError> {
-    let global_pipelines = create_global_pipelines(ontology, datalake, metrics);
-    let namespace_pipelines = create_namespace_pipelines(ontology, datalake, metrics);
-    let namespace_edge_pipelines = create_namespace_edge_pipelines(ontology, datalake, metrics);
-
-    let global_pipeline_count = global_pipelines.len();
-    let namespace_pipeline_count = namespace_pipelines.len();
-    let namespace_edge_pipeline_count = namespace_edge_pipelines.len();
-
-    debug!(
-        global_entities = ?global_pipelines.iter().map(|p| p.entity_name()).collect::<Vec<_>>(),
-        namespace_entities = ?namespace_pipelines.iter().map(|p| p.entity_name()).collect::<Vec<_>>(),
-        namespace_edges = ?namespace_edge_pipelines.iter().map(|p| p.relationship_kind()).collect::<Vec<_>>(),
-        "sdlc pipeline details"
-    );
-
-    let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
-
-    if !global_pipelines.is_empty() {
-        handlers.push(Box::new(GlobalHandler::new(
-            Arc::clone(watermark_store),
-            global_pipelines,
-            metrics.clone(),
-            global_handler_config,
-        )));
-    }
-
-    if !namespace_pipelines.is_empty() || !namespace_edge_pipelines.is_empty() {
-        handlers.push(Box::new(NamespaceHandler::new(
-            Arc::clone(watermark_store),
-            namespace_pipelines,
-            namespace_edge_pipelines,
-            metrics.clone(),
-            namespace_handler_config,
-        )));
-    }
+    config: GlobalHandlerConfig,
+) {
+    let pipelines = create_global_pipelines(ontology, datalake, metrics);
 
     info!(
-        global_entity_pipelines = global_pipeline_count,
-        namespace_entity_pipelines = namespace_pipeline_count,
-        namespace_edge_pipelines = namespace_edge_pipeline_count,
-        "sdlc handlers initialized"
+        entity_pipelines = pipelines.len(),
+        entities = ?pipelines.iter().map(|p| p.entity_name()).collect::<Vec<_>>(),
+        "global handler initialized"
     );
 
-    Ok(handlers)
+    if !pipelines.is_empty() {
+        registry.register_handler(Box::new(GlobalHandler::new(
+            Arc::clone(watermark_store),
+            pipelines,
+            metrics.clone(),
+            config,
+        )));
+    }
+}
+
+fn register_namespace_handler(
+    registry: &HandlerRegistry,
+    datalake: &Arc<dyn DatalakeQuery>,
+    watermark_store: &Arc<dyn WatermarkStore>,
+    ontology: &Arc<Ontology>,
+    metrics: &SdlcMetrics,
+    config: NamespaceHandlerConfig,
+) {
+    let entity_pipelines = create_namespace_pipelines(ontology, datalake, metrics);
+    let edge_pipelines = create_namespace_edge_pipelines(ontology, datalake, metrics);
+
+    info!(
+        entity_pipelines = entity_pipelines.len(),
+        edge_pipelines = edge_pipelines.len(),
+        entities = ?entity_pipelines.iter().map(|p| p.entity_name()).collect::<Vec<_>>(),
+        edges = ?edge_pipelines.iter().map(|p| p.relationship_kind()).collect::<Vec<_>>(),
+        "namespace handler initialized"
+    );
+
+    if !entity_pipelines.is_empty() || !edge_pipelines.is_empty() {
+        registry.register_handler(Box::new(NamespaceHandler::new(
+            Arc::clone(watermark_store),
+            entity_pipelines,
+            edge_pipelines,
+            metrics.clone(),
+            config,
+        )));
+    }
 }
 
 fn create_global_pipelines(

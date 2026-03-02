@@ -300,7 +300,7 @@
         "legend": { "displayMode": "table", "placement": "right" },
         "tooltip": { "mode": "multi" }
       },
-      "description": "95th percentile of full handler invocation time (global-handler vs namespace-handler). This is the wall-clock time for all pipelines in a single handler call."
+      "description": "95th percentile of full handler invocation time (global_handler vs namespace_handler). This is the wall-clock time for all pipelines in a single handler call."
     }
   ],
   "schemaVersion": 39,
