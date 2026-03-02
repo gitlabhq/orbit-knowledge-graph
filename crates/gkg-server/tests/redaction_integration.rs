@@ -1043,6 +1043,20 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
         let last = path_nodes.last().unwrap();
         assert_eq!(last.id, 1000);
         assert_eq!(last.entity_type, "Project");
+
+        // edge_kinds should have one entry per hop (nodes - 1)
+        let edge_kinds = row.edge_kinds();
+        assert_eq!(
+            edge_kinds.len(),
+            path_nodes.len() - 1,
+            "edge_kinds should have one entry per hop"
+        );
+
+        // User(1) --MEMBER_OF--> Group(100) --CONTAINS--> Project(1000)
+        if path_nodes.len() == 3 {
+            assert_eq!(edge_kinds[0], "MEMBER_OF");
+            assert_eq!(edge_kinds[1], "CONTAINS");
+        }
     }
 }
 
@@ -1132,6 +1146,23 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
         !authorized_ends.contains(&1004),
         "path through denied group 102 should be filtered"
     );
+
+    // Surviving paths must have valid edge_kinds
+    for row in result.authorized_rows() {
+        let path_nodes = row.path_nodes();
+        let edge_kinds = row.edge_kinds();
+        assert_eq!(
+            edge_kinds.len(),
+            path_nodes.len() - 1,
+            "edge_kinds length must match hops in surviving paths"
+        );
+        for kind in edge_kinds {
+            assert!(
+                !kind.is_empty(),
+                "surviving path must not have empty edge kinds"
+            );
+        }
+    }
 }
 
 async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
@@ -1167,6 +1198,21 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
         "nothing should be redacted when all authorized"
     );
     assert_eq!(result.authorized_count(), raw_count);
+
+    // Verify edge_kinds survive redaction intact
+    for row in result.authorized_rows() {
+        let path_nodes = row.path_nodes();
+        let edge_kinds = row.edge_kinds();
+        assert_eq!(
+            edge_kinds.len(),
+            path_nodes.len() - 1,
+            "edge_kinds length must equal hops after redaction"
+        );
+        // Every hop should have a non-empty relationship kind
+        for (i, kind) in edge_kinds.iter().enumerate() {
+            assert!(!kind.is_empty(), "edge_kinds[{}] should not be empty", i);
+        }
+    }
 }
 
 async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
@@ -1437,6 +1483,125 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
         result.authorized_count(),
         0,
         "all paths should be denied when intermediates are denied"
+    );
+}
+
+/// Verifies that edge_kinds are correctly populated and preserved through redaction.
+///
+/// Tests:
+/// - edge_kinds array length equals path_nodes length - 1
+/// - edge_kinds contain the correct relationship types in path order
+/// - edge_kinds are preserved in authorized paths after partial redaction
+/// - edge_kinds are not leaked through redacted paths
+async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Query paths from users to projects via groups.
+    // User 1 -> Group 100 -> Project 1000 (MEMBER_OF, CONTAINS)
+    // User 1 -> Group 100 -> Project 1002 (MEMBER_OF, CONTAINS)
+    // User 1 -> Group 102 -> Project 1004 (MEMBER_OF, CONTAINS)
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    let raw_count = result.len();
+    assert!(raw_count >= 3, "should find paths to all 3 projects");
+
+    // Verify edge_kinds before redaction
+    for row in result.iter() {
+        let path_nodes = row.path_nodes();
+        let edge_kinds = row.edge_kinds();
+        assert_eq!(
+            edge_kinds.len(),
+            path_nodes.len() - 1,
+            "pre-redaction: edge_kinds must have one entry per hop"
+        );
+
+        // All paths are 3 nodes: User -> Group -> Project
+        if path_nodes.len() == 3 {
+            assert_eq!(
+                edge_kinds[0], "MEMBER_OF",
+                "first hop should be MEMBER_OF (User->Group)"
+            );
+            assert_eq!(
+                edge_kinds[1], "CONTAINS",
+                "second hop should be CONTAINS (Group->Project)"
+            );
+        }
+    }
+
+    // Authorize only paths through group 100, deny group 102
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]);
+    mock_service.deny("group", &[102]);
+    mock_service.allow("project", &[1000, 1002, 1004]);
+
+    run_redaction(&mut result, &mock_service);
+
+    // Paths to 1000 and 1002 (via group 100) should survive
+    // Path to 1004 (via group 102) should be denied
+    assert!(
+        result.authorized_count() >= 2,
+        "at least 2 paths through group 100 should survive"
+    );
+
+    // Verify edge_kinds are preserved in authorized paths
+    for row in result.authorized_rows() {
+        let path_nodes = row.path_nodes();
+        let edge_kinds = row.edge_kinds();
+
+        assert_eq!(
+            edge_kinds.len(),
+            path_nodes.len() - 1,
+            "post-redaction: edge_kinds length must still match hops"
+        );
+
+        // All surviving paths go User(1) -> Group(100) -> Project
+        assert_eq!(path_nodes[0].id, 1);
+        assert_eq!(path_nodes[0].entity_type, "User");
+        assert_eq!(path_nodes[1].id, 100);
+        assert_eq!(path_nodes[1].entity_type, "Group");
+
+        assert_eq!(edge_kinds[0], "MEMBER_OF");
+        assert_eq!(edge_kinds[1], "CONTAINS");
+
+        // The end project must not be 1004 (denied group 102 path)
+        let end_id = path_nodes.last().unwrap().id;
+        assert_ne!(
+            end_id, 1004,
+            "path to project 1004 (via denied group 102) must not survive"
+        );
+    }
+
+    // Collect surviving end-project IDs
+    let authorized_ends: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().last().map(|n| n.id))
+        .collect();
+    assert!(
+        authorized_ends.contains(&1000),
+        "path to 1000 should survive"
+    );
+    assert!(
+        authorized_ends.contains(&1002),
+        "path to 1002 should survive"
+    );
+    assert!(
+        !authorized_ends.contains(&1004),
+        "path to 1004 must be denied"
     );
 }
 
@@ -2989,6 +3154,327 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Indirect Auth (Dynamic Nodes) Subtests
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// These tests verify redaction for entities that authorize via an owner entity
+// (e.g. Definition authorizes via its owning Project, MergeRequestDiff via
+// its owning MergeRequest). The auth ID must be resolved from the owner entity
+// in the same row, not from the entity's own ID.
+
+const TABLE_FILES: &str = "gl_file";
+const TABLE_DEFINITIONS: &str = "gl_definition";
+
+/// Insert code entities (File, Definition) with edges to an existing Project.
+/// Requires setup_test_data() to have been called first.
+async fn setup_indirect_auth_data(ctx: &TestContext) {
+    // Files belonging to Project 1000 (Public Project, traversal_path '1/100/1000/')
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_FILES} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
+         (3000, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust'),
+         (3001, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main.rs', 'rs', 'Rust')"
+    ))
+    .await;
+
+    // Definitions in those files, also belonging to Project 1000
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_DEFINITIONS} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+         (5000, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'crate::MyStruct', 'MyStruct', 'class', 10, 50, 100, 500),
+         (5001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'crate::my_func', 'my_func', 'function', 60, 80, 600, 900),
+         (5002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'crate::main', 'main', 'function', 1, 20, 0, 200)"
+    ))
+    .await;
+
+    // File belonging to Project 1001 (Private Project, traversal_path '1/101/1001/')
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_FILES} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
+         (3002, '1/101/1001/', 1001, 'main', 'src/secret.rs', 'secret.rs', 'rs', 'Rust')"
+    ))
+    .await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_DEFINITIONS} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+         (5003, '1/101/1001/', 1001, 'main', 'src/secret.rs', 'crate::Secret', 'Secret', 'class', 1, 30, 0, 300)"
+    ))
+    .await;
+
+    // Edges: File --DEFINES--> Definition
+    ctx.execute(&format!(
+        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 3000, 'File', 'DEFINES', 5000, 'Definition'),
+         ('1/100/1000/', 3000, 'File', 'DEFINES', 5001, 'Definition'),
+         ('1/100/1000/', 3001, 'File', 'DEFINES', 5002, 'Definition'),
+         ('1/101/1001/', 3002, 'File', 'DEFINES', 5003, 'Definition')"
+    ))
+    .await;
+}
+
+/// Neighbors query where neighbor is an indirect-auth entity (Definition).
+/// Center = File (also indirect auth, owner: Project via project_id).
+/// Authorization checks for both must go through the owning Project.
+///
+/// Tests:
+/// - Allowing the owning Project authorizes the File center and Definition neighbors
+/// - Denying the owning Project denies everything (fail-closed)
+/// - Mixed: allow one project, deny another — only authorized project's entities pass
+async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+    setup_indirect_auth_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // File 3000's outgoing neighbors: Definition 5000 and 5001 (via DEFINES edges)
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "f", "entity": "File", "node_ids": [3000]},
+        "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    assert_eq!(
+        result.len(),
+        2,
+        "File 3000 should have 2 outgoing DEFINES neighbors (Definitions 5000, 5001)"
+    );
+
+    // --- Test 1: Authorize the owning Project 1000 → both neighbors pass ---
+    let f = result.ctx().get("f").unwrap().clone();
+
+    // Verify center node metadata before redaction.
+    // File uses indirect auth — _gkg_f_id holds the owning Project ID (1000),
+    // not the File's own ID (3000), because redaction resolves through the owner.
+    for row in result.iter() {
+        assert_eq!(
+            row.get_id(&f),
+            Some(1000),
+            "center _gkg_f_id should be the owning Project ID for indirect-auth entities"
+        );
+        assert_eq!(row.get_type(&f), Some("File"), "center type should be File");
+        let neighbor = row.neighbor_node().expect("neighbor should be present");
+        assert_eq!(
+            neighbor.entity_type, "Definition",
+            "neighbor type should be Definition"
+        );
+    }
+
+    let mut mock_service = MockRedactionService::new();
+    // File and Definition both have resource_type "project", ability "read_code".
+    // Only the owning Project ID is authorized — NOT the File/Definition IDs themselves.
+    // This proves authorization resolves through the indirect owner.
+    mock_service.allow("project", &[1000]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(
+        redacted, 0,
+        "all neighbors should pass when owning Project is authorized"
+    );
+
+    // Verify both neighbors survived with correct identity
+    let authorized_neighbors: Vec<(i64, &str)> = result
+        .authorized_rows()
+        .filter_map(|r| r.neighbor_node().map(|n| (n.id, n.entity_type.as_str())))
+        .collect();
+    assert_eq!(authorized_neighbors.len(), 2);
+    let neighbor_ids: HashSet<i64> = authorized_neighbors.iter().map(|(id, _)| *id).collect();
+    assert_eq!(neighbor_ids, HashSet::from([5000, 5001]));
+    for (_, entity_type) in &authorized_neighbors {
+        assert_eq!(*entity_type, "Definition");
+    }
+
+    // --- Test 2: Deny the owning Project → everything denied ---
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    // Confirm both Definitions are present before redaction
+    let pre_deny_ids: HashSet<i64> = result
+        .iter()
+        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .collect();
+    assert_eq!(
+        pre_deny_ids,
+        HashSet::from([5000, 5001]),
+        "before deny, both Definition neighbors should be present"
+    );
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.deny("project", &[1000]);
+
+    run_redaction(&mut result, &mock_service);
+
+    // Both Definition neighbors should be denied — their owning Project is denied
+    let post_deny_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .collect();
+    assert!(
+        post_deny_ids.is_empty(),
+        "Definitions 5000/5001 must not survive when owning Project 1000 is denied; got: {:?}",
+        post_deny_ids
+    );
+    // Verify every row was individually marked unauthorized
+    for row in result.rows() {
+        assert!(
+            !row.is_authorized(),
+            "row with neighbor {:?} should be unauthorized",
+            row.neighbor_node().map(|n| n.id)
+        );
+    }
+
+    // --- Test 3: No authorization at all → fail-closed ---
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    // Capture neighbor IDs before redaction so we can verify they're gone afterward
+    let pre_redaction_neighbor_ids: HashSet<i64> = result
+        .iter()
+        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .collect();
+    assert_eq!(
+        pre_redaction_neighbor_ids,
+        HashSet::from([5000, 5001]),
+        "before redaction, both Definition neighbors should be present"
+    );
+
+    let mock_service = MockRedactionService::new();
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(
+        redacted, 2,
+        "fail-closed: no auth → all denied for indirect-auth entities"
+    );
+    assert_eq!(result.authorized_count(), 0);
+
+    // Verify none of the pre-redaction neighbors survived
+    let post_redaction_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .collect();
+    assert!(
+        post_redaction_ids.is_empty(),
+        "fail-closed must not leak any neighbor data; got: {:?}",
+        post_redaction_ids
+    );
+}
+
+/// PathFinding with indirect-auth entities where the owner is NOT in the path.
+///
+/// Path: File 3000 → (DEFINES) → Definition 5000.
+/// Both authorize via Project 1000, but Project is not a node in the path.
+/// PathFinding has no static _gkg_* nodes (enforce.rs line 107), so all nodes
+/// are dynamic (from _gkg_path array) with their own entity IDs. find_owner_id
+/// can only find the owner if it's actually in the path. Since File and
+/// Definition store their own IDs (3000, 5000), not project_id, the owner
+/// cannot be resolved → fail-closed.
+async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+    setup_indirect_auth_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "File", "node_ids": [3000]},
+            {"id": "end", "entity": "Definition", "node_ids": [5000, 5001]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    let raw_count = result.len();
+    assert!(
+        raw_count > 0,
+        "should find paths from File 3000 to Definitions"
+    );
+
+    // Even though Project 1000 is authorized, the path nodes are File and
+    // Definition — their dynamic node IDs (3000, 5000/5001) don't match any
+    // authorized project ID, and find_owner_id can't locate the Project owner
+    // because it's not in the path. Result: fail-closed.
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("project", &[1000]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(
+        redacted, raw_count,
+        "all paths must be denied: owner Project is not in the path, \
+         so indirect-auth entities cannot resolve their auth ID"
+    );
+    assert_eq!(result.authorized_count(), 0);
+}
+
+/// Mixed indirect auth: neighbors from two different projects.
+/// File 3000 (Project 1000) and File 3002 (Project 1001) both have
+/// Definition neighbors. Authorizing only Project 1000 should filter
+/// out Project 1001's definitions.
+async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+    setup_indirect_auth_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Query neighbors for both files
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "f", "entity": "File", "node_ids": [3000, 3002]},
+        "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    // File 3000 → Def 5000, 5001 (Project 1000)
+    // File 3002 → Def 5003 (Project 1001)
+    assert_eq!(
+        result.len(),
+        3,
+        "should have 3 total neighbors across both files"
+    );
+
+    // Allow Project 1000, deny Project 1001
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("project", &[1000]);
+    mock_service.deny("project", &[1001]);
+
+    run_redaction(&mut result, &mock_service);
+
+    assert_eq!(
+        result.authorized_count(),
+        2,
+        "only Project 1000's definitions should pass"
+    );
+
+    // Verify the surviving neighbors are from Project 1000
+    let neighbor_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.neighbor_node().map(|n| n.id))
+        .collect();
+    assert_eq!(
+        neighbor_ids,
+        HashSet::from([5000, 5001]),
+        "only Definitions from authorized Project 1000 should remain"
+    );
+
+    // Definition 5003 (Project 1001) must not appear
+    assert!(
+        !neighbor_ids.contains(&5003),
+        "Definition from denied Project 1001 must not appear"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Edge Column Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -3881,6 +4367,7 @@ async fn redaction_integration() {
         path_finding_shared_intermediate_node_authorization,
         path_finding_deep_traversal_all_nodes_verified,
         path_finding_all_paths_denied_returns_empty,
+        path_finding_edge_kinds_preserved_through_redaction,
         // search
         search_with_complex_filters_and_redaction,
         search_projects_with_visibility_and_path_filters,
@@ -3909,6 +4396,11 @@ async fn redaction_integration() {
         neighbors_query_center_node_denied_filters_all,
         neighbors_query_multiple_center_nodes_mixed_authorization,
         neighbors_query_incoming_with_redaction,
+        // indirect auth (dynamic nodes)
+        neighbors_indirect_auth_definition_via_project,
+        path_finding_indirect_auth_fail_closed_no_owner_in_path,
+        neighbors_indirect_auth_mixed_projects,
+        // edge columns
         traversal_edge_columns_preserved_through_redaction,
         multi_hop_edge_columns_survive_redaction,
         neighbors_query_filters_by_entity_type,
