@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::config::LOCK_TTL;
 use super::config::{siphon_actions, siphon_ref_types, subjects};
@@ -26,7 +26,7 @@ fn default_events_stream_name() -> String {
     "siphon_stream_main_db".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PushEventHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
@@ -76,7 +76,7 @@ impl PushEventHandler {
 #[async_trait]
 impl Handler for PushEventHandler {
     fn name(&self) -> &str {
-        "code-push-event"
+        "code_push_event"
     }
 
     fn topic(&self) -> Topic {

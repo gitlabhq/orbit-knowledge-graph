@@ -49,7 +49,7 @@ fn default_datalake_batch_size() -> u64 {
     1_000_000
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NamespaceHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
@@ -150,7 +150,7 @@ impl NamespaceHandler {
 #[async_trait]
 impl Handler for NamespaceHandler {
     fn name(&self) -> &str {
-        "namespace-handler"
+        "namespace_handler"
     }
 
     fn topic(&self) -> Topic {
@@ -274,7 +274,7 @@ impl Handler for NamespaceHandler {
         }
 
         self.metrics
-            .record_handler_duration("namespace-handler", elapsed.as_secs_f64());
+            .record_handler_duration("namespace_handler", elapsed.as_secs_f64());
 
         if !errors.is_empty() {
             let failed_count = errors.len();

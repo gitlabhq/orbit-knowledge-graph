@@ -54,11 +54,10 @@ use clickhouse::ClickHouseDestination;
 use configuration::EngineConfiguration;
 use dispatcher::DispatchConfig;
 use engine::EngineBuilder;
-use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use gitlab_client::GitlabClientConfiguration;
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
 use modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
-use modules::{create_code_handlers, create_sdlc_handlers};
 use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -84,6 +83,20 @@ pub struct IndexerConfig {
     pub dispatch: DispatchConfig,
     #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
+}
+
+impl Default for IndexerConfig {
+    fn default() -> Self {
+        Self {
+            nats: NatsConfiguration::default(),
+            graph: ClickHouseConfiguration::default(),
+            datalake: ClickHouseConfiguration::default(),
+            engine: EngineConfiguration::default(),
+            gitlab: None,
+            dispatch: DispatchConfig::default(),
+            health_bind_address: default_health_bind_address(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -125,27 +138,10 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     let registry = Arc::new(HandlerRegistry::default());
 
     info!("initializing SDLC handlers");
-    for handler in
-        create_sdlc_handlers(&config.datalake, &config.graph, &config.engine.handlers).await?
-    {
-        registry.register_handler(handler);
-    }
+    modules::sdlc::register_handlers(&registry, config).await?;
 
-    if let Some(gitlab_config) = &config.gitlab {
-        info!("initializing Code handlers");
-        let gitlab_client =
-            Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
-        for handler in create_code_handlers(
-            &config.graph,
-            &config.datalake,
-            gitlab_client,
-            &config.engine.handlers,
-        )? {
-            registry.register_handler(handler);
-        }
-    } else {
-        info!("Code handlers disabled (GitLab client not configured)");
-    }
+    info!("initializing Code handlers");
+    modules::code::register_handlers(&registry, config)?;
 
     info!(topics = registry.topics().len(), "registered handlers");
 

@@ -2,13 +2,42 @@
 
 use std::sync::Arc;
 
-use crate::configuration::EngineConfiguration;
+use crate::IndexerConfig;
+use crate::clickhouse::ClickHouseConfiguration;
+use crate::configuration::{EngineConfiguration, HandlersConfiguration};
 use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
 use crate::handler::{Handler, HandlerRegistry};
+use crate::modules::sdlc::{GlobalHandlerConfig, NamespaceHandlerConfig};
 use crate::nats::{NatsBroker, NatsServices};
 
 use super::mocks::{MockDestination, MockNatsServices};
+
+/// Creates an `IndexerConfig` suitable for integration tests.
+///
+/// Sets `datalake_batch_size` to 1 for both SDLC handlers so tests process
+/// one row at a time. Uses the provided ClickHouse config for both graph and datalake.
+pub fn create_test_indexer_config(clickhouse_config: &ClickHouseConfiguration) -> IndexerConfig {
+    IndexerConfig {
+        graph: clickhouse_config.clone(),
+        datalake: clickhouse_config.clone(),
+        engine: EngineConfiguration {
+            handlers: HandlersConfiguration {
+                global_handler: GlobalHandlerConfig {
+                    datalake_batch_size: 1,
+                    ..GlobalHandlerConfig::default()
+                },
+                namespace_handler: NamespaceHandlerConfig {
+                    datalake_batch_size: 1,
+                    ..NamespaceHandlerConfig::default()
+                },
+                ..HandlersConfiguration::default()
+            },
+            ..EngineConfiguration::default()
+        },
+        ..IndexerConfig::default()
+    }
+}
 
 /// Fluent builder for test engine setup.
 ///
