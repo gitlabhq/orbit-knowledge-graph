@@ -7,7 +7,9 @@ use arrow::array::{
     TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt64Array,
 };
 use arrow::record_batch::RecordBatch;
-use query_engine::constants::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN};
+use query_engine::constants::{
+    EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
+};
 use query_engine::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
@@ -105,14 +107,23 @@ pub struct QueryResultRow {
     columns: HashMap<String, ColumnValue>,
     /// Nodes discovered dynamically at query time that need redaction checks (e.g nodes where their entity type is not known ahead of time).
     dynamic_nodes: Vec<NodeRef>,
+    /// Relationship kinds for each hop in a path finding query.
+    /// `edge_kinds[i]` is the relationship that connects `dynamic_nodes[i]` to `dynamic_nodes[i+1]`.
+    /// Empty for non-path-finding queries.
+    edge_kinds: Vec<String>,
     authorized: bool,
 }
 
 impl QueryResultRow {
-    fn new(columns: HashMap<String, ColumnValue>, dynamic_nodes: Vec<NodeRef>) -> Self {
+    fn new(
+        columns: HashMap<String, ColumnValue>,
+        dynamic_nodes: Vec<NodeRef>,
+        edge_kinds: Vec<String>,
+    ) -> Self {
         Self {
             columns,
             dynamic_nodes,
+            edge_kinds,
             authorized: true,
         }
     }
@@ -154,6 +165,10 @@ impl QueryResultRow {
 
     pub fn dynamic_nodes_mut(&mut self) -> &mut [NodeRef] {
         &mut self.dynamic_nodes
+    }
+
+    pub fn edge_kinds(&self) -> &[String] {
+        &self.edge_kinds
     }
 
     pub fn is_authorized(&self) -> bool {
@@ -212,7 +227,13 @@ impl QueryResult {
                     Vec::new()
                 };
 
-                rows.push(QueryResultRow::new(columns, dynamic_nodes));
+                let edge_kinds = if is_path_finding {
+                    extract_edge_kinds(batch, row_idx)
+                } else {
+                    Vec::new()
+                };
+
+                rows.push(QueryResultRow::new(columns, dynamic_nodes, edge_kinds));
             }
         }
 
@@ -490,6 +511,29 @@ fn extract_path_nodes(batch: &RecordBatch, row_idx: usize) -> Vec<NodeRef> {
             .map(|i| NodeRef::new(ids.value(i), types.value(i)))
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+/// Extract the relationship kinds array from the `_gkg_edge_kinds` column.
+/// Returns one String per hop — `edge_kinds[i]` connects `path[i]` to `path[i+1]`.
+fn extract_edge_kinds(batch: &RecordBatch, row_idx: usize) -> Vec<String> {
+    let col_idx = match batch.schema().index_of(EDGE_KINDS_COLUMN) {
+        Ok(i) => i,
+        Err(_) => return Vec::new(),
+    };
+
+    let list = match batch.column(col_idx).as_any().downcast_ref::<ListArray>() {
+        Some(l) if !l.is_null(row_idx) => l,
+        _ => return Vec::new(),
+    };
+
+    let values = list.value(row_idx);
+    match values.as_any().downcast_ref::<StringArray>() {
+        Some(arr) => (0..arr.len())
+            .filter(|&i| !arr.is_null(i))
+            .map(|i| arr.value(i).to_string())
+            .collect(),
+        None => Vec::new(),
     }
 }
 

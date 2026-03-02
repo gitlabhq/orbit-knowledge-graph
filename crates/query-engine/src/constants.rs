@@ -11,6 +11,12 @@ pub const GKG_COLUMN_PREFIX: &str = "_gkg_";
 /// Contains Array(Tuple(Int64, String)) with (node_id, entity_type) for each step.
 pub const PATH_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "path");
 
+/// Column name for the relationship kinds array in path finding queries.
+/// Contains Array(String) with the relationship_kind for each hop.
+/// Combined with PATH_COLUMN, this allows full edge reconstruction:
+/// path[i] --edge_kinds[i]--> path[i+1].
+pub const EDGE_KINDS_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "edge_kinds");
+
 /// Column names for neighbor queries. The neighbor's ID and type are dynamic
 /// (could be any entity type), similar to path finding nodes.
 pub const NEIGHBOR_ID_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_id");
