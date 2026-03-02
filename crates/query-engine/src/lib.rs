@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! JSON → Schema Validate → Parse → Validate → Lower → Security → Check → Codegen → SQL
+//! JSON → Schema Validate → Parse → Validate → Lower → Deduplicate → Enforce → Security → Check → Codegen → SQL
 //! ```
 //!
 //! # Example
@@ -35,6 +35,7 @@ pub mod ast;
 pub mod check;
 pub mod codegen;
 pub mod constants;
+pub mod deduplicate;
 pub mod enforce;
 pub mod error;
 pub mod input;
@@ -93,9 +94,11 @@ pub fn compile(
     let input = validated_input(json_input, ontology).count_err()?;
 
     let mut node = lower(&input).count_err()?;
+    deduplicate::deduplicate(&mut node).count_err()?;
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx).count_err()?;
     check_ast(&node, ctx).count_err()?;
+    deduplicate::check_dedup(&node).count_err()?;
     let base = codegen(&node, result_context).count_err()?;
 
     let hydration = build_hydration_plan(&input);
