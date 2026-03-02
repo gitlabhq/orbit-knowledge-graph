@@ -200,7 +200,7 @@
           "pattern": "^[a-z_]+$",
           "description": "ClickHouse table name for all graph edges (e.g., 'gl_edge')."
         },
-        "default_sort_key": {
+        "default_entity_sort_key": {
           "type": "array",
           "description": "Default ClickHouse ORDER BY columns for node tables. Individual nodes inherit this unless they override with their own sort_key.",
           "items": { "type": "string" },
@@ -215,7 +215,7 @@
           "uniqueItems": true
         }
       },
-      "required": ["table_prefix", "edge_table", "default_sort_key", "edge_sort_key"],
+      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key"],
       "additionalProperties": false
     },
 

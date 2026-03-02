@@ -92,7 +92,7 @@ pub struct Ontology {
     /// ClickHouse table name for all graph edges (e.g., `"gl_edge"`).
     edge_table: String,
     /// Default ORDER BY columns for node tables (dedup key for ReplacingMergeTree).
-    default_sort_key: Vec<String>,
+    default_entity_sort_key: Vec<String>,
     /// ORDER BY columns for the edge table (dedup key for ReplacingMergeTree).
     edge_sort_key: Vec<String>,
     domains: BTreeMap<String, DomainInfo>,
@@ -117,7 +117,7 @@ impl Ontology {
             schema_version: String::new(),
             table_prefix: GL_TABLE_PREFIX.to_string(),
             edge_table: EDGE_TABLE.to_string(),
-            default_sort_key: vec![
+            default_entity_sort_key: vec![
                 TRAVERSAL_PATH_COLUMN.to_string(),
                 DEFAULT_PRIMARY_KEY.to_string(),
             ],
@@ -143,7 +143,7 @@ impl Ontology {
                 NodeEntity {
                     name: name.clone(),
                     destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
-                    sort_key: self.default_sort_key.clone(),
+                    sort_key: self.default_entity_sort_key.clone(),
                     ..Default::default()
                 },
             );
@@ -268,7 +268,7 @@ impl Ontology {
         ontology.schema_version = schema.schema_version.unwrap_or_default();
         ontology.table_prefix = schema.settings.table_prefix;
         ontology.edge_table = schema.settings.edge_table;
-        ontology.default_sort_key = schema.settings.default_sort_key;
+        ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;
         ontology.edge_sort_key = schema.settings.edge_sort_key;
 
         if !ontology.edge_table.starts_with(&ontology.table_prefix) {
@@ -292,7 +292,8 @@ impl Ontology {
                 let content = reader.read(node_path)?;
                 let node_def: NodeYaml = parse_yaml(&content, node_path)?;
 
-                let entity = node_def.into_entity(node_name.clone(), &ontology.default_sort_key)?;
+                let entity =
+                    node_def.into_entity(node_name.clone(), &ontology.default_entity_sort_key)?;
 
                 if !entity.destination_table.starts_with(&ontology.table_prefix) {
                     return Err(OntologyError::Validation(format!(
@@ -504,8 +505,8 @@ impl Ontology {
 
     /// Default ORDER BY / dedup key columns for node tables.
     #[must_use]
-    pub fn default_sort_key(&self) -> &[String] {
-        &self.default_sort_key
+    pub fn default_entity_sort_key(&self) -> &[String] {
+        &self.default_entity_sort_key
     }
 
     /// ORDER BY / dedup key columns for the edge table.
@@ -857,7 +858,7 @@ struct SchemaYaml {
 struct SettingsYaml {
     table_prefix: String,
     edge_table: String,
-    default_sort_key: Vec<String>,
+    default_entity_sort_key: Vec<String>,
     edge_sort_key: Vec<String>,
 }
 
@@ -1025,7 +1026,7 @@ impl NodeYaml {
     fn into_entity(
         self,
         name: String,
-        default_sort_key: &[String],
+        default_entity_sort_key: &[String],
     ) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
 
@@ -1089,7 +1090,9 @@ impl NodeYaml {
             }
         }
 
-        let sort_key = self.sort_key.unwrap_or_else(|| default_sort_key.to_vec());
+        let sort_key = self
+            .sort_key
+            .unwrap_or_else(|| default_entity_sort_key.to_vec());
 
         // Convert ETL config
         let etl = self.etl.map(|e| e.into_config()).transpose()?;
@@ -1772,6 +1775,168 @@ mod tests {
         );
     }
 
+    // --- sort_key tests ---
+
+    #[test]
+    fn sort_key_settings_are_non_empty() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert!(
+            !ontology.default_entity_sort_key().is_empty(),
+            "default_entity_sort_key should be non-empty"
+        );
+        assert!(
+            !ontology.edge_sort_key().is_empty(),
+            "edge_sort_key should be non-empty"
+        );
+    }
+
+    #[test]
+    fn sort_key_every_node_has_non_empty_key() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        for node in ontology.nodes() {
+            assert!(
+                !node.sort_key.is_empty(),
+                "{} should have a non-empty sort_key",
+                node.name
+            );
+        }
+    }
+
+    #[test]
+    fn sort_key_most_nodes_inherit_default() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let default = ontology.default_entity_sort_key();
+
+        let (inheriting, overriding): (Vec<_>, Vec<_>) = ontology
+            .nodes()
+            .partition(|n| n.sort_key.as_slice() == default);
+
+        assert!(
+            inheriting.len() > overriding.len(),
+            "most nodes should inherit the default sort_key, \
+             but got {} inheriting vs {} overriding",
+            inheriting.len(),
+            overriding.len()
+        );
+
+        // Overrides must actually differ from the default.
+        for node in &overriding {
+            assert_ne!(
+                node.sort_key.as_slice(),
+                default,
+                "{} is in the override set but equals default",
+                node.name
+            );
+        }
+    }
+
+    #[test]
+    fn sort_key_for_table_resolves_every_node() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        for node in ontology.nodes() {
+            let key = ontology.sort_key_for_table(&node.destination_table);
+            assert_eq!(
+                key,
+                Some(node.sort_key.as_slice()),
+                "sort_key_for_table({}) should return the node's sort_key",
+                node.destination_table
+            );
+        }
+    }
+
+    #[test]
+    fn sort_key_for_table_resolves_edge_table() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_eq!(
+            ontology.sort_key_for_table(ontology.edge_table()),
+            Some(ontology.edge_sort_key())
+        );
+    }
+
+    #[test]
+    fn sort_key_for_table_returns_none_for_unknown() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_eq!(ontology.sort_key_for_table("nonexistent_table"), None);
+    }
+
+    #[test]
+    fn sort_key_with_nodes_builder_inherits_default() {
+        let ontology = Ontology::new().with_nodes(["Foo", "Bar"]);
+
+        let default_key = ontology.default_entity_sort_key().to_vec();
+        for name in &["Foo", "Bar"] {
+            let node = ontology
+                .get_node(name)
+                .unwrap_or_else(|| panic!("{name} should exist"));
+            assert_eq!(
+                node.sort_key, default_key,
+                "builder-created {name} should inherit default_entity_sort_key"
+            );
+        }
+    }
+
+    #[test]
+    fn sort_key_node_yaml_explicit_overrides_default() {
+        let yaml = r#"
+node_type: TestNode
+domain: test
+description: A test node
+label: name
+destination_table: gl_test
+sort_key: [project_id, branch, id]
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "ID"
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Name"
+"#;
+        let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let default_sk = vec!["traversal_path".to_string(), "id".to_string()];
+        let entity = node_def
+            .into_entity("TestNode".to_string(), &default_sk)
+            .expect("should succeed");
+        assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
+    }
+
+    #[test]
+    fn sort_key_node_yaml_absent_inherits_default() {
+        let yaml = r#"
+node_type: TestNode
+domain: test
+description: A test node
+label: name
+destination_table: gl_test
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "ID"
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Name"
+"#;
+        let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
+        let default_sk = vec!["traversal_path".to_string(), "id".to_string()];
+        let entity = node_def
+            .into_entity("TestNode".to_string(), &default_sk)
+            .expect("should succeed");
+        assert_eq!(entity.sort_key, default_sk);
+    }
+
     #[test]
     fn destination_table_must_match_table_prefix() {
         use std::collections::HashMap;
@@ -1794,7 +1959,7 @@ schema_version: "1.0"
 settings:
   table_prefix: "kg_"
   edge_table: "kg_edge"
-  default_sort_key: [traversal_path, id]
+  default_entity_sort_key: [traversal_path, id]
   edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
 domains:
   core:

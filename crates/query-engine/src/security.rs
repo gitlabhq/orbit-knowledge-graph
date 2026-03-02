@@ -156,6 +156,9 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
             aliases
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {
+            // Union inner queries only scan gl_edge (joined to filtered node tables in the outer query).
+            // Subquery must not wrap security-sensitive table scans without pre-applied filters.
+            // Neither variant has traversal_path columns to filter on directly.
             vec![]
         }
     }

@@ -42,7 +42,21 @@ fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
             )));
         }
     }
-    Ok(())
+    check_subqueries_in_from(&q.from, ctx)
+}
+
+/// Recurse into derived-table subqueries and verify their inner queries
+/// carry valid security filters. Unions are skipped because their inner
+/// queries only scan `gl_edge` (security comes from the outer join context).
+fn check_subqueries_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> Result<()> {
+    match table_ref {
+        TableRef::Subquery { query, .. } => check_query(query, ctx),
+        TableRef::Join { left, right, .. } => {
+            check_subqueries_in_from(left, ctx)?;
+            check_subqueries_in_from(right, ctx)
+        }
+        TableRef::Scan { .. } | TableRef::Union { .. } => Ok(()),
+    }
 }
 
 /// Recursively checks whether `expr` contains a `startsWith(alias.traversal_path, path)`
@@ -320,5 +334,121 @@ mod tests {
         };
 
         check_dedup_query(&q).unwrap();
+    fn wrap_in_subquery(inner: Query) -> Node {
+        Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("sq", "id"),
+                alias: None,
+            }],
+            from: TableRef::subquery(inner, "sq"),
+            where_clause: None,
+            ..Default::default()
+        }))
+    }
+
+    fn inner_project_query(where_clause: Option<Expr>) -> Query {
+        Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("p", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "p"),
+            where_clause,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn rejects_subquery_without_inner_security_filter() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let node = wrap_in_subquery(inner_project_query(None));
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
+    }
+
+    #[test]
+    fn accepts_subquery_with_inner_security_filter() {
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let mut inner = inner_project_query(None);
+        crate::security::apply_security_context(&mut Node::Query(Box::new(inner.clone())), &ctx)
+            .unwrap();
+        // Re-extract the filtered query from the node
+        let filter = Expr::func(
+            STARTS_WITH_FNAME,
+            vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::lit("42/43/")],
+        );
+        inner.where_clause = Some(filter);
+        let node = wrap_in_subquery(inner);
+        assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    #[test]
+    fn rejects_aggregate_subquery_without_inner_security_filter() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let inner = Query {
+            select: vec![SelectExpr {
+                expr: Expr::func("count", vec![Expr::col("p", "id")]),
+                alias: Some("cnt".into()),
+            }],
+            from: TableRef::scan("gl_project", "p"),
+            group_by: vec![Expr::col("p", "namespace_id")],
+            having: Some(Expr::binary(
+                crate::ast::Op::Gt,
+                Expr::func("count", vec![Expr::col("p", "id")]),
+                Expr::lit(1),
+            )),
+            ..Default::default()
+        };
+        let node = wrap_in_subquery(inner);
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
+    }
+
+    #[test]
+    fn accepts_aggregate_subquery_with_inner_security_filter() {
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let filter = Expr::func(
+            STARTS_WITH_FNAME,
+            vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::lit("42/43/")],
+        );
+        let inner = Query {
+            select: vec![SelectExpr {
+                expr: Expr::func("count", vec![Expr::col("p", "id")]),
+                alias: Some("cnt".into()),
+            }],
+            from: TableRef::scan("gl_project", "p"),
+            where_clause: Some(filter),
+            group_by: vec![Expr::col("p", "namespace_id")],
+            having: Some(Expr::binary(
+                crate::ast::Op::Gt,
+                Expr::func("count", vec![Expr::col("p", "id")]),
+                Expr::lit(1),
+            )),
+            ..Default::default()
+        };
+        let node = wrap_in_subquery(inner);
+        assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    #[test]
+    fn accepts_subquery_wrapping_non_sensitive_table() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let inner = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("d", "value"),
+                alias: None,
+            }],
+            from: TableRef::scan("dedup_cte", "d"),
+            where_clause: None,
+            ..Default::default()
+        };
+        let node = wrap_in_subquery(inner);
+        assert!(check_ast(&node, &ctx).is_ok());
     }
 }
