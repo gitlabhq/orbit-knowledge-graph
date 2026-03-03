@@ -241,6 +241,8 @@ Rather than a separate authorization endpoint, the redaction exchange occurs ins
 5. GKG applies those authorizations -- the query pipeline marks unauthorized rows and drops them from the result set.
 6. GKG returns the redacted results to Rails as a `ToolResult` or `QueryResult`.
 
+**Multi-entity search queries**: When a search query targets multiple entity types, the engine produces a `UNION ALL` where each arm returns NULLs for columns belonging to other entities. During redaction, `apply_authorizations()` skips NULL redaction columns (they indicate a different entity's arm, not a missing permission). A row is only denied when every redaction column it could match is NULL and no entity was checked at all — preserving the fail-closed default for rows that genuinely lack authorization data.
+
 **Code Review Requirements**:
 
 - GKG redaction module must be called for all non-aggregation queries before returning results.

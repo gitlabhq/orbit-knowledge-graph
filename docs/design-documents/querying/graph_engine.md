@@ -40,6 +40,7 @@ The planner emits ClickHouse SQL similar to these patterns:
 - Variable‑length paths: `WITH RECURSIVE` over the edge table(s) with a depth limit and optional accumulation of `nodes(path)` and `relationships(path)` as arrays.
 - Reverse hops: use the destination‑ordered projection or a reversed view produced on the fly.
 - Alternate relationship types: `UNION ALL` of the participating edge tables inside a single `edges_all` CTE, then join once per hop.
+- Multi-entity search: `UNION ALL` across typed node tables when a search query targets multiple entities. Each arm selects its own columns and emits NULLs for columns belonging to other entities, producing a unified result schema. Security predicates are injected into each arm independently.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
 - Derived‑table subqueries: `(SELECT ... GROUP BY ... HAVING ...) AS alias` in FROM/JOIN positions for deduplication patterns (e.g., `argMax(_deleted, _version)`).

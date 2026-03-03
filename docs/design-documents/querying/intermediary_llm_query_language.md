@@ -47,8 +47,8 @@ The JSON query schema supports five query types through a single unified structu
 | Field | Type | Description |
 |-------|------|-------------|
 | `query_type` | `string` | One of: `traversal`, `aggregation`, `path_finding`, `search`, `neighbors` |
-| `nodes` | `array` | Node selectors to match (required for traversal, aggregation, path_finding) |
-| `node` | `object` | Single node selector (required for search, neighbors) |
+| `nodes` | `array` | Node selectors to match (required for traversal, aggregation, path_finding; also accepted by search for multi-entity queries) |
+| `node` | `object` | Single node selector (required for neighbors; also accepted by search for single-entity queries) |
 
 ### Optional Fields
 
@@ -64,7 +64,7 @@ The JSON query schema supports five query types through a single unified structu
 
 ## Node Selectors
 
-Each node selector specifies which graph nodes to match. For `search` and `neighbors` queries, use the `node` field (singular). For `traversal`, `aggregation`, and `path_finding` queries, use the `nodes` array. You cannot specify both.
+Each node selector specifies which graph nodes to match. For `neighbors` queries, use the `node` field (singular). For `traversal`, `aggregation`, and `path_finding` queries, use the `nodes` array. For `search` queries, use either `node` (single entity) or `nodes` (multiple entities). You cannot specify both `node` and `nodes` in the same query.
 
 ```json
 {
@@ -226,7 +226,9 @@ Find paths between nodes using recursive CTEs.
 
 ### Search Queries
 
-Match a single entity type with optional filters. Search queries use the `node` field (singular) instead of `nodes`.
+Match one or more entity types with optional filters. Use `node` for a single entity or `nodes` for multiple entities in one request.
+
+**Single-entity search** (using `node`):
 
 ```json
 {
@@ -242,6 +244,33 @@ Match a single entity type with optional filters. Search queries use the `node` 
   "limit": 10
 }
 ```
+
+**Multi-entity search** (using `nodes`):
+
+When multiple nodes are provided, the engine generates a `UNION ALL` query with a unified column schema. Each arm returns its own columns and NULLs for columns belonging to other entities. Each node must specify at least one of `node_ids`, `id_range`, or `filters` to constrain the search.
+
+```json
+{
+  "query_type": "search",
+  "nodes": [
+    {
+      "id": "u",
+      "entity": "User",
+      "columns": ["username", "email"],
+      "filters": {"username": {"op": "starts_with", "value": "admin"}}
+    },
+    {
+      "id": "p",
+      "entity": "Project",
+      "columns": ["name", "path"],
+      "node_ids": [1, 2, 3]
+    }
+  ],
+  "limit": 50
+}
+```
+
+The result set contains rows from both entity types. Columns are prefixed with the node alias (for example, `u_username`, `u_email`, `p_name`, `p_path`). Rows from the `User` arm have NULLs for the `p_*` columns and vice versa.
 
 ### Neighbors Queries
 
