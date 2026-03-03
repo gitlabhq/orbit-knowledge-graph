@@ -26,14 +26,39 @@ fn default_jwt_clock_skew_secs() -> u64 {
     60
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct JwtConfig {
+    #[serde(default)]
+    pub signing_key: Option<String>,
+    #[serde(default)]
+    pub verifying_key: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct GitlabConfig {
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub jwt: JwtConfig,
+}
+
+impl GitlabConfig {
+    pub fn client_config(&self) -> Option<GitlabClientConfiguration> {
+        let base_url = self.base_url.clone()?;
+        let signing_key = self.jwt.signing_key.clone()?;
+        Some(GitlabClientConfiguration {
+            base_url,
+            signing_key,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default = "default_bind_address")]
     pub bind_address: SocketAddr,
     #[serde(default = "default_grpc_bind_address")]
     pub grpc_bind_address: SocketAddr,
-    #[serde(default)]
-    pub jwt_secret: Option<String>,
     #[serde(default = "default_jwt_clock_skew_secs")]
     pub jwt_clock_skew_secs: u64,
     #[serde(default)]
@@ -47,7 +72,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub engine: EngineConfiguration,
     #[serde(default)]
-    pub gitlab: Option<GitlabClientConfiguration>,
+    pub gitlab: GitlabConfig,
     #[serde(default)]
     pub dispatch: DispatchConfig,
     #[serde(default)]
@@ -77,9 +102,15 @@ impl AppConfig {
     }
 
     pub fn jwt_secret(&self) -> Result<&str, ConfigError> {
-        self.jwt_secret
+        self.gitlab
+            .jwt
+            .verifying_key
             .as_deref()
             .ok_or(ConfigError::MissingJwtSecret)
+    }
+
+    pub fn gitlab_client_config(&self) -> Option<GitlabClientConfiguration> {
+        self.gitlab.client_config()
     }
 
     pub fn into_shared(self) -> SharedAppConfig {
@@ -93,7 +124,7 @@ pub type SharedAppConfig = Arc<AppConfig>;
 pub enum ConfigError {
     #[error("configuration error: {0}")]
     Config(#[from] config::ConfigError),
-    #[error("GKG_JWT_SECRET is required")]
+    #[error("GKG_GITLAB__JWT__VERIFYING_KEY is required")]
     MissingJwtSecret,
 }
 

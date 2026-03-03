@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
                 graph: config.graph.clone(),
                 datalake: config.datalake.clone(),
                 engine: config.engine.clone(),
-                gitlab: config.gitlab.clone(),
+                gitlab: config.gitlab_client_config(),
                 dispatch: config.dispatch.clone(),
                 health_bind_address: config.indexer_health_bind_address,
             };

@@ -3,6 +3,6 @@
 pub struct GitlabClientConfiguration {
     /// Base URL for the GitLab API (e.g. "http://gitlab:3000").
     pub base_url: String,
-    /// Shared secret used to sign JWT tokens for authentication.
-    pub jwt_secret: String,
+    /// Base64-encoded key used to sign outbound JWT tokens.
+    pub signing_key: String,
 }

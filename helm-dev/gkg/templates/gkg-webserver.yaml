@@ -94,7 +94,7 @@ spec:
               value: {{ .Values.gkgServer.logLevel | default "info" | quote }}
             {{- include "gkg.clickhouseSecretEnv" (dict "prefix" "DATALAKE" "secretName" "clickhouse-credentials") | nindent 12 }}
             {{- include "gkg.clickhouseSecretEnv" (dict "prefix" "GRAPH" "secretName" "clickhouse-credentials") | nindent 12 }}
-            - name: GKG_JWT_SECRET
+            - name: GKG_GITLAB__JWT__VERIFYING_KEY
               valueFrom:
                 secretKeyRef:
                   name: gkg-server-credentials

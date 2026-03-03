@@ -42,7 +42,7 @@ pub struct GitlabClient {
 
 impl GitlabClient {
     pub fn new(config: GitlabClientConfiguration) -> Result<Self, GitlabClientError> {
-        let signing_key = BASE64.decode(&config.jwt_secret)?;
+        let signing_key = BASE64.decode(&config.signing_key)?;
         Ok(Self {
             http: reqwest::Client::new(),
             base_url: config.base_url,

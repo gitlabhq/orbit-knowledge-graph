@@ -304,7 +304,7 @@ tilt-ci:
       cat <<EOF > .tilt-secrets
       POSTGRES_PASSWORD=ci_test_password
       CLICKHOUSE_PASSWORD=ci_test_password
-      GKG_JWT_SECRET=ci_test_jwt_secret_at_least_32_bytes_long
+      GKG_GITLAB__JWT__VERIFYING_KEY=ci_test_jwt_secret_at_least_32_bytes_long
       EOF
     - tilt ci
 
