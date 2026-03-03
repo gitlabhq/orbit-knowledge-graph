@@ -95,7 +95,7 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
    Edit `.tilt-secrets` and fill in:
    - `POSTGRES_PASSWORD`: Check `$GDK_ROOT/postgresql/.s.PGSQL.5432` or use empty string for trust auth
    - `CLICKHOUSE_PASSWORD`: Usually empty for local development
-   - `GKG_JWT_SECRET`: Any 32+ character string
+   - `GKG_JWT_SECRET`: Any 32+ character string (used as `gitlab.jwt.verifying_key` via K8s secret)
 
 3. **Start local environment:**
 

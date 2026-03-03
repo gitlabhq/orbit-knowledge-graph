@@ -23,7 +23,7 @@ spec:
                   name: ${CH_SECRET}
                   key: ${CH_SECRET_KEY}
                   optional: true
-            - name: GKG_GITLAB__JWT_SECRET
+            - name: GKG_GITLAB__JWT__SIGNING_KEY
               valueFrom:
                 secretKeyRef:
                   name: ${GKG_CREDENTIALS_SECRET}
