@@ -344,30 +344,52 @@ impl QueryResult {
     /// - Has no authorization result from the redaction service
     /// - Is explicitly marked as unauthorized
     ///
+    /// For search queries, NULL redaction columns are skipped because multi-node
+    /// search uses UNION ALL where each arm only has real values for its own entity
+    /// and NULLs for others. A search row is denied only if zero nodes are checkable
+    /// or any present node fails authorization.
+    ///
     /// For path finding queries, all nodes in the path are checked.
     /// For neighbors queries, the neighbor node is checked.
     pub fn apply_authorizations(&mut self, authorizations: &[ResourceAuthorization]) -> usize {
         let mut redacted_count = 0;
         let redaction_nodes: Vec<_> = self.ctx.nodes().cloned().collect();
+        let is_search = self.ctx.query_type == Some(QueryType::Search);
 
         for row in &mut self.rows {
             if !row.authorized {
                 continue;
             }
 
-            // Check redaction nodes (from _gkg_* columns)
+            // Check redaction nodes (from _gkg_* columns).
+            //
+            // For multi-node search (UNION ALL), each row only has real values
+            // for one entity — the others are NULL from UNION padding. We skip
+            // NULL nodes for search queries and only deny if zero nodes were
+            // checkable (truly empty row) or any present node is unauthorized.
+            let mut checked_any = false;
             for redaction_node in &redaction_nodes {
                 let Some(node_ref) = row.node_ref(redaction_node) else {
+                    if is_search {
+                        continue;
+                    }
                     // Fail closed: NULL IDs cannot be verified, so deny the row
                     row.set_unauthorized();
                     redacted_count += 1;
                     break;
                 };
+                checked_any = true;
                 if !is_authorized(&node_ref, authorizations, &self.ctx) {
                     row.set_unauthorized();
                     redacted_count += 1;
                     break;
                 }
+            }
+
+            // For search queries: if no nodes were checkable at all, deny (fail-closed).
+            if row.authorized && is_search && !checked_any {
+                row.set_unauthorized();
+                redacted_count += 1;
             }
 
             // Dynamic nodes (path finding, neighbors): entity type discovered at runtime,

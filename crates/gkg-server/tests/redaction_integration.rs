@@ -4332,6 +4332,364 @@ async fn range_pagination_comprehensive(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Multi-Node Search Subtests
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Multi-node search uses UNION ALL to query multiple entity types in a single
+// request. Each row only has real values for one entity — the others are NULL
+// from UNION padding. Redaction must handle these NULLs correctly: skip NULL
+// nodes (they don't apply to that row) and only check present nodes.
+
+/// Multi-node search with full authorization: both entities authorized, all rows pass.
+async fn multi_node_search_all_authorized(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
+            {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000, 1001]}
+        ],
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    assert!(
+        query.base.sql.contains("UNION ALL"),
+        "multi-node search should produce UNION ALL: {}",
+        query.base.sql
+    );
+
+    // Both entities must have redaction columns
+    assert!(query.base.sql.contains("_gkg_u_id"));
+    assert!(query.base.sql.contains("_gkg_u_type"));
+    assert!(query.base.sql.contains("_gkg_p_id"));
+    assert!(query.base.sql.contains("_gkg_p_type"));
+
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+
+    // 2 users + 2 projects = 4 rows
+    assert_eq!(result.len(), 4, "should have 4 rows (2 users + 2 projects)");
+
+    // Verify raw data: user rows have user IDs, project rows have project IDs
+    let raw_user_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    let raw_project_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
+    assert_eq!(raw_user_ids, HashSet::from([1, 2]));
+    assert_eq!(raw_project_ids, HashSet::from([1000, 1001]));
+
+    // UNION ALL rows: user rows must have NULL project IDs and vice versa
+    for row in result.iter() {
+        if row.get_id(&u).is_some() {
+            assert!(
+                row.get_id(&p).is_none(),
+                "user row should have NULL project ID"
+            );
+        } else {
+            assert!(
+                row.get_id(&p).is_some(),
+                "non-user row should have a project ID"
+            );
+        }
+    }
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1, 2]);
+    mock_service.allow("project", &[1000, 1001]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(redacted, 0, "all rows should pass when fully authorized");
+    assert_eq!(result.authorized_count(), 4);
+
+    // Verify the exact same IDs survive redaction
+    let auth_user_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    let auth_project_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&p))
+        .collect();
+    assert_eq!(auth_user_ids, HashSet::from([1, 2]));
+    assert_eq!(auth_project_ids, HashSet::from([1000, 1001]));
+}
+
+/// Multi-node search with partial authorization: deny some entities from each type.
+async fn multi_node_search_partial_authorization(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3]},
+            {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000, 1001]}
+        ],
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+
+    // 3 users + 2 projects = 5 rows
+    assert_eq!(result.len(), 5);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1]); // Allow user 1 only
+    mock_service.deny("user", &[2, 3]);
+    mock_service.allow("project", &[1000]); // Allow project 1000 only
+    mock_service.deny("project", &[1001]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(
+        redacted, 3,
+        "3 rows should be redacted (users 2,3 + project 1001)"
+    );
+    assert_eq!(
+        result.authorized_count(),
+        2,
+        "user 1 and project 1000 should pass"
+    );
+
+    // Verify exactly user 1 and project 1000 survived
+    let auth_user_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    let auth_project_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&p))
+        .collect();
+    assert_eq!(auth_user_ids, HashSet::from([1]));
+    assert_eq!(auth_project_ids, HashSet::from([1000]));
+
+    // Denied IDs must not appear
+    assert!(!auth_user_ids.contains(&2));
+    assert!(!auth_user_ids.contains(&3));
+    assert!(!auth_project_ids.contains(&1001));
+}
+
+/// Multi-node search fail-closed: no authorization returns nothing.
+async fn multi_node_search_fail_closed_no_authorization(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "nodes": [
+            {"id": "u", "entity": "User", "node_ids": [1, 2]},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
+        ],
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+
+    assert_eq!(result.len(), 3, "should have 3 rows before redaction");
+
+    // Verify all rows are present before redaction
+    let raw_user_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    let raw_project_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
+    assert_eq!(raw_user_ids, HashSet::from([1, 2]));
+    assert_eq!(raw_project_ids, HashSet::from([1000]));
+
+    // No authorization at all — fail closed
+    let mock_service = MockRedactionService::new();
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(redacted, 3, "all rows should be redacted");
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "fail-closed: nothing authorized"
+    );
+
+    // No IDs should be accessible through authorized_rows
+    let auth_user_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    let auth_project_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&p))
+        .collect();
+    assert!(auth_user_ids.is_empty());
+    assert!(auth_project_ids.is_empty());
+}
+
+/// Multi-node search: denying one entity type doesn't affect the other.
+/// User rows and Project rows are independent — denying all users should not
+/// affect project authorization.
+async fn multi_node_search_independent_entity_authorization(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
+            {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000, 1001]}
+        ],
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+
+    assert_eq!(result.len(), 4);
+
+    // Deny all users, allow all projects
+    let mut mock_service = MockRedactionService::new();
+    mock_service.deny("user", &[1, 2]);
+    mock_service.allow("project", &[1000, 1001]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(redacted, 2, "only user rows should be denied");
+    assert_eq!(
+        result.authorized_count(),
+        2,
+        "both project rows should pass"
+    );
+
+    // No user IDs should survive
+    let auth_user_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert!(
+        auth_user_ids.is_empty(),
+        "denied user rows should not leak any user IDs"
+    );
+
+    // Both project IDs should survive
+    let auth_project_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&p))
+        .collect();
+    assert_eq!(auth_project_ids, HashSet::from([1000, 1001]));
+
+    // Verify types on authorized rows
+    for row in result.authorized_rows() {
+        assert_eq!(row.get_type(&p), Some("Project"));
+        assert!(
+            row.get_type(&u).is_none(),
+            "authorized rows should not have User type (they are project rows)"
+        );
+    }
+}
+
+/// Multi-node search: mandatory redaction columns present for all entities.
+/// Verify the SQL includes _gkg_{alias}_id and _gkg_{alias}_type for each node.
+async fn multi_node_search_mandatory_columns_present(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // Three entities in a single search
+    let json = r#"{
+        "query_type": "search",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
+            {"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100]},
+            {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]}
+        ],
+        "limit": 100
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+
+    // All three nodes must have redaction columns
+    for col in [
+        "_gkg_u_id",
+        "_gkg_u_type",
+        "_gkg_g_id",
+        "_gkg_g_type",
+        "_gkg_p_id",
+        "_gkg_p_type",
+    ] {
+        assert!(
+            query.base.sql.contains(col),
+            "SQL must include {col}: {}",
+            query.base.sql
+        );
+    }
+
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let u = result.ctx().get("u").unwrap().clone();
+    let g = result.ctx().get("g").unwrap().clone();
+    let p = result.ctx().get("p").unwrap().clone();
+
+    // 1 user + 1 group + 1 project = 3 rows
+    assert_eq!(result.len(), 3);
+
+    // Each row should have exactly one non-NULL entity
+    for row in result.iter() {
+        let present_count = [row.get_id(&u), row.get_id(&g), row.get_id(&p)]
+            .iter()
+            .filter(|id| id.is_some())
+            .count();
+        assert_eq!(
+            present_count, 1,
+            "each UNION ALL row should have exactly one non-NULL entity"
+        );
+    }
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1]);
+    mock_service.allow("group", &[100]);
+    mock_service.allow("project", &[1000]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(redacted, 0, "all 3 rows should pass");
+    assert_eq!(result.authorized_count(), 3);
+
+    // Verify exact IDs survived
+    let auth_user_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    let auth_group_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&g))
+        .collect();
+    let auth_project_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&p))
+        .collect();
+    assert_eq!(auth_user_ids, HashSet::from([1]));
+    assert_eq!(auth_group_ids, HashSet::from([100]));
+    assert_eq!(auth_project_ids, HashSet::from([1000]));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Orchestrator Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4407,5 +4765,11 @@ async fn redaction_integration() {
         enum_filter_normalization_int_vs_string_enums,
         // range pagination
         range_pagination_comprehensive,
+        // multi-node search
+        multi_node_search_all_authorized,
+        multi_node_search_partial_authorization,
+        multi_node_search_fail_closed_no_authorization,
+        multi_node_search_independent_entity_authorization,
+        multi_node_search_mandatory_columns_present,
     );
 }

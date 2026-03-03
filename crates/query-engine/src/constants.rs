@@ -23,10 +23,6 @@ pub const NEIGHBOR_ID_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_id")
 pub const NEIGHBOR_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_type");
 pub const RELATIONSHIP_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "relationship_type");
 
-/// Column names for multi-node search queries. Each row has a single entity type and ID.
-pub const BATCH_ENTITY_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "entity_type");
-pub const BATCH_ID_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "id");
-
 /// Tables that should NOT have traversal path security filters applied.
 /// These are entities whose visibility is determined through relationships
 /// (e.g., MEMBER_OF) rather than direct path hierarchy.

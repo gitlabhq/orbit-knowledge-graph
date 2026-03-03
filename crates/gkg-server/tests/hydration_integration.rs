@@ -263,6 +263,23 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
         compiled.hydration
     );
 
+    // ── Multi-node Search: No hydration (UNION ALL base query has all columns) ──
+    let json = r#"{
+        "query_type": "search",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
+            {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]}
+        ],
+        "limit": 50
+    }"#;
+
+    let compiled = compile(json, &ontology, &security_ctx).unwrap();
+    assert!(
+        matches!(compiled.hydration, HydrationPlan::None),
+        "Multi-node Search should produce None hydration plan, got: {:?}",
+        compiled.hydration
+    );
+
     // ── Traversal: No hydration (static disabled, base query has columns) ──
     let json = r#"{
         "query_type": "traversal",

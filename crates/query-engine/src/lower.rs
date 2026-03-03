@@ -490,7 +490,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Multi-node Search (UNION ALL)
+// Search
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_search(input: &Input) -> Result<Node> {
@@ -523,9 +523,9 @@ fn lower_search(input: &Input) -> Result<Node> {
         .nodes
         .iter()
         .filter_map(|node| {
-            let entity = node.entity.as_ref()?;
+            node.entity.as_ref()?;
             let table = node.table.as_ref()?;
-            Some(build_search_arm(node, entity, table, &all_columns))
+            Some(build_search_arm(node, table, &all_columns))
         })
         .collect();
 
@@ -557,21 +557,13 @@ fn lower_search(input: &Input) -> Result<Node> {
 }
 
 /// Build a single arm of a search query (works for both single and multi-node).
-fn build_search_arm(
-    node: &InputNode,
-    entity: &str,
-    table: &str,
-    all_columns: &[(String, String)],
-) -> Query {
+fn build_search_arm(node: &InputNode, table: &str, all_columns: &[(String, String)]) -> Query {
     let requested_cols: Vec<&str> = match &node.columns {
         Some(ColumnSelection::List(cols)) => cols.iter().map(|s| s.as_str()).collect(),
         _ => vec![],
     };
 
     let mut select = Vec::new();
-
-    select.push(SelectExpr::new(Expr::lit(entity), "_gkg_entity_type"));
-    select.push(SelectExpr::new(Expr::col(&node.id, "id"), "_gkg_id"));
 
     // For each column in the unified schema, output it or NULL.
     for (col_alias, col_name) in all_columns {
@@ -1351,8 +1343,7 @@ mod tests {
             .unwrap()
             .default_columns
             .len();
-        // +2 for _gkg_entity_type and _gkg_id
-        assert_eq!(q.select.len(), user_defaults + 2);
+        assert_eq!(q.select.len(), user_defaults);
         assert!(q.where_clause.is_some());
         assert!(q.group_by.is_empty());
         assert_eq!(count_unions(&q.from), 0);
@@ -1381,8 +1372,7 @@ mod tests {
             .unwrap()
             .default_columns
             .len();
-        // +2 for _gkg_entity_type and _gkg_id
-        assert_eq!(q.select.len(), project_defaults + 2);
+        assert_eq!(q.select.len(), project_defaults);
     }
 
     #[test]
@@ -1403,14 +1393,11 @@ mod tests {
             panic!("expected Query");
         };
 
-        // 2 columns + _gkg_entity_type + _gkg_id
-        assert_eq!(q.select.len(), 4);
+        assert_eq!(q.select.len(), 2);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_username".to_string()));
         assert!(aliases.contains(&&"u_state".to_string()));
-        assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
-        assert!(aliases.contains(&&"_gkg_id".to_string()));
     }
 
     #[test]
@@ -1491,8 +1478,7 @@ mod tests {
             .unwrap()
             .default_columns
             .len();
-        // +2 for _gkg_entity_type and _gkg_id
-        assert_eq!(q.select.len(), user_defaults + 2);
+        assert_eq!(q.select.len(), user_defaults);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_username".to_string()));
@@ -1517,8 +1503,7 @@ mod tests {
             panic!("expected Query");
         };
 
-        // When id is explicitly in the list, it should appear once (+2 for _gkg_entity_type, _gkg_id)
-        assert_eq!(q.select.len(), 4);
+        assert_eq!(q.select.len(), 2);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_id".to_string()));
@@ -1730,8 +1715,6 @@ mod tests {
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_username".to_string()));
-        assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
-        assert!(aliases.contains(&&"_gkg_id".to_string()));
     }
 
     #[test]
@@ -1784,8 +1767,6 @@ mod tests {
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
 
-        assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
-        assert!(aliases.contains(&&"_gkg_id".to_string()));
         assert!(aliases.contains(&&"u_username".to_string()));
         assert!(aliases.contains(&&"p_name".to_string()));
 

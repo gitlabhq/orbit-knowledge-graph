@@ -10,10 +10,13 @@
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, Node, Query, SelectExpr};
-use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
+use crate::constants::{
+    GKG_COLUMN_PREFIX, primary_key_column, redaction_id_column, redaction_type_column,
+};
 use crate::error::Result;
 use crate::input::{EntityAuthConfig, Input, QueryType};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,10 +111,76 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     };
 
     match node {
-        Node::Query(q) => enforce_return_columns(q, input, &selectable_nodes, &mut ctx)?,
+        Node::Query(q) => {
+            enforce_return_columns(q, input, &selectable_nodes, &mut ctx)?;
+
+            // For multi-node search, propagate redaction columns into each
+            // UNION ALL arm so all arms have matching SELECT lists.
+            if input.query_type == QueryType::Search && !q.union_all.is_empty() {
+                propagate_redaction_to_union_arms(q, input);
+            }
+        }
     }
 
     Ok(ctx)
+}
+
+/// After enforce adds redaction columns to the base query of a multi-node
+/// search, each UNION ALL arm needs matching columns. For the arm's own
+/// node the real column ref is used; for other nodes' columns, NULL.
+fn propagate_redaction_to_union_arms(q: &mut Query, input: &Input) {
+    let redaction_aliases: Vec<String> = q
+        .select
+        .iter()
+        .filter_map(|s| {
+            let a = s.alias.as_ref()?;
+            if a.starts_with(GKG_COLUMN_PREFIX) {
+                Some(a.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if redaction_aliases.is_empty() {
+        return;
+    }
+
+    // union_all[i] corresponds to input.nodes[i+1] (nodes[0] is the base).
+    for (arm_idx, arm) in q.union_all.iter_mut().enumerate() {
+        let arm_node = &input.nodes[arm_idx + 1];
+        for alias in &redaction_aliases {
+            let owner = input.nodes.iter().find(|n| {
+                let prefix = format!("_gkg_{}_", n.id);
+                alias.starts_with(&prefix)
+            });
+
+            let Some(owner) = owner else { continue };
+
+            if owner.id != arm_node.id {
+                arm.select.push(SelectExpr {
+                    expr: Expr::lit(Value::Null),
+                    alias: Some(alias.clone()),
+                });
+                continue;
+            }
+
+            let prefix = format!("_gkg_{}_", owner.id);
+            let suffix = &alias[prefix.len()..];
+            let expr = match suffix {
+                "type" => {
+                    let entity = owner.entity.as_deref().unwrap_or("");
+                    Expr::lit(entity)
+                }
+                "pk" => Expr::col(&owner.id, DEFAULT_PRIMARY_KEY),
+                _ => Expr::col(&owner.id, &owner.redaction_id_column),
+            };
+            arm.select.push(SelectExpr {
+                expr,
+                alias: Some(alias.clone()),
+            });
+        }
+    }
 }
 
 fn enforce_return_columns(
@@ -120,6 +189,12 @@ fn enforce_return_columns(
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
 ) -> Result<()> {
+    // For multi-node search UNION ALL, the base query corresponds to
+    // input.nodes[0]. Columns for other nodes must be NULL in the base
+    // arm since those table aliases don't exist in its FROM clause.
+    let is_multi_node_search = input.query_type == QueryType::Search && !q.union_all.is_empty();
+    let base_node_id = input.nodes.first().map(|n| n.id.as_str());
+
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
 
@@ -134,6 +209,11 @@ fn enforce_return_columns(
         let id_col = redaction_node.id_column.clone();
         let type_col = redaction_node.type_column.clone();
 
+        // In multi-node search, only the base arm's node gets real column
+        // refs. Other nodes get NULLs — propagate_redaction_to_union_arms
+        // handles the other arms.
+        let emit_null = is_multi_node_search && base_node_id != Some(node.id.as_str());
+
         // When the auth ID column differs from "id" (e.g. Definition uses
         // "project_id" for authorization), emit a separate pk column so
         // hydration can still look up the entity by its own row ID.
@@ -142,8 +222,13 @@ fn enforce_return_columns(
         if needs_separate_pk {
             let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
             if !has_pk {
+                let expr = if emit_null {
+                    Expr::lit(Value::Null)
+                } else {
+                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY)
+                };
                 q.select.push(SelectExpr {
-                    expr: Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                    expr,
                     alias: Some(pk_col),
                 });
             }
@@ -153,7 +238,11 @@ fn enforce_return_columns(
         let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
 
         if !has_id {
-            let id_expr = Expr::col(&node.id, &node.redaction_id_column);
+            let id_expr = if emit_null {
+                Expr::lit(Value::Null)
+            } else {
+                Expr::col(&node.id, &node.redaction_id_column)
+            };
             q.select.push(SelectExpr {
                 expr: id_expr.clone(),
                 alias: Some(id_col.clone()),
@@ -175,10 +264,15 @@ fn enforce_return_columns(
                 .map(|i| i + 1)
                 .unwrap_or(q.select.len());
 
+            let type_expr = if emit_null {
+                Expr::lit(Value::Null)
+            } else {
+                Expr::lit(entity.as_str())
+            };
             q.select.insert(
                 insert_pos,
                 SelectExpr {
-                    expr: Expr::lit(entity.as_str()),
+                    expr: type_expr,
                     alias: Some(type_col),
                 },
             );
@@ -439,22 +533,26 @@ mod tests {
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
         assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string())));
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string())));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string())));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string())));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
+        );
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
+        );
         assert_eq!(q.group_by.len(), 1); // u.id already present, no duplicate added
 
         // Context should only have the group_by node

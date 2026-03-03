@@ -48,8 +48,8 @@ pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use check::check_ast;
 pub use codegen::{CompiledQuery, HydrationPlan, HydrationTemplate, ParameterizedQuery, codegen};
 pub use constants::{
-    BATCH_ENTITY_TYPE_COLUMN, BATCH_ID_COLUMN, EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN,
-    NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
+    RELATIONSHIP_TYPE_COLUMN,
 };
 pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
@@ -1105,18 +1105,6 @@ mod ontology_integration_tests {
         );
 
         assert!(
-            result.base.sql.contains("_gkg_entity_type"),
-            "expected _gkg_entity_type column: {}",
-            result.base.sql
-        );
-
-        assert!(
-            result.base.sql.contains("_gkg_id"),
-            "expected _gkg_id column: {}",
-            result.base.sql
-        );
-
-        assert!(
             result.base.sql.contains("u_username"),
             "expected u_username column: {}",
             result.base.sql
@@ -1130,6 +1118,18 @@ mod ontology_integration_tests {
         assert!(
             result.base.sql.contains("LIMIT 100"),
             "expected LIMIT 100: {}",
+            result.base.sql
+        );
+
+        // Redaction columns propagated to both UNION arms
+        assert!(
+            result.base.sql.contains("_gkg_u_id"),
+            "expected _gkg_u_id redaction column: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("_gkg_p_id"),
+            "expected _gkg_p_id redaction column: {}",
             result.base.sql
         );
     }
@@ -1150,13 +1150,11 @@ mod ontology_integration_tests {
             result.base.sql
         );
 
-        // Single node uses standard search path, not batch.
         assert!(
             !result.base.sql.contains("UNION ALL"),
             "single node should not have UNION ALL: {}",
             result.base.sql
         );
-        // Standard search columns (per-node aliases), not batch columns.
         assert!(result.base.sql.contains("_gkg_u_id"));
         assert!(result.base.sql.contains("_gkg_u_type"));
     }
