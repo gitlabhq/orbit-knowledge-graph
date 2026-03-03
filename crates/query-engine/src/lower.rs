@@ -43,8 +43,8 @@ fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
 /// are handled in normalize.rs. Lowering is purely mechanical.
 pub fn lower(input: &Input) -> Result<Node> {
     match input.query_type {
-        QueryType::Search if input.nodes.len() > 1 => lower_batch_search(input),
-        QueryType::Traversal | QueryType::Search => lower_traversal(input),
+        QueryType::Traversal => lower_traversal(input),
+        QueryType::Search => lower_search(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
@@ -493,21 +493,23 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
 // Multi-node Search (UNION ALL)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_batch_search(input: &Input) -> Result<Node> {
+fn lower_search(input: &Input) -> Result<Node> {
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
-            "multi-node search requires at least one node".into(),
+            "search requires at least one node".into(),
         ));
     }
 
-    // Collect all (entity, column) pairs across nodes for the unified schema.
+    // Collect all (node_alias, column) pairs across nodes for the unified schema.
     // Normalize has already expanded wildcards to ColumnSelection::List.
     let mut all_columns: Vec<(String, String)> = Vec::new();
     for node in &input.nodes {
-        let Some(entity) = &node.entity else { continue };
+        if node.entity.is_none() {
+            continue;
+        }
         if let Some(ColumnSelection::List(cols)) = &node.columns {
             for col in cols {
-                let key = (entity.clone(), col.clone());
+                let key = (node.id.clone(), col.clone());
                 if !all_columns.contains(&key) {
                     all_columns.push(key);
                 }
@@ -515,39 +517,47 @@ fn lower_batch_search(input: &Input) -> Result<Node> {
         }
     }
 
+    let (limit, offset) = pagination(input);
+
     let mut queries: Vec<Query> = input
         .nodes
         .iter()
         .filter_map(|node| {
             let entity = node.entity.as_ref()?;
             let table = node.table.as_ref()?;
-            Some(build_batch_search_arm(node, entity, table, &all_columns))
+            Some(build_search_arm(node, entity, table, &all_columns))
         })
         .collect();
 
     if queries.is_empty() {
         return Err(QueryError::Lowering(
-            "multi-node search: no valid nodes to query".into(),
+            "search: no valid nodes to query".into(),
         ));
     }
 
-    // Single entity: return directly with limit.
     if queries.len() == 1 {
         let mut query = queries.remove(0);
-        query.limit = Some(input.limit);
+        query.limit = limit;
+        query.offset = offset;
+        if let Some(ref ob) = input.order_by {
+            query.order_by.push(OrderExpr {
+                expr: Expr::col(&ob.node, &ob.property),
+                desc: ob.direction == OrderDirection::Desc,
+            });
+        }
         return Ok(Node::Query(Box::new(query)));
     }
 
-    // Multiple entities: first query is the base, rest go in union_all.
     let mut base_query = queries.remove(0);
     base_query.union_all = queries;
-    base_query.limit = Some(input.limit);
+    base_query.limit = limit;
+    base_query.offset = offset;
 
     Ok(Node::Query(Box::new(base_query)))
 }
 
-/// Build a single arm of the multi-node search UNION.
-fn build_batch_search_arm(
+/// Build a single arm of a search query (works for both single and multi-node).
+fn build_search_arm(
     node: &InputNode,
     entity: &str,
     table: &str,
@@ -560,14 +570,13 @@ fn build_batch_search_arm(
 
     let mut select = Vec::new();
 
-    // Always include: _gkg_entity_type, _gkg_id
     select.push(SelectExpr::new(Expr::lit(entity), "_gkg_entity_type"));
     select.push(SelectExpr::new(Expr::col(&node.id, "id"), "_gkg_id"));
 
     // For each column in the unified schema, output it or NULL.
-    for (col_entity, col_name) in all_columns {
-        let alias = format!("{}_{}", col_entity, col_name);
-        if col_entity == entity && requested_cols.contains(&col_name.as_str()) {
+    for (col_alias, col_name) in all_columns {
+        let alias = format!("{}_{}", col_alias, col_name);
+        if col_alias == &node.id && requested_cols.contains(&col_name.as_str()) {
             select.push(SelectExpr::new(Expr::col(&node.id, col_name), alias));
         } else {
             select.push(SelectExpr::new(Expr::lit(Value::Null), alias));
@@ -1342,7 +1351,8 @@ mod tests {
             .unwrap()
             .default_columns
             .len();
-        assert_eq!(q.select.len(), user_defaults);
+        // +2 for _gkg_entity_type and _gkg_id
+        assert_eq!(q.select.len(), user_defaults + 2);
         assert!(q.where_clause.is_some());
         assert!(q.group_by.is_empty());
         assert_eq!(count_unions(&q.from), 0);
@@ -1371,7 +1381,8 @@ mod tests {
             .unwrap()
             .default_columns
             .len();
-        assert_eq!(q.select.len(), project_defaults);
+        // +2 for _gkg_entity_type and _gkg_id
+        assert_eq!(q.select.len(), project_defaults + 2);
     }
 
     #[test]
@@ -1392,11 +1403,14 @@ mod tests {
             panic!("expected Query");
         };
 
-        assert_eq!(q.select.len(), 2);
+        // 2 columns + _gkg_entity_type + _gkg_id
+        assert_eq!(q.select.len(), 4);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_username".to_string()));
         assert!(aliases.contains(&&"u_state".to_string()));
+        assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_id".to_string()));
     }
 
     #[test]
@@ -1477,7 +1491,8 @@ mod tests {
             .unwrap()
             .default_columns
             .len();
-        assert_eq!(q.select.len(), user_defaults);
+        // +2 for _gkg_entity_type and _gkg_id
+        assert_eq!(q.select.len(), user_defaults + 2);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_username".to_string()));
@@ -1502,8 +1517,8 @@ mod tests {
             panic!("expected Query");
         };
 
-        // When id is explicitly in the list, it should appear once
-        assert_eq!(q.select.len(), 2);
+        // When id is explicitly in the list, it should appear once (+2 for _gkg_entity_type, _gkg_id)
+        assert_eq!(q.select.len(), 4);
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_id".to_string()));
@@ -1685,7 +1700,7 @@ mod tests {
     }
 
     #[test]
-    fn test_single_node_search_uses_standard_path() {
+    fn test_single_node_search_has_entity_columns() {
         use crate::input::ColumnSelection;
 
         let input = Input {
@@ -1713,10 +1728,10 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Single-node search uses standard traversal lowering, not batch path.
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
         assert!(aliases.contains(&&"u_username".to_string()));
-        assert!(!aliases.contains(&&"_gkg_entity_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_id".to_string()));
     }
 
     #[test]
@@ -1771,8 +1786,8 @@ mod tests {
 
         assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
         assert!(aliases.contains(&&"_gkg_id".to_string()));
-        assert!(aliases.contains(&&"User_username".to_string()));
-        assert!(aliases.contains(&&"Project_name".to_string()));
+        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(aliases.contains(&&"p_name".to_string()));
 
         assert_eq!(q.limit, Some(100));
     }

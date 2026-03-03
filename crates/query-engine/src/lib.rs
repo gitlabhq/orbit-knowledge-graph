@@ -1117,13 +1117,13 @@ mod ontology_integration_tests {
         );
 
         assert!(
-            result.base.sql.contains("User_username"),
-            "expected User_username column: {}",
+            result.base.sql.contains("u_username"),
+            "expected u_username column: {}",
             result.base.sql
         );
         assert!(
-            result.base.sql.contains("Project_name"),
-            "expected Project_name column: {}",
+            result.base.sql.contains("p_name"),
+            "expected p_name column: {}",
             result.base.sql
         );
 

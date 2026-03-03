@@ -101,15 +101,10 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
             .iter()
             .filter_map(|agg| agg.group_by.as_deref())
             .collect(),
-        QueryType::Traversal | QueryType::Neighbors => {
+        QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
             input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
-        // Single-node search: standard per-node redaction columns.
-        // Multi-node search: uses _gkg_entity_type/_gkg_id from lower; skip per-node columns.
-        QueryType::Search if input.nodes.len() <= 1 => {
-            input.nodes.iter().map(|n| n.id.as_str()).collect()
-        }
-        QueryType::PathFinding | QueryType::Search => HashSet::new(),
+        QueryType::PathFinding => HashSet::new(),
     };
 
     match node {
@@ -444,26 +439,22 @@ mod tests {
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
         assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
-        );
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
-        );
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string())));
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string())));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string())));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string())));
         assert_eq!(q.group_by.len(), 1); // u.id already present, no duplicate added
 
         // Context should only have the group_by node
