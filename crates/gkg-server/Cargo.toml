@@ -68,6 +68,7 @@ integration-testkit = { path = "../integration-testkit" }
 indexer = { path = "../indexer", features = ["testkit"] }
 query-engine = { path = "../query-engine" }
 regex = { workspace = true }
+tempfile = { workspace = true }
 parser-core = { workspace = true }
 internment = { workspace = true }
 smallvec = { workspace = true }
