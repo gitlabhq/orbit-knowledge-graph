@@ -43,6 +43,7 @@ fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
 /// are handled in normalize.rs. Lowering is purely mechanical.
 pub fn lower(input: &Input) -> Result<Node> {
     match input.query_type {
+        QueryType::Search if input.nodes.len() > 1 => lower_batch_search(input),
         QueryType::Traversal | QueryType::Search => lower_traversal(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
@@ -486,6 +487,123 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         offset,
         ..Default::default()
     })))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-node Search (UNION ALL)
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn lower_batch_search(input: &Input) -> Result<Node> {
+    if input.nodes.is_empty() {
+        return Err(QueryError::Lowering(
+            "multi-node search requires at least one node".into(),
+        ));
+    }
+
+    // Collect all (entity, column) pairs across nodes for the unified schema.
+    // Normalize has already expanded wildcards to ColumnSelection::List.
+    let mut all_columns: Vec<(String, String)> = Vec::new();
+    for node in &input.nodes {
+        let Some(entity) = &node.entity else { continue };
+        if let Some(ColumnSelection::List(cols)) = &node.columns {
+            for col in cols {
+                let key = (entity.clone(), col.clone());
+                if !all_columns.contains(&key) {
+                    all_columns.push(key);
+                }
+            }
+        }
+    }
+
+    let mut queries: Vec<Query> = input
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let entity = node.entity.as_ref()?;
+            let table = node.table.as_ref()?;
+            Some(build_batch_search_arm(node, entity, table, &all_columns))
+        })
+        .collect();
+
+    if queries.is_empty() {
+        return Err(QueryError::Lowering(
+            "multi-node search: no valid nodes to query".into(),
+        ));
+    }
+
+    // Single entity: return directly with limit.
+    if queries.len() == 1 {
+        let mut query = queries.remove(0);
+        query.limit = Some(input.limit);
+        return Ok(Node::Query(Box::new(query)));
+    }
+
+    // Multiple entities: first query is the base, rest go in union_all.
+    let mut base_query = queries.remove(0);
+    base_query.union_all = queries;
+    base_query.limit = Some(input.limit);
+
+    Ok(Node::Query(Box::new(base_query)))
+}
+
+/// Build a single arm of the multi-node search UNION.
+fn build_batch_search_arm(
+    node: &InputNode,
+    entity: &str,
+    table: &str,
+    all_columns: &[(String, String)],
+) -> Query {
+    let requested_cols: Vec<&str> = match &node.columns {
+        Some(ColumnSelection::List(cols)) => cols.iter().map(|s| s.as_str()).collect(),
+        _ => vec![],
+    };
+
+    let mut select = Vec::new();
+
+    // Always include: _gkg_entity_type, _gkg_id
+    select.push(SelectExpr::new(Expr::lit(entity), "_gkg_entity_type"));
+    select.push(SelectExpr::new(Expr::col(&node.id, "id"), "_gkg_id"));
+
+    // For each column in the unified schema, output it or NULL.
+    for (col_entity, col_name) in all_columns {
+        let alias = format!("{}_{}", col_entity, col_name);
+        if col_entity == entity && requested_cols.contains(&col_name.as_str()) {
+            select.push(SelectExpr::new(Expr::col(&node.id, col_name), alias));
+        } else {
+            select.push(SelectExpr::new(Expr::lit(Value::Null), alias));
+        }
+    }
+
+    // Build WHERE clause from filters and node_ids.
+    let mut conds: Vec<Expr> = Vec::new();
+
+    if let Some(filter) = id_filter(&node.id, "id", &node.node_ids) {
+        conds.push(filter);
+    }
+
+    if let Some(r) = &node.id_range {
+        conds.push(Expr::binary(
+            Op::Ge,
+            Expr::col(&node.id, "id"),
+            Expr::lit(r.start),
+        ));
+        conds.push(Expr::binary(
+            Op::Le,
+            Expr::col(&node.id, "id"),
+            Expr::lit(r.end),
+        ));
+    }
+
+    for (prop, filter) in &node.filters {
+        conds.push(filter_expr(&node.id, prop, filter));
+    }
+
+    Query {
+        select,
+        from: TableRef::scan(table, &node.id),
+        where_clause: Expr::and_all(conds.into_iter().map(Some)),
+        ..Default::default()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1564,5 +1682,98 @@ mod tests {
             panic!()
         };
         assert_eq!(extract_edge_type_filter(&q.from), None);
+    }
+
+    #[test]
+    fn test_single_node_search_uses_standard_path() {
+        use crate::input::ColumnSelection;
+
+        let input = Input {
+            query_type: QueryType::Search,
+            nodes: vec![InputNode {
+                id: "u".to_string(),
+                entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
+                columns: Some(ColumnSelection::List(vec!["username".to_string()])),
+                filters: std::collections::HashMap::new(),
+                node_ids: vec![1, 2, 3],
+                id_range: None,
+                id_property: "id".to_string(),
+                ..Default::default()
+            }],
+            relationships: vec![],
+            aggregations: vec![],
+            path: None,
+            neighbors: None,
+            limit: 100,
+            ..Input::default()
+        };
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Single-node search uses standard traversal lowering, not batch path.
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"u_username".to_string()));
+        assert!(!aliases.contains(&&"_gkg_entity_type".to_string()));
+    }
+
+    #[test]
+    fn test_batch_search_multiple_entities() {
+        use crate::input::ColumnSelection;
+
+        let input = Input {
+            query_type: QueryType::Search,
+            nodes: vec![
+                InputNode {
+                    id: "u".to_string(),
+                    entity: Some("User".to_string()),
+                    table: Some("gl_user".to_string()),
+                    columns: Some(ColumnSelection::List(vec!["username".to_string()])),
+                    filters: std::collections::HashMap::new(),
+                    node_ids: vec![1, 2],
+                    id_range: None,
+                    id_property: "id".to_string(),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".to_string(),
+                    entity: Some("Project".to_string()),
+                    table: Some("gl_project".to_string()),
+                    columns: Some(ColumnSelection::List(vec!["name".to_string()])),
+                    filters: std::collections::HashMap::new(),
+                    node_ids: vec![10, 20],
+                    id_range: None,
+                    id_property: "id".to_string(),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![],
+            aggregations: vec![],
+            path: None,
+            neighbors: None,
+            limit: 100,
+            ..Input::default()
+        };
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert_eq!(
+            q.union_all.len(),
+            1,
+            "expected 1 union arm for second entity"
+        );
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+
+        assert!(aliases.contains(&&"_gkg_entity_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_id".to_string()));
+        assert!(aliases.contains(&&"User_username".to_string()));
+        assert!(aliases.contains(&&"Project_name".to_string()));
+
+        assert_eq!(q.limit, Some(100));
     }
 }

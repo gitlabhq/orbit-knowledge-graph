@@ -85,6 +85,7 @@ impl<'a> Validator<'a> {
         self.check_path(input)?;
         self.check_neighbors(input)?;
         self.check_depth(input)?;
+        self.check_multi_node_search(input)?;
         Ok(())
     }
 
@@ -274,6 +275,23 @@ impl<'a> Validator<'a> {
                 "neighbors 'node' references undefined node \"{}\"",
                 neighbors.node
             )));
+        }
+
+        Ok(())
+    }
+
+    fn check_multi_node_search(&self, input: &Input) -> Result<()> {
+        if input.query_type != QueryType::Search || input.nodes.len() <= 1 {
+            return Ok(());
+        }
+
+        for node in &input.nodes {
+            if node.node_ids.is_empty() && node.id_range.is_none() && node.filters.is_empty() {
+                return Err(QueryError::Validation(format!(
+                    "multi-node search node \"{}\" should have node_ids, id_range, or filters to be useful",
+                    node.id
+                )));
+            }
         }
 
         Ok(())
@@ -506,6 +524,33 @@ mod tests {
                 "neighbors": {"node": "ghost", "direction": "both"}
             }"#,
             "undefined node \"ghost\"",
+        );
+    }
+
+    #[test]
+    fn multi_node_search_valid() {
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                    {"id": "n", "entity": "Note", "node_ids": [10, 20]}
+                ]
+            }"#,
+        );
+    }
+
+    #[test]
+    fn multi_node_search_rejects_useless_node() {
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                    {"id": "n", "entity": "Note"}
+                ]
+            }"#,
+            "should have node_ids",
         );
     }
 }

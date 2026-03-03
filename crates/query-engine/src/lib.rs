@@ -48,8 +48,8 @@ pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use check::check_ast;
 pub use codegen::{CompiledQuery, HydrationPlan, HydrationTemplate, ParameterizedQuery, codegen};
 pub use constants::{
-    EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
-    RELATIONSHIP_TYPE_COLUMN,
+    BATCH_ENTITY_TYPE_COLUMN, BATCH_ID_COLUMN, EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN,
+    NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
 };
 pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
@@ -1082,5 +1082,82 @@ mod ontology_integration_tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn multi_node_search_query() {
+        let json = r#"{
+            "query_type": "search",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3]},
+                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [10, 20]}
+            ],
+            "limit": 100
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!("Multi-node search SQL: {}", result.base.sql);
+
+        assert!(
+            result.base.sql.contains("UNION ALL"),
+            "expected UNION ALL for multi-node search: {}",
+            result.base.sql
+        );
+
+        assert!(
+            result.base.sql.contains("_gkg_entity_type"),
+            "expected _gkg_entity_type column: {}",
+            result.base.sql
+        );
+
+        assert!(
+            result.base.sql.contains("_gkg_id"),
+            "expected _gkg_id column: {}",
+            result.base.sql
+        );
+
+        assert!(
+            result.base.sql.contains("User_username"),
+            "expected User_username column: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("Project_name"),
+            "expected Project_name column: {}",
+            result.base.sql
+        );
+
+        assert!(
+            result.base.sql.contains("LIMIT 100"),
+            "expected LIMIT 100: {}",
+            result.base.sql
+        );
+    }
+
+    #[test]
+    fn single_node_search_via_nodes_array() {
+        let json = r#"{
+            "query_type": "search",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": "*", "node_ids": [1, 2, 3]}
+            ],
+            "limit": 50
+        }"#;
+
+        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        println!(
+            "Single node search via nodes array SQL: {}",
+            result.base.sql
+        );
+
+        // Single node uses standard search path, not batch.
+        assert!(
+            !result.base.sql.contains("UNION ALL"),
+            "single node should not have UNION ALL: {}",
+            result.base.sql
+        );
+        // Standard search columns (per-node aliases), not batch columns.
+        assert!(result.base.sql.contains("_gkg_u_id"));
+        assert!(result.base.sql.contains("_gkg_u_type"));
     }
 }

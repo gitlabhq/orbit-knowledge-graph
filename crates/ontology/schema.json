@@ -88,7 +88,7 @@
     {
       "if": {
         "properties": {
-          "query_type": { "enum": ["search", "neighbors"] }
+          "query_type": { "const": "neighbors" }
         }
       },
       "then": {
@@ -96,12 +96,32 @@
         "not": {
           "required": ["nodes"]
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "query_type": { "enum": ["traversal", "aggregation", "path_finding"] }
+        }
       },
-      "else": {
+      "then": {
         "required": ["nodes"],
         "not": {
           "required": ["node"]
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "query_type": { "const": "search" }
+        }
+      },
+      "then": {
+        "anyOf": [
+          { "required": ["node"] },
+          { "required": ["nodes"] }
+        ]
       }
     },
     {

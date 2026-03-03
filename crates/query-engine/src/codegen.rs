@@ -156,6 +156,11 @@ impl Context {
             parts.push(format!("HAVING {}", self.emit_expr(h)));
         }
 
+        // UNION ALL (for multi-node search and other union queries)
+        for union_q in &q.union_all {
+            parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
+        }
+
         // ORDER BY
         if !q.order_by.is_empty() {
             let orders: Vec<_> = q

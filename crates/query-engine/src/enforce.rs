@@ -101,10 +101,15 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
             .iter()
             .filter_map(|agg| agg.group_by.as_deref())
             .collect(),
-        QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
+        QueryType::Traversal | QueryType::Neighbors => {
             input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
-        QueryType::PathFinding => HashSet::new(),
+        // Single-node search: standard per-node redaction columns.
+        // Multi-node search: uses _gkg_entity_type/_gkg_id from lower; skip per-node columns.
+        QueryType::Search if input.nodes.len() <= 1 => {
+            input.nodes.iter().map(|n| n.id.as_str()).collect()
+        }
+        QueryType::PathFinding | QueryType::Search => HashSet::new(),
     };
 
     match node {
