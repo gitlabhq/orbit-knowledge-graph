@@ -18,7 +18,6 @@ stages:
   - ai
   - build
   - publish
-  - deploy
   - release
 
 # Job Templates
@@ -358,14 +357,7 @@ docker-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-arm64"
 
-# Deploy Stage - Helm Charts
-
-# GKE cluster configuration
-variables:
-  GKE_PROJECT: gl-knowledgegraph-prj-f2eec59d
-  GKE_CLUSTER: knowledge-graph-test
-  GKE_ZONE: us-central1
-  HELM_NAMESPACE: gkg
+# Helm Charts
 
 .helm-base:
   image: google/cloud-sdk:slim
@@ -382,14 +374,6 @@ variables:
     - helm dependency update helm-dev/gkg
     - helm dependency update helm-dev/observability
 
-.helm-with-gke-auth:
-  extends: .helm-base
-  before_script:
-    - !reference [.helm-base, before_script]
-    - apt-get install -y google-cloud-cli-gke-gcloud-auth-plugin kubectl
-    - gcloud auth activate-service-account --key-file="${GKE_SA_KEY}"
-    - gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${GKE_PROJECT}
-
 helm-lint:
   extends:
     - .helm-base
@@ -402,71 +386,12 @@ helm-lint:
     - helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
     - helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
 
-helm-dry-run:
-  extends: .helm-with-gke-auth
-  stage: lint
-  needs: []
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  script:
-    - |
-      helm upgrade gkg-obs helm-dev/observability \
-        -f helm-dev/observability/values-sandbox.yaml \
-        --namespace ${HELM_NAMESPACE} \
-        --install \
-        --history-max 1 \
-        --dry-run
-    - |
-      helm upgrade gkg helm-dev/gkg \
-        -f helm-dev/gkg/values-sandbox.yaml \
-        --namespace ${HELM_NAMESPACE} \
-        --install \
-        --history-max 1 \
-        --dry-run
-  environment:
-    name: sandbox
-    action: prepare
-
-deploy-sandbox:
-  extends: .helm-with-gke-auth
-  stage: deploy
-  needs:
-    - helm-lint
-    - helm-dry-run
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      when: manual
-  script:
-    - |
-      helm upgrade gkg-obs helm-dev/observability \
-        -f helm-dev/observability/values-sandbox.yaml \
-        --namespace ${HELM_NAMESPACE} \
-        --create-namespace \
-        --install \
-        --history-max 1 \
-        --wait \
-        --timeout 10m
-    - |
-      helm upgrade gkg helm-dev/gkg \
-        -f helm-dev/gkg/values-sandbox.yaml \
-        --namespace ${HELM_NAMESPACE} \
-        --install \
-        --history-max 1 \
-        --wait \
-        --timeout 5m
-    - kubectl get pods -n ${HELM_NAMESPACE}
-  environment:
-    name: sandbox
-    url: https://console.cloud.google.com/kubernetes/workload?project=${GKE_PROJECT}
-
-# Publish Stage - Proto Gem
-
 build-proto-gem:
   needs: []
   image: ruby:3.3
   tags:
     - saas-linux-small-amd64
-  stage: publish
+  stage: build
   before_script: []
   script:
     - BUNDLE_GEMFILE=tools/protogem/Gemfile bundle install --quiet
@@ -478,12 +403,9 @@ build-proto-gem:
       fi
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      changes:
+    - changes:
         - crates/gkg-server/proto/**/*
         - tools/protogem/**/*
-    - when: manual
-      allow_failure: true
   artifacts:
     paths:
       - _build/gitlab-gkg-proto-*.gem
