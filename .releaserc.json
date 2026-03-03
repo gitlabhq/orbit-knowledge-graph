@@ -39,7 +39,13 @@
       }
     ],
     "@semantic-release/changelog",
-    "@semantic-release/gitlab",
+    [
+      "@semantic-release/gitlab",
+      {
+        "successCommentCondition": false,
+        "failCommentCondition": false
+      }
+    ],
     [
       "@semantic-release/git",
       {
