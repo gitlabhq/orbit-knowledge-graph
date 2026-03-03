@@ -1,0 +1,82 @@
+# frozen_string_literal: true
+
+# AUTO-GENERATED from e2e/tests/scenarios.yaml — do not edit directly.
+# Regenerate: cargo xtask e2e codegen
+# Verify:     cargo xtask e2e codegen --check
+
+require_relative 'test_helper'
+
+Feature.enable(:knowledge_graph)
+
+manifest = load_manifest!
+m = manifest
+
+grpc_endpoint = ENV.fetch('KNOWLEDGE_GRAPH_GRPC_ENDPOINT',
+                          'gkg-webserver.default.svc.cluster.local:50054')
+puts "  gRPC endpoint: #{grpc_endpoint}"
+client = Ai::KnowledgeGraph::GrpcClient.new(endpoint: grpc_endpoint)
+org_id = m[:organization_id]
+
+# Load users from manifest
+root = User.find_by!(username: m[:users][:root][:username])
+{%- for u in users %}
+{{ u.key }} = User.find_by!(username: m[:users][:{{ u.key }}][:username])
+{%- endfor %}
+
+# Variable resolution hash for $variable references
+vars = {
+  'total_projects' => m[:counts][:total_projects],
+  'total_merge_requests' => m[:counts][:total_merge_requests],
+  'total_work_items' => m[:counts][:total_work_items],
+  'total_notes' => m[:counts][:total_notes],
+{%- for key in project_keys %}
+  'proj.{{ key }}' => m[:projects][:{{ key }}][:id],
+{%- endfor %}
+{%- for key in group_keys %}
+  'group.{{ key }}' => m[:groups][:{{ key }}][:id],
+{%- endfor %}
+{%- for uk in all_user_keys %}
+  'user_counts.{{ uk }}.projects' => m[:counts][:per_user][:{{ uk }}][:projects],
+  'user_counts.{{ uk }}.merge_requests' => m[:counts][:per_user][:{{ uk }}][:merge_requests],
+  'user_counts.{{ uk }}.work_items' => m[:counts][:per_user][:{{ uk }}][:work_items],
+  'user_counts.{{ uk }}.notes' => m[:counts][:per_user][:{{ uk }}][:notes],
+{%- endfor %}
+{%- for pk in project_keys %}
+  'project_counts.{{ pk }}.merge_requests' => m[:counts][:per_project][:{{ pk }}][:merge_requests],
+  'project_counts.{{ pk }}.work_items' => m[:counts][:per_project][:{{ pk }}][:work_items],
+  'project_counts.{{ pk }}.milestones' => m[:counts][:per_project][:{{ pk }}][:milestones],
+  'project_counts.{{ pk }}.labels' => m[:counts][:per_project][:{{ pk }}][:labels],
+  'project_counts.{{ pk }}.notes' => m[:counts][:per_project][:{{ pk }}][:notes],
+{%- endfor %}
+}
+
+def resolve(val, vars)
+  return val unless val.is_a?(String) && val.start_with?('$')
+  key = val[1..]
+  resolved = vars[key]
+  raise "Unknown variable: #{val} (available: #{vars.keys.sort.join(', ')})" if resolved.nil?
+  resolved
+end
+
+def resolve_query(json_str, vars)
+  json_str.gsub(/"\$([a-zA-Z0-9_.]+)"/) do
+    key = $1
+    resolved = vars[key]
+    raise "Unknown variable in query: $#{key} (available: #{vars.keys.sort.join(', ')})" if resolved.nil?
+    resolved.to_s
+  end
+end
+{% for tc in test_cases %}
+{%- if tc.is_section_header %}
+
+# =============================================================================
+TestHarness.section('{{ tc.section }}')
+{% endif %}
+{%- if tc.is_test %}
+
+TestHarness.run("{{ tc.ruby_name }}", {{ tc.expect_args }}) do
+  q(client, {{ tc.user_key }}, org_id, JSON.parse(resolve_query('{{ tc.query }}', vars)))
+end
+{% endif %}
+{%- endfor %}
+TestHarness.summary

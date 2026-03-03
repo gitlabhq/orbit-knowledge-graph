@@ -243,6 +243,7 @@ cargo xtask e2e codegen --check  # verify committed files match (CI)
 Tests run as Ruby scripts inside the GitLab toolbox pod, which has access to the Rails console and the GKG gRPC endpoint.
 
 - **`scenarios.yaml`** -- Single source of truth for test data definitions and assertions. Drives codegen.
+- **`templates/`** -- Tera (Jinja2-style) templates that produce the Ruby scripts. `codegen.rs` builds a context from `scenarios.yaml` and renders these templates.
 - **`create_test_data.rb`** -- Auto-generated. Creates a test matrix: users with varying group memberships, projects across public and private groups, MRs, work items, and notes. Writes a `manifest.json` describing what was created.
 - **`redaction_test.rb`** -- Auto-generated. Queries the GKG graph as each test user and asserts that redaction is correct: users only see entities in namespaces they have access to. Outputs JSON results.
 - **`test_helper.rb`** -- Shared utilities for gRPC calls, manifest loading, and assertion helpers. Not generated.
