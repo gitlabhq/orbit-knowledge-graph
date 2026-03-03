@@ -2,6 +2,14 @@ use super::prepare::{PreparedEdge, PreparedEdgeEtl, PreparedEtlConfig};
 
 pub const SOURCE_DATA_TABLE: &str = "source_data";
 
+fn traversal_path_expression(namespaced: bool) -> &'static str {
+    if namespaced {
+        "traversal_path"
+    } else {
+        "'0/' AS traversal_path"
+    }
+}
+
 pub fn build_transform_sql(config: &PreparedEtlConfig) -> String {
     let mut columns: Vec<&str> = config
         .fields
@@ -29,11 +37,7 @@ pub fn build_edge_etl_transform_sql(config: &PreparedEdgeEtl) -> String {
         .map(|f| format!(" AND {}", f))
         .unwrap_or_default();
 
-    let traversal_path_expr = if config.namespaced {
-        "traversal_path"
-    } else {
-        "'0/' AS traversal_path"
-    };
+    let traversal_path_expr = traversal_path_expression(config.namespaced);
 
     format!(
         r#"SELECT
@@ -79,11 +83,7 @@ fn build_multi_target_edge_sql(edge: &PreparedEdge, delimiter: &str) -> String {
         (edge.source_id.as_str(), exploded_value.as_str())
     };
 
-    let traversal_path_expr = if edge.namespaced {
-        "traversal_path"
-    } else {
-        "'0/' AS traversal_path"
-    };
+    let traversal_path_expr = traversal_path_expression(edge.namespaced);
 
     format!(
         r#"SELECT
@@ -113,11 +113,7 @@ fn build_single_value_edge_sql(edge: &PreparedEdge) -> String {
         .map(|f| format!(" AND {}", f))
         .unwrap_or_default();
 
-    let traversal_path_expr = if edge.namespaced {
-        "traversal_path"
-    } else {
-        "'0/' AS traversal_path"
-    };
+    let traversal_path_expr = traversal_path_expression(edge.namespaced);
 
     format!(
         r#"SELECT

@@ -9,7 +9,7 @@ use tracing::{debug, info, warn};
 
 use serde::{Deserialize, Serialize};
 
-use super::config::LOCK_TTL;
+use super::config::CODE_LOCK_TTL;
 use super::config::{siphon_actions, siphon_ref_types, subjects};
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::metrics::{CodeMetrics, RecordStageError};
@@ -319,7 +319,7 @@ impl PushEventHandler {
     ) -> Result<bool, HandlerError> {
         let key = project_lock_key(project_id, branch);
         ctx.lock_service
-            .try_acquire(&key, LOCK_TTL)
+            .try_acquire(&key, CODE_LOCK_TTL)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))
     }
@@ -387,9 +387,7 @@ mod tests {
     use chrono::Utc;
 
     fn test_metrics() -> CodeMetrics {
-        let provider = opentelemetry::global::meter_provider();
-        let meter = provider.meter("test");
-        CodeMetrics::with_meter(&meter)
+        CodeMetrics::with_meter(&crate::testkit::test_meter())
     }
 
     struct TestContext {

@@ -10,7 +10,7 @@ use super::metrics::DispatchMetrics;
 use crate::configuration::DispatcherConfiguration;
 use crate::dispatcher::{DispatchError, Dispatcher};
 use crate::locking::LockService;
-use crate::modules::sdlc::locking::{LOCK_TTL, global_lock_key};
+use crate::modules::sdlc::locking::{SDLC_LOCK_TTL, global_lock_key};
 use crate::nats::NatsServices;
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
@@ -71,7 +71,7 @@ impl GlobalDispatcher {
     async fn dispatch_inner(&self) -> Result<(), DispatchError> {
         let acquired = self
             .lock_service
-            .try_acquire(global_lock_key(), LOCK_TTL)
+            .try_acquire(global_lock_key(), SDLC_LOCK_TTL)
             .await
             .map_err(|error| {
                 self.metrics.record_error(self.name(), "lock");

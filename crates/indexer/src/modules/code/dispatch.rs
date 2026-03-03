@@ -170,9 +170,7 @@ mod tests {
     use crate::testkit::MockNatsServices;
 
     fn test_metrics() -> DispatchMetrics {
-        let provider = opentelemetry::global::meter_provider();
-        let meter = provider.meter("test");
-        DispatchMetrics::with_meter(&meter)
+        DispatchMetrics::with_meter(&crate::testkit::test_meter())
     }
 
     fn test_client() -> ArrowClickHouseClient {
