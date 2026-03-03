@@ -1,0 +1,21 @@
+[package]
+name = "migrations"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+arrow = { workspace = true }
+clickhouse-client = { path = "../clickhouse-client" }
+clickhouse = { workspace = true }
+chrono = { workspace = true }
+ontology = { path = "../ontology" }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+arrow-ipc = { workspace = true, features = ["lz4"] }
+integration-testkit = { path = "../integration-testkit" }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

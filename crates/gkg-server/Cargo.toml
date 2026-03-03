@@ -24,6 +24,7 @@ config = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 health-check = { path = "../health-check" }
 indexer = { path = "../indexer" }
+migrations = { path = "../migrations" }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
 prost = { workspace = true }

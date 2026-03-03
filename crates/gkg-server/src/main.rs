@@ -67,6 +67,12 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(Into::into)
         }
         Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
+        Mode::Migrate => {
+            let command = args
+                .migrate_command
+                .expect("a migrate subcommand is required for migrate mode");
+            gkg_server::migrate::run(&config, command).await
+        }
         Mode::Indexer => {
             let indexer_config = IndexerConfig {
                 nats: config.nats.clone(),
