@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use ontology::{Ontology, OntologyError};
 
-pub const LOCK_TTL: Duration = Duration::from_secs(60);
+pub const CODE_LOCK_TTL: Duration = Duration::from_secs(60);
 
 pub mod siphon_actions {
     pub const PUSHED: i32 = 2;

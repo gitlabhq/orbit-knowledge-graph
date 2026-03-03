@@ -11,7 +11,7 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::configuration::DispatcherConfiguration;
 use crate::dispatcher::{DispatchError, Dispatcher};
 use crate::locking::LockService;
-use crate::modules::sdlc::locking::{LOCK_TTL, namespace_lock_key};
+use crate::modules::sdlc::locking::{SDLC_LOCK_TTL, namespace_lock_key};
 use crate::nats::NatsServices;
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::{Envelope, Event};
@@ -111,7 +111,7 @@ impl NamespaceDispatcher {
             let lock_key = namespace_lock_key(*organization_id, *namespace_id);
             let acquired = self
                 .lock_service
-                .try_acquire(&lock_key, LOCK_TTL)
+                .try_acquire(&lock_key, SDLC_LOCK_TTL)
                 .await
                 .map_err(|error| {
                     self.metrics.record_error(self.name(), "lock");

@@ -478,9 +478,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn test_metrics() -> SdlcMetrics {
-        let provider = opentelemetry::global::meter_provider();
-        let meter = provider.meter("test");
-        SdlcMetrics::with_meter(&meter)
+        SdlcMetrics::with_meter(&crate::testkit::test_meter())
     }
 
     struct MockDatalake;

@@ -31,30 +31,19 @@ impl PreparedField {
     }
 
     fn build_expression(field: &Field) -> String {
-        if field.data_type == DataType::Enum {
-            match field.enum_type {
-                EnumType::Int => {
-                    if let Some(ref values) = field.enum_values {
-                        let cases: Vec<String> = values
-                            .iter()
-                            .map(|(k, v)| format!("WHEN {} = {} THEN '{}'", field.source, k, v))
-                            .collect();
-                        return format!(
-                            "CASE {} ELSE 'unknown' END AS {}",
-                            cases.join(" "),
-                            field.name
-                        );
-                    }
-                }
-                EnumType::String => {
-                    // String enums pass through as-is, no transformation needed
-                    if field.source == field.name {
-                        return field.name.clone();
-                    } else {
-                        return format!("{} AS {}", field.source, field.name);
-                    }
-                }
-            }
+        if field.data_type == DataType::Enum
+            && field.enum_type == EnumType::Int
+            && let Some(ref values) = field.enum_values
+        {
+            let cases: Vec<String> = values
+                .iter()
+                .map(|(k, v)| format!("WHEN {} = {} THEN '{}'", field.source, k, v))
+                .collect();
+            return format!(
+                "CASE {} ELSE 'unknown' END AS {}",
+                cases.join(" "),
+                field.name
+            );
         }
 
         if field.source == field.name {

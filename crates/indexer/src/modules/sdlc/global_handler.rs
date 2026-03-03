@@ -16,7 +16,8 @@ use tracing::{debug, error, info};
 use super::locking::global_lock_key;
 use super::metrics::SdlcMetrics;
 use super::pipeline::OntologyEntityPipeline;
-use super::watermark_store::{TIMESTAMP_FORMAT, WatermarkError, WatermarkStore};
+use super::watermark_store::{WatermarkError, WatermarkStore};
+use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::topic::GlobalIndexingRequest;
 
 #[derive(Clone, Serialize)]
@@ -224,9 +225,7 @@ mod tests {
     use std::sync::Mutex;
 
     fn test_metrics() -> SdlcMetrics {
-        let provider = opentelemetry::global::meter_provider();
-        let meter = provider.meter("test");
-        SdlcMetrics::with_meter(&meter)
+        SdlcMetrics::with_meter(&crate::testkit::test_meter())
     }
 
     struct RecordingGlobalWatermarkStore {

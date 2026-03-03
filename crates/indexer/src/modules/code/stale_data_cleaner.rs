@@ -7,9 +7,7 @@ use thiserror::Error;
 use tracing::debug;
 
 use super::config::CodeTableNames;
-use crate::clickhouse::ArrowClickHouseClient;
-
-const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.6f";
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 
 const CODE_EDGE_SOURCE_KINDS: &[&str] = &["Directory", "File", "Definition", "ImportedSymbol"];
 

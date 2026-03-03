@@ -2,14 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::clickhouse::ArrowClickHouseClient;
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use thiserror::Error;
-
-const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.6f";
 
 #[derive(Debug, Error)]
 pub enum WatermarkError {

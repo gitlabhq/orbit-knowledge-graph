@@ -6,7 +6,7 @@ use tracing::{debug, info, warn};
 
 use serde::{Deserialize, Serialize};
 
-use super::config::LOCK_TTL;
+use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::project_store::ProjectStore;
@@ -141,7 +141,7 @@ impl ProjectCodeIndexingHandler {
         let lock_key = project_lock_key(project_id, default_branch);
         let acquired = context
             .lock_service
-            .try_acquire(&lock_key, LOCK_TTL)
+            .try_acquire(&lock_key, CODE_LOCK_TTL)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?;
 
@@ -212,9 +212,7 @@ mod tests {
     use chrono::Utc;
 
     fn test_metrics() -> CodeMetrics {
-        let provider = opentelemetry::global::meter_provider();
-        let meter = provider.meter("test");
-        CodeMetrics::with_meter(&meter)
+        CodeMetrics::with_meter(&crate::testkit::test_meter())
     }
 
     struct TestContext {

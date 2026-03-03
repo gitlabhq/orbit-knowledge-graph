@@ -159,7 +159,7 @@ mod tests {
     use std::time::Duration;
 
     fn test_metrics() -> Arc<EngineMetrics> {
-        Arc::new(EngineMetrics::new())
+        Arc::new(EngineMetrics::with_meter(&crate::testkit::test_meter()))
     }
 
     async fn measure_max_concurrency(
