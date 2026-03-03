@@ -19,6 +19,7 @@ infra/             -- infrastructure primitives (no domain logic)
   helm.rs          -- Helm CLI: install, upgrade, uninstall, repo add
   kube.rs          -- kube-rs primitives: SSA apply, cp, exec, wait, delete
 
+codegen.rs         -- generates Ruby test scripts from scenarios.yaml
 config.rs          -- deserializes config/e2e.yaml into Config
 constants.rs       -- structural constants (paths, table lists, tool names)
 template.rs        -- ${VAR} template renderer for YAML manifests
@@ -39,7 +40,10 @@ e2e/cng/Dockerfile.rails                 -- CNG image overlay
 e2e/helm-values.yaml                     -- GKG Helm overrides
 e2e/templates/dispatch-indexing-job.yaml.tmpl
 e2e/templates/rails-clickhouse-config.yml.tmpl
-e2e/tests/{redaction_test,test_helper,create_test_data}.rb
+e2e/tests/scenarios.yaml                 -- test data + assertion definitions (source of truth)
+e2e/tests/test_helper.rb                 -- shared Ruby test harness (not generated)
+e2e/tests/create_test_data.rb            -- auto-generated from scenarios.yaml
+e2e/tests/redaction_test.rb              -- auto-generated from scenarios.yaml
 ```
 
 For usage, configuration, and the full pipeline walkthrough, see [docs/dev/e2e.md](../../../../docs/dev/e2e.md).

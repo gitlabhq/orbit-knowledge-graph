@@ -54,6 +54,9 @@ Integration tests need Docker: `mise test:integration`.
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbook | `docs/dev/RUNBOOK.md` |
 | Helm charts (dev) | `helm-dev/gkg/`, `helm-dev/observability/` |
+| E2E test scenario definitions | `e2e/tests/scenarios.yaml` |
+| E2E Ruby codegen | `crates/xtask/src/e2e/codegen.rs` |
+| E2E testing guide | `docs/dev/e2e.md` |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Related repos and local paths | `/related-repositories` skill |
 

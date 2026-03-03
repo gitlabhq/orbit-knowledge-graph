@@ -88,6 +88,16 @@ enum E2eCommand {
     ///
     /// Runs in the foreground. Ctrl+C to stop.
     Serve,
+    /// Generate Ruby test scripts from scenarios.yaml.
+    ///
+    /// Reads e2e/tests/scenarios.yaml and generates create_test_data.rb
+    /// and redaction_test.rb. Use --check to verify committed files match
+    /// (for CI).
+    Codegen {
+        /// Verify generated files match without writing (for CI).
+        #[arg(long)]
+        check: bool,
+    },
     /// Tear down the E2E environment.
     ///
     /// By default, tears down everything (GKG + GitLab + Traefik + Colima).
@@ -112,6 +122,12 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::E2e { command } => {
+            // Codegen is purely local — skip preflight tool checks.
+            if let E2eCommand::Codegen { check } = command {
+                let root = e2e::env::workspace_root();
+                return e2e::codegen::run(&root, check);
+            }
+
             for tool in e2e::constants::REQUIRED_TOOLS {
                 if !e2e::cmd::exists(&sh, tool) {
                     anyhow::bail!("{tool} not found on PATH");
@@ -165,6 +181,7 @@ async fn main() -> Result<()> {
                     let cfg = e2e::config::Config::load()?;
                     e2e::pipeline::rebuild::run(&sh, &cfg, gkg, rails, skip_webpack).await
                 }
+                E2eCommand::Codegen { .. } => unreachable!("handled above"),
                 E2eCommand::Teardown {
                     keep_colima,
                     gkg_only,

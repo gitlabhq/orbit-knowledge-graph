@@ -70,6 +70,7 @@ pub const E2E_TESTS_DIR: &str = "e2e/tests";
 
 // -- Paths (relative to GKG repo root) ----------------------------------------
 
+pub const SCENARIOS_YAML: &str = "e2e/tests/scenarios.yaml";
 pub const GRAPH_SQL_PATH: &str = "fixtures/schema/graph.sql";
 pub const GKG_CHART_PATH: &str = "helm-dev/gkg";
 pub const HELM_VALUES_YAML: &str = "e2e/helm-values.yaml";

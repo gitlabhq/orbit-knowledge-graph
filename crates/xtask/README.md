@@ -18,6 +18,9 @@ GITLAB_SRC=~/path/to/gitlab cargo xtask e2e setup --gkg
 # Run redaction tests
 cargo xtask e2e test
 
+# Regenerate Ruby test scripts from scenarios.yaml
+cargo xtask e2e codegen
+
 # Rebuild after code changes
 cargo xtask e2e rebuild --gkg      # GKG server image (~2-3min)
 cargo xtask e2e rebuild --rails    # CNG images from GITLAB_SRC (~5-8min)

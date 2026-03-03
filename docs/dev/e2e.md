@@ -77,6 +77,15 @@ Port-forwards the GitLab UI and GKG webserver to localhost. Runs in the foregrou
 
 Login with `root` / password from `config/e2e.yaml` (`gitlab_ui.root_password`).
 
+### `codegen`
+
+Generates Ruby test scripts (`create_test_data.rb`, `redaction_test.rb`) from `e2e/tests/scenarios.yaml`. The generated files are committed to git.
+
+```shell
+cargo xtask e2e codegen          # regenerate .rb files
+cargo xtask e2e codegen --check  # verify committed files match (CI)
+```
+
 ### `teardown`
 
 | Flag | What it keeps |
@@ -147,13 +156,96 @@ Structural constants (file paths, table lists, concurrency limits) that define t
 
 Helm values files (`gitlab-values.yaml`, `traefik-values.yaml`, `helm-values.yaml`) contain only non-default overrides. Values that must stay in sync with `config/e2e.yaml` are applied at deploy time via `--set` flags rather than duplicated in YAML. The ClickHouse manifest is fully templated (`clickhouse.yaml.tmpl`) and rendered from config values.
 
+## Test scenarios DSL
+
+Test data definitions and assertions are declared in [`e2e/tests/scenarios.yaml`](../../e2e/tests/scenarios.yaml). The Ruby scripts (`create_test_data.rb`, `redaction_test.rb`) are auto-generated from this YAML. Do not edit them directly.
+
+### YAML schema
+
+| Section | Purpose |
+|---------|---------|
+| `users` | Test users. Key = logical name, optional `username` override. |
+| `groups` | Group hierarchy. Recursive `children` for subgroups. `visibility` defaults to `public`. |
+| `projects` | Projects with parent group reference and entity counts (milestones, labels, work items, MRs, notes). |
+| `memberships` | Group memberships per user (access level). Users not listed have no memberships. |
+| `assertions` | Test sections with inline GKG JSON queries and expected result counts. |
+
+### Query format
+
+Queries use the GKG JSON query DSL inline as strings. Single-line:
+
+```yaml
+- name: "root: all projects"
+  query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}'
+  expect: { eq: "$total_projects" }
+```
+
+Multiline queries use YAML block scalars:
+
+```yaml
+- name: "root: MRs in smoke project"
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.smoke"] },
+        { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+      ],
+      "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+      "limit": 50
+    }
+  expect: { gte: 1 }
+```
+
+### Variables
+
+`$variable` references in queries and expectations are resolved at runtime from the manifest written by `create_test_data.rb`:
+
+| Variable pattern | Example | Resolves to |
+|-----------------|---------|-------------|
+| `$total_<entity>` | `$total_projects` | Global entity count |
+| `$proj.<key>` | `$proj.smoke` | Project database ID |
+| `$group.<key>` | `$group.redaction` | Group database ID |
+| `$user_counts.<user>.<entity>` | `$user_counts.lois.projects` | Per-user visible entity count |
+| `$project_counts.<proj>.<entity>` | `$project_counts.frontend.merge_requests` | Per-project entity count |
+
+### Expectations
+
+| Form | Meaning |
+|------|---------|
+| `{ eq: 3 }` | Exactly 3 result rows |
+| `{ eq: "$variable" }` | Exact count resolved from manifest |
+| `{ gte: 1 }` | At least 1 row |
+| `{ range: [5, 10] }` | Between 5 and 10 rows (inclusive) |
+
+### Fan-out
+
+Use `users` (plural) to run the same tests for multiple users. Test names are automatically prefixed with the username:
+
+```yaml
+- section: "No memberships"
+  users: [vickey, hanna]
+  tests:
+    - name: "0 projects"
+      ...
+# Generates: "vickey.schmidt: 0 projects", "hanna: 0 projects"
+```
+
+### Regenerating Ruby scripts
+
+```shell
+cargo xtask e2e codegen          # write generated files
+cargo xtask e2e codegen --check  # verify committed files match (CI)
+```
+
 ## Test architecture
 
 Tests run as Ruby scripts inside the GitLab toolbox pod, which has access to the Rails console and the GKG gRPC endpoint.
 
-- **`create_test_data.rb`** -- Creates a test matrix: 5 users with varying group memberships, 4 projects across public and private groups, MRs, work items, and notes. Writes a `manifest.json` describing what was created.
-- **`redaction_test.rb`** -- Queries the GKG graph as each test user and asserts that redaction is correct: users only see entities in namespaces they have access to. Outputs JSON results.
-- **`test_helper.rb`** -- Shared utilities for gRPC calls, JWT signing, and assertion helpers.
+- **`scenarios.yaml`** -- Single source of truth for test data definitions and assertions. Drives codegen.
+- **`create_test_data.rb`** -- Auto-generated. Creates a test matrix: users with varying group memberships, projects across public and private groups, MRs, work items, and notes. Writes a `manifest.json` describing what was created.
+- **`redaction_test.rb`** -- Auto-generated. Queries the GKG graph as each test user and asserts that redaction is correct: users only see entities in namespaces they have access to. Outputs JSON results.
+- **`test_helper.rb`** -- Shared utilities for gRPC calls, manifest loading, and assertion helpers. Not generated.
 
 ## Module structure
 

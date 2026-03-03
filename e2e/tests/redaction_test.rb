@@ -1,287 +1,312 @@
 # frozen_string_literal: true
 
-# =============================================================================
-# Knowledge Graph -- Redaction / Permission E2E Test
-# =============================================================================
-#
-# Verifies that the GKG server correctly scopes results to each user's
-# group_traversal_ids JWT claim. Only entities whose traversal_path is a
-# prefix match for one of the user's group paths are returned.
-#
-# All IDs and counts are loaded from /tmp/e2e/manifest.json (written by
-# create_test_data.rb). No hardcoded IDs.
-#
-# Run with:
-#   bundle exec rails runner /tmp/e2e/redaction_test.rb RAILS_ENV=production
-#
-# =============================================================================
+# AUTO-GENERATED from e2e/tests/scenarios.yaml — do not edit directly.
+# Regenerate: cargo xtask e2e codegen
+# Verify:     cargo xtask e2e codegen --check
 
 require_relative 'test_helper'
 
 Feature.enable(:knowledge_graph)
 
 manifest = load_manifest!
-m = manifest # short alias
+m = manifest
 
-# The GKG webserver runs in the default namespace; this test runs in the
-# gitlab-namespace toolbox pod.  Override the default "localhost:50054" with
-# the cross-namespace service FQDN.
 grpc_endpoint = ENV.fetch('KNOWLEDGE_GRAPH_GRPC_ENDPOINT',
                           'gkg-webserver.default.svc.cluster.local:50054')
 puts "  gRPC endpoint: #{grpc_endpoint}"
 client = Ai::KnowledgeGraph::GrpcClient.new(endpoint: grpc_endpoint)
 org_id = m[:organization_id]
 
-# Load users from manifest (single source of truth for usernames)
-root     = User.find_by!(username: m[:users][:root][:username])
-lois     = User.find_by!(username: m[:users][:lois][:username])
+# Load users from manifest
+root = User.find_by!(username: m[:users][:root][:username])
 franklyn = User.find_by!(username: m[:users][:franklyn][:username])
-vickey   = User.find_by!(username: m[:users][:vickey][:username])
-hanna    = User.find_by!(username: m[:users][:hanna][:username])
+hanna = User.find_by!(username: m[:users][:hanna][:username])
+lois = User.find_by!(username: m[:users][:lois][:username])
+vickey = User.find_by!(username: m[:users][:vickey][:username])
 
-# Extract dynamic IDs from manifest
-proj_smoke_id     = m[:projects][:smoke][:id]
-proj_frontend_id  = m[:projects][:frontend][:id]
-proj_backend_id   = m[:projects][:backend][:id]
-proj_redaction_id = m[:projects][:redaction][:id]
+# Variable resolution hash for $variable references
+vars = {
+  'total_projects' => m[:counts][:total_projects],
+  'total_merge_requests' => m[:counts][:total_merge_requests],
+  'total_work_items' => m[:counts][:total_work_items],
+  'total_notes' => m[:counts][:total_notes],
+  'proj.backend' => m[:projects][:backend][:id],
+  'proj.frontend' => m[:projects][:frontend][:id],
+  'proj.redaction' => m[:projects][:redaction][:id],
+  'proj.smoke' => m[:projects][:smoke][:id],
+  'group.gitlab_org' => m[:groups][:gitlab_org][:id],
+  'group.backend' => m[:groups][:backend][:id],
+  'group.frontend' => m[:groups][:frontend][:id],
+  'group.redaction' => m[:groups][:redaction][:id],
+  'group.toolbox' => m[:groups][:toolbox][:id],
+  'group.smoke_tests' => m[:groups][:smoke_tests][:id],
+  'user_counts.root.projects' => m[:counts][:per_user][:root][:projects],
+  'user_counts.root.merge_requests' => m[:counts][:per_user][:root][:merge_requests],
+  'user_counts.root.work_items' => m[:counts][:per_user][:root][:work_items],
+  'user_counts.root.notes' => m[:counts][:per_user][:root][:notes],
+  'user_counts.franklyn.projects' => m[:counts][:per_user][:franklyn][:projects],
+  'user_counts.franklyn.merge_requests' => m[:counts][:per_user][:franklyn][:merge_requests],
+  'user_counts.franklyn.work_items' => m[:counts][:per_user][:franklyn][:work_items],
+  'user_counts.franklyn.notes' => m[:counts][:per_user][:franklyn][:notes],
+  'user_counts.hanna.projects' => m[:counts][:per_user][:hanna][:projects],
+  'user_counts.hanna.merge_requests' => m[:counts][:per_user][:hanna][:merge_requests],
+  'user_counts.hanna.work_items' => m[:counts][:per_user][:hanna][:work_items],
+  'user_counts.hanna.notes' => m[:counts][:per_user][:hanna][:notes],
+  'user_counts.lois.projects' => m[:counts][:per_user][:lois][:projects],
+  'user_counts.lois.merge_requests' => m[:counts][:per_user][:lois][:merge_requests],
+  'user_counts.lois.work_items' => m[:counts][:per_user][:lois][:work_items],
+  'user_counts.lois.notes' => m[:counts][:per_user][:lois][:notes],
+  'user_counts.vickey.projects' => m[:counts][:per_user][:vickey][:projects],
+  'user_counts.vickey.merge_requests' => m[:counts][:per_user][:vickey][:merge_requests],
+  'user_counts.vickey.work_items' => m[:counts][:per_user][:vickey][:work_items],
+  'user_counts.vickey.notes' => m[:counts][:per_user][:vickey][:notes],
+  'project_counts.backend.merge_requests' => m[:counts][:per_project][:backend][:merge_requests],
+  'project_counts.backend.work_items' => m[:counts][:per_project][:backend][:work_items],
+  'project_counts.backend.milestones' => m[:counts][:per_project][:backend][:milestones],
+  'project_counts.backend.labels' => m[:counts][:per_project][:backend][:labels],
+  'project_counts.backend.notes' => m[:counts][:per_project][:backend][:notes],
+  'project_counts.frontend.merge_requests' => m[:counts][:per_project][:frontend][:merge_requests],
+  'project_counts.frontend.work_items' => m[:counts][:per_project][:frontend][:work_items],
+  'project_counts.frontend.milestones' => m[:counts][:per_project][:frontend][:milestones],
+  'project_counts.frontend.labels' => m[:counts][:per_project][:frontend][:labels],
+  'project_counts.frontend.notes' => m[:counts][:per_project][:frontend][:notes],
+  'project_counts.redaction.merge_requests' => m[:counts][:per_project][:redaction][:merge_requests],
+  'project_counts.redaction.work_items' => m[:counts][:per_project][:redaction][:work_items],
+  'project_counts.redaction.milestones' => m[:counts][:per_project][:redaction][:milestones],
+  'project_counts.redaction.labels' => m[:counts][:per_project][:redaction][:labels],
+  'project_counts.redaction.notes' => m[:counts][:per_project][:redaction][:notes],
+  'project_counts.smoke.merge_requests' => m[:counts][:per_project][:smoke][:merge_requests],
+  'project_counts.smoke.work_items' => m[:counts][:per_project][:smoke][:work_items],
+  'project_counts.smoke.milestones' => m[:counts][:per_project][:smoke][:milestones],
+  'project_counts.smoke.labels' => m[:counts][:per_project][:smoke][:labels],
+  'project_counts.smoke.notes' => m[:counts][:per_project][:smoke][:notes],
+}
 
-total_projects    = m[:counts][:total_projects]
+def resolve(val, vars)
+  return val unless val.is_a?(String) && val.start_with?('$')
+  key = val[1..]
+  resolved = vars[key]
+  raise "Unknown variable: #{val} (available: #{vars.keys.sort.join(', ')})" if resolved.nil?
+  resolved
+end
 
-lois_counts     = m[:counts][:per_user][:lois]
-franklyn_counts = m[:counts][:per_user][:franklyn]
+def resolve_query(json_str, vars)
+  json_str.gsub(/"\$([a-zA-Z0-9_.]+)"/) do
+    key = $1
+    resolved = vars[key]
+    raise "Unknown variable in query: $#{key} (available: #{vars.keys.sort.join(', ')})" if resolved.nil?
+    resolved.to_s
+  end
+end
 
-# =============================================================================
-# SECTION 1: Admin sees everything
 # =============================================================================
 TestHarness.section('1. Admin (root) -- sees all entities')
 
-TestHarness.run('root: all projects', expected_min: total_projects, expected_max: total_projects) do
-  q(client, root, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
+TestHarness.run("root: all projects", expected_min: resolve('$total_projects', vars), expected_max: resolve('$total_projects', vars)) do
+  q(client, root, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}', vars)))
 end
 
-TestHarness.run('root: MRs in smoke project via traversal', expected_min: 1) do
-  q(client, root, org_id, { query_type: 'traversal',
-                            nodes: [
-                              { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_smoke_id] },
-                              { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
-                            ],
-                            relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
-                            limit: 50 })
+TestHarness.run("root: MRs in smoke project via traversal", expected_min: 1) do
+  q(client, root, org_id, JSON.parse(resolve_query('{
+  "query_type": "traversal",
+  "nodes": [
+    { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.smoke"] },
+    { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+  ],
+  "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+  "limit": 50
+}', vars)))
 end
 
-TestHarness.run('root: private redaction project visible', expected_min: 1, expected_max: 1) do
-  q(client, root, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
+TestHarness.run("root: private redaction project visible", expected_min: 1, expected_max: 1) do
+  q(client, root, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}', vars)))
 end
 
-TestHarness.run('root: private group kg-redaction-test-group visible', expected_min: 1) do
-  q(client, root, org_id, { query_type: 'search',
-                            node: { id: 'g', entity: 'Group', columns: ['name'],
-                                    filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
-end
-
-# =============================================================================
-# SECTION 2: lois -- scoped to gitlab-org + redaction groups
-# =============================================================================
-TestHarness.section("2. lois -- visible projects: frontend, backend, redaction (#{lois_counts[:projects]} total)")
-
-TestHarness.run("lois: #{lois_counts[:projects]} projects", expected_min: lois_counts[:projects],
-                                                            expected_max: lois_counts[:projects]) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
-end
-
-TestHarness.run('lois: frontend project visible', expected_min: 1, expected_max: 1) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_frontend_id] }, limit: 5 })
-end
-
-TestHarness.run('lois: backend project visible', expected_min: 1, expected_max: 1) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_backend_id] }, limit: 5 })
-end
-
-TestHarness.run('lois: private redaction project visible (member via group)', expected_min: 1, expected_max: 1) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
-end
-
-TestHarness.run('lois: smoke project NOT visible (not in toolbox group)', expected_min: 0, expected_max: 0) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_smoke_id] }, limit: 5 })
-end
-
-TestHarness.run("lois: #{lois_counts[:merge_requests]} MRs", expected_min: lois_counts[:merge_requests],
-                                                             expected_max: lois_counts[:merge_requests]) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }, limit: 200 })
-end
-
-TestHarness.run("lois: #{lois_counts[:notes]} notes", expected_min: lois_counts[:notes],
-                                                      expected_max: lois_counts[:notes]) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'n', entity: 'Note', columns: ['id'] }, limit: 200 })
-end
-
-TestHarness.run("lois: #{lois_counts[:work_items]} work items", expected_min: lois_counts[:work_items],
-                                                                expected_max: lois_counts[:work_items]) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'wi', entity: 'WorkItem', columns: ['title'] }, limit: 200 })
-end
-
-TestHarness.run('lois: private group kg-redaction-test-group visible', expected_min: 1) do
-  q(client, lois, org_id, { query_type: 'search',
-                            node: { id: 'g', entity: 'Group', columns: ['name'],
-                                    filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
+TestHarness.run("root: private group kg-redaction-test-group visible", expected_min: 1) do
+  q(client, root, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}', vars)))
 end
 
 # =============================================================================
-# SECTION 3: franklyn -- scoped to toolbox group only
-# =============================================================================
-TestHarness.section("3. franklyn -- visible projects: smoke (#{franklyn_counts[:projects]} total)")
+TestHarness.section('2. lois -- visible projects: frontend, backend, redaction ($user_counts.lois.projects total)')
 
-TestHarness.run("franklyn: #{franklyn_counts[:projects]} project", expected_min: franklyn_counts[:projects],
-                                                                   expected_max: franklyn_counts[:projects]) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
+TestHarness.run("lois: #{resolve('$user_counts.lois.projects', vars)} projects", expected_min: resolve('$user_counts.lois.projects', vars), expected_max: resolve('$user_counts.lois.projects', vars)) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}', vars)))
 end
 
-TestHarness.run('franklyn: smoke project visible', expected_min: 1, expected_max: 1) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_smoke_id] }, limit: 5 })
+TestHarness.run("lois: frontend project visible", expected_min: 1, expected_max: 1) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.frontend"]},"limit":5}', vars)))
 end
 
-TestHarness.run('franklyn: frontend project NOT visible', expected_min: 0, expected_max: 0) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_frontend_id] }, limit: 5 })
+TestHarness.run("lois: backend project visible", expected_min: 1, expected_max: 1) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.backend"]},"limit":5}', vars)))
 end
 
-TestHarness.run('franklyn: redaction project NOT visible', expected_min: 0, expected_max: 0) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
+TestHarness.run("lois: private redaction project visible (member via group)", expected_min: 1, expected_max: 1) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}', vars)))
 end
 
-TestHarness.run("franklyn: #{franklyn_counts[:merge_requests]} MRs", expected_min: franklyn_counts[:merge_requests],
-                                                                     expected_max: franklyn_counts[:merge_requests]) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }, limit: 200 })
+TestHarness.run("lois: smoke project NOT visible (not in toolbox group)", expected_min: 0, expected_max: 0) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.smoke"]},"limit":5}', vars)))
 end
 
-TestHarness.run("franklyn: #{franklyn_counts[:notes]} notes", expected_min: franklyn_counts[:notes],
-                                                              expected_max: franklyn_counts[:notes]) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'n', entity: 'Note', columns: ['id'] }, limit: 200 })
+TestHarness.run("lois: #{resolve('$user_counts.lois.merge_requests', vars)} MRs", expected_min: resolve('$user_counts.lois.merge_requests', vars), expected_max: resolve('$user_counts.lois.merge_requests', vars)) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"mr","entity":"MergeRequest","columns":["iid"]},"limit":200}', vars)))
 end
 
-TestHarness.run("franklyn: #{franklyn_counts[:work_items]} work items", expected_min: franklyn_counts[:work_items],
-                                                                        expected_max: franklyn_counts[:work_items]) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'wi', entity: 'WorkItem', columns: ['title'] }, limit: 200 })
+TestHarness.run("lois: #{resolve('$user_counts.lois.notes', vars)} notes", expected_min: resolve('$user_counts.lois.notes', vars), expected_max: resolve('$user_counts.lois.notes', vars)) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"n","entity":"Note","columns":["id"]},"limit":200}', vars)))
 end
 
-TestHarness.run('franklyn: private group kg-redaction-test-group NOT visible', expected_min: 0, expected_max: 0) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'g', entity: 'Group', columns: ['name'],
-                                        filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
+TestHarness.run("lois: #{resolve('$user_counts.lois.work_items', vars)} work items", expected_min: resolve('$user_counts.lois.work_items', vars), expected_max: resolve('$user_counts.lois.work_items', vars)) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"wi","entity":"WorkItem","columns":["title"]},"limit":200}', vars)))
 end
 
-TestHarness.run('franklyn: private redaction project NOT visible', expected_min: 0, expected_max: 0) do
-  q(client, franklyn, org_id, { query_type: 'search',
-                                node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
+TestHarness.run("lois: private group kg-redaction-test-group visible", expected_min: 1) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}', vars)))
 end
 
 # =============================================================================
-# SECTION 4: vickey and hanna -- empty traversal_ids -> see nothing
+TestHarness.section('3. franklyn -- visible projects: smoke ($user_counts.franklyn.projects total)')
+
+TestHarness.run("franklyn: #{resolve('$user_counts.franklyn.projects', vars)} project", expected_min: resolve('$user_counts.franklyn.projects', vars), expected_max: resolve('$user_counts.franklyn.projects', vars)) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}', vars)))
+end
+
+TestHarness.run("franklyn: smoke project visible", expected_min: 1, expected_max: 1) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.smoke"]},"limit":5}', vars)))
+end
+
+TestHarness.run("franklyn: frontend project NOT visible", expected_min: 0, expected_max: 0) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.frontend"]},"limit":5}', vars)))
+end
+
+TestHarness.run("franklyn: redaction project NOT visible", expected_min: 0, expected_max: 0) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}', vars)))
+end
+
+TestHarness.run("franklyn: #{resolve('$user_counts.franklyn.merge_requests', vars)} MRs", expected_min: resolve('$user_counts.franklyn.merge_requests', vars), expected_max: resolve('$user_counts.franklyn.merge_requests', vars)) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"mr","entity":"MergeRequest","columns":["iid"]},"limit":200}', vars)))
+end
+
+TestHarness.run("franklyn: #{resolve('$user_counts.franklyn.notes', vars)} notes", expected_min: resolve('$user_counts.franklyn.notes', vars), expected_max: resolve('$user_counts.franklyn.notes', vars)) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"n","entity":"Note","columns":["id"]},"limit":200}', vars)))
+end
+
+TestHarness.run("franklyn: #{resolve('$user_counts.franklyn.work_items', vars)} work items", expected_min: resolve('$user_counts.franklyn.work_items', vars), expected_max: resolve('$user_counts.franklyn.work_items', vars)) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"wi","entity":"WorkItem","columns":["title"]},"limit":200}', vars)))
+end
+
+TestHarness.run("franklyn: private group kg-redaction-test-group NOT visible", expected_min: 0, expected_max: 0) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}', vars)))
+end
+
+TestHarness.run("franklyn: private redaction project NOT visible", expected_min: 0, expected_max: 0) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}', vars)))
+end
+
 # =============================================================================
 TestHarness.section('4. vickey & hanna -- no group memberships -> zero results')
 
-{ 'vickey.schmidt' => vickey, 'hanna' => hanna }.each do |username, user|
-  TestHarness.run("#{username}: 0 projects", expected_min: 0, expected_max: 0) do
-    q(client, user, org_id, { query_type: 'search',
-                              node: { id: 'p', entity: 'Project', columns: ['name'] }, limit: 100 })
-  end
+TestHarness.run("vickey.schmidt: 0 projects", expected_min: 0, expected_max: 0) do
+  q(client, vickey, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}', vars)))
+end
 
-  TestHarness.run("#{username}: 0 MRs", expected_min: 0, expected_max: 0) do
-    q(client, user, org_id, { query_type: 'search',
-                              node: { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }, limit: 100 })
-  end
+TestHarness.run("vickey.schmidt: 0 MRs", expected_min: 0, expected_max: 0) do
+  q(client, vickey, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"mr","entity":"MergeRequest","columns":["iid"]},"limit":100}', vars)))
+end
 
-  TestHarness.run("#{username}: 0 notes", expected_min: 0, expected_max: 0) do
-    q(client, user, org_id, { query_type: 'search',
-                              node: { id: 'n', entity: 'Note', columns: ['id'] }, limit: 100 })
-  end
+TestHarness.run("vickey.schmidt: 0 notes", expected_min: 0, expected_max: 0) do
+  q(client, vickey, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"n","entity":"Note","columns":["id"]},"limit":100}', vars)))
+end
 
-  TestHarness.run("#{username}: 0 work items", expected_min: 0, expected_max: 0) do
-    q(client, user, org_id, { query_type: 'search',
-                              node: { id: 'wi', entity: 'WorkItem', columns: ['title'] }, limit: 100 })
-  end
+TestHarness.run("vickey.schmidt: 0 work items", expected_min: 0, expected_max: 0) do
+  q(client, vickey, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"wi","entity":"WorkItem","columns":["title"]},"limit":100}', vars)))
+end
 
-  TestHarness.run("#{username}: private group NOT visible", expected_min: 0, expected_max: 0) do
-    q(client, user, org_id, { query_type: 'search',
-                              node: { id: 'g', entity: 'Group', columns: ['name'],
-                                      filters: { name: { op: 'eq', value: 'kg-redaction-test-group' } } }, limit: 5 })
-  end
+TestHarness.run("vickey.schmidt: private group NOT visible", expected_min: 0, expected_max: 0) do
+  q(client, vickey, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}', vars)))
+end
 
-  TestHarness.run("#{username}: private redaction project NOT visible", expected_min: 0, expected_max: 0) do
-    q(client, user, org_id, { query_type: 'search',
-                              node: { id: 'p', entity: 'Project', columns: ['name'], node_ids: [proj_redaction_id] }, limit: 5 })
-  end
+TestHarness.run("vickey.schmidt: private redaction project NOT visible", expected_min: 0, expected_max: 0) do
+  q(client, vickey, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}', vars)))
 end
 
 # =============================================================================
-# SECTION 5: Cross-user isolation -- lois cannot see franklyn's project, etc.
+TestHarness.section('4. vickey & hanna -- no group memberships -> zero results')
+
+TestHarness.run("hanna: 0 projects", expected_min: 0, expected_max: 0) do
+  q(client, hanna, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}', vars)))
+end
+
+TestHarness.run("hanna: 0 MRs", expected_min: 0, expected_max: 0) do
+  q(client, hanna, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"mr","entity":"MergeRequest","columns":["iid"]},"limit":100}', vars)))
+end
+
+TestHarness.run("hanna: 0 notes", expected_min: 0, expected_max: 0) do
+  q(client, hanna, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"n","entity":"Note","columns":["id"]},"limit":100}', vars)))
+end
+
+TestHarness.run("hanna: 0 work items", expected_min: 0, expected_max: 0) do
+  q(client, hanna, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"wi","entity":"WorkItem","columns":["title"]},"limit":100}', vars)))
+end
+
+TestHarness.run("hanna: private group NOT visible", expected_min: 0, expected_max: 0) do
+  q(client, hanna, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}', vars)))
+end
+
+TestHarness.run("hanna: private redaction project NOT visible", expected_min: 0, expected_max: 0) do
+  q(client, hanna, org_id, JSON.parse(resolve_query('{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}', vars)))
+end
+
 # =============================================================================
 TestHarness.section('5. Cross-user isolation')
 
-TestHarness.run('lois cannot see smoke project MRs (not in toolbox group)', expected_min: 0, expected_max: 0) do
-  q(client, lois, org_id, { query_type: 'traversal',
-                            nodes: [
-                              { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [proj_smoke_id] },
-                              { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
-                            ],
-                            relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
-                            limit: 50 })
+TestHarness.run("lois cannot see smoke project MRs (not in toolbox group)", expected_min: 0, expected_max: 0) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{
+  "query_type": "traversal",
+  "nodes": [
+    { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.smoke"] },
+    { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+  ],
+  "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+  "limit": 50
+}', vars)))
 end
 
-TestHarness.run('franklyn cannot see frontend project MRs (not in gitlab-org group)', expected_min: 0,
-                                                                                      expected_max: 0) do
-  q(client, franklyn, org_id, { query_type: 'traversal',
-                                nodes: [
-                                  { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [proj_frontend_id] },
-                                  { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
-                                ],
-                                relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
-                                limit: 50 })
+TestHarness.run("franklyn cannot see frontend project MRs (not in gitlab-org group)", expected_min: 0, expected_max: 0) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{
+  "query_type": "traversal",
+  "nodes": [
+    { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.frontend"] },
+    { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+  ],
+  "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+  "limit": 50
+}', vars)))
 end
 
-# lois sees MRs in frontend project (she has gitlab-org membership)
-# NOTE: Traversal queries join gl_edge (IN_PROJECT) with gl_merge_request on id.
-# Because the edge table does not filter source_kind, Labels/Milestones with
-# overlapping ids produce extra rows. Use expected_min only (no max).
-frontend_mr_count = m[:counts][:per_project][:frontend][:merge_requests]
-TestHarness.run("lois sees MRs in frontend project (>=#{frontend_mr_count})", expected_min: frontend_mr_count) do
-  q(client, lois, org_id, { query_type: 'traversal',
-                            nodes: [
-                              { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [proj_frontend_id] },
-                              { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
-                            ],
-                            relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
-                            limit: 50 })
+TestHarness.run("lois sees MRs in frontend project (>=#{resolve('$project_counts.frontend.merge_requests', vars)})", expected_min: resolve('$project_counts.frontend.merge_requests', vars)) do
+  q(client, lois, org_id, JSON.parse(resolve_query('{
+  "query_type": "traversal",
+  "nodes": [
+    { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.frontend"] },
+    { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+  ],
+  "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+  "limit": 50
+}', vars)))
 end
 
-# franklyn sees MRs in smoke project (he has toolbox membership)
-# NOTE: Same traversal join behavior as above — use expected_min only.
-smoke_mr_count = m[:counts][:per_project][:smoke][:merge_requests]
-TestHarness.run("franklyn sees MRs in smoke project (>=#{smoke_mr_count})", expected_min: smoke_mr_count) do
-  q(client, franklyn, org_id, { query_type: 'traversal',
-                                nodes: [
-                                  { id: 'p',  entity: 'Project',      columns: ['name'], node_ids: [proj_smoke_id] },
-                                  { id: 'mr', entity: 'MergeRequest', columns: ['iid'] }
-                                ],
-                                relationships: [{ type: 'IN_PROJECT', from: 'mr', to: 'p' }],
-                                limit: 50 })
+TestHarness.run("franklyn sees MRs in smoke project (>=#{resolve('$project_counts.smoke.merge_requests', vars)})", expected_min: resolve('$project_counts.smoke.merge_requests', vars)) do
+  q(client, franklyn, org_id, JSON.parse(resolve_query('{
+  "query_type": "traversal",
+  "nodes": [
+    { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.smoke"] },
+    { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+  ],
+  "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+  "limit": 50
+}', vars)))
 end
 
-# =============================================================================
 TestHarness.summary

@@ -1,0 +1,412 @@
+# =============================================================================
+# E2E Test Scenarios
+# =============================================================================
+#
+# Single source of truth for e2e test data and assertions.
+#
+# The Ruby scripts (create_test_data.rb, redaction_test.rb) are AUTO-GENERATED
+# from this file. Do not edit them directly — modify this file and run:
+#
+#   cargo xtask e2e codegen
+#
+# To verify generated files match in CI:
+#
+#   cargo xtask e2e codegen --check
+#
+# ## Structure
+#
+#   users:        Test users created in the GitLab instance.
+#   groups:       Group hierarchy (recursive children for subgroups).
+#   projects:     Projects with parent group reference and entity counts.
+#   memberships:  Group memberships per user.
+#   assertions:   Test sections with inline GKG JSON queries and expected results.
+#
+# ## Query format
+#
+# Queries use the GKG JSON query DSL inline as strings. Single-line:
+#
+#   query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}'
+#
+# Or multiline using YAML block scalars:
+#
+#   query: |
+#     {
+#       "query_type": "traversal",
+#       "nodes": [
+#         { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.smoke"] },
+#         { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+#       ],
+#       "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+#       "limit": 50
+#     }
+#
+# ## Variables
+#
+# $variable references in queries and expectations are resolved at runtime
+# from the manifest written by create_test_data.rb:
+#
+#   $total_projects                          -> manifest[:counts][:total_projects]
+#   $total_merge_requests                    -> manifest[:counts][:total_merge_requests]
+#   $total_work_items                        -> manifest[:counts][:total_work_items]
+#   $total_notes                             -> manifest[:counts][:total_notes]
+#   $proj.<key>                              -> manifest[:projects][:<key>][:id]
+#   $group.<key>                             -> manifest[:groups][:<key>][:id]
+#   $user_counts.<user>.<entity>             -> manifest[:counts][:per_user][:<user>][:<entity>]
+#   $project_counts.<project>.<entity>       -> manifest[:counts][:per_project][:<project>][:<entity>]
+#
+# ## Expectations
+#
+#   { eq: 3 }           Exactly 3 result rows.
+#   { eq: "$variable" } Exact count resolved from manifest.
+#   { gte: 1 }          At least 1 row.
+#   { range: [5, 10] }  Between 5 and 10 rows (inclusive).
+#
+# ## Fan-out
+#
+# Use `users` (plural) to run the same tests for multiple users.
+# Test names are prefixed with the username automatically:
+#
+#   - section: "No memberships"
+#     users: [vickey, hanna]
+#     tests:
+#       - name: "0 projects"
+#         ...
+#   # Generates: "vickey.schmidt: 0 projects", "hanna: 0 projects"
+#
+# =============================================================================
+
+password: "TestPass123!"
+
+# -----------------------------------------------------------------------------
+# Users
+# -----------------------------------------------------------------------------
+# Key = logical name used throughout this file.
+# username defaults to the key unless explicitly overridden.
+# All users are created with the shared password above.
+
+users:
+  lois:
+    name: Lois Lane
+    email: lois@example.com
+  franklyn:
+    username: franklyn.mcdermott
+    name: Franklyn McDermott
+    email: franklyn@example.com
+  vickey:
+    username: vickey.schmidt
+    name: Vickey Schmidt
+    email: vickey@example.com
+  hanna:
+    name: Hanna Baker
+    email: hanna@example.com
+
+# -----------------------------------------------------------------------------
+# Groups
+# -----------------------------------------------------------------------------
+# Top-level keys are root groups. Use `children` for subgroups (recursive).
+# visibility defaults to "public" unless set to "private".
+# name defaults to the key (with underscores replaced by hyphens) unless set.
+# path is derived from name.
+
+groups:
+  toolbox:
+    children:
+      smoke_tests:
+        name: smoke-tests
+
+  gitlab_org:
+    name: gitlab-org
+    children:
+      frontend: {}
+      backend: {}
+
+  redaction:
+    name: kg-redaction-test-group
+    visibility: private
+
+# -----------------------------------------------------------------------------
+# Projects
+# -----------------------------------------------------------------------------
+# group references a group key (including nested children keys).
+# visibility defaults to "public" unless set to "private".
+# entities defines how many of each resource to create.
+#
+# merge_requests.merged: how many of the total are set to merged state.
+# notes.per_mr / per_issue: notes created on the first N MRs/issues.
+# notes.first_n_mrs / first_n_issues: how many MRs/issues get notes.
+#
+# Only public projects get merge_requests and notes (matching current behavior).
+
+projects:
+  smoke:
+    name: gitlab-smoke-tests
+    group: smoke_tests
+    visibility: public
+    entities:
+      milestones: 3
+      labels: 3
+      work_items: 8
+      merge_requests: { total: 6, merged: 4 }
+      notes: { per_mr: 2, first_n_mrs: 4, per_issue: 2, first_n_issues: 4 }
+
+  frontend:
+    name: gitlab-test
+    group: frontend
+    visibility: public
+    entities:
+      milestones: 3
+      labels: 3
+      work_items: 8
+      merge_requests: { total: 6, merged: 4 }
+      notes: { per_mr: 2, first_n_mrs: 4, per_issue: 2, first_n_issues: 4 }
+
+  backend:
+    name: gitlab-shell
+    group: backend
+    visibility: public
+    entities:
+      milestones: 3
+      labels: 3
+      work_items: 8
+      merge_requests: { total: 6, merged: 4 }
+      notes: { per_mr: 2, first_n_mrs: 4, per_issue: 2, first_n_issues: 4 }
+
+  redaction:
+    name: kg-redaction-test-project
+    group: redaction
+    visibility: private
+    entities:
+      milestones: 3
+      labels: 3
+      work_items: 8
+      merge_requests: { total: 0 }
+      notes: {}
+
+# -----------------------------------------------------------------------------
+# Memberships
+# -----------------------------------------------------------------------------
+# Maps user keys to group memberships. Users not listed have no memberships
+# and see nothing (vickey, hanna).
+
+memberships:
+  lois:
+    - { group: gitlab_org, access: developer }
+    - { group: redaction, access: developer }
+  franklyn:
+    - { group: toolbox, access: developer }
+
+# -----------------------------------------------------------------------------
+# Assertions
+# -----------------------------------------------------------------------------
+# Each section runs a set of gRPC queries as a specific user (or users for
+# fan-out) and asserts the result row count.
+#
+# admin: true means the user is the root admin and bypasses redaction.
+
+assertions:
+  # ===========================================================================
+  # SECTION 1: Admin sees everything
+  # ===========================================================================
+  - section: "1. Admin (root) -- sees all entities"
+    user: root
+    admin: true
+    tests:
+      - name: "root: all projects"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}'
+        expect: { eq: "$total_projects" }
+
+      - name: "root: MRs in smoke project via traversal"
+        query: |
+          {
+            "query_type": "traversal",
+            "nodes": [
+              { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.smoke"] },
+              { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+            ],
+            "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+            "limit": 50
+          }
+        expect: { gte: 1 }
+
+      - name: "root: private redaction project visible"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}'
+        expect: { eq: 1 }
+
+      - name: "root: private group kg-redaction-test-group visible"
+        query: '{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}'
+        expect: { gte: 1 }
+
+  # ===========================================================================
+  # SECTION 2: lois -- scoped to gitlab-org + redaction groups
+  # ===========================================================================
+  - section: "2. lois -- visible projects: frontend, backend, redaction ($user_counts.lois.projects total)"
+    user: lois
+    tests:
+      - name: "lois: $user_counts.lois.projects projects"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}'
+        expect: { eq: "$user_counts.lois.projects" }
+
+      - name: "lois: frontend project visible"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.frontend"]},"limit":5}'
+        expect: { eq: 1 }
+
+      - name: "lois: backend project visible"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.backend"]},"limit":5}'
+        expect: { eq: 1 }
+
+      - name: "lois: private redaction project visible (member via group)"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}'
+        expect: { eq: 1 }
+
+      - name: "lois: smoke project NOT visible (not in toolbox group)"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.smoke"]},"limit":5}'
+        expect: { eq: 0 }
+
+      - name: "lois: $user_counts.lois.merge_requests MRs"
+        query: '{"query_type":"search","node":{"id":"mr","entity":"MergeRequest","columns":["iid"]},"limit":200}'
+        expect: { eq: "$user_counts.lois.merge_requests" }
+
+      - name: "lois: $user_counts.lois.notes notes"
+        query: '{"query_type":"search","node":{"id":"n","entity":"Note","columns":["id"]},"limit":200}'
+        expect: { eq: "$user_counts.lois.notes" }
+
+      - name: "lois: $user_counts.lois.work_items work items"
+        query: '{"query_type":"search","node":{"id":"wi","entity":"WorkItem","columns":["title"]},"limit":200}'
+        expect: { eq: "$user_counts.lois.work_items" }
+
+      - name: "lois: private group kg-redaction-test-group visible"
+        query: '{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}'
+        expect: { gte: 1 }
+
+  # ===========================================================================
+  # SECTION 3: franklyn -- scoped to toolbox group only
+  # ===========================================================================
+  - section: "3. franklyn -- visible projects: smoke ($user_counts.franklyn.projects total)"
+    user: franklyn
+    tests:
+      - name: "franklyn: $user_counts.franklyn.projects project"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}'
+        expect: { eq: "$user_counts.franklyn.projects" }
+
+      - name: "franklyn: smoke project visible"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.smoke"]},"limit":5}'
+        expect: { eq: 1 }
+
+      - name: "franklyn: frontend project NOT visible"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.frontend"]},"limit":5}'
+        expect: { eq: 0 }
+
+      - name: "franklyn: redaction project NOT visible"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}'
+        expect: { eq: 0 }
+
+      - name: "franklyn: $user_counts.franklyn.merge_requests MRs"
+        query: '{"query_type":"search","node":{"id":"mr","entity":"MergeRequest","columns":["iid"]},"limit":200}'
+        expect: { eq: "$user_counts.franklyn.merge_requests" }
+
+      - name: "franklyn: $user_counts.franklyn.notes notes"
+        query: '{"query_type":"search","node":{"id":"n","entity":"Note","columns":["id"]},"limit":200}'
+        expect: { eq: "$user_counts.franklyn.notes" }
+
+      - name: "franklyn: $user_counts.franklyn.work_items work items"
+        query: '{"query_type":"search","node":{"id":"wi","entity":"WorkItem","columns":["title"]},"limit":200}'
+        expect: { eq: "$user_counts.franklyn.work_items" }
+
+      - name: "franklyn: private group kg-redaction-test-group NOT visible"
+        query: '{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}'
+        expect: { eq: 0 }
+
+      - name: "franklyn: private redaction project NOT visible"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}'
+        expect: { eq: 0 }
+
+  # ===========================================================================
+  # SECTION 4: vickey and hanna -- empty traversal_ids -> see nothing
+  # ===========================================================================
+  - section: "4. vickey & hanna -- no group memberships -> zero results"
+    users: [vickey, hanna]
+    tests:
+      - name: "0 projects"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":100}'
+        expect: { eq: 0 }
+
+      - name: "0 MRs"
+        query: '{"query_type":"search","node":{"id":"mr","entity":"MergeRequest","columns":["iid"]},"limit":100}'
+        expect: { eq: 0 }
+
+      - name: "0 notes"
+        query: '{"query_type":"search","node":{"id":"n","entity":"Note","columns":["id"]},"limit":100}'
+        expect: { eq: 0 }
+
+      - name: "0 work items"
+        query: '{"query_type":"search","node":{"id":"wi","entity":"WorkItem","columns":["title"]},"limit":100}'
+        expect: { eq: 0 }
+
+      - name: "private group NOT visible"
+        query: '{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"],"filters":{"name":{"op":"eq","value":"kg-redaction-test-group"}}},"limit":5}'
+        expect: { eq: 0 }
+
+      - name: "private redaction project NOT visible"
+        query: '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"],"node_ids":["$proj.redaction"]},"limit":5}'
+        expect: { eq: 0 }
+
+  # ===========================================================================
+  # SECTION 5: Cross-user isolation
+  # ===========================================================================
+  - section: "5. Cross-user isolation"
+    tests:
+      - name: "lois cannot see smoke project MRs (not in toolbox group)"
+        user: lois
+        query: |
+          {
+            "query_type": "traversal",
+            "nodes": [
+              { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.smoke"] },
+              { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+            ],
+            "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+            "limit": 50
+          }
+        expect: { eq: 0 }
+
+      - name: "franklyn cannot see frontend project MRs (not in gitlab-org group)"
+        user: franklyn
+        query: |
+          {
+            "query_type": "traversal",
+            "nodes": [
+              { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.frontend"] },
+              { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+            ],
+            "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+            "limit": 50
+          }
+        expect: { eq: 0 }
+
+      - name: "lois sees MRs in frontend project (>=$project_counts.frontend.merge_requests)"
+        user: lois
+        query: |
+          {
+            "query_type": "traversal",
+            "nodes": [
+              { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.frontend"] },
+              { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+            ],
+            "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+            "limit": 50
+          }
+        expect: { gte: "$project_counts.frontend.merge_requests" }
+
+      - name: "franklyn sees MRs in smoke project (>=$project_counts.smoke.merge_requests)"
+        user: franklyn
+        query: |
+          {
+            "query_type": "traversal",
+            "nodes": [
+              { "id": "p", "entity": "Project", "columns": ["name"], "node_ids": ["$proj.smoke"] },
+              { "id": "mr", "entity": "MergeRequest", "columns": ["iid"] }
+            ],
+            "relationships": [{ "type": "IN_PROJECT", "from": "mr", "to": "p" }],
+            "limit": 50
+          }
+        expect: { gte: "$project_counts.smoke.merge_requests" }

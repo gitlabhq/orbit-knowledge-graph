@@ -1,23 +1,8 @@
 # frozen_string_literal: true
 
-# =============================================================================
-# E2E Test Data Creation Script
-# =============================================================================
-#
-# Creates ALL test data from scratch in a fresh GitLab instance:
-#   - 4 test users (lois, franklyn, vickey, hanna)
-#   - Group hierarchy: parent groups with subgroups
-#   - Projects in subgroups (public and private)
-#   - MRs, work items, notes, milestones, labels
-#   - Memberships at various access levels
-#
-# Writes a JSON manifest to /tmp/e2e/manifest.json with all dynamic IDs
-# so that redaction_test.rb can load them.
-#
-# Run with:
-#   bundle exec rails runner /tmp/e2e/create_test_data.rb RAILS_ENV=production
-#
-# =============================================================================
+# AUTO-GENERATED from e2e/tests/scenarios.yaml — do not edit directly.
+# Regenerate: cargo xtask e2e codegen
+# Verify:     cargo xtask e2e codegen --check
 
 require 'json'
 
@@ -25,20 +10,6 @@ E2E_POD_DIR = ENV.fetch('E2E_POD_DIR', '/tmp/e2e')
 MANIFEST_PATH = "#{E2E_POD_DIR}/manifest.json"
 TEST_PASSWORD = 'TestPass123!'
 
-# GitLab service objects return results in various shapes: ServiceResponse with
-# payload hash, plain hash, or the model directly. This normalizes all of them.
-def unwrap(result, key)
-  if result.respond_to?(:payload) && result.payload.is_a?(Hash)
-    result.payload[key] || result.payload
-  elsif result.is_a?(Hash)
-    result[key] || result
-  else
-    result
-  end
-end
-
-# GitLab service objects return results in various shapes: ServiceResponse with
-# payload hash, plain hash, or the model directly. This normalizes all of them.
 def unwrap(result, key)
   if result.respond_to?(:payload) && result.payload.is_a?(Hash)
     result.payload[key] || result.payload
@@ -97,16 +68,12 @@ def find_or_create_user(username, name, email, admin, org)
     puts "  Created user '#{username}' (id: #{user.id})"
   end
 
-  # Ensure OrganizationUser record exists. GitLab seed data creates this for
-  # the root user but not for programmatically-created users. Without it,
-  # group.add_member fails with "already belongs to another organization".
   Organizations::OrganizationUser.find_or_create_by!(organization: org, user: user) do |record|
     record.access_level = :default
   end
 
   user
 rescue StandardError => e
-  # Try alternative creation via service
   puts "  Direct creation failed (#{e.message[0..80]}), trying CreateService..."
   result = Users::CreateService.new(admin, {
                                       username: username,
@@ -121,7 +88,6 @@ rescue StandardError => e
 
   puts "  Created user '#{username}' via service (id: #{user.id})"
 
-  # Ensure OrganizationUser for service-created users too
   Organizations::OrganizationUser.find_or_create_by!(organization: org, user: user) do |record|
     record.access_level = :default
   end
@@ -129,21 +95,21 @@ rescue StandardError => e
   user
 end
 
-lois     = find_or_create_user('lois', 'Lois Lane', 'lois@example.com', admin, org)
 franklyn = find_or_create_user('franklyn.mcdermott', 'Franklyn McDermott', 'franklyn@example.com', admin, org)
-vickey   = find_or_create_user('vickey.schmidt', 'Vickey Schmidt', 'vickey@example.com', admin, org)
-hanna    = find_or_create_user('hanna', 'Hanna Baker', 'hanna@example.com', admin, org)
+hanna = find_or_create_user('hanna', 'Hanna Baker', 'hanna@example.com', admin, org)
+lois = find_or_create_user('lois', 'Lois Lane', 'lois@example.com', admin, org)
+vickey = find_or_create_user('vickey.schmidt', 'Vickey Schmidt', 'vickey@example.com', admin, org)
 
 manifest[:users] = {
   root: { id: admin.id, username: 'root' },
-  lois: { id: lois.id, username: 'lois' },
   franklyn: { id: franklyn.id, username: 'franklyn.mcdermott' },
+  hanna: { id: hanna.id, username: 'hanna' },
+  lois: { id: lois.id, username: 'lois' },
   vickey: { id: vickey.id, username: 'vickey.schmidt' },
-  hanna: { id: hanna.id, username: 'hanna' }
 }
 
 # =============================================================================
-# 2. CREATE GROUPS (hierarchy for traversal-path testing)
+# 2. CREATE GROUPS
 # =============================================================================
 puts "\n--- 2. Creating group hierarchy ---"
 
@@ -170,38 +136,27 @@ def find_or_create_group(name, path, admin, org, parent: nil, visibility: 20)
   group
 end
 
-# Parent group: "toolbox" (public)
-toolbox_group = find_or_create_group('toolbox', 'toolbox', admin, org)
-
-# Subgroup under toolbox: "smoke-tests" (public)
-smoke_tests_subgroup = find_or_create_group('smoke-tests', 'smoke-tests', admin, org, parent: toolbox_group)
-
-# Parent group: "gitlab-org" (public)
-gitlab_org_group = find_or_create_group('gitlab-org', 'gitlab-org', admin, org)
-
-# Subgroup under gitlab-org: "frontend" (public)
-frontend_subgroup = find_or_create_group('frontend', 'frontend', admin, org, parent: gitlab_org_group)
-
-# Subgroup under gitlab-org: "backend" (public)
-backend_subgroup = find_or_create_group('backend', 'backend', admin, org, parent: gitlab_org_group)
-
-# Private group for redaction testing
+gitlab_org_group = find_or_create_group('gitlab-org', 'gitlab-org', admin, org, visibility: 20)
+backend_group = find_or_create_group('backend', 'backend', admin, org, parent: gitlab_org_group, visibility: 20)
+frontend_group = find_or_create_group('frontend', 'frontend', admin, org, parent: gitlab_org_group, visibility: 20)
 redaction_group = find_or_create_group('kg-redaction-test-group', 'kg-redaction-test-group', admin, org, visibility: 0)
+toolbox_group = find_or_create_group('toolbox', 'toolbox', admin, org, visibility: 20)
+smoke_tests_group = find_or_create_group('smoke-tests', 'smoke-tests', admin, org, parent: toolbox_group, visibility: 20)
 
 manifest[:groups] = {
-  toolbox: { id: toolbox_group.id, path: toolbox_group.full_path,
-             traversal: "#{toolbox_group.traversal_ids.join('/')}/" },
-  smoke_tests: { id: smoke_tests_subgroup.id, path: smoke_tests_subgroup.full_path,
-                 traversal: "#{smoke_tests_subgroup.traversal_ids.join('/')}/" },
   gitlab_org: { id: gitlab_org_group.id, path: gitlab_org_group.full_path,
-                traversal: "#{gitlab_org_group.traversal_ids.join('/')}/" },
-  frontend: { id: frontend_subgroup.id, path: frontend_subgroup.full_path,
-              traversal: "#{frontend_subgroup.traversal_ids.join('/')}/" },
-  backend: { id: backend_subgroup.id, path: backend_subgroup.full_path,
-             traversal: "#{backend_subgroup.traversal_ids.join('/')}/" },
+              traversal: "#{gitlab_org_group.traversal_ids.join('/')}/" },
+  backend: { id: backend_group.id, path: backend_group.full_path,
+              traversal: "#{backend_group.traversal_ids.join('/')}/" },
+  frontend: { id: frontend_group.id, path: frontend_group.full_path,
+              traversal: "#{frontend_group.traversal_ids.join('/')}/" },
   redaction: { id: redaction_group.id, path: redaction_group.full_path,
-               traversal: "#{redaction_group.traversal_ids.join('/')}/",
-               visibility: 'private' }
+              traversal: "#{redaction_group.traversal_ids.join('/')}/",
+              visibility: 'private' },
+  toolbox: { id: toolbox_group.id, path: toolbox_group.full_path,
+              traversal: "#{toolbox_group.traversal_ids.join('/')}/" },
+  smoke_tests: { id: smoke_tests_group.id, path: smoke_tests_group.full_path,
+              traversal: "#{smoke_tests_group.traversal_ids.join('/')}/" },
 }
 
 # =============================================================================
@@ -231,34 +186,23 @@ def find_or_create_project(name, path, namespace, admin, org, visibility: 20)
   project
 end
 
-# Project 1: toolbox/smoke-tests/gitlab-smoke-tests (public)
-proj_smoke = find_or_create_project('gitlab-smoke-tests', 'gitlab-smoke-tests',
-                                    smoke_tests_subgroup, admin, org)
+proj_backend = find_or_create_project('gitlab-shell', 'gitlab-shell', backend_group, admin, org, visibility: 20)
+proj_frontend = find_or_create_project('gitlab-test', 'gitlab-test', frontend_group, admin, org, visibility: 20)
+proj_redaction = find_or_create_project('kg-redaction-test-project', 'kg-redaction-test-project', redaction_group, admin, org, visibility: 0)
+proj_smoke = find_or_create_project('gitlab-smoke-tests', 'gitlab-smoke-tests', smoke_tests_group, admin, org, visibility: 20)
 
-# Project 2: gitlab-org/frontend/gitlab-test (public)
-proj_frontend = find_or_create_project('gitlab-test', 'gitlab-test',
-                                       frontend_subgroup, admin, org)
-
-# Project 3: gitlab-org/backend/gitlab-shell (public)
-proj_backend = find_or_create_project('gitlab-shell', 'gitlab-shell',
-                                      backend_subgroup, admin, org)
-
-# Project 4: kg-redaction-test-group/kg-redaction-test-project (private)
-proj_redaction = find_or_create_project('kg-redaction-test-project', 'kg-redaction-test-project',
-                                        redaction_group, admin, org, visibility: 0)
-
-all_public_projects = [proj_smoke, proj_frontend, proj_backend]
-all_projects = all_public_projects + [proj_redaction]
+all_public_projects = [proj_backend, proj_frontend, proj_smoke]
+all_projects = [proj_backend, proj_frontend, proj_redaction, proj_smoke]
 
 manifest[:projects] = {
+  backend: { id: proj_backend.id, name: proj_backend.name, path: proj_backend.full_path,
+           group_key: :backend, visibility: 'public' },
+  frontend: { id: proj_frontend.id, name: proj_frontend.name, path: proj_frontend.full_path,
+           group_key: :frontend, visibility: 'public' },
+  redaction: { id: proj_redaction.id, name: proj_redaction.name, path: proj_redaction.full_path,
+           group_key: :redaction, visibility: 'private' },
   smoke: { id: proj_smoke.id, name: proj_smoke.name, path: proj_smoke.full_path,
            group_key: :smoke_tests, visibility: 'public' },
-  frontend: { id: proj_frontend.id, name: proj_frontend.name, path: proj_frontend.full_path,
-              group_key: :frontend, visibility: 'public' },
-  backend: { id: proj_backend.id, name: proj_backend.name, path: proj_backend.full_path,
-             group_key: :backend, visibility: 'public' },
-  redaction: { id: proj_redaction.id, name: proj_redaction.name, path: proj_redaction.full_path,
-               group_key: :redaction, visibility: 'private' }
 }
 
 # =============================================================================
@@ -279,58 +223,38 @@ rescue StandardError => e
   puts "  ERROR: Could not add #{user.username} to group '#{group.name}': #{e.class}: #{e.message[0..120]}"
 end
 
-def add_project_member(project, user, access_level, label)
-  return if project.member?(user)
-
-  project.add_member(user, access_level)
-  puts "  Added #{user.username} to project '#{project.name}' as #{label}"
-rescue StandardError => e
-  puts "  WARN: Could not add #{user.username} to project '#{project.name}': #{e.message[0..80]}"
-end
-
-# lois: developer on gitlab-org group (sees frontend + backend projects)
-#        + developer on redaction group (sees private project)
+add_group_member(toolbox_group, franklyn, Gitlab::Access::DEVELOPER, 'developer')
 add_group_member(gitlab_org_group, lois, Gitlab::Access::DEVELOPER, 'developer')
 add_group_member(redaction_group, lois, Gitlab::Access::DEVELOPER, 'developer')
 
-# franklyn: developer on toolbox group (sees smoke project only)
-add_group_member(toolbox_group, franklyn, Gitlab::Access::DEVELOPER, 'developer')
-
-# vickey: no group memberships at reporter+ level (sees nothing via traversal)
-# hanna: no group memberships at reporter+ level (sees nothing via traversal)
-
-# Membership summary for manifest
 manifest[:memberships] = {
-  lois: {
-    groups: %i[gitlab_org redaction],
-    access_level: 'developer',
-    visible_project_keys: %i[frontend backend redaction],
-    visible_group_traversals: [
-      manifest[:groups][:gitlab_org][:traversal],
-      manifest[:groups][:redaction][:traversal]
-    ]
-  },
   franklyn: {
     groups: [:toolbox],
     access_level: 'developer',
     visible_project_keys: [:smoke],
     visible_group_traversals: [
-      manifest[:groups][:toolbox][:traversal]
+      manifest[:groups][:toolbox][:traversal],
+    ]
+  },
+  hanna: { groups: [], visible_project_keys: [], visible_group_traversals: [] },
+  lois: {
+    groups: [:gitlab_org, :redaction],
+    access_level: 'developer',
+    visible_project_keys: [:backend, :frontend, :redaction],
+    visible_group_traversals: [
+      manifest[:groups][:gitlab_org][:traversal],
+      manifest[:groups][:redaction][:traversal],
     ]
   },
   vickey: { groups: [], visible_project_keys: [], visible_group_traversals: [] },
-  hanna: { groups: [], visible_project_keys: [], visible_group_traversals: [] }
 }
 
 # =============================================================================
 # 5. POPULATE knowledge_graph_enabled_namespaces
 # =============================================================================
-# This PG table has no Rails model — it's a raw table that siphon replicates
-# to siphon_knowledge_graph_enabled_namespaces in ClickHouse. The dispatcher
-# queries it to find which namespaces to index.
 puts "\n--- 5. Populating knowledge_graph_enabled_namespaces ---"
 
-root_groups = [toolbox_group, gitlab_org_group, redaction_group]
+root_groups = [gitlab_org_group, redaction_group, toolbox_group]
 root_groups.each do |group|
   ActiveRecord::Base.connection.execute(<<~SQL)
     INSERT INTO knowledge_graph_enabled_namespaces (root_namespace_id, created_at, updated_at)
@@ -392,7 +316,7 @@ manifest[:labels] = all_projects.each_with_object({}) do |proj, h|
 end
 
 # =============================================================================
-# 8. CREATE WORK ITEMS (issues)
+# 8. CREATE WORK ITEMS
 # =============================================================================
 puts "\n--- 8. Creating work items (issues) ---"
 
@@ -439,14 +363,12 @@ all_public_projects.each do |proj|
     source_branch = "feature/#{proj.path}-mr-#{i + 1}"
     next if proj.merge_requests.find_by(title: title)
 
-    # Create source branch from default branch
     begin
       proj.repository.create_branch(source_branch, proj.default_branch || 'main')
     rescue StandardError
       # Branch may already exist
     end
 
-    # Always use admin as author (other users may not have project access yet)
     state = i < 4 ? 'merged' : 'opened'
 
     result = MergeRequests::CreateService.new(
@@ -462,9 +384,7 @@ all_public_projects.each do |proj|
     mr = unwrap(result, :merge_request)
 
     if mr.is_a?(MergeRequest) && mr.persisted? && state == 'merged'
-      # MergeRequest uses state_id: 1=opened, 2=closed, 3=merged, 4=locked
       mr.update_columns(state_id: 3)
-      # Update merged_at in metrics if the table exists
       begin
         mr.metrics&.update_columns(merged_at: Time.current - (6 - i).days)
       rescue StandardError
@@ -480,20 +400,18 @@ puts "  Created #{mr_count} new MRs (#{all_projects.sum { |p| p.merge_requests.c
 
 manifest[:merge_requests] = all_projects.each_with_object({}) do |proj, h|
   key = manifest[:projects].find { |_k, v| v[:id] == proj.id }&.first
-  # state_id: 1=opened, 2=closed, 3=merged, 4=locked
   state_map = { 1 => 'opened', 2 => 'closed', 3 => 'merged', 4 => 'locked' }
   mrs = proj.merge_requests.pluck(:id, :iid, :title, :state_id)
   h[key] = mrs.map { |id, iid, title, sid| { id: id, iid: iid, title: title, state: state_map[sid] || 'unknown' } }
 end
 
 # =============================================================================
-# 10. CREATE NOTES (on MRs and issues)
+# 10. CREATE NOTES
 # =============================================================================
 puts "\n--- 10. Creating notes ---"
 
 note_count = 0
 all_public_projects.each do |proj|
-  # Notes on MRs
   proj.merge_requests.limit(4).each do |mr|
     2.times do |i|
       body = "Review comment #{i + 1} on #{mr.title}"
@@ -508,7 +426,6 @@ all_public_projects.each do |proj|
     end
   end
 
-  # Notes on issues
   proj.issues.limit(4).each do |issue|
     2.times do |i|
       body = "Discussion comment #{i + 1} on #{issue.title}"
@@ -527,7 +444,6 @@ puts "  Created #{note_count} new notes"
 
 manifest[:notes] = all_projects.each_with_object({}) do |proj, h|
   key = manifest[:projects].find { |_k, v| v[:id] == proj.id }&.first
-  # Count non-system notes in this project
   count = Note.joins("INNER JOIN issues ON notes.noteable_type = 'Issue' AND notes.noteable_id = issues.id")
               .where(issues: { project_id: proj.id })
               .where(system: false).count +
@@ -575,9 +491,8 @@ all_projects.each do |proj|
 end
 
 # Per-user expected visible counts (based on group memberships)
-# lois sees: frontend + backend + redaction projects
-lois_visible = %i[frontend backend redaction]
 franklyn_visible = [:smoke]
+lois_visible = [:backend, :frontend, :redaction]
 
 manifest[:counts][:per_user] = {
   root: {
@@ -586,20 +501,20 @@ manifest[:counts][:per_user] = {
     work_items: total_work_items,
     notes: total_notes
   },
-  lois: {
-    projects: lois_visible.size,
-    merge_requests: lois_visible.sum { |k| manifest[:counts][:per_project][k][:merge_requests] },
-    work_items: lois_visible.sum { |k| manifest[:counts][:per_project][k][:work_items] },
-    notes: lois_visible.sum { |k| manifest[:counts][:per_project][k][:notes] }
-  },
   franklyn: {
     projects: franklyn_visible.size,
     merge_requests: franklyn_visible.sum { |k| manifest[:counts][:per_project][k][:merge_requests] },
     work_items: franklyn_visible.sum { |k| manifest[:counts][:per_project][k][:work_items] },
     notes: franklyn_visible.sum { |k| manifest[:counts][:per_project][k][:notes] }
   },
+  hanna: { projects: 0, merge_requests: 0, work_items: 0, notes: 0 },
+  lois: {
+    projects: lois_visible.size,
+    merge_requests: lois_visible.sum { |k| manifest[:counts][:per_project][k][:merge_requests] },
+    work_items: lois_visible.sum { |k| manifest[:counts][:per_project][k][:work_items] },
+    notes: lois_visible.sum { |k| manifest[:counts][:per_project][k][:notes] }
+  },
   vickey: { projects: 0, merge_requests: 0, work_items: 0, notes: 0 },
-  hanna: { projects: 0, merge_requests: 0, work_items: 0, notes: 0 }
 }
 
 # =============================================================================
@@ -641,9 +556,9 @@ manifest[:counts][:per_user].each do |user, counts|
 end
 puts ''
 puts 'Memberships:'
-puts '  lois: developer on gitlab-org + kg-redaction-test-group -> sees frontend, backend, redaction projects'
-puts '  franklyn: developer on toolbox -> sees smoke project'
-puts '  vickey: no memberships -> sees nothing'
+puts '  franklyn: developer on toolbox -> sees smoke projects'
 puts '  hanna: no memberships -> sees nothing'
+puts '  lois: developer on gitlab_org + redaction -> sees backend, frontend, redaction projects'
+puts '  vickey: no memberships -> sees nothing'
 puts ''
 puts '=== DONE ==='
