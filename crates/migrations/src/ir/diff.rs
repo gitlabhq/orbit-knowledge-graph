@@ -61,15 +61,15 @@ pub fn diff_schemas(desired: &TableSchema, current: Option<&TableSchema>) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{ClickHouseType, Engine};
+    use crate::ir::{ClickHouseType, DELETED_COLUMN, Engine, VERSION_COLUMN};
 
     fn make_table(name: &str, columns: Vec<ColumnSchema>) -> TableSchema {
         TableSchema {
             name: name.to_string(),
             columns,
             engine: Engine::ReplacingMergeTree {
-                version_column: "_version".to_string(),
-                deleted_column: Some("_deleted".to_string()),
+                version_column: VERSION_COLUMN.to_string(),
+                deleted_column: Some(DELETED_COLUMN.to_string()),
             },
             order_by: vec!["id".to_string()],
             primary_key: vec!["id".to_string()],

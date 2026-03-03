@@ -1,4 +1,4 @@
-use super::{ClickHouseType, ColumnSchema, Engine, TableSchema};
+use super::{ClickHouseType, ColumnSchema, Engine, TableSchema, VERSION_COLUMN};
 
 /// A raw row from `DESCRIBE TABLE`.
 #[derive(Debug)]
@@ -86,15 +86,15 @@ fn parse_engine(sql: &str) -> Engine {
         let after = &sql[start + "ReplacingMergeTree(".len()..];
         if let Some(end) = after.find(')') {
             let params: Vec<&str> = after[..end].split(',').map(|s| s.trim()).collect();
-            version_column = params.first().unwrap_or(&"_version").to_string();
+            version_column = params.first().unwrap_or(&VERSION_COLUMN).to_string();
             if params.len() > 1 {
                 deleted_column = Some(params[1].to_string());
             }
         } else {
-            version_column = "_version".to_string();
+            version_column = VERSION_COLUMN.to_string();
         }
     } else {
-        version_column = "_version".to_string();
+        version_column = VERSION_COLUMN.to_string();
     }
 
     Engine::ReplacingMergeTree {
@@ -141,6 +141,7 @@ pub fn build_table_schema(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::DELETED_COLUMN;
 
     #[test]
     fn parse_nullable_type() {
@@ -170,8 +171,8 @@ mod tests {
         assert_eq!(
             engine,
             Engine::ReplacingMergeTree {
-                version_column: "_version".to_string(),
-                deleted_column: Some("_deleted".to_string()),
+                version_column: VERSION_COLUMN.to_string(),
+                deleted_column: Some(DELETED_COLUMN.to_string()),
             }
         );
     }
@@ -183,7 +184,7 @@ mod tests {
         assert_eq!(
             engine,
             Engine::ReplacingMergeTree {
-                version_column: "_version".to_string(),
+                version_column: VERSION_COLUMN.to_string(),
                 deleted_column: None,
             }
         );

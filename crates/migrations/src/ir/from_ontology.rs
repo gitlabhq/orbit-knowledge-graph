@@ -284,8 +284,8 @@ mod tests {
                 "relationship_kind",
                 "target_id",
                 "target_kind",
-                "_version",
-                "_deleted",
+                VERSION_COLUMN,
+                DELETED_COLUMN,
             ]
         );
     }

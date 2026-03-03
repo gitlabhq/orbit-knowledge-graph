@@ -119,7 +119,7 @@ fn render_column(column: &ColumnSchema) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{ClickHouseType, Engine};
+    use crate::ir::{ClickHouseType, DELETED_COLUMN, Engine, VERSION_COLUMN};
 
     #[test]
     fn create_table_renders_correctly() {
@@ -139,21 +139,21 @@ mod tests {
                     default_value: None,
                 },
                 ColumnSchema {
-                    name: "_version".to_string(),
+                    name: VERSION_COLUMN.to_string(),
                     column_type: ClickHouseType::DateTime64,
                     nullable: false,
                     default_value: Some("now64(6)".to_string()),
                 },
                 ColumnSchema {
-                    name: "_deleted".to_string(),
+                    name: DELETED_COLUMN.to_string(),
                     column_type: ClickHouseType::Bool,
                     nullable: false,
                     default_value: Some("false".to_string()),
                 },
             ],
             engine: Engine::ReplacingMergeTree {
-                version_column: "_version".to_string(),
-                deleted_column: Some("_deleted".to_string()),
+                version_column: VERSION_COLUMN.to_string(),
+                deleted_column: Some(DELETED_COLUMN.to_string()),
             },
             order_by: vec!["id".to_string()],
             primary_key: vec!["id".to_string()],
@@ -183,8 +183,8 @@ mod tests {
                 default_value: None,
             }],
             engine: Engine::ReplacingMergeTree {
-                version_column: "_version".to_string(),
-                deleted_column: Some("_deleted".to_string()),
+                version_column: VERSION_COLUMN.to_string(),
+                deleted_column: Some(DELETED_COLUMN.to_string()),
             },
             order_by: vec![
                 "traversal_path".to_string(),
@@ -251,8 +251,8 @@ mod tests {
                 default_value: None,
             }],
             engine: Engine::ReplacingMergeTree {
-                version_column: "_version".to_string(),
-                deleted_column: Some("_deleted".to_string()),
+                version_column: VERSION_COLUMN.to_string(),
+                deleted_column: Some(DELETED_COLUMN.to_string()),
             },
             order_by: vec!["id".to_string()],
             primary_key: vec!["id".to_string()],

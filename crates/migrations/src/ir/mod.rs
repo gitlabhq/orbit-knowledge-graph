@@ -5,6 +5,8 @@ pub mod sql;
 
 use std::fmt;
 
+pub use ontology::{DELETED_COLUMN, VERSION_COLUMN};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableSchema {
     pub name: String,
