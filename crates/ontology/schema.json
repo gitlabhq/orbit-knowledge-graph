@@ -121,7 +121,13 @@
         "anyOf": [
           { "required": ["node"] },
           { "required": ["nodes"] }
-        ]
+        ],
+        "properties": {
+          "nodes": {
+            "maxItems": 5,
+            "description": "Search queries accept at most 5 nodes to limit UNION ALL fan-out"
+          }
+        }
       }
     },
     {
