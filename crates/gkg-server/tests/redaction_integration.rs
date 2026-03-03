@@ -2021,6 +2021,134 @@ fn fail_closed_null_type_denies_row() {
     );
 }
 
+/// Multi-node search: a row where ALL redaction columns are NULL must be denied.
+///
+/// This exercises the `checked_any` guard in `apply_authorizations`. In normal
+/// operation this shouldn't happen (every UNION arm populates its own node),
+/// but if it did, fail-closed must kick in.
+#[test]
+fn search_all_null_redaction_columns_denies_row() {
+    use arrow::array::{Array, Int64Array, StringArray};
+    use arrow::datatypes::{Field, Schema};
+    use arrow::record_batch::RecordBatch;
+    use query_engine::{QueryType, ResultContext};
+    use std::sync::Arc;
+
+    fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
+        let fields: Vec<Field> = columns
+            .iter()
+            .map(|(name, arr)| Field::new(*name, arr.data_type().clone(), true))
+            .collect();
+        let schema = Arc::new(Schema::new(fields));
+        let arrays: Vec<Arc<dyn Array>> = columns.into_iter().map(|(_, arr)| arr).collect();
+        RecordBatch::try_new(schema, arrays).unwrap()
+    }
+
+    let ontology = load_ontology();
+
+    // Row 0: valid user, NULL project (normal UNION padding)
+    // Row 1: ALL NULLs — no entity at all
+    let batch = make_batch(vec![
+        (
+            "_gkg_u_id",
+            Arc::new(Int64Array::from(vec![Some(1), None])) as Arc<dyn Array>,
+        ),
+        (
+            "_gkg_u_type",
+            Arc::new(StringArray::from(vec![Some("User"), None])) as Arc<dyn Array>,
+        ),
+        (
+            "_gkg_p_id",
+            Arc::new(Int64Array::from(vec![None, None])) as Arc<dyn Array>,
+        ),
+        (
+            "_gkg_p_type",
+            Arc::new(StringArray::from(vec![None::<&str>, None])) as Arc<dyn Array>,
+        ),
+    ]);
+
+    let mut ctx = ResultContext::new().with_query_type(QueryType::Search);
+    ctx.add_node("u", "User");
+    ctx.add_node("p", "Project");
+    for (entity, config) in build_entity_auth(&ontology) {
+        ctx.add_entity_auth(entity, config);
+    }
+
+    let mut result = QueryResult::from_batches(&[batch], &ctx);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1]);
+    mock_service.allow("project", &[100]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(redacted, 1, "all-NULL row must be denied");
+    assert!(result.rows()[0].is_authorized(), "user 1 should pass");
+    assert!(
+        !result.rows()[1].is_authorized(),
+        "all-NULL row must be denied (checked_any guard)"
+    );
+}
+
+/// Single-node search where the only node has a NULL ID: must be denied.
+///
+/// With `is_search = true`, the NULL node is skipped (not fail-closed), but
+/// then `checked_any` is false, so the row is still denied. This confirms
+/// that single-node search with data corruption is not accidentally permitted.
+#[test]
+fn search_single_node_null_id_denies_row() {
+    use arrow::array::{Array, Int64Array, StringArray};
+    use arrow::datatypes::{Field, Schema};
+    use arrow::record_batch::RecordBatch;
+    use query_engine::{QueryType, ResultContext};
+    use std::sync::Arc;
+
+    fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
+        let fields: Vec<Field> = columns
+            .iter()
+            .map(|(name, arr)| Field::new(*name, arr.data_type().clone(), true))
+            .collect();
+        let schema = Arc::new(Schema::new(fields));
+        let arrays: Vec<Arc<dyn Array>> = columns.into_iter().map(|(_, arr)| arr).collect();
+        RecordBatch::try_new(schema, arrays).unwrap()
+    }
+
+    let ontology = load_ontology();
+
+    // Row 0: valid user
+    // Row 1: NULL user ID (data corruption in single-node search)
+    let batch = make_batch(vec![
+        (
+            "_gkg_u_id",
+            Arc::new(Int64Array::from(vec![Some(1), None])) as Arc<dyn Array>,
+        ),
+        (
+            "_gkg_u_type",
+            Arc::new(StringArray::from(vec![Some("User"), Some("User")])) as Arc<dyn Array>,
+        ),
+    ]);
+
+    let mut ctx = ResultContext::new().with_query_type(QueryType::Search);
+    ctx.add_node("u", "User");
+    for (entity, config) in build_entity_auth(&ontology) {
+        ctx.add_entity_auth(entity, config);
+    }
+
+    let mut result = QueryResult::from_batches(&[batch], &ctx);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(redacted, 1, "NULL ID row must be denied even in search");
+    assert!(result.rows()[0].is_authorized(), "user 1 should pass");
+    assert!(
+        !result.rows()[1].is_authorized(),
+        "NULL ID in single-node search must be denied (checked_any sees zero checkable nodes)"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Column Selection Integration Subtests
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1132,6 +1132,14 @@ mod ontology_integration_tests {
             "expected _gkg_p_id redaction column: {}",
             result.base.sql
         );
+
+        // Security: traversal_path filter must be present in the Project
+        // UNION arm (gl_user is skip-listed, so only Project gets one).
+        assert!(
+            result.base.sql.contains("startsWith(p.traversal_path,"),
+            "Project UNION arm must have traversal_path security filter: {}",
+            result.base.sql
+        );
     }
 
     #[test]
