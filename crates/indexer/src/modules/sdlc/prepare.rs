@@ -74,6 +74,7 @@ pub struct PreparedEtlConfig {
     pub extract_query: String,
     pub fields: Vec<PreparedField>,
     pub edges: Vec<PreparedEdge>,
+    pub cursor_columns: Vec<String>,
 }
 
 impl PreparedEtlConfig {
@@ -86,6 +87,7 @@ impl PreparedEtlConfig {
             extract_query: build_extract_query(node, etl)?,
             fields: node.fields.iter().map(PreparedField::from_field).collect(),
             edges: prepare_edges(node, etl, ontology),
+            cursor_columns: node.sort_key.clone(),
         })
     }
 }
@@ -104,6 +106,7 @@ pub struct PreparedEdgeEtl {
     pub target_kind: SqlExpr,
     pub source_type_filter: Option<String>,
     pub namespaced: bool,
+    pub cursor_columns: Vec<String>,
 }
 
 impl PreparedEdgeEtl {
@@ -127,6 +130,7 @@ impl PreparedEdgeEtl {
             target_kind,
             source_type_filter,
             namespaced: config.scope == EtlScope::Namespaced,
+            cursor_columns: ontology.edge_sort_key().to_vec(),
         }
     }
 }

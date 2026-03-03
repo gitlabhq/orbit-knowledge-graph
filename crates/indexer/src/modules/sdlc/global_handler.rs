@@ -13,10 +13,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
+use super::cursor_paginator::{CursorValue, serialize_cursor};
 use super::locking::global_lock_key;
 use super::metrics::SdlcMetrics;
 use super::pipeline::OntologyEntityPipeline;
-use super::watermark_store::{WatermarkError, WatermarkStore};
+use super::watermark_store::{
+    CursorReporter, InProgressCursor, WatermarkError, WatermarkState, WatermarkStore,
+};
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::topic::GlobalIndexingRequest;
 
@@ -24,6 +27,8 @@ use crate::topic::GlobalIndexingRequest;
 pub struct GlobalQueryParams {
     pub last_watermark: String,
     pub watermark: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub __starting_cursor: Option<String>,
 }
 
 impl GlobalQueryParams {
@@ -31,7 +36,15 @@ impl GlobalQueryParams {
         Self {
             last_watermark: last_watermark.format(TIMESTAMP_FORMAT).to_string(),
             watermark: watermark.format(TIMESTAMP_FORMAT).to_string(),
+            __starting_cursor: None,
         }
+    }
+
+    pub fn with_starting_cursor(mut self, cursor_values: &[CursorValue]) -> Self {
+        if !cursor_values.is_empty() {
+            self.__starting_cursor = Some(serialize_cursor(cursor_values));
+        }
+        self
     }
 
     pub fn to_json(&self) -> serde_json::Value {
@@ -107,26 +120,59 @@ impl Handler for GlobalHandler {
             SerializationError::Json(e) => HandlerError::Deserialization(e),
         })?;
 
-        let last_watermark = match self.watermark_store.get_global_watermark().await {
-            Ok(w) => {
+        let state = match self.watermark_store.get_global_state().await {
+            Ok(s) => {
                 debug!(
-                    watermark = %w.format(TIMESTAMP_FORMAT),
-                    "retrieved global watermark"
+                    watermark = %s.watermark.format(TIMESTAMP_FORMAT),
+                    has_cursor = s.in_progress.is_some(),
+                    "retrieved global state"
                 );
-                w
+                s
             }
             Err(WatermarkError::NoData) => {
                 info!("no global watermark found, starting from epoch");
-                DateTime::<Utc>::UNIX_EPOCH
+                WatermarkState {
+                    watermark: DateTime::<Utc>::UNIX_EPOCH,
+                    in_progress: None,
+                }
             }
             Err(error) => {
                 error!(%error, "global watermark fetch failed, reprocessing from epoch");
-                DateTime::<Utc>::UNIX_EPOCH
+                WatermarkState {
+                    watermark: DateTime::<Utc>::UNIX_EPOCH,
+                    in_progress: None,
+                }
             }
         };
 
+        let is_resuming = state.in_progress.is_some();
+        let (params, target_watermark) = match &state.in_progress {
+            Some(cursor) => {
+                let params = GlobalQueryParams::new(&state.watermark, &cursor.upper_watermark)
+                    .with_starting_cursor(&cursor.cursor_values);
+                (params, cursor.upper_watermark)
+            }
+            None => {
+                let params = GlobalQueryParams::new(&state.watermark, &payload.watermark);
+                (params, payload.watermark)
+            }
+        };
+
+        if !is_resuming {
+            let initial_cursor = InProgressCursor {
+                cursor_values: vec![],
+                upper_watermark: target_watermark,
+            };
+            if let Err(error) = self
+                .watermark_store
+                .save_global_cursor(&initial_cursor)
+                .await
+            {
+                error!(%error, "failed to save initial global cursor");
+            }
+        }
+
         let started_at = Instant::now();
-        let params = GlobalQueryParams::new(&last_watermark, &payload.watermark);
 
         info!(
             from_watermark = %params.last_watermark,
@@ -135,12 +181,21 @@ impl Handler for GlobalHandler {
             "starting global indexing"
         );
 
+        let cursor_reporter = GlobalCursorReporter {
+            watermark_store: Arc::clone(&self.watermark_store),
+            upper_watermark: target_watermark,
+        };
+
         let mut errors = Vec::new();
         let mut successful_pipelines = 0;
         let mut total_rows_indexed: u64 = 0;
         for pipeline in &self.pipelines {
             match pipeline
-                .process(params.to_json(), context.destination.as_ref())
+                .process(
+                    params.to_json(),
+                    context.destination.as_ref(),
+                    &cursor_reporter,
+                )
                 .await
             {
                 Ok(rows) => {
@@ -160,19 +215,28 @@ impl Handler for GlobalHandler {
 
         if errors.is_empty() && total_rows_indexed > 0 {
             self.watermark_store
-                .set_global_watermark(&payload.watermark)
+                .complete_global_watermark(&target_watermark)
                 .await
                 .map_err(|e| {
-                    HandlerError::Processing(format!("failed to update global watermark: {e}"))
+                    HandlerError::Processing(format!("failed to complete global watermark: {e}"))
                 })?;
 
             self.metrics
-                .record_watermark_lag("global", &payload.watermark);
+                .record_watermark_lag("global", &target_watermark);
 
             info!(
-                watermark = %payload.watermark.format(TIMESTAMP_FORMAT),
+                watermark = %target_watermark.format(TIMESTAMP_FORMAT),
                 "global watermark updated"
             );
+        } else if errors.is_empty() {
+            // Clear cursor even when no rows indexed
+            if let Err(error) = self
+                .watermark_store
+                .complete_global_watermark(&state.watermark)
+                .await
+            {
+                error!(%error, "failed to clear global cursor");
+            }
         }
 
         if errors.is_empty() {
@@ -213,11 +277,32 @@ impl Handler for GlobalHandler {
     }
 }
 
+struct GlobalCursorReporter {
+    watermark_store: Arc<dyn WatermarkStore>,
+    upper_watermark: DateTime<Utc>,
+}
+
+#[async_trait]
+impl CursorReporter for GlobalCursorReporter {
+    async fn on_page_complete(&self, cursor_values: &[CursorValue]) -> Result<(), HandlerError> {
+        let cursor = InProgressCursor {
+            cursor_values: cursor_values.to_vec(),
+            upper_watermark: self.upper_watermark,
+        };
+        self.watermark_store
+            .save_global_cursor(&cursor)
+            .await
+            .map_err(|error| {
+                HandlerError::Processing(format!("failed to save global cursor: {error}"))
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::modules::sdlc::test_fixtures::{
-        EmptyDatalake, MockWatermarkStore, NonEmptyDatalake,
+        EmptyDatalake, NonEmptyDatalake,
     };
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use ontology::{DataType, EtlConfig, EtlScope, Field, NodeEntity, Ontology};
@@ -246,32 +331,54 @@ mod tests {
 
     #[async_trait]
     impl WatermarkStore for RecordingGlobalWatermarkStore {
-        async fn get_global_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
-            Ok(DateTime::<Utc>::UNIX_EPOCH)
-        }
-
-        async fn set_global_watermark(
-            &self,
-            watermark: &DateTime<Utc>,
-        ) -> Result<(), WatermarkError> {
-            *self.watermark.lock().unwrap() = Some(*watermark);
-            Ok(())
-        }
-
-        async fn get_namespace_watermark(
+        async fn get_namespace_state(
             &self,
             _: i64,
             _: &str,
-        ) -> Result<DateTime<Utc>, WatermarkError> {
-            Ok(DateTime::<Utc>::UNIX_EPOCH)
+        ) -> Result<WatermarkState, WatermarkError> {
+            Ok(WatermarkState {
+                watermark: DateTime::<Utc>::UNIX_EPOCH,
+                in_progress: None,
+            })
         }
 
-        async fn set_namespace_watermark(
+        async fn save_namespace_cursor(
+            &self,
+            _: i64,
+            _: &str,
+            _: &InProgressCursor,
+        ) -> Result<(), WatermarkError> {
+            Ok(())
+        }
+
+        async fn complete_namespace_watermark(
             &self,
             _: i64,
             _: &str,
             _: &DateTime<Utc>,
         ) -> Result<(), WatermarkError> {
+            Ok(())
+        }
+
+        async fn get_global_state(&self) -> Result<WatermarkState, WatermarkError> {
+            Ok(WatermarkState {
+                watermark: DateTime::<Utc>::UNIX_EPOCH,
+                in_progress: None,
+            })
+        }
+
+        async fn save_global_cursor(
+            &self,
+            _: &InProgressCursor,
+        ) -> Result<(), WatermarkError> {
+            Ok(())
+        }
+
+        async fn complete_global_watermark(
+            &self,
+            watermark: &DateTime<Utc>,
+        ) -> Result<(), WatermarkError> {
+            *self.watermark.lock().unwrap() = Some(*watermark);
             Ok(())
         }
     }
@@ -323,7 +430,7 @@ mod tests {
         ];
 
         let handler = GlobalHandler::new(
-            Arc::new(MockWatermarkStore),
+            Arc::new(RecordingGlobalWatermarkStore::new()),
             pipelines,
             test_metrics(),
             GlobalHandlerConfig::default(),
@@ -359,7 +466,7 @@ mod tests {
         ];
 
         let handler = GlobalHandler::new(
-            Arc::new(MockWatermarkStore),
+            Arc::new(RecordingGlobalWatermarkStore::new()),
             pipelines,
             test_metrics(),
             GlobalHandlerConfig::default(),
@@ -466,10 +573,12 @@ mod tests {
 
         handler.handle(context, envelope).await.unwrap();
 
+        // When no rows indexed, complete_global_watermark is called with the old watermark (epoch)
+        // to clear the cursor, but the watermark itself doesn't advance
         assert_eq!(
             store.stored_watermark(),
-            None,
-            "global watermark should not be updated when no rows were indexed"
+            Some(DateTime::<Utc>::UNIX_EPOCH),
+            "global watermark should remain at epoch when no rows were indexed"
         );
     }
 }

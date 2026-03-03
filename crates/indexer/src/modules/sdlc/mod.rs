@@ -1,3 +1,4 @@
+mod cursor_paginator;
 mod datalake;
 pub mod dispatch;
 mod global_handler;
@@ -201,7 +202,9 @@ pub(crate) mod test_fixtures {
     use futures::stream;
 
     use super::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
-    use super::watermark_store::{WatermarkError, WatermarkStore};
+    use super::watermark_store::{
+        InProgressCursor, WatermarkError, WatermarkState, WatermarkStore,
+    };
 
     pub(crate) struct EmptyDatalake;
 
@@ -258,30 +261,56 @@ pub(crate) mod test_fixtures {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) struct MockWatermarkStore;
 
     #[async_trait]
     impl WatermarkStore for MockWatermarkStore {
-        async fn get_global_watermark(&self) -> Result<DateTime<Utc>, WatermarkError> {
-            Ok(DateTime::<Utc>::UNIX_EPOCH)
+        async fn get_namespace_state(
+            &self,
+            _: i64,
+            _: &str,
+        ) -> Result<WatermarkState, WatermarkError> {
+            Ok(WatermarkState {
+                watermark: DateTime::<Utc>::UNIX_EPOCH,
+                in_progress: None,
+            })
         }
 
-        async fn set_global_watermark(&self, _: &DateTime<Utc>) -> Result<(), WatermarkError> {
+        async fn save_namespace_cursor(
+            &self,
+            _: i64,
+            _: &str,
+            _: &InProgressCursor,
+        ) -> Result<(), WatermarkError> {
             Ok(())
         }
 
-        async fn get_namespace_watermark(
+        async fn complete_namespace_watermark(
             &self,
             _: i64,
             _: &str,
-        ) -> Result<DateTime<Utc>, WatermarkError> {
-            Ok(DateTime::<Utc>::UNIX_EPOCH)
+            _: &DateTime<Utc>,
+        ) -> Result<(), WatermarkError> {
+            Ok(())
         }
 
-        async fn set_namespace_watermark(
+        async fn get_global_state(&self) -> Result<WatermarkState, WatermarkError> {
+            Ok(WatermarkState {
+                watermark: DateTime::<Utc>::UNIX_EPOCH,
+                in_progress: None,
+            })
+        }
+
+        async fn save_global_cursor(
             &self,
-            _: i64,
-            _: &str,
+            _: &InProgressCursor,
+        ) -> Result<(), WatermarkError> {
+            Ok(())
+        }
+
+        async fn complete_global_watermark(
+            &self,
             _: &DateTime<Utc>,
         ) -> Result<(), WatermarkError> {
             Ok(())

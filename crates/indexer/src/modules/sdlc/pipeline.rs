@@ -12,12 +12,16 @@ use ontology::{EdgeSourceEtlConfig, NodeEntity, Ontology};
 use serde_json::Value;
 use tracing::{debug, info};
 
+use super::cursor_paginator::{CursorPaginator, CursorValue, cursor_params};
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
 use super::prepare::{PreparedEdgeEtl, PreparedEtlConfig};
 use super::transform::{
     SOURCE_DATA_TABLE, build_all_edge_sql, build_edge_etl_transform_sql, build_transform_sql,
 };
+use super::watermark_store::CursorReporter;
+
+const DEFAULT_PAGE_SIZE: u64 = 100_000;
 
 pub struct OntologyEntityPipeline {
     entity_name: String,
@@ -28,6 +32,8 @@ pub struct OntologyEntityPipeline {
     edge_transforms: Vec<String>,
     datalake: Arc<dyn DatalakeQuery>,
     metrics: SdlcMetrics,
+    cursor_columns: Vec<String>,
+    page_size: u64,
 }
 
 impl OntologyEntityPipeline {
@@ -50,6 +56,8 @@ impl OntologyEntityPipeline {
             edge_transforms,
             datalake,
             metrics,
+            cursor_columns: config.cursor_columns,
+            page_size: DEFAULT_PAGE_SIZE,
         })
     }
 
@@ -61,100 +69,75 @@ impl OntologyEntityPipeline {
         &self,
         params: Value,
         destination: &dyn Destination,
+        cursor_reporter: &dyn CursorReporter,
     ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
 
         let entity_writer = destination
             .new_batch_writer(&self.destination_table)
             .await
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to create {} writer: {e}",
-                    self.entity_name
-                ))
-            })?;
+            .map_err(|e| self.error(format!("failed to create writer: {e}")))?;
 
         let edge_writer = destination
             .new_batch_writer(&self.edge_table)
             .await
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to create edge writer for {}: {e}",
-                    self.entity_name
-                ))
-            })?;
+            .map_err(|e| self.error(format!("failed to create edge writer: {e}")))?;
 
-        debug!(
-            entity = %self.entity_name,
-            %params,
-            "querying datalake for entity data"
-        );
+        let mut paginator =
+            CursorPaginator::new(self.cursor_columns.clone(), self.page_size);
+        if let Some(starting) = extract_starting_cursor(&params) {
+            paginator = paginator.with_cursor(starting);
+        }
 
-        let query_start = Instant::now();
-        let mut stream = self
-            .datalake
-            .query_arrow(&self.extract_query, params)
-            .await
-            .map_err(|e| {
-                HandlerError::Processing(format!("failed to query {} data: {e}", self.entity_name))
-            })?;
-        self.metrics
-            .record_datalake_query_duration(&self.entity_name, query_start.elapsed().as_secs_f64());
-
-        let mut batch_count: u64 = 0;
         let mut total_rows: u64 = 0;
         let mut total_edges: u64 = 0;
+        let mut total_batches: u64 = 0;
 
-        while let Some(result) = stream.next().await {
-            let source_batch = result.map_err(|e| {
-                HandlerError::Processing(format!("failed to read {} batch: {e}", self.entity_name))
-            })?;
+        loop {
+            let page_query = paginator.build_page_query(&self.extract_query);
+            let page_params = merge_cursor_params(&params, &paginator);
 
-            if source_batch.num_rows() == 0 {
-                continue;
+            let query_start = Instant::now();
+            let mut stream = self
+                .datalake
+                .query_arrow(&page_query, page_params)
+                .await
+                .map_err(|e| self.error(format!("failed to query data: {e}")))?;
+            self.metrics
+                .record_datalake_query_duration(&self.entity_name, query_start.elapsed().as_secs_f64());
+
+            let mut page_rows: u64 = 0;
+            let mut last_cursor: Option<Vec<CursorValue>> = None;
+
+            while let Some(result) = stream.next().await {
+                let batch = result
+                    .map_err(|e| self.error(format!("failed to read batch: {e}")))?;
+                if batch.num_rows() == 0 {
+                    continue;
+                }
+
+                total_batches += 1;
+                page_rows += batch.num_rows() as u64;
+                last_cursor = paginator.advance(&batch);
+
+                let edges = self
+                    .transform_and_write_batch(batch, entity_writer.as_ref(), edge_writer.as_ref())
+                    .await?;
+                total_edges += edges as u64;
             }
 
-            batch_count += 1;
-            let batch_rows = source_batch.num_rows() as u64;
-            total_rows += batch_rows;
+            total_rows += page_rows;
 
-            let edges_written = self
-                .transform_and_write_batch(
-                    source_batch,
-                    entity_writer.as_ref(),
-                    edge_writer.as_ref(),
-                )
-                .await?;
-            total_edges += edges_written as u64;
+            if let Some(ref cursor) = last_cursor {
+                cursor_reporter.on_page_complete(cursor).await?;
+            }
+
+            if paginator.is_last_page(page_rows) {
+                break;
+            }
         }
 
-        let elapsed = started_at.elapsed();
-
-        self.metrics.record_pipeline_completion(
-            &self.entity_name,
-            elapsed.as_secs_f64(),
-            total_rows,
-            total_edges,
-            batch_count,
-        );
-
-        if total_rows == 0 {
-            debug!(
-                entity = %self.entity_name,
-                elapsed_ms = elapsed.as_millis() as u64,
-                "entity pipeline processing complete"
-            );
-        } else {
-            info!(
-                entity = %self.entity_name,
-                batches_processed = batch_count,
-                total_rows,
-                total_edges,
-                elapsed_ms = elapsed.as_millis() as u64,
-                "entity pipeline processing complete"
-            );
-        }
-
+        self.log_completion(started_at, total_rows, total_edges, total_batches);
         Ok(total_rows)
     }
 
@@ -167,49 +150,28 @@ impl OntologyEntityPipeline {
         let transform_start = Instant::now();
         let session = SessionContext::new();
 
-        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to create mem table for {}: {e}",
-                self.entity_name
-            ))
-        })?;
+        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]])
+            .map_err(|e| self.error(format!("failed to create mem table: {e}")))?;
 
         session
             .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to register table for {}: {e}",
-                    self.entity_name
-                ))
-            })?;
+            .map_err(|e| self.error(format!("failed to register table: {e}")))?;
 
         let transformed = self.execute_query(&session, &self.transform_sql).await?;
-        let rows_transformed = transformed.num_rows();
         entity_writer
             .write_batch(&[transformed])
             .await
-            .map_err(|e| {
-                HandlerError::Processing(format!("failed to write {}: {e}", self.entity_name))
-            })?;
-
-        debug!(
-            entity = %self.entity_name,
-            rows = rows_transformed,
-            "entity batch transform and write complete"
-        );
+            .map_err(|e| self.error(format!("failed to write entities: {e}")))?;
 
         let mut edges_written = 0;
         for edge_sql in &self.edge_transforms {
             let edges = self.execute_query(&session, edge_sql).await?;
-            let edge_count = edges.num_rows();
-            if edge_count > 0 {
-                edge_writer.write_batch(&[edges]).await.map_err(|e| {
-                    HandlerError::Processing(format!(
-                        "failed to write edges for {}: {e}",
-                        self.entity_name
-                    ))
-                })?;
-                edges_written += edge_count;
+            if edges.num_rows() > 0 {
+                edge_writer
+                    .write_batch(std::slice::from_ref(&edges))
+                    .await
+                    .map_err(|e| self.error(format!("failed to write edges: {e}")))?;
+                edges_written += edges.num_rows();
             }
         }
 
@@ -224,38 +186,52 @@ impl OntologyEntityPipeline {
         session: &SessionContext,
         sql: &str,
     ) -> Result<RecordBatch, HandlerError> {
-        let dataframe = session.sql(sql).await.map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to execute sql for {}: {e}",
-                self.entity_name
-            ))
-        })?;
+        let dataframe = session
+            .sql(sql)
+            .await
+            .map_err(|e| self.error(format!("failed to execute sql: {e}")))?;
 
         let schema = Arc::new(dataframe.schema().as_arrow().clone());
-
-        let batches = dataframe.collect().await.map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to collect results for {}: {e}",
-                self.entity_name
-            ))
-        })?;
+        let batches = dataframe
+            .collect()
+            .await
+            .map_err(|e| self.error(format!("failed to collect results: {e}")))?;
 
         if batches.is_empty() {
             return Ok(RecordBatch::new_empty(schema));
         }
 
-        concat_batches(&schema, &batches).map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to concat batches for {}: {e}",
-                self.entity_name
-            ))
-        })
+        concat_batches(&schema, &batches)
+            .map_err(|e| self.error(format!("failed to concat batches: {e}")))
+    }
+
+    fn error(&self, message: String) -> HandlerError {
+        HandlerError::Processing(format!("{}: {message}", self.entity_name))
+    }
+
+    fn log_completion(&self, started_at: Instant, total_rows: u64, total_edges: u64, total_batches: u64) {
+        let elapsed = started_at.elapsed();
+        self.metrics.record_pipeline_completion(
+            &self.entity_name,
+            elapsed.as_secs_f64(),
+            total_rows,
+            total_edges,
+            total_batches,
+        );
+
+        if total_rows == 0 {
+            debug!(entity = %self.entity_name, elapsed_ms = elapsed.as_millis() as u64, "entity pipeline complete");
+        } else {
+            info!(
+                entity = %self.entity_name, batches_processed = total_batches,
+                total_rows, total_edges, elapsed_ms = elapsed.as_millis() as u64,
+                "entity pipeline complete"
+            );
+        }
     }
 }
 
-/// Pipeline for processing edge ETL from join tables.
-///
-/// Unlike `OntologyEntityPipeline`, this only produces edges (no nodes).
+/// Pipeline for edge ETL from join tables. Produces edges only, no nodes.
 pub struct OntologyEdgePipeline {
     relationship_kind: String,
     edge_table: String,
@@ -263,6 +239,8 @@ pub struct OntologyEdgePipeline {
     transform_sql: String,
     datalake: Arc<dyn DatalakeQuery>,
     metrics: SdlcMetrics,
+    cursor_columns: Vec<String>,
+    page_size: u64,
 }
 
 impl OntologyEdgePipeline {
@@ -283,6 +261,8 @@ impl OntologyEdgePipeline {
             transform_sql,
             datalake,
             metrics,
+            cursor_columns: prepared.cursor_columns,
+            page_size: DEFAULT_PAGE_SIZE,
         }
     }
 
@@ -294,94 +274,72 @@ impl OntologyEdgePipeline {
         &self,
         params: Value,
         destination: &dyn Destination,
+        cursor_reporter: &dyn CursorReporter,
     ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
 
         let edge_writer = destination
             .new_batch_writer(&self.edge_table)
             .await
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to create edge writer for {}: {e}",
-                    self.relationship_kind
-                ))
-            })?;
+            .map_err(|e| self.error(format!("failed to create edge writer: {e}")))?;
 
-        debug!(
-            edge = %self.relationship_kind,
-            %params,
-            "querying datalake for edge data"
-        );
+        let mut paginator =
+            CursorPaginator::new(self.cursor_columns.clone(), self.page_size);
+        if let Some(starting) = extract_starting_cursor(&params) {
+            paginator = paginator.with_cursor(starting);
+        }
 
-        let query_start = Instant::now();
-        let mut stream = self
-            .datalake
-            .query_arrow(&self.extract_query, params)
-            .await
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to query {} edge data: {e}",
-                    self.relationship_kind
-                ))
-            })?;
-        self.metrics.record_datalake_query_duration(
-            &self.relationship_kind,
-            query_start.elapsed().as_secs_f64(),
-        );
-
-        let mut batch_count: u64 = 0;
         let mut total_rows: u64 = 0;
-        let mut total_edges_written: u64 = 0;
+        let mut total_edges: u64 = 0;
+        let mut total_batches: u64 = 0;
 
-        while let Some(result) = stream.next().await {
-            let source_batch = result.map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to read {} edge batch: {e}",
-                    self.relationship_kind
-                ))
-            })?;
+        loop {
+            let page_query = paginator.build_page_query(&self.extract_query);
+            let page_params = merge_cursor_params(&params, &paginator);
 
-            if source_batch.num_rows() == 0 {
-                continue;
+            let query_start = Instant::now();
+            let mut stream = self
+                .datalake
+                .query_arrow(&page_query, page_params)
+                .await
+                .map_err(|e| self.error(format!("failed to query data: {e}")))?;
+            self.metrics.record_datalake_query_duration(
+                &self.relationship_kind,
+                query_start.elapsed().as_secs_f64(),
+            );
+
+            let mut page_rows: u64 = 0;
+            let mut last_cursor: Option<Vec<CursorValue>> = None;
+
+            while let Some(result) = stream.next().await {
+                let batch = result
+                    .map_err(|e| self.error(format!("failed to read batch: {e}")))?;
+                if batch.num_rows() == 0 {
+                    continue;
+                }
+
+                total_batches += 1;
+                page_rows += batch.num_rows() as u64;
+                last_cursor = paginator.advance(&batch);
+
+                let edges = self
+                    .transform_and_write_batch(batch, edge_writer.as_ref())
+                    .await?;
+                total_edges += edges as u64;
             }
 
-            batch_count += 1;
-            let batch_rows = source_batch.num_rows() as u64;
-            total_rows += batch_rows;
+            total_rows += page_rows;
 
-            let edges_written = self
-                .transform_and_write_batch(source_batch, edge_writer.as_ref())
-                .await?;
-            total_edges_written += edges_written as u64;
+            if let Some(ref cursor) = last_cursor {
+                cursor_reporter.on_page_complete(cursor).await?;
+            }
+
+            if paginator.is_last_page(page_rows) {
+                break;
+            }
         }
 
-        let elapsed = started_at.elapsed();
-
-        self.metrics.record_pipeline_completion(
-            &self.relationship_kind,
-            elapsed.as_secs_f64(),
-            total_rows,
-            total_edges_written,
-            batch_count,
-        );
-
-        if total_rows == 0 {
-            debug!(
-                edge = %self.relationship_kind,
-                elapsed_ms = elapsed.as_millis() as u64,
-                "edge pipeline processing complete"
-            );
-        } else {
-            info!(
-                edge = %self.relationship_kind,
-                batches_processed = batch_count,
-                source_rows = total_rows,
-                edges_written = total_edges_written,
-                elapsed_ms = elapsed.as_millis() as u64,
-                "edge pipeline processing complete"
-            );
-        }
-
+        self.log_completion(started_at, total_rows, total_edges, total_batches);
         Ok(total_rows)
     }
 
@@ -393,37 +351,20 @@ impl OntologyEdgePipeline {
         let transform_start = Instant::now();
         let session = SessionContext::new();
 
-        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to create mem table for {} edges: {e}",
-                self.relationship_kind
-            ))
-        })?;
+        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]])
+            .map_err(|e| self.error(format!("failed to create mem table: {e}")))?;
 
         session
             .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to register table for {} edges: {e}",
-                    self.relationship_kind
-                ))
-            })?;
+            .map_err(|e| self.error(format!("failed to register table: {e}")))?;
 
         let edges = self.execute_query(&session, &self.transform_sql).await?;
-        let edges_count = edges.num_rows();
-        if edges_count > 0 {
-            edge_writer.write_batch(&[edges]).await.map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to write {} edges: {e}",
-                    self.relationship_kind
-                ))
-            })?;
-
-            debug!(
-                edge = %self.relationship_kind,
-                edges_written = edges_count,
-                "edge batch transform and write complete"
-            );
+        let count = edges.num_rows();
+        if count > 0 {
+            edge_writer
+                .write_batch(&[edges])
+                .await
+                .map_err(|e| self.error(format!("failed to write edges: {e}")))?;
         }
 
         self.metrics.record_transform_duration(
@@ -431,7 +372,7 @@ impl OntologyEdgePipeline {
             transform_start.elapsed().as_secs_f64(),
         );
 
-        Ok(edges_count)
+        Ok(count)
     }
 
     async fn execute_query(
@@ -439,33 +380,68 @@ impl OntologyEdgePipeline {
         session: &SessionContext,
         sql: &str,
     ) -> Result<RecordBatch, HandlerError> {
-        let dataframe = session.sql(sql).await.map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to execute sql for {} edges: {e}",
-                self.relationship_kind
-            ))
-        })?;
+        let dataframe = session
+            .sql(sql)
+            .await
+            .map_err(|e| self.error(format!("failed to execute sql: {e}")))?;
 
         let schema = Arc::new(dataframe.schema().as_arrow().clone());
-
-        let batches = dataframe.collect().await.map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to collect results for {} edges: {e}",
-                self.relationship_kind
-            ))
-        })?;
+        let batches = dataframe
+            .collect()
+            .await
+            .map_err(|e| self.error(format!("failed to collect results: {e}")))?;
 
         if batches.is_empty() {
             return Ok(RecordBatch::new_empty(schema));
         }
 
-        concat_batches(&schema, &batches).map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to concat batches for {} edges: {e}",
-                self.relationship_kind
-            ))
-        })
+        concat_batches(&schema, &batches)
+            .map_err(|e| self.error(format!("failed to concat batches: {e}")))
     }
+
+    fn error(&self, message: String) -> HandlerError {
+        HandlerError::Processing(format!("{}: {message}", self.relationship_kind))
+    }
+
+    fn log_completion(&self, started_at: Instant, total_rows: u64, total_edges: u64, total_batches: u64) {
+        let elapsed = started_at.elapsed();
+        self.metrics.record_pipeline_completion(
+            &self.relationship_kind,
+            elapsed.as_secs_f64(),
+            total_rows,
+            total_edges,
+            total_batches,
+        );
+
+        if total_rows == 0 {
+            debug!(edge = %self.relationship_kind, elapsed_ms = elapsed.as_millis() as u64, "edge pipeline complete");
+        } else {
+            info!(
+                edge = %self.relationship_kind, batches_processed = total_batches,
+                source_rows = total_rows, edges_written = total_edges,
+                elapsed_ms = elapsed.as_millis() as u64, "edge pipeline complete"
+            );
+        }
+    }
+}
+
+fn extract_starting_cursor(params: &Value) -> Option<Vec<CursorValue>> {
+    params
+        .get("__starting_cursor")
+        .and_then(|v| v.as_str())
+        .and_then(|s| super::cursor_paginator::deserialize_cursor(s).ok())
+}
+
+fn merge_cursor_params(base_params: &Value, paginator: &CursorPaginator) -> Value {
+    let mut params = base_params.clone();
+    if let Some(cursor_values) = paginator.cursor_values()
+        && let Value::Object(ref mut map) = params
+    {
+        for (key, value) in cursor_params(cursor_values) {
+            map.insert(key, value);
+        }
+    }
+    params
 }
 
 #[cfg(test)]
