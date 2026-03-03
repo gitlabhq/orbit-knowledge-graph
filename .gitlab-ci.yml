@@ -589,7 +589,7 @@ release-manifest:
 ai:performance:
   extends: .ai-review-base
   stage: ai
-  timeout: 30 minutes
+  timeout: 1 hour
   needs: []
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -607,7 +607,7 @@ ai:performance:
 ai:security:
   extends: .ai-review-base
   stage: ai
-  timeout: 30 minutes
+  timeout: 1 hour
   needs: []
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -625,7 +625,7 @@ ai:security:
 ai:docs:
   extends: .ai-review-base
   stage: ai
-  timeout: 15 minutes
+  timeout: 1 hour
   needs: []
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
