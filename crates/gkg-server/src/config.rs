@@ -10,6 +10,9 @@ use indexer::nats::NatsConfiguration;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
 
+use crate::constants::SECRET_FILE_DIR;
+use crate::secret_file_source::SecretFileSource;
+
 fn default_bind_address() -> SocketAddr {
     "127.0.0.1:4200".parse().unwrap()
 }
@@ -85,8 +88,13 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load() -> Result<Self, ConfigError> {
+        Self::load_with_secret_dir(SECRET_FILE_DIR)
+    }
+
+    fn load_with_secret_dir(secret_dir: &str) -> Result<Self, ConfigError> {
         let config = config::Config::builder()
             .add_source(config::File::with_name("config/default").required(false))
+            .add_source(SecretFileSource::new(secret_dir))
             .add_source(
                 config::Environment::with_prefix("GKG")
                     .prefix_separator("_")

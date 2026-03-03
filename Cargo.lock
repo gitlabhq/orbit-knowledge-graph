@@ -2803,6 +2803,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "tempfile",
  "testcontainers",
  "testcontainers-modules",
  "thiserror 2.0.18",
