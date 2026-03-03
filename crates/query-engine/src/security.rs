@@ -82,20 +82,23 @@ pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<
 }
 
 fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
-    // Apply security to the main query
     let aliases = collect_node_aliases(&q.from);
-    if aliases.is_empty() {
-        return Ok(());
+    if !aliases.is_empty() {
+        let security_conds = aliases
+            .iter()
+            .map(|a| build_path_filter(a, &ctx.traversal_paths));
+        q.where_clause = Expr::and_all(
+            security_conds
+                .map(Some)
+                .chain(std::iter::once(q.where_clause.take())),
+        );
     }
-    let security_conds = aliases
-        .iter()
-        .map(|a| build_path_filter(a, &ctx.traversal_paths));
-    // Note: Security predicates always applied first for short-circuit filtering
-    q.where_clause = Expr::and_all(
-        security_conds
-            .map(Some)
-            .chain(std::iter::once(q.where_clause.take())),
-    );
+
+    // Recurse into UNION ALL arms (multi-node search).
+    for arm in &mut q.union_all {
+        apply_to_query(arm, ctx)?;
+    }
+
     Ok(())
 }
 
@@ -307,6 +310,42 @@ mod tests {
         assert!(should_apply_security_filter(EDGE_TABLE));
         assert!(should_apply_security_filter("gl_project"));
         assert!(should_apply_security_filter("gl_merge_request"));
+    }
+
+    #[test]
+    fn inject_recurses_into_union_all_arms() {
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "u"),
+            where_clause: None,
+            union_all: vec![Query {
+                select: vec![SelectExpr {
+                    expr: Expr::col("p", "id"),
+                    alias: None,
+                }],
+                from: TableRef::scan("gl_project", "p"),
+                where_clause: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx).unwrap();
+
+        let Node::Query(q) = &node;
+        assert!(
+            q.where_clause.is_some(),
+            "base arm should have security filter"
+        );
+        assert_eq!(q.union_all.len(), 1);
+        assert!(
+            q.union_all[0].where_clause.is_some(),
+            "UNION ALL arm should have security filter"
+        );
     }
 
     #[test]

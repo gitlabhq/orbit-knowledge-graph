@@ -36,6 +36,12 @@ fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
             )));
         }
     }
+
+    // Recurse into UNION ALL arms (multi-node search).
+    for arm in &q.union_all {
+        check_query(arm, ctx)?;
+    }
+
     check_subqueries_in_from(&q.from, ctx)
 }
 
@@ -259,6 +265,63 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
+        assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    #[test]
+    fn rejects_union_all_arm_without_security_filter() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let filter = Expr::func(
+            STARTS_WITH_FNAME,
+            vec![Expr::col("u", TRAVERSAL_PATH_COLUMN), Expr::lit("1/")],
+        );
+        let node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "u"),
+            where_clause: Some(filter),
+            union_all: vec![Query {
+                select: vec![SelectExpr {
+                    expr: Expr::col("p", "id"),
+                    alias: None,
+                }],
+                from: TableRef::scan("gl_project", "p"),
+                where_clause: None, // Missing security filter
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
+    }
+
+    #[test]
+    fn accepts_union_all_arms_with_security_filters() {
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "u"),
+            where_clause: None,
+            union_all: vec![Query {
+                select: vec![SelectExpr {
+                    expr: Expr::col("p", "id"),
+                    alias: None,
+                }],
+                from: TableRef::scan("gl_project", "p"),
+                where_clause: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        crate::security::apply_security_context(&mut node, &ctx).unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
