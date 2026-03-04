@@ -986,15 +986,15 @@ mod tests {
     fn test_lower_with_filters() {
         let input = validated_input(
             r#"{
-            "query_type": "traversal",
-            "nodes": [{
+            "query_type": "search",
+            "node": {
                 "id": "u",
                 "entity": "User",
                 "filters": {
                     "created_at": {"op": "gte", "value": "2024-01-01"},
                     "state": {"op": "in", "value": ["active", "blocked"]}
                 }
-            }],
+            },
             "limit": 30
         }"#,
         );

@@ -118,64 +118,8 @@ impl Context {
             parts.push(self.emit_ctes(&q.ctes)?);
         }
 
-        // SELECT
-        let select_items: Vec<_> = q
-            .select
-            .iter()
-            .map(|sel| {
-                let expr = self.emit_expr(&sel.expr);
-                match &sel.alias {
-                    Some(alias) => format!("{expr} AS {alias}"),
-                    None => expr,
-                }
-            })
-            .collect();
-        parts.push(format!("SELECT {}", select_items.join(", ")));
-
-        // FROM
-        let from = self.emit_table_ref(&q.from)?;
-        parts.push(format!("FROM {}", from.sql));
-
-        // WHERE
-        let mut where_parts = from.type_conditions;
-        if let Some(w) = &q.where_clause {
-            where_parts.push(self.emit_expr(w));
-        }
-        if !where_parts.is_empty() {
-            parts.push(format!("WHERE {}", where_parts.join(" AND ")));
-        }
-
-        // GROUP BY
-        if !q.group_by.is_empty() {
-            let groups: Vec<_> = q.group_by.iter().map(|g| self.emit_expr(g)).collect();
-            parts.push(format!("GROUP BY {}", groups.join(", ")));
-        }
-
-        // HAVING
-        if let Some(h) = &q.having {
-            parts.push(format!("HAVING {}", self.emit_expr(h)));
-        }
-
-        // ORDER BY
-        if !q.order_by.is_empty() {
-            let orders: Vec<_> = q
-                .order_by
-                .iter()
-                .map(|o| {
-                    let dir = if o.desc { "DESC" } else { "ASC" };
-                    format!("{} {dir}", self.emit_expr(&o.expr))
-                })
-                .collect();
-            parts.push(format!("ORDER BY {}", orders.join(", ")));
-        }
-
-        // LIMIT / OFFSET
-        if let Some(limit) = q.limit {
-            parts.push(format!("LIMIT {limit}"));
-        }
-        if let Some(offset) = q.offset {
-            parts.push(format!("OFFSET {offset}"));
-        }
+        // SELECT, FROM, WHERE, GROUP BY, HAVING, UNION ALL, ORDER BY, LIMIT, OFFSET
+        parts.push(self.emit_query_body(q)?);
 
         Ok(parts.join(" "))
     }
@@ -199,7 +143,8 @@ impl Context {
         Ok(format!("{} {}", keyword, cte_parts.join(", ")))
     }
 
-    /// Emit query body without CTEs (for use inside CTE definitions).
+    /// Emit the query body (SELECT through LIMIT/OFFSET, including UNION ALL).
+    /// Used by both `emit_query` (top-level) and CTE definitions.
     fn emit_query_body(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
@@ -241,7 +186,7 @@ impl Context {
             parts.push(format!("HAVING {}", self.emit_expr(h)));
         }
 
-        // UNION ALL (for recursive CTEs)
+        // UNION ALL
         for union_q in &q.union_all {
             parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
         }
@@ -822,6 +767,111 @@ mod tests {
         assert!(
             result.sql.contains(") AS deduped_e ON"),
             "expected subquery alias: {}",
+            result.sql
+        );
+    }
+
+    // ── UNION ALL tests ─────────────────────────────────────────────
+
+    #[test]
+    fn union_all_in_cte_body() {
+        use crate::ast::Cte;
+
+        let q = Query {
+            ctes: vec![Cte {
+                name: "path_cte".into(),
+                query: Box::new(Query {
+                    select: vec![SelectExpr::new(Expr::col("p", "id"), "node_id")],
+                    from: TableRef::scan("gl_project", "p"),
+                    union_all: vec![Query {
+                        select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],
+                        from: TableRef::scan("path_cte", "c"),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+                recursive: true,
+            }],
+            select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
+            from: TableRef::scan("path_cte", "r"),
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("WITH RECURSIVE"),
+            "expected WITH RECURSIVE: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "expected UNION ALL in CTE body: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn union_all_in_top_level_query() {
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::scan("gl_user", "u"),
+            union_all: vec![Query {
+                select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
+                from: TableRef::scan("gl_project", "p"),
+                ..Default::default()
+            }],
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "expected UNION ALL: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("LIMIT 10"),
+            "LIMIT should apply to full UNION result: {}",
+            result.sql
+        );
+        let union_pos = result.sql.find("UNION ALL").unwrap();
+        let limit_pos = result.sql.find("LIMIT").unwrap();
+        assert!(union_pos < limit_pos, "UNION ALL must precede LIMIT");
+    }
+
+    #[test]
+    fn table_ref_union_emits_derived_table() {
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("all_edges", "id"), "id")],
+            from: TableRef::Union {
+                queries: vec![
+                    Query {
+                        select: vec![SelectExpr::new(Expr::col("e1", "source"), "id")],
+                        from: TableRef::scan("gl_edge", "e1"),
+                        ..Default::default()
+                    },
+                    Query {
+                        select: vec![SelectExpr::new(Expr::col("e2", "source"), "id")],
+                        from: TableRef::scan("gl_edge", "e2"),
+                        ..Default::default()
+                    },
+                ],
+                alias: "all_edges".into(),
+            },
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "expected UNION ALL: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains(") AS all_edges"),
+            "expected derived table alias: {}",
             result.sql
         );
     }

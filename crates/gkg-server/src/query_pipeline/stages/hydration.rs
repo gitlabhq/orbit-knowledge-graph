@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::warn;
 
 use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
@@ -15,6 +14,8 @@ use crate::redaction::{ColumnValue, QueryResult};
 use super::super::error::PipelineError;
 use super::super::metrics::PipelineObserver;
 use super::super::types::{HydrationOutput, RedactionOutput};
+
+use query_engine::constants::{GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, redaction_id_column};
 
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 
@@ -116,10 +117,10 @@ impl HydrationStage {
             .iter()
             .filter(|(_, ids)| !ids.is_empty())
             .map(|(entity_type, ids)| {
-                let query_json = build_dynamic_search_query(entity_type, ids, &self.ontology);
-                self.compile_and_fetch(entity_type, query_json, security_context)
+                let query_json = build_dynamic_search_query(entity_type, ids, &self.ontology)?;
+                Ok(self.compile_and_fetch(entity_type, query_json, security_context))
             })
-            .collect();
+            .collect::<Result<Vec<_>, PipelineError>>()?;
 
         let results = try_join_all(futures).await?;
         let mut merged = HashMap::new();
@@ -154,7 +155,7 @@ impl HydrationStage {
 
 /// Collect entity IDs for a static template from `_gkg_{alias}_id` columns.
 fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
-    let id_column = format!("_gkg_{}_id", template.node_alias);
+    let id_column = redaction_id_column(&template.node_alias);
     let mut ids: Vec<i64> = result
         .authorized_rows()
         .filter_map(|row| row.get_column_i64(&id_column))
@@ -174,7 +175,7 @@ fn merge_static_properties(
 ) {
     for row in result.authorized_rows_mut() {
         for template in templates {
-            let id = row.get_column_i64(&format!("_gkg_{}_id", template.node_alias));
+            let id = row.get_column_i64(&redaction_id_column(&template.node_alias));
             if let Some(id) = id
                 && let Some(props) = property_map.get(&(template.entity_type.clone(), id))
             {
@@ -221,35 +222,34 @@ fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap
 
 /// Build a search query JSON from scratch for dynamic hydration.
 /// Only used when entity types are discovered at runtime (PathFinding, Neighbors).
-/// Uses `default_columns` from the ontology when available, falling back to `"*"`.
 fn build_dynamic_search_query(
     entity_type: &str,
     ids: &[i64],
     ontology: &ontology::Ontology,
-) -> String {
-    let node = ontology.get_node(entity_type);
-    if node.is_none() {
-        warn!(
-            entity_type,
-            "entity type not found in ontology during dynamic hydration, falling back to all columns"
-        );
-    }
-    let columns: serde_json::Value = node
+) -> Result<String, PipelineError> {
+    let columns: serde_json::Value = ontology
+        .get_node(entity_type)
         .filter(|n| !n.default_columns.is_empty())
         .map(|n| serde_json::json!(n.default_columns))
-        .unwrap_or_else(|| serde_json::json!("*"));
+        .ok_or_else(|| {
+            PipelineError::Execution(format!(
+                "entity type not found in ontology or has no default_columns during dynamic hydration: {entity_type}"
+            ))
+        })?;
 
-    serde_json::json!({
+    let query_json = serde_json::json!({
         "query_type": "search",
         "node": {
-            "id": "n",
+            "id": HYDRATION_NODE_ALIAS,
             "entity": entity_type,
             "columns": columns,
             "node_ids": ids
         },
         "limit": 1000
     })
-    .to_string()
+    .to_string();
+
+    Ok(query_json)
 }
 
 fn parse_property_batches(
@@ -257,10 +257,12 @@ fn parse_property_batches(
     batches: &[RecordBatch],
 ) -> Result<PropertyMap, PipelineError> {
     let mut result = HashMap::new();
+    let id_column = redaction_id_column(HYDRATION_NODE_ALIAS);
+    let alias_prefix = format!("{HYDRATION_NODE_ALIAS}_");
 
     for batch in batches {
         let schema = batch.schema();
-        let id_idx = schema.index_of("_gkg_n_id").ok();
+        let id_idx = schema.index_of(&id_column).ok();
 
         let Some(id_idx) = id_idx else {
             continue;
@@ -280,11 +282,12 @@ fn parse_property_batches(
             let mut props = HashMap::new();
             for (col_idx, field) in schema.fields().iter().enumerate() {
                 let name = field.name();
-                if name.starts_with("_gkg_") {
+                if name.starts_with(GKG_COLUMN_PREFIX) {
                     continue;
                 }
+                let clean_name = name.strip_prefix(&alias_prefix).unwrap_or(name).to_string();
                 if let Some(value) = column_value_from_arrow(batch.column(col_idx), row) {
-                    props.insert(name.clone(), value);
+                    props.insert(clean_name, value);
                 }
             }
 

@@ -42,3 +42,7 @@ pub fn redaction_id_column(alias: &str) -> String {
 pub fn redaction_type_column(alias: &str) -> String {
     format!("{GKG_COLUMN_PREFIX}{alias}_type")
 }
+
+/// Node alias used in synthetic hydration search queries.
+/// `parse_property_batches` strips this prefix so consumers see clean keys.
+pub const HYDRATION_NODE_ALIAS: &str = "hydrate";

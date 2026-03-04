@@ -3,26 +3,20 @@
 //! Tests the full compile → execute → hydrate → format flow, verifying that
 //! hydrated properties appear on NodeRef for Dynamic plans (PathFinding,
 //! Neighbors) and on flat columns for Static plans (Traversal).
-//! Redaction is skipped — all rows are treated as authorized.
 
 mod common;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
+use common::{
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
+    run_redaction, test_security_context,
+};
 use gkg_server::query_pipeline::{HydrationStage, PipelineObserver, RedactionOutput, row_to_json};
 use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests;
-use ontology::Ontology;
 use query_engine::{HydrationPlan, SecurityContext, compile};
-
-fn load_ontology() -> Ontology {
-    Ontology::load_embedded().expect("embedded ontology should load")
-}
-
-fn test_security_context() -> SecurityContext {
-    SecurityContext::new(1, vec!["1/".into()]).expect("valid security context")
-}
 
 async fn setup_test_data(ctx: &TestContext) {
     ctx.execute(
@@ -65,11 +59,11 @@ async fn setup_test_data(ctx: &TestContext) {
     .await;
 }
 
-/// Helper: compile, execute base query, skip redaction, run hydration.
+/// Compile, execute base query, skip redaction, run hydration.
 async fn compile_execute_hydrate(
     ctx: &TestContext,
     json: &str,
-    ontology: &Arc<Ontology>,
+    ontology: &Arc<ontology::Ontology>,
     security_ctx: &SecurityContext,
     hydration_stage: &HydrationStage,
 ) -> (QueryResult, query_engine::ResultContext, HydrationPlan) {
@@ -98,20 +92,58 @@ async fn compile_execute_hydrate(
     (output.query_result, output.result_context, plan)
 }
 
+/// Compile, execute, redact, then hydrate — the actual production flow.
+async fn compile_execute_redact_hydrate(
+    ctx: &TestContext,
+    json: &str,
+    ontology: &Arc<ontology::Ontology>,
+    security_ctx: &SecurityContext,
+    hydration_stage: &HydrationStage,
+    mock_service: &MockRedactionService,
+) -> (QueryResult, query_engine::ResultContext, usize) {
+    let compiled = compile(json, ontology, security_ctx).unwrap();
+
+    let batches = ctx.query_parameterized(&compiled.base).await;
+    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+
+    let redacted_count = run_redaction(&mut result, mock_service);
+
+    let redaction_output = RedactionOutput {
+        query_result: result,
+        redacted_count,
+    };
+
+    let mut obs = PipelineObserver::start();
+    let output = hydration_stage
+        .execute(
+            redaction_output,
+            &compiled.hydration,
+            security_ctx,
+            &mut obs,
+        )
+        .await
+        .expect("hydration should succeed");
+
+    (output.query_result, output.result_context, redacted_count)
+}
+
+fn make_hydration_stage(ctx: &TestContext) -> (Arc<ontology::Ontology>, HydrationStage) {
+    let ontology = Arc::new(load_ontology());
+    let client = Arc::new(ctx.create_client());
+    let stage = HydrationStage::new(ontology.clone(), client);
+    (ontology, stage)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Subtests
+// PathFinding Hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn hydration_full_pipeline(ctx: &TestContext) {
+async fn path_finding_dynamic_hydration(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let ontology = Arc::new(load_ontology());
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
     let security_ctx = test_security_context();
-    let client = Arc::new(ctx.create_client());
-    let hydration_stage = HydrationStage::new(ontology.clone(), client);
 
-    // ── PathFinding: Dynamic hydration ──────────────────────────────────
-    // Path: User 1 → Group 100 → Project 1000
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -121,7 +153,7 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let (result, ctx_ref, plan) =
+    let (result, _ctx_ref, plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
 
     assert!(
@@ -130,7 +162,6 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
     );
     assert!(!result.is_empty(), "should find at least one path");
 
-    // Every node in every path should have hydrated properties
     for row in result.authorized_rows() {
         let path_nodes = row.path_nodes();
         assert!(path_nodes.len() >= 2, "path should have start and end");
@@ -159,22 +190,88 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
             );
         }
 
-        // Edge kinds should match the number of hops (nodes - 1)
         let edge_kinds = row.edge_kinds();
-        assert_eq!(
-            edge_kinds.len(),
-            path_nodes.len() - 1,
-            "edge_kinds should have one entry per hop"
-        );
+        assert_eq!(edge_kinds.len(), path_nodes.len() - 1);
 
-        // User(1) --MEMBER_OF--> Group(100) --CONTAINS--> Project(1000)
         if path_nodes.len() == 3 {
             assert_eq!(edge_kinds[0], "MEMBER_OF");
             assert_eq!(edge_kinds[1], "CONTAINS");
         }
     }
+}
 
-    // Formatter should emit a "path" array with properties
+async fn path_finding_hydrated_property_values(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let (result, _ctx_ref, _plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+
+    let row = result.authorized_rows().next().expect("should have a path");
+    let path_nodes = row.path_nodes();
+
+    // User 1 = alice
+    let user_props = &path_nodes[0].properties;
+    assert_eq!(
+        user_props.get("username").and_then(|v| v.as_str()),
+        Some("alice"),
+        "User 1 username should be 'alice'"
+    );
+    assert_eq!(
+        user_props.get("name").and_then(|v| v.as_str()),
+        Some("Alice Admin"),
+        "User 1 name should be 'Alice Admin'"
+    );
+
+    // Project 1000 = Public Project
+    let project = path_nodes.last().unwrap();
+    let project_props = &project.properties;
+    assert_eq!(
+        project_props.get("name").and_then(|v| v.as_str()),
+        Some("Public Project"),
+        "Project 1000 name should be 'Public Project'"
+    );
+
+    // Group 100 (intermediate)
+    if path_nodes.len() == 3 {
+        let group_props = &path_nodes[1].properties;
+        assert_eq!(
+            group_props.get("name").and_then(|v| v.as_str()),
+            Some("Public Group"),
+            "Group 100 name should be 'Public Group'"
+        );
+    }
+}
+
+async fn path_finding_json_format(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let (result, ctx_ref, _plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+
     let row = result.authorized_rows().next().unwrap();
     let json_val = row_to_json(row, &ctx_ref);
     let obj = json_val.as_object().unwrap();
@@ -195,7 +292,6 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
         first.keys().collect::<Vec<_>>()
     );
 
-    // Edges: flat array of relationship kinds, positional with path
     let edges = obj
         .get("edges")
         .expect("PathFinding JSON should have 'edges' key")
@@ -207,16 +303,25 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
         assert_eq!(edges[0].as_str().unwrap(), "MEMBER_OF");
         assert_eq!(edges[1].as_str().unwrap(), "CONTAINS");
     }
+}
 
-    // ── Neighbors: Dynamic hydration ────────────────────────────────────
-    // User 1's outgoing neighbors → Group 100
+// ─────────────────────────────────────────────────────────────────────────────
+// Neighbors Hydration
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn neighbors_dynamic_hydration(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let security_ctx = test_security_context();
+
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
-    let (result, ctx_ref, plan) =
+    let (result, _ctx_ref, plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
 
     assert!(matches!(plan, HydrationPlan::Dynamic));
@@ -230,11 +335,58 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
             "neighbor should have hydrated properties"
         );
     }
+}
 
-    // Formatter should merge neighbor properties as top-level keys
+async fn neighbors_hydrated_property_values(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let (result, _ctx_ref, _plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+
+    // User 1 is member of Group 100 ("Public Group")
+    let neighbor_names: HashSet<&str> = result
+        .authorized_rows()
+        .filter_map(|r| {
+            r.neighbor_node()
+                .and_then(|n| n.properties.get("name")?.as_str())
+        })
+        .collect();
+
+    assert!(
+        neighbor_names.contains("Public Group"),
+        "should find 'Public Group' in neighbor properties, got: {:?}",
+        neighbor_names
+    );
+}
+
+async fn neighbors_json_format(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let (result, ctx_ref, _plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+
     let row = result.authorized_rows().next().unwrap();
     let json_val = row_to_json(row, &ctx_ref);
     let obj = json_val.as_object().unwrap();
+
     assert!(
         !obj.contains_key("path"),
         "neighbors should not have 'path'"
@@ -248,8 +400,18 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
         "neighbors JSON should have hydrated top-level properties, keys: {:?}",
         obj.keys().collect::<Vec<_>>()
     );
+}
 
-    // ── Search: No hydration (base query already carries all columns) ──
+// ─────────────────────────────────────────────────────────────────────────────
+// Hydration Plan Selection
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn search_produces_no_hydration_plan(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
     let json = r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
@@ -262,8 +424,14 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
         "Search should produce None (static hydration disabled), got: {:?}",
         compiled.hydration
     );
+}
 
-    // ── Traversal: No hydration (static disabled, base query has columns) ──
+async fn traversal_produces_no_hydration_plan(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -283,11 +451,204 @@ async fn hydration_full_pipeline(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Full Pipeline: Redact → Hydrate
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let security_ctx = test_security_context();
+
+    // Two paths exist: User 1 → Group 100 → Project 1000
+    //                  User 2 → Group 101 → Project 1001
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1001]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    // Allow User 1's path, deny User 2
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1]);
+    mock_service.deny("user", &[2]);
+    mock_service.allow("group", &[100, 101]);
+    mock_service.allow("project", &[1000, 1001]);
+
+    let (result, _ctx_ref, redacted_count) = compile_execute_redact_hydrate(
+        ctx,
+        json,
+        &ontology,
+        &security_ctx,
+        &hydration_stage,
+        &mock_service,
+    )
+    .await;
+
+    assert!(redacted_count > 0, "some paths should have been redacted");
+    assert!(
+        result.authorized_count() > 0,
+        "some paths should survive redaction"
+    );
+
+    // Surviving paths should still have hydrated properties
+    for row in result.authorized_rows() {
+        let path_nodes = row.path_nodes();
+        assert!(path_nodes.len() >= 2);
+
+        // Start node must be User 1 (User 2 was denied)
+        assert_eq!(path_nodes[0].id, 1);
+        assert_eq!(path_nodes[0].entity_type, "User");
+        assert!(
+            !path_nodes[0].properties.is_empty(),
+            "surviving path start node should be hydrated"
+        );
+
+        // Verify actual property value on surviving path
+        assert_eq!(
+            path_nodes[0]
+                .properties
+                .get("username")
+                .and_then(|v| v.as_str()),
+            Some("alice"),
+            "hydrated User 1 should have username 'alice'"
+        );
+
+        let last = path_nodes.last().unwrap();
+        assert!(
+            !last.properties.is_empty(),
+            "surviving path end node should be hydrated"
+        );
+    }
+
+    // User 2's paths must not appear
+    let start_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().first().map(|n| n.id))
+        .collect();
+    assert!(
+        !start_ids.contains(&2),
+        "denied User 2's paths must not appear after redaction + hydration"
+    );
+}
+
+async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let security_ctx = test_security_context();
+
+    // User 2's outgoing neighbors: Group 101 ("Private Group")
+    // User 3's outgoing neighbors: Group 101 ("Private Group")
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "node_ids": [2, 3]},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    // Allow User 2, deny User 3; allow the neighbor group
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[2]);
+    mock_service.deny("user", &[3]);
+    mock_service.allow("group", &[101]);
+
+    let (result, _ctx_ref, redacted_count) = compile_execute_redact_hydrate(
+        ctx,
+        json,
+        &ontology,
+        &security_ctx,
+        &hydration_stage,
+        &mock_service,
+    )
+    .await;
+
+    assert!(redacted_count > 0, "User 3's row should be redacted");
+    assert_eq!(
+        result.authorized_count(),
+        1,
+        "only User 2's row should survive"
+    );
+
+    let row = result.authorized_rows().next().unwrap();
+    let neighbor = row.neighbor_node().expect("should have neighbor");
+
+    assert_eq!(neighbor.entity_type, "Group");
+    assert_eq!(neighbor.id, 101);
+
+    // Hydrated properties should be present on the surviving neighbor
+    assert!(
+        !neighbor.properties.is_empty(),
+        "surviving neighbor should be hydrated after redaction"
+    );
+    assert_eq!(
+        neighbor.properties.get("name").and_then(|v| v.as_str()),
+        Some("Private Group"),
+        "surviving neighbor should have correct hydrated name"
+    );
+}
+
+async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    // Deny everything
+    let mock_service = MockRedactionService::new();
+
+    let (result, _ctx_ref, redacted_count) = compile_execute_redact_hydrate(
+        ctx,
+        json,
+        &ontology,
+        &security_ctx,
+        &hydration_stage,
+        &mock_service,
+    )
+    .await;
+
+    assert!(redacted_count > 0, "should have had paths to redact");
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "no rows should survive after full denial"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Orchestrator
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn hydration_integration() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
-    run_subtests!(&ctx, hydration_full_pipeline,);
+    run_subtests!(
+        &ctx,
+        // path finding hydration
+        path_finding_dynamic_hydration,
+        path_finding_hydrated_property_values,
+        path_finding_json_format,
+        // neighbors hydration
+        neighbors_dynamic_hydration,
+        neighbors_hydrated_property_values,
+        neighbors_json_format,
+        // hydration plan selection
+        search_produces_no_hydration_plan,
+        traversal_produces_no_hydration_plan,
+        // full pipeline: redact then hydrate
+        path_finding_hydration_after_partial_redaction,
+        neighbors_hydration_after_partial_redaction,
+        path_finding_all_denied_then_hydrate,
+    );
 }

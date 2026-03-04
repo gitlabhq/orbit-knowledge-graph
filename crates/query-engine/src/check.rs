@@ -36,20 +36,32 @@ fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
             )));
         }
     }
-    check_subqueries_in_from(&q.from, ctx)
+
+    // Recurse into UNION ALL arms (defense-in-depth: currently only
+    // recursive CTE arms which scan CTE names, not gl_* tables).
+    for arm in &q.union_all {
+        check_query(arm, ctx)?;
+    }
+
+    check_derived_tables_in_from(&q.from, ctx)
 }
 
-/// Recurse into derived-table subqueries and verify their inner queries
-/// carry valid security filters. Unions are skipped because their inner
-/// queries only scan `gl_edge` (security comes from the outer join context).
-fn check_subqueries_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> Result<()> {
+/// Recurse into derived tables (subqueries, UNION ALL arms) in a FROM clause
+/// and verify each arm's query has valid security filters.
+fn check_derived_tables_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> Result<()> {
     match table_ref {
         TableRef::Subquery { query, .. } => check_query(query, ctx),
-        TableRef::Join { left, right, .. } => {
-            check_subqueries_in_from(left, ctx)?;
-            check_subqueries_in_from(right, ctx)
+        TableRef::Union { queries, .. } => {
+            for arm in queries {
+                check_query(arm, ctx)?;
+            }
+            Ok(())
         }
-        TableRef::Scan { .. } | TableRef::Union { .. } => Ok(()),
+        TableRef::Join { left, right, .. } => {
+            check_derived_tables_in_from(left, ctx)?;
+            check_derived_tables_in_from(right, ctx)
+        }
+        TableRef::Scan { .. } => Ok(()),
     }
 }
 
@@ -275,6 +287,220 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
+        assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    // ── UNION ALL arm checks ────────────────────────────────────────
+
+    #[test]
+    fn rejects_union_all_arm_without_security_filter() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let filter = Expr::func(
+            STARTS_WITH_FNAME,
+            vec![Expr::col("u", TRAVERSAL_PATH_COLUMN), Expr::lit("1/")],
+        );
+        let node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "u"),
+            where_clause: Some(filter),
+            union_all: vec![Query {
+                select: vec![SelectExpr {
+                    expr: Expr::col("p", "id"),
+                    alias: None,
+                }],
+                from: TableRef::scan("gl_project", "p"),
+                where_clause: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
+    }
+
+    #[test]
+    fn accepts_union_all_arms_with_security_filters() {
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "u"),
+            where_clause: None,
+            union_all: vec![Query {
+                select: vec![SelectExpr {
+                    expr: Expr::col("p", "id"),
+                    alias: None,
+                }],
+                from: TableRef::scan("gl_project", "p"),
+                where_clause: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        crate::security::apply_security_context(&mut node, &ctx).unwrap();
+        assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    // ── CTE security check tests ────────────────────────────────────
+
+    #[test]
+    fn rejects_cte_with_sensitive_table_missing_filter() {
+        use crate::ast::Cte;
+
+        let node = Node::Query(Box::new(Query {
+            ctes: vec![Cte::new(
+                "base",
+                Query {
+                    select: vec![SelectExpr {
+                        expr: Expr::col("p", "id"),
+                        alias: Some("node_id".into()),
+                    }],
+                    from: TableRef::scan("gl_project", "p"),
+                    where_clause: None,
+                    ..Default::default()
+                },
+            )],
+            select: vec![SelectExpr {
+                expr: Expr::col("base", "node_id"),
+                alias: None,
+            }],
+            from: TableRef::scan("base", "b"),
+            ..Default::default()
+        }));
+
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter"),
+            "CTE scanning gl_project without filter should be rejected: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn accepts_cte_with_security_filter() {
+        use crate::ast::Cte;
+
+        let filter = Expr::func(
+            STARTS_WITH_FNAME,
+            vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::lit("42/43/")],
+        );
+        let node = Node::Query(Box::new(Query {
+            ctes: vec![Cte::new(
+                "base",
+                Query {
+                    select: vec![SelectExpr {
+                        expr: Expr::col("p", "id"),
+                        alias: Some("node_id".into()),
+                    }],
+                    from: TableRef::scan("gl_project", "p"),
+                    where_clause: Some(filter),
+                    ..Default::default()
+                },
+            )],
+            select: vec![SelectExpr {
+                expr: Expr::col("base", "node_id"),
+                alias: None,
+            }],
+            from: TableRef::scan("base", "b"),
+            ..Default::default()
+        }));
+
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    // ── TableRef::Union structural enforcement ──────────────────────
+
+    #[test]
+    fn rejects_union_arm_missing_security_filter() {
+        use ontology::constants::EDGE_TABLE;
+
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let filter = Expr::func(
+            STARTS_WITH_FNAME,
+            vec![Expr::col("e", TRAVERSAL_PATH_COLUMN), Expr::lit("1/")],
+        );
+        let node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("hop", "source_id"),
+                alias: None,
+            }],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan(EDGE_TABLE, "e"),
+                TableRef::Union {
+                    queries: vec![Query {
+                        select: vec![SelectExpr {
+                            expr: Expr::col("p", "id"),
+                            alias: None,
+                        }],
+                        from: TableRef::scan("gl_project", "p"),
+                        where_clause: None,
+                        ..Default::default()
+                    }],
+                    alias: "bad_union".into(),
+                },
+                Expr::lit(true),
+            ),
+            where_clause: Some(filter),
+            ..Default::default()
+        }));
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter"),
+            "union arm scanning gl_project without filter should be rejected, got: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_union_arm_with_security_filter() {
+        use ontology::constants::EDGE_TABLE;
+
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let outer_filter = Expr::func(
+            STARTS_WITH_FNAME,
+            vec![Expr::col("e", TRAVERSAL_PATH_COLUMN), Expr::lit("42/43/")],
+        );
+        let arm_filter = Expr::func(
+            STARTS_WITH_FNAME,
+            vec![Expr::col("e1", TRAVERSAL_PATH_COLUMN), Expr::lit("42/43/")],
+        );
+        let node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("hop", "source_id"),
+                alias: None,
+            }],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan(EDGE_TABLE, "e"),
+                TableRef::Union {
+                    queries: vec![Query {
+                        select: vec![SelectExpr {
+                            expr: Expr::col("e1", "source_id"),
+                            alias: None,
+                        }],
+                        from: TableRef::scan(EDGE_TABLE, "e1"),
+                        where_clause: Some(arm_filter),
+                        ..Default::default()
+                    }],
+                    alias: "hop_e0".into(),
+                },
+                Expr::lit(true),
+            ),
+            where_clause: Some(outer_filter),
+            ..Default::default()
+        }));
         assert!(check_ast(&node, &ctx).is_ok());
     }
 }

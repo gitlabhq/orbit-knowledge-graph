@@ -6,79 +6,15 @@
 
 mod common;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
-use gkg_server::redaction::{QueryResult, ResourceAuthorization, ResourceCheck};
+use common::{
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, compile_and_execute,
+    load_ontology, run_redaction, test_security_context,
+};
+use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests;
-use ontology::Ontology;
-use query_engine::{SecurityContext, build_entity_auth, compile};
-
-fn load_ontology() -> Ontology {
-    Ontology::load_embedded().expect("embedded ontology should load")
-}
-
-fn test_security_context() -> SecurityContext {
-    SecurityContext::new(1, vec!["1/".into()]).expect("valid security context")
-}
-
-struct MockRedactionService {
-    authorizations: HashMap<String, HashMap<i64, bool>>,
-}
-
-impl MockRedactionService {
-    fn new() -> Self {
-        Self {
-            authorizations: HashMap::new(),
-        }
-    }
-
-    fn allow(&mut self, resource_type: &str, ids: &[i64]) {
-        let map = self
-            .authorizations
-            .entry(resource_type.to_string())
-            .or_default();
-        for id in ids {
-            map.insert(*id, true);
-        }
-    }
-
-    fn deny(&mut self, resource_type: &str, ids: &[i64]) {
-        let map = self
-            .authorizations
-            .entry(resource_type.to_string())
-            .or_default();
-        for id in ids {
-            map.insert(*id, false);
-        }
-    }
-
-    fn check(&self, checks: &[ResourceCheck]) -> Vec<ResourceAuthorization> {
-        checks
-            .iter()
-            .map(|check| {
-                let authorized = check
-                    .ids
-                    .iter()
-                    .map(|id| {
-                        let allowed = self
-                            .authorizations
-                            .get(&check.resource_type)
-                            .and_then(|m| m.get(id))
-                            .copied()
-                            .unwrap_or(false);
-                        (*id, allowed)
-                    })
-                    .collect();
-
-                ResourceAuthorization {
-                    resource_type: check.resource_type.clone(),
-                    authorized,
-                }
-            })
-            .collect()
-    }
-}
+use query_engine::{build_entity_auth, compile};
 
 const TABLE_USERS: &str = "gl_user";
 const TABLE_GROUPS: &str = "gl_group";
@@ -148,12 +84,6 @@ async fn setup_test_data(ctx: &TestContext) {
          ('1/102/', 102, 'Group', 'CONTAINS', 1004, 'Project')"
     ))
     .await;
-}
-
-fn run_redaction(result: &mut QueryResult, mock_service: &MockRedactionService) -> usize {
-    let checks = result.resource_checks();
-    let authorizations = mock_service.check(&checks);
-    result.apply_authorizations(&authorizations)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4332,6 +4262,224 @@ async fn range_pagination_comprehensive(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MergeRequest Redaction Subtests
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn search_merge_requests_with_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (_, mut result) = compile_and_execute(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "mr", "entity": "MergeRequest"},
+            "limit": 10
+        }"#,
+    )
+    .await;
+    let mr = result.ctx().get("mr").unwrap().clone();
+
+    let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&mr)).collect();
+    assert_eq!(
+        raw_ids,
+        ALL_MR_IDS.iter().copied().collect::<HashSet<_>>(),
+        "should find all 4 MRs"
+    );
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("merge_request", &[2000, 2001]);
+    mock_service.deny("merge_request", &[2002, 2003]);
+
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(redacted, 2, "MRs 2002 and 2003 should be redacted");
+    assert_eq!(result.authorized_count(), 2);
+
+    let authorized_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&mr))
+        .collect();
+    assert_eq!(authorized_ids, HashSet::from([2000, 2001]));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Order Preservation Subtests
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn redaction_preserves_row_order(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (_, mut result) = compile_and_execute(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
+            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "limit": 10
+        }"#,
+    )
+    .await;
+    let u = result.ctx().get("u").unwrap().clone();
+
+    let raw_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    assert_eq!(raw_ids, vec![1, 2, 3, 4, 5]);
+
+    // Remove alternating rows: surviving rows must maintain original order
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1, 3, 5]);
+    mock_service.deny("user", &[2, 4]);
+
+    run_redaction(&mut result, &mock_service);
+
+    let authorized_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(
+        authorized_ids,
+        vec![1, 3, 5],
+        "relative order must be preserved after redaction"
+    );
+}
+
+async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (_, mut result) = compile_and_execute(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
+            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "limit": 10
+        }"#,
+    )
+    .await;
+    let u = result.ctx().get("u").unwrap().clone();
+
+    let raw_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    assert_eq!(raw_ids, vec![5, 4, 3, 2, 1]);
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[5, 3, 1]);
+    mock_service.deny("user", &[4, 2]);
+
+    run_redaction(&mut result, &mock_service);
+
+    let authorized_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(
+        authorized_ids,
+        vec![5, 3, 1],
+        "descending order must be preserved after redaction"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty Path Finding Subtests
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn path_finding_no_path_exists_returns_empty(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    let (_, mut result) = compile_and_execute(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [99999]},
+                {"id": "end", "entity": "Project", "node_ids": [99999]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#,
+    )
+    .await;
+
+    assert_eq!(
+        result.len(),
+        0,
+        "ClickHouse should return 0 rows when no path exists"
+    );
+
+    let mock_service = MockRedactionService::new();
+    let redacted = run_redaction(&mut result, &mock_service);
+
+    assert_eq!(redacted, 0);
+    assert_eq!(result.authorized_count(), 0);
+    assert!(result.resource_checks().is_empty());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-Entity ID Collision Subtests
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
+    setup_test_data(ctx).await;
+
+    // Insert a Group with ID=1 (same numeric ID as User 1)
+    ctx.execute(
+        "INSERT INTO gl_group (id, name, visibility_level, traversal_path) \
+         VALUES (1, 'Collision Group', 'public', '1/1/')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) \
+         VALUES ('1/1/', 1, 'User', 'MEMBER_OF', 1, 'Group')",
+    )
+    .await;
+
+    let (_, mut result) = compile_and_execute(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 30
+        }"#,
+    )
+    .await;
+    let u = result.ctx().get("u").unwrap().clone();
+    let g = result.ctx().get("g").unwrap().clone();
+
+    let collision_exists = result
+        .iter()
+        .any(|r| r.get_id(&u) == Some(1) && r.get_id(&g) == Some(1));
+    assert!(collision_exists, "should have row where User 1 → Group 1");
+
+    // Allow User 1 but deny Group 1 — the (1, 1) row must be redacted
+    // even though the numeric ID 1 is allowed for Users.
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1]);
+    mock_service.deny("group", &[1]);
+    mock_service.allow("group", &[100, 102]);
+
+    run_redaction(&mut result, &mock_service);
+
+    let authorized_pairs: HashSet<(i64, i64)> = result
+        .authorized_rows()
+        .filter_map(|r| Some((r.get_id(&u)?, r.get_id(&g)?)))
+        .collect();
+
+    assert!(
+        !authorized_pairs.contains(&(1, 1)),
+        "User 1 → Group 1 must be denied: resource_type discrimination is required"
+    );
+    assert!(
+        authorized_pairs.contains(&(1, 100)),
+        "User 1 → Group 100 should pass"
+    );
+    assert!(
+        authorized_pairs.contains(&(1, 102)),
+        "User 1 → Group 102 should pass"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Orchestrator Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4407,5 +4555,14 @@ async fn redaction_integration() {
         enum_filter_normalization_int_vs_string_enums,
         // range pagination
         range_pagination_comprehensive,
+        // merge request redaction
+        search_merge_requests_with_redaction,
+        // order preservation
+        redaction_preserves_row_order,
+        redaction_preserves_row_order_desc,
+        // empty path finding
+        path_finding_no_path_exists_returns_empty,
+        // cross-entity ID collision
+        cross_entity_id_collision_redaction,
     );
 }

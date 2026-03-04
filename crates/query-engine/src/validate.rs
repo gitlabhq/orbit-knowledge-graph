@@ -78,6 +78,7 @@ impl<'a> Validator<'a> {
 
     /// Validate cross-node references that JSON Schema cannot express.
     pub fn check_references(&self, input: &Input) -> Result<()> {
+        self.check_duplicate_node_ids(input)?;
         self.check_pagination(input)?;
         self.check_relationships(input)?;
         self.check_aggregations(input)?;
@@ -85,16 +86,33 @@ impl<'a> Validator<'a> {
         self.check_path(input)?;
         self.check_neighbors(input)?;
         self.check_depth(input)?;
+        // Run after individual reference checks so "undefined node X" errors
+        // take priority over "node Y is unreferenced".
+        self.check_unreferenced_nodes(input)?;
         Ok(())
     }
 
-    /// Defense-in-depth: reject traversal depths that exceed the hard cap.
-    /// The JSON schema already enforces max_hops <= 3 and max_depth <= 3,
+    /// Defense-in-depth: reject queries that exceed hard caps on complexity.
+    /// The JSON schema already enforces these limits via maxItems / maximum,
     /// so this only fires if schema validation was somehow bypassed.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
         const MAX_HOPS_CAP: u32 = 3;
         const MAX_DEPTH_CAP: u32 = 3;
+        const MAX_NODES_CAP: usize = 5;
+        const MAX_RELS_CAP: usize = 5;
 
+        if input.nodes.len() > MAX_NODES_CAP {
+            return Err(QueryError::DepthExceeded(format!(
+                "nodes count ({}) must not exceed {MAX_NODES_CAP}",
+                input.nodes.len()
+            )));
+        }
+        if input.relationships.len() > MAX_RELS_CAP {
+            return Err(QueryError::DepthExceeded(format!(
+                "relationships count ({}) must not exceed {MAX_RELS_CAP}",
+                input.relationships.len()
+            )));
+        }
         for rel in &input.relationships {
             if rel.max_hops > MAX_HOPS_CAP {
                 return Err(QueryError::DepthExceeded(format!(
@@ -276,6 +294,63 @@ impl<'a> Validator<'a> {
             )));
         }
 
+        Ok(())
+    }
+
+    /// Every declared node must be referenced by at least one structural field
+    /// (relationship, path, neighbors). Unreferenced nodes would be absent from
+    /// the FROM clause, producing broken SQL or silently dropped columns.
+    fn check_unreferenced_nodes(&self, input: &Input) -> Result<()> {
+        let referenced: std::collections::HashSet<&str> = match input.query_type {
+            // Single-node query types: the one declared node is the query.
+            QueryType::Search | QueryType::Neighbors => return Ok(()),
+            QueryType::Traversal | QueryType::Aggregation => {
+                let mut set: std::collections::HashSet<&str> = input
+                    .relationships
+                    .iter()
+                    .flat_map(|r| [r.from.as_str(), r.to.as_str()])
+                    .collect();
+                for agg in &input.aggregations {
+                    if let Some(ref t) = agg.target {
+                        set.insert(t.as_str());
+                    }
+                    if let Some(ref g) = agg.group_by {
+                        set.insert(g.as_str());
+                    }
+                }
+                set
+            }
+            QueryType::PathFinding => {
+                let mut set = std::collections::HashSet::new();
+                if let Some(ref path) = input.path {
+                    set.insert(path.from.as_str());
+                    set.insert(path.to.as_str());
+                }
+                set
+            }
+        };
+
+        for node in &input.nodes {
+            if !referenced.contains(node.id.as_str()) {
+                return Err(QueryError::ReferenceError(format!(
+                    "node \"{}\" is not referenced by any relationship or path",
+                    node.id
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_duplicate_node_ids(&self, input: &Input) -> Result<()> {
+        let mut seen = std::collections::HashSet::new();
+        for node in &input.nodes {
+            if !seen.insert(&node.id) {
+                return Err(QueryError::ReferenceError(format!(
+                    "duplicate node id \"{}\"",
+                    node.id
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -506,6 +581,61 @@ mod tests {
                 "neighbors": {"node": "ghost", "direction": "both"}
             }"#,
             "undefined node \"ghost\"",
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_node_ids() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "Project"}
+                ]
+            }"#,
+            "duplicate node id \"u\"",
+        );
+    }
+
+    #[test]
+    fn accepts_unique_node_ids() {
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
+            }"#,
+        );
+    }
+
+    #[test]
+    fn rejects_unreferenced_traversal_node() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"},
+                    {"id": "orphan", "entity": "Note"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
+            }"#,
+            "node \"orphan\" is not referenced",
+        );
+    }
+
+    #[test]
+    fn accepts_aggregation_node_referenced_only_by_target() {
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "p", "entity": "Project"}],
+                "aggregations": [{"function": "count", "target": "p", "alias": "total"}]
+            }"#,
         );
     }
 }
