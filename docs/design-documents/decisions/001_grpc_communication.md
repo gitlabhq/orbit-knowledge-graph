@@ -21,18 +21,17 @@ The problem is that GKG needs to call *back* to Rails during query execution. St
 
 ## Decision
 
-Use gRPC with bidirectional streaming for the two RPCs that require redaction (`ExecuteTool`, `ExecuteQuery`), and standard unary RPCs for the three that do not (`ListTools`, `GetOntology`, `GetClusterHealth`).
+Use gRPC with bidirectional streaming for the RPC that requires redaction (`ExecuteQuery`), and standard unary RPCs for the three that do not (`ListTools`, `GetGraphSchema`, `GetClusterHealth`).
 
 ### Service definition
 
-From `gkg.proto` (package `gkg.v1`):
+From `gkg.proto` (package `gkg.v1`). The original 5-RPC design included `ExecuteTool` and `GetOntology`; these were consolidated into `ExecuteQuery` (with `ResponseFormat`) and `GetGraphSchema` respectively. See [ADR 003](003_api_design.md) for the rationale.
 
 ```protobuf
 service KnowledgeGraphService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
-  rpc ExecuteTool(stream ExecuteToolMessage) returns (stream ExecuteToolMessage);
   rpc ExecuteQuery(stream ExecuteQueryMessage) returns (stream ExecuteQueryMessage);
-  rpc GetOntology(GetOntologyRequest) returns (GetOntologyResponse);
+  rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
 }
 ```
@@ -40,19 +39,18 @@ service KnowledgeGraphService {
 | RPC | Pattern | Purpose |
 |-----|---------|---------|
 | `ListTools` | Unary | Return available tool definitions with JSON schemas |
-| `ExecuteTool` | Bidi streaming | Execute a tool call with mid-stream redaction exchange |
-| `ExecuteQuery` | Bidi streaming | Execute a raw graph query with mid-stream redaction exchange |
-| `GetOntology` | Unary | Return the full ontology schema (nodes, edges, domains) |
+| `ExecuteQuery` | Bidi streaming | Execute a graph query with mid-stream redaction exchange |
+| `GetGraphSchema` | Unary | Return the graph schema with optional node expansion |
 | `GetClusterHealth` | Unary | Return cluster health for the Orbit dashboard |
 
 ### The bidirectional streaming redaction exchange
 
-The two bidi RPCs follow the same four-step message sequence:
+The `ExecuteQuery` bidi RPC follows a four-step message sequence:
 
-1. Client sends request -- `ExecuteToolRequest` or `ExecuteQueryRequest`
-2. Server sends `RedactionRequired` -- a list of `ResourceCheck` messages, each containing a `resource_type`, `ability`, and batch of `ids` that need authorization
+1. Client sends `ExecuteQueryRequest`
+2. Server sends `RedactionRequired` -- a list of `ResourceToAuthorize` messages, each containing a `resource_type`, `ability`, and batch of `ids` that need authorization
 3. Client sends `RedactionResponse` -- a map of `resource_id -> authorized (bool)` per resource type
-4. Server sends result -- `ToolResult` or `QueryResult`, with unauthorized rows already filtered
+4. Server sends `ExecuteQueryResult`, with unauthorized rows already filtered
 
 ```mermaid
 sequenceDiagram
@@ -86,7 +84,7 @@ sequenceDiagram
 
 ### Row-level authorization mapping
 
-The `ResourceCheck` grouping works at the row level. After GKG executes a ClickHouse query, it scans the result set for columns prefixed with `_gkg_p_` (permission metadata injected during indexing). Rows are grouped by `(resource_type, ability)` to minimize round-trips to Rails:
+The `ResourceToAuthorize` grouping works at the row level. After GKG executes a ClickHouse query, it scans the result set for columns prefixed with `_gkg_p_` (permission metadata injected during indexing). Rows are grouped by `(resource_type, ability)` to minimize round-trips to Rails:
 
 ```plaintext
 -- SQL result (Arrow batches) --
@@ -108,7 +106,7 @@ ids = {}
   row 1 → node_ref(p) = NodeRef { id: 5, entity_type: "Project" }
           ids[("projects", "read")].insert(5)   → { ("projects","read"): {1, 5} }
 
-→ ResourceCheck { resource_type: "projects", ability: "read", ids: [1, 5] }
+→ ResourceToAuthorize { resource_type: "projects", ability: "read", ids: [1, 5] }
 
 -- AuthorizationStage → redaction service --
 request:  { resource_type: "projects", ability: "read", ids: [1, 5] }
@@ -128,27 +126,25 @@ response: ResourceAuthorization { resource_type: "projects", authorized: { 1: tr
 
 ### Message types
 
-Each bidi stream uses a `oneof` envelope that carries all four message phases:
+The bidi stream uses a `oneof` envelope that carries all four message phases:
 
 ```protobuf
-message ExecuteToolMessage {
-  oneof message {
-    ExecuteToolRequest request = 1;
+message ExecuteQueryMessage {
+  oneof content {
+    ExecuteQueryRequest request = 1;
     RedactionExchange redaction = 2;
-    ToolResult result = 3;
-    Error error = 4;
+    ExecuteQueryResult result = 3;
+    ExecuteQueryError error = 4;
   }
 }
 
 message RedactionExchange {
-  oneof exchange {
+  oneof content {
     RedactionRequired required = 1;
     RedactionResponse response = 2;
   }
 }
 ```
-
-The `RedactionExchange` type is shared between `ExecuteToolMessage` and `ExecuteQueryMessage` since the authorization protocol is identical for both RPCs.
 
 ## Why bidirectional streaming
 
@@ -223,7 +219,7 @@ Every `Ability.allowed?` call in Rails hits Postgres to evaluate DeclarativePoli
 
 ### Mitigations
 
-The `ResourceCheck` message groups IDs by `(resource_type, ability)`, and GKG enforces a maximum of 100 resource IDs per check. For a 1000-row result with mixed types, this means at most 10 batched checks rather than 1000 individual ones.
+The `ResourceToAuthorize` message groups IDs by `(resource_type, ability)`, and GKG enforces a maximum of 100 resource IDs per check. For a 1000-row result with mixed types, this means at most 10 batched checks rather than 1000 individual ones.
 
 The GKG query engine already enforces a 1000-row limit per query, which caps the upper bound of permission checks per request.
 
@@ -274,3 +270,4 @@ If Rails is down or slow, GKG cannot complete any query that requires Layer 3 ch
 - [MR !273: gRPC service implementation](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/273)
 - [Gitaly client in Rails](https://gitlab.com/gitlab-org/gitlab/-/tree/master/lib/gitlab/gitaly_client)
 - [Gitaly proto definitions](https://gitlab.com/gitlab-org/gitaly/-/tree/master/proto)
+- [ADR 003: API Design — Unified REST + GraphQL](003_api_design.md)

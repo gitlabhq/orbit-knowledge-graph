@@ -31,7 +31,7 @@ Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrum
 - HTTP latency (p50, p95, p99) by HTTP method and path
 - gRPC error and success rate by RPC method
 - gRPC latency (p50, p95, p99) by RPC method
-- gRPC bidi stream duration for `ExecuteTool` and `ExecuteQuery` RPCs
+- gRPC bidi stream duration for `ExecuteQuery` RPCs
 - Redaction exchange latency (time spent waiting for Rails authorization responses)
 
 **KG Indexer Service:**
