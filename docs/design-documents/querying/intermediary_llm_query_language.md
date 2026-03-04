@@ -280,7 +280,7 @@ Entity and relationship type names in queries must match definitions in the onto
 
 ### Schema Discovery
 
-The `get_graph_entities` tool returns the ontology in a compact TOON format sized for LLM context windows. It does not expose the underlying ClickHouse or Postgres schema.
+The `get_graph_schema` tool returns the ontology in a compact TOON format sized for LLM context windows. It does not expose the underlying ClickHouse or Postgres schema.
 
 By default, the response lists node types grouped by domain and edge types with their source/target types. Pass `expand_nodes` to get property details and relationships for specific entity types.
 
