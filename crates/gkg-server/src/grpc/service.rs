@@ -146,13 +146,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     use crate::proto::execute_query_result::Content;
 
                     let content = if use_llm_format {
-                        Some(Content::FormattedText(
-                            output.formatted_result.to_string(),
-                        ))
+                        Some(Content::FormattedText(output.formatted_result.to_string()))
                     } else {
-                        Some(Content::ResultJson(
-                            output.formatted_result.to_string(),
-                        ))
+                        Some(Content::ResultJson(output.formatted_result.to_string()))
                     };
 
                     let metadata = Some(QueryMetadata {

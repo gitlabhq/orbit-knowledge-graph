@@ -19,7 +19,6 @@ struct QueryPipelineMetrics {
     hydration_duration_ms: Histogram<f64>,
     result_set_size: Histogram<u64>,
     node_count: Histogram<u64>,
-    redacted_count: Histogram<u64>,
     security_rejected: Counter<u64>,
     execution_failed: Counter<u64>,
     authorization_failed: Counter<u64>,
@@ -63,10 +62,6 @@ impl QueryPipelineMetrics {
             node_count: meter
                 .u64_histogram("qp.node_count")
                 .with_description("Number of Arrow record batches returned from ClickHouse")
-                .build(),
-            redacted_count: meter
-                .u64_histogram("qp.redacted_count")
-                .with_description("Number of rows redacted per query")
                 .build(),
             security_rejected: meter
                 .u64_counter("qp.error.security_rejected")
