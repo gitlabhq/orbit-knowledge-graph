@@ -1,0 +1,502 @@
+pub(crate) mod ast;
+pub(crate) mod codegen;
+pub(crate) mod from_ontology;
+
+use arrow::array::Array;
+use arrow::record_batch::RecordBatch;
+
+use super::indexing_position::IndexingPosition;
+use ast::{Expr, Op, OrderExpr, Query};
+
+/// A self-contained, structured representation of a paginated ClickHouse extract query.
+///
+/// Built from ontology fields (both Table and Query ETL types converge here).
+/// Owns its cursor state. Generates complete SQL via [`to_sql`](Self::to_sql).
+/// Advances to the next page via [`advance`](Self::advance), returning a new instance.
+///
+/// The pipeline loop reads like:
+///
+/// ```ignore
+/// let mut query = plan.extract_query.clone();
+/// loop {
+///     let sql = query.to_sql();
+///     let batches = datalake.query(&sql, &params).await?;
+///     // ... transform and write ...
+///     query = query.advance(&last_batch);
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc_v2) struct ExtractQuery {
+    base_query: Query,
+    sort_key_columns: Vec<String>,
+    cursor_values: Vec<String>,
+    batch_size: u64,
+}
+
+impl ExtractQuery {
+    pub fn new(
+        base_query: Query,
+        sort_key_columns: Vec<String>,
+        batch_size: u64,
+    ) -> Self {
+        Self {
+            base_query,
+            sort_key_columns,
+            cursor_values: Vec::new(),
+            batch_size,
+        }
+    }
+
+    /// Generate the complete ClickHouse SQL for the current page.
+    ///
+    /// Clones the base query, injects watermark and cursor conditions
+    /// into the WHERE clause, sets ORDER BY and LIMIT, then emits SQL.
+    pub fn to_sql(&self) -> String {
+        let mut query = self.base_query.clone();
+
+        // Inject cursor condition into the WHERE clause if we have cursor values.
+        if let Some(cursor_expr) = self.build_cursor_expr() {
+            query.where_clause = Expr::and_all([query.where_clause, Some(cursor_expr)]);
+        }
+
+        // Set ORDER BY from sort key columns.
+        query.order_by = self
+            .sort_key_columns
+            .iter()
+            .map(|column| OrderExpr {
+                expr: Expr::raw(column.clone()),
+            })
+            .collect();
+
+        query.limit = Some(self.batch_size);
+
+        codegen::emit_sql(&query)
+    }
+
+    /// Advance to the next page by reading cursor values from the last row of a batch.
+    ///
+    /// The `ExtractQuery` knows its own sort key columns, so it extracts the
+    /// values directly — no external cursor logic needed.
+    /// Returns a new `ExtractQuery` — the original is not mutated.
+    pub fn advance(&self, batch: &RecordBatch) -> Self {
+        let cursor_values = self.extract_cursor_values(batch);
+        let mut next = self.clone();
+        next.cursor_values = cursor_values;
+        next
+    }
+
+    /// Resume from a previously saved position.
+    /// If the position has cursor values, the query resumes from there.
+    /// If the position is completed (no cursor), returns self unchanged.
+    pub fn resume_from(mut self, position: &IndexingPosition) -> Self {
+        if let Some(values) = &position.cursor_values {
+            self.cursor_values = values.clone();
+        }
+        self
+    }
+
+    /// True when this is the first page (no cursor position yet).
+    pub fn is_first_page(&self) -> bool {
+        self.cursor_values.is_empty()
+    }
+
+    /// The current cursor values (needed for position persistence).
+    pub fn cursor_values(&self) -> &[String] {
+        &self.cursor_values
+    }
+
+    /// The configured batch size (rows per page).
+    pub fn batch_size(&self) -> u64 {
+        self.batch_size
+    }
+
+    /// Build the composite key greater-than expression for cursor pagination.
+    ///
+    /// For sort key columns `[c1, c2, c3]` with values `[v1, v2, v3]`, produces:
+    ///
+    /// ```sql
+    /// (c1 > 'v1') OR (c1 = 'v1' AND c2 > 'v2') OR (c1 = 'v1' AND c2 = 'v2' AND c3 > 'v3')
+    /// ```
+    fn build_cursor_expr(&self) -> Option<Expr> {
+        if self.cursor_values.is_empty() {
+            return None;
+        }
+
+        let disjuncts: Vec<Option<Expr>> = (0..self.sort_key_columns.len())
+            .map(|depth| {
+                let mut conjuncts: Vec<Option<Expr>> = Vec::with_capacity(depth + 1);
+
+                for prefix in 0..depth {
+                    conjuncts.push(Some(Expr::eq(
+                        Expr::raw(self.sort_key_columns[prefix].clone()),
+                        Expr::raw(format!("'{}'", self.cursor_values[prefix])),
+                    )));
+                }
+                conjuncts.push(Some(Expr::binary(
+                    Op::Gt,
+                    Expr::raw(self.sort_key_columns[depth].clone()),
+                    Expr::raw(format!("'{}'", self.cursor_values[depth])),
+                )));
+
+                Expr::and_all(conjuncts)
+            })
+            .collect();
+
+        Expr::or_all(disjuncts)
+    }
+
+    /// Read sort key column values from the last row of a batch.
+    fn extract_cursor_values(&self, batch: &RecordBatch) -> Vec<String> {
+        let last_row = batch.num_rows() - 1;
+
+        self.sort_key_columns
+            .iter()
+            .map(|column_name| {
+                let column_index = batch.schema().index_of(column_name).unwrap_or_else(|_| {
+                    panic!("sort key column '{column_name}' not found in batch")
+                });
+
+                let column = batch.column(column_index);
+                array_value_to_string(column, last_row)
+            })
+            .collect()
+    }
+}
+
+/// A single unit of extract-transform-load work.
+///
+/// Abstract over nodes and edges: the pipeline just knows "extract with this query,
+/// run these DataFusion transforms, write each to its destination table."
+/// For a node entity, `transforms` produces both node rows and edge rows.
+/// For a join-table edge, `transforms` produces only edge rows.
+/// The pipeline treats both cases identically.
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc_v2) struct PipelinePlan {
+    pub name: String,
+    pub extract_query: ExtractQuery,
+    pub transforms: Vec<TransformOutput>,
+}
+
+/// One DataFusion SQL transform and where to write the results.
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc_v2) struct TransformOutput {
+    pub query: Query,
+    pub destination_table: String,
+}
+
+impl TransformOutput {
+    pub fn to_sql(&self) -> String {
+        codegen::emit_sql(&self.query)
+    }
+}
+
+/// Convert a single array cell to its string representation for cursor values.
+fn array_value_to_string(array: &dyn Array, row: usize) -> String {
+    use arrow::array::*;
+    use arrow::datatypes::DataType;
+
+    match array.data_type() {
+        DataType::Int8 => array
+            .as_any()
+            .downcast_ref::<Int8Array>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::Int16 => array
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::Int32 => array
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::Int64 => array
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::UInt8 => array
+            .as_any()
+            .downcast_ref::<UInt8Array>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::UInt16 => array
+            .as_any()
+            .downcast_ref::<UInt16Array>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::UInt32 => array
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::UInt64 => array
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::Utf8 => array
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        DataType::LargeUtf8 => array
+            .as_any()
+            .downcast_ref::<LargeStringArray>()
+            .unwrap()
+            .value(row)
+            .to_string(),
+        other => panic!("unsupported sort key column type for cursor: {other}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ast::{SelectExpr, TableRef};
+    use arrow::array::{Int64Array, StringArray};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use chrono::Utc;
+    use std::sync::Arc;
+
+    fn position_with_cursor(values: Vec<&str>) -> IndexingPosition {
+        IndexingPosition {
+            watermark: Utc::now(),
+            cursor_values: Some(values.into_iter().map(String::from).collect()),
+        }
+    }
+
+    fn base_extract_query(sort_keys: Vec<&str>) -> Query {
+        Query {
+            select: vec![
+                SelectExpr::bare(Expr::col("", "id")),
+                SelectExpr::bare(Expr::col("", "name")),
+                SelectExpr::new(
+                    Expr::raw("_siphon_replicated_at"),
+                    "_version",
+                ),
+                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
+            ],
+            from: TableRef::scan("source_table", None),
+            where_clause: Some(Expr::and_all([
+                Some(Expr::binary(
+                    Op::Gt,
+                    Expr::raw("_siphon_replicated_at"),
+                    Expr::raw("{last_watermark:String}"),
+                )),
+                Some(Expr::binary(
+                    Op::Le,
+                    Expr::raw("_siphon_replicated_at"),
+                    Expr::raw("{watermark:String}"),
+                )),
+            ]).unwrap()),
+            order_by: sort_keys
+                .iter()
+                .map(|k| OrderExpr {
+                    expr: Expr::raw(k.to_string()),
+                })
+                .collect(),
+            limit: None,
+        }
+    }
+
+    fn simple_query(sort_keys: Vec<&str>, batch_size: u64) -> ExtractQuery {
+        let sort_key_columns: Vec<String> = sort_keys.iter().map(|s| s.to_string()).collect();
+        ExtractQuery::new(
+            base_extract_query(sort_keys.clone()),
+            sort_key_columns,
+            batch_size,
+        )
+    }
+
+    fn query_with_where(where_clause: &str, sort_keys: Vec<&str>) -> ExtractQuery {
+        let sort_key_columns: Vec<String> = sort_keys.iter().map(|s| s.to_string()).collect();
+        let mut base = base_extract_query(sort_keys.clone());
+        base.where_clause = Expr::and_all([
+            base.where_clause,
+            Some(Expr::raw(where_clause.to_string())),
+        ]);
+        ExtractQuery::new(
+            base,
+            sort_key_columns,
+            1000,
+        )
+    }
+
+    #[test]
+    fn first_page_sql_has_no_cursor_clause() {
+        let query = simple_query(vec!["traversal_path", "id"], 1000);
+
+        let sql = query.to_sql();
+
+        assert!(query.is_first_page());
+        assert!(sql.contains("ORDER BY traversal_path, id"));
+        assert!(sql.contains("LIMIT 1000"));
+        assert!(!sql.contains("(traversal_path >"));
+    }
+
+    #[test]
+    fn first_page_sql_includes_watermark_conditions() {
+        let query = simple_query(vec!["id"], 500);
+
+        let sql = query.to_sql();
+
+        assert!(sql.contains("_siphon_replicated_at > {last_watermark:String}"));
+        assert!(sql.contains("_siphon_replicated_at <= {watermark:String}"));
+        assert!(sql.contains("_siphon_replicated_at AS _version"));
+        assert!(sql.contains("_siphon_deleted AS _deleted"));
+    }
+
+    #[test]
+    fn first_page_sql_includes_where_clause() {
+        let query = query_with_where(
+            "startsWith(traversal_path, {traversal_path:String})",
+            vec!["id"],
+        );
+
+        let sql = query.to_sql();
+
+        assert!(sql.contains("startsWith(traversal_path, {traversal_path:String})"));
+    }
+
+    #[test]
+    fn advanced_page_sql_includes_cursor_clause_single_column() {
+        let query = simple_query(vec!["id"], 1000);
+        let advanced = query.resume_from(&position_with_cursor(vec!["42"]));
+
+        let sql = advanced.to_sql();
+
+        assert!(!advanced.is_first_page());
+        assert!(
+            sql.contains("(id > '42')"),
+            "expected cursor clause in SQL: {sql}"
+        );
+        assert!(sql.contains("ORDER BY id LIMIT 1000"));
+    }
+
+    #[test]
+    fn advanced_page_sql_includes_cursor_clause_two_columns() {
+        let query = simple_query(vec!["traversal_path", "id"], 1000);
+        let advanced = query.resume_from(&position_with_cursor(vec!["1/2/", "42"]));
+
+        let sql = advanced.to_sql();
+
+        assert!(
+            sql.contains("(traversal_path > '1/2/')"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn advanced_page_sql_includes_cursor_clause_three_columns() {
+        let query = simple_query(vec!["traversal_path", "project_id", "id"], 1000);
+        let advanced = query.resume_from(&position_with_cursor(vec!["1/2/", "10", "99"]));
+
+        let sql = advanced.to_sql();
+
+        assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
+        assert!(
+            sql.contains("(project_id > '10')"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("(project_id = '10')") && sql.contains("(id > '99')"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn resume_from_applies_cursor_values() {
+        let query = simple_query(vec!["id"], 1000);
+        let resumed = query.resume_from(&position_with_cursor(vec!["42"]));
+
+        assert!(!resumed.is_first_page());
+        assert_eq!(resumed.cursor_values(), &["42"]);
+    }
+
+    #[test]
+    fn resume_from_completed_position_keeps_first_page() {
+        let query = simple_query(vec!["id"], 1000);
+        let completed = IndexingPosition {
+            watermark: Utc::now(),
+            cursor_values: None,
+        };
+        let resumed = query.resume_from(&completed);
+
+        assert!(resumed.is_first_page());
+    }
+
+    #[test]
+    fn resume_from_produces_correct_sql() {
+        let query = simple_query(vec!["id"], 1000);
+        let resumed = query.resume_from(&position_with_cursor(vec!["42"]));
+        let sql = resumed.to_sql();
+
+        assert!(
+            sql.contains("(id > '42')"),
+            "resume_from should produce cursor clause: {sql}"
+        );
+    }
+
+    #[test]
+    fn advanced_page_with_where_clause_includes_both_conditions() {
+        let query = query_with_where(
+            "startsWith(traversal_path, {traversal_path:String})",
+            vec!["traversal_path", "id"],
+        );
+        let advanced = query.resume_from(&position_with_cursor(vec!["1/2/", "42"]));
+
+        let sql = advanced.to_sql();
+
+        assert!(sql.contains("startsWith(traversal_path, {traversal_path:String})"));
+        assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
+        assert!(
+            sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn advance_extracts_cursor_from_last_row() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("traversal_path", DataType::Utf8, false),
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["1/2/", "1/3/", "1/4/"])),
+                Arc::new(Int64Array::from(vec![10, 20, 30])),
+                Arc::new(StringArray::from(vec![Some("a"), Some("b"), Some("c")])),
+            ],
+        )
+        .unwrap();
+
+        let query = simple_query(vec!["traversal_path", "id"], 1000);
+        let advanced = query.advance(&batch);
+
+        assert_eq!(advanced.cursor_values(), &["1/4/", "30"]);
+    }
+
+    #[test]
+    fn order_by_columns_appear_in_sql() {
+        let query = simple_query(vec!["traversal_path", "id"], 1000);
+        assert!(query.to_sql().contains("ORDER BY traversal_path, id"));
+    }
+}

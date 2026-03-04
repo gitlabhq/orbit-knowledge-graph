@@ -110,29 +110,12 @@ properties:
 etl:
   type: query
   scope: namespaced
-  query: |
-    SELECT
-        id,
-        note,
-        noteable_type,
-        noteable_id,
-        line_code,
-        created_at,
-        updated_at,
-        discussion_id,
-        resolved_at,
-        internal,
-        confidential,
-        commit_id,
-        author_id,
-        traversal_path,
-        _siphon_deleted AS _deleted,
-        _siphon_replicated_at AS _version
-    FROM siphon_notes
-    WHERE system = false
-        AND startsWith(traversal_path, {traversal_path:String})
-        AND _siphon_replicated_at > {last_watermark:String}
-        AND _siphon_replicated_at <= {watermark:String}
+  select: "id, note, noteable_type, noteable_id, line_code, created_at, updated_at, discussion_id, resolved_at, internal, confidential, commit_id, author_id, traversal_path"
+  from: siphon_notes
+  where: "system = false AND startsWith(traversal_path, {traversal_path:String})"
+  watermark: _siphon_replicated_at
+  deleted: _siphon_deleted
+  order_by: [traversal_path, noteable_type, noteable_id, id]
   edges:
     author_id:
       to: User

@@ -22,6 +22,7 @@ etl:
   source: siphon_issue_links
   watermark: _siphon_replicated_at
   deleted: _siphon_deleted
+  order_by: [traversal_path, source_id, id]
   from:
     id: source_id
     type: WorkItem

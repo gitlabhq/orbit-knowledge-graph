@@ -89,6 +89,7 @@ etl:
   source: siphon_merge_request_diffs
   watermark: _siphon_replicated_at
   deleted: _siphon_deleted
+  order_by: [traversal_path, merge_request_id, id]
   edges:
     merge_request_id:
       to: MergeRequest

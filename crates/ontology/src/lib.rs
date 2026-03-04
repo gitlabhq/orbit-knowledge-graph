@@ -939,7 +939,13 @@ struct EtlYaml {
     #[serde(default)]
     deleted: Option<String>,
     #[serde(default)]
-    query: Option<String>,
+    select: Option<String>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default, rename = "where")]
+    where_clause: Option<String>,
+    #[serde(default)]
+    order_by: Option<Vec<String>>,
     #[serde(default)]
     edges: BTreeMap<String, EdgeMappingYaml>,
 }
@@ -1005,6 +1011,7 @@ struct EdgeEtlYaml {
     source: String,
     watermark: String,
     deleted: String,
+    order_by: Vec<String>,
     from: EdgeEndpointYaml,
     to: EdgeEndpointYaml,
 }
@@ -1094,8 +1101,7 @@ impl NodeYaml {
             .sort_key
             .unwrap_or_else(|| default_entity_sort_key.to_vec());
 
-        // Convert ETL config
-        let etl = self.etl.map(|e| e.into_config()).transpose()?;
+        let etl = self.etl.map(|e| e.into_config(&sort_key)).transpose()?;
 
         let redaction = self.redaction.map(|r| RedactionConfig {
             resource_type: r.resource_type,
@@ -1126,7 +1132,7 @@ impl NodeYaml {
 }
 
 impl EtlYaml {
-    fn into_config(self) -> Result<EtlConfig, OntologyError> {
+    fn into_config(self, default_order_by: &[String]) -> Result<EtlConfig, OntologyError> {
         let scope = match self.scope.as_str() {
             "global" => EtlScope::Global,
             "namespaced" => EtlScope::Namespaced,
@@ -1188,23 +1194,46 @@ impl EtlYaml {
                         "ETL type 'table' requires a 'deleted' field".to_string(),
                     )
                 })?;
+                let order_by = self.order_by.unwrap_or_else(|| default_order_by.to_vec());
                 Ok(EtlConfig::Table {
                     scope,
                     source,
                     watermark,
                     deleted,
+                    order_by,
                     edges,
                 })
             }
             "query" => {
-                let query = self.query.ok_or_else(|| {
+                let select = self.select.ok_or_else(|| {
                     OntologyError::Validation(
-                        "ETL type 'query' requires a 'query' field".to_string(),
+                        "ETL type 'query' requires a 'select' field".to_string(),
                     )
                 })?;
+                let from = self.from.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'query' requires a 'from' field".to_string(),
+                    )
+                })?;
+                let watermark = self.watermark.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'query' requires a 'watermark' field".to_string(),
+                    )
+                })?;
+                let deleted = self.deleted.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'query' requires a 'deleted' field".to_string(),
+                    )
+                })?;
+                let order_by = self.order_by.unwrap_or_else(|| default_order_by.to_vec());
                 Ok(EtlConfig::Query {
                     scope,
-                    query,
+                    select,
+                    from,
+                    where_clause: self.where_clause,
+                    watermark,
+                    deleted,
+                    order_by,
                     edges,
                 })
             }
@@ -1254,6 +1283,7 @@ impl EdgeYaml {
             source: etl.source,
             watermark: etl.watermark,
             deleted: etl.deleted,
+            order_by: etl.order_by,
             from,
             to,
         }))

@@ -63,24 +63,24 @@ impl IndexerTestExt for TestContext {
         let indexer_config = create_test_indexer_config(&self.config);
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let registry = HandlerRegistry::default();
-        indexer::modules::sdlc::register_handlers(&registry, &indexer_config, &ontology)
+        indexer::modules::sdlc_v2::register_handlers(&registry, &indexer_config, &ontology)
             .await
-            .expect("failed to create SDLC handlers");
+            .expect("failed to create SDLC v2 handlers");
         registry
-            .find_by_name("namespace_handler")
-            .expect("namespace_handler not found")
+            .find_by_name("sdlc_v2_namespace_handler")
+            .expect("sdlc_v2_namespace_handler not found")
     }
 
     async fn get_global_handler(&self) -> Arc<dyn Handler> {
         let indexer_config = create_test_indexer_config(&self.config);
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let registry = HandlerRegistry::default();
-        indexer::modules::sdlc::register_handlers(&registry, &indexer_config, &ontology)
+        indexer::modules::sdlc_v2::register_handlers(&registry, &indexer_config, &ontology)
             .await
-            .expect("failed to create SDLC handlers");
+            .expect("failed to create SDLC v2 handlers");
         registry
-            .find_by_name("global_handler")
-            .expect("global_handler not found")
+            .find_by_name("sdlc_v2_global_handler")
+            .expect("sdlc_v2_global_handler not found")
     }
 
     async fn assert_edge_count(

@@ -12,6 +12,7 @@ etl:
   source: siphon_merge_requests_closing_issues
   watermark: _siphon_replicated_at
   deleted: _siphon_deleted
+  order_by: [traversal_path, issue_id, id]
   from:
     id: merge_request_id
     type: MergeRequest

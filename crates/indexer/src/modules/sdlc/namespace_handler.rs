@@ -425,9 +425,12 @@ mod tests {
             ),
             etl: Some(EtlConfig::Query {
                 scope: EtlScope::Namespaced,
-                query: format!(
-                    "SELECT id, _deleted, _version FROM {source_table} WHERE traversal_path LIKE {{traversal_path:String}}"
-                ),
+                select: "id".to_string(),
+                from: source_table.to_string(),
+                where_clause: Some("traversal_path LIKE {traversal_path:String}".to_string()),
+                watermark: "_siphon_replicated_at".to_string(),
+                deleted: "_siphon_deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges: BTreeMap::new(),
             }),
             ..Default::default()

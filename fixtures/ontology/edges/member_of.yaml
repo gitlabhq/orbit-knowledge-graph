@@ -47,6 +47,7 @@ etl:
   source: siphon_members
   watermark: _siphon_replicated_at
   deleted: _siphon_deleted
+  order_by: [traversal_path, id]
   from:
     id: user_id
     type: User

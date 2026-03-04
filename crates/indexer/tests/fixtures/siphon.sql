@@ -971,3 +971,14 @@ WHERE
     AND ref IS NOT NULL 
     AND commit_to IS NOT NULL
     AND _siphon_deleted = false;
+
+-- Position tracking for sdlc_v2 cursor-based pagination
+CREATE TABLE IF NOT EXISTS sdlc_indexing_position
+(
+    `key` String,
+    `watermark` DateTime64(6, 'UTC'),
+    `cursor_values` String DEFAULT 'null',
+    `_version` DateTime64(6, 'UTC') DEFAULT now64()
+)
+ENGINE = ReplacingMergeTree(_version)
+ORDER BY key;

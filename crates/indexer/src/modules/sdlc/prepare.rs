@@ -249,7 +249,22 @@ fn build_extract_query(node: &NodeEntity, etl: &EtlConfig) -> Option<String> {
                 watermark
             ))
         }
-        EtlConfig::Query { query, .. } => Some(query.clone()),
+        EtlConfig::Query {
+            select,
+            from,
+            where_clause,
+            watermark,
+            deleted,
+            ..
+        } => {
+            let mut sql = format!(
+                "SELECT {select}, {watermark} AS _version, {deleted} AS _deleted FROM {from} WHERE {watermark} > {{last_watermark:String}} AND {watermark} <= {{watermark:String}}"
+            );
+            if let Some(condition) = where_clause {
+                sql.push_str(&format!(" AND {condition}"));
+            }
+            Some(sql)
+        }
     }
 }
 
@@ -531,6 +546,7 @@ mod tests {
                 source: "siphon_groups".to_string(),
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges,
             }),
             ..Default::default()
@@ -568,6 +584,7 @@ mod tests {
                 source: "siphon_notes".to_string(),
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges,
             }),
             ..Default::default()
@@ -627,6 +644,11 @@ mod tests {
             source: "siphon_members".to_string(),
             watermark: "_siphon_replicated_at".to_string(),
             deleted: "_siphon_deleted".to_string(),
+            order_by: vec![
+                "traversal_path".to_string(),
+                "user_id".to_string(),
+                "source_id".to_string(),
+            ],
             from: EdgeEndpoint {
                 id_column: "user_id".to_string(),
                 node_type: EdgeEndpointType::Literal("User".to_string()),

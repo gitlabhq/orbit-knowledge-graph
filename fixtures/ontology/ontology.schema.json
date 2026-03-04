@@ -111,37 +111,80 @@
     "etlConfig": {
       "type": "object",
       "description": "ETL configuration for indexing this entity from source tables.",
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["table", "query"],
-          "description": "ETL type - 'table' for simple extraction, 'query' for complex JOINs."
+      "oneOf": [
+        {
+          "description": "Table ETL: simple extraction from a single source table.",
+          "properties": {
+            "type": { "type": "string", "const": "table" },
+            "scope": { "$ref": "#/definitions/etlScope" },
+            "source": {
+              "type": "string",
+              "description": "Source table name."
+            },
+            "watermark": {
+              "type": "string",
+              "description": "Column name for incremental processing watermark."
+            },
+            "deleted": {
+              "type": "string",
+              "description": "Column name indicating soft-deleted records."
+            },
+            "order_by": {
+              "type": "array",
+              "description": "Columns for ORDER BY in extract queries. Defaults to the node's sort_key if not specified.",
+              "items": { "type": "string" },
+              "minItems": 1
+            },
+            "edges": {
+              "type": "object",
+              "description": "Edge generation config keyed by source column name.",
+              "additionalProperties": { "$ref": "#/definitions/edgeMappingDefinition" }
+            }
+          },
+          "required": ["type", "scope", "source", "watermark", "deleted"],
+          "additionalProperties": false
         },
-        "scope": { "$ref": "#/definitions/etlScope" },
-        "source": {
-          "type": "string",
-          "description": "Source table name for watermark tracking."
-        },
-        "watermark": {
-          "type": "string",
-          "description": "Column name for incremental processing watermark."
-        },
-        "deleted": {
-          "type": "string",
-          "description": "Column name indicating soft-deleted records."
-        },
-        "query": {
-          "type": "string",
-          "description": "SQL query template with {last_watermark:String}, {watermark:String}, and {traversal_path:String} placeholders."
-        },
-        "edges": {
-          "type": "object",
-          "description": "Edge generation config keyed by source column name.",
-          "additionalProperties": { "$ref": "#/definitions/edgeMappingDefinition" }
+        {
+          "description": "Query ETL: structured extraction with JOINs and custom conditions.",
+          "properties": {
+            "type": { "type": "string", "const": "query" },
+            "scope": { "$ref": "#/definitions/etlScope" },
+            "select": {
+              "type": "string",
+              "description": "Column expressions for the SELECT clause."
+            },
+            "from": {
+              "type": "string",
+              "description": "Table or JOIN expression for the FROM clause."
+            },
+            "where": {
+              "type": "string",
+              "description": "Extra WHERE conditions beyond watermark filtering. May contain ClickHouse parameter placeholders like {traversal_path:String}."
+            },
+            "watermark": {
+              "type": "string",
+              "description": "Column name for incremental processing watermark."
+            },
+            "deleted": {
+              "type": "string",
+              "description": "Column name indicating soft-deleted records."
+            },
+            "order_by": {
+              "type": "array",
+              "description": "Columns for ORDER BY in extract queries. Defaults to the node's sort_key if not specified.",
+              "items": { "type": "string" },
+              "minItems": 1
+            },
+            "edges": {
+              "type": "object",
+              "description": "Edge generation config keyed by source column name.",
+              "additionalProperties": { "$ref": "#/definitions/edgeMappingDefinition" }
+            }
+          },
+          "required": ["type", "scope", "select", "from", "watermark", "deleted"],
+          "additionalProperties": false
         }
-      },
-      "required": ["type", "scope"],
-      "additionalProperties": false
+      ]
     },
 
     "redactionConfig": {
@@ -402,10 +445,16 @@
           "type": "string",
           "description": "Column indicating deleted records."
         },
+        "order_by": {
+          "type": "array",
+          "description": "Columns for ORDER BY in extract queries and cursor-based pagination.",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
         "from": { "$ref": "#/definitions/edgeEtlEndpoint" },
         "to": { "$ref": "#/definitions/edgeEtlEndpoint" }
       },
-      "required": ["scope", "source", "watermark", "deleted", "from", "to"],
+      "required": ["scope", "source", "watermark", "deleted", "order_by", "from", "to"],
       "additionalProperties": false
     },
 

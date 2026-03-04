@@ -5,8 +5,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::constants::{DELETED_COLUMN, VERSION_COLUMN};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EtlScope {
     Global,
@@ -48,12 +46,26 @@ pub enum EtlConfig {
         source: String,
         watermark: String,
         deleted: String,
+        /// Columns for ORDER BY in extract queries and cursor-based pagination.
+        order_by: Vec<String>,
         /// Edges to generate from columns. Key is the source column name.
         edges: BTreeMap<String, EdgeMapping>,
     },
     Query {
         scope: EtlScope,
-        query: String,
+        /// Column expressions for the SELECT clause.
+        select: String,
+        /// Table or JOIN expression for the FROM clause.
+        from: String,
+        /// Extra WHERE conditions beyond watermark filtering.
+        /// May contain ClickHouse parameter placeholders like {traversal_path:String}.
+        where_clause: Option<String>,
+        /// Column used for incremental processing watermark.
+        watermark: String,
+        /// Column indicating soft-deleted records.
+        deleted: String,
+        /// Columns for ORDER BY in extract queries and cursor-based pagination.
+        order_by: Vec<String>,
         /// Edges to generate from columns. Key is the source column name.
         edges: BTreeMap<String, EdgeMapping>,
     },
@@ -67,10 +79,24 @@ impl EtlConfig {
         }
     }
 
-    pub fn deleted(&self) -> Option<&str> {
+    pub fn deleted(&self) -> &str {
         match self {
-            EtlConfig::Table { deleted, .. } => Some(deleted.as_str()),
-            EtlConfig::Query { .. } => None,
+            EtlConfig::Table { deleted, .. } => deleted.as_str(),
+            EtlConfig::Query { deleted, .. } => deleted.as_str(),
+        }
+    }
+
+    pub fn watermark(&self) -> &str {
+        match self {
+            EtlConfig::Table { watermark, .. } => watermark.as_str(),
+            EtlConfig::Query { watermark, .. } => watermark.as_str(),
+        }
+    }
+
+    pub fn order_by(&self) -> &[String] {
+        match self {
+            EtlConfig::Table { order_by, .. } => order_by,
+            EtlConfig::Query { order_by, .. } => order_by,
         }
     }
 
@@ -82,33 +108,26 @@ impl EtlConfig {
     }
 
     pub fn validate_query_parameters(&self) -> Vec<&'static str> {
-        let EtlConfig::Query { scope, query, .. } = self else {
+        let EtlConfig::Query {
+            scope,
+            where_clause,
+            ..
+        } = self
+        else {
             return Vec::new();
         };
 
-        let mut missing = Vec::new();
+        if *scope == EtlScope::Namespaced {
+            let has_traversal_path = where_clause
+                .as_deref()
+                .is_some_and(|w| w.contains("{traversal_path:String}"));
 
-        if !query.contains("{last_watermark:String}") {
-            missing.push("{last_watermark:String}");
+            if !has_traversal_path {
+                return vec!["{traversal_path:String}"];
+            }
         }
 
-        if !query.contains("{watermark:String}") {
-            missing.push("{watermark:String}");
-        }
-
-        if *scope == EtlScope::Namespaced && !query.contains("{traversal_path:String}") {
-            missing.push("{traversal_path:String}");
-        }
-
-        if !query.contains(DELETED_COLUMN) {
-            missing.push(DELETED_COLUMN);
-        }
-
-        if !query.contains(VERSION_COLUMN) {
-            missing.push(VERSION_COLUMN);
-        }
-
-        missing
+        Vec::new()
     }
 }
 
@@ -116,72 +135,90 @@ impl EtlConfig {
 mod tests {
     use super::*;
 
-    #[test]
-    fn validate_query_parameters_returns_empty_for_valid_global_query() {
-        let config = EtlConfig::Query {
-            scope: EtlScope::Global,
-            query: "SELECT _deleted, _version FROM t WHERE x > {last_watermark:String} AND x <= {watermark:String}"
-                .to_string(),
+    fn query_config(scope: EtlScope, where_clause: Option<&str>) -> EtlConfig {
+        EtlConfig::Query {
+            scope,
+            select: "id, name".to_string(),
+            from: "source_table".to_string(),
+            where_clause: where_clause.map(String::from),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
-        };
+        }
+    }
 
+    #[test]
+    fn validate_query_parameters_passes_for_global_query() {
+        let config = query_config(EtlScope::Global, None);
         assert!(config.validate_query_parameters().is_empty());
     }
 
     #[test]
-    fn validate_query_parameters_returns_empty_for_valid_namespaced_query() {
-        let config = EtlConfig::Query {
-            scope: EtlScope::Namespaced,
-            query: "SELECT _deleted, _version FROM t WHERE path LIKE {traversal_path:String} AND x > {last_watermark:String} AND x <= {watermark:String}"
-                .to_string(),
-            edges: BTreeMap::new(),
-        };
-
+    fn validate_query_parameters_passes_for_namespaced_query_with_traversal_path() {
+        let config = query_config(
+            EtlScope::Namespaced,
+            Some("startsWith(traversal_path, {traversal_path:String})"),
+        );
         assert!(config.validate_query_parameters().is_empty());
     }
 
     #[test]
-    fn validate_query_parameters_returns_missing_for_global_query() {
-        let config = EtlConfig::Query {
-            scope: EtlScope::Global,
-            query: "SELECT * FROM t".to_string(),
-            edges: BTreeMap::new(),
-        };
-
+    fn validate_query_parameters_fails_for_namespaced_query_without_traversal_path() {
+        let config = query_config(EtlScope::Namespaced, Some("status = 'active'"));
         let missing = config.validate_query_parameters();
-        assert_eq!(missing.len(), 4);
-        assert!(missing.contains(&"{last_watermark:String}"));
-        assert!(missing.contains(&"{watermark:String}"));
-        assert!(missing.contains(&"_deleted"));
-        assert!(missing.contains(&"_version"));
+        assert_eq!(missing, vec!["{traversal_path:String}"]);
     }
 
     #[test]
-    fn validate_query_parameters_returns_missing_traversal_path_for_namespaced_query() {
-        let config = EtlConfig::Query {
+    fn validate_query_parameters_fails_for_namespaced_query_with_no_where_clause() {
+        let config = query_config(EtlScope::Namespaced, None);
+        let missing = config.validate_query_parameters();
+        assert_eq!(missing, vec!["{traversal_path:String}"]);
+    }
+
+    #[test]
+    fn validate_query_parameters_skips_table_etl() {
+        let config = EtlConfig::Table {
             scope: EtlScope::Namespaced,
-            query: "SELECT _deleted, _version FROM t WHERE x > {last_watermark:String} AND x <= {watermark:String}"
-                .to_string(),
+            source: "t".to_string(),
+            watermark: "w".to_string(),
+            deleted: "d".to_string(),
+            order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
         };
-
-        let missing = config.validate_query_parameters();
-        assert_eq!(missing.len(), 1);
-        assert!(missing.contains(&"{traversal_path:String}"));
+        assert!(config.validate_query_parameters().is_empty());
     }
 
     #[test]
-    fn validate_query_parameters_returns_missing_deleted_and_version() {
-        let config = EtlConfig::Query {
+    fn deleted_returns_column_for_both_etl_types() {
+        let table = EtlConfig::Table {
             scope: EtlScope::Global,
-            query: "SELECT * FROM t WHERE x > {last_watermark:String} AND x <= {watermark:String}"
-                .to_string(),
+            source: "t".to_string(),
+            watermark: "w".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
         };
+        assert_eq!(table.deleted(), "_siphon_deleted");
 
-        let missing = config.validate_query_parameters();
-        assert_eq!(missing.len(), 2);
-        assert!(missing.contains(&"_deleted"));
-        assert!(missing.contains(&"_version"));
+        let query = query_config(EtlScope::Global, None);
+        assert_eq!(query.deleted(), "_siphon_deleted");
+    }
+
+    #[test]
+    fn watermark_returns_column_for_both_etl_types() {
+        let table = EtlConfig::Table {
+            scope: EtlScope::Global,
+            source: "t".to_string(),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "d".to_string(),
+            order_by: vec!["id".to_string()],
+            edges: BTreeMap::new(),
+        };
+        assert_eq!(table.watermark(), "_siphon_replicated_at");
+
+        let query = query_config(EtlScope::Global, None);
+        assert_eq!(query.watermark(), "_siphon_replicated_at");
     }
 }

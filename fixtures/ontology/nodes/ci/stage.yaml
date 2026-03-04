@@ -79,6 +79,7 @@ etl:
   source: siphon_p_ci_stages
   watermark: _siphon_replicated_at
   deleted: _siphon_deleted
+  order_by: [traversal_path, id, partition_id]
   edges:
     project_id:
       to: Project

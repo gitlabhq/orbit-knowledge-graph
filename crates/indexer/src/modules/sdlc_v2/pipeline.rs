@@ -1,0 +1,613 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use arrow::compute::concat_batches;
+use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, Utc};
+use datafusion::datasource::MemTable;
+use datafusion::prelude::*;
+use serde_json::Value;
+use tracing::{debug, info, warn};
+
+use crate::clickhouse::TIMESTAMP_FORMAT;
+use crate::destination::Destination;
+use crate::handler::HandlerError;
+
+use super::datalake::DatalakeQuery;
+use super::indexing_position::{IndexingPosition, IndexingPositionStore};
+use super::metrics::SdlcMetrics;
+use super::plan::{PipelinePlan, TransformOutput};
+
+const SOURCE_DATA_TABLE: &str = "source_data";
+const MAX_RETRIES: u32 = 3;
+
+/// Opaque context built by the handler.
+///
+/// The pipeline doesn't interpret these values — it passes `watermark` and
+/// `base_conditions` through to ClickHouse as query parameters, and uses
+/// `position_key` to look up cursor state from the position store.
+pub(super) struct PipelineContext {
+    pub watermark: DateTime<Utc>,
+    pub position_key: String,
+    pub base_conditions: BTreeMap<String, String>,
+}
+
+/// Runs pipeline plans against the datalake with cursor-based pagination.
+///
+/// Dependencies are injected via the constructor. The [`run`](Self::run) method
+/// only takes the per-invocation arguments: which plans to run, context from the
+/// handler, and where to write results.
+pub(super) struct Pipeline {
+    datalake: Arc<dyn DatalakeQuery>,
+    position_store: Arc<dyn IndexingPositionStore>,
+    destination: Arc<dyn Destination>,
+    metrics: SdlcMetrics,
+}
+
+impl Pipeline {
+    pub fn new(
+        datalake: Arc<dyn DatalakeQuery>,
+        position_store: Arc<dyn IndexingPositionStore>,
+        destination: Arc<dyn Destination>,
+        metrics: SdlcMetrics,
+    ) -> Self {
+        Self {
+            datalake,
+            position_store,
+            destination,
+            metrics,
+        }
+    }
+
+    pub async fn run(
+        &self,
+        plans: &[PipelinePlan],
+        context: &PipelineContext,
+    ) -> Result<(), HandlerError> {
+        let mut errors = Vec::new();
+
+        for plan in plans {
+            if let Err(err) = self.run_plan(plan, context).await {
+                self.metrics
+                    .record_pipeline_error(&plan.name, err.error_kind());
+                errors.push(format!("{}: {err}", plan.name));
+            }
+        }
+
+        if errors.is_empty() {
+            return Ok(());
+        }
+
+        Err(HandlerError::Processing(format!(
+            "pipelines failed: {}",
+            errors.join("; ")
+        )))
+    }
+
+    async fn run_plan(
+        &self,
+        plan: &PipelinePlan,
+        context: &PipelineContext,
+    ) -> Result<(), HandlerError> {
+        let started_at = Instant::now();
+        let mut extract_query = plan.extract_query.clone();
+
+        let position_key = format!("{}.{}", context.position_key, plan.name);
+        let position = self.load_position(&position_key).await;
+        let params = self.prepare_query_params(&position.watermark, context);
+
+        let mut total_rows: u64 = 0;
+        let mut batch_count: u64 = 0;
+        extract_query = extract_query.resume_from(&position);
+
+        loop {
+            let batches = self
+                .extract_batch(&extract_query.to_sql(), params.clone())
+                .await?;
+
+            if batches.is_empty() {
+                break;
+            }
+
+            let rows_in_batch: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+            batch_count += 1;
+            total_rows += rows_in_batch;
+
+            self.transform_and_write(&plan.name, &batches, &plan.transforms)
+                .await?;
+
+            self.position_store
+                .save_progress(
+                    &position_key,
+                    &IndexingPosition {
+                        watermark: context.watermark,
+                        cursor_values: Some(extract_query.cursor_values().to_vec()),
+                    },
+                )
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to save cursor for {}: {err}",
+                        plan.name
+                    ))
+                })?;
+
+            extract_query = extract_query.advance(batches.last().unwrap());
+            if rows_in_batch < plan.extract_query.batch_size() {
+                break;
+            }
+        }
+
+        self.position_store
+            .save_completed(&position_key, &context.watermark)
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to mark {} as completed: {err}",
+                    plan.name
+                ))
+            })?;
+
+        let elapsed = started_at.elapsed();
+        self.metrics.record_pipeline_completion(
+            &plan.name,
+            elapsed.as_secs_f64(),
+            total_rows,
+            0,
+            batch_count,
+        );
+
+        if total_rows > 0 {
+            info!(
+                pipeline = %plan.name,
+                total_rows,
+                batch_count,
+                elapsed_ms = elapsed.as_millis() as u64,
+                "pipeline completed"
+            );
+        } else {
+            debug!(
+                pipeline = %plan.name,
+                elapsed_ms = elapsed.as_millis() as u64,
+                "pipeline completed with no data"
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn extract_batch(
+        &self,
+        sql: &str,
+        params: Value,
+    ) -> Result<Vec<RecordBatch>, HandlerError> {
+        let mut last_error = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                // Retries: 100ms → 200ms → 400ms, then gives up.
+                let backoff = Duration::from_millis(100 * 2u64.pow(attempt - 1));
+                tokio::time::sleep(backoff).await;
+            }
+
+            match self.datalake.query_batches(sql, params.clone()).await {
+                Ok(batches) => return Ok(batches),
+                Err(err) => {
+                    warn!(
+                        attempt,
+                        max_retries = MAX_RETRIES,
+                        %err,
+                        "datalake query failed, retrying"
+                    );
+                    last_error = Some(HandlerError::Processing(format!(
+                        "datalake query failed: {err}"
+                    )));
+                }
+            }
+        }
+
+        Err(last_error.unwrap())
+    }
+
+    async fn transform_and_write(
+        &self,
+        pipeline_name: &str,
+        batches: &[RecordBatch],
+        transforms: &[TransformOutput],
+    ) -> Result<(), HandlerError> {
+        let schema = batches[0].schema();
+        let combined = concat_batches(&schema, batches).map_err(|err| {
+            HandlerError::Processing(format!(
+                "failed to concat batches for {pipeline_name}: {err}"
+            ))
+        })?;
+
+        let session = SessionContext::new();
+        let mem_table =
+            MemTable::try_new(combined.schema(), vec![vec![combined]]).map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to create mem table for {pipeline_name}: {err}"
+                ))
+            })?;
+
+        session
+            .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
+            .map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to register table for {pipeline_name}: {err}"
+                ))
+            })?;
+
+        let mut transform_duration = Duration::ZERO;
+
+        for transform in transforms {
+            let transform_start = Instant::now();
+            let result_batch = self
+                .execute_transform(&session, &transform.to_sql())
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to transform {pipeline_name} for {}: {err}",
+                        transform.destination_table
+                    ))
+                })?;
+            transform_duration += transform_start.elapsed();
+
+            if result_batch.num_rows() == 0 {
+                continue;
+            }
+
+            let writer = self
+                .destination
+                .new_batch_writer(&transform.destination_table)
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to create writer for {}: {err}",
+                        transform.destination_table
+                    ))
+                })?;
+
+            writer.write_batch(&[result_batch]).await.map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to write to {}: {err}",
+                    transform.destination_table
+                ))
+            })?;
+        }
+
+        self.metrics
+            .record_transform_duration(pipeline_name, transform_duration.as_secs_f64());
+
+        Ok(())
+    }
+
+    async fn execute_transform(
+        &self,
+        session: &SessionContext,
+        sql: &str,
+    ) -> Result<RecordBatch, datafusion::error::DataFusionError> {
+        let dataframe = session.sql(sql).await?;
+        let schema = Arc::new(dataframe.schema().as_arrow().clone());
+        let batches = dataframe.collect().await?;
+
+        if batches.is_empty() {
+            return Ok(RecordBatch::new_empty(schema));
+        }
+
+        concat_batches(&schema, &batches).map_err(Into::into)
+    }
+
+    async fn load_position(&self, position_key: &str) -> IndexingPosition {
+        match self.position_store.load(position_key).await {
+            Ok(Some(position)) => position,
+            Ok(None) => IndexingPosition {
+                watermark: DateTime::<Utc>::UNIX_EPOCH,
+                cursor_values: None,
+            },
+            Err(err) => {
+                warn!(
+                    position_key,
+                    %err,
+                    "failed to load position, starting from epoch"
+                );
+                IndexingPosition {
+                    watermark: DateTime::<Utc>::UNIX_EPOCH,
+                    cursor_values: None,
+                }
+            }
+        }
+    }
+
+    fn prepare_query_params(
+        &self,
+        last_watermark: &DateTime<Utc>,
+        context: &PipelineContext,
+    ) -> Value {
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "last_watermark".to_string(),
+            Value::String(last_watermark.format(TIMESTAMP_FORMAT).to_string()),
+        );
+        params.insert(
+            "watermark".to_string(),
+            Value::String(context.watermark.format(TIMESTAMP_FORMAT).to_string()),
+        );
+        for (key, value) in &context.base_conditions {
+            params.insert(key.clone(), Value::String(value.clone()));
+        }
+        Value::Object(params)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modules::sdlc_v2::datalake::{DatalakeError, DatalakeQuery};
+    use crate::modules::sdlc_v2::indexing_position::IndexingPositionError;
+    use crate::modules::sdlc_v2::plan::ast::{Expr, Op, Query, SelectExpr, TableRef};
+    use crate::modules::sdlc_v2::plan::ExtractQuery;
+    use crate::testkit::MockDestination;
+    use arrow::array::{BooleanArray, Int64Array, StringArray};
+    use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    fn test_metrics() -> SdlcMetrics {
+        SdlcMetrics::with_meter(&crate::testkit::test_meter())
+    }
+
+    fn simple_extract_query(batch_size: u64) -> ExtractQuery {
+        let base_query = Query {
+            select: vec![
+                SelectExpr::bare(Expr::col("", "id")),
+                SelectExpr::bare(Expr::col("", "name")),
+                SelectExpr::new(Expr::raw("_siphon_replicated_at"), "_version"),
+                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
+            ],
+            from: TableRef::scan("source_table", None),
+            where_clause: Some(
+                Expr::and_all([
+                    Some(Expr::binary(
+                        Op::Gt,
+                        Expr::raw("_siphon_replicated_at"),
+                        Expr::raw("{last_watermark:String}"),
+                    )),
+                    Some(Expr::binary(
+                        Op::Le,
+                        Expr::raw("_siphon_replicated_at"),
+                        Expr::raw("{watermark:String}"),
+                    )),
+                ])
+                .unwrap(),
+            ),
+            order_by: vec![],
+            limit: None,
+        };
+
+        ExtractQuery::new(
+            base_query,
+            vec!["id".to_string()],
+            batch_size,
+        )
+    }
+
+    fn simple_plan(name: &str) -> PipelinePlan {
+        let transform_query = Query {
+            select: vec![
+                SelectExpr::bare(Expr::col("", "id")),
+                SelectExpr::bare(Expr::col("", "name")),
+                SelectExpr::bare(Expr::col("", "_version")),
+                SelectExpr::bare(Expr::col("", "_deleted")),
+            ],
+            from: TableRef::scan(SOURCE_DATA_TABLE, None),
+            where_clause: None,
+            order_by: vec![],
+            limit: None,
+        };
+
+        PipelinePlan {
+            name: name.to_string(),
+            extract_query: simple_extract_query(1000),
+            transforms: vec![TransformOutput {
+                query: transform_query,
+                destination_table: "gl_test".to_string(),
+            }],
+        }
+    }
+
+    fn test_context() -> PipelineContext {
+        PipelineContext {
+            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
+            position_key: "test.Entity".to_string(),
+            base_conditions: BTreeMap::new(),
+        }
+    }
+
+    fn test_batch(rows: usize) -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![
+            ArrowField::new("id", ArrowDataType::Int64, false),
+            ArrowField::new("name", ArrowDataType::Utf8, true),
+            ArrowField::new("_version", ArrowDataType::Int64, false),
+            ArrowField::new("_deleted", ArrowDataType::Boolean, false),
+        ]));
+
+        let ids: Vec<i64> = (1..=rows as i64).collect();
+        let names: Vec<&str> = (0..rows).map(|_| "test").collect();
+        let versions: Vec<i64> = vec![1; rows];
+        let deleted: Vec<bool> = vec![false; rows];
+
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(ids)),
+                Arc::new(StringArray::from(names)),
+                Arc::new(Int64Array::from(versions)),
+                Arc::new(BooleanArray::from(deleted)),
+            ],
+        )
+        .unwrap()
+    }
+
+    struct EmptyDatalake;
+
+    #[async_trait]
+    impl DatalakeQuery for EmptyDatalake {
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            Ok(vec![])
+        }
+    }
+
+    struct MultiBatchDatalake {
+        call_count: Mutex<u32>,
+        batch_size: usize,
+    }
+
+    #[async_trait]
+    impl DatalakeQuery for MultiBatchDatalake {
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+
+            let rows = if *count == 1 {
+                self.batch_size
+            } else {
+                self.batch_size / 2
+            };
+
+            Ok(vec![test_batch(rows)])
+        }
+    }
+
+    struct FailingDatalake;
+
+    #[async_trait]
+    impl DatalakeQuery for FailingDatalake {
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            Err(DatalakeError::Query("simulated failure".to_string()))
+        }
+    }
+
+    struct RecordingPositionStore {
+        state: Mutex<Option<IndexingPosition>>,
+    }
+
+    impl RecordingPositionStore {
+        fn new() -> Self {
+            Self {
+                state: Mutex::new(None),
+            }
+        }
+
+        fn current_state(&self) -> Option<IndexingPosition> {
+            self.state.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl IndexingPositionStore for RecordingPositionStore {
+        async fn load(
+            &self,
+            _key: &str,
+        ) -> Result<Option<IndexingPosition>, IndexingPositionError> {
+            Ok(self.state.lock().unwrap().clone())
+        }
+
+        async fn save_progress(
+            &self,
+            _key: &str,
+            position: &IndexingPosition,
+        ) -> Result<(), IndexingPositionError> {
+            *self.state.lock().unwrap() = Some(position.clone());
+            Ok(())
+        }
+
+        async fn save_completed(
+            &self,
+            _key: &str,
+            watermark: &DateTime<Utc>,
+        ) -> Result<(), IndexingPositionError> {
+            *self.state.lock().unwrap() = Some(IndexingPosition {
+                watermark: *watermark,
+                cursor_values: None,
+            });
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn multi_batch_paginates_and_completes() {
+        let store = Arc::new(RecordingPositionStore::new());
+        let mut plan = simple_plan("Test");
+        plan.extract_query = simple_extract_query(10);
+
+        let pipeline = Pipeline::new(
+            Arc::new(MultiBatchDatalake {
+                call_count: Mutex::new(0),
+                batch_size: 10,
+            }),
+            store.clone(),
+            Arc::new(MockDestination::new()),
+            test_metrics(),
+        );
+
+        let result = pipeline.run(&[plan], &test_context()).await;
+
+        assert!(result.is_ok());
+
+        let final_state = store.current_state().unwrap();
+        assert!(final_state.cursor_values.is_none(), "should be completed");
+    }
+
+    #[tokio::test]
+    async fn continues_past_individual_failures() {
+        let pipeline = Pipeline::new(
+            Arc::new(FailingDatalake),
+            Arc::new(RecordingPositionStore::new()),
+            Arc::new(MockDestination::new()),
+            test_metrics(),
+        );
+
+        let plans = vec![simple_plan("First"), simple_plan("Second")];
+        let result = pipeline.run(&plans, &test_context()).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("First"), "should mention first failure");
+        assert!(err_msg.contains("Second"), "should mention second failure");
+    }
+
+    #[tokio::test]
+    async fn resumes_from_stored_cursor() {
+        let store = Arc::new(RecordingPositionStore {
+            state: Mutex::new(Some(IndexingPosition {
+                watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
+                cursor_values: Some(vec!["5".to_string()]),
+            })),
+        });
+
+        let pipeline = Pipeline::new(
+            Arc::new(EmptyDatalake),
+            store,
+            Arc::new(MockDestination::new()),
+            test_metrics(),
+        );
+
+        let result = pipeline.run(&[simple_plan("Test")], &test_context()).await;
+
+        assert!(result.is_ok());
+    }
+}

@@ -29,7 +29,7 @@ pub async fn processes_notes_with_edges(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_note ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_note FINAL ORDER BY id").await;
     assert!(!result.is_empty(), "notes result should not be empty");
 
     let batch = &result[0];
@@ -78,7 +78,7 @@ pub async fn filters_out_system_notes(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, note FROM gl_note ORDER BY id")
+        .query("SELECT id, note FROM gl_note FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "notes result should not be empty");
 

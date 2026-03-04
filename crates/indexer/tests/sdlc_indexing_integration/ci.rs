@@ -63,7 +63,7 @@ pub async fn processes_pipelines(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_pipeline ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_pipeline FINAL ORDER BY id").await;
     assert!(!result.is_empty(), "pipeline result should not be empty");
 
     let batch = &result[0];
@@ -138,7 +138,7 @@ pub async fn processes_stages(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_stage ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_stage FINAL ORDER BY id").await;
     assert!(!result.is_empty(), "stage result should not be empty");
 
     let batch = &result[0];
@@ -220,7 +220,7 @@ pub async fn processes_jobs(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_job ORDER BY id").await;
+    let result = context.query("SELECT * FROM gl_job FINAL ORDER BY id").await;
     assert!(!result.is_empty(), "job result should not be empty");
 
     let batch = &result[0];
@@ -315,7 +315,7 @@ pub async fn processes_ci_hierarchy(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let pipeline_result = context.query("SELECT * FROM gl_pipeline").await;
+    let pipeline_result = context.query("SELECT * FROM gl_pipeline FINAL").await;
     assert!(
         !pipeline_result.is_empty(),
         "pipeline result should not be empty"
@@ -323,12 +323,12 @@ pub async fn processes_ci_hierarchy(context: &TestContext) {
     assert_eq!(pipeline_result[0].num_rows(), 1, "should have 1 pipeline");
 
     let stage_result = context
-        .query("SELECT * FROM gl_stage ORDER BY position")
+        .query("SELECT * FROM gl_stage FINAL ORDER BY position")
         .await;
     assert!(!stage_result.is_empty(), "stage result should not be empty");
     assert_eq!(stage_result[0].num_rows(), 2, "should have 2 stages");
 
-    let job_result = context.query("SELECT * FROM gl_job ORDER BY id").await;
+    let job_result = context.query("SELECT * FROM gl_job FINAL ORDER BY id").await;
     assert!(!job_result.is_empty(), "job result should not be empty");
     assert_eq!(job_result[0].num_rows(), 4, "should have 4 jobs");
 
