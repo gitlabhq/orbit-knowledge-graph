@@ -236,10 +236,10 @@ Rather than a separate authorization endpoint, the redaction exchange occurs ins
 
 1. Rails sends the query to GKG over a gRPC bidirectional stream.
 2. GKG runs the query on ClickHouse and identifies redactable columns from the ontology.
-3. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceCheck[]` entries, grouped by entity type and ability (e.g., all issues that need `read_issue` checks).
+3. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceToAuthorize[]` entries, grouped by entity type and ability (e.g., all issues that need `read_issue` checks).
 4. Rails calls `Ability.allowed?` for each resource and responds with `ResourceAuthorization[]` on the same stream.
 5. GKG applies those authorizations -- the query pipeline marks unauthorized rows and drops them from the result set.
-6. GKG returns the redacted results to Rails as a `ToolResult` or `QueryResult`.
+6. GKG returns the redacted results to Rails as an `ExecuteQueryResult`.
 
 **Code Review Requirements**:
 
@@ -276,7 +276,7 @@ sequenceDiagram
     AuthEngine->>AuthEngine: Group rows by entity type + permission + resource IDs
 
     Note over AuthEngine, Rails: gRPC Bidirectional Streaming RedactionExchange
-    AuthEngine->>Rails: RedactionExchange.required (ResourceCheck[])
+    AuthEngine->>Rails: RedactionExchange.required (ResourceToAuthorize[])
     Rails->>Rails: Ability.allowed? per resource
     Rails-->>AuthEngine: RedactionExchange.response (ResourceAuthorization[])
 
@@ -285,7 +285,7 @@ sequenceDiagram
     deactivate AuthEngine
     deactivate WebServer
 
-    WebServer-->>Rails: ToolResult/QueryResult with redacted payload
+    WebServer-->>Rails: ExecuteQueryResult with redacted payload
     Rails-->>Client: Final redacted data
 ```
 
