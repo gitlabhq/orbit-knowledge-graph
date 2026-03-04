@@ -1,0 +1,21 @@
+[package]
+name = "query-engine-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+query-engine = { path = ".." }
+ontology = { path = "../../ontology" }
+once_cell = "1.21.3"
+
+[[bin]]
+name = "fuzz_compile_raw"
+path = "fuzz_targets/fuzz_compile_raw.rs"
+doc = false

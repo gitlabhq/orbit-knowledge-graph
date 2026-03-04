@@ -1,0 +1,36 @@
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "note",
+      "entity": "Note",
+      "filters": {
+        "system": false
+      }
+    },
+    {
+      "id": "author",
+      "entity": "User"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "AUTHORED",
+      "from": "author",
+      "to": "note"
+    }
+  ],
+  "aggregations": [
+    {
+      "function": "count",
+      "target": "note",
+      "group_by": "author",
+      "alias": "note_count"
+    }
+  ],
+  "aggregation_sort": {
+    "agg_index": 0,
+    "direction": "DESC"
+  },
+  "limit": 20
+}

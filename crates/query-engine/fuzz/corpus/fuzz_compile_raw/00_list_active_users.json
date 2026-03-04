@@ -1,0 +1,16 @@
+{
+  "query_type": "search",
+  "node": {
+    "id": "u",
+    "entity": "User",
+    "filters": {
+      "state": "active"
+    }
+  },
+  "limit": 30,
+  "order_by": {
+    "node": "u",
+    "property": "created_at",
+    "direction": "DESC"
+  }
+}

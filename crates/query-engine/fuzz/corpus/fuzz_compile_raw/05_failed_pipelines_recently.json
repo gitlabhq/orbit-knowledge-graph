@@ -1,0 +1,29 @@
+{
+  "query_type": "traversal",
+  "nodes": [
+    {
+      "id": "pipe",
+      "entity": "Pipeline",
+      "filters": {
+        "status": "failed"
+      }
+    },
+    {
+      "id": "p",
+      "entity": "Project"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "IN_PROJECT",
+      "from": "pipe",
+      "to": "p"
+    }
+  ],
+  "limit": 30,
+  "order_by": {
+    "node": "pipe",
+    "property": "created_at",
+    "direction": "DESC"
+  }
+}

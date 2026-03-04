@@ -1,0 +1,20 @@
+{
+  "query_type": "search",
+  "node": {
+    "id": "pipe",
+    "entity": "Pipeline",
+    "filters": {
+      "status": "success",
+      "duration": {
+        "op": "gt",
+        "value": 60
+      }
+    }
+  },
+  "limit": 20,
+  "order_by": {
+    "node": "pipe",
+    "property": "duration",
+    "direction": "DESC"
+  }
+}

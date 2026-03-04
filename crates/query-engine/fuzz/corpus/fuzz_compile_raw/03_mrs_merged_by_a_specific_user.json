@@ -1,0 +1,30 @@
+{
+  "query_type": "traversal",
+  "nodes": [
+    {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "filters": {
+        "state": "merged"
+      }
+    },
+    {
+      "id": "merger",
+      "entity": "User",
+      "node_ids": "$sample"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "MERGED_BY",
+      "from": "mr",
+      "to": "merger"
+    }
+  ],
+  "limit": 30,
+  "order_by": {
+    "node": "mr",
+    "property": "updated_at",
+    "direction": "DESC"
+  }
+}

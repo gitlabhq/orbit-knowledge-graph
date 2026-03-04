@@ -1,0 +1,38 @@
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "mr",
+      "entity": "MergeRequest"
+    },
+    {
+      "id": "reviewer",
+      "entity": "User"
+    },
+    {
+      "id": "p",
+      "entity": "Project"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "REVIEWER",
+      "from": "mr",
+      "to": "reviewer"
+    },
+    {
+      "type": "IN_PROJECT",
+      "from": "mr",
+      "to": "p"
+    }
+  ],
+  "aggregations": [
+    {
+      "function": "count",
+      "target": "reviewer",
+      "group_by": "p",
+      "alias": "reviewer_count"
+    }
+  ],
+  "limit": 15
+}

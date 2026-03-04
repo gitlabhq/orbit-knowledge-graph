@@ -1,0 +1,20 @@
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "v",
+      "entity": "Vulnerability",
+      "filters": {
+        "report_type": "sast"
+      }
+    }
+  ],
+  "aggregations": [
+    {
+      "function": "count",
+      "target": "v",
+      "alias": "total"
+    }
+  ],
+  "limit": 10
+}

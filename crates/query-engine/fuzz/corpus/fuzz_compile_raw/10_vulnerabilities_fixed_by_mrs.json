@@ -1,0 +1,27 @@
+{
+  "query_type": "traversal",
+  "nodes": [
+    {
+      "id": "v",
+      "entity": "Vulnerability",
+      "filters": {
+        "state": "resolved"
+      }
+    },
+    {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "filters": {
+        "state": "merged"
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "type": "FIXES",
+      "from": "mr",
+      "to": "v"
+    }
+  ],
+  "limit": 25
+}
