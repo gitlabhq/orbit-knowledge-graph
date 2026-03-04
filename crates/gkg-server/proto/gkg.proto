@@ -68,11 +68,17 @@ message ExecuteQueryRequest {
 
 // Server-sent final message with query results.
 message ExecuteQueryResult {
-  string result_json = 1;       // formatted result (JSON array or GOON text)
-  string generated_sql = 2;     // compiled ClickHouse SQL for debugging
-  int32 row_count = 3;          // total rows returned after redaction
-  int32 redacted_count = 4;     // rows removed by authorization
-  double execution_time_ms = 5; // wall-clock query execution time
+  oneof content {
+    string result_json = 1;     // format = RAW: structured JSON
+    string formatted_text = 2;  // format = LLM: compact text
+  }
+  QueryMetadata metadata = 3;
+}
+
+message QueryMetadata {
+  string query_type = 1;              // e.g. "traversal", "aggregation", "search"
+  repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s) for debugging
+  int32 row_count = 3;                // rows returned after redaction
 }
 
 // Server-sent error when query compilation or execution fails.

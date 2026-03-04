@@ -34,23 +34,36 @@ pub struct ExecuteQueryRequest {
     pub query_type: i32,
 }
 /// Server-sent final message with query results.
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExecuteQueryResult {
-    /// formatted result (JSON array or GOON text)
+    #[prost(message, optional, tag = "3")]
+    pub metadata: ::core::option::Option<QueryMetadata>,
+    #[prost(oneof = "execute_query_result::Content", tags = "1, 2")]
+    pub content: ::core::option::Option<execute_query_result::Content>,
+}
+/// Nested message and enum types in `ExecuteQueryResult`.
+pub mod execute_query_result {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Content {
+        /// format = RAW: structured JSON
+        #[prost(string, tag = "1")]
+        ResultJson(::prost::alloc::string::String),
+        /// format = LLM: compact text
+        #[prost(string, tag = "2")]
+        FormattedText(::prost::alloc::string::String),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryMetadata {
+    /// e.g. "traversal", "aggregation", "search"
     #[prost(string, tag = "1")]
-    pub result_json: ::prost::alloc::string::String,
-    /// compiled ClickHouse SQL for debugging
-    #[prost(string, tag = "2")]
-    pub generated_sql: ::prost::alloc::string::String,
-    /// total rows returned after redaction
+    pub query_type: ::prost::alloc::string::String,
+    /// compiled ClickHouse SQL(s) for debugging
+    #[prost(string, repeated, tag = "2")]
+    pub raw_query_strings: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// rows returned after redaction
     #[prost(int32, tag = "3")]
     pub row_count: i32,
-    /// rows removed by authorization
-    #[prost(int32, tag = "4")]
-    pub redacted_count: i32,
-    /// wall-clock query execution time
-    #[prost(double, tag = "5")]
-    pub execution_time_ms: f64,
 }
 /// Server-sent error when query compilation or execution fails.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -212,7 +225,7 @@ pub struct RedactionRequired {
 /// A batch of resource IDs that need authorization checks.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ResourceToAuthorize {
-    /// e.g. "Project", "MergeRequest"
+    /// e.g. "project", "merge_request"
     #[prost(string, tag = "1")]
     pub resource_type: ::prost::alloc::string::String,
     #[prost(int64, repeated, tag = "2")]

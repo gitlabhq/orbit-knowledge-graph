@@ -171,9 +171,6 @@ impl PipelineObserver {
         METRICS.hydration_duration_ms.record(self.hydration_ms, &qt);
         METRICS.node_count.record(self.batch_count as u64, &qt);
         METRICS.result_set_size.record(output.row_count as u64, &qt);
-        METRICS
-            .redacted_count
-            .record(output.redacted_count as u64, &qt);
     }
 }
 

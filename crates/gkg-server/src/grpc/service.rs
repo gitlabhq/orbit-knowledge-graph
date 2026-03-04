@@ -17,9 +17,9 @@ use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
     GetGraphSchemaRequest, GetGraphSchemaResponse, ListToolsRequest, ListToolsResponse,
-    ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response,
+    QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
+    SchemaNodeStyle, SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition,
+    execute_query_message, get_graph_schema_response,
 };
 use crate::query_pipeline::{
     ContextEngineFormatter, QueryPipelineService, RawRowFormatter, receive_query_request,
@@ -142,17 +142,29 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             match result {
                 Ok(output) => {
                     info!("Sending final query result");
+
+                    use crate::proto::execute_query_result::Content;
+
+                    let content = if use_llm_format {
+                        Some(Content::FormattedText(
+                            output.formatted_result.to_string(),
+                        ))
+                    } else {
+                        Some(Content::ResultJson(
+                            output.formatted_result.to_string(),
+                        ))
+                    };
+
+                    let metadata = Some(QueryMetadata {
+                        query_type: output.query_type,
+                        raw_query_strings: output.raw_query_strings,
+                        row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                    });
+
                     let _ = tx
                         .send(Ok(ExecuteQueryMessage {
                             content: Some(execute_query_message::Content::Result(
-                                ExecuteQueryResult {
-                                    result_json: output.formatted_result.to_string(),
-                                    generated_sql: output.generated_sql.unwrap_or_default(),
-                                    row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
-                                    redacted_count: i32::try_from(output.redacted_count)
-                                        .unwrap_or(i32::MAX),
-                                    execution_time_ms: output.execution_time_ms,
-                                },
+                                ExecuteQueryResult { content, metadata },
                             )),
                         }))
                         .await;
