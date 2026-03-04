@@ -113,7 +113,7 @@ enum ResponseFormat {
 
 | RPC | `format = raw` | `format = llm` |
 |-----|----------------|----------------|
-| `ExecuteQuery` | Tabular JSON rows + `generated_sql` | [GOON](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205) (Graph Object Output Notation) — deduplicated nodes/edges, 25-50% token savings |
+| `ExecuteQuery` | Tabular JSON rows + `QueryMetadata` | [GOON](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205) (Graph Object Output Notation) — deduplicated nodes/edges, 25-50% token savings |
 | `GetGraphSchema` | Structured schema (domains, nodes, edges, properties, styles) | [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text (`{name: "User", props: ["id:int", ...], out: [...]}`) |
 | `GetClusterHealth` | Structured health (status, version, components) | [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) — compact key-value notation |
 | `ListTools` | Tool definitions (name, description, parameters_json_schema) | Same (no LLM variant needed) |
@@ -170,10 +170,9 @@ Execute a Knowledge Graph query.
   "result": [
     { "_id": "123", "_type": "MergeRequest", "title": "Fix bug", "state": "merged" }
   ],
-  "generated_sql": "SELECT ... FROM merge_requests WHERE ...",
-  "row_count": 10,
-  "redacted_count": 2,
-  "execution_time_ms": 45.2
+  "query_type": "search",
+  "raw_query_strings": ["SELECT ... FROM merge_requests WHERE ..."],
+  "row_count": 10
 }
 ```
 
@@ -182,10 +181,9 @@ Execute a Knowledge Graph query.
 ```json
 {
   "result": "@goon{v:1,org:123}\nnodes:\n  MergeRequest[10]{id,iid,title,state,author_id}:\n    501,42,\"Fix auth bug\",merged,1\n    ...",
-  "generated_sql": "SELECT ...",
-  "row_count": 10,
-  "redacted_count": 2,
-  "execution_time_ms": 45.2
+  "query_type": "search",
+  "raw_query_strings": ["SELECT ..."],
+  "row_count": 10
 }
 ```
 
@@ -470,11 +468,17 @@ message ExecuteQueryRequest {
 }
 
 message ExecuteQueryResult {
-  string result_json = 1;
-  string generated_sql = 2;
+  oneof content {
+    string result_json = 1;
+    string formatted_text = 2;
+  }
+  QueryMetadata metadata = 3;
+}
+
+message QueryMetadata {
+  string query_type = 1;
+  repeated string raw_query_strings = 2;
   int32 row_count = 3;
-  int32 redacted_count = 4;
-  double execution_time_ms = 5;
 }
 
 message ExecuteQueryError {

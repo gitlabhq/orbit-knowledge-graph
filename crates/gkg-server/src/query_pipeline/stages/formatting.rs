@@ -26,14 +26,20 @@ impl<F: ResultFormatter> FormattingStage<F> {
         _obs: &PipelineObserver,
     ) -> PipelineOutput {
         let row_count = input.query_result.authorized_count();
-        let generated_sql = &compiled.compiled_query.base.sql;
         let formatted =
             self.formatter
                 .format(&input.query_result, &input.result_context, &self.ontology);
 
+        let query_type = input
+            .result_context
+            .query_type
+            .map(|qt| <&str>::from(qt).to_string())
+            .unwrap_or_default();
+
         PipelineOutput {
             formatted_result: formatted,
-            generated_sql: Some(generated_sql.clone()),
+            query_type,
+            raw_query_strings: vec![compiled.compiled_query.base.sql.clone()],
             row_count,
             redacted_count: input.redacted_count,
         }
@@ -101,8 +107,9 @@ mod tests {
         let output = stage.execute(input, &compiled, &PipelineObserver::start());
 
         assert_eq!(output.formatted_result, json!(["ok"]));
-        assert_eq!(output.generated_sql.as_deref(), Some("SELECT 1"));
         assert_eq!(output.row_count, 2); // 3 total - 1 redacted
         assert_eq!(output.redacted_count, 1);
+        assert_eq!(output.raw_query_strings, vec!["SELECT 1"]);
+        assert_eq!(output.query_type, "");
     }
 }

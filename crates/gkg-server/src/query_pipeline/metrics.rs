@@ -140,6 +140,10 @@ impl PipelineObserver {
         self.hydration_ms = elapsed.as_secs_f64() * 1000.0;
     }
 
+    pub fn elapsed_ms(&self) -> f64 {
+        self.start.elapsed().as_secs_f64() * 1000.0
+    }
+
     /// Pass a fallible stage result through, recording error metrics if it failed.
     pub fn check<T>(&self, result: Result<T, PipelineError>) -> Result<T, PipelineError> {
         if let Err(ref e) = result {

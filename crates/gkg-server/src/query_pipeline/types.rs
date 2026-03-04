@@ -35,7 +35,8 @@ pub struct HydrationOutput {
 
 pub struct PipelineOutput {
     pub formatted_result: Value,
-    pub generated_sql: Option<String>,
+    pub query_type: String,
+    pub raw_query_strings: Vec<String>,
     pub row_count: usize,
     pub redacted_count: usize,
 }

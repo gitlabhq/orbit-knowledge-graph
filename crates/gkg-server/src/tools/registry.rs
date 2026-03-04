@@ -17,13 +17,13 @@ pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
-        vec![Self::query_graph(), Self::get_graph_entities()]
+        vec![Self::query_graph(), Self::get_graph_schema()]
     }
 
     fn query_graph() -> ToolDefinition {
         let base_description = "Execute graph queries to find nodes, traverse relationships, \
                                 explore neighborhoods, find paths, or aggregate data. \
-                                Use get_graph_entities to discover available entity types and relationships.";
+                                Use get_graph_schema to discover available entity types and relationships.";
 
         let description = match condensed_query_schema() {
             Ok(schema) => format!(
@@ -50,9 +50,9 @@ impl ToolRegistry {
         }
     }
 
-    fn get_graph_entities() -> ToolDefinition {
+    fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
-            name: "get_graph_entities".to_string(),
+            name: "get_graph_schema".to_string(),
             description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
                           and edges with their source/target types. Use expand_nodes to get \
                           property details for specific types."
@@ -115,19 +115,19 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
 
         assert!(names.contains(&"query_graph"));
-        assert!(names.contains(&"get_graph_entities"));
+        assert!(names.contains(&"get_graph_schema"));
     }
 
     #[test]
-    fn test_get_graph_entities_has_expand_nodes_param() {
+    fn test_get_graph_schema_has_expand_nodes_param() {
         let ontology = test_ontology();
         let tools = ToolRegistry::get_all_tools(&ontology);
-        let get_entities = tools
+        let get_schema = tools
             .iter()
-            .find(|t| t.name == "get_graph_entities")
-            .expect("get_graph_entities tool should exist");
+            .find(|t| t.name == "get_graph_schema")
+            .expect("get_graph_schema tool should exist");
 
-        let params = &get_entities.parameters;
+        let params = &get_schema.parameters;
         assert_eq!(params["type"], "object");
         assert!(params["properties"]["expand_nodes"].is_object());
     }
@@ -171,8 +171,8 @@ mod tests {
             "Description should contain traversal"
         );
         assert!(
-            desc.contains("get_graph_entities"),
-            "Description should reference get_graph_entities for entity discovery"
+            desc.contains("get_graph_schema"),
+            "Description should reference get_graph_schema for entity discovery"
         );
     }
 
@@ -192,7 +192,7 @@ mod tests {
         );
         assert!(
             !desc.contains("AUTHORED"),
-            "Description should not contain relationship types (use get_graph_entities)"
+            "Description should not contain relationship types (use get_graph_schema)"
         );
     }
 }
