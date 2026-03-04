@@ -40,3 +40,4 @@ _build/
 # Local planning docs
 todo.md
 plan.md
+.claude/worktrees/

@@ -3,21 +3,14 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use tracing::{error, warn};
 
-use crate::proto::{
-    Error as ProtoError, ExecuteQueryMessage, ExecuteToolMessage, execute_query_message,
-    execute_tool_message,
-};
-use crate::tools::ExecutorError;
+use crate::proto::{ExecuteQueryError, ExecuteQueryMessage, execute_query_message};
 
 use super::error::PipelineError;
 
 pub struct QueryRequest {
-    pub query_json: String,
-}
-
-pub struct ToolRequest {
-    pub tool_name: String,
-    pub arguments_json: String,
+    pub query: String,
+    pub format: i32,
+    pub query_type: i32,
 }
 
 pub async fn receive_query_request(
@@ -38,50 +31,17 @@ pub async fn receive_query_request(
         }
     };
 
-    match first_msg.message {
-        Some(execute_query_message::Message::Request(r)) => Some(QueryRequest {
-            query_json: r.query_json,
+    match first_msg.content {
+        Some(execute_query_message::Content::Request(r)) => Some(QueryRequest {
+            query: r.query,
+            format: r.format,
+            query_type: r.query_type,
         }),
         _ => {
             warn!("Expected ExecuteQueryRequest as first message");
             let _ = tx
                 .send(Err(Status::invalid_argument(
                     "Expected ExecuteQueryRequest as first message",
-                )))
-                .await;
-            None
-        }
-    }
-}
-
-pub async fn receive_tool_request(
-    stream: &mut Streaming<ExecuteToolMessage>,
-    tx: &mpsc::Sender<Result<ExecuteToolMessage, Status>>,
-) -> Option<ToolRequest> {
-    let first_msg = match stream.next().await {
-        Some(Ok(msg)) => msg,
-        Some(Err(e)) => {
-            error!(error = %e, "Failed to receive initial message");
-            let _ = tx.send(Err(e)).await;
-            return None;
-        }
-        None => {
-            warn!("Empty stream received");
-            let _ = tx.send(Err(Status::invalid_argument("Empty stream"))).await;
-            return None;
-        }
-    };
-
-    match first_msg.message {
-        Some(execute_tool_message::Message::Request(r)) => Some(ToolRequest {
-            tool_name: r.tool_name,
-            arguments_json: r.arguments_json,
-        }),
-        _ => {
-            warn!("Expected ExecuteToolRequest as first message");
-            let _ = tx
-                .send(Err(Status::invalid_argument(
-                    "Expected ExecuteToolRequest as first message",
                 )))
                 .await;
             None
@@ -96,38 +56,8 @@ pub async fn send_query_error(
     error!(error = %error, "Pipeline error");
     let _ = tx
         .send(Ok(ExecuteQueryMessage {
-            message: Some(execute_query_message::Message::Error(ProtoError {
+            content: Some(execute_query_message::Content::Error(ExecuteQueryError {
                 code: error.code().to_string(),
-                message: error.to_string(),
-            })),
-        }))
-        .await;
-}
-
-pub async fn send_tool_pipeline_error(
-    tx: &mpsc::Sender<Result<ExecuteToolMessage, Status>>,
-    error: PipelineError,
-) {
-    error!(error = %error, "Pipeline error");
-    let _ = tx
-        .send(Ok(ExecuteToolMessage {
-            message: Some(execute_tool_message::Message::Error(ProtoError {
-                code: error.code().to_string(),
-                message: error.to_string(),
-            })),
-        }))
-        .await;
-}
-
-pub async fn send_tool_executor_error(
-    tx: &mpsc::Sender<Result<ExecuteToolMessage, Status>>,
-    error: ExecutorError,
-) {
-    error!(error = %error, "Tool execution error");
-    let _ = tx
-        .send(Ok(ExecuteToolMessage {
-            message: Some(execute_tool_message::Message::Error(ProtoError {
-                code: error.code(),
                 message: error.to_string(),
             })),
         }))
