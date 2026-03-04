@@ -261,6 +261,67 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_stubbed_health_structured_has_components() {
+        let checker = ClusterHealthChecker::new(None);
+        let response = checker.get_cluster_health(ResponseFormat::Raw as i32).await;
+
+        match response.content {
+            Some(get_cluster_health_response::Content::Structured(s)) => {
+                assert!(!s.components.is_empty(), "Should have components");
+                let names: Vec<&str> = s.components.iter().map(|c| c.name.as_str()).collect();
+                assert!(names.contains(&"webserver"), "Should include webserver");
+                assert!(names.contains(&"clickhouse"), "Should include clickhouse");
+            }
+            _ => panic!("Expected structured response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_llm_format_contains_all_components() {
+        let checker = ClusterHealthChecker::new(None);
+        let response = checker.get_cluster_health(ResponseFormat::Llm as i32).await;
+
+        match response.content {
+            Some(get_cluster_health_response::Content::FormattedText(text)) => {
+                assert!(text.contains("clickhouse"), "TOON should mention clickhouse");
+                assert!(text.contains("indexer"), "TOON should mention indexer");
+            }
+            _ => panic!("Expected formatted text response"),
+        }
+    }
+
+    #[test]
+    fn test_format_health_as_toon_status_mapping() {
+        let health = StructuredClusterHealth {
+            status: ClusterStatus::Degraded.into(),
+            timestamp: "2026-03-03T00:00:00Z".to_string(),
+            version: "0.6.0".to_string(),
+            components: vec![],
+        };
+
+        let text = ClusterHealthChecker::format_health_as_toon(&health);
+        assert!(text.contains("degraded"), "Should map degraded status");
+    }
+
+    #[test]
+    fn test_format_health_as_toon_replicas() {
+        let health = StructuredClusterHealth {
+            status: ClusterStatus::Healthy.into(),
+            timestamp: "2026-03-03T00:00:00Z".to_string(),
+            version: "0.6.0".to_string(),
+            components: vec![ComponentHealth {
+                name: "webserver".to_string(),
+                status: ClusterStatus::Healthy.into(),
+                replicas: Some(ReplicaStatus { ready: 2, desired: 3 }),
+                metrics: HashMap::new(),
+            }],
+        };
+
+        let text = ClusterHealthChecker::format_health_as_toon(&health);
+        assert!(text.contains("2/3"), "Should format replicas as ready/desired");
+    }
+
     #[test]
     fn test_default_has_no_health_client() {
         let checker = ClusterHealthChecker::default();

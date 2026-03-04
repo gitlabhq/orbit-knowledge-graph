@@ -423,4 +423,52 @@ mod tests {
         assert!(toon.contains("username"));
         assert!(toon.contains("props"));
     }
+
+    #[test]
+    fn test_build_domains_groups_nodes_by_domain() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let domains = service.build_domains(&[]);
+        assert!(!domains.is_empty());
+
+        let core = domains.iter().find(|d| d.name == "core");
+        assert!(core.is_some(), "Should have a core domain");
+    }
+
+    #[test]
+    fn test_build_edges_returns_all_relationships() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let edges = service.build_edges();
+        assert!(!edges.is_empty());
+
+        let authored = edges.iter().find(|e| e.name == "AUTHORED");
+        assert!(authored.is_some(), "Should have AUTHORED edge");
+        assert!(!authored.unwrap().from.is_empty(), "AUTHORED should have source types");
+        assert!(!authored.unwrap().to.is_empty(), "AUTHORED should have target types");
+    }
+
+    #[test]
+    fn test_resolve_unknown_tool_returns_not_found() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let result = service.resolve("nonexistent_tool", "{}");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("nonexistent_tool"));
+    }
+
+    #[test]
+    fn test_build_schema_toon_with_unknown_expand_node() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let toon = service
+            .build_schema_toon(&["FakeNode".to_string()])
+            .expect("Should succeed without error");
+        assert!(toon.contains("domains"), "Should still return valid schema");
+    }
 }

@@ -449,4 +449,98 @@ mod tests {
         let project = project_node.unwrap();
         assert!(project.properties.is_empty(), "Unexpanded Project should have no properties");
     }
+
+    #[test]
+    fn test_get_node_edge_names_returns_sorted() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+
+        let (outgoing, incoming) = service.get_node_edge_names("User");
+
+        assert!(
+            !outgoing.is_empty() || !incoming.is_empty(),
+            "User should have at least one edge"
+        );
+
+        let is_sorted = |v: &[String]| v.windows(2).all(|w| w[0] <= w[1]);
+        assert!(is_sorted(&outgoing), "Outgoing edges should be sorted");
+        assert!(is_sorted(&incoming), "Incoming edges should be sorted");
+    }
+
+    #[test]
+    fn test_get_node_edge_names_unknown_node_returns_empty() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+
+        let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
+
+        assert!(outgoing.is_empty());
+        assert!(incoming.is_empty());
+    }
+
+    #[test]
+    fn test_expanded_node_has_property_details() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+
+        let response = service.build_structured_schema(&["User".to_string()]);
+        let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
+
+        let id_prop = user.properties.iter().find(|p| p.name == "id");
+        assert!(id_prop.is_some(), "User should have an id property");
+        assert!(!id_prop.unwrap().data_type.is_empty(), "Property should have a data type");
+
+        let username_prop = user.properties.iter().find(|p| p.name == "username");
+        assert!(username_prop.is_some(), "User should have a username property");
+    }
+
+    #[test]
+    fn test_structured_schema_domains_have_nodes() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+
+        let response = service.build_structured_schema(&[]);
+
+        for domain in &response.domains {
+            assert!(!domain.name.is_empty(), "Domain should have a name");
+            assert!(!domain.node_names.is_empty(), "Domain {} should have nodes", domain.name);
+        }
+    }
+
+    #[test]
+    fn test_structured_schema_edges_have_variants() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+
+        let response = service.build_structured_schema(&[]);
+
+        for edge in &response.edges {
+            assert!(!edge.name.is_empty(), "Edge should have a name");
+            assert!(!edge.variants.is_empty(), "Edge {} should have variants", edge.name);
+            for variant in &edge.variants {
+                assert!(!variant.source_type.is_empty());
+                assert!(!variant.target_type.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn test_expand_multiple_nodes() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+
+        let response = service.build_structured_schema(&[
+            "User".to_string(),
+            "Project".to_string(),
+        ]);
+
+        let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
+        let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
+
+        assert!(!user.properties.is_empty(), "User should be expanded");
+        assert!(!project.properties.is_empty(), "Project should be expanded");
+
+        let mr = response.nodes.iter().find(|n| n.name == "MergeRequest").unwrap();
+        assert!(mr.properties.is_empty(), "MergeRequest should not be expanded");
+    }
 }
