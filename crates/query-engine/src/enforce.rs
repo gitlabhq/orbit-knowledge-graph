@@ -191,7 +191,7 @@ fn enforce_return_columns(
 #[allow(irrefutable_let_patterns)]
 mod tests {
     use super::*;
-    use crate::ast::TableRef;
+    use crate::ast::{JoinType, TableRef};
     use crate::input::{InputNode, QueryType};
 
     fn test_input() -> Input {
@@ -214,6 +214,15 @@ mod tests {
         }
     }
 
+    fn two_table_from() -> TableRef {
+        TableRef::join(
+            JoinType::Inner,
+            TableRef::scan("gl_user", "u"),
+            TableRef::scan("gl_project", "p"),
+            Expr::lit(true),
+        )
+    }
+
     #[test]
     fn adds_type_columns_after_id_columns() {
         let query = Query {
@@ -227,7 +236,7 @@ mod tests {
                     alias: Some("_gkg_p_id".into()),
                 },
             ],
-            from: TableRef::scan("kg_user", "u"),
+            from: two_table_from(),
             limit: Some(30),
             ..Default::default()
         };
@@ -276,7 +285,7 @@ mod tests {
                     alias: Some("_gkg_p_id".into()),
                 },
             ],
-            from: TableRef::scan("kg_user", "u"),
+            from: two_table_from(),
             limit: Some(30),
             ..Default::default()
         };
@@ -304,7 +313,7 @@ mod tests {
                 expr: Expr::col("u", "username"),
                 alias: Some("name".into()),
             }],
-            from: TableRef::scan("kg_user", "u"),
+            from: two_table_from(),
             limit: Some(30),
             ..Default::default()
         };
@@ -369,7 +378,7 @@ mod tests {
         let input = test_input();
         let query = Query {
             select: vec![],
-            from: TableRef::scan("kg_user", "u"),
+            from: two_table_from(),
             limit: Some(30),
             ..Default::default()
         };
@@ -527,7 +536,12 @@ mod tests {
     fn uses_correct_redaction_id_column_per_node() {
         let mut node = Node::Query(Box::new(Query {
             select: vec![],
-            from: TableRef::scan("gl_definition", "d"),
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_definition", "d"),
+                TableRef::scan("gl_project", "p"),
+                Expr::lit(true),
+            ),
             limit: Some(10),
             ..Default::default()
         }));
@@ -656,5 +670,44 @@ mod tests {
         // The ResultContext is empty but has query_type set for path extraction.
         assert!(ctx.is_empty());
         assert_eq!(ctx.query_type, Some(QueryType::PathFinding));
+    }
+
+    #[test]
+    fn default_entity_does_not_emit_pk_column() {
+        let input = Input {
+            nodes: vec![InputNode {
+                id: "p".to_string(),
+                entity: Some("Project".to_string()),
+                table: Some("gl_project".to_string()),
+                // redaction_id_column defaults to "id" — same as DEFAULT_PRIMARY_KEY
+                ..Default::default()
+            }],
+            ..Input::default()
+        };
+
+        let query = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("p", "name"),
+                alias: Some("p_name".into()),
+            }],
+            from: TableRef::scan("gl_project", "p"),
+            ..Default::default()
+        };
+
+        let mut node = Node::Query(Box::new(query));
+        enforce_return(&mut node, &input).unwrap();
+
+        let Node::Query(q) = node else {
+            panic!("expected Query")
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"_gkg_p_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_p_type".to_string()));
+        assert!(
+            !aliases.contains(&&"_gkg_p_pk".to_string()),
+            "default entity (redaction_id_column == id) should not emit _gkg_p_pk"
+        );
+        assert_eq!(q.select.len(), 3); // p_name + _gkg_p_id + _gkg_p_type
     }
 }

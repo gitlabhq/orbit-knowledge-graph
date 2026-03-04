@@ -82,20 +82,26 @@ pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<
 }
 
 fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
-    // Apply security to the main query
     let aliases = collect_node_aliases(&q.from);
-    if aliases.is_empty() {
-        return Ok(());
+    if !aliases.is_empty() {
+        let security_conds = aliases
+            .iter()
+            .map(|a| build_path_filter(a, &ctx.traversal_paths));
+        q.where_clause = Expr::and_all(
+            security_conds
+                .map(Some)
+                .chain(std::iter::once(q.where_clause.take())),
+        );
     }
-    let security_conds = aliases
-        .iter()
-        .map(|a| build_path_filter(a, &ctx.traversal_paths));
-    // Note: Security predicates always applied first for short-circuit filtering
-    q.where_clause = Expr::and_all(
-        security_conds
-            .map(Some)
-            .chain(std::iter::once(q.where_clause.take())),
-    );
+
+    // Recurse into derived tables (UNION ALL arms, subqueries) in FROM
+    apply_security_to_from(&mut q.from, ctx)?;
+
+    // Recurse into top-level UNION ALL arms
+    for arm in &mut q.union_all {
+        apply_to_query(arm, ctx)?;
+    }
+
     Ok(())
 }
 
@@ -155,13 +161,31 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
             aliases.extend(collect_node_aliases(right));
             aliases
         }
-        TableRef::Union { .. } | TableRef::Subquery { .. } => {
-            // Union inner queries only scan gl_edge (joined to filtered node tables in the outer query).
-            // Subquery must not wrap security-sensitive table scans without pre-applied filters.
-            // Neither variant has traversal_path columns to filter on directly.
-            vec![]
-        }
+        // Derived tables don't have traversal_path columns themselves.
+        // Their arms get security filters via apply_security_to_from.
+        TableRef::Union { .. } | TableRef::Subquery { .. } => vec![],
     }
+}
+
+/// Recurse into derived tables (UNION ALL arms, subqueries) inside a FROM
+/// clause and apply security filters to each arm's query.
+fn apply_security_to_from(table_ref: &mut TableRef, ctx: &SecurityContext) -> Result<()> {
+    match table_ref {
+        TableRef::Union { queries, .. } => {
+            for arm in queries {
+                apply_to_query(arm, ctx)?;
+            }
+        }
+        TableRef::Subquery { query, .. } => {
+            apply_to_query(query, ctx)?;
+        }
+        TableRef::Join { left, right, .. } => {
+            apply_security_to_from(left, ctx)?;
+            apply_security_to_from(right, ctx)?;
+        }
+        TableRef::Scan { .. } => {}
+    }
+    Ok(())
 }
 
 /// Determines if a table should have traversal path security filters applied.
@@ -316,5 +340,110 @@ mod tests {
         assert!(!should_apply_security_filter("some_cte"));
         // Only gl_ prefixed tables should have security filters
         assert!(!should_apply_security_filter("nodes"));
+    }
+
+    #[test]
+    fn union_aliases_are_not_collected() {
+        let from = TableRef::union_all(
+            vec![Query {
+                select: vec![SelectExpr {
+                    expr: Expr::col("e", "source_id"),
+                    alias: None,
+                }],
+                from: TableRef::scan(EDGE_TABLE, "e"),
+                ..Default::default()
+            }],
+            "hop_e0",
+        );
+        let aliases = collect_node_aliases(&from);
+        assert!(aliases.is_empty());
+    }
+
+    #[test]
+    fn inject_recurses_into_union_from_arms() {
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("outer_e", "source_id"),
+                alias: None,
+            }],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan(EDGE_TABLE, "outer_e"),
+                TableRef::union_all(
+                    vec![Query {
+                        select: vec![SelectExpr {
+                            expr: Expr::col("e1", "source_id"),
+                            alias: None,
+                        }],
+                        from: TableRef::scan(EDGE_TABLE, "e1"),
+                        where_clause: None,
+                        ..Default::default()
+                    }],
+                    "hop_e0",
+                ),
+                Expr::lit(true),
+            ),
+            where_clause: None,
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx).unwrap();
+
+        let Node::Query(q) = &node;
+        assert!(
+            q.where_clause.is_some(),
+            "outer query should have security filter on outer_e"
+        );
+
+        // The union arm scanning gl_edge should also get a filter
+        if let TableRef::Join { right, .. } = &q.from {
+            if let TableRef::Union { queries, .. } = right.as_ref() {
+                assert!(
+                    queries[0].where_clause.is_some(),
+                    "UNION ALL arm should have security filter applied"
+                );
+            } else {
+                panic!("expected Union");
+            }
+        } else {
+            panic!("expected Join");
+        }
+    }
+
+    #[test]
+    fn inject_recurses_into_union_all_arms() {
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("u", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "u"),
+            where_clause: None,
+            union_all: vec![Query {
+                select: vec![SelectExpr {
+                    expr: Expr::col("p", "id"),
+                    alias: None,
+                }],
+                from: TableRef::scan("gl_project", "p"),
+                where_clause: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx).unwrap();
+
+        let Node::Query(q) = &node;
+        assert!(
+            q.where_clause.is_some(),
+            "base query should have security filter"
+        );
+        assert_eq!(q.union_all.len(), 1);
+        assert!(
+            q.union_all[0].where_clause.is_some(),
+            "UNION ALL arm should have security filter"
+        );
     }
 }

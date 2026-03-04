@@ -48,8 +48,8 @@ pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use check::check_ast;
 pub use codegen::{CompiledQuery, HydrationPlan, HydrationTemplate, ParameterizedQuery, codegen};
 pub use constants::{
-    EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
-    RELATIONSHIP_TYPE_COLUMN,
+    EDGE_KINDS_COLUMN, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, NEIGHBOR_ID_COLUMN,
+    NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
 };
 pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
@@ -459,6 +459,11 @@ mod tests {
                 {"id": "_private", "entity": "Note", "columns": ["confidential"]},
                 {"id": "CamelCase", "entity": "Project", "columns": ["name"]},
                 {"id": "node123", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "user_node", "to": "_private"},
+                {"type": "CONTAINS", "from": "CamelCase", "to": "_private"},
+                {"type": "MEMBER_OF", "from": "user_node", "to": "node123"}
             ]
         }"#;
         assert!(compile(json, &test_ontology(), &test_ctx()).is_ok());
