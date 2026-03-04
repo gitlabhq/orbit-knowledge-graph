@@ -29,7 +29,8 @@ pub enum HydrationPlan {
     /// One template per entity type, with IDs to be filled at runtime.
     Static(Vec<HydrationTemplate>),
     /// Entity types discovered at runtime (PathFinding, Neighbors).
-    Dynamic,
+    /// Carries the original column selection so hydration can respect it.
+    Dynamic { all_columns: bool },
 }
 
 #[derive(Debug, Clone)]

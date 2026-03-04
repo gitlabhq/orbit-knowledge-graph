@@ -58,11 +58,13 @@ impl HydrationStage {
                     merge_static_properties(&mut query_result, &property_map, templates);
                 }
             }
-            HydrationPlan::Dynamic => {
+            HydrationPlan::Dynamic { all_columns } => {
                 let refs = extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
-                    let property_map =
-                        obs.check(self.hydrate_dynamic(&refs, security_context).await)?;
+                    let property_map = obs.check(
+                        self.hydrate_dynamic(&refs, *all_columns, security_context)
+                            .await,
+                    )?;
                     merge_dynamic_properties(&mut query_result, &property_map);
                 }
             }
@@ -111,13 +113,15 @@ impl HydrationStage {
     async fn hydrate_dynamic(
         &self,
         refs: &HashMap<String, Vec<i64>>,
+        all_columns: bool,
         security_context: &SecurityContext,
     ) -> Result<PropertyMap, PipelineError> {
         let futures: Vec<_> = refs
             .iter()
             .filter(|(_, ids)| !ids.is_empty())
             .map(|(entity_type, ids)| {
-                let query_json = build_dynamic_search_query(entity_type, ids, &self.ontology)?;
+                let query_json =
+                    build_dynamic_search_query(entity_type, ids, all_columns, &self.ontology)?;
                 Ok(self.compile_and_fetch(entity_type, query_json, security_context))
             })
             .collect::<Result<Vec<_>, PipelineError>>()?;
@@ -222,23 +226,39 @@ fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap
 
 /// Build a search query JSON from scratch for dynamic hydration.
 /// Only used when entity types are discovered at runtime (PathFinding, Neighbors).
+/// When `all_columns` is true (query used `columns: "*"`), fetches all properties.
+/// Otherwise falls back to the entity's `default_columns` from the ontology.
 fn build_dynamic_search_query(
     entity_type: &str,
     ids: &[i64],
+    all_columns: bool,
     ontology: &ontology::Ontology,
 ) -> Result<String, PipelineError> {
-    if ontology.get_node(entity_type).is_none() {
-        return Err(PipelineError::Execution(format!(
-            "entity type not found in ontology during dynamic hydration: {entity_type}"
-        )));
-    }
+    let columns: serde_json::Value = if all_columns {
+        if ontology.get_node(entity_type).is_none() {
+            return Err(PipelineError::Execution(format!(
+                "entity type not found in ontology during dynamic hydration: {entity_type}"
+            )));
+        }
+        serde_json::json!("*")
+    } else {
+        ontology
+            .get_node(entity_type)
+            .filter(|n| !n.default_columns.is_empty())
+            .map(|n| serde_json::json!(n.default_columns))
+            .ok_or_else(|| {
+                PipelineError::Execution(format!(
+                    "entity type not found in ontology or has no default_columns during dynamic hydration: {entity_type}"
+                ))
+            })?
+    };
 
     let query_json = serde_json::json!({
         "query_type": "search",
         "node": {
             "id": HYDRATION_NODE_ALIAS,
             "entity": entity_type,
-            "columns": "*",
+            "columns": columns,
             "node_ids": ids
         },
         "limit": 1000

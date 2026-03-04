@@ -113,7 +113,13 @@ pub fn compile(
 fn build_hydration_plan(input: &Input) -> HydrationPlan {
     match input.query_type {
         QueryType::Aggregation => HydrationPlan::None,
-        QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
+        QueryType::PathFinding | QueryType::Neighbors => {
+            let all_columns = input
+                .nodes
+                .iter()
+                .any(|n| n.columns == Some(crate::input::ColumnSelection::All));
+            HydrationPlan::Dynamic { all_columns }
+        }
         // TODO: Static hydration for Traversal/Search requires the base query
         // in lower.rs to emit only ID/type columns (slim SELECT). Until that
         // refactor lands, Traversal/Search results already carry all requested
