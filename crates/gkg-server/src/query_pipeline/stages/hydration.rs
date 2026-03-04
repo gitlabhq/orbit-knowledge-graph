@@ -227,22 +227,18 @@ fn build_dynamic_search_query(
     ids: &[i64],
     ontology: &ontology::Ontology,
 ) -> Result<String, PipelineError> {
-    let columns: serde_json::Value = ontology
-        .get_node(entity_type)
-        .filter(|n| !n.default_columns.is_empty())
-        .map(|n| serde_json::json!(n.default_columns))
-        .ok_or_else(|| {
-            PipelineError::Execution(format!(
-                "entity type not found in ontology or has no default_columns during dynamic hydration: {entity_type}"
-            ))
-        })?;
+    if ontology.get_node(entity_type).is_none() {
+        return Err(PipelineError::Execution(format!(
+            "entity type not found in ontology during dynamic hydration: {entity_type}"
+        )));
+    }
 
     let query_json = serde_json::json!({
         "query_type": "search",
         "node": {
             "id": HYDRATION_NODE_ALIAS,
             "entity": entity_type,
-            "columns": columns,
+            "columns": "*",
             "node_ids": ids
         },
         "limit": 1000
