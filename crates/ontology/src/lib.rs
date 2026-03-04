@@ -175,6 +175,9 @@ impl Ontology {
         })?;
         for (field_name, data_type, nullable) in fields {
             let field_name_string: String = field_name.into();
+            if field_name_string == constants::TRAVERSAL_PATH_COLUMN {
+                node.has_traversal_path = true;
+            }
             node.fields.push(Field {
                 name: field_name_string.clone(),
                 source: field_name_string,
@@ -1108,6 +1111,10 @@ impl NodeYaml {
             color: s.color,
         });
 
+        let has_traversal_path = fields
+            .iter()
+            .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
+
         Ok(NodeEntity {
             name,
             domain: self.domain,
@@ -1121,6 +1128,7 @@ impl NodeYaml {
             etl,
             redaction,
             style,
+            has_traversal_path,
         })
     }
 }

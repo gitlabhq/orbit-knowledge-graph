@@ -147,6 +147,11 @@ pub struct InputNode {
     /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
     #[serde(skip)]
     pub redaction_id_column: String,
+    /// Whether this node's table has a `traversal_path` column.
+    /// Populated during normalization from the ontology. Used by the lowerer to add
+    /// `traversal_path` join conditions between node and edge tables.
+    #[serde(skip)]
+    pub has_traversal_path: bool,
 }
 
 impl Default for InputNode {
@@ -161,6 +166,7 @@ impl Default for InputNode {
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
+            has_traversal_path: false,
         }
     }
 }

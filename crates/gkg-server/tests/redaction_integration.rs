@@ -77,11 +77,11 @@ async fn setup_test_data(ctx: &TestContext) {
          ('1/101/', 4, 'User', 'MEMBER_OF', 101, 'Group'),
          ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group'),
          ('1/101/', 5, 'User', 'MEMBER_OF', 101, 'Group'),
-         ('1/100/', 100, 'Group', 'CONTAINS', 1000, 'Project'),
-         ('1/100/', 100, 'Group', 'CONTAINS', 1002, 'Project'),
-         ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
-         ('1/101/', 101, 'Group', 'CONTAINS', 1003, 'Project'),
-         ('1/102/', 102, 'Group', 'CONTAINS', 1004, 'Project')"
+         ('1/100/1000/', 100, 'Group', 'CONTAINS', 1000, 'Project'),
+         ('1/100/1002/', 100, 'Group', 'CONTAINS', 1002, 'Project'),
+         ('1/101/1001/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
+         ('1/101/1003/', 101, 'Group', 'CONTAINS', 1003, 'Project'),
+         ('1/102/1004/', 102, 'Group', 'CONTAINS', 1004, 'Project')"
     ))
     .await;
 }

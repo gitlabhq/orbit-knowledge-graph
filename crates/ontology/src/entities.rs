@@ -69,6 +69,9 @@ pub struct NodeEntity {
     /// If `None`, this entity does not require redaction validation.
     pub redaction: Option<RedactionConfig>,
     pub style: NodeStyle,
+    /// Whether this entity's table has a `traversal_path` column.
+    /// Derived from the declared fields during ontology loading.
+    pub has_traversal_path: bool,
 }
 
 impl Default for NodeEntity {
@@ -86,6 +89,7 @@ impl Default for NodeEntity {
             etl: None,
             redaction: None,
             style: NodeStyle::default(),
+            has_traversal_path: false,
         }
     }
 }
