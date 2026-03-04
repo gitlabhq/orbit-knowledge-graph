@@ -446,8 +446,14 @@ mod tests {
 
         let authored = edges.iter().find(|e| e.name == "AUTHORED");
         assert!(authored.is_some(), "Should have AUTHORED edge");
-        assert!(!authored.unwrap().from.is_empty(), "AUTHORED should have source types");
-        assert!(!authored.unwrap().to.is_empty(), "AUTHORED should have target types");
+        assert!(
+            !authored.unwrap().from.is_empty(),
+            "AUTHORED should have source types"
+        );
+        assert!(
+            !authored.unwrap().to.is_empty(),
+            "AUTHORED should have target types"
+        );
     }
 
     #[test]

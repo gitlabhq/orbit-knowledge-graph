@@ -284,7 +284,10 @@ mod tests {
 
         match response.content {
             Some(get_cluster_health_response::Content::FormattedText(text)) => {
-                assert!(text.contains("clickhouse"), "TOON should mention clickhouse");
+                assert!(
+                    text.contains("clickhouse"),
+                    "TOON should mention clickhouse"
+                );
                 assert!(text.contains("indexer"), "TOON should mention indexer");
             }
             _ => panic!("Expected formatted text response"),
@@ -313,13 +316,19 @@ mod tests {
             components: vec![ComponentHealth {
                 name: "webserver".to_string(),
                 status: ClusterStatus::Healthy.into(),
-                replicas: Some(ReplicaStatus { ready: 2, desired: 3 }),
+                replicas: Some(ReplicaStatus {
+                    ready: 2,
+                    desired: 3,
+                }),
                 metrics: HashMap::new(),
             }],
         };
 
         let text = ClusterHealthChecker::format_health_as_toon(&health);
-        assert!(text.contains("2/3"), "Should format replicas as ready/desired");
+        assert!(
+            text.contains("2/3"),
+            "Should format replicas as ready/desired"
+        );
     }
 
     #[test]

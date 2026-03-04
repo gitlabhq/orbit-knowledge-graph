@@ -6,8 +6,7 @@ use uuid::Uuid;
 
 use crate::proto::{
     ExecuteQueryMessage, RedactionExchange, RedactionRequired,
-    ResourceToAuthorize as ProtoResourceToAuthorize, execute_query_message,
-    redaction_exchange,
+    ResourceToAuthorize as ProtoResourceToAuthorize, execute_query_message, redaction_exchange,
 };
 
 use super::{ResourceAuthorization, ResourceCheck};

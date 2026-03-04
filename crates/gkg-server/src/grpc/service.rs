@@ -15,12 +15,11 @@ use tracing::{info, instrument};
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::{
-    ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest,
-    GetClusterHealthResponse, GetGraphSchemaRequest, GetGraphSchemaResponse, ListToolsRequest,
-    ListToolsResponse, ResponseFormat, SchemaEdge, SchemaEdgeVariant, SchemaDomain, SchemaNode,
-    SchemaNodeStyle, SchemaProperty, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition,
-    execute_query_message, get_graph_schema_response,
+    ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
+    GetGraphSchemaRequest, GetGraphSchemaResponse, ListToolsRequest, ListToolsResponse,
+    ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
+    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    get_graph_schema_response,
 };
 use crate::query_pipeline::{
     ContextEngineFormatter, QueryPipelineService, RawRowFormatter, receive_query_request,
@@ -423,7 +422,10 @@ mod tests {
         assert!(user_node.is_some());
         let user = user_node.unwrap();
         assert_eq!(user.domain, "core");
-        assert!(user.properties.is_empty(), "Unexpanded node should have no properties");
+        assert!(
+            user.properties.is_empty(),
+            "Unexpanded node should have no properties"
+        );
         assert!(user.style.is_none(), "Unexpanded node should have no style");
     }
 
@@ -437,7 +439,10 @@ mod tests {
         let user_node = response.nodes.iter().find(|n| n.name == "User");
         assert!(user_node.is_some());
         let user = user_node.unwrap();
-        assert!(!user.properties.is_empty(), "Expanded node should have properties");
+        assert!(
+            !user.properties.is_empty(),
+            "Expanded node should have properties"
+        );
         assert!(user.style.is_some(), "Expanded node should have style");
         assert!(
             !user.outgoing_edges.is_empty() || !user.incoming_edges.is_empty(),
@@ -447,7 +452,10 @@ mod tests {
         let project_node = response.nodes.iter().find(|n| n.name == "Project");
         assert!(project_node.is_some());
         let project = project_node.unwrap();
-        assert!(project.properties.is_empty(), "Unexpanded Project should have no properties");
+        assert!(
+            project.properties.is_empty(),
+            "Unexpanded Project should have no properties"
+        );
     }
 
     #[test]
@@ -488,10 +496,16 @@ mod tests {
 
         let id_prop = user.properties.iter().find(|p| p.name == "id");
         assert!(id_prop.is_some(), "User should have an id property");
-        assert!(!id_prop.unwrap().data_type.is_empty(), "Property should have a data type");
+        assert!(
+            !id_prop.unwrap().data_type.is_empty(),
+            "Property should have a data type"
+        );
 
         let username_prop = user.properties.iter().find(|p| p.name == "username");
-        assert!(username_prop.is_some(), "User should have a username property");
+        assert!(
+            username_prop.is_some(),
+            "User should have a username property"
+        );
     }
 
     #[test]
@@ -503,7 +517,11 @@ mod tests {
 
         for domain in &response.domains {
             assert!(!domain.name.is_empty(), "Domain should have a name");
-            assert!(!domain.node_names.is_empty(), "Domain {} should have nodes", domain.name);
+            assert!(
+                !domain.node_names.is_empty(),
+                "Domain {} should have nodes",
+                domain.name
+            );
         }
     }
 
@@ -516,7 +534,11 @@ mod tests {
 
         for edge in &response.edges {
             assert!(!edge.name.is_empty(), "Edge should have a name");
-            assert!(!edge.variants.is_empty(), "Edge {} should have variants", edge.name);
+            assert!(
+                !edge.variants.is_empty(),
+                "Edge {} should have variants",
+                edge.name
+            );
             for variant in &edge.variants {
                 assert!(!variant.source_type.is_empty());
                 assert!(!variant.target_type.is_empty());
@@ -529,10 +551,8 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
 
-        let response = service.build_structured_schema(&[
-            "User".to_string(),
-            "Project".to_string(),
-        ]);
+        let response =
+            service.build_structured_schema(&["User".to_string(), "Project".to_string()]);
 
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
         let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
@@ -540,7 +560,14 @@ mod tests {
         assert!(!user.properties.is_empty(), "User should be expanded");
         assert!(!project.properties.is_empty(), "Project should be expanded");
 
-        let mr = response.nodes.iter().find(|n| n.name == "MergeRequest").unwrap();
-        assert!(mr.properties.is_empty(), "MergeRequest should not be expanded");
+        let mr = response
+            .nodes
+            .iter()
+            .find(|n| n.name == "MergeRequest")
+            .unwrap();
+        assert!(
+            mr.properties.is_empty(),
+            "MergeRequest should not be expanded"
+        );
     }
 }
