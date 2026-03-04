@@ -111,19 +111,55 @@ If they grow large, move to CI cache artifacts instead.
 ## Triaging Crashes
 
 When libFuzzer finds a crash, it saves the reproducing input to
-`fuzz/artifacts/<target>/`. To reproduce:
+`fuzz/artifacts/<target>/`. Artifacts are gitignored — they are a transient
+working directory for libFuzzer, not a permanent record.
+
+### Reproducing
 
 ```sh
-cargo fuzz run fuzz_ruby_parse fuzz/artifacts/fuzz_ruby_parse/crash-<hash>
+cd crates/code-parser/fuzz
+RUSTUP_TOOLCHAIN=nightly cargo fuzz run fuzz_ruby_parse fuzz/artifacts/fuzz_ruby_parse/crash-<hash>
+
+# With backtrace
+RUST_BACKTRACE=1 RUSTUP_TOOLCHAIN=nightly cargo fuzz run fuzz_ruby_parse fuzz/artifacts/fuzz_ruby_parse/crash-<hash>
 ```
 
-For a backtrace:
+### Crash triage workflow
 
-```sh
-RUST_BACKTRACE=1 cargo fuzz run fuzz_ruby_parse fuzz/artifacts/fuzz_ruby_parse/crash-<hash>
+1. **Reproduce** the crash locally to confirm it's real (not a flaky OOM from
+   resource limits).
+2. **Copy the artifact to the corpus** with a descriptive name and the
+   appropriate file extension (`.rb`, `.json`, etc.) so it passes the corpus
+   `.gitignore` allowlist:
+
+   ```sh
+   cp fuzz/artifacts/fuzz_ruby_parse/oom-<hash> \
+      fuzz/corpus/fuzz_ruby_parse/regression_oom_description.rb
+   ```
+
+3. **Commit the regression seed** in its own commit:
+
+   ```sh
+   git add fuzz/corpus/fuzz_ruby_parse/regression_oom_description.rb
+   git commit -m "test(fuzz): add regression seed for <description>"
+   ```
+
+4. **File an issue** with the crash input, backtrace, and root cause analysis.
+5. **Fix the bug** in a separate commit. The regression seed stays in the corpus
+   permanently — every future `cargo fuzz run` re-validates it before exploring
+   new inputs, preventing regressions.
+
+### Naming convention for regression seeds
+
+Use the prefix `regression_` followed by the crash type and a short description:
+
+```
+regression_oom_nested_blocks.rb
+regression_panic_empty_fqn.rb
+regression_crash_malformed_json.json
 ```
 
-Crash triage priority:
+### Severity guidelines
 
 | Crate | Severity | Rationale |
 |-------|----------|-----------|
