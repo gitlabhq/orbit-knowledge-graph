@@ -9,13 +9,30 @@ use crate::input::{
     ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
     InputRelationship, OrderDirection, QueryType,
 };
-use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, EDGE_TABLE};
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, EDGE_TABLE, TRAVERSAL_PATH_COLUMN,
+};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// Maps edge column names to output alias suffixes.
 /// Uses EDGE_RESERVED_COLUMNS order: traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind
 const EDGE_ALIAS_SUFFIXES: &[&str] = &["path", "type", "src", "src_type", "dst", "dst_type"];
+
+/// Build `startsWith(edge.traversal_path, node.traversal_path)`.
+///
+/// The edge's path is always equal to or deeper than the node's path in the
+/// namespace hierarchy, so a prefix match is correct for both source and target
+/// sides. ClickHouse can still use the ORDER BY key prefix for this predicate.
+fn edge_path_starts_with(edge_alias: &str, node_alias: &str) -> Expr {
+    Expr::func(
+        "startsWith",
+        vec![
+            Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
+            Expr::col(node_alias, TRAVERSAL_PATH_COLUMN),
+        ],
+    )
+}
 
 /// Generate SELECT expressions for all edge columns with the given table alias.
 fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
@@ -202,6 +219,10 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     // The CTE carries a slim edge_kinds Array(String) per hop instead of
     // the full edge tuple — enough to reconstruct edges when combined with
     // the typed node path.
+    //
+    // No traversal_path conditions inside the CTE: path-finding can traverse
+    // across namespace boundaries (e.g. cross-project RELATED_TO edges), so
+    // consecutive edges may have unrelated paths.
     let mut base = path_base_query(&start.node_ids, &start_table, &start.id, start_entity);
     let forward = path_recursive_branch(path.max_depth, true, &end.node_ids, &path.rel_types);
     let reverse = path_recursive_branch(path.max_depth, false, &end.node_ids, &path.rel_types);
@@ -211,6 +232,12 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let recursive_cte = Cte::recursive("paths", base);
 
     let (limit, offset) = pagination(input);
+
+    // Final join: paths CTE → end node table.
+    let final_join_cond = Expr::eq(
+        Expr::col("paths", "node_id"),
+        Expr::col(&end.id, DEFAULT_PRIMARY_KEY),
+    );
 
     Ok(Node::Query(Box::new(Query {
         ctes: vec![recursive_cte],
@@ -223,10 +250,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             JoinType::Inner,
             TableRef::scan("paths", "paths"),
             TableRef::scan(&end_table, &end.id),
-            Expr::eq(
-                Expr::col("paths", "node_id"),
-                Expr::col(&end.id, DEFAULT_PRIMARY_KEY),
-            ),
+            final_join_cond,
         ),
         where_clause: id_filter(&end.id, DEFAULT_PRIMARY_KEY, &end.node_ids),
         order_by: vec![OrderExpr {
@@ -341,49 +365,55 @@ fn path_recursive_branch(
     let where_clause =
         Expr::and_all([Some(depth_check), Some(cycle_check), early_term, rel_filter]);
 
+    let select = vec![
+        SelectExpr::new(next_node_id, "node_id"),
+        SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "path_ids"),
+                    Expr::func("array", vec![Expr::col("e", next_id_col)]),
+                ],
+            ),
+            "path_ids",
+        ),
+        SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "path"),
+                    Expr::func("array", vec![next_tuple]),
+                ],
+            ),
+            "path",
+        ),
+        SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "edge_kinds"),
+                    Expr::func("array", vec![Expr::col("e", "relationship_kind")]),
+                ],
+            ),
+            "edge_kinds",
+        ),
+        SelectExpr::new(
+            Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::lit(1i64)),
+            "depth",
+        ),
+    ];
+
+    // No traversal_path condition: path-finding can cross namespace boundaries,
+    // so the CTE row's context and the next edge may have unrelated paths.
+    let join_cond = Expr::eq(Expr::col("p", "node_id"), Expr::col("e", join_col));
+
     Query {
-        select: vec![
-            SelectExpr::new(next_node_id, "node_id"),
-            SelectExpr::new(
-                Expr::func(
-                    "arrayConcat",
-                    vec![
-                        Expr::col("p", "path_ids"),
-                        Expr::func("array", vec![Expr::col("e", next_id_col)]),
-                    ],
-                ),
-                "path_ids",
-            ),
-            SelectExpr::new(
-                Expr::func(
-                    "arrayConcat",
-                    vec![
-                        Expr::col("p", "path"),
-                        Expr::func("array", vec![next_tuple]),
-                    ],
-                ),
-                "path",
-            ),
-            SelectExpr::new(
-                Expr::func(
-                    "arrayConcat",
-                    vec![
-                        Expr::col("p", "edge_kinds"),
-                        Expr::func("array", vec![Expr::col("e", "relationship_kind")]),
-                    ],
-                ),
-                "edge_kinds",
-            ),
-            SelectExpr::new(
-                Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::lit(1i64)),
-                "depth",
-            ),
-        ],
+        select,
         from: TableRef::join(
             JoinType::Inner,
             TableRef::scan("paths", "p"),
             TableRef::scan(EDGE_TABLE, "e"),
-            Expr::eq(Expr::col("p", "node_id"), Expr::col("e", join_col)),
+            join_cond,
         ),
         where_clause,
         ..Default::default()
@@ -422,6 +452,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
             edge_alias,
             center_entity,
             neighbors_config.direction,
+            center_node.has_traversal_path,
         ),
     );
 
@@ -511,6 +542,9 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
+        // No traversal_path condition between consecutive edges: cross-namespace
+        // relationships (e.g. RELATED_TO, CLOSES) can link entities in different
+        // namespaces, so consecutive edges may have different paths.
         let join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
         from = TableRef::join(
             JoinType::Inner,
@@ -525,6 +559,10 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
             SelectExpr::new(Expr::col("e1", start_col), "start_id"),
             SelectExpr::new(Expr::col(format!("e{depth}"), end_col), "end_id"),
             SelectExpr::new(Expr::lit(depth as i64), "depth"),
+            SelectExpr::new(
+                Expr::col("e1", TRAVERSAL_PATH_COLUMN),
+                TRAVERSAL_PATH_COLUMN,
+            ),
         ],
         from,
         ..Default::default()
@@ -573,44 +611,60 @@ fn build_joins(
             let alias = format!("hop_e{i}");
             edge_aliases.insert(i, alias.clone());
 
+            let from_node = find_node(nodes, &rel.from)?;
             let union = build_hop_union_all(rel, &alias);
             let (from_col, to_col) = rel.direction.union_columns();
 
-            result = TableRef::join(
-                JoinType::Inner,
-                result,
-                union,
-                Expr::eq(
-                    Expr::col(&rel.from, DEFAULT_PRIMARY_KEY),
-                    Expr::col(&alias, from_col),
-                ),
+            let mut source_cond = Expr::eq(
+                Expr::col(&rel.from, DEFAULT_PRIMARY_KEY),
+                Expr::col(&alias, from_col),
             );
+            if from_node.has_traversal_path {
+                source_cond = Expr::binary(
+                    Op::And,
+                    edge_path_starts_with(&alias, &rel.from),
+                    source_cond,
+                );
+            }
+            result = TableRef::join(JoinType::Inner, result, union, source_cond);
+
+            let mut target_cond = Expr::eq(
+                Expr::col(&alias, to_col),
+                Expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
+            );
+            if target.has_traversal_path {
+                target_cond =
+                    Expr::binary(Op::And, edge_path_starts_with(&alias, &rel.to), target_cond);
+            }
             result = TableRef::join(
                 JoinType::Inner,
                 result,
                 TableRef::scan(&target_table, &rel.to),
-                Expr::eq(
-                    Expr::col(&alias, to_col),
-                    Expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
-                ),
+                target_cond,
             );
         } else {
             // Single-hop: direct edge join
             let alias = format!("e{i}");
             edge_aliases.insert(i, alias.clone());
 
+            let from_node = find_node(nodes, &rel.from)?;
             let edge = edge_scan(&alias, &type_filter(&rel.types));
             result = TableRef::join(
                 JoinType::Inner,
                 result,
                 edge,
-                source_join_cond(&rel.from, &alias, rel.direction),
+                source_join_cond(
+                    &rel.from,
+                    &alias,
+                    rel.direction,
+                    from_node.has_traversal_path,
+                ),
             );
             result = TableRef::join(
                 JoinType::Inner,
                 result,
                 TableRef::scan(&target_table, &rel.to),
-                target_join_cond(&alias, &rel.to, rel.direction),
+                target_join_cond(&alias, &rel.to, rel.direction, target.has_traversal_path),
             );
         }
     }
@@ -619,8 +673,12 @@ fn build_joins(
 }
 
 /// Join from source node to edge table.
-fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
-    match dir {
+/// When `with_path` is true, adds `startsWith(edge.traversal_path, node.traversal_path)`
+/// to leverage ClickHouse's ORDER BY key on the edge table. The edge's path
+/// is always equal to or deeper than either endpoint's path in the namespace
+/// hierarchy, so a prefix match is safe for all directions.
+fn source_join_cond(node: &str, edge: &str, dir: Direction, with_path: bool) -> Expr {
+    let id_cond = match dir {
         Direction::Outgoing => Expr::eq(
             Expr::col(node, DEFAULT_PRIMARY_KEY),
             Expr::col(edge, "source_id"),
@@ -639,13 +697,25 @@ fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
                 Expr::col(edge, "target_id"),
             ),
         ),
+    };
+    if with_path {
+        Expr::binary(Op::And, edge_path_starts_with(edge, node), id_cond)
+    } else {
+        id_cond
     }
 }
 
 /// Join from source node to edge table, with entity type filter.
 /// Unlike `source_join_cond`, this also filters on source_kind/target_kind
 /// to prevent ID collisions across entity types.
-fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Direction) -> Expr {
+/// When `with_path` is true, adds `startsWith(edge.traversal_path, node.traversal_path)`.
+fn source_join_cond_with_kind(
+    node: &str,
+    edge: &str,
+    entity: &str,
+    dir: Direction,
+    with_path: bool,
+) -> Expr {
     let id_and_kind = |id_col, kind_col| {
         Expr::binary(
             Op::And,
@@ -657,19 +727,26 @@ fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Directi
         )
     };
 
-    match dir {
+    let id_cond = match dir {
         Direction::Outgoing => id_and_kind("source_id", "source_kind"),
         Direction::Incoming => id_and_kind("target_id", "target_kind"),
         Direction::Both => Expr::or(
             id_and_kind("source_id", "source_kind"),
             id_and_kind("target_id", "target_kind"),
         ),
+    };
+    if with_path {
+        Expr::binary(Op::And, edge_path_starts_with(edge, node), id_cond)
+    } else {
+        id_cond
     }
 }
 
 /// Join from edge table to target node.
-fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
-    match dir {
+///
+/// When `with_path` is true, adds `startsWith(edge.traversal_path, node.traversal_path)`.
+fn target_join_cond(edge: &str, node: &str, dir: Direction, with_path: bool) -> Expr {
+    let id_cond = match dir {
         Direction::Outgoing => Expr::eq(
             Expr::col(edge, "target_id"),
             Expr::col(node, DEFAULT_PRIMARY_KEY),
@@ -688,6 +765,11 @@ fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
             ),
         ),
+    };
+    if with_path {
+        Expr::binary(Op::And, edge_path_starts_with(edge, node), id_cond)
+    } else {
+        id_cond
     }
 }
 
