@@ -176,7 +176,7 @@ message RedactionRequired {
 
 // A batch of resource IDs that need authorization checks.
 message ResourceToAuthorize {
-  string resource_type = 1;      // e.g. "Project", "MergeRequest"
+  string resource_type = 1;      // e.g. "project", "merge_request"
   repeated int64 resource_ids = 2;
   repeated string abilities = 3; // e.g. ["read_project"]
 }

@@ -148,8 +148,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                                 ExecuteQueryResult {
                                     result_json: output.formatted_result.to_string(),
                                     generated_sql: output.generated_sql.unwrap_or_default(),
-                                    row_count: output.row_count as i32,
-                                    redacted_count: output.redacted_count as i32,
+                                    row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                                    redacted_count: i32::try_from(output.redacted_count)
+                                        .unwrap_or(i32::MAX),
                                     execution_time_ms: output.execution_time_ms,
                                 },
                             )),

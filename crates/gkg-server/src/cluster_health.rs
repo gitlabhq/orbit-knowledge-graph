@@ -198,7 +198,10 @@ impl ClusterHealthChecker {
         };
 
         let options = EncodeOptions::default();
-        encode(&toon, &options).unwrap_or_else(|_| format!("status:{}", toon.status))
+        encode(&toon, &options).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "Failed to encode health as TOON, falling back");
+            format!("status:{}", toon.status)
+        })
     }
 }
 

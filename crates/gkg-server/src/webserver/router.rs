@@ -8,7 +8,7 @@ use serde::Serialize;
 use tower_http::trace::TraceLayer;
 
 use crate::cluster_health::ClusterHealthChecker;
-use crate::proto::{ResponseFormat, get_cluster_health_response};
+use crate::proto::{ClusterStatus, ResponseFormat, get_cluster_health_response};
 use crate::webserver::JwtValidator;
 
 #[derive(Clone)]
@@ -69,10 +69,10 @@ async fn cluster_health(State(state): State<AppState>) -> Json<ClusterHealthResp
         }
     };
 
-    let status = match structured.status {
-        1 => "healthy",
-        2 => "degraded",
-        3 => "unhealthy",
+    let status = match ClusterStatus::try_from(structured.status) {
+        Ok(ClusterStatus::Healthy) => "healthy",
+        Ok(ClusterStatus::Degraded) => "degraded",
+        Ok(ClusterStatus::Unhealthy) => "unhealthy",
         _ => "unknown",
     };
 
@@ -80,10 +80,10 @@ async fn cluster_health(State(state): State<AppState>) -> Json<ClusterHealthResp
         .components
         .into_iter()
         .map(|c| {
-            let component_status = match c.status {
-                1 => "healthy",
-                2 => "degraded",
-                3 => "unhealthy",
+            let component_status = match ClusterStatus::try_from(c.status) {
+                Ok(ClusterStatus::Healthy) => "healthy",
+                Ok(ClusterStatus::Degraded) => "degraded",
+                Ok(ClusterStatus::Unhealthy) => "unhealthy",
                 _ => "unknown",
             };
 
