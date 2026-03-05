@@ -1,10 +1,17 @@
-use super::super::metrics::PipelineObserver;
-use super::super::types::{AuthorizationOutput, RedactionOutput};
+use crate::redaction::RedactionMessage;
 
+use super::super::error::PipelineError;
+use super::super::metrics::PipelineObserver;
+use super::super::types::{
+    AuthorizationOutput, PipelineRequest, QueryPipelineContext, RedactionOutput,
+};
+use super::PipelineStage;
+
+#[derive(Clone)]
 pub struct RedactionStage;
 
 impl RedactionStage {
-    pub fn execute(mut input: AuthorizationOutput, _obs: &PipelineObserver) -> RedactionOutput {
+    fn process(mut input: AuthorizationOutput) -> RedactionOutput {
         let redacted_count = input
             .query_result
             .apply_authorizations(&input.authorizations);
@@ -13,6 +20,21 @@ impl RedactionStage {
             query_result: input.query_result,
             redacted_count,
         }
+    }
+}
+
+impl<M: RedactionMessage> PipelineStage<M> for RedactionStage {
+    type Input = AuthorizationOutput;
+    type Output = RedactionOutput;
+
+    async fn execute(
+        &self,
+        input: Self::Input,
+        _ctx: &mut QueryPipelineContext,
+        _req: &mut PipelineRequest<'_, M>,
+        _obs: &mut PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        Ok(Self::process(input))
     }
 }
 
@@ -66,7 +88,7 @@ mod tests {
             authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
         }];
 
-        let output = RedactionStage::execute(make_input(auth), &PipelineObserver::start());
+        let output = RedactionStage::process(make_input(auth));
 
         assert_eq!(output.redacted_count, 1);
         assert_eq!(output.query_result.authorized_count(), 2);
@@ -74,7 +96,7 @@ mod tests {
 
     #[test]
     fn no_authorizations_redacts_all() {
-        let output = RedactionStage::execute(make_input(vec![]), &PipelineObserver::start());
+        let output = RedactionStage::process(make_input(vec![]));
 
         assert_eq!(output.redacted_count, 3);
         assert_eq!(output.query_result.authorized_count(), 0);

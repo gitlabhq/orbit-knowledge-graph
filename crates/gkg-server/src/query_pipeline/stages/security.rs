@@ -1,21 +1,17 @@
 use query_engine::SecurityContext;
 
 use crate::auth::Claims;
+use crate::redaction::RedactionMessage;
 
 use super::super::error::PipelineError;
 use super::super::metrics::PipelineObserver;
+use super::super::types::{PipelineRequest, QueryPipelineContext};
+use super::PipelineStage;
 
+#[derive(Clone)]
 pub struct SecurityStage;
 
 impl SecurityStage {
-    pub fn execute(
-        claims: &Claims,
-        obs: &PipelineObserver,
-    ) -> Result<SecurityContext, PipelineError> {
-        let result = Self::build_context(claims);
-        obs.check(result.map_err(PipelineError::from))
-    }
-
     fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
         let org_id = claims
             .organization_id
@@ -27,6 +23,24 @@ impl SecurityStage {
             claims.group_traversal_ids.clone()
         };
         SecurityContext::new(org_id, traversal_paths).map_err(|e| SecurityError(e.to_string()))
+    }
+}
+
+impl<M: RedactionMessage> PipelineStage<M> for SecurityStage {
+    type Input = ();
+    type Output = ();
+
+    async fn execute(
+        &self,
+        _input: Self::Input,
+        ctx: &mut QueryPipelineContext,
+        req: &mut PipelineRequest<'_, M>,
+        obs: &mut PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        let result = Self::build_context(req.claims);
+        let security_context = obs.check(result.map_err(PipelineError::from))?;
+        ctx.security_context = Some(security_context);
+        Ok(())
     }
 }
 

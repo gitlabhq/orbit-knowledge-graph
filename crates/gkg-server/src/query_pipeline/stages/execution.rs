@@ -1,47 +1,47 @@
-use std::sync::Arc;
 use std::time::Instant;
 
 use crate::query_pipeline::types::ExecutionOutput;
+use crate::redaction::RedactionMessage;
 use clickhouse_client::ArrowClickHouseClient;
 
 use super::super::error::PipelineError;
 use super::super::metrics::PipelineObserver;
-use super::super::types::CompilationOutput;
-pub struct ExecutionStage {
-    client: Arc<ArrowClickHouseClient>,
-}
+use super::super::types::{PipelineRequest, QueryPipelineContext};
+use super::PipelineStage;
 
-impl ExecutionStage {
-    pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { client }
-    }
+#[derive(Clone)]
+pub struct ExecutionStage;
 
-    pub async fn execute(
+impl<M: RedactionMessage> PipelineStage<M> for ExecutionStage {
+    type Input = ();
+    type Output = ExecutionOutput;
+
+    async fn execute(
         &self,
-        compiled: &CompilationOutput,
+        _input: Self::Input,
+        ctx: &mut QueryPipelineContext,
+        _req: &mut PipelineRequest<'_, M>,
         obs: &mut PipelineObserver,
-    ) -> Result<ExecutionOutput, PipelineError> {
+    ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
-        let sql = &compiled.compiled_query.base.sql;
-        let params = &compiled.compiled_query.base.params;
+        let compiled = ctx.compiled()?;
+        let sql = &compiled.base.sql;
+        let params = &compiled.base.params;
 
-        let mut query = self.client.query(sql);
+        let mut query = ctx.client.query(sql);
         for (key, value) in params.iter() {
             query = ArrowClickHouseClient::bind_param(query, key, value);
         }
-        let result = obs.check(
+        let batches = obs.check(
             query
                 .fetch_arrow()
                 .await
                 .map_err(|e| PipelineError::Execution(e.to_string())),
-        );
-        if let Ok(ref batches) = result {
-            obs.executed(t.elapsed(), batches.len());
-            return Ok(ExecutionOutput {
-                batches: batches.clone(),
-                result_context: compiled.compiled_query.base.result_context.clone(),
-            });
-        }
-        Err(PipelineError::Execution("No batches returned".into()))
+        )?;
+        obs.executed(t.elapsed(), batches.len());
+        Ok(ExecutionOutput {
+            batches,
+            result_context: compiled.base.result_context.clone(),
+        })
     }
 }

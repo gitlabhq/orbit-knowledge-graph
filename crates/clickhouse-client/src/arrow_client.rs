@@ -132,6 +132,14 @@ impl ArrowClickHouseClient {
     }
 }
 
+#[cfg(any(test, feature = "testkit"))]
+impl ArrowClickHouseClient {
+    /// Unconfigured client for unit tests. Never connects to anything.
+    pub fn dummy() -> Self {
+        Self::new("http://localhost:0", "default", "default", None)
+    }
+}
+
 impl std::fmt::Debug for ArrowClickHouseClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArrowClickHouseClient")

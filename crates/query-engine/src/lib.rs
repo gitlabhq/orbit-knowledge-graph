@@ -46,7 +46,9 @@ pub mod validate;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use check::check_ast;
-pub use codegen::{CompiledQuery, HydrationPlan, HydrationTemplate, ParameterizedQuery, codegen};
+pub use codegen::{
+    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParameterizedQuery, codegen,
+};
 pub use constants::{
     EDGE_KINDS_COLUMN, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, NEIGHBOR_ID_COLUMN,
     NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
@@ -79,17 +81,16 @@ fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
     normalize(input, ontology).count_err()
 }
 
-/// Compile a JSON query into a base query and hydration plan.
+/// Compile a JSON query into a [`CompiledQueryContext`].
 ///
-/// Returns a [`CompiledQuery`] containing the base SQL (predicate application,
-/// authz columns for redaction) plus a [`HydrationPlan`] describing how to fetch
-/// full entity properties after authorization and redaction.
-#[must_use = "the compiled query should be used"]
+/// The context contains the parameterized SQL, bind parameters, result context
+/// for redaction, hydration plan, and the validated input.
+#[must_use = "the compiled query context should be used"]
 pub fn compile(
     json_input: &str,
     ontology: &Ontology,
     ctx: &SecurityContext,
-) -> Result<CompiledQuery> {
+) -> Result<CompiledQueryContext> {
     let input = validated_input(json_input, ontology).count_err()?;
 
     let mut node = lower(&input).count_err()?;
@@ -99,8 +100,14 @@ pub fn compile(
     let base = codegen(&node, result_context).count_err()?;
 
     let hydration = build_hydration_plan(&input);
+    let query_type = input.query_type;
 
-    Ok(CompiledQuery { base, hydration })
+    Ok(CompiledQueryContext {
+        query_type,
+        base,
+        hydration,
+        input,
+    })
 }
 
 /// Build the hydration plan based on query type.

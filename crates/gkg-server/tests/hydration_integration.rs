@@ -13,7 +13,12 @@ use common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
     run_redaction, test_security_context,
 };
-use gkg_server::query_pipeline::{HydrationStage, PipelineObserver, RedactionOutput, row_to_json};
+use gkg_server::auth::Claims;
+use gkg_server::proto::ExecuteQueryMessage;
+use gkg_server::query_pipeline::{
+    HydrationStage, PipelineObserver, PipelineRequest, PipelineStage, QueryPipelineContext,
+    RedactionOutput, row_to_json,
+};
 use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests;
 use query_engine::{HydrationPlan, SecurityContext, compile};
@@ -65,7 +70,7 @@ async fn compile_execute_hydrate(
     json: &str,
     ontology: &Arc<ontology::Ontology>,
     security_ctx: &SecurityContext,
-    hydration_stage: &HydrationStage,
+    client: &Arc<clickhouse_client::ArrowClickHouseClient>,
 ) -> (QueryResult, query_engine::ResultContext, HydrationPlan) {
     let compiled = compile(json, ontology, security_ctx).unwrap();
     let plan = compiled.hydration.clone();
@@ -78,14 +83,23 @@ async fn compile_execute_hydrate(
         redacted_count: 0,
     };
 
+    let claims = Claims::dummy();
+    let mut pipeline_ctx = QueryPipelineContext {
+        compiled: Some(Arc::new(compiled)),
+        ontology: Arc::clone(ontology),
+        client: Arc::clone(client),
+        security_context: Some(security_ctx.clone()),
+    };
+    let mut req: PipelineRequest<'_, ExecuteQueryMessage> = PipelineRequest {
+        claims: &claims,
+        query_json: "",
+        tx: None,
+        stream: None,
+    };
     let mut obs = PipelineObserver::start();
-    let output = hydration_stage
-        .execute(
-            redaction_output,
-            &compiled.hydration,
-            security_ctx,
-            &mut obs,
-        )
+
+    let output = HydrationStage
+        .execute(redaction_output, &mut pipeline_ctx, &mut req, &mut obs)
         .await
         .expect("hydration should succeed");
 
@@ -98,7 +112,7 @@ async fn compile_execute_redact_hydrate(
     json: &str,
     ontology: &Arc<ontology::Ontology>,
     security_ctx: &SecurityContext,
-    hydration_stage: &HydrationStage,
+    client: &Arc<clickhouse_client::ArrowClickHouseClient>,
     mock_service: &MockRedactionService,
 ) -> (QueryResult, query_engine::ResultContext, usize) {
     let compiled = compile(json, ontology, security_ctx).unwrap();
@@ -113,25 +127,38 @@ async fn compile_execute_redact_hydrate(
         redacted_count,
     };
 
+    let claims = Claims::dummy();
+    let mut pipeline_ctx = QueryPipelineContext {
+        compiled: Some(Arc::new(compiled)),
+        ontology: Arc::clone(ontology),
+        client: Arc::clone(client),
+        security_context: Some(security_ctx.clone()),
+    };
+    let mut req: PipelineRequest<'_, ExecuteQueryMessage> = PipelineRequest {
+        claims: &claims,
+        query_json: "",
+        tx: None,
+        stream: None,
+    };
     let mut obs = PipelineObserver::start();
-    let output = hydration_stage
-        .execute(
-            redaction_output,
-            &compiled.hydration,
-            security_ctx,
-            &mut obs,
-        )
+
+    let output = HydrationStage
+        .execute(redaction_output, &mut pipeline_ctx, &mut req, &mut obs)
         .await
         .expect("hydration should succeed");
 
     (output.query_result, output.result_context, redacted_count)
 }
 
-fn make_hydration_stage(ctx: &TestContext) -> (Arc<ontology::Ontology>, HydrationStage) {
+fn make_test_resources(
+    ctx: &TestContext,
+) -> (
+    Arc<ontology::Ontology>,
+    Arc<clickhouse_client::ArrowClickHouseClient>,
+) {
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
-    let stage = HydrationStage::new(ontology.clone(), client);
-    (ontology, stage)
+    (ontology, client)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -141,7 +168,7 @@ fn make_hydration_stage(ctx: &TestContext) -> (Arc<ontology::Ontology>, Hydratio
 async fn path_finding_dynamic_hydration(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -154,7 +181,7 @@ async fn path_finding_dynamic_hydration(ctx: &TestContext) {
     }"#;
 
     let (result, _ctx_ref, plan) =
-        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
     assert!(
         matches!(plan, HydrationPlan::Dynamic),
@@ -203,7 +230,7 @@ async fn path_finding_dynamic_hydration(ctx: &TestContext) {
 async fn path_finding_hydrated_property_values(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -216,7 +243,7 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
     }"#;
 
     let (result, _ctx_ref, _plan) =
-        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
     let row = result.authorized_rows().next().expect("should have a path");
     let path_nodes = row.path_nodes();
@@ -257,7 +284,7 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
 async fn path_finding_json_format(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -270,7 +297,7 @@ async fn path_finding_json_format(ctx: &TestContext) {
     }"#;
 
     let (result, ctx_ref, _plan) =
-        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
     let row = result.authorized_rows().next().unwrap();
     let json_val = row_to_json(row, &ctx_ref);
@@ -312,7 +339,7 @@ async fn path_finding_json_format(ctx: &TestContext) {
 async fn neighbors_dynamic_hydration(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -322,7 +349,7 @@ async fn neighbors_dynamic_hydration(ctx: &TestContext) {
     }"#;
 
     let (result, _ctx_ref, plan) =
-        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
     assert!(matches!(plan, HydrationPlan::Dynamic));
     assert!(!result.is_empty(), "should find neighbors");
@@ -340,7 +367,7 @@ async fn neighbors_dynamic_hydration(ctx: &TestContext) {
 async fn neighbors_hydrated_property_values(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -350,7 +377,7 @@ async fn neighbors_hydrated_property_values(ctx: &TestContext) {
     }"#;
 
     let (result, _ctx_ref, _plan) =
-        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
     // User 1 is member of Group 100 ("Public Group")
     let neighbor_names: HashSet<&str> = result
@@ -371,7 +398,7 @@ async fn neighbors_hydrated_property_values(ctx: &TestContext) {
 async fn neighbors_json_format(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -381,7 +408,7 @@ async fn neighbors_json_format(ctx: &TestContext) {
     }"#;
 
     let (result, ctx_ref, _plan) =
-        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &hydration_stage).await;
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
     let row = result.authorized_rows().next().unwrap();
     let json_val = row_to_json(row, &ctx_ref);
@@ -457,7 +484,7 @@ async fn traversal_produces_no_hydration_plan(ctx: &TestContext) {
 async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     // Two paths exist: User 1 → Group 100 → Project 1000
@@ -478,15 +505,9 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
     mock_service.allow("group", &[100, 101]);
     mock_service.allow("project", &[1000, 1001]);
 
-    let (result, _ctx_ref, redacted_count) = compile_execute_redact_hydrate(
-        ctx,
-        json,
-        &ontology,
-        &security_ctx,
-        &hydration_stage,
-        &mock_service,
-    )
-    .await;
+    let (result, _ctx_ref, redacted_count) =
+        compile_execute_redact_hydrate(ctx, json, &ontology, &security_ctx, &client, &mock_service)
+            .await;
 
     assert!(redacted_count > 0, "some paths should have been redacted");
     assert!(
@@ -538,7 +559,7 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
 async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     // User 2's outgoing neighbors: Group 101 ("Private Group")
@@ -555,15 +576,9 @@ async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
     mock_service.deny("user", &[3]);
     mock_service.allow("group", &[101]);
 
-    let (result, _ctx_ref, redacted_count) = compile_execute_redact_hydrate(
-        ctx,
-        json,
-        &ontology,
-        &security_ctx,
-        &hydration_stage,
-        &mock_service,
-    )
-    .await;
+    let (result, _ctx_ref, redacted_count) =
+        compile_execute_redact_hydrate(ctx, json, &ontology, &security_ctx, &client, &mock_service)
+            .await;
 
     assert!(redacted_count > 0, "User 3's row should be redacted");
     assert_eq!(
@@ -593,7 +608,7 @@ async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
 async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    let (ontology, hydration_stage) = make_hydration_stage(ctx);
+    let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
     let json = r#"{
@@ -608,15 +623,9 @@ async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
     // Deny everything
     let mock_service = MockRedactionService::new();
 
-    let (result, _ctx_ref, redacted_count) = compile_execute_redact_hydrate(
-        ctx,
-        json,
-        &ontology,
-        &security_ctx,
-        &hydration_stage,
-        &mock_service,
-    )
-    .await;
+    let (result, _ctx_ref, redacted_count) =
+        compile_execute_redact_hydrate(ctx, json, &ontology, &security_ctx, &client, &mock_service)
+            .await;
 
     assert!(redacted_count > 0, "should have had paths to redact");
     assert_eq!(

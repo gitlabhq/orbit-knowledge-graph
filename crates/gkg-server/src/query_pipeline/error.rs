@@ -18,6 +18,9 @@ pub enum PipelineError {
 
     #[error("Authorization exchange failed")]
     Authorization(RedactionExchangeError),
+
+    #[error("Streaming channel not available: {0}")]
+    Streaming(String),
 }
 
 impl PipelineError {
@@ -27,6 +30,7 @@ impl PipelineError {
             Self::Compile(_) => "compile_error",
             Self::Execution(_) => "execution_error",
             Self::Authorization(_) => "authorization_error",
+            Self::Streaming(_) => "streaming_error",
         }
     }
 
@@ -36,6 +40,7 @@ impl PipelineError {
             Self::Compile(msg) => Status::invalid_argument(msg),
             Self::Execution(msg) => Status::internal(msg),
             Self::Authorization(e) => e.into_status(),
+            Self::Streaming(msg) => Status::failed_precondition(msg),
         }
     }
 }
