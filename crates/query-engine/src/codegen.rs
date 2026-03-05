@@ -5,6 +5,8 @@
 use crate::ast::{Cte, Expr, Node, Op, Query, TableRef};
 use crate::enforce::ResultContext;
 use crate::error::Result;
+use crate::input::Input;
+use crate::input::QueryType;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -16,9 +18,11 @@ pub struct ParameterizedQuery {
 }
 
 #[derive(Debug, Clone)]
-pub struct CompiledQuery {
+pub struct CompiledQueryContext {
+    pub query_type: QueryType,
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
+    pub input: Input,
 }
 
 #[derive(Debug, Clone)]

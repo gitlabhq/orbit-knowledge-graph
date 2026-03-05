@@ -12,30 +12,23 @@ use super::formatter::ResultFormatter;
 use super::metrics::PipelineObserver;
 use super::stages::{
     AuthorizationStage, CompilationStage, ExecutionStage, ExtractionStage, FormattingStage,
-    HydrationStage, RedactionStage, SecurityStage,
+    HydrationStage, PipelineRunner, RedactionStage, SecurityStage,
 };
-use super::types::PipelineOutput;
+use super::types::{PipelineOutput, PipelineRequest, QueryPipelineContext};
 
 #[derive(Clone)]
 pub struct QueryPipelineService<F: ResultFormatter + Clone> {
     ontology: Arc<Ontology>,
-    execution: Arc<ExecutionStage>,
-    hydration: Arc<HydrationStage>,
-    formatter: F,
+    client: Arc<ArrowClickHouseClient>,
+    formatter: FormattingStage<F>,
 }
 
 impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
     pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>, formatter: F) -> Self {
-        let hydration = Arc::new(HydrationStage::new(
-            Arc::clone(&ontology),
-            Arc::clone(&client),
-        ));
-        let execution = Arc::new(ExecutionStage::new(client));
         Self {
             ontology,
-            execution,
-            hydration,
-            formatter,
+            client,
+            formatter: FormattingStage::new(formatter),
         }
     }
 
@@ -48,33 +41,40 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
     ) -> Result<PipelineOutput, PipelineError> {
         let mut obs = PipelineObserver::start();
 
-        let security_context = SecurityStage::execute(claims, &obs)?;
+        let mut ctx = QueryPipelineContext {
+            compiled: None,
+            ontology: Arc::clone(&self.ontology),
+            client: Arc::clone(&self.client),
+            security_context: None,
+        };
 
-        let compiled =
-            CompilationStage::execute(query_json, &self.ontology, &security_context, &mut obs)?;
+        let req = PipelineRequest {
+            claims,
+            query_json,
+            tx: Some(tx),
+            stream: Some(stream),
+        };
 
-        let execution_output = self.execution.execute(&compiled, &mut obs).await?;
-        let query_result = ExtractionStage::execute(execution_output, &obs);
+        let output = PipelineRunner::start(&mut ctx, req, &mut obs)
+            .then(&SecurityStage)
+            .await?
+            .then(&CompilationStage)
+            .await?
+            .then(&ExecutionStage)
+            .await?
+            .then(&ExtractionStage)
+            .await?
+            .then(&AuthorizationStage)
+            .await?
+            .then(&RedactionStage)
+            .await?
+            .then(&HydrationStage)
+            .await?
+            .then(&self.formatter)
+            .await?
+            .finish();
 
-        let authorized = AuthorizationStage::execute(query_result, tx, stream, &mut obs).await?;
-
-        let redacted = RedactionStage::execute(authorized, &obs);
-
-        let hydrated = self
-            .hydration
-            .execute(
-                redacted,
-                &compiled.compiled_query.hydration,
-                &security_context,
-                &mut obs,
-            )
-            .await?;
-
-        let formatting_stage =
-            FormattingStage::new(self.formatter.clone(), Arc::clone(&self.ontology));
-        let output = formatting_stage.execute(hydrated, &compiled, &obs);
         obs.finish(&output);
-
         Ok(output)
     }
 }

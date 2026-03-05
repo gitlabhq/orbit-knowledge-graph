@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Instant;
 
 use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
@@ -9,78 +8,27 @@ use futures::future::try_join_all;
 use ontology::Ontology;
 use query_engine::{HydrationPlan, HydrationTemplate, SecurityContext, compile};
 
-use crate::redaction::{ColumnValue, QueryResult};
+use crate::redaction::{ColumnValue, QueryResult, RedactionMessage};
 
 use super::super::error::PipelineError;
 use super::super::metrics::PipelineObserver;
-use super::super::types::{HydrationOutput, RedactionOutput};
+use super::super::types::{
+    HydrationOutput, PipelineRequest, QueryPipelineContext, RedactionOutput,
+};
+use super::PipelineStage;
 
 use query_engine::constants::{GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, redaction_id_column};
 
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 
-pub struct HydrationStage {
-    ontology: Arc<Ontology>,
-    client: Arc<ArrowClickHouseClient>,
-}
+#[derive(Clone)]
+pub struct HydrationStage;
 
 impl HydrationStage {
-    pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { ontology, client }
-    }
-
-    pub async fn execute(
-        &self,
-        input: RedactionOutput,
-        hydration_plan: &HydrationPlan,
-        security_context: &SecurityContext,
-        obs: &mut PipelineObserver,
-    ) -> Result<HydrationOutput, PipelineError> {
-        let t = Instant::now();
-        let mut query_result = input.query_result;
-        let result_context = query_result.ctx().clone();
-
-        match hydration_plan {
-            HydrationPlan::None => {
-                obs.hydrated(t.elapsed());
-                return Ok(HydrationOutput {
-                    query_result,
-                    result_context,
-                    redacted_count: input.redacted_count,
-                });
-            }
-            HydrationPlan::Static(templates) => {
-                let property_map = obs.check(
-                    self.hydrate_static(templates, &query_result, security_context)
-                        .await,
-                )?;
-                if !property_map.is_empty() {
-                    merge_static_properties(&mut query_result, &property_map, templates);
-                }
-            }
-            HydrationPlan::Dynamic => {
-                let refs = extract_dynamic_refs(&query_result);
-                if !refs.is_empty() {
-                    let property_map =
-                        obs.check(self.hydrate_dynamic(&refs, security_context).await)?;
-                    merge_dynamic_properties(&mut query_result, &property_map);
-                }
-            }
-        }
-
-        obs.hydrated(t.elapsed());
-        Ok(HydrationOutput {
-            query_result,
-            result_context,
-            redacted_count: input.redacted_count,
-        })
-    }
-
     /// Static hydration: use pre-built templates from compile time.
-    /// Collects IDs from `_gkg_{alias}_id` columns, injects them into
-    /// template query JSON, compiles and executes concurrently.
     async fn hydrate_static(
-        &self,
+        client: &ArrowClickHouseClient,
+        ontology: &Ontology,
         templates: &[HydrationTemplate],
         query_result: &QueryResult,
         security_context: &SecurityContext,
@@ -93,7 +41,13 @@ impl HydrationStage {
                     return None;
                 }
                 let query_json = template.with_ids(&ids);
-                Some(self.compile_and_fetch(&template.entity_type, query_json, security_context))
+                Some(compile_and_fetch(
+                    client,
+                    ontology,
+                    &template.entity_type,
+                    query_json,
+                    security_context,
+                ))
             })
             .collect();
 
@@ -106,10 +60,9 @@ impl HydrationStage {
     }
 
     /// Dynamic hydration: build search queries from scratch at runtime.
-    /// Entity types are discovered from dynamic_nodes after redaction.
-    /// All entity-type queries execute concurrently.
     async fn hydrate_dynamic(
-        &self,
+        client: &ArrowClickHouseClient,
+        ontology: &Ontology,
         refs: &HashMap<String, Vec<i64>>,
         security_context: &SecurityContext,
     ) -> Result<PropertyMap, PipelineError> {
@@ -117,8 +70,14 @@ impl HydrationStage {
             .iter()
             .filter(|(_, ids)| !ids.is_empty())
             .map(|(entity_type, ids)| {
-                let query_json = build_dynamic_search_query(entity_type, ids, &self.ontology)?;
-                Ok(self.compile_and_fetch(entity_type, query_json, security_context))
+                let query_json = build_dynamic_search_query(entity_type, ids, ontology)?;
+                Ok(compile_and_fetch(
+                    client,
+                    ontology,
+                    entity_type,
+                    query_json,
+                    security_context,
+                ))
             })
             .collect::<Result<Vec<_>, PipelineError>>()?;
 
@@ -129,27 +88,93 @@ impl HydrationStage {
         }
         Ok(merged)
     }
+}
 
-    /// Compile a hydration query JSON string, execute it, and parse the results.
-    async fn compile_and_fetch(
+/// Compile a hydration query JSON string, execute it, and parse the results.
+async fn compile_and_fetch(
+    client: &ArrowClickHouseClient,
+    ontology: &Ontology,
+    entity_type: &str,
+    query_json: String,
+    security_context: &SecurityContext,
+) -> Result<PropertyMap, PipelineError> {
+    let compiled = compile(&query_json, ontology, security_context)
+        .map_err(|e| PipelineError::Compile(e.to_string()))?;
+
+    let mut query = client.query(&compiled.base.sql);
+    for (key, value) in &compiled.base.params {
+        query = ArrowClickHouseClient::bind_param(query, key, value);
+    }
+    let batches = query
+        .fetch_arrow()
+        .await
+        .map_err(|e| PipelineError::Execution(e.to_string()))?;
+
+    parse_property_batches(entity_type, &batches)
+}
+
+impl<M: RedactionMessage> PipelineStage<M> for HydrationStage {
+    type Input = RedactionOutput;
+    type Output = HydrationOutput;
+
+    async fn execute(
         &self,
-        entity_type: &str,
-        query_json: String,
-        security_context: &SecurityContext,
-    ) -> Result<PropertyMap, PipelineError> {
-        let compiled = compile(&query_json, &self.ontology, security_context)
-            .map_err(|e| PipelineError::Compile(e.to_string()))?;
+        input: Self::Input,
+        ctx: &mut QueryPipelineContext,
+        _req: &mut PipelineRequest<'_, M>,
+        obs: &mut PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        let t = Instant::now();
+        let mut query_result = input.query_result;
+        let result_context = query_result.ctx().clone();
 
-        let mut query = self.client.query(&compiled.base.sql);
-        for (key, value) in &compiled.base.params {
-            query = ArrowClickHouseClient::bind_param(query, key, value);
+        match &ctx.compiled()?.hydration {
+            HydrationPlan::None => {
+                obs.hydrated(t.elapsed());
+                return Ok(HydrationOutput {
+                    query_result,
+                    result_context,
+                    redacted_count: input.redacted_count,
+                });
+            }
+            HydrationPlan::Static(templates) => {
+                let property_map = obs.check(
+                    Self::hydrate_static(
+                        &ctx.client,
+                        &ctx.ontology,
+                        templates,
+                        &query_result,
+                        ctx.security_context()?,
+                    )
+                    .await,
+                )?;
+                if !property_map.is_empty() {
+                    merge_static_properties(&mut query_result, &property_map, templates);
+                }
+            }
+            HydrationPlan::Dynamic => {
+                let refs = extract_dynamic_refs(&query_result);
+                if !refs.is_empty() {
+                    let property_map = obs.check(
+                        Self::hydrate_dynamic(
+                            &ctx.client,
+                            &ctx.ontology,
+                            &refs,
+                            ctx.security_context()?,
+                        )
+                        .await,
+                    )?;
+                    merge_dynamic_properties(&mut query_result, &property_map);
+                }
+            }
         }
-        let batches = query
-            .fetch_arrow()
-            .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
-        parse_property_batches(entity_type, &batches)
+        obs.hydrated(t.elapsed());
+        Ok(HydrationOutput {
+            query_result,
+            result_context,
+            redacted_count: input.redacted_count,
+        })
     }
 }
 

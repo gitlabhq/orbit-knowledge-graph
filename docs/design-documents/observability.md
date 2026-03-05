@@ -115,6 +115,7 @@ The query pipeline instruments end-to-end query execution from security check th
 | `qp.error.security_rejected` | Counter | `reason` (security) | Pipeline rejected due to invalid or missing security context |
 | `qp.error.execution_failed` | Counter | `reason` (execution) | ClickHouse query execution failed |
 | `qp.error.authorization_failed` | Counter | `reason` (authorization) | Authorization exchange with Rails failed |
+| `qp.error.streaming_failed` | Counter | `reason` (streaming) | Streaming channel unavailable during authorization |
 
 *Query engine metrics (`query_engine`):*
 

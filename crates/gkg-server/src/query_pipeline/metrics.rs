@@ -23,6 +23,7 @@ struct QueryPipelineMetrics {
     security_rejected: Counter<u64>,
     execution_failed: Counter<u64>,
     authorization_failed: Counter<u64>,
+    streaming_failed: Counter<u64>,
 }
 
 impl QueryPipelineMetrics {
@@ -80,6 +81,10 @@ impl QueryPipelineMetrics {
                 .u64_counter("qp.error.authorization_failed")
                 .with_description("Authorization exchange with Rails failed")
                 .build(),
+            streaming_failed: meter
+                .u64_counter("qp.error.streaming_failed")
+                .with_description("Streaming channel unavailable during authorization")
+                .build(),
         }
     }
 }
@@ -92,6 +97,7 @@ fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
         PipelineError::Compile(_) => None,
         PipelineError::Execution(_) => Some((&METRICS.execution_failed, "execution")),
         PipelineError::Authorization(_) => Some((&METRICS.authorization_failed, "authorization")),
+        PipelineError::Streaming(_) => Some((&METRICS.streaming_failed, "streaming")),
     }
 }
 

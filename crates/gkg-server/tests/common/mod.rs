@@ -10,7 +10,7 @@ use indexer::handler::{Handler, HandlerContext, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
 use indexer::testkit::{MockLockService, MockNatsServices, create_test_indexer_config};
 use ontology::Ontology;
-use query_engine::{CompiledQuery, SecurityContext, compile};
+use query_engine::{CompiledQueryContext, SecurityContext, compile};
 
 pub use integration_testkit::{
     TestContext, get_boolean_column, get_int64_column, get_string_column, get_uint64_column,
@@ -120,7 +120,10 @@ pub fn test_security_context() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).expect("valid security context")
 }
 
-pub async fn compile_and_execute(ctx: &TestContext, json: &str) -> (CompiledQuery, QueryResult) {
+pub async fn compile_and_execute(
+    ctx: &TestContext,
+    json: &str,
+) -> (CompiledQueryContext, QueryResult) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
     let compiled = compile(json, &ontology, &security_ctx).unwrap();

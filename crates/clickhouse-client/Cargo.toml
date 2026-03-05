@@ -4,6 +4,10 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+default = []
+testkit = []
+
 [dependencies]
 arrow = { workspace = true }
 arrow-ipc = { workspace = true }

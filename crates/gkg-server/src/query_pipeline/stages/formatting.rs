@@ -1,34 +1,30 @@
-use std::sync::Arc;
+use crate::redaction::RedactionMessage;
 
-use ontology::Ontology;
-
+use super::super::error::PipelineError;
 use super::super::formatter::ResultFormatter;
 use super::super::metrics::PipelineObserver;
-use super::super::types::{CompilationOutput, HydrationOutput, PipelineOutput};
+use super::super::types::{HydrationOutput, PipelineOutput, PipelineRequest, QueryPipelineContext};
+use super::PipelineStage;
 
+#[derive(Clone)]
 pub struct FormattingStage<F: ResultFormatter> {
     formatter: F,
-    ontology: Arc<Ontology>,
 }
 
 impl<F: ResultFormatter> FormattingStage<F> {
-    pub fn new(formatter: F, ontology: Arc<Ontology>) -> Self {
-        Self {
-            formatter,
-            ontology,
-        }
+    pub fn new(formatter: F) -> Self {
+        Self { formatter }
     }
 
-    pub fn execute(
+    fn process(
         &self,
         input: HydrationOutput,
-        compiled: &CompilationOutput,
-        _obs: &PipelineObserver,
-    ) -> PipelineOutput {
+        ctx: &QueryPipelineContext,
+    ) -> Result<PipelineOutput, PipelineError> {
         let row_count = input.query_result.authorized_count();
         let formatted =
             self.formatter
-                .format(&input.query_result, &input.result_context, &self.ontology);
+                .format(&input.query_result, &input.result_context, &ctx.ontology);
 
         let query_type = input
             .result_context
@@ -36,13 +32,30 @@ impl<F: ResultFormatter> FormattingStage<F> {
             .map(|qt| <&str>::from(qt).to_string())
             .unwrap_or_default();
 
-        PipelineOutput {
+        Ok(PipelineOutput {
             formatted_result: formatted,
             query_type,
-            raw_query_strings: vec![compiled.compiled_query.base.sql.clone()],
+            raw_query_strings: vec![ctx.compiled()?.base.sql.clone()],
             row_count,
             redacted_count: input.redacted_count,
-        }
+        })
+    }
+}
+
+impl<M: RedactionMessage, F: ResultFormatter + Clone + Send + Sync> PipelineStage<M>
+    for FormattingStage<F>
+{
+    type Input = HydrationOutput;
+    type Output = PipelineOutput;
+
+    async fn execute(
+        &self,
+        input: Self::Input,
+        ctx: &mut QueryPipelineContext,
+        _req: &mut PipelineRequest<'_, M>,
+        _obs: &mut PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        self.process(input, ctx)
     }
 }
 
@@ -52,12 +65,17 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::{CompiledQuery, HydrationPlan, ParameterizedQuery, ResultContext};
+    use ontology::Ontology;
+    use query_engine::{
+        CompiledQueryContext, HydrationPlan, ParameterizedQuery, QueryType, ResultContext,
+    };
     use serde_json::{Value, json};
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use crate::redaction::QueryResult;
 
+    #[derive(Clone)]
     struct ConstFormatter(Value);
 
     impl ResultFormatter for ConstFormatter {
@@ -81,10 +99,10 @@ mod tests {
         )
         .unwrap();
 
-        let mut ctx = ResultContext::new();
-        ctx.add_node("p", "Project");
+        let mut result_ctx = ResultContext::new();
+        result_ctx.add_node("p", "Project");
 
-        let mut qr = QueryResult::from_batches(&[batch], &ctx);
+        let mut qr = QueryResult::from_batches(&[batch], &result_ctx);
         qr.rows_mut()[0].set_unauthorized();
 
         let input = HydrationOutput {
@@ -92,19 +110,29 @@ mod tests {
             query_result: qr,
             redacted_count: 1,
         };
-        let compiled = CompilationOutput {
-            compiled_query: CompiledQuery {
+        let ctx = QueryPipelineContext {
+            compiled: Some(Arc::new(CompiledQueryContext {
+                query_type: QueryType::Search,
                 base: ParameterizedQuery {
                     sql: "SELECT 1".to_string(),
                     params: HashMap::new(),
                     result_context: ResultContext::new(),
                 },
                 hydration: HydrationPlan::None,
-            },
+                input: serde_json::from_value(serde_json::json!({
+                    "query_type": "search",
+                    "node": {"id": "p", "entity": "Project"},
+                    "limit": 10
+                }))
+                .unwrap(),
+            })),
+            ontology: Arc::new(Ontology::new()),
+            client: Arc::new(clickhouse_client::ArrowClickHouseClient::dummy()),
+            security_context: None,
         };
 
-        let stage = FormattingStage::new(ConstFormatter(json!(["ok"])), Arc::new(Ontology::new()));
-        let output = stage.execute(input, &compiled, &PipelineObserver::start());
+        let stage = FormattingStage::new(ConstFormatter(json!(["ok"])));
+        let output = stage.process(input, &ctx).unwrap();
 
         assert_eq!(output.formatted_result, json!(["ok"]));
         assert_eq!(output.row_count, 2); // 3 total - 1 redacted

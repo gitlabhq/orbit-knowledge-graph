@@ -1,15 +1,35 @@
-use crate::redaction::QueryResult;
+use crate::redaction::{QueryResult, RedactionMessage};
 
+use super::super::error::PipelineError;
 use super::super::metrics::PipelineObserver;
-use super::super::types::{ExecutionOutput, ExtractionOutput};
+use super::super::types::{
+    ExecutionOutput, ExtractionOutput, PipelineRequest, QueryPipelineContext,
+};
+use super::PipelineStage;
 
+#[derive(Clone)]
 pub struct ExtractionStage;
 
 impl ExtractionStage {
-    pub fn execute(input: ExecutionOutput, _obs: &PipelineObserver) -> ExtractionOutput {
+    fn process(input: ExecutionOutput) -> ExtractionOutput {
         ExtractionOutput {
             query_result: QueryResult::from_batches(&input.batches, &input.result_context),
         }
+    }
+}
+
+impl<M: RedactionMessage> PipelineStage<M> for ExtractionStage {
+    type Input = ExecutionOutput;
+    type Output = ExtractionOutput;
+
+    async fn execute(
+        &self,
+        input: Self::Input,
+        _ctx: &mut QueryPipelineContext,
+        _req: &mut PipelineRequest<'_, M>,
+        _obs: &mut PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        Ok(Self::process(input))
     }
 }
 
@@ -37,16 +57,13 @@ mod tests {
         )
         .unwrap();
 
-        let mut ctx = ResultContext::new();
-        ctx.add_node("p", "Project");
+        let mut ctx_result = ResultContext::new();
+        ctx_result.add_node("p", "Project");
 
-        let output = ExtractionStage::execute(
-            ExecutionOutput {
-                batches: vec![batch],
-                result_context: ctx,
-            },
-            &PipelineObserver::start(),
-        );
+        let output = ExtractionStage::process(ExecutionOutput {
+            batches: vec![batch],
+            result_context: ctx_result,
+        });
 
         assert_eq!(output.query_result.len(), 2);
         assert!(output.query_result.ctx().get("p").is_some());
