@@ -1,0 +1,127 @@
+use serde::Deserialize;
+use std::collections::BTreeMap;
+
+use crate::OntologyError;
+use crate::entities::{EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig};
+use crate::etl::EtlScope;
+
+use super::EtlSettings;
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct EdgeYaml {
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    variants: Vec<EdgeVariantYaml>,
+    #[serde(default)]
+    etl: Option<EdgeEtlYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeVariantYaml {
+    from_node: EdgeNodeRef,
+    to_node: EdgeNodeRef,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeNodeRef {
+    #[serde(rename = "type")]
+    node_type: String,
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeEtlYaml {
+    scope: EtlScope,
+    source: String,
+    #[serde(default)]
+    watermark: Option<String>,
+    #[serde(default)]
+    deleted: Option<String>,
+    order_by: Vec<String>,
+    from: EdgeEndpointYaml,
+    to: EdgeEndpointYaml,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeEndpointYaml {
+    id: String,
+    #[serde(rename = "type")]
+    type_literal: Option<String>,
+    #[serde(rename = "type_column")]
+    type_column: Option<String>,
+    #[serde(default)]
+    type_mapping: BTreeMap<String, String>,
+}
+
+impl EdgeYaml {
+    pub(crate) fn to_entities(&self, relationship_kind: String) -> Vec<EdgeEntity> {
+        self.variants
+            .iter()
+            .map(|v| EdgeEntity {
+                relationship_kind: relationship_kind.clone(),
+                source: v.from_node.id.clone(),
+                source_kind: v.from_node.node_type.clone(),
+                target: v.to_node.id.clone(),
+                target_kind: v.to_node.node_type.clone(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn into_etl_config(
+        self,
+        etl_settings: &EtlSettings,
+    ) -> Result<Option<EdgeSourceEtlConfig>, OntologyError> {
+        let Some(etl) = self.etl else {
+            return Ok(None);
+        };
+
+        let from = convert_endpoint(etl.from, "from")?;
+        let to = convert_endpoint(etl.to, "to")?;
+
+        let watermark = etl
+            .watermark
+            .unwrap_or_else(|| etl_settings.watermark.clone());
+        let deleted = etl.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
+
+        Ok(Some(EdgeSourceEtlConfig {
+            scope: etl.scope,
+            source: etl.source,
+            watermark,
+            deleted,
+            order_by: etl.order_by,
+            from,
+            to,
+        }))
+    }
+}
+
+fn convert_endpoint(
+    ep: EdgeEndpointYaml,
+    endpoint_name: &str,
+) -> Result<EdgeEndpoint, OntologyError> {
+    let node_type = match (ep.type_literal, ep.type_column) {
+        (Some(lit), None) => EdgeEndpointType::Literal(lit),
+        (None, Some(col)) => EdgeEndpointType::Column {
+            column: col,
+            type_mapping: ep.type_mapping,
+        },
+        (Some(_), Some(_)) => {
+            return Err(OntologyError::Validation(format!(
+                "edge source endpoint '{}': use 'type' or 'type_column', not both",
+                endpoint_name
+            )));
+        }
+        (None, None) => {
+            return Err(OntologyError::Validation(format!(
+                "edge source endpoint '{}': requires 'type' or 'type_column'",
+                endpoint_name
+            )));
+        }
+    };
+
+    Ok(EdgeEndpoint {
+        id_column: ep.id,
+        node_type,
+    })
+}

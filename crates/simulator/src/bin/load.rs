@@ -111,10 +111,10 @@ async fn main() -> Result<()> {
                 let start = std::time::Instant::now();
 
                 if args.use_cli {
-                    writer.load_parquet_file(&tbl_name, &file_path)?;
+                    writer.load_parquet_file(tbl_name, &file_path)?;
                 } else {
                     let batches = reader.read_batches(*org_id, &node.name)?;
-                    writer.write_batches(&tbl_name, &batches).await?;
+                    writer.write_batches(tbl_name, &batches).await?;
                 }
 
                 println!("{:.1}s", start.elapsed().as_secs_f64());

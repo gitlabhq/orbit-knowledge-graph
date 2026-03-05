@@ -68,11 +68,16 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             continue;
         };
 
-        node.table = Some(ontology.table_name(entity).map_err(|_| {
-            QueryError::AllowlistRejected(format!(
-                "entity '{entity}' passed schema validation but has no table mapping"
-            ))
-        })?);
+        node.table = Some(
+            ontology
+                .table_name(entity)
+                .map_err(|_| {
+                    QueryError::AllowlistRejected(format!(
+                        "entity '{entity}' passed schema validation but has no table mapping"
+                    ))
+                })?
+                .to_owned(),
+        );
 
         let node_entity = ontology.get_node(entity).ok_or_else(|| {
             QueryError::AllowlistRejected(format!(

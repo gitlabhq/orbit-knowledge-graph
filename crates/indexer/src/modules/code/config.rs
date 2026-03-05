@@ -30,10 +30,10 @@ pub struct CodeTableNames {
 impl CodeTableNames {
     pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
         Ok(Self {
-            directory: ontology.table_name("Directory")?,
-            file: ontology.table_name("File")?,
-            definition: ontology.table_name("Definition")?,
-            imported_symbol: ontology.table_name("ImportedSymbol")?,
+            directory: ontology.table_name("Directory")?.to_owned(),
+            file: ontology.table_name("File")?.to_owned(),
+            definition: ontology.table_name("Definition")?.to_owned(),
+            imported_symbol: ontology.table_name("ImportedSymbol")?.to_owned(),
             edge: ontology.edge_table().to_string(),
         })
     }
