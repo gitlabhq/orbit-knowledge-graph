@@ -37,8 +37,8 @@ impl<'a> SchemaGenerator<'a> {
                 .iter()
                 .map(|s| s.as_str())
                 .collect();
-            let ddl = self.schema_to_ddl(&tbl_name, &schema, &primary_key, &order_by);
-            statements.push((tbl_name, ddl));
+            let ddl = self.schema_to_ddl(tbl_name, &schema, &primary_key, &order_by);
+            statements.push((tbl_name.to_owned(), ddl));
         }
 
         // Edge table
@@ -155,7 +155,7 @@ impl<'a> SchemaGenerator<'a> {
             "*" => self
                 .ontology
                 .nodes()
-                .map(|n| self.ontology.table_name(&n.name).unwrap())
+                .map(|n| self.ontology.table_name(&n.name).unwrap().to_owned())
                 .collect(),
             "edges" => vec![EDGE_TABLE.to_string()],
             _ => vec![pattern.to_string()],

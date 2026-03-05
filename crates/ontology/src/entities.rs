@@ -4,6 +4,7 @@ use std::{collections::BTreeMap, fmt};
 
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::etl::EtlConfig;
+use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainInfo {
@@ -12,18 +13,30 @@ pub struct DomainInfo {
     pub node_names: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct NodeStyle {
+    #[serde(default = "NodeStyle::default_size")]
     pub size: i32,
+    #[serde(default = "NodeStyle::default_color")]
     pub color: String,
 }
 
 impl Default for NodeStyle {
     fn default() -> Self {
         Self {
-            size: 30,
-            color: "#6B7280".to_string(),
+            size: Self::default_size(),
+            color: Self::default_color(),
         }
+    }
+}
+
+impl NodeStyle {
+    fn default_size() -> i32 {
+        30
+    }
+
+    fn default_color() -> String {
+        "#6B7280".to_string()
     }
 }
 
@@ -31,16 +44,28 @@ impl Default for NodeStyle {
 ///
 /// Defines how this entity should be validated against Rails' RedactionService
 /// to ensure users have permission to view the entity.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RedactionConfig {
     /// Rails resource type (e.g., "projects", "merge_requests", "groups", "users").
     /// This maps to the key used in `Authz::RedactionService::RESOURCE_CLASSES`.
     pub resource_type: String,
     /// Column containing the ID for redaction (defaults to "id").
+    #[serde(default = "RedactionConfig::default_id_column")]
     pub id_column: String,
     /// The ability to check for this resource (e.g., "read_project", "read_group").
     /// Defaults to "read".
+    #[serde(default = "RedactionConfig::default_ability")]
     pub ability: String,
+}
+
+impl RedactionConfig {
+    fn default_id_column() -> String {
+        "id".to_string()
+    }
+
+    fn default_ability() -> String {
+        "read".to_string()
+    }
 }
 
 /// A node entity representing a record or row in the knowledge graph.
@@ -210,8 +235,44 @@ pub enum DataType {
     Uuid,
 }
 
+impl<'de> Deserialize<'de> for DataType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = <&str>::deserialize(deserializer)?;
+        match s {
+            "string" => Ok(Self::String),
+            "int64" | "int" | "integer" => Ok(Self::Int),
+            "float64" | "float" | "double" => Ok(Self::Float),
+            "boolean" | "bool" => Ok(Self::Bool),
+            "date" => Ok(Self::Date),
+            "timestamp" | "datetime" => Ok(Self::DateTime),
+            "enum" => Ok(Self::Enum),
+            "uuid" => Ok(Self::Uuid),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &[
+                    "string",
+                    "int64",
+                    "int",
+                    "integer",
+                    "float64",
+                    "float",
+                    "double",
+                    "boolean",
+                    "bool",
+                    "date",
+                    "timestamp",
+                    "datetime",
+                    "enum",
+                    "uuid",
+                ],
+            )),
+        }
+    }
+}
+
 /// Enum storage type - how the enum is stored in the source database.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum EnumType {
     /// Integer values that map to string labels (requires CASE transformation).
     #[default]

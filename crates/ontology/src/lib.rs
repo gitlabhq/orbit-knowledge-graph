@@ -19,6 +19,8 @@
 pub mod constants;
 mod entities;
 pub mod etl;
+mod json_schema;
+mod loading;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
@@ -30,17 +32,11 @@ pub use entities::{
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
-use rust_embed::Embed;
-use serde::Deserialize;
-use serde_json::{Map, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
-/// Embedded ontology files from `fixtures/ontology/`.
-#[derive(Embed)]
-#[folder = "$CARGO_MANIFEST_DIR/../../fixtures/ontology/"]
-struct EmbeddedOntology;
+use loading::EtlSettings;
 
 /// Errors that can occur when loading or validating an ontology.
 #[derive(Debug)]
@@ -83,33 +79,25 @@ impl fmt::Display for OntologyError {
     }
 }
 
-/// Default ETL settings resolved from `settings.etl` in schema.yaml.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct EtlSettings {
-    watermark: String,
-    deleted: String,
-    order_by: Vec<String>,
-}
-
 /// A loaded ontology containing all node and edge entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
     schema_version: String,
     /// Prefix for all ClickHouse graph table names (e.g., `"gl_"`).
-    table_prefix: String,
+    pub(crate) table_prefix: String,
     /// ClickHouse table name for all graph edges (e.g., `"gl_edge"`).
-    edge_table: String,
+    pub(crate) edge_table: String,
     /// Default ORDER BY columns for node tables (dedup key for ReplacingMergeTree).
-    default_entity_sort_key: Vec<String>,
+    pub(crate) default_entity_sort_key: Vec<String>,
     /// ORDER BY columns for the edge table (dedup key for ReplacingMergeTree).
-    edge_sort_key: Vec<String>,
-    domains: BTreeMap<String, DomainInfo>,
-    nodes: BTreeMap<String, NodeEntity>,
-    edges: BTreeMap<String, Vec<EdgeEntity>>,
-    edge_descriptions: BTreeMap<String, String>,
+    pub(crate) edge_sort_key: Vec<String>,
+    pub(crate) domains: BTreeMap<String, DomainInfo>,
+    pub(crate) nodes: BTreeMap<String, NodeEntity>,
+    pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
+    pub(crate) edge_descriptions: BTreeMap<String, String>,
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
-    edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
-    etl_settings: EtlSettings,
+    pub(crate) edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
+    pub(crate) etl_settings: EtlSettings,
 }
 
 impl Default for Ontology {
@@ -261,7 +249,7 @@ impl Ontology {
     /// - Validation fails (duplicate nodes, invalid edge references, etc.)
     #[must_use = "this returns the loaded ontology, which should not be discarded"]
     pub fn load_from_dir(dir: impl AsRef<Path>) -> Result<Self, OntologyError> {
-        Self::load_with(&DirReader(dir.as_ref()))
+        loading::load_from_dir(dir.as_ref())
     }
 
     /// Load ontology from embedded files compiled into the binary.
@@ -277,112 +265,7 @@ impl Ontology {
     /// - Validation fails (duplicate nodes, invalid edge references, etc.)
     #[must_use = "this returns the loaded ontology, which should not be discarded"]
     pub fn load_embedded() -> Result<Self, OntologyError> {
-        Self::load_with(&EmbeddedReader)
-    }
-
-    fn load_with(reader: &impl ReadOntologyFile) -> Result<Self, OntologyError> {
-        let schema_content = reader.read("schema.yaml")?;
-        let schema: SchemaYaml = parse_yaml(&schema_content, "schema.yaml")?;
-
-        let mut ontology = Ontology::new();
-        ontology.schema_version = schema.schema_version.unwrap_or_default();
-        ontology.table_prefix = schema.settings.table_prefix;
-        ontology.edge_table = schema.settings.edge_table;
-        ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;
-        ontology.edge_sort_key = schema.settings.edge_sort_key;
-        ontology.etl_settings = EtlSettings {
-            watermark: schema.settings.etl.default_watermark,
-            deleted: schema.settings.etl.default_deleted,
-            order_by: schema.settings.etl.default_etl_order_by,
-        };
-
-        if !ontology.edge_table.starts_with(&ontology.table_prefix) {
-            return Err(OntologyError::Validation(format!(
-                "edge_table '{}' does not start with table_prefix '{}'",
-                ontology.edge_table, ontology.table_prefix
-            )));
-        }
-
-        for (domain_name, domain) in &schema.domains {
-            let mut node_names = Vec::new();
-
-            for (node_name, node_path) in &domain.nodes {
-                if ontology.nodes.contains_key(node_name) {
-                    return Err(OntologyError::Validation(format!(
-                        "duplicate node definition: '{}'",
-                        node_name
-                    )));
-                }
-
-                let content = reader.read(node_path)?;
-                let node_def: NodeYaml = parse_yaml(&content, node_path)?;
-
-                let entity = node_def.into_entity(
-                    node_name.clone(),
-                    &ontology.default_entity_sort_key,
-                    &ontology.etl_settings,
-                )?;
-
-                if !entity.destination_table.starts_with(&ontology.table_prefix) {
-                    return Err(OntologyError::Validation(format!(
-                        "node '{}' has destination_table '{}' which does not start with \
-                         table_prefix '{}'",
-                        node_name, entity.destination_table, ontology.table_prefix
-                    )));
-                }
-
-                ontology.nodes.insert(node_name.clone(), entity);
-                node_names.push(node_name.clone());
-            }
-
-            node_names.sort();
-            ontology.domains.insert(
-                domain_name.clone(),
-                DomainInfo {
-                    name: domain_name.clone(),
-                    description: domain.description.clone().unwrap_or_default(),
-                    node_names,
-                },
-            );
-        }
-
-        for (edge_name, edge_path) in &schema.edges {
-            let content = reader.read(edge_path)?;
-            let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
-
-            let entities = edge_def.to_entities(edge_name.clone());
-
-            for entity in &entities {
-                if !ontology.nodes.contains_key(&entity.source_kind) {
-                    return Err(OntologyError::Validation(format!(
-                        "edge '{}' references unknown source node '{}'",
-                        edge_name, entity.source_kind
-                    )));
-                }
-                if !ontology.nodes.contains_key(&entity.target_kind) {
-                    return Err(OntologyError::Validation(format!(
-                        "edge '{}' references unknown target node '{}'",
-                        edge_name, entity.target_kind
-                    )));
-                }
-            }
-
-            ontology.edges.insert(edge_name.clone(), entities);
-
-            if let Some(desc) = &edge_def.description {
-                ontology
-                    .edge_descriptions
-                    .insert(edge_name.clone(), desc.clone());
-            }
-
-            if let Some(etl_config) = edge_def.into_etl_config(&ontology.etl_settings)? {
-                ontology
-                    .edge_etl_configs
-                    .insert(edge_name.clone(), etl_config);
-            }
-        }
-
-        Ok(ontology)
+        loading::load_embedded()
     }
 
     /// Get a node by name.
@@ -563,11 +446,6 @@ impl Ontology {
     }
 
     #[must_use]
-    pub fn get_domain(&self, name: &str) -> Option<&DomainInfo> {
-        self.domains.get(name)
-    }
-
-    #[must_use]
     pub fn get_edge_description(&self, name: &str) -> Option<&str> {
         self.edge_descriptions.get(name).map(|s| s.as_str())
     }
@@ -600,17 +478,14 @@ impl Ontology {
     /// Returns `false` if the node doesn't exist.
     #[must_use]
     pub fn has_field(&self, node_name: &str, field_name: &str) -> bool {
-        // Node must exist first
         let Some(node) = self.nodes.get(node_name) else {
             return false;
         };
 
-        // Reserved columns on node tables
         if NODE_RESERVED_COLUMNS.contains(&field_name) {
             return true;
         }
 
-        // Check defined fields
         node.fields.iter().any(|f| f.name == field_name)
     }
 
@@ -633,7 +508,6 @@ impl Ontology {
             OntologyError::Validation(format!("unknown node type \"{node_name}\""))
         })?;
 
-        // Reserved columns on node tables
         if NODE_RESERVED_COLUMNS.contains(&field_name) {
             return Ok(());
         }
@@ -668,132 +542,11 @@ impl Ontology {
     /// # Errors
     ///
     /// Returns an error if the node label is unknown.
-    pub fn table_name(&self, node_label: &str) -> Result<String, OntologyError> {
+    pub fn table_name(&self, node_label: &str) -> Result<&str, OntologyError> {
         let node = self.nodes.get(node_label).ok_or_else(|| {
             OntologyError::Validation(format!("unknown node label \"{node_label}\""))
         })?;
-        Ok(node.destination_table.clone())
-    }
-
-    /// Generate a JSON Schema with ontology values populated.
-    ///
-    /// Given a base schema template, this populates:
-    /// - `$defs.EntityType.enum` with valid entity types
-    /// - `$defs.RelationshipTypeName.enum` with valid relationship types (including wildcard `*`)
-    /// - `$defs.NodeProperties` with property definitions per node type
-    /// - `$defs.NodeSelector.allOf` with per-entity column and filter validation
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the base schema is invalid JSON or missing required sections.
-    pub fn derive_json_schema(&self, base_schema_json: &str) -> Result<Value, OntologyError> {
-        let mut schema: Value = serde_json::from_str(base_schema_json)
-            .map_err(|e| OntologyError::Validation(format!("failed to parse base schema: {e}")))?;
-
-        let defs = schema
-            .get_mut("$defs")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| OntologyError::Validation("schema missing $defs".into()))?;
-
-        // Populate EntityType enum with valid entity names
-        if let Some(entity_type) = defs.get_mut("EntityType").and_then(Value::as_object_mut) {
-            let types: Vec<Value> = self
-                .node_names()
-                .map(|s| Value::String(s.to_string()))
-                .collect();
-            entity_type.insert("enum".to_string(), Value::Array(types));
-        }
-
-        // Populate RelationshipTypeName enum (including wildcard)
-        if let Some(rel_type) = defs
-            .get_mut("RelationshipTypeName")
-            .and_then(Value::as_object_mut)
-        {
-            let types: Vec<Value> = self
-                .edge_names()
-                .map(|s| Value::String(s.to_string()))
-                .chain(std::iter::once(Value::String("*".to_string())))
-                .collect();
-            rel_type.insert("enum".to_string(), Value::Array(types));
-        }
-
-        // Populate NodeProperties with property definitions per node type
-        let node_props = self.build_node_properties_schema();
-        defs.insert("NodeProperties".to_string(), node_props);
-
-        // Wire entity-correlated column/filter validation into NodeSelector
-        let entity_conditions = self.build_node_selector_validation();
-        if let Some(node_selector) = defs.get_mut("NodeSelector").and_then(Value::as_object_mut) {
-            node_selector.insert("allOf".to_string(), Value::Array(entity_conditions));
-        }
-
-        Ok(schema)
-    }
-
-    /// Build the NodeProperties schema object from node field definitions.
-    fn build_node_properties_schema(&self) -> Value {
-        let mut node_props = Map::new();
-
-        for node in self.nodes() {
-            let mut prop_map = Map::new();
-
-            for field in &node.fields {
-                let mut prop_schema = Map::new();
-                prop_schema.insert(
-                    "type".to_string(),
-                    Value::String(field.data_type.to_json_schema_type().to_string()),
-                );
-
-                if let Some(enum_values) = &field.enum_values {
-                    let values: Vec<Value> = enum_values
-                        .values()
-                        .map(|v| Value::String(v.clone()))
-                        .collect();
-                    prop_schema.insert("enum".to_string(), Value::Array(values));
-                }
-
-                prop_map.insert(field.name.clone(), Value::Object(prop_schema));
-            }
-
-            node_props.insert(node.name.clone(), Value::Object(prop_map));
-        }
-
-        Value::Object(node_props)
-    }
-
-    /// Build per-entity `if/then` validation rules for `NodeSelector`.
-    ///
-    /// For each entity type, constrains `columns` and `filters.propertyNames`
-    /// to valid field names (entity fields + reserved columns) when `entity` matches.
-    fn build_node_selector_validation(&self) -> Vec<Value> {
-        self.nodes()
-            .map(|node| {
-                let valid_fields: Vec<Value> = NODE_RESERVED_COLUMNS
-                    .iter()
-                    .map(|s| Value::String((*s).to_string()))
-                    .chain(node.fields.iter().map(|f| Value::String(f.name.clone())))
-                    .collect();
-
-                let columns_enum = valid_fields.clone();
-
-                serde_json::json!({
-                    "if": { "properties": { "entity": { "const": node.name } } },
-                    "then": {
-                        "properties": {
-                            "columns": {
-                                "oneOf": [
-                                    { "const": "*" },
-                                    { "type": "array", "items": { "enum": columns_enum }, "minItems": 1 }
-                                ]
-                            },
-                            "filters": {
-                                "propertyNames": { "enum": valid_fields }
-                            }
-                        }
-                    }
-                })
-            })
-            .collect()
+        Ok(&node.destination_table)
     }
 }
 
@@ -808,567 +561,10 @@ impl fmt::Display for Ontology {
     }
 }
 
-// --- File reading ---
-
-trait ReadOntologyFile {
-    fn read(&self, path: &str) -> Result<String, OntologyError>;
-}
-
-struct DirReader<'a>(&'a Path);
-
-impl ReadOntologyFile for DirReader<'_> {
-    fn read(&self, path: &str) -> Result<String, OntologyError> {
-        let full_path = self.0.join(path);
-        std::fs::read_to_string(&full_path).map_err(|e| OntologyError::Io {
-            path: full_path.to_string_lossy().to_string(),
-            source: e,
-        })
-    }
-}
-
-struct EmbeddedReader;
-
-impl ReadOntologyFile for EmbeddedReader {
-    fn read(&self, path: &str) -> Result<String, OntologyError> {
-        let file = EmbeddedOntology::get(path).ok_or_else(|| OntologyError::Io {
-            path: path.to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("embedded file not found: {}", path),
-            ),
-        })?;
-
-        String::from_utf8(file.data.to_vec()).map_err(|e| OntologyError::Io {
-            path: path.to_string(),
-            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-        })
-    }
-}
-
-fn parse_yaml<T: for<'de> Deserialize<'de>>(content: &str, path: &str) -> Result<T, OntologyError> {
-    serde_yaml::from_str(content).map_err(|e| OntologyError::Yaml {
-        path: path.to_string(),
-        source: e,
-    })
-}
-
-fn parse_data_type(s: &str, field_name: &str) -> Result<DataType, OntologyError> {
-    match s {
-        "int64" | "int" | "integer" => Ok(DataType::Int),
-        "float64" | "float" | "double" => Ok(DataType::Float),
-        "boolean" | "bool" => Ok(DataType::Bool),
-        "date" => Ok(DataType::Date),
-        "timestamp" | "datetime" => Ok(DataType::DateTime),
-        "string" => Ok(DataType::String),
-        "enum" => Ok(DataType::Enum),
-        "uuid" => Ok(DataType::Uuid),
-        other => Err(OntologyError::Validation(format!(
-            "unknown data type '{}' for field '{}'",
-            other, field_name
-        ))),
-    }
-}
-
-// --- YAML deserialization types ---
-
-#[derive(Debug, Deserialize)]
-struct SchemaYaml {
-    #[serde(default)]
-    schema_version: Option<String>,
-    settings: SettingsYaml,
-    #[serde(default)]
-    domains: BTreeMap<String, DomainYaml>,
-    #[serde(default)]
-    edges: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SettingsYaml {
-    table_prefix: String,
-    edge_table: String,
-    default_entity_sort_key: Vec<String>,
-    edge_sort_key: Vec<String>,
-    etl: EtlSettingsYaml,
-}
-
-#[derive(Debug, Deserialize)]
-struct EtlSettingsYaml {
-    default_watermark: String,
-    default_deleted: String,
-    default_etl_order_by: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DomainYaml {
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    nodes: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NodeYaml {
-    #[allow(dead_code)]
-    node_type: String,
-    domain: String,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    label: String,
-    destination_table: String,
-    #[serde(default)]
-    properties: BTreeMap<String, PropertyYaml>,
-    #[serde(default)]
-    default_columns: Vec<String>,
-    #[serde(default)]
-    sort_key: Option<Vec<String>>,
-    #[serde(default)]
-    etl: Option<EtlYaml>,
-    #[serde(default)]
-    redaction: Option<RedactionYaml>,
-    #[serde(default)]
-    style: Option<StyleYaml>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StyleYaml {
-    #[serde(default = "default_size")]
-    size: i32,
-    #[serde(default = "default_color")]
-    color: String,
-}
-
-fn default_size() -> i32 {
-    30
-}
-
-fn default_color() -> String {
-    "#6B7280".to_string()
-}
-
-#[derive(Debug, Deserialize)]
-struct RedactionYaml {
-    resource_type: String,
-    #[serde(default = "default_id_column")]
-    id_column: String,
-    #[serde(default = "default_ability")]
-    ability: String,
-}
-
-fn default_id_column() -> String {
-    "id".to_string()
-}
-
-fn default_ability() -> String {
-    "read".to_string()
-}
-
-#[derive(Debug, Deserialize)]
-struct EtlYaml {
-    #[serde(rename = "type")]
-    etl_type: String,
-    scope: String,
-    #[serde(default)]
-    source: Option<String>,
-    #[serde(default)]
-    watermark: Option<String>,
-    #[serde(default)]
-    deleted: Option<String>,
-    #[serde(default)]
-    select: Option<String>,
-    #[serde(default)]
-    from: Option<String>,
-    #[serde(default, rename = "where")]
-    where_clause: Option<String>,
-    #[serde(default)]
-    order_by: Option<Vec<String>>,
-    #[serde(default)]
-    traversal_path_filter: Option<String>,
-    #[serde(default)]
-    edges: BTreeMap<String, EdgeMappingYaml>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EdgeMappingYaml {
-    #[serde(rename = "to")]
-    target_literal: Option<String>,
-    #[serde(rename = "to_column")]
-    target_column: Option<String>,
-    #[serde(rename = "as")]
-    relationship_kind: String,
-    #[serde(default)]
-    direction: EdgeDirection,
-    #[serde(default)]
-    delimiter: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PropertyYaml {
-    #[serde(rename = "type")]
-    property_type: String,
-    source: String,
-    #[serde(default)]
-    nullable: bool,
-    #[serde(default)]
-    #[allow(dead_code)]
-    description: String,
-    /// Integer to string mapping for int-based enums.
-    #[serde(default)]
-    values: Option<BTreeMap<i64, String>>,
-    /// How the enum is stored: "int" (default) or "string".
-    #[serde(default)]
-    enum_type: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EdgeYaml {
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    variants: Vec<EdgeVariantYaml>,
-    #[serde(default)]
-    etl: Option<EdgeEtlYaml>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EdgeVariantYaml {
-    from_node: EdgeNodeRef,
-    to_node: EdgeNodeRef,
-}
-
-#[derive(Debug, Deserialize)]
-struct EdgeNodeRef {
-    #[serde(rename = "type")]
-    node_type: String,
-    id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct EdgeEtlYaml {
-    scope: String,
-    source: String,
-    #[serde(default)]
-    watermark: Option<String>,
-    #[serde(default)]
-    deleted: Option<String>,
-    order_by: Vec<String>,
-    from: EdgeEndpointYaml,
-    to: EdgeEndpointYaml,
-}
-
-#[derive(Debug, Deserialize)]
-struct EdgeEndpointYaml {
-    id: String,
-    #[serde(rename = "type")]
-    type_literal: Option<String>,
-    #[serde(rename = "type_column")]
-    type_column: Option<String>,
-    #[serde(default)]
-    type_mapping: BTreeMap<String, String>,
-}
-
-// --- Conversion implementations ---
-
-impl NodeYaml {
-    fn into_entity(
-        self,
-        name: String,
-        default_entity_sort_key: &[String],
-        etl_settings: &EtlSettings,
-    ) -> Result<NodeEntity, OntologyError> {
-        let mut primary_keys = Vec::new();
-
-        let fields: Result<Vec<Field>, OntologyError> = self
-            .properties
-            .into_iter()
-            .map(|(prop_name, prop_def)| {
-                if prop_name == DEFAULT_PRIMARY_KEY {
-                    primary_keys.push(prop_name.clone());
-                }
-
-                let data_type = parse_data_type(&prop_def.property_type, &prop_name)?;
-
-                let enum_type = match prop_def.enum_type.as_deref() {
-                    Some("string") => EnumType::String,
-                    Some("int") | None => EnumType::Int,
-                    Some(other) => {
-                        return Err(OntologyError::Validation(format!(
-                            "unknown enum_type '{}' for field '{}', expected 'int' or 'string'",
-                            other, prop_name
-                        )));
-                    }
-                };
-
-                Ok(Field {
-                    name: prop_name,
-                    source: prop_def.source,
-                    data_type,
-                    nullable: prop_def.nullable,
-                    enum_values: prop_def.values,
-                    enum_type,
-                })
-            })
-            .collect();
-
-        let fields = fields?;
-
-        // Default primary key if none found
-        if primary_keys.is_empty() {
-            primary_keys.push(DEFAULT_PRIMARY_KEY.to_string());
-        }
-
-        // Validate primary keys exist in fields
-        for pk in &primary_keys {
-            if !fields.iter().any(|f| &f.name == pk) {
-                return Err(OntologyError::Validation(format!(
-                    "primary key '{}' not found in fields for node '{}'",
-                    pk, name
-                )));
-            }
-        }
-
-        // Validate default_columns reference declared properties
-        let field_names: HashSet<&str> = fields.iter().map(|f| f.name.as_str()).collect();
-        for col in &self.default_columns {
-            if !field_names.contains(col.as_str()) {
-                return Err(OntologyError::Validation(format!(
-                    "default_columns entry '{}' is not a declared property of node '{}'",
-                    col, name
-                )));
-            }
-        }
-
-        let sort_key = self
-            .sort_key
-            .unwrap_or_else(|| default_entity_sort_key.to_vec());
-
-        let etl = self.etl.map(|e| e.into_config(etl_settings)).transpose()?;
-
-        let redaction = self.redaction.map(|r| RedactionConfig {
-            resource_type: r.resource_type,
-            id_column: r.id_column,
-            ability: r.ability,
-        });
-
-        let style = self.style.map_or_else(NodeStyle::default, |s| NodeStyle {
-            size: s.size,
-            color: s.color,
-        });
-
-        let has_traversal_path = fields
-            .iter()
-            .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
-
-        Ok(NodeEntity {
-            name,
-            domain: self.domain,
-            description: self.description,
-            label: self.label,
-            fields,
-            primary_keys,
-            default_columns: self.default_columns,
-            sort_key,
-            destination_table: self.destination_table,
-            etl,
-            redaction,
-            style,
-            has_traversal_path,
-        })
-    }
-}
-
-impl EtlYaml {
-    fn into_config(self, etl_settings: &EtlSettings) -> Result<EtlConfig, OntologyError> {
-        let scope = match self.scope.as_str() {
-            "global" => EtlScope::Global,
-            "namespaced" => EtlScope::Namespaced,
-            other => {
-                return Err(OntologyError::Validation(format!(
-                    "invalid ETL scope: '{}', expected 'global' or 'namespaced'",
-                    other
-                )));
-            }
-        };
-
-        let edges: Result<BTreeMap<String, EdgeMapping>, OntologyError> = self
-            .edges
-            .into_iter()
-            .map(|(column, mapping)| {
-                let target = match (mapping.target_literal, mapping.target_column) {
-                    (Some(lit), None) => EdgeTarget::Literal(lit),
-                    (None, Some(col)) => EdgeTarget::Column(col),
-                    (Some(_), Some(_)) => {
-                        return Err(OntologyError::Validation(format!(
-                            "edge '{}': use 'to' or 'to_column', not both",
-                            column
-                        )));
-                    }
-                    (None, None) => {
-                        return Err(OntologyError::Validation(format!(
-                            "edge '{}': requires 'to' or 'to_column'",
-                            column
-                        )));
-                    }
-                };
-                Ok((
-                    column,
-                    EdgeMapping {
-                        target,
-                        relationship_kind: mapping.relationship_kind,
-                        direction: mapping.direction,
-                        delimiter: mapping.delimiter,
-                    },
-                ))
-            })
-            .collect();
-        let edges = edges?;
-
-        match self.etl_type.as_str() {
-            "table" => {
-                let source = self.source.ok_or_else(|| {
-                    OntologyError::Validation(
-                        "ETL type 'table' requires a 'source' field".to_string(),
-                    )
-                })?;
-                let watermark = self
-                    .watermark
-                    .unwrap_or_else(|| etl_settings.watermark.clone());
-                let deleted = self.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
-                let order_by = self
-                    .order_by
-                    .unwrap_or_else(|| etl_settings.order_by.clone());
-                Ok(EtlConfig::Table {
-                    scope,
-                    source,
-                    watermark,
-                    deleted,
-                    order_by,
-                    edges,
-                })
-            }
-            "query" => {
-                let select = self.select.ok_or_else(|| {
-                    OntologyError::Validation(
-                        "ETL type 'query' requires a 'select' field".to_string(),
-                    )
-                })?;
-                let from = self.from.ok_or_else(|| {
-                    OntologyError::Validation(
-                        "ETL type 'query' requires a 'from' field".to_string(),
-                    )
-                })?;
-                let watermark = self
-                    .watermark
-                    .unwrap_or_else(|| etl_settings.watermark.clone());
-                let deleted = self.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
-                let order_by = self
-                    .order_by
-                    .unwrap_or_else(|| etl_settings.order_by.clone());
-                Ok(EtlConfig::Query {
-                    scope,
-                    select,
-                    from,
-                    where_clause: self.where_clause,
-                    watermark,
-                    deleted,
-                    order_by,
-                    traversal_path_filter: self.traversal_path_filter,
-                    edges,
-                })
-            }
-            other => Err(OntologyError::Validation(format!(
-                "invalid ETL type: '{}', expected 'table' or 'query'",
-                other
-            ))),
-        }
-    }
-}
-
-impl EdgeYaml {
-    fn to_entities(&self, relationship_kind: String) -> Vec<EdgeEntity> {
-        self.variants
-            .iter()
-            .map(|v| EdgeEntity {
-                relationship_kind: relationship_kind.clone(),
-                source: v.from_node.id.clone(),
-                source_kind: v.from_node.node_type.clone(),
-                target: v.to_node.id.clone(),
-                target_kind: v.to_node.node_type.clone(),
-            })
-            .collect()
-    }
-
-    fn into_etl_config(
-        self,
-        etl_settings: &EtlSettings,
-    ) -> Result<Option<EdgeSourceEtlConfig>, OntologyError> {
-        let Some(etl) = self.etl else {
-            return Ok(None);
-        };
-
-        let scope = match etl.scope.as_str() {
-            "global" => EtlScope::Global,
-            "namespaced" => EtlScope::Namespaced,
-            other => {
-                return Err(OntologyError::Validation(format!(
-                    "invalid edge ETL scope: '{}', expected 'global' or 'namespaced'",
-                    other
-                )));
-            }
-        };
-
-        let from = etl.from.into_endpoint("from")?;
-        let to = etl.to.into_endpoint("to")?;
-
-        let watermark = etl
-            .watermark
-            .unwrap_or_else(|| etl_settings.watermark.clone());
-        let deleted = etl.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
-
-        Ok(Some(EdgeSourceEtlConfig {
-            scope,
-            source: etl.source,
-            watermark,
-            deleted,
-            order_by: etl.order_by,
-            from,
-            to,
-        }))
-    }
-}
-
-impl EdgeEndpointYaml {
-    fn into_endpoint(self, endpoint_name: &str) -> Result<EdgeEndpoint, OntologyError> {
-        let node_type = match (self.type_literal, self.type_column) {
-            (Some(lit), None) => EdgeEndpointType::Literal(lit),
-            (None, Some(col)) => EdgeEndpointType::Column {
-                column: col,
-                type_mapping: self.type_mapping,
-            },
-            (Some(_), Some(_)) => {
-                return Err(OntologyError::Validation(format!(
-                    "edge source endpoint '{}': use 'type' or 'type_column', not both",
-                    endpoint_name
-                )));
-            }
-            (None, None) => {
-                return Err(OntologyError::Validation(format!(
-                    "edge source endpoint '{}': requires 'type' or 'type_column'",
-                    endpoint_name
-                )));
-            }
-        };
-
-        Ok(EdgeEndpoint {
-            id_column: self.id,
-            node_type,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loading::{EtlSettings, NodeYaml, ReadOntologyFile, load_with};
 
     fn fixtures_dir() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1383,7 +579,6 @@ mod tests {
     fn test_load_ontology() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        // Verify ontology has some nodes and edges (don't check for specific entities)
         assert!(
             ontology.node_count() > 0,
             "ontology should have at least one node"
@@ -1399,7 +594,6 @@ mod tests {
         let embedded = Ontology::load_embedded().expect("should load embedded ontology");
         let from_dir = Ontology::load_from_dir(fixtures_dir()).expect("should load from dir");
 
-        // Embedded and directory-loaded ontologies should be identical
         assert_eq!(embedded, from_dir);
     }
 
@@ -1407,7 +601,6 @@ mod tests {
     fn test_getters_and_iterators() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        // get_node
         let user = ontology.get_node("User").expect("User should exist");
         assert_eq!(user.name, "User");
         let field_names: Vec<_> = user.fields.iter().map(|f| f.name.as_str()).collect();
@@ -1416,21 +609,18 @@ mod tests {
         assert!(field_names.contains(&"email"));
         assert!(user.primary_keys.contains(&"id".to_string()));
 
-        // get_edge
         let authored = ontology
             .get_edge("AUTHORED")
             .expect("AUTHORED should exist");
         assert!(!authored.is_empty());
         assert_eq!(authored[0].relationship_kind, "AUTHORED");
 
-        // node iterators
         let names: Vec<_> = ontology.node_names().collect();
         assert!(names.contains(&"User"));
         assert!(names.contains(&"Project"));
         let nodes: Vec<_> = ontology.nodes().collect();
         assert_eq!(nodes.len(), ontology.node_count());
 
-        // edge iterators
         let edge_names: Vec<_> = ontology.edge_names().collect();
         assert!(edge_names.contains(&"AUTHORED"));
         let edges: Vec<_> = ontology.edges().collect();
@@ -1439,24 +629,20 @@ mod tests {
 
     #[test]
     fn test_display() {
-        // Ontology display
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
         let display = format!("{ontology}");
         assert!(display.contains("nodes"));
         assert!(display.contains("edge types"));
 
-        // NodeEntity display
         let user = ontology.get_node("User").expect("User should exist");
         assert!(format!("{user}").contains("User"));
 
-        // DataType display
         assert_eq!(format!("{}", DataType::String), "String");
         assert_eq!(format!("{}", DataType::Int), "Int");
         assert_eq!(format!("{}", DataType::Date), "Date");
         assert_eq!(format!("{}", DataType::DateTime), "DateTime");
         assert_eq!(format!("{}", DataType::Uuid), "Uuid");
 
-        // Field display
         let field = Field {
             name: "email".into(),
             source: "email".into(),
@@ -1482,10 +668,8 @@ mod tests {
         let ontology1 = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
         let ontology2 = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        // Equality
         assert_eq!(ontology1, ontology2);
 
-        // Deterministic order
         let names1: Vec<_> = ontology1.node_names().collect();
         let names2: Vec<_> = ontology2.node_names().collect();
         assert_eq!(names1, names2);
@@ -1507,20 +691,17 @@ mod tests {
                 [("username", DataType::String), ("age", DataType::Int)],
             );
 
-        // with_nodes
         assert_eq!(ontology.node_count(), 3);
         assert!(ontology.has_node("User"));
         assert!(ontology.has_node("Project"));
         assert!(ontology.has_node("Note"));
         assert!(!ontology.has_node("Group"));
 
-        // with_edges
         assert_eq!(ontology.edge_count(), 2);
         assert!(ontology.has_edge("AUTHORED"));
         assert!(ontology.has_edge("CONTAINS"));
         assert!(!ontology.has_edge("MEMBER_OF"));
 
-        // with_fields
         let user = ontology.get_node("User").unwrap();
         assert_eq!(user.fields.len(), 2);
         let field_names: Vec<_> = user.fields.iter().map(|f| f.name.as_str()).collect();
@@ -1544,14 +725,9 @@ mod tests {
             .with_nodes(["User"])
             .with_fields("User", [("username", DataType::String)]);
 
-        // Reserved columns on nodes (only "id")
         assert!(ontology.has_field("User", "id"));
-
-        // Defined fields
         assert!(ontology.has_field("User", "username"));
         assert!(!ontology.has_field("User", "nonexistent"));
-
-        // Unknown node returns false even for reserved columns
         assert!(!ontology.has_field("Unknown", "id"));
         assert!(!ontology.has_field("Unknown", "field"));
     }
@@ -1562,23 +738,17 @@ mod tests {
             .with_nodes(["User"])
             .with_fields("User", [("username", DataType::String)]);
 
-        // Reserved columns pass for existing nodes
         assert!(ontology.validate_field("User", "id").is_ok());
-
-        // Defined fields pass
         assert!(ontology.validate_field("User", "username").is_ok());
 
-        // Unknown node fails (even for reserved columns)
         let err = ontology.validate_field("Unknown", "id").unwrap_err();
         assert!(err.to_string().contains("unknown node type"));
         let err = ontology.validate_field("Unknown", "field").unwrap_err();
         assert!(err.to_string().contains("unknown node type"));
 
-        // Unknown field fails
         let err = ontology.validate_field("User", "nonexistent").unwrap_err();
         assert!(err.to_string().contains("does not exist"));
 
-        // Empty entity name fails
         let err = Ontology::new().validate_field("", "field").unwrap_err();
         assert!(err.to_string().contains("without an entity type"));
     }
@@ -1589,13 +759,9 @@ mod tests {
             .with_nodes(["User"])
             .with_edges(["AUTHORED"]);
 
-        // Valid node
         assert!(ontology.validate_type("User").is_ok());
-
-        // Valid edge
         assert!(ontology.validate_type("AUTHORED").is_ok());
 
-        // Invalid type
         let err = ontology.validate_type("Invalid").unwrap_err();
         assert!(err.to_string().contains("not a valid node label"));
     }
@@ -1604,11 +770,9 @@ mod tests {
     fn test_table_name() {
         let ontology = Ontology::new().with_nodes(["User", "Project"]);
 
-        // Valid nodes
         assert_eq!(ontology.table_name("User").unwrap(), "gl_user");
         assert_eq!(ontology.table_name("Project").unwrap(), "gl_project");
 
-        // Unknown node
         let err = ontology.table_name("Unknown").unwrap_err();
         assert!(err.to_string().contains("unknown node label"));
     }
@@ -1640,20 +804,17 @@ mod tests {
 
         let result = ontology.derive_json_schema(base_schema()).unwrap();
 
-        // Check EntityType enum
         let labels = result["$defs"]["EntityType"]["enum"].as_array().unwrap();
         let label_strs: Vec<_> = labels.iter().filter_map(|v| v.as_str()).collect();
         assert!(label_strs.contains(&"User"));
         assert!(label_strs.contains(&"Project"));
 
-        // Check RelationshipTypeName enum
         let types = result["$defs"]["RelationshipTypeName"]["enum"]
             .as_array()
             .unwrap();
         let type_strs: Vec<_> = types.iter().filter_map(|v| v.as_str()).collect();
         assert!(type_strs.contains(&"AUTHORED"));
 
-        // Check NodeProperties
         let user_props = &result["$defs"]["NodeProperties"]["User"];
         assert!(user_props.is_object());
         assert_eq!(user_props["username"]["type"], "string");
@@ -1663,11 +824,9 @@ mod tests {
     fn test_derive_json_schema_errors() {
         let ontology = Ontology::new();
 
-        // Invalid JSON
         let err = ontology.derive_json_schema("not valid json").unwrap_err();
         assert!(err.to_string().contains("failed to parse base schema"));
 
-        // Missing $defs
         let err = ontology.derive_json_schema("{}").unwrap_err();
         assert!(err.to_string().contains("missing $defs"));
     }
@@ -1898,7 +1057,6 @@ mod tests {
             overriding.len()
         );
 
-        // Overrides must actually differ from the default.
         for node in &overriding {
             assert_ne!(
                 node.sort_key.as_slice(),
@@ -2091,7 +1249,7 @@ style:
             .to_string(),
         );
 
-        let err = Ontology::load_with(&MockReader(files)).unwrap_err();
+        let err = load_with(&MockReader(files)).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("gl_user") && msg.contains("kg_"),
