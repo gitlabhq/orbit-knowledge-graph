@@ -55,7 +55,7 @@ pub use constants::{
 };
 pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
-pub use input::EntityAuthConfig;
+pub use input::{DynamicColumnMode, EntityAuthConfig};
 pub use input::{Input, QueryType, parse_input};
 pub use lower::lower;
 pub use metrics::{METRICS, QueryEngineMetrics};

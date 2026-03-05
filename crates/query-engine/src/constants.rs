@@ -46,3 +46,6 @@ pub fn redaction_type_column(alias: &str) -> String {
 /// Node alias used in synthetic hydration search queries.
 /// `parse_property_batches` strips this prefix so consumers see clean keys.
 pub const HYDRATION_NODE_ALIAS: &str = "hydrate";
+
+/// Upper bound on rows fetched per entity type during dynamic hydration.
+pub const MAX_DYNAMIC_HYDRATION_RESULTS: usize = 1000;
