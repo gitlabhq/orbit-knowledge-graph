@@ -6,7 +6,9 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::future::try_join_all;
 use ontology::Ontology;
-use query_engine::{HydrationPlan, HydrationTemplate, SecurityContext, compile};
+use query_engine::{
+    DynamicColumnMode, HydrationPlan, HydrationTemplate, Input, QueryType, SecurityContext, compile,
+};
 
 use crate::redaction::{ColumnValue, QueryResult, RedactionMessage};
 
@@ -17,7 +19,9 @@ use super::super::types::{
 };
 use super::PipelineStage;
 
-use query_engine::constants::{GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, redaction_id_column};
+use query_engine::constants::{
+    GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
+};
 
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 
@@ -64,13 +68,14 @@ impl HydrationStage {
         client: &ArrowClickHouseClient,
         ontology: &Ontology,
         refs: &HashMap<String, Vec<i64>>,
+        input: &Input,
         security_context: &SecurityContext,
     ) -> Result<PropertyMap, PipelineError> {
         let futures: Vec<_> = refs
             .iter()
             .filter(|(_, ids)| !ids.is_empty())
             .map(|(entity_type, ids)| {
-                let query_json = build_dynamic_search_query(entity_type, ids, ontology)?;
+                let query_json = build_dynamic_search_query(entity_type, ids, input, ontology)?;
                 Ok(compile_and_fetch(
                     client,
                     ontology,
@@ -160,6 +165,7 @@ impl<M: RedactionMessage> PipelineStage<M> for HydrationStage {
                             &ctx.client,
                             &ctx.ontology,
                             &refs,
+                            &ctx.compiled()?.input,
                             ctx.security_context()?,
                         )
                         .await,
@@ -247,30 +253,41 @@ fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap
 
 /// Build a search query JSON from scratch for dynamic hydration.
 /// Only used when entity types are discovered at runtime (PathFinding, Neighbors).
+/// Reads `input.options.dynamic_columns` to decide whether to fetch all columns
+/// or only the entity's `default_columns` from the ontology.
 fn build_dynamic_search_query(
     entity_type: &str,
     ids: &[i64],
+    input: &Input,
     ontology: &ontology::Ontology,
 ) -> Result<String, PipelineError> {
-    let columns: serde_json::Value = ontology
-        .get_node(entity_type)
-        .filter(|n| !n.default_columns.is_empty())
-        .map(|n| serde_json::json!(n.default_columns))
-        .ok_or_else(|| {
-            PipelineError::Execution(format!(
-                "entity type not found in ontology or has no default_columns during dynamic hydration: {entity_type}"
-            ))
-        })?;
+    let node = ontology.get_node(entity_type).ok_or_else(|| {
+        PipelineError::Execution(format!(
+            "entity type not found in ontology during dynamic hydration: {entity_type}"
+        ))
+    })?;
+
+    let columns: serde_json::Value = match input.options.dynamic_columns {
+        DynamicColumnMode::All => serde_json::json!("*"),
+        DynamicColumnMode::Default => {
+            if node.default_columns.is_empty() {
+                return Err(PipelineError::Execution(format!(
+                    "no default_columns defined for {entity_type}"
+                )));
+            }
+            serde_json::json!(node.default_columns)
+        }
+    };
 
     let query_json = serde_json::json!({
-        "query_type": "search",
+        "query_type": QueryType::Search.to_string(),
         "node": {
             "id": HYDRATION_NODE_ALIAS,
             "entity": entity_type,
             "columns": columns,
             "node_ids": ids
         },
-        "limit": 1000
+        "limit": ids.len().min(MAX_DYNAMIC_HYDRATION_RESULTS)
     })
     .to_string();
 

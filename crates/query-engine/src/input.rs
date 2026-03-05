@@ -11,6 +11,28 @@ use std::collections::HashMap;
 // Top-level input
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Controls which columns are fetched for dynamically-discovered entities
+/// during hydration (PathFinding, Neighbors).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub enum DynamicColumnMode {
+    /// Fetch all columns from the ontology for each entity type.
+    #[serde(rename = "*")]
+    All,
+    /// Fetch only the entity's `default_columns` from the ontology.
+    #[default]
+    #[serde(rename = "default")]
+    Default,
+}
+
+/// Consumer-level preferences that affect result presentation, not query semantics.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct QueryOptions {
+    /// Columns fetched for dynamically-discovered entities during hydration.
+    /// `All` returns every column; `Default` returns the entity's `default_columns`.
+    #[serde(default)]
+    pub dynamic_columns: DynamicColumnMode,
+}
+
 /// Authorization config for an entity type, derived from the ontology and carried
 /// through the compilation pipeline so the server never re-consults the ontology at
 /// request time.
@@ -45,6 +67,8 @@ pub struct Input {
     pub range: Option<InputRange>,
     pub order_by: Option<InputOrderBy>,
     pub aggregation_sort: Option<InputAggSort>,
+    #[serde(default)]
+    pub options: QueryOptions,
     /// Auth config for every entity type with redaction configured. Populated by
     /// normalization; covers all ontology entities (not just those in this query)
     /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
@@ -65,6 +89,7 @@ impl Default for Input {
             range: None,
             order_by: None,
             aggregation_sort: None,
+            options: QueryOptions::default(),
             entity_auth: HashMap::new(),
         }
     }
@@ -106,7 +131,7 @@ pub struct InputRange {
     pub end: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display, strum::IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum QueryType {
@@ -672,5 +697,58 @@ mod tests {
 
         assert!(input.range.is_none());
         assert_eq!(input.limit, 30);
+    }
+
+    #[test]
+    fn options_default_when_omitted() {
+        let input =
+            parse_input(r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}}"#)
+                .unwrap();
+
+        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
+    }
+
+    #[test]
+    fn options_dynamic_columns_all() {
+        let input = parse_input(
+            r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u"},
+            "options": {"dynamic_columns": "*"}
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::All);
+    }
+
+    #[test]
+    fn options_dynamic_columns_default() {
+        let input = parse_input(
+            r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u"},
+            "options": {"dynamic_columns": "default"}
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
+    }
+
+    #[test]
+    fn options_empty_object_uses_defaults() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
+            "options": {}
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
     }
 }

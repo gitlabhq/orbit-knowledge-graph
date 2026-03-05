@@ -79,6 +79,10 @@
     "aggregation_sort": {
       "$ref": "#/$defs/AggregationSort",
       "description": "Ordering for aggregation outputs"
+    },
+    "options": {
+      "$ref": "#/$defs/QueryOptions",
+      "description": "Consumer-level preferences that affect result presentation, not query semantics."
     }
   },
   "allOf": [
@@ -601,6 +605,24 @@
       "description": "Sort direction",
       "enum": ["ASC", "DESC"],
       "default": "ASC"
+    },
+    "QueryOptions": {
+      "type": "object",
+      "description": "Consumer-level preferences that affect result presentation, not query semantics.",
+      "properties": {
+        "dynamic_columns": {
+          "$ref": "#/$defs/DynamicColumnMode",
+          "description": "Columns fetched for dynamically-discovered entities (PathFinding, Neighbors hydration). '*' returns all columns; 'default' returns the entity's default_columns from the ontology. Defaults to 'default'.",
+          "default": "default"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DynamicColumnMode": {
+      "type": "string",
+      "description": "Controls column selection for dynamically-discovered entities during hydration.",
+      "enum": ["*", "default"],
+      "default": "default"
     }
   }
 }

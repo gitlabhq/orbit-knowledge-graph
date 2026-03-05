@@ -61,6 +61,7 @@ The JSON query schema supports five query types through a single unified structu
 | `limit` | `integer` | Max results (1-1000, default: 30) |
 | `order_by` | `object` | Result ordering specification |
 | `aggregation_sort` | `object` | Ordering for aggregation outputs |
+| `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
 
 ## Node Selectors
 
@@ -267,6 +268,28 @@ Find all nodes connected to a given node. Neighbors queries use the `node` field
 | `rel_types` | `array` | Relationship types to traverse. If omitted, all types are considered. |
 
 The response includes the neighbor's ID, entity type, and the relationship that connects them.
+
+## Query Options
+
+The `options` object controls presentation behavior without changing query semantics. It is optional and all fields have sensible defaults.
+
+```json
+{
+  "query_type": "path_finding",
+  "nodes": [
+    {"id": "start", "entity": "User", "node_ids": [1]},
+    {"id": "end", "entity": "Project", "node_ids": [100]}
+  ],
+  "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3},
+  "options": {"dynamic_columns": "*"}
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dynamic_columns` | `string` | `"default"` | Columns fetched for dynamically-discovered entities during PathFinding/Neighbors hydration. `"default"` returns the entity's `default_columns` from the ontology. `"*"` returns all columns. |
+
+This is relevant for PathFinding and Neighbors queries where entity types are discovered at runtime. For Search and Traversal queries, column selection is controlled per-node via the `columns` field and this option has no effect.
 
 ## Ontology Integration
 
