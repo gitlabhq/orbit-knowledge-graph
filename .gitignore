@@ -36,8 +36,8 @@ _build/
 
 # Git worktrees
 .worktrees/
+.claude/worktrees/
 
 # Local planning docs
 todo.md
 plan.md
-.claude/worktrees/

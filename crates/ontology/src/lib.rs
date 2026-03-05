@@ -83,6 +83,14 @@ impl fmt::Display for OntologyError {
     }
 }
 
+/// Default ETL settings resolved from `settings.etl` in schema.yaml.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EtlSettings {
+    watermark: String,
+    deleted: String,
+    order_by: Vec<String>,
+}
+
 /// A loaded ontology containing all node and edge entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
@@ -101,6 +109,7 @@ pub struct Ontology {
     edge_descriptions: BTreeMap<String, String>,
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
     edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
+    etl_settings: EtlSettings,
 }
 
 impl Default for Ontology {
@@ -130,6 +139,14 @@ impl Ontology {
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
             edge_etl_configs: BTreeMap::new(),
+            etl_settings: EtlSettings {
+                watermark: "_siphon_replicated_at".to_string(),
+                deleted: "_siphon_deleted".to_string(),
+                order_by: vec![
+                    TRAVERSAL_PATH_COLUMN.to_string(),
+                    DEFAULT_PRIMARY_KEY.to_string(),
+                ],
+            },
         }
     }
 
@@ -273,6 +290,11 @@ impl Ontology {
         ontology.edge_table = schema.settings.edge_table;
         ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;
         ontology.edge_sort_key = schema.settings.edge_sort_key;
+        ontology.etl_settings = EtlSettings {
+            watermark: schema.settings.etl.default_watermark,
+            deleted: schema.settings.etl.default_deleted,
+            order_by: schema.settings.etl.default_etl_order_by,
+        };
 
         if !ontology.edge_table.starts_with(&ontology.table_prefix) {
             return Err(OntologyError::Validation(format!(
@@ -295,8 +317,11 @@ impl Ontology {
                 let content = reader.read(node_path)?;
                 let node_def: NodeYaml = parse_yaml(&content, node_path)?;
 
-                let entity =
-                    node_def.into_entity(node_name.clone(), &ontology.default_entity_sort_key)?;
+                let entity = node_def.into_entity(
+                    node_name.clone(),
+                    &ontology.default_entity_sort_key,
+                    &ontology.etl_settings,
+                )?;
 
                 if !entity.destination_table.starts_with(&ontology.table_prefix) {
                     return Err(OntologyError::Validation(format!(
@@ -350,7 +375,7 @@ impl Ontology {
                     .insert(edge_name.clone(), desc.clone());
             }
 
-            if let Some(etl_config) = edge_def.into_etl_config()? {
+            if let Some(etl_config) = edge_def.into_etl_config(&ontology.etl_settings)? {
                 ontology
                     .edge_etl_configs
                     .insert(edge_name.clone(), etl_config);
@@ -863,6 +888,14 @@ struct SettingsYaml {
     edge_table: String,
     default_entity_sort_key: Vec<String>,
     edge_sort_key: Vec<String>,
+    etl: EtlSettingsYaml,
+}
+
+#[derive(Debug, Deserialize)]
+struct EtlSettingsYaml {
+    default_watermark: String,
+    default_deleted: String,
+    default_etl_order_by: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -942,7 +975,15 @@ struct EtlYaml {
     #[serde(default)]
     deleted: Option<String>,
     #[serde(default)]
-    query: Option<String>,
+    select: Option<String>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default, rename = "where")]
+    where_clause: Option<String>,
+    #[serde(default)]
+    order_by: Option<Vec<String>>,
+    #[serde(default)]
+    traversal_path_filter: Option<String>,
     #[serde(default)]
     edges: BTreeMap<String, EdgeMappingYaml>,
 }
@@ -1006,8 +1047,11 @@ struct EdgeNodeRef {
 struct EdgeEtlYaml {
     scope: String,
     source: String,
-    watermark: String,
-    deleted: String,
+    #[serde(default)]
+    watermark: Option<String>,
+    #[serde(default)]
+    deleted: Option<String>,
+    order_by: Vec<String>,
     from: EdgeEndpointYaml,
     to: EdgeEndpointYaml,
 }
@@ -1030,6 +1074,7 @@ impl NodeYaml {
         self,
         name: String,
         default_entity_sort_key: &[String],
+        etl_settings: &EtlSettings,
     ) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
 
@@ -1097,8 +1142,7 @@ impl NodeYaml {
             .sort_key
             .unwrap_or_else(|| default_entity_sort_key.to_vec());
 
-        // Convert ETL config
-        let etl = self.etl.map(|e| e.into_config()).transpose()?;
+        let etl = self.etl.map(|e| e.into_config(etl_settings)).transpose()?;
 
         let redaction = self.redaction.map(|r| RedactionConfig {
             resource_type: r.resource_type,
@@ -1134,7 +1178,7 @@ impl NodeYaml {
 }
 
 impl EtlYaml {
-    fn into_config(self) -> Result<EtlConfig, OntologyError> {
+    fn into_config(self, etl_settings: &EtlSettings) -> Result<EtlConfig, OntologyError> {
         let scope = match self.scope.as_str() {
             "global" => EtlScope::Global,
             "namespaced" => EtlScope::Namespaced,
@@ -1186,33 +1230,49 @@ impl EtlYaml {
                         "ETL type 'table' requires a 'source' field".to_string(),
                     )
                 })?;
-                let watermark = self.watermark.ok_or_else(|| {
-                    OntologyError::Validation(
-                        "ETL type 'table' requires a 'watermark' field".to_string(),
-                    )
-                })?;
-                let deleted = self.deleted.ok_or_else(|| {
-                    OntologyError::Validation(
-                        "ETL type 'table' requires a 'deleted' field".to_string(),
-                    )
-                })?;
+                let watermark = self
+                    .watermark
+                    .unwrap_or_else(|| etl_settings.watermark.clone());
+                let deleted = self.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
+                let order_by = self
+                    .order_by
+                    .unwrap_or_else(|| etl_settings.order_by.clone());
                 Ok(EtlConfig::Table {
                     scope,
                     source,
                     watermark,
                     deleted,
+                    order_by,
                     edges,
                 })
             }
             "query" => {
-                let query = self.query.ok_or_else(|| {
+                let select = self.select.ok_or_else(|| {
                     OntologyError::Validation(
-                        "ETL type 'query' requires a 'query' field".to_string(),
+                        "ETL type 'query' requires a 'select' field".to_string(),
                     )
                 })?;
+                let from = self.from.ok_or_else(|| {
+                    OntologyError::Validation(
+                        "ETL type 'query' requires a 'from' field".to_string(),
+                    )
+                })?;
+                let watermark = self
+                    .watermark
+                    .unwrap_or_else(|| etl_settings.watermark.clone());
+                let deleted = self.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
+                let order_by = self
+                    .order_by
+                    .unwrap_or_else(|| etl_settings.order_by.clone());
                 Ok(EtlConfig::Query {
                     scope,
-                    query,
+                    select,
+                    from,
+                    where_clause: self.where_clause,
+                    watermark,
+                    deleted,
+                    order_by,
+                    traversal_path_filter: self.traversal_path_filter,
                     edges,
                 })
             }
@@ -1238,7 +1298,10 @@ impl EdgeYaml {
             .collect()
     }
 
-    fn into_etl_config(self) -> Result<Option<EdgeSourceEtlConfig>, OntologyError> {
+    fn into_etl_config(
+        self,
+        etl_settings: &EtlSettings,
+    ) -> Result<Option<EdgeSourceEtlConfig>, OntologyError> {
         let Some(etl) = self.etl else {
             return Ok(None);
         };
@@ -1257,11 +1320,17 @@ impl EdgeYaml {
         let from = etl.from.into_endpoint("from")?;
         let to = etl.to.into_endpoint("to")?;
 
+        let watermark = etl
+            .watermark
+            .unwrap_or_else(|| etl_settings.watermark.clone());
+        let deleted = etl.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
+
         Ok(Some(EdgeSourceEtlConfig {
             scope,
             source: etl.source,
-            watermark: etl.watermark,
-            deleted: etl.deleted,
+            watermark,
+            deleted,
+            order_by: etl.order_by,
             from,
             to,
         }))
@@ -1910,9 +1979,14 @@ properties:
     description: "Name"
 "#;
         let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
-        let default_sk = vec!["traversal_path".to_string(), "id".to_string()];
+        let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
+        let etl_settings = EtlSettings {
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["traversal_path".to_string(), "id".to_string()],
+        };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sk)
+            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
             .expect("should succeed");
         assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
     }
@@ -1938,11 +2012,16 @@ properties:
     description: "Name"
 "#;
         let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
-        let default_sk = vec!["traversal_path".to_string(), "id".to_string()];
+        let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
+        let etl_settings = EtlSettings {
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["traversal_path".to_string(), "id".to_string()],
+        };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sk)
+            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
             .expect("should succeed");
-        assert_eq!(entity.sort_key, default_sk);
+        assert_eq!(entity.sort_key, default_sort_key);
     }
 
     #[test]
@@ -1969,6 +2048,10 @@ settings:
   edge_table: "kg_edge"
   default_entity_sort_key: [traversal_path, id]
   edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+  etl:
+    default_watermark: _siphon_replicated_at
+    default_deleted: _siphon_deleted
+    default_etl_order_by: [traversal_path, id]
 domains:
   core:
     nodes:
@@ -2129,9 +2212,14 @@ properties:
     description: "Name"
 "#;
         let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
-        let default_sk = vec!["traversal_path".to_string(), "id".to_string()];
+        let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
+        let etl_settings = EtlSettings {
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["traversal_path".to_string(), "id".to_string()],
+        };
         let err = node_def
-            .into_entity("TestNode".to_string(), &default_sk)
+            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
             .unwrap_err();
         assert!(
             err.to_string().contains("nonexistent_field"),
@@ -2164,11 +2252,16 @@ properties:
     description: "Name"
 "#;
         let node_def: NodeYaml = serde_yaml::from_str(yaml).expect("valid YAML");
-        let default_sk = vec!["traversal_path".to_string(), "id".to_string()];
+        let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
+        let etl_settings = EtlSettings {
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["traversal_path".to_string(), "id".to_string()],
+        };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sk)
+            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
-        assert_eq!(entity.sort_key, default_sk);
+        assert_eq!(entity.sort_key, default_sort_key);
     }
 }

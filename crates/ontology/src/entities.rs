@@ -126,6 +126,8 @@ pub struct EdgeSourceEtlConfig {
     pub watermark: String,
     /// Column name for soft delete flag.
     pub deleted: String,
+    /// Columns for ORDER BY in extract queries and cursor-based pagination.
+    pub order_by: Vec<String>,
     /// Source endpoint configuration.
     pub from: EdgeEndpoint,
     /// Target endpoint configuration.

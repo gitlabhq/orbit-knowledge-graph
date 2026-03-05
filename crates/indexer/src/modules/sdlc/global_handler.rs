@@ -297,6 +297,7 @@ mod tests {
                 source: source.to_string(),
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges: BTreeMap::new(),
             }),
             ..Default::default()

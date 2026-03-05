@@ -81,8 +81,6 @@ etl:
   type: table
   scope: namespaced
   source: siphon_milestones
-  watermark: _siphon_replicated_at
-  deleted: _siphon_deleted
   edges:
     project_id:
       to: Project

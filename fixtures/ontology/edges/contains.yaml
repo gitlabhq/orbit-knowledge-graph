@@ -30,8 +30,7 @@ variants:
 etl:
   scope: namespaced
   source: siphon_work_item_parent_links
-  watermark: _siphon_replicated_at
-  deleted: _siphon_deleted
+  order_by: [traversal_path, work_item_parent_id, id]
   from:
     id: work_item_parent_id
     type: WorkItem

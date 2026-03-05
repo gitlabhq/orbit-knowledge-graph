@@ -90,28 +90,21 @@ properties:
 etl:
   type: query
   scope: namespaced
-  query: |
-    SELECT
-        project.id AS id,
-        project.name AS name,
-        project.description AS description,
-        project.visibility_level AS visibility_level,
-        project.path AS path,
-        project.namespace_id AS namespace_id,
-        project.creator_id AS creator_id,
-        project.created_at AS created_at,
-        project.updated_at AS updated_at,
-        project.archived AS archived,
-        project.star_count AS star_count,
-        project.last_activity_at AS last_activity_at,
-        traversal_paths.traversal_path AS traversal_path,
-        project._siphon_deleted AS _deleted,
-        project._siphon_replicated_at AS _version
-    FROM siphon_projects project
-    INNER JOIN project_namespace_traversal_paths traversal_paths ON project.id = traversal_paths.id
-    WHERE project.id IN (SELECT id FROM project_namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))
-        AND project._siphon_replicated_at > {last_watermark:String}
-        AND project._siphon_replicated_at <= {watermark:String}
+  select: >-
+    project.id AS id, project.name AS name, project.description AS description,
+    project.visibility_level AS visibility_level, project.path AS path,
+    project.namespace_id AS namespace_id, project.creator_id AS creator_id,
+    project.created_at AS created_at, project.updated_at AS updated_at,
+    project.archived AS archived, project.star_count AS star_count,
+    project.last_activity_at AS last_activity_at,
+    traversal_paths.traversal_path AS traversal_path
+  from: >-
+    siphon_projects project
+    INNER JOIN project_namespace_traversal_paths traversal_paths
+    ON project.id = traversal_paths.id
+  traversal_path_filter: "project.id IN (SELECT id FROM project_namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
+  watermark: project._siphon_replicated_at
+  deleted: project._siphon_deleted
   edges:
     creator_id:
       to: User
