@@ -12,6 +12,9 @@ pub enum NatsError {
     #[error("failed to publish message: {0}")]
     Publish(String),
 
+    #[error("publish rejected: message already exists for subject")]
+    PublishDuplicate,
+
     #[error("failed to subscribe to topic: {0}")]
     Subscribe(String),
 

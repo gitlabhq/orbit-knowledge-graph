@@ -9,8 +9,6 @@ use tracing::info;
 use super::metrics::DispatchMetrics;
 use crate::configuration::DispatcherConfiguration;
 use crate::dispatcher::{DispatchError, Dispatcher};
-use crate::locking::LockService;
-use crate::modules::sdlc::locking::{SDLC_LOCK_TTL, global_lock_key};
 use crate::nats::NatsServices;
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
@@ -23,7 +21,6 @@ pub struct GlobalDispatcherConfig {
 
 pub struct GlobalDispatcher {
     nats: Arc<dyn NatsServices>,
-    lock_service: Arc<dyn LockService>,
     metrics: DispatchMetrics,
     config: GlobalDispatcherConfig,
 }
@@ -31,13 +28,11 @@ pub struct GlobalDispatcher {
 impl GlobalDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
-        lock_service: Arc<dyn LockService>,
         metrics: DispatchMetrics,
         config: GlobalDispatcherConfig,
     ) -> Self {
         Self {
             nats,
-            lock_service,
             metrics,
             config,
         }
@@ -69,21 +64,6 @@ impl Dispatcher for GlobalDispatcher {
 
 impl GlobalDispatcher {
     async fn dispatch_inner(&self) -> Result<(), DispatchError> {
-        let acquired = self
-            .lock_service
-            .try_acquire(global_lock_key(), SDLC_LOCK_TTL)
-            .await
-            .map_err(|error| {
-                self.metrics.record_error(self.name(), "lock");
-                DispatchError::new(error)
-            })?;
-
-        if !acquired {
-            info!("skipping global indexing request, lock already held");
-            self.metrics.record_requests_skipped(self.name(), 1);
-            return Ok(());
-        }
-
         let envelope = Envelope::new(&GlobalIndexingRequest {
             watermark: Utc::now(),
         })
@@ -92,16 +72,25 @@ impl GlobalDispatcher {
             DispatchError::new(error)
         })?;
 
-        self.nats
+        match self
+            .nats
             .publish(&GlobalIndexingRequest::topic(), &envelope)
             .await
-            .map_err(|error| {
+        {
+            Ok(()) => {
+                self.metrics.record_requests_published(self.name(), 1);
+                info!("dispatched global indexing request");
+            }
+            Err(crate::nats::NatsError::PublishDuplicate) => {
+                self.metrics.record_requests_skipped(self.name(), 1);
+                info!("skipping global indexing request, already in-flight");
+            }
+            Err(error) => {
                 self.metrics.record_error(self.name(), "publish");
-                DispatchError::new(error)
-            })?;
+                return Err(DispatchError::new(error));
+            }
+        }
 
-        self.metrics.record_requests_published(self.name(), 1);
-        info!("dispatched global indexing request");
         Ok(())
     }
 }

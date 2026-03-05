@@ -10,7 +10,7 @@
 //! ```ignore
 //! async fn handle(&self, ctx: HandlerContext, envelope: Envelope) -> Result<(), HandlerError> {
 //!     let derived = DerivedEvent { /* ... */ };
-//!     let topic = Topic::new("stream", "subject");
+//!     let topic = Topic::owned("stream", "subject");
 //!     ctx.nats.publish(&topic, &Envelope::new(&derived)?).await?;
 //!     Ok(())
 //! }

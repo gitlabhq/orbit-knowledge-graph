@@ -10,11 +10,9 @@ use super::metrics::DispatchMetrics;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::configuration::DispatcherConfiguration;
 use crate::dispatcher::{DispatchError, Dispatcher};
-use crate::locking::LockService;
-use crate::modules::sdlc::locking::{SDLC_LOCK_TTL, namespace_lock_key};
 use crate::nats::NatsServices;
 use crate::topic::NamespaceIndexingRequest;
-use crate::types::{Envelope, Event};
+use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
 
 const ENABLED_NAMESPACE_QUERY: &str = r#"
@@ -32,7 +30,6 @@ pub struct NamespaceDispatcherConfig {
 
 pub struct NamespaceDispatcher {
     nats: Arc<dyn NatsServices>,
-    lock_service: Arc<dyn LockService>,
     datalake: ArrowClickHouseClient,
     metrics: DispatchMetrics,
     config: NamespaceDispatcherConfig,
@@ -41,14 +38,12 @@ pub struct NamespaceDispatcher {
 impl NamespaceDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
-        lock_service: Arc<dyn LockService>,
         datalake: ArrowClickHouseClient,
         metrics: DispatchMetrics,
         config: NamespaceDispatcherConfig,
     ) -> Self {
         Self {
             nats,
-            lock_service,
             datalake,
             metrics,
             config,
@@ -108,50 +103,40 @@ impl NamespaceDispatcher {
         let mut skipped: u64 = 0;
 
         for (namespace_id, organization_id) in namespace_ids.iter().zip(organization_ids.iter()) {
-            let lock_key = namespace_lock_key(*organization_id, *namespace_id);
-            let acquired = self
-                .lock_service
-                .try_acquire(&lock_key, SDLC_LOCK_TTL)
-                .await
-                .map_err(|error| {
-                    self.metrics.record_error(self.name(), "lock");
-                    DispatchError::new(error)
-                })?;
-
-            if !acquired {
-                skipped += 1;
-                debug!(
-                    namespace_id = *namespace_id,
-                    organization_id = *organization_id,
-                    "skipped namespace indexing request, lock already held"
-                );
-                continue;
-            }
-
-            let envelope = Envelope::new(&NamespaceIndexingRequest {
+            let request = NamespaceIndexingRequest {
                 organization: *organization_id,
                 namespace: *namespace_id,
                 watermark,
-            })
-            .map_err(|error| {
+            };
+
+            let topic = request.publish_topic();
+            let envelope = Envelope::new(&request).map_err(|error| {
                 self.metrics.record_error(self.name(), "publish");
                 DispatchError::new(error)
             })?;
 
-            self.nats
-                .publish(&NamespaceIndexingRequest::topic(), &envelope)
-                .await
-                .map_err(|error| {
+            match self.nats.publish(&topic, &envelope).await {
+                Ok(()) => {
+                    dispatched += 1;
+                    debug!(
+                        namespace_id = *namespace_id,
+                        organization_id = *organization_id,
+                        "dispatched namespace indexing request"
+                    );
+                }
+                Err(crate::nats::NatsError::PublishDuplicate) => {
+                    skipped += 1;
+                    debug!(
+                        namespace_id = *namespace_id,
+                        organization_id = *organization_id,
+                        "skipped namespace indexing request, already in-flight"
+                    );
+                }
+                Err(error) => {
                     self.metrics.record_error(self.name(), "publish");
-                    DispatchError::new(error)
-                })?;
-
-            dispatched += 1;
-            debug!(
-                namespace_id = *namespace_id,
-                organization_id = *organization_id,
-                "dispatched namespace indexing request"
-            );
+                    return Err(DispatchError::new(error));
+                }
+            }
         }
 
         self.metrics

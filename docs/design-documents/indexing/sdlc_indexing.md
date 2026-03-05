@@ -185,21 +185,18 @@ Example NATS JetStream subjects:
 - `gkg.indexing.jobs.initial`
 - `gkg.indexing.jobs.incremental`
 
-**Picking up an indexing job**
+**Dispatch deduplication**
 
-NATS JetStream ensures that each message is delivered at least once. This means that if a worker fails to process a message, it will be redelivered to another worker. To avoid duplicate processing on the same message, we will use the NATS KV store to store to acquire a lock on the namespace at the start of the indexing job.
+The dispatcher publishes indexing requests to parameterized subjects (e.g. `sdlc.namespace.indexing.requested.<org>.<ns>`). The `GKG_INDEXER` stream is configured with `max_messages_per_subject: 1`, `discard_new_per_subject: true`, and `WorkQueue` retention. This means:
 
-Example NATS KV:
+- If a message already exists for that subject (a handler hasn't acked yet), NATS rejects the publish as a duplicate.
+- When the handler acks, WorkQueue retention deletes the message, opening the slot for the next dispatch cycle.
 
-- Key: `/gkg-indexer/indexing/{namespace_id}/lock`
-- Value: `{ "worker_id": String, "started_at": Instant }`
-- TTL: 1 hour (estimated based on the amount of resources)
-
-If the lock is not present, the worker will acquire it and process the job. If the lock is present, the worker will check if the job has already started. If it has, the worker will proceed to the next job.
+This replaces the previous KV-lock-based deduplication with a simpler, infrastructure-level guarantee.
 
 **Completing an indexing job**
 
-When the worker has completed the indexing job, it will remove the lock from the NATS KV store and update the database to reflect the date of the last indexing alongside relevant metadata.
+When the handler acks the message, WorkQueue retention automatically removes it from the stream. The handler then updates the database to reflect the date of the last indexing alongside relevant metadata.
 
 ```sql
 UPDATE knowledge_graph_enabled_namespaces
@@ -259,7 +256,7 @@ WHERE id = '{namespace_id}';
 INSERT INTO knowledge_graph_indexing_job_events (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'error', NOW());
 ```
 
-If the worker fails unexpectedly, the KV lock will eventually expire and the job will be re-created in the next indexing cycle. This leverages eventual consistency which is acceptable since we're not aiming for real-time consistency.
+If the worker fails unexpectedly, the unacked message will be redelivered by NATS to another worker. If the message exceeds `max_deliver`, it is discarded and the next dispatch cycle will re-create the request. This leverages eventual consistency which is acceptable since we're not aiming for real-time consistency.
 
 ##### ETL
 

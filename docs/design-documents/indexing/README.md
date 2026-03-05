@@ -104,7 +104,7 @@ Siphon uses PostgreSQL's logical replication to capture changes from the write-a
 
 - Delivers and distributes needed CDC events (like `events` and `push_event_payloads`) to indexing workers via NATS JetStream subjects.
 - Distributes workload across multiple indexer replicas
-- Provides NATS KV for distributed locking and state management for both code and SDLC indexing.
+- Provides NATS KV for code handler mutual exclusion (push_event vs project_code) and cadence coordination. SDLC dispatch deduplication uses per-subject message limits on the JetStream stream.
 
 Both indexing pipelines subscribe to relevant NATS subjects and use the same NATS deployment for event distribution and coordination.
 

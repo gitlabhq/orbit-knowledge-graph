@@ -1,7 +1,12 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use tracing::debug;
+
+use crate::nats::{KvPutOptions, KvPutResult};
+
+pub const INDEXING_LOCKS_BUCKET: &str = "indexing_locks";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LockError {
@@ -28,10 +33,6 @@ impl NatsLockService {
 #[async_trait]
 impl LockService for NatsLockService {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError> {
-        use crate::modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
-        use crate::nats::{KvPutOptions, KvPutResult};
-        use bytes::Bytes;
-
         let options = KvPutOptions::create_with_ttl(ttl);
         match self
             .nats
@@ -54,8 +55,6 @@ impl LockService for NatsLockService {
     }
 
     async fn release(&self, key: &str) -> Result<(), LockError> {
-        use crate::modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
-
         let result = self
             .nats
             .kv_delete(INDEXING_LOCKS_BUCKET, key)

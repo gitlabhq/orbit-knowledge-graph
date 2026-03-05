@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::config::CODE_LOCK_TTL;
 use super::config::{siphon_actions, siphon_ref_types, subjects};
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
+use super::locking::project_lock_key;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::repository_service::RepositoryService;
@@ -19,7 +20,6 @@ use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use super::watermark_store::CodeWatermarkStore;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::modules::sdlc::locking::project_lock_key;
 use crate::types::{Envelope, Topic};
 
 fn default_events_stream_name() -> String {
@@ -80,7 +80,7 @@ impl Handler for PushEventHandler {
     }
 
     fn topic(&self) -> Topic {
-        Topic::new(
+        Topic::external(
             self.config.events_stream_name.clone(),
             format!(
                 "{}.{}",

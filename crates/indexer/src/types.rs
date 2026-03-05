@@ -25,14 +25,27 @@ pub struct Topic {
     pub stream: Arc<str>,
     /// The subject filter within the stream.
     pub subject: Arc<str>,
+    /// Whether we own this stream and should manage its configuration.
+    /// External streams (e.g. Siphon CDC) are not owned and their config is never modified.
+    pub owned: bool,
 }
 
 impl Topic {
-    /// Creates a new topic from stream and subject.
-    pub fn new(stream: impl Into<Arc<str>>, subject: impl Into<Arc<str>>) -> Self {
+    /// Creates a new topic for a stream we own and manage.
+    pub fn owned(stream: impl Into<Arc<str>>, subject: impl Into<Arc<str>>) -> Self {
         Self {
             stream: stream.into(),
             subject: subject.into(),
+            owned: true,
+        }
+    }
+
+    /// Creates a new topic for an external stream we only consume from.
+    pub fn external(stream: impl Into<Arc<str>>, subject: impl Into<Arc<str>>) -> Self {
+        Self {
+            stream: stream.into(),
+            subject: subject.into(),
+            owned: false,
         }
     }
 }
@@ -69,7 +82,7 @@ impl MessageId {
 ///
 /// impl Event for UserCreated {
 ///     fn topic() -> Topic {
-///         Topic::new("users-stream", "user.created")
+///         Topic::owned("users-stream", "user.created")
 ///     }
 /// }
 ///
@@ -110,7 +123,7 @@ pub struct Envelope {
 ///
 /// impl Event for OrderPlaced {
 ///     fn topic() -> Topic {
-///         Topic::new("orders-stream", "orders.placed")
+///         Topic::owned("orders-stream", "orders.placed")
 ///     }
 /// }
 /// ```
@@ -159,7 +172,7 @@ mod tests {
 
     impl Event for TestEvent {
         fn topic() -> Topic {
-            Topic::new("test-stream", "test-events")
+            Topic::owned("test-stream", "test-events")
         }
     }
 

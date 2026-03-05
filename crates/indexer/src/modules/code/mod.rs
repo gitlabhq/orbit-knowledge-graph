@@ -8,6 +8,7 @@ mod arrow_converter;
 pub mod config;
 pub mod dispatch;
 pub mod indexing_pipeline;
+pub mod locking;
 pub mod metrics;
 mod project_code_indexing_handler;
 mod project_store;

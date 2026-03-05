@@ -5,8 +5,7 @@ use tracing::{info, warn};
 
 use crate::configuration::DispatcherConfiguration;
 use crate::configuration::DispatchersConfiguration;
-use crate::locking::{LockService, NatsLockService};
-use crate::modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
+use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsConfiguration, NatsServices, NatsServicesImpl};
 
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]

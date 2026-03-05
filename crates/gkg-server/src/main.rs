@@ -45,13 +45,11 @@ async fn main() -> anyhow::Result<()> {
             let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
                 Box::new(GlobalDispatcher::new(
                     services.nats.clone(),
-                    services.lock_service.clone(),
                     metrics.clone(),
                     config.dispatch.dispatchers.global.clone(),
                 )),
                 Box::new(NamespaceDispatcher::new(
                     services.nats.clone(),
-                    services.lock_service.clone(),
                     datalake.clone(),
                     metrics.clone(),
                     config.dispatch.dispatchers.namespace.clone(),

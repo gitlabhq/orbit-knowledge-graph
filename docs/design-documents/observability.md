@@ -61,9 +61,9 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 | `indexer.dispatch.runs` | Counter | count | `dispatcher`, `outcome` (success/error) | Total dispatch runs by dispatcher |
 | `indexer.dispatch.duration` | Histogram | s | `dispatcher` | End-to-end duration of a dispatch cycle |
 | `indexer.dispatch.requests.published` | Counter | count | `dispatcher` | Namespace/global requests successfully published |
-| `indexer.dispatch.requests.skipped` | Counter | count | `dispatcher` | Requests skipped due to lock contention |
+| `indexer.dispatch.requests.skipped` | Counter | count | `dispatcher` | Requests skipped (already in-flight) |
 | `indexer.dispatch.query.duration` | Histogram | s | | Duration of the enabled-namespaces ClickHouse query |
-| `indexer.dispatch.errors` | Counter | count | `dispatcher`, `stage` (lock/publish/query) | Dispatch errors by stage |
+| `indexer.dispatch.errors` | Counter | count | `dispatcher`, `stage` (publish/query) | Dispatch errors by stage |
 
 *SDLC module metrics (`indexer_sdlc`):*
 

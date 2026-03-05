@@ -13,7 +13,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
-use super::locking::global_lock_key;
 use super::metrics::SdlcMetrics;
 use super::pipeline::OntologyEntityPipeline;
 use super::watermark_store::{WatermarkError, WatermarkStore};
@@ -176,10 +175,6 @@ impl Handler for GlobalHandler {
         }
 
         if errors.is_empty() {
-            if let Err(error) = context.lock_service.release(global_lock_key()).await {
-                error!(%error, "failed to release global lock, will expire via TTL");
-            }
-
             info!(
                 successful_pipelines,
                 elapsed_ms = elapsed.as_millis() as u64,
@@ -346,49 +341,6 @@ mod tests {
         let result = handler.handle(context, envelope).await;
 
         assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn handler_releases_lock_on_success() {
-        let datalake = Arc::new(EmptyDatalake);
-        let ontology = Ontology::new();
-        let user_node = create_test_node("User", "siphon_users");
-
-        let pipelines = vec![
-            OntologyEntityPipeline::from_node(&user_node, &ontology, datalake, test_metrics())
-                .unwrap(),
-        ];
-
-        let handler = GlobalHandler::new(
-            Arc::new(MockWatermarkStore),
-            pipelines,
-            test_metrics(),
-            GlobalHandlerConfig::default(),
-        );
-
-        let payload = serde_json::json!({
-            "watermark": "2024-01-21T00:00:00Z"
-        })
-        .to_string();
-        let envelope = TestEnvelopeFactory::simple(&payload);
-
-        let mock_locks = Arc::new(MockLockService::new());
-        mock_locks.set_lock(global_lock_key());
-
-        let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(
-            destination,
-            Arc::new(MockNatsServices::new()),
-            mock_locks.clone(),
-        );
-
-        let result = handler.handle(context, envelope).await;
-
-        assert!(result.is_ok());
-        assert!(
-            !mock_locks.is_held(global_lock_key()),
-            "global lock should be released after successful processing"
-        );
     }
 
     #[tokio::test]
