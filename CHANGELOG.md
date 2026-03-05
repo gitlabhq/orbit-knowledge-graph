@@ -1,3 +1,20 @@
+## [0.7.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.6.0...v0.7.0) (2026-03-05)
+
+### Features
+
+* align gkg.proto for API design ([1c70ffa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1c70ffa1d92b8d6884f9f711cdc2607db68f1360)) by Michael Angelo Rivera
+* **graph:** add traversal_path join filtering for some edge lookups ([d772683](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d7726834b9713d919ce3c2f5d8bd86d2077c048a)) by Michael Usachenko
+
+### Fixes
+
+* **release:** disable semantic-release MR commenting ([74232ab](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/74232ab950f5fff407ff234024ad822cfe96bc03)) by Bohdan Parkhomchuk
+
+### Other
+
+* **adr:** add ADR 003 for Orbit API design ([a7eaae5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a7eaae5c99205be8c61f1539441cb0fbc0eb0795)) by Michael Angelo Rivera
+* **deps:** update rust crate cliclack to 0.4.0 ([9118e4a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9118e4aebc869fac550f7fe33051a9126f25e0e5)) by GitLab Renovate Bot
+* **graphsec:** harden engine + query pipeline w/ more gating and test coverage ([0ab725d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0ab725d4f623544adbff56986f98339544b17673)) by Michael Usachenko
+
 ## [0.6.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.5.0...v0.6.0) (2026-03-03)
 
 ### Features
