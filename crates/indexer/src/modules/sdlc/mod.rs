@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod checkpoint;
 mod datalake;
 pub mod dispatch;
 mod global_handler;
@@ -5,6 +7,8 @@ pub mod locking;
 mod metrics;
 mod namespace_handler;
 mod pipeline;
+#[allow(dead_code)]
+mod plan;
 mod prepare;
 mod transform;
 mod watermark_store;
