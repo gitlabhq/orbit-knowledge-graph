@@ -46,7 +46,7 @@ impl KnowledgeGraphServiceImpl {
     pub fn new(
         validator: Arc<JwtValidator>,
         clickhouse_config: &ClickHouseConfiguration,
-        health_check_url: Option<String>,
+        cluster_health: Arc<ClusterHealthChecker>,
     ) -> Self {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
         let client = Arc::new(clickhouse_config.build_client());
@@ -55,7 +55,6 @@ impl KnowledgeGraphServiceImpl {
             QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), RawRowFormatter);
         let llm_pipeline =
             QueryPipelineService::new(Arc::clone(&ontology), client, ContextEngineFormatter);
-        let cluster_health = ClusterHealthChecker::new(health_check_url).into_arc();
         Self {
             validator,
             ontology,
@@ -397,7 +396,11 @@ mod tests {
     #[test]
     fn test_service_can_be_created() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let plan = service
             .tool_service
@@ -418,7 +421,11 @@ mod tests {
     #[test]
     fn test_build_structured_schema() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let response = service.build_structured_schema(&[]);
 
@@ -441,7 +448,11 @@ mod tests {
     #[test]
     fn test_build_structured_schema_with_expand() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let response = service.build_structured_schema(&["User".to_string()]);
 
@@ -470,7 +481,11 @@ mod tests {
     #[test]
     fn test_get_node_edge_names_returns_sorted() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
 
@@ -487,7 +502,11 @@ mod tests {
     #[test]
     fn test_get_node_edge_names_unknown_node_returns_empty() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
 
@@ -498,7 +517,11 @@ mod tests {
     #[test]
     fn test_expanded_node_has_property_details() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let response = service.build_structured_schema(&["User".to_string()]);
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
@@ -520,7 +543,11 @@ mod tests {
     #[test]
     fn test_structured_schema_domains_have_nodes() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let response = service.build_structured_schema(&[]);
 
@@ -537,7 +564,11 @@ mod tests {
     #[test]
     fn test_structured_schema_edges_have_variants() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let response = service.build_structured_schema(&[]);
 
@@ -558,7 +589,11 @@ mod tests {
     #[test]
     fn test_expand_multiple_nodes() {
         let validator = Arc::new(mock_validator());
-        let service = KnowledgeGraphServiceImpl::new(validator, &test_config(), None);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
 
         let response =
             service.build_structured_schema(&["User".to_string(), "Project".to_string()]);

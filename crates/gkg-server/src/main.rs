@@ -3,6 +3,7 @@ use std::sync::Arc;
 use clap::Parser;
 use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
+use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::config::AppConfig;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
@@ -95,10 +96,12 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
         config.jwt_clock_skew_secs,
     )?);
 
+    let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
+
     let http_server = HttpServer::bind(
         config.bind_address,
         (*validator).clone(),
-        config.health_check_url.clone(),
+        Arc::clone(&cluster_health),
     )
     .await?;
     info!(addr = %config.bind_address, "HTTP server bound");
@@ -107,7 +110,7 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
         config.grpc_bind_address,
         validator,
         &config.graph,
-        config.health_check_url.clone(),
+        Arc::clone(&cluster_health),
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 

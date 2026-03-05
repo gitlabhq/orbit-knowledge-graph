@@ -7,6 +7,7 @@ use tonic::transport::Server as TonicServer;
 use tracing::info;
 
 use crate::auth::JwtValidator;
+use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
 
 use super::service::KnowledgeGraphServiceImpl;
@@ -27,10 +28,9 @@ impl GrpcServer {
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
         clickhouse_config: &ClickHouseConfiguration,
-        health_check_url: Option<String>,
+        cluster_health: Arc<ClusterHealthChecker>,
     ) -> Self {
-        let service =
-            KnowledgeGraphServiceImpl::new(validator, clickhouse_config, health_check_url);
+        let service = KnowledgeGraphServiceImpl::new(validator, clickhouse_config, cluster_health);
         Self {
             addr,
             service: KnowledgeGraphServiceServer::with_interceptor(service, server_interceptor),
@@ -63,7 +63,8 @@ mod tests {
             Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
         let clickhouse_config = ClickHouseConfiguration::default();
 
-        let server = GrpcServer::new(addr, validator, &clickhouse_config, None);
+        let cluster_health = ClusterHealthChecker::default().into_arc();
+        let server = GrpcServer::new(addr, validator, &clickhouse_config, cluster_health);
         assert_eq!(server.addr(), addr);
     }
 }
