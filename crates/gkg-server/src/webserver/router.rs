@@ -51,7 +51,16 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
-async fn cluster_health(State(state): State<AppState>) -> Json<ClusterHealthResponse> {
+fn status_label(val: i32) -> &'static str {
+    match ClusterStatus::try_from(val) {
+        Ok(ClusterStatus::Healthy) => "healthy",
+        Ok(ClusterStatus::Degraded) => "degraded",
+        Ok(ClusterStatus::Unhealthy) => "unhealthy",
+        _ => "unknown",
+    }
+}
+
+async fn cluster_health_handler(State(state): State<AppState>) -> Json<ClusterHealthResponse> {
     let health = state
         .cluster_health
         .get_cluster_health(ResponseFormat::Raw as i32)
@@ -69,52 +78,37 @@ async fn cluster_health(State(state): State<AppState>) -> Json<ClusterHealthResp
         }
     };
 
-    let status = match ClusterStatus::try_from(structured.status) {
-        Ok(ClusterStatus::Healthy) => "healthy",
-        Ok(ClusterStatus::Degraded) => "degraded",
-        Ok(ClusterStatus::Unhealthy) => "unhealthy",
-        _ => "unknown",
-    };
-
     let components = structured
         .components
         .into_iter()
-        .map(|c| {
-            let component_status = match ClusterStatus::try_from(c.status) {
-                Ok(ClusterStatus::Healthy) => "healthy",
-                Ok(ClusterStatus::Degraded) => "degraded",
-                Ok(ClusterStatus::Unhealthy) => "unhealthy",
-                _ => "unknown",
-            };
-
-            ComponentHealthResponse {
-                name: c.name,
-                status: component_status.to_string(),
-                replicas: c.replicas.map(|r| ReplicaStatusResponse {
-                    ready: r.ready,
-                    desired: r.desired,
-                }),
-                metrics: c.metrics,
-            }
+        .map(|c| ComponentHealthResponse {
+            name: c.name,
+            status: status_label(c.status).to_string(),
+            replicas: c.replicas.map(|r| ReplicaStatusResponse {
+                ready: r.ready,
+                desired: r.desired,
+            }),
+            metrics: c.metrics,
         })
         .collect();
 
     Json(ClusterHealthResponse {
-        status: status.to_string(),
+        status: status_label(structured.status).to_string(),
         timestamp: structured.timestamp,
         version: structured.version,
         components,
     })
 }
 
-pub fn create_router(_validator: JwtValidator, health_check_url: Option<String>) -> Router {
-    let state = AppState {
-        cluster_health: ClusterHealthChecker::new(health_check_url).into_arc(),
-    };
+pub fn create_router(
+    _validator: JwtValidator,
+    cluster_health: Arc<ClusterHealthChecker>,
+) -> Router {
+    let state = AppState { cluster_health };
 
     Router::new()
         .route("/health", get(health))
-        .route("/api/v1/cluster_health", get(cluster_health))
+        .route("/api/v1/cluster_health", get(cluster_health_handler))
         .with_state(state)
         .layer(HttpMetricsLayer::new())
         .layer(CorrelationIdLayer::new())

@@ -2,11 +2,13 @@ mod health_client;
 mod router;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::auth::JwtValidator;
+use crate::cluster_health::ClusterHealthChecker;
 
 pub use health_client::InfrastructureHealthClient;
 pub use router::create_router;
@@ -20,10 +22,10 @@ impl Server {
     pub async fn bind(
         addr: SocketAddr,
         validator: JwtValidator,
-        health_check_url: Option<String>,
+        cluster_health: Arc<ClusterHealthChecker>,
     ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr).await?;
-        let router = create_router(validator, health_check_url);
+        let router = create_router(validator, cluster_health);
         Ok(Self { listener, router })
     }
 
