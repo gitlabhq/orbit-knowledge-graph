@@ -196,6 +196,7 @@ mod tests {
                 source: "siphon_users".to_string(),
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges: BTreeMap::new(),
             }),
             ..Default::default()
@@ -253,6 +254,7 @@ mod tests {
                 source: "siphon_groups".to_string(),
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges,
             }),
             ..Default::default()
@@ -292,6 +294,7 @@ mod tests {
                 source: "siphon_notes".to_string(),
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges,
             }),
             ..Default::default()
@@ -331,6 +334,7 @@ mod tests {
                 source: "hierarchy_work_items".to_string(),
                 watermark: "version".to_string(),
                 deleted: "deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges,
             }),
             ..Default::default()
@@ -372,6 +376,7 @@ mod tests {
                 source: "hierarchy_work_items".to_string(),
                 watermark: "version".to_string(),
                 deleted: "deleted".to_string(),
+                order_by: vec!["id".to_string()],
                 edges,
             }),
             ..Default::default()

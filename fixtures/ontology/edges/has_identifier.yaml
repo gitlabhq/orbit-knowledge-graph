@@ -14,8 +14,7 @@ variants:
 etl:
   scope: namespaced
   source: siphon_vulnerability_occurrence_identifiers
-  watermark: _siphon_replicated_at
-  deleted: _siphon_deleted
+  order_by: [traversal_path, id]
   from:
     id: occurrence_id
     type: VulnerabilityOccurrence

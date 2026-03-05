@@ -80,8 +80,6 @@ etl:
   type: table
   scope: namespaced
   source: siphon_security_scans
-  watermark: _siphon_replicated_at
-  deleted: _siphon_deleted
   edges:
     project_id:
       to: Project

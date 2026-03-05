@@ -10,8 +10,7 @@ variants:
 etl:
   scope: namespaced
   source: siphon_vulnerability_merge_request_links
-  watermark: _siphon_replicated_at
-  deleted: _siphon_deleted
+  order_by: [traversal_path, id]
   from:
     id: merge_request_id
     type: MergeRequest

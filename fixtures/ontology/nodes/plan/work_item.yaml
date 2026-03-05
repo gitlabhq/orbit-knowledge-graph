@@ -119,34 +119,17 @@ properties:
 etl:
   type: query
   scope: namespaced
-  query: |
-    SELECT
-      wi.traversal_path,
-      wi.id,
-      wi.title,
-      si.description,
-      wi.author_id,
-      wi.iid,
-      wi.state_id,
-      wi.work_item_type_id,
-      wi.confidential,
-      wi.due_date,
-      wi.start_date,
-      wi.weight,
-      wi.milestone_id,
-      wi.namespace_id,
-      wi.created_at,
-      wi.updated_at,
-      wi.closed_at,
-      wi.assignee_ids,
-      wi.label_ids,
-      wi.version AS _version,
-      wi.deleted AS _deleted
-    FROM hierarchy_work_items wi
-    LEFT JOIN siphon_issues si ON wi.id = si.id
-    WHERE startsWith(wi.traversal_path, {traversal_path:String})
-      AND wi.version > {last_watermark:String}
-      AND wi.version <= {watermark:String}
+  select: >-
+    wi.traversal_path, wi.id, wi.title, si.description,
+    wi.author_id, wi.iid, wi.state_id, wi.work_item_type_id,
+    wi.confidential, wi.due_date, wi.start_date, wi.weight,
+    wi.milestone_id, wi.namespace_id, wi.created_at, wi.updated_at,
+    wi.closed_at, wi.assignee_ids, wi.label_ids
+  from: "hierarchy_work_items wi LEFT JOIN siphon_issues si ON wi.id = si.id"
+  traversal_path_filter: "startsWith(wi.traversal_path, {traversal_path:String})"
+  watermark: wi.version
+  deleted: wi.deleted
+  order_by: [traversal_path, work_item_type_id, id]
   edges:
     author_id:
       to: User
