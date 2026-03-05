@@ -33,13 +33,11 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
     let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
-            services.lock_service.clone(),
             metrics.clone(),
             GlobalDispatcherConfig::default(),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats,
-            services.lock_service,
             datalake,
             metrics,
             NamespaceDispatcherConfig::default(),

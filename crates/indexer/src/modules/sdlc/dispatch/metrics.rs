@@ -40,7 +40,7 @@ impl DispatchMetrics {
 
         let requests_skipped = meter
             .u64_counter("indexer.dispatch.requests.skipped")
-            .with_description("Requests skipped due to lock contention")
+            .with_description("Requests skipped because already in-flight")
             .build();
 
         let query_duration = meter

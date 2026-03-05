@@ -204,7 +204,7 @@ impl MockHandler {
     pub fn new(stream: &'static str, subject: &'static str) -> Self {
         Self {
             name: format!("mock-handler-{}:{}", stream, subject),
-            topic: Topic::new(stream, subject),
+            topic: Topic::owned(stream, subject),
             delay: None,
             error: None,
             engine_config: HandlerConfiguration::default(),

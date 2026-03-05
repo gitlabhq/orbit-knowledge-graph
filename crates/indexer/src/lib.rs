@@ -56,7 +56,7 @@ use engine::EngineBuilder;
 use gitlab_client::GitlabClientConfiguration;
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
-use modules::sdlc::locking::INDEXING_LOCKS_BUCKET;
+use locking::INDEXING_LOCKS_BUCKET;
 use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;

@@ -13,7 +13,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
-use super::locking::namespace_lock_key;
 use super::metrics::SdlcMetrics;
 use super::pipeline::{OntologyEdgePipeline, OntologyEntityPipeline};
 use super::watermark_store::{WatermarkError, WatermarkStore};
@@ -255,15 +254,6 @@ impl Handler for NamespaceHandler {
         let elapsed = started_at.elapsed();
 
         if errors.is_empty() {
-            let lock_key = namespace_lock_key(payload.organization, payload.namespace);
-            if let Err(error) = context.lock_service.release(&lock_key).await {
-                error!(
-                    namespace_id = payload.namespace,
-                    %error,
-                    "failed to release namespace lock, will expire via TTL"
-                );
-            }
-
             info!(
                 namespace_id = payload.namespace,
                 organization_id = payload.organization,
@@ -485,54 +475,6 @@ mod tests {
         let result = handler.handle(context, envelope).await;
 
         assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn handler_releases_lock_on_success() {
-        let datalake = Arc::new(EmptyDatalake);
-        let ontology = Ontology::new();
-        let group_node = create_test_node("Group", "groups");
-
-        let pipelines = vec![
-            OntologyEntityPipeline::from_node(&group_node, &ontology, datalake, test_metrics())
-                .unwrap(),
-        ];
-
-        let handler = NamespaceHandler::new(
-            Arc::new(RecordingWatermarkStore::new()),
-            pipelines,
-            vec![],
-            test_metrics(),
-            NamespaceHandlerConfig::default(),
-        );
-
-        let namespace_id = 42i64;
-        let payload = serde_json::json!({
-            "organization": 1,
-            "namespace": namespace_id,
-            "watermark": "2024-01-21T00:00:00Z"
-        })
-        .to_string();
-        let envelope = TestEnvelopeFactory::simple(&payload);
-
-        let mock_locks = Arc::new(MockLockService::new());
-        let lock_key = namespace_lock_key(1, namespace_id);
-        mock_locks.set_lock(&lock_key);
-
-        let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(
-            destination,
-            Arc::new(MockNatsServices::new()),
-            mock_locks.clone(),
-        );
-
-        let result = handler.handle(context, envelope).await;
-
-        assert!(result.is_ok());
-        assert!(
-            !mock_locks.is_held(&lock_key),
-            "namespace lock should be released after successful processing"
-        );
     }
 
     #[tokio::test]
@@ -899,59 +841,6 @@ mod tests {
         assert!(
             result.is_ok(),
             "should succeed because watermark set is skipped when no rows were indexed"
-        );
-    }
-
-    #[tokio::test]
-    async fn lock_not_released_when_pipeline_fails() {
-        let failing_datalake: Arc<dyn DatalakeQuery> = Arc::new(FailingDatalake);
-        let ontology = Ontology::new();
-        let group_node = create_test_node("Group", "groups");
-
-        let pipelines = vec![
-            OntologyEntityPipeline::from_node(
-                &group_node,
-                &ontology,
-                failing_datalake,
-                test_metrics(),
-            )
-            .unwrap(),
-        ];
-
-        let handler = NamespaceHandler::new(
-            Arc::new(RecordingWatermarkStore::new()),
-            pipelines,
-            vec![],
-            test_metrics(),
-            NamespaceHandlerConfig::default(),
-        );
-
-        let namespace_id = 42i64;
-        let payload = serde_json::json!({
-            "organization": 1,
-            "namespace": namespace_id,
-            "watermark": "2024-01-21T00:00:00Z"
-        })
-        .to_string();
-        let envelope = TestEnvelopeFactory::simple(&payload);
-
-        let mock_locks = Arc::new(MockLockService::new());
-        let lock_key = namespace_lock_key(1, namespace_id);
-        mock_locks.set_lock(&lock_key);
-
-        let destination = Arc::new(MockDestination::new());
-        let context = HandlerContext::new(
-            destination,
-            Arc::new(MockNatsServices::new()),
-            mock_locks.clone(),
-        );
-
-        let result = handler.handle(context, envelope).await;
-        assert!(result.is_err());
-
-        assert!(
-            mock_locks.is_held(&lock_key),
-            "namespace lock should NOT be released when processing fails"
         );
     }
 }

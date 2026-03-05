@@ -10,7 +10,7 @@
 //! #[async_trait]
 //! impl Handler for MyHandler {
 //!     fn name(&self) -> &str { "my-handler" }
-//!     fn topic(&self) -> Topic { Topic::new("my-stream", "my-subject") }
+//!     fn topic(&self) -> Topic { Topic::owned("my-stream", "my-subject") }
 //!
 //!     async fn handle(&self, ctx: HandlerContext, msg: Envelope) -> Result<(), HandlerError> {
 //!         // ctx.destination has your writers
@@ -187,11 +187,11 @@ mod tests {
         registry.register_handler(Box::new(MockHandler::new("stream1", "subject1")));
         registry.register_handler(Box::new(MockHandler::new("stream1", "subject1")));
 
-        let topic = Topic::new("stream1", "subject1");
+        let topic = Topic::owned("stream1", "subject1");
         let handlers = registry.handlers_for(&topic);
         assert_eq!(handlers.len(), 2);
 
-        let unknown = Topic::new("unknown", "unknown");
+        let unknown = Topic::owned("unknown", "unknown");
         assert!(registry.handlers_for(&unknown).is_empty());
 
         assert_eq!(registry.topics(), vec![topic]);
@@ -205,9 +205,9 @@ mod tests {
         registry.register_handler(Box::new(MockHandler::new("stream", "s1")));
         registry.register_handler(Box::new(MockHandler::new("stream", "s2")));
 
-        let t0 = Topic::new("stream", "s0");
-        let t1 = Topic::new("stream", "s1");
-        let t2 = Topic::new("stream", "s2");
+        let t0 = Topic::owned("stream", "s0");
+        let t1 = Topic::owned("stream", "s1");
+        let t2 = Topic::owned("stream", "s2");
 
         let handles: Vec<_> = (0..50)
             .map(|_| {

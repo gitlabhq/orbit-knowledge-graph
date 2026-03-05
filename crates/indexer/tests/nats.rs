@@ -25,7 +25,7 @@ struct TestEvent {
 
 impl Event for TestEvent {
     fn topic() -> Topic {
-        Topic::new(TEST_STREAM, TEST_SUBJECT)
+        Topic::owned(TEST_STREAM, TEST_SUBJECT)
     }
 }
 
@@ -98,7 +98,7 @@ async fn publish_and_subscribe() {
         .await
         .expect("failed to connect");
 
-    let topic = Topic::new(TEST_STREAM, TEST_SUBJECT);
+    let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker
         .subscribe(&topic, Arc::new(EngineMetrics::new()))
@@ -144,7 +144,7 @@ async fn nack_redelivers_message() {
         .await
         .expect("failed to connect");
 
-    let topic = Topic::new(TEST_STREAM, TEST_SUBJECT);
+    let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker
         .subscribe(&topic, Arc::new(EngineMetrics::new()))
@@ -194,7 +194,7 @@ async fn nonexistent_stream() {
         .await
         .expect("failed to connect");
 
-    let topic = Topic::new("nonexistent", "subject");
+    let topic = Topic::owned("nonexistent", "subject");
     let result = broker
         .subscribe(&topic, Arc::new(EngineMetrics::new()))
         .await;
@@ -235,8 +235,8 @@ async fn multiple_streams() {
         .await
         .expect("failed to connect");
 
-    let topic_a = Topic::new("stream_a", "a.events");
-    let topic_b = Topic::new("stream_b", "b.events");
+    let topic_a = Topic::owned("stream_a", "a.events");
+    let topic_b = Topic::owned("stream_b", "b.events");
 
     let mut sub_a = broker
         .subscribe(&topic_a, Arc::new(EngineMetrics::new()))
@@ -305,7 +305,7 @@ async fn auto_creates_stream_with_configured_settings() {
         .await
         .expect("failed to connect");
 
-    let topic = Topic::new("auto_created_stream", "auto.events");
+    let topic = Topic::owned("auto_created_stream", "auto.events");
     let topics = vec![topic.clone()];
 
     broker
@@ -343,7 +343,7 @@ async fn skips_creation_when_disabled() {
         .await
         .expect("failed to connect");
 
-    let topic = Topic::new("should_not_exist", "skip.events");
+    let topic = Topic::owned("should_not_exist", "skip.events");
     let topics = vec![topic];
 
     broker
@@ -366,7 +366,6 @@ async fn skips_creation_when_disabled() {
 #[tokio::test]
 async fn idempotent_when_stream_exists() {
     let (_container, url) = start_nats_container().await;
-    create_test_stream(&url).await;
 
     let config = NatsConfiguration {
         url: url.clone(),
@@ -378,15 +377,15 @@ async fn idempotent_when_stream_exists() {
         .await
         .expect("failed to connect");
 
-    let topic = Topic::new(TEST_STREAM, TEST_SUBJECT);
+    let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
     let topics = vec![topic];
 
     let result = broker.ensure_streams(&topics).await;
-    assert!(result.is_ok(), "ensure_streams should be idempotent");
+    assert!(result.is_ok(), "ensure_streams should create stream");
 
     let result2 = broker.ensure_streams(&topics).await;
     assert!(
         result2.is_ok(),
-        "ensure_streams should succeed on second call"
+        "ensure_streams should be idempotent on second call"
     );
 }

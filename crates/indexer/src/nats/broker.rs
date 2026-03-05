@@ -24,6 +24,9 @@ use tracing::{debug, info, warn};
 use crate::metrics::EngineMetrics;
 use crate::types::{Envelope, MessageId, Topic};
 
+use async_nats::jetstream::ErrorCode;
+use async_nats::jetstream::context::{PublishError, PublishErrorKind};
+
 use super::configuration::NatsConfiguration;
 use super::error::{NatsError, map_connect_error, map_subscribe_error};
 use super::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
@@ -96,16 +99,26 @@ impl NatsBroker {
             return Ok(());
         }
 
-        let mut streams: HashMap<&Arc<str>, Vec<String>> = HashMap::new();
+        let mut owned_streams: HashMap<&Arc<str>, Vec<String>> = HashMap::new();
+        let mut external_streams: Vec<&Arc<str>> = Vec::new();
+
         for topic in topics {
-            streams
-                .entry(&topic.stream)
-                .or_default()
-                .push(topic.subject.to_string());
+            if topic.owned {
+                owned_streams
+                    .entry(&topic.stream)
+                    .or_default()
+                    .push(topic.subject.to_string());
+            } else {
+                external_streams.push(&topic.stream);
+            }
         }
 
-        for (stream_name, subjects) in streams {
-            self.get_or_create_stream(stream_name, subjects).await?;
+        for (stream_name, subjects) in owned_streams {
+            self.create_or_update_stream(stream_name, subjects).await?;
+        }
+
+        for stream_name in external_streams {
+            self.get_stream(stream_name).await?;
         }
 
         Ok(())
@@ -138,20 +151,11 @@ impl NatsBroker {
         Ok(())
     }
 
-    async fn get_or_create_stream(
+    async fn create_or_update_stream(
         &self,
         stream_name: &Arc<str>,
         subjects: Vec<String>,
     ) -> Result<Stream, NatsError> {
-        match self.get_stream(stream_name).await {
-            Ok(stream) => {
-                info!(stream = %stream_name, "stream found");
-                return Ok(stream);
-            }
-            Err(NatsError::StreamNotFound { .. }) => {}
-            Err(e) => return Err(e),
-        }
-
         let stream_config = async_nats::jetstream::stream::Config {
             name: stream_name.to_string(),
             subjects: subjects.clone(),
@@ -159,8 +163,11 @@ impl NatsBroker {
             max_age: self.config.stream_max_age().unwrap_or_default(),
             max_bytes: self.config.stream_max_bytes.unwrap_or(-1),
             max_messages: self.config.stream_max_messages.unwrap_or(-1),
+            max_messages_per_subject: 1,
             storage: async_nats::jetstream::stream::StorageType::File,
-            retention: async_nats::jetstream::stream::RetentionPolicy::Limits,
+            retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+            discard: async_nats::jetstream::stream::DiscardPolicy::New,
+            discard_new_per_subject: true,
             ..Default::default()
         };
 
@@ -173,7 +180,7 @@ impl NatsBroker {
                 source: e,
             })?;
 
-        info!(stream = %stream_name, ?subjects, "stream created");
+        info!(stream = %stream_name, ?subjects, "stream created or updated");
 
         let mut cache = self.streams.write().await;
         cache.insert(stream_name.clone(), stream.clone());
@@ -265,7 +272,8 @@ impl NatsBroker {
     }
 
     pub async fn publish(&self, topic: &Topic, envelope: &Envelope) -> Result<(), NatsError> {
-        self.jetstream
+        let ack_future = self
+            .jetstream
             .publish(topic.subject.to_string(), envelope.payload.clone())
             .await
             .map_err(|e| {
@@ -273,16 +281,18 @@ impl NatsBroker {
                     "failed to publish to '{}' (stream '{}'): {e}",
                     topic.subject, topic.stream
                 ))
-            })?
-            .await
-            .map_err(|e| {
-                NatsError::Publish(format!(
-                    "publish ack failed for '{}' (stream '{}'): {e}",
-                    topic.subject, topic.stream
-                ))
             })?;
 
-        Ok(())
+        match ack_future.await {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == PublishErrorKind::Other && is_per_subject_limit_error(&e) => {
+                Err(NatsError::PublishDuplicate)
+            }
+            Err(e) => Err(NatsError::Publish(format!(
+                "publish ack failed for '{}' (stream '{}'): {e}",
+                topic.subject, topic.stream
+            ))),
+        }
     }
 
     pub async fn subscribe(
@@ -491,4 +501,16 @@ impl NatsBroker {
             message: e.to_string(),
         })
     }
+}
+
+/// async_nats has no typed variant for per-subject limit rejection; it falls through to PublishErrorKind::Other.
+fn is_per_subject_limit_error(error: &PublishError) -> bool {
+    use std::error::Error as _;
+    let Some(source) = error.source() else {
+        return false;
+    };
+    if let Some(api_error) = source.downcast_ref::<async_nats::jetstream::Error>() {
+        return api_error.error_code() == ErrorCode::STREAM_STORE_FAILED;
+    }
+    false
 }

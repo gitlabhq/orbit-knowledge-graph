@@ -11,7 +11,7 @@ use crate::dispatcher::{DispatchError, Dispatcher};
 use crate::modules::sdlc::dispatch::DispatchMetrics;
 use crate::nats::NatsServices;
 use crate::topic::ProjectCodeIndexingRequest;
-use crate::types::{Envelope, Event};
+use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
 
 const PENDING_PROJECTS_QUERY: &str = r#"
@@ -112,32 +112,43 @@ impl ProjectCodeDispatcher {
         );
 
         let mut dispatched: u64 = 0;
+        let mut skipped: u64 = 0;
 
         for project_id in &project_ids {
-            let envelope = Envelope::new(&ProjectCodeIndexingRequest {
+            let request = ProjectCodeIndexingRequest {
                 project_id: *project_id,
-            })
-            .map_err(|error| {
+            };
+
+            let topic = request.publish_topic();
+            let envelope = Envelope::new(&request).map_err(|error| {
                 self.metrics.record_error(self.name(), "publish");
                 DispatchError::new(error)
             })?;
 
-            self.nats
-                .publish(&ProjectCodeIndexingRequest::topic(), &envelope)
-                .await
-                .map_err(|error| {
+            match self.nats.publish(&topic, &envelope).await {
+                Ok(()) => {
+                    dispatched += 1;
+                    debug!(project_id, "dispatched code indexing request");
+                }
+                Err(crate::nats::NatsError::PublishDuplicate) => {
+                    skipped += 1;
+                    debug!(
+                        project_id,
+                        "skipped code indexing request, already in-flight"
+                    );
+                }
+                Err(error) => {
                     self.metrics.record_error(self.name(), "publish");
-                    DispatchError::new(error)
-                })?;
-
-            dispatched += 1;
-            debug!(project_id, "dispatched code indexing request");
+                    return Err(DispatchError::new(error));
+                }
+            }
         }
 
         self.metrics
             .record_requests_published(self.name(), dispatched);
+        self.metrics.record_requests_skipped(self.name(), skipped);
 
-        info!(dispatched, "dispatched code indexing requests");
+        info!(dispatched, skipped, "dispatched code indexing requests");
         Ok(())
     }
 

@@ -3,7 +3,6 @@ mod checkpoint;
 mod datalake;
 pub mod dispatch;
 mod global_handler;
-pub mod locking;
 mod metrics;
 mod namespace_handler;
 mod pipeline;

@@ -34,7 +34,7 @@ const PASSWORD: &str = "testpass";
 const DATABASE: &str = "test";
 
 fn test_topic() -> Topic {
-    Topic::new(STREAM, SUBJECT)
+    Topic::external(STREAM, SUBJECT)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

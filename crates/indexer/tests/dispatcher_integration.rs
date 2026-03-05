@@ -13,7 +13,7 @@ use indexer::modules::sdlc::dispatch::{
     NamespaceDispatcherConfig,
 };
 use indexer::nats::NatsConfiguration;
-use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT};
+use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};
 use serde::Deserialize;
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -95,7 +95,8 @@ impl TestContext {
     }
 
     async fn consume_namespace_requests(&self) -> Vec<NamespaceRequest> {
-        self.consume_messages(NAMESPACE_INDEXING_SUBJECT).await
+        self.consume_messages(NAMESPACE_INDEXING_SUBJECT_PATTERN)
+            .await
     }
 
     async fn consume_messages<T: for<'de> Deserialize<'de>>(&self, subject: &str) -> Vec<T> {
@@ -151,8 +152,12 @@ impl TestContext {
                 name: INDEXER_STREAM.into(),
                 subjects: vec![
                     GLOBAL_INDEXING_SUBJECT.into(),
-                    NAMESPACE_INDEXING_SUBJECT.into(),
+                    NAMESPACE_INDEXING_SUBJECT_PATTERN.into(),
                 ],
+                retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+                max_messages_per_subject: 1,
+                discard: async_nats::jetstream::stream::DiscardPolicy::New,
+                discard_new_per_subject: true,
                 ..Default::default()
             })
             .await
@@ -194,13 +199,11 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
-            services.lock_service.clone(),
             metrics.clone(),
             GlobalDispatcherConfig::default(),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats,
-            services.lock_service,
             datalake,
             metrics,
             NamespaceDispatcherConfig::default(),

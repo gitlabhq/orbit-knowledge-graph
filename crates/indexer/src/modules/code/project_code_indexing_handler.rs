@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
+use super::locking::project_lock_key;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::project_store::ProjectStore;
 use super::push_event_store::PushEventStore;
@@ -15,7 +16,6 @@ use super::repository_service::RepositoryService;
 use super::watermark_store::CodeWatermarkStore;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::modules::sdlc::locking::project_lock_key;
 use crate::topic::ProjectCodeIndexingRequest;
 use crate::types::{Envelope, Event, Topic};
 
