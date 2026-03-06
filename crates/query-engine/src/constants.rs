@@ -23,11 +23,6 @@ pub const NEIGHBOR_ID_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_id")
 pub const NEIGHBOR_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_type");
 pub const RELATIONSHIP_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "relationship_type");
 
-/// Tables that should NOT have traversal path security filters applied.
-/// These are entities whose visibility is determined through relationships
-/// (e.g., MEMBER_OF) rather than direct path hierarchy.
-pub const SKIP_SECURITY_FILTER_TABLES: &[&str] = &[concatcp!(GL_TABLE_PREFIX, "user")];
-
 // _gkg_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
     format!("{GKG_COLUMN_PREFIX}{alias}_pk")

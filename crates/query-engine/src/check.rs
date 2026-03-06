@@ -11,24 +11,27 @@ use serde_json::Value;
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::security::{SecurityContext, collect_node_aliases};
+use crate::security::{collect_node_aliases, SecurityContext};
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 
 /// Verify post-compilation invariants on the final AST.
-pub fn check_ast(node: &Node, ctx: &SecurityContext) -> Result<()> {
+///
+/// `skip_tables` must match the list passed to `apply_security_context` so the
+/// checker agrees on which tables need traversal_path filters.
+pub fn check_ast(node: &Node, ctx: &SecurityContext, skip_tables: &[String]) -> Result<()> {
     match node {
         Node::Query(q) => {
             for cte in &q.ctes {
-                check_query(&cte.query, ctx)?;
+                check_query(&cte.query, ctx, skip_tables)?;
             }
-            check_query(q, ctx)
+            check_query(q, ctx, skip_tables)
         }
     }
 }
 
-fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
-    let aliases = collect_node_aliases(&q.from);
+fn check_query(q: &Query, ctx: &SecurityContext, skip_tables: &[String]) -> Result<()> {
+    let aliases = collect_node_aliases(&q.from, skip_tables);
     for alias in &aliases {
         if !has_valid_path_filter(q.where_clause.as_ref(), alias, ctx) {
             return Err(QueryError::Security(format!(
@@ -40,26 +43,30 @@ fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
     // Recurse into UNION ALL arms (defense-in-depth: currently only
     // recursive CTE arms which scan CTE names, not gl_* tables).
     for arm in &q.union_all {
-        check_query(arm, ctx)?;
+        check_query(arm, ctx, skip_tables)?;
     }
 
-    check_derived_tables_in_from(&q.from, ctx)
+    check_derived_tables_in_from(&q.from, ctx, skip_tables)
 }
 
 /// Recurse into derived tables (subqueries, UNION ALL arms) in a FROM clause
 /// and verify each arm's query has valid security filters.
-fn check_derived_tables_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> Result<()> {
+fn check_derived_tables_in_from(
+    table_ref: &TableRef,
+    ctx: &SecurityContext,
+    skip_tables: &[String],
+) -> Result<()> {
     match table_ref {
-        TableRef::Subquery { query, .. } => check_query(query, ctx),
+        TableRef::Subquery { query, .. } => check_query(query, ctx, skip_tables),
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                check_query(arm, ctx)?;
+                check_query(arm, ctx, skip_tables)?;
             }
             Ok(())
         }
         TableRef::Join { left, right, .. } => {
-            check_derived_tables_in_from(left, ctx)?;
-            check_derived_tables_in_from(right, ctx)
+            check_derived_tables_in_from(left, ctx, skip_tables)?;
+            check_derived_tables_in_from(right, ctx, skip_tables)
         }
         TableRef::Scan { .. } => Ok(()),
     }
@@ -101,6 +108,11 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
 mod tests {
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
+
+    fn no_skip() -> Vec<String> {
+        vec![]
+    }
+
     fn project_query(where_clause: Option<Expr>) -> Node {
         Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -118,19 +130,18 @@ mod tests {
     fn passes_after_security_injection() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::security::apply_security_context(&mut node, &ctx).unwrap();
-        assert!(check_ast(&node, &ctx).is_ok());
+        crate::security::apply_security_context(&mut node, &ctx, &no_skip()).unwrap();
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 
     #[test]
     fn fails_without_any_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = project_query(Some(Expr::lit(true)));
-        let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        let err = check_ast(&node, &ctx, &no_skip()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -142,19 +153,18 @@ mod tests {
             vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::lit("99/")],
         );
         let node = project_query(Some(wrong_filter));
-        let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        let err = check_ast(&node, &ctx, &no_skip()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
     fn accepts_lowest_common_prefix() {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::security::apply_security_context(&mut node, &ctx).unwrap();
-        assert!(check_ast(&node, &ctx).is_ok());
+        crate::security::apply_security_context(&mut node, &ctx, &no_skip()).unwrap();
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 
     #[test]
@@ -169,7 +179,7 @@ mod tests {
             where_clause: None,
             ..Default::default()
         }));
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 
     fn wrap_in_subquery(inner: Query) -> Node {
@@ -200,19 +210,22 @@ mod tests {
     fn rejects_subquery_without_inner_security_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = wrap_in_subquery(inner_project_query(None));
-        let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        let err = check_ast(&node, &ctx, &no_skip()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
     fn accepts_subquery_with_inner_security_filter() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut inner = inner_project_query(None);
-        crate::security::apply_security_context(&mut Node::Query(Box::new(inner.clone())), &ctx)
-            .unwrap();
+        crate::security::apply_security_context(
+            &mut Node::Query(Box::new(inner.clone())),
+            &ctx,
+            &no_skip(),
+        )
+        .unwrap();
         // Re-extract the filtered query from the node
         let filter = Expr::func(
             STARTS_WITH_FNAME,
@@ -220,7 +233,7 @@ mod tests {
         );
         inner.where_clause = Some(filter);
         let node = wrap_in_subquery(inner);
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 
     #[test]
@@ -241,11 +254,10 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        let err = check_ast(&node, &ctx, &no_skip()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -271,7 +283,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 
     #[test]
@@ -287,7 +299,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 
     // ── UNION ALL arm checks ────────────────────────────────────────
@@ -317,11 +329,10 @@ mod tests {
             }],
             ..Default::default()
         }));
-        let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        let err = check_ast(&node, &ctx, &no_skip()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -345,8 +356,8 @@ mod tests {
             }],
             ..Default::default()
         }));
-        crate::security::apply_security_context(&mut node, &ctx).unwrap();
-        assert!(check_ast(&node, &ctx).is_ok());
+        crate::security::apply_security_context(&mut node, &ctx, &no_skip()).unwrap();
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 
     // ── CTE security check tests ────────────────────────────────────
@@ -377,7 +388,7 @@ mod tests {
         }));
 
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &no_skip()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -416,7 +427,7 @@ mod tests {
         }));
 
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 
     // ── TableRef::Union structural enforcement ──────────────────────
@@ -455,7 +466,7 @@ mod tests {
             where_clause: Some(filter),
             ..Default::default()
         }));
-        let err = check_ast(&node, &ctx).unwrap_err();
+        let err = check_ast(&node, &ctx, &no_skip()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -501,6 +512,6 @@ mod tests {
             where_clause: Some(outer_filter),
             ..Default::default()
         }));
-        assert!(check_ast(&node, &ctx).is_ok());
+        assert!(check_ast(&node, &ctx, &no_skip()).is_ok());
     }
 }

@@ -24,6 +24,16 @@ pub enum DynamicColumnMode {
     Default,
 }
 
+/// Ontology-derived settings that affect query compilation (e.g., security filter behavior).
+/// Populated during normalization from the ontology; not part of the JSON input.
+#[derive(Debug, Clone, Default)]
+pub struct QuerySettings {
+    /// Table names that should skip traversal_path security filters.
+    /// These are entities whose visibility is determined through relationships
+    /// rather than direct path hierarchy.
+    pub skip_traversal_path_tables: Vec<String>,
+}
+
 /// Consumer-level preferences that affect result presentation, not query semantics.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct QueryOptions {
@@ -69,6 +79,10 @@ pub struct Input {
     pub aggregation_sort: Option<InputAggSort>,
     #[serde(default)]
     pub options: QueryOptions,
+    /// Ontology-derived settings that affect query compilation. Populated during
+    /// normalization; not part of the JSON input.
+    #[serde(skip)]
+    pub settings: QuerySettings,
     /// Auth config for every entity type with redaction configured. Populated by
     /// normalization; covers all ontology entities (not just those in this query)
     /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
@@ -90,6 +104,7 @@ impl Default for Input {
             order_by: None,
             aggregation_sort: None,
             options: QueryOptions::default(),
+            settings: QuerySettings::default(),
             entity_auth: HashMap::new(),
         }
     }

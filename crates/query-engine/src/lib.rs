@@ -55,7 +55,7 @@ pub use constants::{
 };
 pub use enforce::{RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
-pub use input::{DynamicColumnMode, EntityAuthConfig};
+pub use input::{DynamicColumnMode, EntityAuthConfig, QuerySettings};
 pub use input::{Input, QueryType, parse_input};
 pub use lower::lower;
 pub use metrics::{METRICS, QueryEngineMetrics};
@@ -95,8 +95,9 @@ pub fn compile(
 
     let mut node = lower(&input).count_err()?;
     let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx).count_err()?;
-    check_ast(&node, ctx).count_err()?;
+    let skip_tables = &input.settings.skip_traversal_path_tables;
+    apply_security_context(&mut node, ctx, skip_tables).count_err()?;
+    check_ast(&node, ctx, skip_tables).count_err()?;
     let base = codegen(&node, result_context).count_err()?;
 
     let hydration = build_hydration_plan(&input);

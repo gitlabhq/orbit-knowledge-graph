@@ -88,6 +88,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;
     ontology.edge_sort_key = schema.settings.edge_sort_key;
 
+    // Resolve entity names to table names for skip_traversal_path.
+    // Validation that entities exist happens after nodes are loaded (below).
+    let skip_traversal_path_entities = schema.settings.skip_traversal_path;
+
     let etl_settings = EtlSettings {
         watermark: schema.settings.etl.default_watermark,
         deleted: schema.settings.etl.default_deleted,
@@ -179,6 +183,18 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .edge_etl_configs
                 .insert(edge_name.clone(), etl_config);
         }
+    }
+
+    // Resolve skip_traversal_path entity names → table names.
+    for entity_name in &skip_traversal_path_entities {
+        let node = ontology.nodes.get(entity_name).ok_or_else(|| {
+            OntologyError::Validation(format!(
+                "skip_traversal_path references unknown node '{entity_name}'"
+            ))
+        })?;
+        ontology
+            .skip_traversal_path_tables
+            .push(node.destination_table.clone());
     }
 
     Ok(ontology)

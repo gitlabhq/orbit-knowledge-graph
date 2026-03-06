@@ -1,10 +1,10 @@
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 
-use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::entities::{DataType, EnumType, Field, NodeEntity, NodeStyle, RedactionConfig};
 use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+use crate::OntologyError;
 
 use super::EtlSettings;
 

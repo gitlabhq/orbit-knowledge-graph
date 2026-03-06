@@ -18,6 +18,8 @@ pub(super) struct SettingsYaml {
     pub edge_table: String,
     pub default_entity_sort_key: Vec<String>,
     pub edge_sort_key: Vec<String>,
+    #[serde(default)]
+    pub skip_traversal_path: Vec<String>,
     pub etl: EtlSettingsYaml,
 }
 

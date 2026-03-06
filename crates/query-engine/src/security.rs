@@ -8,7 +8,7 @@
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
 use crate::ast::{Expr, Node, Op, Query, TableRef};
-use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
+use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -70,19 +70,26 @@ fn validate_traversal_path(path: &str, org_id: i64) -> Result<()> {
 }
 
 /// Inject security filters into an AST node (mutates in place).
-pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<()> {
+///
+/// `skip_tables` lists table names that should NOT have traversal_path filters
+/// applied (e.g., entities whose visibility is relationship-based).
+pub fn apply_security_context(
+    node: &mut Node,
+    ctx: &SecurityContext,
+    skip_tables: &[String],
+) -> Result<()> {
     match node {
         Node::Query(q) => {
             for cte in &mut q.ctes {
-                apply_to_query(&mut cte.query, ctx)?;
+                apply_to_query(&mut cte.query, ctx, skip_tables)?;
             }
-            apply_to_query(q, ctx)
+            apply_to_query(q, ctx, skip_tables)
         }
     }
 }
 
-fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
-    let aliases = collect_node_aliases(&q.from);
+fn apply_to_query(q: &mut Query, ctx: &SecurityContext, skip_tables: &[String]) -> Result<()> {
+    let aliases = collect_node_aliases(&q.from, skip_tables);
     if !aliases.is_empty() {
         let security_conds = aliases
             .iter()
@@ -95,11 +102,11 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
     }
 
     // Recurse into derived tables (UNION ALL arms, subqueries) in FROM
-    apply_security_to_from(&mut q.from, ctx)?;
+    apply_security_to_from(&mut q.from, ctx, skip_tables)?;
 
     // Recurse into top-level UNION ALL arms
     for arm in &mut q.union_all {
-        apply_to_query(arm, ctx)?;
+        apply_to_query(arm, ctx, skip_tables)?;
     }
 
     Ok(())
@@ -150,15 +157,15 @@ fn starts_with_expr(alias: &str, path: &str) -> Expr {
     )
 }
 
-pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
+pub(crate) fn collect_node_aliases(table_ref: &TableRef, skip_tables: &[String]) -> Vec<String> {
     match table_ref {
-        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table) => {
+        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, skip_tables) => {
             vec![alias.clone()]
         }
         TableRef::Scan { .. } => vec![],
         TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_node_aliases(left);
-            aliases.extend(collect_node_aliases(right));
+            let mut aliases = collect_node_aliases(left, skip_tables);
+            aliases.extend(collect_node_aliases(right, skip_tables));
             aliases
         }
         // Derived tables don't have traversal_path columns themselves.
@@ -169,19 +176,23 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
 
 /// Recurse into derived tables (UNION ALL arms, subqueries) inside a FROM
 /// clause and apply security filters to each arm's query.
-fn apply_security_to_from(table_ref: &mut TableRef, ctx: &SecurityContext) -> Result<()> {
+fn apply_security_to_from(
+    table_ref: &mut TableRef,
+    ctx: &SecurityContext,
+    skip_tables: &[String],
+) -> Result<()> {
     match table_ref {
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                apply_to_query(arm, ctx)?;
+                apply_to_query(arm, ctx, skip_tables)?;
             }
         }
         TableRef::Subquery { query, .. } => {
-            apply_to_query(query, ctx)?;
+            apply_to_query(query, ctx, skip_tables)?;
         }
         TableRef::Join { left, right, .. } => {
-            apply_security_to_from(left, ctx)?;
-            apply_security_to_from(right, ctx)?;
+            apply_security_to_from(left, ctx, skip_tables)?;
+            apply_security_to_from(right, ctx, skip_tables)?;
         }
         TableRef::Scan { .. } => {}
     }
@@ -189,14 +200,14 @@ fn apply_security_to_from(table_ref: &mut TableRef, ctx: &SecurityContext) -> Re
 }
 
 /// Determines if a table should have traversal path security filters applied.
-fn should_apply_security_filter(table: &str) -> bool {
+fn should_apply_security_filter(table: &str, skip_tables: &[String]) -> bool {
     // Only apply to actual node tables and edge table (GL_TABLE_PREFIX)
     // This excludes CTEs like "path_cte" which don't have traversal_path
     if !table.starts_with(GL_TABLE_PREFIX) {
         return false;
     }
     // Skip tables for entities whose visibility is relationship-based
-    if SKIP_SECURITY_FILTER_TABLES.contains(&table) {
+    if skip_tables.iter().any(|s| s == table) {
         return false;
     }
     true
@@ -207,6 +218,14 @@ mod tests {
     use super::*;
     use crate::ast::{JoinType, SelectExpr};
     use ontology::constants::EDGE_TABLE;
+
+    fn skip_user() -> Vec<String> {
+        vec!["gl_user".to_string()]
+    }
+
+    fn no_skip() -> Vec<String> {
+        vec![]
+    }
 
     fn simple_query() -> Node {
         Node::Query(Box::new(Query {
@@ -277,7 +296,7 @@ mod tests {
     fn inject_adds_security_to_simple_query() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = simple_query();
-        apply_security_context(&mut node, &ctx).unwrap();
+        apply_security_context(&mut node, &ctx, &no_skip()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -293,7 +312,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx).unwrap();
+        apply_security_context(&mut node, &ctx, &no_skip()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -306,13 +325,12 @@ mod tests {
             Expr::eq(Expr::col("p", "id"), Expr::col("e", "source")),
         );
 
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &no_skip());
         assert_eq!(aliases, vec!["p", "e"]);
     }
 
     #[test]
     fn inject_skips_user_table() {
-        // User visibility is determined through MEMBER_OF, not traversal path
         let from = TableRef::join(
             JoinType::Inner,
             TableRef::scan("gl_user", "u"),
@@ -320,26 +338,28 @@ mod tests {
             Expr::lit(true),
         );
 
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &skip_user());
         // Should only include mr, not u (gl_user is skipped)
         assert_eq!(aliases, vec!["mr"]);
     }
 
     #[test]
     fn should_apply_security_filter_skips_user() {
-        assert!(!should_apply_security_filter("gl_user"));
-        assert!(should_apply_security_filter(EDGE_TABLE));
-        assert!(should_apply_security_filter("gl_project"));
-        assert!(should_apply_security_filter("gl_merge_request"));
+        let skip = skip_user();
+        assert!(!should_apply_security_filter("gl_user", &skip));
+        assert!(should_apply_security_filter(EDGE_TABLE, &skip));
+        assert!(should_apply_security_filter("gl_project", &skip));
+        assert!(should_apply_security_filter("gl_merge_request", &skip));
     }
 
     #[test]
     fn should_apply_security_filter_skips_ctes() {
+        let skip = no_skip();
         // CTEs like path_cte don't have traversal_path column
-        assert!(!should_apply_security_filter("path_cte"));
-        assert!(!should_apply_security_filter("some_cte"));
+        assert!(!should_apply_security_filter("path_cte", &skip));
+        assert!(!should_apply_security_filter("some_cte", &skip));
         // Only gl_ prefixed tables should have security filters
-        assert!(!should_apply_security_filter("nodes"));
+        assert!(!should_apply_security_filter("nodes", &skip));
     }
 
     #[test]
@@ -355,7 +375,7 @@ mod tests {
             }],
             "hop_e0",
         );
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &no_skip());
         assert!(aliases.is_empty());
     }
 
@@ -388,7 +408,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx).unwrap();
+        apply_security_context(&mut node, &ctx, &no_skip()).unwrap();
 
         let Node::Query(q) = &node;
         assert!(
@@ -433,7 +453,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx).unwrap();
+        apply_security_context(&mut node, &ctx, &no_skip()).unwrap();
 
         let Node::Query(q) = &node;
         assert!(

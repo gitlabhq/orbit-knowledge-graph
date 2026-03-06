@@ -261,6 +261,13 @@
           "minItems": 1,
           "uniqueItems": true
         },
+        "skip_traversal_path": {
+          "type": "array",
+          "description": "Entity types whose tables should NOT have traversal_path security filters applied. These are entities whose visibility is determined through relationships rather than direct path hierarchy.",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "default": []
+        },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."

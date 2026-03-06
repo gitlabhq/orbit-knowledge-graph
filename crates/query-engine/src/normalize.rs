@@ -7,7 +7,7 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, EntityAuthConfig, Input};
+use crate::input::{ColumnSelection, EntityAuthConfig, Input, QuerySettings};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
@@ -62,6 +62,9 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
 /// - Expands wildcard column selections ("*") to explicit column lists
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     input.entity_auth = build_entity_auth(ontology);
+    input.settings = QuerySettings {
+        skip_traversal_path_tables: ontology.skip_traversal_path_tables().to_vec(),
+    };
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {

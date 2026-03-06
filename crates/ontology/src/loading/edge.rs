@@ -1,9 +1,9 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-use crate::OntologyError;
 use crate::entities::{EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig};
 use crate::etl::EtlScope;
+use crate::OntologyError;
 
 use super::EtlSettings;
 

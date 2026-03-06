@@ -91,6 +91,9 @@ pub struct Ontology {
     pub(crate) default_entity_sort_key: Vec<String>,
     /// ORDER BY columns for the edge table (dedup key for ReplacingMergeTree).
     pub(crate) edge_sort_key: Vec<String>,
+    /// Entity types whose tables skip traversal_path security filters.
+    /// Resolved to table names (e.g., `["gl_user"]`) during loading.
+    pub(crate) skip_traversal_path_tables: Vec<String>,
     pub(crate) domains: BTreeMap<String, DomainInfo>,
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
@@ -122,6 +125,7 @@ impl Ontology {
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect(),
+            skip_traversal_path_tables: Vec::new(),
             domains: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
@@ -424,6 +428,12 @@ impl Ontology {
     #[must_use]
     pub fn edge_sort_key(&self) -> &[String] {
         &self.edge_sort_key
+    }
+
+    /// Table names that should skip traversal_path security filters.
+    #[must_use]
+    pub fn skip_traversal_path_tables(&self) -> &[String] {
+        &self.skip_traversal_path_tables
     }
 
     /// Look up the dedup key (ORDER BY columns) for a ClickHouse table name.
