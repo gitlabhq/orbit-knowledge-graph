@@ -11,8 +11,8 @@ use crate::common::{
 pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
     context
         .execute(
-            "INSERT INTO namespace_indexing_watermark (namespace, entity, watermark)
-            VALUES (100, 'Group', '2024-01-19 00:00:00')",
+            "INSERT INTO sdlc_checkpoint (key, watermark, cursor_values) \
+             VALUES ('ns.100.Group', '2024-01-19 00:00:00.000000', 'null')",
         )
         .await;
 
@@ -50,7 +50,9 @@ pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT count() as cnt FROM gl_group").await;
+    let result = context
+        .query("SELECT count() as cnt FROM gl_group FINAL")
+        .await;
     let count_array = result[0]
         .column(0)
         .as_any()
@@ -63,7 +65,7 @@ pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
         "should only process new-team, not org1"
     );
 
-    let names = context.query("SELECT name FROM gl_group").await;
+    let names = context.query("SELECT name FROM gl_group FINAL").await;
     let name_array = get_string_column(&names[0], "name");
 
     assert_eq!(name_array.value(0), "new-team");

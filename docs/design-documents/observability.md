@@ -71,7 +71,6 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 |---|---|---|---|---|
 | `indexer.sdlc.pipeline.duration` | Histogram | s | `entity` | End-to-end duration of an entity or edge pipeline run |
 | `indexer.sdlc.pipeline.rows.processed` | Counter | count | `entity` | Total rows extracted and written |
-| `indexer.sdlc.pipeline.edges.processed` | Counter | count | `entity` | Total edges written |
 | `indexer.sdlc.pipeline.batches.processed` | Counter | count | `entity` | Total Arrow batches processed |
 | `indexer.sdlc.pipeline.errors` | Counter | count | `entity`, `error_kind` | SDLC pipeline failures |
 | `indexer.sdlc.handler.duration` | Histogram | s | `handler` | Duration of a full handler invocation |

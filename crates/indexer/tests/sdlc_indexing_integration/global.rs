@@ -40,7 +40,9 @@ pub async fn processes_and_transforms_users(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_user ORDER BY id").await;
+    let result = context
+        .query("SELECT * FROM gl_user FINAL ORDER BY id")
+        .await;
 
     assert!(!result.is_empty(), "result should not be empty");
 
@@ -72,7 +74,10 @@ pub async fn processes_and_transforms_users(context: &TestContext) {
 
 pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
     context
-        .execute("INSERT INTO global_indexing_watermark (watermark) VALUES ('2024-01-19 00:00:00')")
+        .execute(
+            "INSERT INTO sdlc_checkpoint (key, watermark, cursor_values) \
+             VALUES ('global.User', '2024-01-19 00:00:00.000000', 'null')",
+        )
         .await;
 
     context
@@ -105,7 +110,9 @@ pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT count() as cnt FROM gl_user").await;
+    let result = context
+        .query("SELECT count() as cnt FROM gl_user FINAL")
+        .await;
     let count_array = result[0]
         .column(0)
         .as_any()
@@ -118,7 +125,7 @@ pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
         "should only process new_user, not old_user"
     );
 
-    let usernames = context.query("SELECT username FROM gl_user").await;
+    let usernames = context.query("SELECT username FROM gl_user FINAL").await;
 
     let username_array = usernames[0]
         .column(0)

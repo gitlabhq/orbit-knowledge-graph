@@ -1,17 +1,11 @@
--- Watermark tables
+-- Checkpoint table
 
-CREATE TABLE IF NOT EXISTS global_indexing_watermark (
-    id UInt8 DEFAULT 1,
+CREATE TABLE IF NOT EXISTS sdlc_checkpoint (
+    key String,
     watermark DateTime64(6, 'UTC'),
+    cursor_values String DEFAULT '',
     _version DateTime64(6, 'UTC') DEFAULT now64()
-) ENGINE = ReplacingMergeTree(_version) ORDER BY (id);
-
-CREATE TABLE IF NOT EXISTS namespace_indexing_watermark (
-    namespace Int64,
-    entity String,
-    watermark DateTime64(6, 'UTC'),
-    _version DateTime64(6, 'UTC') DEFAULT now64()
-) ENGINE = ReplacingMergeTree(_version) ORDER BY (namespace, entity) PRIMARY KEY(namespace, entity);
+) ENGINE = ReplacingMergeTree(_version) ORDER BY (key);
 
 -- Graph node tables
 

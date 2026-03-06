@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfiguration};
 use query_engine::ParameterizedQuery;
@@ -53,10 +54,18 @@ impl TestContext {
     }
 
     pub async fn query(&self, sql: &str) -> Vec<RecordBatch> {
-        self.create_client()
+        let batches = self
+            .create_client()
             .query_arrow(sql)
             .await
-            .expect("query failed")
+            .expect("query failed");
+
+        if batches.len() <= 1 {
+            return batches;
+        }
+
+        let schema = batches[0].schema();
+        vec![concat_batches(&schema, &batches).expect("failed to concat query results")]
     }
 
     pub async fn execute(&self, sql: &str) {

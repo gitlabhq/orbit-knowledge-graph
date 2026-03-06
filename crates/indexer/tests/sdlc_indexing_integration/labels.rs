@@ -59,7 +59,7 @@ pub async fn processes_labels_with_edges(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, title, color, description FROM gl_label ORDER BY id")
+        .query("SELECT id, title, color, description FROM gl_label FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "labels should exist");
 

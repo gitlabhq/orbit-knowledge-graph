@@ -1,561 +1,606 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::destination::{BatchWriter, Destination};
-use crate::handler::HandlerError;
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
-use futures::StreamExt;
-use ontology::{EdgeSourceEtlConfig, NodeEntity, Ontology};
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
+use crate::clickhouse::TIMESTAMP_FORMAT;
+use crate::destination::Destination;
+use crate::handler::HandlerError;
+
+use super::checkpoint_store::{Checkpoint, CheckpointStore};
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
-use super::prepare::{PreparedEdgeEtl, PreparedEtlConfig};
-use super::transform::{
-    SOURCE_DATA_TABLE, build_all_edge_sql, build_edge_etl_transform_sql, build_transform_sql,
-};
+use super::plan::{PipelinePlan, SOURCE_DATA_TABLE, Transformation};
+const MAX_RETRIES: u32 = 3;
 
-pub struct OntologyEntityPipeline {
-    entity_name: String,
-    destination_table: String,
-    edge_table: String,
-    extract_query: String,
-    transform_sql: String,
-    edge_transforms: Vec<String>,
+pub(in crate::modules::sdlc) struct PipelineContext {
+    pub watermark: DateTime<Utc>,
+    pub position_key: String,
+    pub base_conditions: BTreeMap<String, String>,
+}
+
+pub(in crate::modules::sdlc) struct Pipeline {
     datalake: Arc<dyn DatalakeQuery>,
+    checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
 }
 
-impl OntologyEntityPipeline {
-    pub fn from_node(
-        node: &NodeEntity,
-        ontology: &Ontology,
+impl Pipeline {
+    pub fn new(
         datalake: Arc<dyn DatalakeQuery>,
-        metrics: SdlcMetrics,
-    ) -> Option<Self> {
-        let config = PreparedEtlConfig::from_node(node, ontology)?;
-        let transform_sql = build_transform_sql(&config);
-        let edge_transforms = build_all_edge_sql(&config);
-
-        Some(Self {
-            entity_name: config.node_kind,
-            destination_table: config.destination_table,
-            edge_table: ontology.edge_table().to_string(),
-            extract_query: config.extract_query,
-            transform_sql,
-            edge_transforms,
-            datalake,
-            metrics,
-        })
-    }
-
-    pub fn entity_name(&self) -> &str {
-        &self.entity_name
-    }
-
-    pub async fn process(
-        &self,
-        params: Value,
-        destination: &dyn Destination,
-    ) -> Result<u64, HandlerError> {
-        let started_at = Instant::now();
-
-        let entity_writer = destination
-            .new_batch_writer(&self.destination_table)
-            .await
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to create {} writer: {e}",
-                    self.entity_name
-                ))
-            })?;
-
-        let edge_writer = destination
-            .new_batch_writer(&self.edge_table)
-            .await
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to create edge writer for {}: {e}",
-                    self.entity_name
-                ))
-            })?;
-
-        debug!(
-            entity = %self.entity_name,
-            %params,
-            "querying datalake for entity data"
-        );
-
-        let query_start = Instant::now();
-        let mut stream = self
-            .datalake
-            .query_arrow(&self.extract_query, params)
-            .await
-            .map_err(|e| {
-                HandlerError::Processing(format!("failed to query {} data: {e}", self.entity_name))
-            })?;
-        self.metrics
-            .record_datalake_query_duration(&self.entity_name, query_start.elapsed().as_secs_f64());
-
-        let mut batch_count: u64 = 0;
-        let mut total_rows: u64 = 0;
-        let mut total_edges: u64 = 0;
-
-        while let Some(result) = stream.next().await {
-            let source_batch = result.map_err(|e| {
-                HandlerError::Processing(format!("failed to read {} batch: {e}", self.entity_name))
-            })?;
-
-            if source_batch.num_rows() == 0 {
-                continue;
-            }
-
-            batch_count += 1;
-            let batch_rows = source_batch.num_rows() as u64;
-            total_rows += batch_rows;
-
-            let edges_written = self
-                .transform_and_write_batch(
-                    source_batch,
-                    entity_writer.as_ref(),
-                    edge_writer.as_ref(),
-                )
-                .await?;
-            total_edges += edges_written as u64;
-        }
-
-        let elapsed = started_at.elapsed();
-
-        self.metrics.record_pipeline_completion(
-            &self.entity_name,
-            elapsed.as_secs_f64(),
-            total_rows,
-            total_edges,
-            batch_count,
-        );
-
-        if total_rows == 0 {
-            debug!(
-                entity = %self.entity_name,
-                elapsed_ms = elapsed.as_millis() as u64,
-                "entity pipeline processing complete"
-            );
-        } else {
-            info!(
-                entity = %self.entity_name,
-                batches_processed = batch_count,
-                total_rows,
-                total_edges,
-                elapsed_ms = elapsed.as_millis() as u64,
-                "entity pipeline processing complete"
-            );
-        }
-
-        Ok(total_rows)
-    }
-
-    async fn transform_and_write_batch(
-        &self,
-        batch: RecordBatch,
-        entity_writer: &dyn BatchWriter,
-        edge_writer: &dyn BatchWriter,
-    ) -> Result<usize, HandlerError> {
-        let transform_start = Instant::now();
-        let session = SessionContext::new();
-
-        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to create mem table for {}: {e}",
-                self.entity_name
-            ))
-        })?;
-
-        session
-            .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to register table for {}: {e}",
-                    self.entity_name
-                ))
-            })?;
-
-        let transformed = self.execute_query(&session, &self.transform_sql).await?;
-        let rows_transformed = transformed.num_rows();
-        entity_writer
-            .write_batch(&[transformed])
-            .await
-            .map_err(|e| {
-                HandlerError::Processing(format!("failed to write {}: {e}", self.entity_name))
-            })?;
-
-        debug!(
-            entity = %self.entity_name,
-            rows = rows_transformed,
-            "entity batch transform and write complete"
-        );
-
-        let mut edges_written = 0;
-        for edge_sql in &self.edge_transforms {
-            let edges = self.execute_query(&session, edge_sql).await?;
-            let edge_count = edges.num_rows();
-            if edge_count > 0 {
-                edge_writer.write_batch(&[edges]).await.map_err(|e| {
-                    HandlerError::Processing(format!(
-                        "failed to write edges for {}: {e}",
-                        self.entity_name
-                    ))
-                })?;
-                edges_written += edge_count;
-            }
-        }
-
-        self.metrics
-            .record_transform_duration(&self.entity_name, transform_start.elapsed().as_secs_f64());
-
-        Ok(edges_written)
-    }
-
-    async fn execute_query(
-        &self,
-        session: &SessionContext,
-        sql: &str,
-    ) -> Result<RecordBatch, HandlerError> {
-        let dataframe = session.sql(sql).await.map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to execute sql for {}: {e}",
-                self.entity_name
-            ))
-        })?;
-
-        let schema = Arc::new(dataframe.schema().as_arrow().clone());
-
-        let batches = dataframe.collect().await.map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to collect results for {}: {e}",
-                self.entity_name
-            ))
-        })?;
-
-        if batches.is_empty() {
-            return Ok(RecordBatch::new_empty(schema));
-        }
-
-        concat_batches(&schema, &batches).map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to concat batches for {}: {e}",
-                self.entity_name
-            ))
-        })
-    }
-}
-
-/// Pipeline for processing edge ETL from join tables.
-///
-/// Unlike `OntologyEntityPipeline`, this only produces edges (no nodes).
-pub struct OntologyEdgePipeline {
-    relationship_kind: String,
-    edge_table: String,
-    extract_query: String,
-    transform_sql: String,
-    datalake: Arc<dyn DatalakeQuery>,
-    metrics: SdlcMetrics,
-}
-
-impl OntologyEdgePipeline {
-    pub fn from_config(
-        relationship_kind: &str,
-        config: &EdgeSourceEtlConfig,
-        ontology: &Ontology,
-        datalake: Arc<dyn DatalakeQuery>,
+        checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
     ) -> Self {
-        let prepared = PreparedEdgeEtl::from_config(relationship_kind, config, ontology);
-        let transform_sql = build_edge_etl_transform_sql(&prepared);
-
         Self {
-            relationship_kind: relationship_kind.to_string(),
-            edge_table: ontology.edge_table().to_string(),
-            extract_query: prepared.extract_query,
-            transform_sql,
             datalake,
+            checkpoint_store,
             metrics,
         }
     }
 
-    pub fn relationship_kind(&self) -> &str {
-        &self.relationship_kind
-    }
-
-    pub async fn process(
+    pub async fn run(
         &self,
-        params: Value,
+        plans: &[PipelinePlan],
+        context: &PipelineContext,
         destination: &dyn Destination,
-    ) -> Result<u64, HandlerError> {
-        let started_at = Instant::now();
+    ) -> Result<(), HandlerError> {
+        let mut errors = Vec::new();
 
-        let edge_writer = destination
-            .new_batch_writer(&self.edge_table)
-            .await
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to create edge writer for {}: {e}",
-                    self.relationship_kind
-                ))
-            })?;
-
-        debug!(
-            edge = %self.relationship_kind,
-            %params,
-            "querying datalake for edge data"
-        );
-
-        let query_start = Instant::now();
-        let mut stream = self
-            .datalake
-            .query_arrow(&self.extract_query, params)
-            .await
-            .map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to query {} edge data: {e}",
-                    self.relationship_kind
-                ))
-            })?;
-        self.metrics.record_datalake_query_duration(
-            &self.relationship_kind,
-            query_start.elapsed().as_secs_f64(),
-        );
-
-        let mut batch_count: u64 = 0;
-        let mut total_rows: u64 = 0;
-        let mut total_edges_written: u64 = 0;
-
-        while let Some(result) = stream.next().await {
-            let source_batch = result.map_err(|e| {
-                HandlerError::Processing(format!(
-                    "failed to read {} edge batch: {e}",
-                    self.relationship_kind
-                ))
-            })?;
-
-            if source_batch.num_rows() == 0 {
-                continue;
+        for plan in plans {
+            if let Err(err) = self.run_plan(plan, context, destination).await {
+                self.metrics
+                    .record_pipeline_error(&plan.name, err.error_kind());
+                errors.push(format!("{}: {err}", plan.name));
             }
-
-            batch_count += 1;
-            let batch_rows = source_batch.num_rows() as u64;
-            total_rows += batch_rows;
-
-            let edges_written = self
-                .transform_and_write_batch(source_batch, edge_writer.as_ref())
-                .await?;
-            total_edges_written += edges_written as u64;
         }
 
-        let elapsed = started_at.elapsed();
-
-        self.metrics.record_pipeline_completion(
-            &self.relationship_kind,
-            elapsed.as_secs_f64(),
-            total_rows,
-            total_edges_written,
-            batch_count,
-        );
-
-        if total_rows == 0 {
-            debug!(
-                edge = %self.relationship_kind,
-                elapsed_ms = elapsed.as_millis() as u64,
-                "edge pipeline processing complete"
-            );
-        } else {
-            info!(
-                edge = %self.relationship_kind,
-                batches_processed = batch_count,
-                source_rows = total_rows,
-                edges_written = total_edges_written,
-                elapsed_ms = elapsed.as_millis() as u64,
-                "edge pipeline processing complete"
-            );
+        if errors.is_empty() {
+            return Ok(());
         }
 
-        Ok(total_rows)
+        Err(HandlerError::Processing(format!(
+            "pipelines failed: {}",
+            errors.join("; ")
+        )))
     }
 
-    async fn transform_and_write_batch(
+    async fn run_plan(
         &self,
-        batch: RecordBatch,
-        edge_writer: &dyn BatchWriter,
-    ) -> Result<usize, HandlerError> {
-        let transform_start = Instant::now();
+        plan: &PipelinePlan,
+        context: &PipelineContext,
+        destination: &dyn Destination,
+    ) -> Result<(), HandlerError> {
+        let started_at = Instant::now();
+        let mut extract_query = plan.extract_query.clone();
+
+        let position_key = format!("{}.{}", context.position_key, plan.name);
+        let checkpoint = self.load_checkpoint(&position_key).await;
+        let params = self.build_query_params(&checkpoint.watermark, context);
+
+        let mut total_rows: u64 = 0;
+        let mut batch_count: u64 = 0;
+        extract_query = extract_query.resume_from(&checkpoint);
+
+        if !extract_query.is_first_page() {
+            info!(
+                pipeline = %plan.name,
+                "resuming from saved cursor"
+            );
+        }
+
         let session = SessionContext::new();
 
-        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch]]).map_err(|e| {
+        loop {
+            let batches = self
+                .extract_batch(&plan.name, &extract_query.to_sql(), params.clone())
+                .await?;
+
+            if batches.is_empty() {
+                break;
+            }
+
+            let rows_in_batch: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+            batch_count += 1;
+            total_rows += rows_in_batch;
+
+            self.transform_and_write(
+                &session,
+                &plan.name,
+                &batches,
+                &plan.transforms,
+                destination,
+            )
+            .await?;
+
+            extract_query = extract_query.advance(batches.last().unwrap());
+
+            self.checkpoint_store
+                .save_progress(
+                    &position_key,
+                    &Checkpoint {
+                        watermark: context.watermark,
+                        cursor_values: Some(extract_query.cursor_values().to_vec()),
+                    },
+                )
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to save cursor for {}: {err}",
+                        plan.name
+                    ))
+                })?;
+
+            if rows_in_batch < plan.extract_query.batch_size() {
+                break;
+            }
+        }
+
+        self.checkpoint_store
+            .save_completed(&position_key, &context.watermark)
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to mark {} as completed: {err}",
+                    plan.name
+                ))
+            })?;
+
+        let elapsed = started_at.elapsed();
+        self.metrics.record_pipeline_completion(
+            &plan.name,
+            elapsed.as_secs_f64(),
+            total_rows,
+            batch_count,
+        );
+        self.metrics
+            .record_watermark_lag(&plan.name, &context.watermark);
+
+        if total_rows > 0 {
+            info!(
+                pipeline = %plan.name,
+                total_rows,
+                batch_count,
+                elapsed_ms = elapsed.as_millis() as u64,
+                "pipeline completed"
+            );
+        } else {
+            debug!(
+                pipeline = %plan.name,
+                elapsed_ms = elapsed.as_millis() as u64,
+                "pipeline completed with no data"
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn extract_batch(
+        &self,
+        pipeline_name: &str,
+        sql: &str,
+        params: Value,
+    ) -> Result<Vec<RecordBatch>, HandlerError> {
+        let mut last_error = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = Duration::from_millis(100 * 2u64.pow(attempt - 1));
+                tokio::time::sleep(backoff).await;
+            }
+
+            let query_start = Instant::now();
+            match self.datalake.query_batches(sql, params.clone()).await {
+                Ok(batches) => {
+                    self.metrics.record_datalake_query_duration(
+                        pipeline_name,
+                        query_start.elapsed().as_secs_f64(),
+                    );
+                    return Ok(batches);
+                }
+                Err(err) => {
+                    warn!(
+                        attempt,
+                        max_retries = MAX_RETRIES,
+                        %err,
+                        "datalake query failed, retrying"
+                    );
+                    last_error = Some(HandlerError::Processing(format!(
+                        "datalake query failed: {err}"
+                    )));
+                }
+            }
+        }
+
+        Err(last_error.unwrap())
+    }
+
+    async fn transform_and_write(
+        &self,
+        session: &SessionContext,
+        pipeline_name: &str,
+        batches: &[RecordBatch],
+        transforms: &[Transformation],
+        destination: &dyn Destination,
+    ) -> Result<(), HandlerError> {
+        let schema = batches[0].schema();
+
+        // Deregister previous batch if present, then register the new one.
+        let _ = session.deregister_table(SOURCE_DATA_TABLE);
+        let mem_table = MemTable::try_new(schema, vec![batches.to_vec()]).map_err(|err| {
             HandlerError::Processing(format!(
-                "failed to create mem table for {} edges: {e}",
-                self.relationship_kind
+                "failed to create mem table for {pipeline_name}: {err}"
             ))
         })?;
 
         session
             .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
-            .map_err(|e| {
+            .map_err(|err| {
                 HandlerError::Processing(format!(
-                    "failed to register table for {} edges: {e}",
-                    self.relationship_kind
+                    "failed to register table for {pipeline_name}: {err}"
                 ))
             })?;
 
-        let edges = self.execute_query(&session, &self.transform_sql).await?;
-        let edges_count = edges.num_rows();
-        if edges_count > 0 {
-            edge_writer.write_batch(&[edges]).await.map_err(|e| {
+        let mut transform_duration = Duration::ZERO;
+
+        for transform in transforms {
+            let transform_start = Instant::now();
+            let result_batch = self
+                .execute_transform(session, &transform.to_sql())
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to transform {pipeline_name} for {}: {err}",
+                        transform.destination_table
+                    ))
+                })?;
+            transform_duration += transform_start.elapsed();
+
+            if result_batch.num_rows() == 0 {
+                continue;
+            }
+
+            let writer = destination
+                .new_batch_writer(&transform.destination_table)
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to create writer for {}: {err}",
+                        transform.destination_table
+                    ))
+                })?;
+
+            writer.write_batch(&[result_batch]).await.map_err(|err| {
                 HandlerError::Processing(format!(
-                    "failed to write {} edges: {e}",
-                    self.relationship_kind
+                    "failed to write to {}: {err}",
+                    transform.destination_table
                 ))
             })?;
-
-            debug!(
-                edge = %self.relationship_kind,
-                edges_written = edges_count,
-                "edge batch transform and write complete"
-            );
         }
 
-        self.metrics.record_transform_duration(
-            &self.relationship_kind,
-            transform_start.elapsed().as_secs_f64(),
-        );
+        self.metrics
+            .record_transform_duration(pipeline_name, transform_duration.as_secs_f64());
 
-        Ok(edges_count)
+        Ok(())
     }
 
-    async fn execute_query(
+    async fn execute_transform(
         &self,
         session: &SessionContext,
         sql: &str,
-    ) -> Result<RecordBatch, HandlerError> {
-        let dataframe = session.sql(sql).await.map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to execute sql for {} edges: {e}",
-                self.relationship_kind
-            ))
-        })?;
-
+    ) -> Result<RecordBatch, datafusion::error::DataFusionError> {
+        let dataframe = session.sql(sql).await?;
         let schema = Arc::new(dataframe.schema().as_arrow().clone());
-
-        let batches = dataframe.collect().await.map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to collect results for {} edges: {e}",
-                self.relationship_kind
-            ))
-        })?;
+        let batches = dataframe.collect().await?;
 
         if batches.is_empty() {
             return Ok(RecordBatch::new_empty(schema));
         }
 
-        concat_batches(&schema, &batches).map_err(|e| {
-            HandlerError::Processing(format!(
-                "failed to concat batches for {} edges: {e}",
-                self.relationship_kind
-            ))
-        })
+        concat_batches(&schema, &batches).map_err(Into::into)
+    }
+
+    async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
+        match self.checkpoint_store.load(position_key).await {
+            Ok(Some(checkpoint)) => checkpoint,
+            Ok(None) => Checkpoint {
+                watermark: DateTime::<Utc>::UNIX_EPOCH,
+                cursor_values: None,
+            },
+            Err(err) => {
+                warn!(
+                    position_key,
+                    %err,
+                    "failed to load checkpoint, starting from epoch"
+                );
+                Checkpoint {
+                    watermark: DateTime::<Utc>::UNIX_EPOCH,
+                    cursor_values: None,
+                }
+            }
+        }
+    }
+
+    fn build_query_params(
+        &self,
+        last_watermark: &DateTime<Utc>,
+        context: &PipelineContext,
+    ) -> Value {
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "last_watermark".to_string(),
+            Value::String(last_watermark.format(TIMESTAMP_FORMAT).to_string()),
+        );
+        params.insert(
+            "watermark".to_string(),
+            Value::String(context.watermark.format(TIMESTAMP_FORMAT).to_string()),
+        );
+        for (key, value) in &context.base_conditions {
+            params.insert(key.clone(), Value::String(value.clone()));
+        }
+        Value::Object(params)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream};
+    use crate::modules::sdlc::checkpoint_store::CheckpointError;
+    use crate::modules::sdlc::datalake::DatalakeError;
+    use crate::modules::sdlc::plan::ExtractQuery;
+    use crate::modules::sdlc::plan::ast::{Expr, Op, Query, SelectExpr, TableRef};
+    use crate::modules::sdlc::test_fixtures::test_metrics;
+    use crate::testkit::MockDestination;
+    use arrow::array::{BooleanArray, Int64Array, StringArray};
+    use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
-    use futures::stream;
-    use ontology::{DataType, EtlConfig, EtlScope, Field, constants::GL_TABLE_PREFIX};
-    use std::collections::BTreeMap;
+    use std::sync::Mutex;
 
-    fn test_metrics() -> SdlcMetrics {
-        SdlcMetrics::with_meter(&crate::testkit::test_meter())
+    fn simple_extract_query(batch_size: u64) -> ExtractQuery {
+        let base_query = Query {
+            select: vec![
+                SelectExpr::bare(Expr::col("", "id")),
+                SelectExpr::bare(Expr::col("", "name")),
+                SelectExpr::new(Expr::raw("_siphon_replicated_at"), "_version"),
+                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
+            ],
+            from: TableRef::scan("source_table", None),
+            where_clause: Some(
+                Expr::and_all([
+                    Some(Expr::binary(
+                        Op::Gt,
+                        Expr::raw("_siphon_replicated_at"),
+                        Expr::param("last_watermark", "String"),
+                    )),
+                    Some(Expr::binary(
+                        Op::Le,
+                        Expr::raw("_siphon_replicated_at"),
+                        Expr::param("watermark", "String"),
+                    )),
+                ])
+                .unwrap(),
+            ),
+            order_by: vec![],
+            limit: None,
+        };
+
+        ExtractQuery::new(base_query, vec!["id".to_string()], batch_size)
     }
 
-    struct MockDatalake;
+    fn simple_plan(name: &str) -> PipelinePlan {
+        let transform_query = Query {
+            select: vec![
+                SelectExpr::bare(Expr::col("", "id")),
+                SelectExpr::bare(Expr::col("", "name")),
+            ],
+            from: TableRef::scan(SOURCE_DATA_TABLE, None),
+            where_clause: None,
+            order_by: vec![],
+            limit: None,
+        };
+
+        PipelinePlan {
+            name: name.to_string(),
+            extract_query: simple_extract_query(1000),
+            transforms: vec![Transformation {
+                query: transform_query,
+                destination_table: format!("gl_{}", name.to_lowercase()),
+            }],
+        }
+    }
+
+    fn test_context() -> PipelineContext {
+        PipelineContext {
+            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
+            position_key: "test".to_string(),
+            base_conditions: BTreeMap::new(),
+        }
+    }
+
+    fn test_batch(rows: usize) -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![
+            ArrowField::new("id", ArrowDataType::Int64, false),
+            ArrowField::new("name", ArrowDataType::Utf8, true),
+            ArrowField::new("_version", ArrowDataType::Int64, false),
+            ArrowField::new("_deleted", ArrowDataType::Boolean, false),
+        ]));
+
+        let ids: Vec<i64> = (1..=rows as i64).collect();
+        let names: Vec<Option<&str>> = (0..rows).map(|_| Some("test")).collect();
+        let versions: Vec<i64> = (1..=rows as i64).collect();
+        let deleted: Vec<bool> = vec![false; rows];
+
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(ids)),
+                Arc::new(StringArray::from(names)),
+                Arc::new(Int64Array::from(versions)),
+                Arc::new(BooleanArray::from(deleted)),
+            ],
+        )
+        .unwrap()
+    }
+
+    use crate::modules::sdlc::test_fixtures::EmptyDatalake;
+    use crate::modules::sdlc::test_fixtures::FailingDatalake;
+
+    struct MultiBatchDatalake {
+        call_count: Mutex<u32>,
+        batch_size: usize,
+    }
 
     #[async_trait]
-    impl DatalakeQuery for MockDatalake {
+    impl DatalakeQuery for MultiBatchDatalake {
         async fn query_arrow(
             &self,
             _sql: &str,
             _params: Value,
-        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(stream::empty()))
+        ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+
+            let rows = if *count == 1 {
+                self.batch_size
+            } else {
+                self.batch_size / 2
+            };
+
+            Ok(vec![test_batch(rows)])
         }
     }
 
-    fn create_test_node() -> NodeEntity {
-        NodeEntity {
-            name: "User".to_string(),
-            domain: "core".to_string(),
-            label: "username".to_string(),
-            fields: vec![
-                Field {
-                    name: "id".to_string(),
-                    source: "id".to_string(),
-                    data_type: DataType::Int,
-                    nullable: false,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
-                },
-                Field {
-                    name: "username".to_string(),
-                    source: "username".to_string(),
-                    data_type: DataType::String,
-                    nullable: true,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
-                },
-            ],
-            destination_table: format!("{GL_TABLE_PREFIX}user"),
-            etl: Some(EtlConfig::Table {
-                scope: EtlScope::Global,
-                source: "siphon_users".to_string(),
-                watermark: "_siphon_replicated_at".to_string(),
-                deleted: "_siphon_deleted".to_string(),
-                order_by: vec!["id".to_string()],
-                edges: BTreeMap::new(),
+    struct RecordingCheckpointStore {
+        state: Mutex<Option<Checkpoint>>,
+    }
+
+    impl RecordingCheckpointStore {
+        fn new() -> Self {
+            Self {
+                state: Mutex::new(None),
+            }
+        }
+
+        fn current_state(&self) -> Option<Checkpoint> {
+            self.state.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl CheckpointStore for RecordingCheckpointStore {
+        async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
+            Ok(self.state.lock().unwrap().clone())
+        }
+
+        async fn save_progress(
+            &self,
+            _key: &str,
+            checkpoint: &Checkpoint,
+        ) -> Result<(), CheckpointError> {
+            *self.state.lock().unwrap() = Some(checkpoint.clone());
+            Ok(())
+        }
+
+        async fn save_completed(
+            &self,
+            _key: &str,
+            watermark: &DateTime<Utc>,
+        ) -> Result<(), CheckpointError> {
+            *self.state.lock().unwrap() = Some(Checkpoint {
+                watermark: *watermark,
+                cursor_values: None,
+            });
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_datalake_completes_without_error() {
+        let pipeline = Pipeline::new(
+            Arc::new(EmptyDatalake),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+        );
+        let destination = MockDestination::new();
+
+        let result = pipeline
+            .run(&[simple_plan("Test")], &test_context(), &destination)
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn multi_batch_paginates_and_completes() {
+        let store = Arc::new(RecordingCheckpointStore::new());
+        let mut plan = simple_plan("Test");
+        plan.extract_query = simple_extract_query(10);
+
+        let pipeline = Pipeline::new(
+            Arc::new(MultiBatchDatalake {
+                call_count: Mutex::new(0),
+                batch_size: 10,
             }),
-            ..Default::default()
-        }
+            store.clone(),
+            test_metrics(),
+        );
+        let destination = MockDestination::new();
+
+        let result = pipeline.run(&[plan], &test_context(), &destination).await;
+
+        assert!(result.is_ok());
+
+        let final_state = store.current_state().unwrap();
+        assert!(final_state.cursor_values.is_none(), "should be completed");
     }
 
-    #[test]
-    fn from_node_creates_pipeline() {
-        let node = create_test_node();
-        let ontology = Ontology::new();
-        let datalake = Arc::new(MockDatalake);
+    #[tokio::test]
+    async fn continues_past_individual_failures() {
+        let pipeline = Pipeline::new(
+            Arc::new(FailingDatalake),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+        );
+        let destination = MockDestination::new();
 
-        let pipeline =
-            OntologyEntityPipeline::from_node(&node, &ontology, datalake, test_metrics());
+        let plans = vec![simple_plan("First"), simple_plan("Second")];
+        let result = pipeline.run(&plans, &test_context(), &destination).await;
 
-        assert!(pipeline.is_some());
-        assert_eq!(pipeline.unwrap().entity_name(), "User");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("First"), "should mention first failure");
+        assert!(err_msg.contains("Second"), "should mention second failure");
     }
 
-    #[test]
-    fn from_node_returns_none_without_etl() {
-        let node = NodeEntity {
-            name: "NoEtl".to_string(),
-            destination_table: "test".to_string(),
-            ..Default::default()
-        };
-        let ontology = Ontology::new();
-        let datalake = Arc::new(MockDatalake);
+    #[tokio::test]
+    async fn resumes_from_stored_cursor() {
+        let store = Arc::new(RecordingCheckpointStore {
+            state: Mutex::new(Some(Checkpoint {
+                watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
+                cursor_values: Some(vec!["5".to_string()]),
+            })),
+        });
 
-        let pipeline =
-            OntologyEntityPipeline::from_node(&node, &ontology, datalake, test_metrics());
+        let pipeline = Pipeline::new(Arc::new(EmptyDatalake), store, test_metrics());
+        let destination = MockDestination::new();
 
-        assert!(pipeline.is_none());
+        let result = pipeline
+            .run(&[simple_plan("Test")], &test_context(), &destination)
+            .await;
+
+        assert!(result.is_ok());
     }
 }

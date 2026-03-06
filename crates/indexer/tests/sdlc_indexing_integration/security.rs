@@ -65,7 +65,7 @@ pub async fn processes_vulnerabilities(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, title, state, severity, report_type FROM gl_vulnerability ORDER BY id")
+        .query("SELECT id, title, state, severity, report_type FROM gl_vulnerability FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "vulnerabilities should exist");
 
@@ -143,7 +143,9 @@ pub async fn processes_scanners(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, external_id, name, vendor FROM gl_vulnerability_scanner ORDER BY id")
+        .query(
+            "SELECT id, external_id, name, vendor FROM gl_vulnerability_scanner FINAL ORDER BY id",
+        )
         .await;
     assert!(!result.is_empty(), "scanners should exist");
 
@@ -214,7 +216,7 @@ pub async fn processes_vulnerability_identifiers(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, external_type, external_id, name, url FROM gl_vulnerability_identifier ORDER BY id")
+        .query("SELECT id, external_type, external_id, name, url FROM gl_vulnerability_identifier FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "vulnerability identifiers should exist");
 
@@ -303,7 +305,7 @@ pub async fn processes_findings(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, uuid, name, description, solution, severity, deduplicated FROM gl_finding ORDER BY id")
+        .query("SELECT id, uuid, name, description, solution, severity, deduplicated FROM gl_finding FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "findings should exist");
 
@@ -408,7 +410,7 @@ pub async fn processes_vulnerability_with_user_edges(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, title, state FROM gl_vulnerability ORDER BY id")
+        .query("SELECT id, title, state FROM gl_vulnerability FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "vulnerabilities should exist");
     assert_eq!(result[0].num_rows(), 3);
@@ -577,7 +579,7 @@ pub async fn processes_vulnerability_occurrences(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, uuid, name, description, solution, cve, severity, report_type, detection_method FROM gl_vulnerability_occurrence ORDER BY id")
+        .query("SELECT id, uuid, name, description, solution, cve, severity, report_type, detection_method FROM gl_vulnerability_occurrence FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "vulnerability occurrences should exist");
 
@@ -892,7 +894,7 @@ pub async fn processes_security_scans(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, scan_type, status, latest FROM gl_security_scan ORDER BY id")
+        .query("SELECT id, scan_type, status, latest FROM gl_security_scan FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "security scans should exist");
 

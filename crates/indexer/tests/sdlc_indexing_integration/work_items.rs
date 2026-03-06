@@ -49,7 +49,7 @@ pub async fn processes_work_items_with_edges(context: &TestContext) {
 
     let result = context
         .query(
-            "SELECT id, title, state, work_item_type, confidential FROM gl_work_item ORDER BY id",
+            "SELECT id, title, state, work_item_type, confidential FROM gl_work_item FINAL ORDER BY id",
         )
         .await;
     assert!(!result.is_empty(), "work items should exist");
