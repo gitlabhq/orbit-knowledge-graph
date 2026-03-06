@@ -4,6 +4,43 @@
 //! Each node maps directly to ClickHouse SQL constructs.
 
 use serde_json::Value;
+use std::fmt;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ClickHouse parameter types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ClickHouse types used in parameterized query placeholders (`{pN:Type}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChType {
+    String,
+    Int64,
+    Float64,
+    Bool,
+}
+
+impl ChType {
+    /// Infer ClickHouse type from a JSON value.
+    pub fn from_value(v: &Value) -> Self {
+        match v {
+            Value::Number(n) if n.is_i64() => ChType::Int64,
+            Value::Number(_) => ChType::Float64,
+            Value::Bool(_) => ChType::Bool,
+            _ => ChType::String,
+        }
+    }
+}
+
+impl fmt::Display for ChType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ChType::String => write!(f, "String"),
+            ChType::Int64 => write!(f, "Int64"),
+            ChType::Float64 => write!(f, "Float64"),
+            ChType::Bool => write!(f, "Bool"),
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Expressions
@@ -14,8 +51,10 @@ use serde_json::Value;
 pub enum Expr {
     /// Column reference → `table.column`
     Column { table: String, column: String },
-    /// Constant value → parameterized as `{p0:Type}`
+    /// Constant value → parameterized as `{pN:Type}`, type inferred from Value.
     Literal(Value),
+    /// Constant value with explicit ClickHouse type → `{pN:Type}`.
+    Param { data_type: ChType, value: Value },
     /// Function call → `NAME(arg1, arg2, ...)`
     /// Used for aggregates (COUNT, SUM) and ClickHouse functions (arrayConcat, has).
     FuncCall { name: String, args: Vec<Expr> },
@@ -252,6 +291,13 @@ impl Expr {
 
     pub fn lit(value: impl Into<Value>) -> Self {
         Expr::Literal(value.into())
+    }
+
+    pub fn param(data_type: ChType, value: impl Into<Value>) -> Self {
+        Expr::Param {
+            data_type,
+            value: value.into(),
+        }
     }
 
     pub fn func(name: impl Into<String>, args: Vec<Expr>) -> Self {

@@ -2,7 +2,7 @@
 //!
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
-use crate::ast::{Cte, Expr, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, Node, Op, Query, TableRef};
 use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
@@ -223,6 +223,7 @@ impl Context {
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Literal(v) => self.emit_literal(v),
+            Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => {
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
@@ -248,7 +249,7 @@ impl Context {
         }
     }
 
-    fn emit_literal(&mut self, v: &Value) -> String {
+    fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
         match v {
             Value::Null => "NULL".into(),
             Value::Array(arr) => {
@@ -256,7 +257,7 @@ impl Context {
                     .iter()
                     .map(|item| {
                         let name = format!("p{}", self.params.len());
-                        let placeholder = format!("{{{name}:{}}}", ch_type(item));
+                        let placeholder = format!("{{{name}:{data_type}}}");
                         self.params.insert(name, item.clone());
                         placeholder
                     })
@@ -265,10 +266,24 @@ impl Context {
             }
             _ => {
                 let name = format!("p{}", self.params.len());
-                let placeholder = format!("{{{name}:{}}}", ch_type(v));
+                let placeholder = format!("{{{name}:{data_type}}}");
                 self.params.insert(name, v.clone());
                 placeholder
             }
+        }
+    }
+
+    fn emit_literal(&mut self, v: &Value) -> String {
+        match v {
+            Value::Null => "NULL".into(),
+            Value::Array(arr) => {
+                let placeholders: Vec<_> = arr
+                    .iter()
+                    .map(|item| self.emit_param(ChType::from_value(item), item))
+                    .collect();
+                format!("({})", placeholders.join(", "))
+            }
+            _ => self.emit_param(ChType::from_value(v), v),
         }
     }
 
@@ -358,16 +373,6 @@ impl Context {
 struct TableRefResult {
     sql: String,
     type_conditions: Vec<String>,
-}
-
-fn ch_type(v: &Value) -> &'static str {
-    match v {
-        Value::String(_) => "String",
-        Value::Number(n) if n.is_i64() => "Int64",
-        Value::Number(_) => "Float64",
-        Value::Bool(_) => "Bool",
-        _ => "String",
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

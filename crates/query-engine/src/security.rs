@@ -7,7 +7,7 @@
 //! - 1 path: `startsWith(path)`
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
-use crate::ast::{Expr, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Expr, Node, Op, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
 use once_cell::sync::Lazy;
@@ -107,7 +107,7 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
 
 fn build_path_filter(alias: &str, paths: &[String]) -> Expr {
     match paths.len() {
-        0 => Expr::lit(false),
+        0 => Expr::param(ChType::Bool, false),
         1 => starts_with_expr(alias, &paths[0]),
         _ => {
             let prefix = lowest_common_prefix(paths);
@@ -146,7 +146,10 @@ fn lowest_common_prefix(paths: &[String]) -> String {
 fn starts_with_expr(alias: &str, path: &str) -> Expr {
     Expr::func(
         "startsWith",
-        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::lit(path)],
+        vec![
+            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+            Expr::param(ChType::String, path),
+        ],
     )
 }
 
