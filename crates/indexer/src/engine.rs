@@ -79,7 +79,6 @@ pub struct EngineBuilder {
     destination: Arc<dyn Destination>,
     metrics: Option<Arc<EngineMetrics>>,
     nats_services: Option<Arc<dyn NatsServices>>,
-    lock_service: Option<Arc<dyn LockService>>,
 }
 
 impl EngineBuilder {
@@ -94,17 +93,11 @@ impl EngineBuilder {
             destination,
             metrics: None,
             nats_services: None,
-            lock_service: None,
         }
     }
 
     pub fn nats_services(mut self, nats_services: Arc<dyn NatsServices>) -> Self {
         self.nats_services = Some(nats_services);
-        self
-    }
-
-    pub fn lock_service(mut self, lock_service: Arc<dyn LockService>) -> Self {
-        self.lock_service = Some(lock_service);
         self
     }
 
@@ -118,9 +111,8 @@ impl EngineBuilder {
             .nats_services
             .unwrap_or_else(|| Arc::new(NatsServicesImpl::new(self.broker.clone())));
 
-        let lock_service: Arc<dyn LockService> = self
-            .lock_service
-            .unwrap_or_else(|| Arc::new(NatsLockService::new(nats_services.clone())));
+        let lock_service: Arc<dyn LockService> =
+            Arc::new(NatsLockService::new(nats_services.clone()));
 
         let metrics = self
             .metrics

@@ -4,7 +4,6 @@ use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::StreamReader;
 use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
-use clickhouse::sql::Bind;
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream;
@@ -153,11 +152,6 @@ pub struct ArrowQuery {
 }
 
 impl ArrowQuery {
-    pub fn bind(mut self, value: impl Bind) -> Self {
-        self.inner = self.inner.bind(value);
-        self
-    }
-
     pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
         self.inner = self.inner.param(name, value);
         self
