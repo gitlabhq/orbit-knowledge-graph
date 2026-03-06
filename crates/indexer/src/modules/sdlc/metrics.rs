@@ -9,7 +9,6 @@ use crate::metrics::DURATION_BUCKETS;
 pub struct SdlcMetrics {
     pub(super) pipeline_duration: Histogram<f64>,
     pub(super) pipeline_rows_processed: Counter<u64>,
-    pub(super) pipeline_edges_processed: Counter<u64>,
     pub(super) pipeline_batches_processed: Counter<u64>,
     pub(super) pipeline_errors: Counter<u64>,
     pub(super) handler_duration: Histogram<f64>,
@@ -35,11 +34,6 @@ impl SdlcMetrics {
         let pipeline_rows_processed = meter
             .u64_counter("indexer.sdlc.pipeline.rows.processed")
             .with_description("Total rows extracted and written by SDLC pipelines")
-            .build();
-
-        let pipeline_edges_processed = meter
-            .u64_counter("indexer.sdlc.pipeline.edges.processed")
-            .with_description("Total edges written by SDLC pipelines")
             .build();
 
         let pipeline_batches_processed = meter
@@ -84,7 +78,6 @@ impl SdlcMetrics {
         Self {
             pipeline_duration,
             pipeline_rows_processed,
-            pipeline_edges_processed,
             pipeline_batches_processed,
             pipeline_errors,
             handler_duration,
@@ -111,13 +104,11 @@ impl SdlcMetrics {
         entity: &str,
         duration: f64,
         rows: u64,
-        edges: u64,
         batches: u64,
     ) {
         let labels = [KeyValue::new("entity", entity.to_owned())];
         self.pipeline_duration.record(duration, &labels);
         self.pipeline_rows_processed.add(rows, &labels);
-        self.pipeline_edges_processed.add(edges, &labels);
         self.pipeline_batches_processed.add(batches, &labels);
     }
 

@@ -3,10 +3,12 @@ pub(crate) mod codegen;
 pub(crate) mod input;
 pub(crate) mod lower;
 
+pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
+
 use arrow::array::Array;
 use arrow::record_batch::RecordBatch;
 
-use super::checkpoint::Checkpoint;
+use super::checkpoint_store::Checkpoint;
 use ast::{Expr, Op, OrderExpr, Query};
 
 /// Paginated ClickHouse extract query. Owns its cursor state and generates
@@ -151,9 +153,14 @@ pub(in crate::modules::sdlc) struct Plans {
 
 pub(in crate::modules::sdlc) fn build_plans(
     ontology: &ontology::Ontology,
-    batch_size: u64,
+    global_batch_size: u64,
+    namespaced_batch_size: u64,
 ) -> Plans {
-    lower::lower(input::from_ontology(ontology), batch_size)
+    lower::lower(
+        input::from_ontology(ontology),
+        global_batch_size,
+        namespaced_batch_size,
+    )
 }
 
 fn array_value_to_string(array: &dyn Array, row: usize) -> String {

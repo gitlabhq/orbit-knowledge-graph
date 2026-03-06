@@ -5,14 +5,16 @@ use ontology::{
 use std::collections::BTreeMap;
 
 pub(in crate::modules::sdlc) struct PlanInput {
+    pub edge_table: String,
     pub node_plans: Vec<NodePlan>,
-    pub edge_plans: Vec<EdgePlan>,
+    pub standalone_edge_plans: Vec<StandaloneEdgePlan>,
 }
 
 pub(in crate::modules::sdlc) struct NodePlan {
     pub name: String,
     pub scope: EtlScope,
     pub columns: Vec<NodeColumn>,
+    pub edges: Vec<FkEdgeTransform>,
     pub extract: ExtractPlan,
 }
 
@@ -29,7 +31,20 @@ pub(in crate::modules::sdlc) enum NodeColumn {
     },
 }
 
-pub(in crate::modules::sdlc) struct EdgePlan {
+/// An FK edge is derived from the same source data as its parent node.
+/// It produces edge rows by reading FK columns from the already-extracted batch.
+pub(in crate::modules::sdlc) struct FkEdgeTransform {
+    pub relationship_kind: String,
+    pub source_id: EdgeId,
+    pub source_kind: EdgeKind,
+    pub target_id: EdgeId,
+    pub target_kind: EdgeKind,
+    pub filters: Vec<EdgeFilter>,
+    pub namespaced: bool,
+}
+
+/// A standalone edge has its own dedicated source table and extraction.
+pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub relationship_kind: String,
     pub scope: EtlScope,
     pub source_id: EdgeId,
@@ -94,17 +109,15 @@ pub(in crate::modules::sdlc) enum ExtractSource {
 pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput {
     let edge_table = ontology.edge_table().to_string();
     let mut node_plans = Vec::new();
-    let mut edge_plans = Vec::new();
+    let mut standalone_edge_plans = Vec::new();
 
     for node in ontology.nodes() {
         let Some(etl) = &node.etl else { continue };
-        let (nodes, edges) = resolve_node(node, etl, ontology, &edge_table);
-        node_plans.push(nodes);
-        edge_plans.extend(edges);
+        node_plans.push(resolve_node(node, etl, ontology));
     }
 
     for (relationship_kind, config) in ontology.edge_etl_configs() {
-        edge_plans.push(resolve_standalone_edge(
+        standalone_edge_plans.push(resolve_standalone_edge(
             relationship_kind,
             config,
             ontology,
@@ -113,21 +126,19 @@ pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput 
     }
 
     PlanInput {
+        edge_table: edge_table.to_string(),
         node_plans,
-        edge_plans,
+        standalone_edge_plans,
     }
 }
 
-fn resolve_node(
-    node: &NodeEntity,
-    etl: &EtlConfig,
-    ontology: &Ontology,
-    edge_table: &str,
-) -> (NodePlan, Vec<EdgePlan>) {
+fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> NodePlan {
     let scope = etl.scope();
     let namespaced = scope == EtlScope::Namespaced;
 
-    let node_columns: Vec<ExtractColumn> = node
+    let edges = resolve_fk_edges(etl, &node.name, namespaced, ontology);
+
+    let mut node_columns: Vec<ExtractColumn> = node
         .fields
         .iter()
         .map(|field| match &field.data_type {
@@ -136,16 +147,37 @@ fn resolve_node(
         })
         .collect();
 
-    let node_plan = NodePlan {
+    // FK edge transforms read from the same extracted batch, so their columns
+    // (FK id, type discriminator, traversal_path) must be in the extract too.
+    let extra_fk_columns = collect_fk_extract_columns(etl, namespaced);
+    append_missing(&mut node_columns, &extra_fk_columns);
+
+    NodePlan {
         name: node.name.clone(),
         scope,
         columns: resolve_node_columns(&node.fields),
+        edges,
         extract: build_extract_plan(etl, node_columns, &node.destination_table),
-    };
+    }
+}
 
-    let fk_edges = resolve_fk_edges(etl, &node.name, scope, namespaced, ontology, edge_table);
+/// Collects all extra column names that FK edge transforms need beyond the
+/// node's own fields. This ensures the extract query includes them.
+fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> Vec<String> {
+    let mut columns = vec!["id".to_string()];
 
-    (node_plan, fk_edges)
+    for (fk_column, mapping) in etl.edges() {
+        columns.push(fk_column.clone());
+        if let EdgeTarget::Column(type_column) = &mapping.target {
+            columns.push(type_column.clone());
+        }
+    }
+
+    if namespaced && !etl.edges().is_empty() {
+        columns.push(TRAVERSAL_PATH_COLUMN.to_string());
+    }
+
+    columns
 }
 
 fn resolve_node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
@@ -174,25 +206,20 @@ fn resolve_node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
         .collect()
 }
 
-/// Each FK column on a node (e.g. `author_id`, `project_id`) becomes its own
-/// edge plan. The node's row is one endpoint; the FK value is the other.
+/// Each FK column on a node (e.g. `author_id`, `project_id`) becomes an FK edge
+/// transform. These share extraction with their parent node — no separate query.
 fn resolve_fk_edges(
     etl: &EtlConfig,
     node_name: &str,
-    scope: EtlScope,
     namespaced: bool,
     ontology: &Ontology,
-    edge_table: &str,
-) -> Vec<EdgePlan> {
+) -> Vec<FkEdgeTransform> {
     etl.edges()
         .iter()
         .map(|(fk_column, mapping)| {
             let fk_ref = EdgeId::Column(fk_column.clone());
             let node_id = EdgeId::Column("id".to_string());
 
-            // The FK target type is either hardcoded ("User") or read from a
-            // column at runtime ("noteable_type"). When dynamic, we also build
-            // a filter to restrict to the types the ontology actually defines.
             let (fk_kind, type_filter) = match &mapping.target {
                 EdgeTarget::Literal(target_type) => (EdgeKind::Literal(target_type.clone()), None),
                 EdgeTarget::Column(type_column) => {
@@ -213,16 +240,12 @@ fn resolve_fk_edges(
                 }
             };
 
-            // Outgoing: (this_node) --[edge]--> (fk_target)
-            // Incoming: (fk_target) --[edge]--> (this_node)
             let node_literal = EdgeKind::Literal(node_name.to_string());
             let (mut source_id, source_kind, mut target_id, target_kind) = match mapping.direction {
                 EdgeDirection::Outgoing => (node_id, node_literal, fk_ref, fk_kind),
                 EdgeDirection::Incoming => (fk_ref, fk_kind, node_id, node_literal),
             };
 
-            // Delimited FK columns (e.g. "1/2/3") need to be exploded into
-            // individual IDs. The exploded side also needs null/empty guards.
             let mut filters = Vec::new();
             if let Some(ref delimiter) = mapping.delimiter {
                 let exploded_id = EdgeId::Exploded {
@@ -242,28 +265,14 @@ fn resolve_fk_edges(
                 }
             }
 
-            // Only pull the columns we actually need from the parent's source.
-            let mut fk_columns = vec![
-                ExtractColumn::Bare("id".to_string()),
-                ExtractColumn::Bare(fk_column.clone()),
-            ];
-            if let EdgeTarget::Column(type_column) = &mapping.target {
-                append_missing(&mut fk_columns, std::slice::from_ref(type_column));
-            }
-            if namespaced {
-                append_missing(&mut fk_columns, &[TRAVERSAL_PATH_COLUMN.to_string()]);
-            }
-
-            EdgePlan {
+            FkEdgeTransform {
                 relationship_kind: mapping.relationship_kind.clone(),
-                scope,
                 source_id,
                 source_kind,
                 target_id,
                 target_kind,
                 filters,
                 namespaced,
-                extract: build_extract_plan(etl, fk_columns, edge_table),
             }
         })
         .collect()
@@ -276,12 +285,10 @@ fn resolve_standalone_edge(
     config: &EdgeSourceEtlConfig,
     ontology: &Ontology,
     edge_table: &str,
-) -> EdgePlan {
+) -> StandaloneEdgePlan {
     let scope = config.scope;
     let namespaced = scope == EtlScope::Namespaced;
 
-    // Each endpoint (from/to) resolves to an id column, a kind, and an
-    // optional type filter based on what the ontology allows.
     let (source_id, source_kind, source_filter) = resolve_endpoint(&config.from, || {
         ontology.get_edge_source_types(relationship_kind)
     });
@@ -289,7 +296,6 @@ fn resolve_standalone_edge(
         ontology.get_edge_all_target_types(relationship_kind)
     });
 
-    // Both endpoints must be non-null for a valid edge row.
     let mut filters = vec![
         EdgeFilter::IsNotNull(config.from.id_column.clone()),
         EdgeFilter::IsNotNull(config.to.id_column.clone()),
@@ -298,7 +304,6 @@ fn resolve_standalone_edge(
         filters.push(f);
     }
 
-    // Collect the minimal set of columns needed from the source table.
     let mut extract_columns = vec![
         ExtractColumn::Bare(config.from.id_column.clone()),
         ExtractColumn::Bare(config.to.id_column.clone()),
@@ -315,7 +320,7 @@ fn resolve_standalone_edge(
         append_missing(&mut extract_columns, &[TRAVERSAL_PATH_COLUMN.to_string()]);
     }
 
-    EdgePlan {
+    StandaloneEdgePlan {
         relationship_kind: relationship_kind.to_string(),
         scope,
         source_id,
@@ -338,13 +343,6 @@ fn resolve_standalone_edge(
     }
 }
 
-/// Resolves one side (source or target) of a standalone edge. Returns the
-/// id reference, the node kind expression, and an optional type filter.
-///
-/// For literal endpoints ("User"), the kind is a constant string.
-/// For column endpoints ("noteable_type"), the kind is read at runtime,
-/// optionally remapped through a type_mapping, and filtered to only the
-/// node types the ontology recognizes for this relationship.
 fn resolve_endpoint(
     endpoint: &ontology::EdgeEndpoint,
     resolve_allowed_types: impl FnOnce() -> Vec<String>,
@@ -379,9 +377,6 @@ fn resolve_endpoint(
     }
 }
 
-/// Builds an ExtractPlan from an EtlConfig. For table ETL, `table_columns`
-/// provides the SELECT columns. For query ETL, columns come from the raw SELECT
-/// string and `table_columns` is ignored.
 fn build_extract_plan(
     etl: &EtlConfig,
     table_columns: Vec<ExtractColumn>,
@@ -397,8 +392,20 @@ fn build_extract_plan(
             order_by,
             ..
         } => {
+            // The default order_by from schema.yaml includes traversal_path,
+            // but global source tables (e.g. siphon_users) don't have that column.
+            let order_by = if namespaced {
+                order_by.clone()
+            } else {
+                order_by
+                    .iter()
+                    .filter(|col| col.as_str() != TRAVERSAL_PATH_COLUMN)
+                    .cloned()
+                    .collect()
+            };
+
             let mut columns = table_columns;
-            append_missing(&mut columns, order_by);
+            append_missing(&mut columns, &order_by);
 
             ExtractPlan {
                 destination_table: destination_table.to_string(),
@@ -406,7 +413,7 @@ fn build_extract_plan(
                 source: ExtractSource::Table(source.clone()),
                 watermark: watermark.clone(),
                 deleted: deleted.clone(),
-                order_by: order_by.clone(),
+                order_by,
                 namespaced,
                 traversal_path_filter: None,
                 additional_where: None,
@@ -447,7 +454,9 @@ fn append_missing(columns: &mut Vec<ExtractColumn>, names: &[String]) {
     for name in names {
         let already_present = columns.iter().any(|c| {
             let col_name = c.name();
-            col_name == name || col_name.ends_with(&format!(" AS {name}"))
+            col_name == name
+                || col_name.ends_with(&format!(" AS {name}"))
+                || col_name.ends_with(&format!(".{name}"))
         });
         if !already_present {
             columns.push(ExtractColumn::Bare(name.clone()));

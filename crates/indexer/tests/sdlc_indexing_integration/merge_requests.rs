@@ -41,7 +41,7 @@ pub async fn processes_merge_requests_with_edges(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, title, state, merge_status, draft, squash FROM gl_merge_request ORDER BY id")
+        .query("SELECT id, title, state, merge_status, draft, squash FROM gl_merge_request FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "merge requests should exist");
 

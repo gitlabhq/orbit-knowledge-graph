@@ -2,48 +2,89 @@ use ontology::{EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::ast::{Expr, Op, Query, SelectExpr, TableRef};
 use super::input::{
-    EdgeFilter, EdgeId, EdgeKind, EdgePlan, ExtractColumn, ExtractPlan, ExtractSource, NodeColumn,
-    NodePlan, PlanInput,
+    EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan, ExtractSource, FkEdgeTransform,
+    NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
 };
-use super::{ExtractQuery, PipelinePlan, Plans, Transformation};
-
-const SOURCE_DATA_TABLE: &str = "source_data";
+use super::{ExtractQuery, PipelinePlan, Plans, SOURCE_DATA_TABLE, Transformation};
 const VERSION_ALIAS: &str = "_version";
 const DELETED_ALIAS: &str = "_deleted";
 
-pub(in crate::modules::sdlc) fn lower(inputs: PlanInput, batch_size: u64) -> Plans {
+pub(in crate::modules::sdlc) fn lower(
+    inputs: PlanInput,
+    global_batch_size: u64,
+    namespaced_batch_size: u64,
+) -> Plans {
     let mut global = Vec::new();
     let mut namespaced = Vec::new();
 
-    let mut push = |plan: PipelinePlan, scope: EtlScope| match scope {
-        EtlScope::Global => global.push(plan),
-        EtlScope::Namespaced => namespaced.push(plan),
-    };
-
     for node in inputs.node_plans {
+        let batch_size = match node.scope {
+            EtlScope::Global => global_batch_size,
+            EtlScope::Namespaced => namespaced_batch_size,
+        };
         let scope = node.scope;
-        push(lower_node_plan(node, batch_size), scope);
+        let plan = lower_node_plan(node, &inputs.edge_table, batch_size);
+        match scope {
+            EtlScope::Global => global.push(plan),
+            EtlScope::Namespaced => namespaced.push(plan),
+        }
     }
 
-    for edge in inputs.edge_plans {
+    for edge in inputs.standalone_edge_plans {
+        let batch_size = match edge.scope {
+            EtlScope::Global => global_batch_size,
+            EtlScope::Namespaced => namespaced_batch_size,
+        };
         let scope = edge.scope;
-        push(lower_edge_plan(edge, batch_size), scope);
+        let plan = lower_standalone_edge_plan(edge, batch_size);
+        match scope {
+            EtlScope::Global => global.push(plan),
+            EtlScope::Namespaced => namespaced.push(plan),
+        }
     }
 
     Plans { global, namespaced }
 }
 
-fn lower_node_plan(input: NodePlan, batch_size: u64) -> PipelinePlan {
-    let destination_table = input.extract.destination_table.clone();
+fn lower_node_plan(input: NodePlan, edge_table: &str, batch_size: u64) -> PipelinePlan {
+    let node_destination = input.extract.destination_table.clone();
     let extract_query = lower_extract_plan(input.extract, batch_size);
+
+    let mut transforms = vec![Transformation {
+        query: lower_node_transform(&input.columns),
+        destination_table: node_destination,
+    }];
+
+    for fk_edge in &input.edges {
+        transforms.push(lower_fk_edge_transform(fk_edge, edge_table));
+    }
 
     PipelinePlan {
         name: input.name,
         extract_query,
-        transforms: vec![Transformation {
-            query: lower_node_transform(&input.columns),
-            destination_table,
-        }],
+        transforms,
+    }
+}
+
+fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, edge_table: &str) -> Transformation {
+    let transform_query = Query {
+        select: lower_edge_select(
+            lower_edge_id(&fk_edge.source_id),
+            lower_edge_kind(&fk_edge.source_kind),
+            &fk_edge.relationship_kind,
+            lower_edge_id(&fk_edge.target_id),
+            lower_edge_kind(&fk_edge.target_kind),
+            fk_edge.namespaced,
+        ),
+        from: TableRef::scan(SOURCE_DATA_TABLE, None),
+        where_clause: lower_filters(&fk_edge.filters),
+        order_by: vec![],
+        limit: None,
+    };
+
+    Transformation {
+        query: transform_query,
+        destination_table: edge_table.to_string(),
     }
 }
 
@@ -84,7 +125,7 @@ fn lower_node_column(column: &NodeColumn) -> SelectExpr {
     }
 }
 
-fn lower_edge_plan(input: EdgePlan, batch_size: u64) -> PipelinePlan {
+fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> PipelinePlan {
     let destination_table = input.extract.destination_table.clone();
     let extract_query = lower_extract_plan(input.extract, batch_size);
 
@@ -292,7 +333,7 @@ mod tests {
     }
 
     fn build_plans(ontology: &ontology::Ontology, batch_size: u64) -> Plans {
-        lower(input::from_ontology(ontology), batch_size)
+        lower(input::from_ontology(ontology), batch_size, batch_size)
     }
 
     #[test]
@@ -315,35 +356,38 @@ mod tests {
     }
 
     #[test]
-    fn node_plan_has_single_transform() {
+    fn node_plan_includes_fk_edge_transforms() {
         let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1_000_000);
 
         let note_plan = plans.namespaced.iter().find(|p| p.name == "Note").unwrap();
-        assert_eq!(note_plan.transforms.len(), 1);
+        assert!(
+            note_plan.transforms.len() >= 2,
+            "Note should have node transform + FK edge transforms"
+        );
         assert_eq!(note_plan.transforms[0].destination_table, "gl_note");
+        assert_eq!(
+            note_plan.transforms[1].destination_table,
+            ontology.edge_table().to_string(),
+        );
     }
 
     #[test]
-    fn fk_edges_produce_separate_edge_plans() {
+    fn standalone_edges_produce_separate_plans() {
         let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1_000_000);
 
         let all_plans: Vec<_> = plans.global.iter().chain(plans.namespaced.iter()).collect();
 
         let edge_table = ontology.edge_table().to_string();
-        let edge_plans: Vec<_> = all_plans
+        let standalone_edge_plans: Vec<_> = all_plans
             .iter()
-            .filter(|p| {
-                p.transforms
-                    .iter()
-                    .any(|t| t.destination_table == edge_table)
-            })
+            .filter(|p| p.transforms.len() == 1 && p.transforms[0].destination_table == edge_table)
             .collect();
 
         assert!(
-            !edge_plans.is_empty(),
-            "should have edge plans writing to {edge_table}"
+            !standalone_edge_plans.is_empty(),
+            "should have standalone edge plans writing to {edge_table}"
         );
     }
 
@@ -385,21 +429,9 @@ mod tests {
     }
 
     #[test]
-    fn edge_sql_outgoing_literal() {
-        let edge = EdgePlan {
+    fn fk_edge_transform_sql_outgoing_literal() {
+        let fk_edge = FkEdgeTransform {
             relationship_kind: "owns".to_string(),
-            scope: EtlScope::Namespaced,
-            extract: ExtractPlan {
-                destination_table: "gl_edges".to_string(),
-                columns: vec![],
-                source: ExtractSource::Table("siphon_groups".to_string()),
-                watermark: "_siphon_replicated_at".to_string(),
-                deleted: "_siphon_deleted".to_string(),
-                order_by: vec!["id".to_string()],
-                namespaced: false,
-                traversal_path_filter: None,
-                additional_where: None,
-            },
             source_id: EdgeId::Column("id".to_string()),
             source_kind: EdgeKind::Literal("Group".to_string()),
             target_id: EdgeId::Column("owner_id".to_string()),
@@ -408,8 +440,8 @@ mod tests {
             namespaced: true,
         };
 
-        let plan = lower_edge_plan(edge, 1000);
-        let sql = emit(&plan.transforms[0].query);
+        let transform = lower_fk_edge_transform(&fk_edge, "gl_edge");
+        let sql = emit(&transform.query);
 
         assert!(sql.contains("id AS source_id"));
         assert!(sql.contains("'Group' AS source_kind"));
@@ -418,21 +450,9 @@ mod tests {
     }
 
     #[test]
-    fn edge_sql_incoming_literal() {
-        let edge = EdgePlan {
+    fn fk_edge_transform_sql_incoming_literal() {
+        let fk_edge = FkEdgeTransform {
             relationship_kind: "authored".to_string(),
-            scope: EtlScope::Namespaced,
-            extract: ExtractPlan {
-                destination_table: "gl_edges".to_string(),
-                columns: vec![],
-                source: ExtractSource::Table("siphon_notes".to_string()),
-                watermark: "_siphon_replicated_at".to_string(),
-                deleted: "_siphon_deleted".to_string(),
-                order_by: vec!["id".to_string()],
-                namespaced: false,
-                traversal_path_filter: None,
-                additional_where: None,
-            },
             source_id: EdgeId::Column("author_id".to_string()),
             source_kind: EdgeKind::Literal("User".to_string()),
             target_id: EdgeId::Column("id".to_string()),
@@ -441,8 +461,8 @@ mod tests {
             namespaced: true,
         };
 
-        let plan = lower_edge_plan(edge, 1000);
-        let sql = emit(&plan.transforms[0].query);
+        let transform = lower_fk_edge_transform(&fk_edge, "gl_edge");
+        let sql = emit(&transform.query);
 
         assert!(sql.contains("author_id AS source_id"));
         assert!(sql.contains("'User' AS source_kind"));
@@ -451,21 +471,9 @@ mod tests {
     }
 
     #[test]
-    fn edge_sql_multi_value_incoming() {
-        let edge = EdgePlan {
+    fn fk_edge_transform_sql_multi_value_incoming() {
+        let fk_edge = FkEdgeTransform {
             relationship_kind: "assigned".to_string(),
-            scope: EtlScope::Namespaced,
-            extract: ExtractPlan {
-                destination_table: "gl_edges".to_string(),
-                columns: vec![],
-                source: ExtractSource::Table("siphon_work_items".to_string()),
-                watermark: "_siphon_replicated_at".to_string(),
-                deleted: "_siphon_deleted".to_string(),
-                order_by: vec!["id".to_string()],
-                namespaced: false,
-                traversal_path_filter: None,
-                additional_where: None,
-            },
             source_id: EdgeId::Exploded {
                 column: "assignee_ids".to_string(),
                 delimiter: "/".to_string(),
@@ -480,8 +488,8 @@ mod tests {
             namespaced: true,
         };
 
-        let plan = lower_edge_plan(edge, 1000);
-        let sql = emit(&plan.transforms[0].query);
+        let transform = lower_fk_edge_transform(&fk_edge, "gl_edge");
+        let sql = emit(&transform.query);
 
         assert!(
             sql.contains("CAST(NULLIF(unnest(string_to_array(assignee_ids, '/')), '') AS BIGINT)"),

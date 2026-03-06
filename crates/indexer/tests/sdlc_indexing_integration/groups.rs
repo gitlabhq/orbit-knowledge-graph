@@ -49,7 +49,9 @@ pub async fn processes_and_transforms_groups(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_group ORDER BY id").await;
+    let result = context
+        .query("SELECT * FROM gl_group FINAL ORDER BY id")
+        .await;
     assert!(!result.is_empty(), "groups result should not be empty");
 
     let batch = &result[0];

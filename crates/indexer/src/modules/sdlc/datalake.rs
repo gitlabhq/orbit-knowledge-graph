@@ -32,6 +32,12 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         sql: &str,
         params: Value,
     ) -> Result<RecordBatchStream<'_>, DatalakeError>;
+
+    async fn query_batches(
+        &self,
+        sql: &str,
+        params: Value,
+    ) -> Result<Vec<RecordBatch>, DatalakeError>;
 }
 
 pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
@@ -73,5 +79,23 @@ impl DatalakeQuery for Datalake {
         Ok(Box::pin(stream.map(|result| {
             result.map_err(|e| DatalakeError::Query(e.to_string()))
         })))
+    }
+
+    async fn query_batches(
+        &self,
+        sql: &str,
+        params: Value,
+    ) -> Result<Vec<RecordBatch>, DatalakeError> {
+        let mut stream = self.query_arrow(sql, params).await?;
+        let mut batches = Vec::new();
+
+        while let Some(result) = stream.next().await {
+            let batch = result?;
+            if batch.num_rows() > 0 {
+                batches.push(batch);
+            }
+        }
+
+        Ok(batches)
     }
 }

@@ -42,7 +42,7 @@ pub async fn processes_merge_request_diffs_with_edges(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, merge_request_id, state, commits_count, files_count FROM gl_merge_request_diff ORDER BY id")
+        .query("SELECT id, merge_request_id, state, commits_count, files_count FROM gl_merge_request_diff FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "merge request diffs should exist");
 
@@ -109,7 +109,7 @@ pub async fn processes_merge_request_diff_files_with_edges(context: &TestContext
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT merge_request_id, merge_request_diff_id, old_path, new_path, new_file, deleted_file FROM gl_merge_request_diff_file ORDER BY old_path")
+        .query("SELECT merge_request_id, merge_request_diff_id, old_path, new_path, new_file, deleted_file FROM gl_merge_request_diff_file FINAL ORDER BY old_path")
         .await;
     assert!(!result.is_empty(), "merge request diff files should exist");
 

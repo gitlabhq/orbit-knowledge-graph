@@ -31,7 +31,7 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_request_timeout_secs")]
     pub request_timeout_secs: u64,
 
-    /// Acknowledgment wait time in seconds before message redelivery. Defaults to 30.
+    /// Acknowledgment wait time in seconds before message redelivery. Defaults to 300.
     #[serde(default = "NatsConfiguration::default_ack_wait_secs")]
     pub ack_wait_secs: u64,
 
@@ -103,7 +103,7 @@ impl NatsConfiguration {
     }
 
     fn default_ack_wait_secs() -> u64 {
-        30
+        300
     }
 
     fn default_max_deliver() -> Option<u32> {

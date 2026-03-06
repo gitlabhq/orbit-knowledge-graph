@@ -60,7 +60,7 @@ pub async fn processes_milestones_with_edges(context: &TestContext) {
         .expect("handler should succeed");
 
     let result = context
-        .query("SELECT id, title, state, due_date FROM gl_milestone ORDER BY id")
+        .query("SELECT id, title, state, due_date FROM gl_milestone FINAL ORDER BY id")
         .await;
     assert!(!result.is_empty(), "milestones should exist");
 

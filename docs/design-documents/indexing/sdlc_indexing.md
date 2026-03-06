@@ -260,14 +260,24 @@ If the worker fails unexpectedly, the unacked message will be redelivered by NAT
 
 ##### ETL
 
-**Data transformation**
+**Ontology-driven plan building**
 
-The `gkg-indexer` will be responsible for querying the ClickHouse database and transforming it into the desired format.
+ETL plans come from the ontology YAML in `fixtures/ontology/nodes/` and `fixtures/ontology/edges/`. Each node entity with an `etl` config becomes a `PipelinePlan` with an extraction query and one or more transforms. FK edges defined on a node are folded into the parent node's plan so they share the same extracted batch instead of querying the datalake twice. Standalone edges get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
 
-Since we're going to do a `ClickHouse` to `ClickHouse` transformation and the amount of rows for each individual entity being relatively small (reaching the low millions per namespaces). This means that we can use a simple `SELECT` statement to get the data and write it to the Knowledge Graph database.
+**Pipeline: extract, transform, write**
+
+Each handler invocation runs its plans through a shared `Pipeline` struct. The loop for a single plan works like this:
+
+1. Load the last checkpoint from `sdlc_checkpoint` to get the watermark and cursor position.
+2. Build a parameterized extraction query against the datalake, filtered by watermark range and (for namespaced entities) traversal path.
+3. Page through results with keyset pagination. Each page is bounded by `LIMIT` and ordered by composite sort keys (e.g., `ORDER BY traversal_path, id`). The cursor from the last row becomes the filter for the next page via a DNF predicate: `(c1 > v1) OR (c1 = v1 AND c2 > v2)`.
+4. Transform each batch in-memory with DataFusion SQL, mapping source columns to graph columns, resolving FK edges, and applying type discriminators.
+5. Write the transformed batch to the graph ClickHouse database.
+6. Save the cursor to the checkpoint store. If the indexer crashes mid-pagination, the next run picks up from the last written batch rather than replaying the entire watermark window.
+7. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
 
 ```sql
---- ClickHouse
+--- Example extraction query with keyset pagination
 SELECT
     id,
     organization_id,
@@ -275,27 +285,39 @@ SELECT
     created_at,
     state,
     title,
-    traversal_id
+    traversal_path,
+    _siphon_replicated_at AS _version,
+    _siphon_deleted AS _deleted
 FROM sdlc.issues
-WHERE organization_id = {organization_id} AND _siphon_replicated_at > {since_date}
+WHERE _siphon_replicated_at > {last_watermark:String}
+  AND _siphon_replicated_at <= {watermark:String}
+  AND traversal_path LIKE {traversal_path:String}
+  AND ((traversal_path > {cursor_0:String})
+       OR (traversal_path = {cursor_0:String} AND id > {cursor_1:Int64}))
+ORDER BY traversal_path, id
+LIMIT 1000000
 ```
 
-To minimize the memory footprint of queries with large result sets, we will stream the query results to the `gkg-indexer` worker. This is supported by default in the [Rust ClickHouse client](https://clickhouse.com/docs/integrations/rust). For each row, we will transform the data into the desired graph format and write it to the Knowledge Graph database using either ClickHouse server-side or client-side Inserting APIs.
+**Checkpoint store**
 
-If we want to be extra cautious, we can use `LIMIT` and `OFFSET` to paginate the results, allowing us to process the data in chunks. This is typically done in a loop and avoids overwhelming the database with a large amount of data at once.
+A single `sdlc_checkpoint` table replaces the old per-entity watermark tables. Each row has a position key, a watermark, and optional cursor values:
 
-In the above example you may have noticed that we're using `{since_date}` to filter the data. This is important for both the initial and incremental indexing. Why? Because we want to set a rendez-vous point for the indexing process to avoid gaps in the data that could be caused by data added between the last insert statement and writing the `last_indexed_at` timestamp to the database. For the initial indexing, this value will be the date of the start of the indexing job, for incremental indexing, this value will be the date of the last indexing job.
+```sql
+CREATE TABLE IF NOT EXISTS sdlc_checkpoint (
+    key String,
+    watermark DateTime64(6, 'UTC'),
+    cursor_values String DEFAULT '',
+    _version DateTime64(6, 'UTC') DEFAULT now64()
+) ENGINE = ReplacingMergeTree(_version) ORDER BY (key);
+```
+
+Three states: no row means first run (start from epoch). Empty `cursor_values` means the plan finished its last run cleanly. Non-empty `cursor_values` means the plan was interrupted mid-pagination and should resume from that cursor.
+
+Position keys encode scope and entity, e.g. `"global.User"` or `"ns.42.Project"` for namespace 42's Project plan.
 
 **Data deletion**
 
-Some entities may have been deleted from the database. This will be reflected by the `_siphon_deleted` column being set to `false`. Entities that marked as deleted in the Analytics ClickHouse database will need to be deleted from the Knowledge Graph database.
-
-If we want to avoid deleting the entities immediately because of potential database performance concerns, we can filter the entities that are not marked as deleted at query time and then delete all the deleted entities at once in a deletion job.
-
-```sql
-DELETE FROM database_b.<table_name>
-WHERE deleted = true;
-```
+Rows deleted in the source database have `_siphon_deleted` set to `true`. The extraction query pulls these rows alongside live data, and the `_deleted` flag carries through to the graph table. Downstream queries filter on the flag. Periodic cleanup jobs remove flagged rows from the graph tables.
 
 ##### Zero-downtime schema changes
 

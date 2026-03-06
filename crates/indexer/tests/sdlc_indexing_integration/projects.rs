@@ -56,7 +56,9 @@ pub async fn processes_projects(context: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = context.query("SELECT * FROM gl_project ORDER BY id").await;
+    let result = context
+        .query("SELECT * FROM gl_project FINAL ORDER BY id")
+        .await;
     assert!(!result.is_empty(), "projects result should not be empty");
 
     let batch = &result[0];
