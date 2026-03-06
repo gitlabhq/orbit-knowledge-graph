@@ -251,12 +251,16 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
     // User 1 = alice
     let user_props = &path_nodes[0].properties;
     assert_eq!(
-        user_props.get("username").and_then(|v| v.as_str()),
+        user_props
+            .get("username")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("alice"),
         "User 1 username should be 'alice'"
     );
     assert_eq!(
-        user_props.get("name").and_then(|v| v.as_str()),
+        user_props
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Alice Admin"),
         "User 1 name should be 'Alice Admin'"
     );
@@ -265,7 +269,9 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
     let project = path_nodes.last().unwrap();
     let project_props = &project.properties;
     assert_eq!(
-        project_props.get("name").and_then(|v| v.as_str()),
+        project_props
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Public Project"),
         "Project 1000 name should be 'Public Project'"
     );
@@ -274,7 +280,9 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
     if path_nodes.len() == 3 {
         let group_props = &path_nodes[1].properties;
         assert_eq!(
-            group_props.get("name").and_then(|v| v.as_str()),
+            group_props
+                .get("name")
+                .and_then(|v| v.as_string().map(|s| s.as_str())),
             Some("Public Group"),
             "Group 100 name should be 'Public Group'"
         );
@@ -384,7 +392,7 @@ async fn neighbors_hydrated_property_values(ctx: &TestContext) {
         .authorized_rows()
         .filter_map(|r| {
             r.neighbor_node()
-                .and_then(|n| n.properties.get("name")?.as_str())
+                .and_then(|n| n.properties.get("name")?.as_string().map(|s| s.as_str()))
         })
         .collect();
 
@@ -533,7 +541,7 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
             path_nodes[0]
                 .properties
                 .get("username")
-                .and_then(|v| v.as_str()),
+                .and_then(|v| v.as_string().map(|s| s.as_str())),
             Some("alice"),
             "hydrated User 1 should have username 'alice'"
         );
@@ -599,7 +607,10 @@ async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
         "surviving neighbor should be hydrated after redaction"
     );
     assert_eq!(
-        neighbor.properties.get("name").and_then(|v| v.as_str()),
+        neighbor
+            .properties
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
         Some("Private Group"),
         "surviving neighbor should have correct hydrated name"
     );

@@ -1,4 +1,5 @@
 use query_engine::SecurityContext;
+use thiserror::Error;
 
 use crate::auth::Claims;
 use crate::redaction::RedactionMessage;
@@ -44,16 +45,9 @@ impl<M: RedactionMessage> PipelineStage<M> for SecurityStage {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{0}")]
 pub struct SecurityError(pub String);
-
-impl std::fmt::Display for SecurityError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for SecurityError {}
 
 #[cfg(test)]
 mod tests {
