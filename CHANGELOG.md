@@ -1,3 +1,22 @@
+## [0.8.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.7.0...v0.8.0) (2026-03-06)
+
+### Features
+
+* **indexer:** add plan module with AST, codegen, and ontology-driven pipeline plans ([4fb995d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4fb995d4e1cac16e02691a587dc3b2505320619d)) by Jean-Gabriel Doyon
+* **ontology:** structured ETL fields and order_by support ([6c86fd3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6c86fd3348a701dce2552c6aea91f1e98753e242)) by Jean-Gabriel Doyon
+* **querying:** add options field to json queries, apply it to dynamic hydration ([5660a25](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5660a250a02cc408e92aa928fb5ff44fc0dafec2)) by Michael Usachenko
+
+### Fixes
+
+* **clickhouse:** enable TLS for HTTPS connections ([ae073a5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ae073a5181cd4eb9be86b406c1678d153d850b02)) by Bohdan Parkhomchuk
+
+### Other
+
+* **indexer:** replace dispatcher KV locks with NATS per-subject dedup ([2fd1f66](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2fd1f6645c42bdd990c2a12d6af5accbdb108a08)) by Jean-Gabriel Doyon
+* **ontology:** break up ontology crate ([89770c3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/89770c38b1917cc95ea83f28857a3b31b29553d5)) by Michael Usachenko
+* **querying:** query pipeline state and execution flow cleanup ([1b2dd16](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1b2dd1610f65db95a3a3aecfcc432c01d937bde7)) by Michael Usachenko
+* share ClusterHealthChecker, add health check docs ([49b833c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/49b833c553132a1e91b61807ff27a245dd09292e)) by Michael Angelo Rivera
+
 ## [0.7.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.6.0...v0.7.0) (2026-03-05)
 
 ### Features
