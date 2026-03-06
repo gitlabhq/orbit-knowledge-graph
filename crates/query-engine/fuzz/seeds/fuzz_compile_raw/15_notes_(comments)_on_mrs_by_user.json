@@ -1,0 +1,31 @@
+{
+  "query_type": "traversal",
+  "nodes": [
+    {
+      "id": "note",
+      "entity": "Note",
+      "filters": {
+        "system": false,
+        "noteable_type": "MergeRequest"
+      }
+    },
+    {
+      "id": "author",
+      "entity": "User",
+      "node_ids": "$sample"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "AUTHORED",
+      "from": "author",
+      "to": "note"
+    }
+  ],
+  "limit": 30,
+  "order_by": {
+    "node": "note",
+    "property": "created_at",
+    "direction": "DESC"
+  }
+}

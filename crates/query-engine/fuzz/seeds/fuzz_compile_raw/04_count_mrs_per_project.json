@@ -1,0 +1,33 @@
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "mr",
+      "entity": "MergeRequest"
+    },
+    {
+      "id": "p",
+      "entity": "Project"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "IN_PROJECT",
+      "from": "mr",
+      "to": "p"
+    }
+  ],
+  "aggregations": [
+    {
+      "function": "count",
+      "target": "mr",
+      "group_by": "p",
+      "alias": "mr_count"
+    }
+  ],
+  "aggregation_sort": {
+    "agg_index": 0,
+    "direction": "DESC"
+  },
+  "limit": 10
+}

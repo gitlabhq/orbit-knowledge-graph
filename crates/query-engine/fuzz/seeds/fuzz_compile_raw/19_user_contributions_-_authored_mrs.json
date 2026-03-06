@@ -1,0 +1,33 @@
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "mr",
+      "entity": "MergeRequest"
+    },
+    {
+      "id": "author",
+      "entity": "User"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "AUTHORED",
+      "from": "author",
+      "to": "mr"
+    }
+  ],
+  "aggregations": [
+    {
+      "function": "count",
+      "target": "mr",
+      "group_by": "author",
+      "alias": "mr_count"
+    }
+  ],
+  "aggregation_sort": {
+    "agg_index": 0,
+    "direction": "DESC"
+  },
+  "limit": 20
+}

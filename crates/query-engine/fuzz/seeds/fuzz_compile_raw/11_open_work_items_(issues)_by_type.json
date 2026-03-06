@@ -1,0 +1,20 @@
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "wi",
+      "entity": "WorkItem",
+      "filters": {
+        "state": "opened"
+      }
+    }
+  ],
+  "aggregations": [
+    {
+      "function": "count",
+      "target": "wi",
+      "alias": "count"
+    }
+  ],
+  "limit": 10
+}

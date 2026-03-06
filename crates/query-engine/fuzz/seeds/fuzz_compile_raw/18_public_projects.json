@@ -1,0 +1,17 @@
+{
+  "query_type": "search",
+  "node": {
+    "id": "p",
+    "entity": "Project",
+    "filters": {
+      "visibility_level": "public",
+      "archived": false
+    }
+  },
+  "limit": 20,
+  "order_by": {
+    "node": "p",
+    "property": "star_count",
+    "direction": "DESC"
+  }
+}
