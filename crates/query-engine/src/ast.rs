@@ -4,14 +4,13 @@
 //! Each node maps directly to ClickHouse SQL constructs.
 
 use serde_json::Value;
-use std::fmt;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ClickHouse parameter types
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// ClickHouse types used in parameterized query placeholders (`{pN:Type}`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
 pub enum ChType {
     String,
     Int64,
@@ -27,17 +26,6 @@ impl ChType {
             Value::Number(_) => ChType::Float64,
             Value::Bool(_) => ChType::Bool,
             _ => ChType::String,
-        }
-    }
-}
-
-impl fmt::Display for ChType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ChType::String => write!(f, "String"),
-            ChType::Int64 => write!(f, "Int64"),
-            ChType::Float64 => write!(f, "Float64"),
-            ChType::Bool => write!(f, "Bool"),
         }
     }
 }
@@ -72,49 +60,42 @@ pub enum Expr {
 }
 
 /// SQL operators for expressions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum Op {
     // Comparison
+    #[strum(serialize = "=")]
     Eq,
+    #[strum(serialize = "!=")]
     Ne,
+    #[strum(serialize = "<")]
     Lt,
+    #[strum(serialize = "<=")]
     Le,
+    #[strum(serialize = ">")]
     Gt,
+    #[strum(serialize = ">=")]
     Ge,
+    #[strum(serialize = "IN")]
     In,
+    #[strum(serialize = "LIKE")]
     Like,
+    #[strum(serialize = "ILIKE")]
     ILike,
     // Logical
+    #[strum(serialize = "AND")]
     And,
+    #[strum(serialize = "OR")]
     Or,
+    #[strum(serialize = "NOT")]
     Not,
     // Null checks
+    #[strum(serialize = "IS NULL")]
     IsNull,
+    #[strum(serialize = "IS NOT NULL")]
     IsNotNull,
     // Arithmetic
+    #[strum(serialize = "+")]
     Add,
-}
-
-impl Op {
-    pub fn as_sql(&self) -> &'static str {
-        match self {
-            Op::Eq => "=",
-            Op::Ne => "!=",
-            Op::Lt => "<",
-            Op::Le => "<=",
-            Op::Gt => ">",
-            Op::Ge => ">=",
-            Op::In => "IN",
-            Op::Like => "LIKE",
-            Op::ILike => "ILIKE",
-            Op::And => "AND",
-            Op::Or => "OR",
-            Op::Not => "NOT",
-            Op::IsNull => "IS NULL",
-            Op::IsNotNull => "IS NOT NULL",
-            Op::Add => "+",
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,23 +134,13 @@ pub enum TableRef {
 /// - Left: all rows from left, matching from right (NULLs if no match)
 /// - Right: all rows from right, matching from left
 /// - Full: all rows from both sides
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "UPPERCASE")]
 pub enum JoinType {
     Inner,
     Left,
     Right,
     Full,
-}
-
-impl JoinType {
-    pub fn as_sql(&self) -> &'static str {
-        match self {
-            JoinType::Inner => "INNER",
-            JoinType::Left => "LEFT",
-            JoinType::Right => "RIGHT",
-            JoinType::Full => "FULL",
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

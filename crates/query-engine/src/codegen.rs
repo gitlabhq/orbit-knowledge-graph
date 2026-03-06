@@ -235,15 +235,15 @@ impl Context {
                     format!("{l} IN {r}")
                 } else {
                     // This is for binary ops like =, >, <=, etc.
-                    format!("({l} {} {r})", op.as_sql())
+                    format!("({l} {op} {r})")
                 }
             }
             Expr::UnaryOp { op, expr } => {
                 let e = self.emit_expr(expr);
                 if *op == Op::IsNull || *op == Op::IsNotNull {
-                    format!("({e} {})", op.as_sql())
+                    format!("({e} {op})")
                 } else {
-                    format!("({} {e})", op.as_sql())
+                    format!("({op} {e})")
                 }
             }
         }
@@ -340,10 +340,7 @@ impl Context {
                 Ok(TableRefResult {
                     sql: format!(
                         "{} {} JOIN {} ON {}",
-                        left_res.sql,
-                        join_type.as_sql(),
-                        right_res.sql,
-                        on_clause
+                        left_res.sql, join_type, right_res.sql, on_clause
                     ),
                     type_conditions: left_res.type_conditions,
                 })
