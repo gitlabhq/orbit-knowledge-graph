@@ -5,7 +5,8 @@ use query_engine::{
 };
 use serde_json::{Value, json};
 
-use crate::redaction::{ColumnValue, NodeRef, QueryResult, QueryResultRow};
+use crate::arrow::ColumnValue;
+use crate::redaction::{NodeRef, QueryResult, QueryResultRow};
 
 pub trait ResultFormatter: Send + Sync {
     fn format(
@@ -52,12 +53,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
         {
             continue;
         }
-        let json_value = match value {
-            ColumnValue::Int64(v) => json!(v),
-            ColumnValue::String(v) => json!(v),
-            ColumnValue::Null => Value::Null,
-        };
-        obj.insert(name.clone(), json_value);
+        obj.insert(name.clone(), column_value_to_json(value));
     }
 
     for node in ctx.nodes() {

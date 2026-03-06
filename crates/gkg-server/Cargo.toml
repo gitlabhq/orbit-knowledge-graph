@@ -55,6 +55,7 @@ tonic-prost = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 toon-format = { version = "0.4.1", default-features = false }
 rustc-hash = { workspace = true }
+enum-as-inner = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

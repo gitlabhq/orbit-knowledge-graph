@@ -2,10 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use arrow::array::{
-    Array, Int64Array, ListArray, StringArray, StructArray, TimestampMicrosecondArray,
-    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt64Array,
-};
 use arrow::record_batch::RecordBatch;
 use query_engine::constants::{
     EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
@@ -13,6 +9,7 @@ use query_engine::constants::{
 use query_engine::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
+use crate::arrow::{ArrowUtils, ColumnValue};
 
 #[derive(Debug, Clone)]
 pub struct NodeRef {
@@ -37,67 +34,6 @@ impl NodeRef {
             id,
             entity_type: entity_type.into(),
             properties: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct RedactableNodes {
-    nodes: Vec<NodeRef>,
-}
-
-impl RedactableNodes {
-    pub fn new() -> Self {
-        Self { nodes: Vec::new() }
-    }
-
-    pub fn add(&mut self, id: i64, entity_type: impl Into<String>) {
-        self.nodes.push(NodeRef::new(id, entity_type));
-    }
-
-    pub fn nodes(&self) -> &[NodeRef] {
-        &self.nodes
-    }
-
-    pub fn len(&self) -> usize {
-        self.nodes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-    }
-
-    pub fn group_by_type(&self) -> HashMap<&str, Vec<i64>> {
-        let mut groups: HashMap<&str, Vec<i64>> = HashMap::new();
-        for node in &self.nodes {
-            groups
-                .entry(node.entity_type.as_str())
-                .or_default()
-                .push(node.id);
-        }
-        groups
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ColumnValue {
-    Int64(i64),
-    String(String),
-    Null,
-}
-
-impl ColumnValue {
-    pub fn as_i64(&self) -> Option<i64> {
-        match self {
-            ColumnValue::Int64(v) => Some(*v),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> Option<&str> {
-        match self {
-            ColumnValue::String(v) => Some(v.as_str()),
-            _ => None,
         }
     }
 }
@@ -137,11 +73,14 @@ impl QueryResultRow {
     }
 
     pub fn get_id(&self, node: &RedactionNode) -> Option<i64> {
-        self.columns.get(&node.id_column)?.as_i64()
+        self.columns.get(&node.id_column)?.as_int64().copied()
     }
 
     pub fn get_type(&self, node: &RedactionNode) -> Option<&str> {
-        self.columns.get(&node.type_column)?.as_str()
+        self.columns
+            .get(&node.type_column)?
+            .as_string()
+            .map(|s| s.as_str())
     }
 
     pub fn node_ref(&self, node: &RedactionNode) -> Option<NodeRef> {
@@ -180,11 +119,11 @@ impl QueryResultRow {
     }
 
     pub fn get_column_i64(&self, column: &str) -> Option<i64> {
-        self.columns.get(column)?.as_i64()
+        self.columns.get(column)?.as_int64().copied()
     }
 
     pub fn get_column_string(&self, column: &str) -> Option<String> {
-        self.columns.get(column)?.as_str().map(|s| s.to_string())
+        self.columns.get(column)?.as_string().cloned()
     }
 
     pub fn set_column(&mut self, column: String, value: ColumnValue) {
@@ -206,29 +145,31 @@ impl QueryResult {
 
         let mut rows = Vec::new();
         for batch in batches {
-            let schema = batch.schema();
             for row_idx in 0..batch.num_rows() {
-                let mut columns = HashMap::new();
-                for (col_idx, field) in schema.fields().iter().enumerate() {
-                    columns.insert(
-                        field.name().clone(),
-                        extract_value(batch.column(col_idx).as_ref(), row_idx),
-                    );
-                }
+                let columns = ArrowUtils::extract_row(batch, row_idx);
 
-                // Extract dynamic nodes (path finding nodes, neighbor nodes)
-                // Path finding nodes are extracted from _gkg_path column
-                // Neighbor nodes are extracted from _gkg_neighbor_id/_gkg_neighbor_type cols
                 let dynamic_nodes = if is_path_finding {
-                    extract_path_nodes(batch, row_idx)
+                    // Extract nodes from the _gkg_path column in path finding queries.
+                    // The column is Array(Tuple(Int64, String)) where each tuple is (node_id, entity_type).
+                    ArrowUtils::get_i64_string_pairs(batch, PATH_COLUMN, row_idx)
+                        .into_iter()
+                        .map(|(id, t)| NodeRef::new(id, t))
+                        .collect()
                 } else if is_neighbors {
-                    extract_neighbor_node(batch, row_idx).into_iter().collect()
+                    // Neighbor node from _gkg_neighbor_id / _gkg_neighbor_type columns
+                    let neighbor = ArrowUtils::get_column_i64(batch, NEIGHBOR_ID_COLUMN, row_idx)
+                        .and_then(|id| {
+                            ArrowUtils::get_column_string(batch, NEIGHBOR_TYPE_COLUMN, row_idx)
+                                .map(|t| NodeRef::new(id, t))
+                        });
+                    neighbor.into_iter().collect()
                 } else {
                     Vec::new()
                 };
 
+                // Relationship kinds per hop — only present in path finding queries
                 let edge_kinds = if is_path_finding {
-                    extract_edge_kinds(batch, row_idx)
+                    ArrowUtils::get_string_list(batch, EDGE_KINDS_COLUMN, row_idx)
                 } else {
                     Vec::new()
                 };
@@ -269,23 +210,6 @@ impl QueryResult {
 
     pub fn iter(&self) -> impl Iterator<Item = &QueryResultRow> {
         self.rows.iter()
-    }
-
-    pub fn extract_redactable_nodes(&self) -> RedactableNodes {
-        let mut nodes = RedactableNodes::new();
-        for row in &self.rows {
-            // Extract nodes from _gkg_* columns
-            for redaction_node in self.ctx.nodes() {
-                if let Some(node_ref) = row.node_ref(redaction_node) {
-                    nodes.add(node_ref.id, node_ref.entity_type);
-                }
-            }
-            // Extract nodes from dynamic nodes (path finding nodes, neighbor nodes)
-            for node_ref in &row.dynamic_nodes {
-                nodes.add(node_ref.id, &node_ref.entity_type);
-            }
-        }
-        nodes
     }
 
     /// Collect all resource IDs that need authorization, grouped by (resource_type, ability).
@@ -475,130 +399,10 @@ fn find_owner_id(row: &QueryResultRow, owner_type: &str, ctx: &ResultContext) ->
     None
 }
 
-fn extract_value(array: &dyn Array, idx: usize) -> ColumnValue {
-    if array.is_null(idx) {
-        return ColumnValue::Null;
-    }
-
-    if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
-        return ColumnValue::Int64(arr.value(idx));
-    }
-
-    if let Some(arr) = array.as_any().downcast_ref::<UInt64Array>() {
-        let val = arr.value(idx);
-        return ColumnValue::Int64(i64::try_from(val).unwrap_or(i64::MAX));
-    }
-
-    if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
-        return ColumnValue::String(arr.value(idx).to_string());
-    }
-
-    if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
-        return timestamp_to_string(arr.value_as_datetime(idx));
-    }
-
-    if let Some(arr) = array.as_any().downcast_ref::<TimestampMillisecondArray>() {
-        return timestamp_to_string(arr.value_as_datetime(idx));
-    }
-
-    if let Some(arr) = array.as_any().downcast_ref::<TimestampMicrosecondArray>() {
-        return timestamp_to_string(arr.value_as_datetime(idx));
-    }
-
-    if let Some(arr) = array.as_any().downcast_ref::<TimestampNanosecondArray>() {
-        return timestamp_to_string(arr.value_as_datetime(idx));
-    }
-
-    ColumnValue::Null
-}
-
-fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
-    dt.map(|d| ColumnValue::String(d.format("%Y-%m-%dT%H:%M:%SZ").to_string()))
-        .unwrap_or(ColumnValue::Null)
-}
-
-/// Extract nodes from the _gkg_path column in path finding queries.
-/// The column is Array(Tuple(Int64, String)) where each tuple is (node_id, entity_type).
-fn extract_path_nodes(batch: &RecordBatch, row_idx: usize) -> Vec<NodeRef> {
-    let col_idx = match batch.schema().index_of(PATH_COLUMN) {
-        Ok(i) => i,
-        Err(_) => return Vec::new(),
-    };
-
-    let list = match batch.column(col_idx).as_any().downcast_ref::<ListArray>() {
-        Some(l) if !l.is_null(row_idx) => l,
-        _ => return Vec::new(),
-    };
-
-    let values = list.value(row_idx);
-    let structs = match values.as_any().downcast_ref::<StructArray>() {
-        Some(s) if s.num_columns() >= 2 => s,
-        _ => return Vec::new(),
-    };
-
-    let ids = structs.column(0).as_any().downcast_ref::<Int64Array>();
-    let types = structs.column(1).as_any().downcast_ref::<StringArray>();
-
-    match (ids, types) {
-        (Some(ids), Some(types)) => (0..ids.len())
-            .filter(|&i| !ids.is_null(i) && !types.is_null(i))
-            .map(|i| NodeRef::new(ids.value(i), types.value(i)))
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// Extract the relationship kinds array from the `_gkg_edge_kinds` column.
-/// Returns one String per hop — `edge_kinds[i]` connects `path[i]` to `path[i+1]`.
-fn extract_edge_kinds(batch: &RecordBatch, row_idx: usize) -> Vec<String> {
-    let col_idx = match batch.schema().index_of(EDGE_KINDS_COLUMN) {
-        Ok(i) => i,
-        Err(_) => return Vec::new(),
-    };
-
-    let list = match batch.column(col_idx).as_any().downcast_ref::<ListArray>() {
-        Some(l) if !l.is_null(row_idx) => l,
-        _ => return Vec::new(),
-    };
-
-    let values = list.value(row_idx);
-    match values.as_any().downcast_ref::<StringArray>() {
-        Some(arr) => (0..arr.len())
-            .filter(|&i| !arr.is_null(i))
-            .map(|i| arr.value(i).to_string())
-            .collect(),
-        None => Vec::new(),
-    }
-}
-
-/// Extract the neighbor node from neighbor_id/neighbor_type columns in neighbors queries.
-/// Returns None if either column is missing or null.
-fn extract_neighbor_node(batch: &RecordBatch, row_idx: usize) -> Option<NodeRef> {
-    let id_col_idx = batch.schema().index_of(NEIGHBOR_ID_COLUMN).ok()?;
-    let type_col_idx = batch.schema().index_of(NEIGHBOR_TYPE_COLUMN).ok()?;
-
-    let id_array = batch
-        .column(id_col_idx)
-        .as_any()
-        .downcast_ref::<Int64Array>()?;
-    let type_array = batch
-        .column(type_col_idx)
-        .as_any()
-        .downcast_ref::<StringArray>()?;
-
-    if id_array.is_null(row_idx) || type_array.is_null(row_idx) {
-        return None;
-    }
-
-    Some(NodeRef::new(
-        id_array.value(row_idx),
-        type_array.value(row_idx),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::array::{Array, Int64Array, StringArray, TimestampMillisecondArray, UInt64Array};
     use arrow::datatypes::{Field, Schema};
     use query_engine::EntityAuthConfig;
     use std::collections::HashSet;
@@ -702,115 +506,6 @@ mod tests {
             let original = NodeRef::new(99, "Group");
             let cloned = original.clone();
             assert_eq!(original, cloned);
-        }
-    }
-
-    mod redactable_nodes_tests {
-        use super::*;
-
-        #[test]
-        fn new_is_empty() {
-            let nodes = RedactableNodes::new();
-            assert!(nodes.is_empty());
-            assert_eq!(nodes.len(), 0);
-        }
-
-        #[test]
-        fn add_and_retrieve() {
-            let mut nodes = RedactableNodes::new();
-            nodes.add(1, "User");
-            nodes.add(2, "Project");
-            nodes.add(3, "User");
-
-            assert_eq!(nodes.len(), 3);
-            assert!(!nodes.is_empty());
-
-            let refs = nodes.nodes();
-            assert_eq!(refs[0], NodeRef::new(1, "User"));
-            assert_eq!(refs[1], NodeRef::new(2, "Project"));
-            assert_eq!(refs[2], NodeRef::new(3, "User"));
-        }
-
-        #[test]
-        fn group_by_type_empty() {
-            let nodes = RedactableNodes::new();
-            let groups = nodes.group_by_type();
-            assert!(groups.is_empty());
-        }
-
-        #[test]
-        fn group_by_type_single_type() {
-            let mut nodes = RedactableNodes::new();
-            nodes.add(1, "User");
-            nodes.add(2, "User");
-            nodes.add(3, "User");
-
-            let groups = nodes.group_by_type();
-            assert_eq!(groups.len(), 1);
-            assert_eq!(groups.get("User"), Some(&vec![1, 2, 3]));
-        }
-
-        #[test]
-        fn group_by_type_multiple_types() {
-            let mut nodes = RedactableNodes::new();
-            nodes.add(1, "User");
-            nodes.add(100, "Project");
-            nodes.add(2, "User");
-            nodes.add(200, "Group");
-            nodes.add(101, "Project");
-
-            let groups = nodes.group_by_type();
-            assert_eq!(groups.len(), 3);
-            assert_eq!(groups.get("User"), Some(&vec![1, 2]));
-            assert_eq!(groups.get("Project"), Some(&vec![100, 101]));
-            assert_eq!(groups.get("Group"), Some(&vec![200]));
-        }
-
-        #[test]
-        fn group_by_type_preserves_order() {
-            let mut nodes = RedactableNodes::new();
-            nodes.add(3, "User");
-            nodes.add(1, "User");
-            nodes.add(2, "User");
-
-            let groups = nodes.group_by_type();
-            assert_eq!(groups.get("User"), Some(&vec![3, 1, 2]));
-        }
-    }
-
-    mod column_value_tests {
-        use super::*;
-
-        #[test]
-        fn int64_as_i64() {
-            let val = ColumnValue::Int64(42);
-            assert_eq!(val.as_i64(), Some(42));
-            assert_eq!(val.as_str(), None);
-        }
-
-        #[test]
-        fn string_as_str() {
-            let val = ColumnValue::String("hello".to_string());
-            assert_eq!(val.as_str(), Some("hello"));
-            assert_eq!(val.as_i64(), None);
-        }
-
-        #[test]
-        fn null_returns_none() {
-            let val = ColumnValue::Null;
-            assert_eq!(val.as_i64(), None);
-            assert_eq!(val.as_str(), None);
-        }
-
-        #[test]
-        fn equality() {
-            assert_eq!(ColumnValue::Int64(1), ColumnValue::Int64(1));
-            assert_ne!(ColumnValue::Int64(1), ColumnValue::Int64(2));
-            assert_eq!(
-                ColumnValue::String("a".to_string()),
-                ColumnValue::String("a".to_string())
-            );
-            assert_ne!(ColumnValue::Null, ColumnValue::Int64(0));
         }
     }
 
@@ -998,18 +693,6 @@ mod tests {
             let u = result.ctx().get("u").unwrap();
             let ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(u)).collect();
             assert_eq!(ids, vec![1, 2, 3]);
-        }
-
-        #[test]
-        fn extract_redactable_nodes_all_nodes() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let nodes = result.extract_redactable_nodes();
-
-            assert_eq!(nodes.len(), 6);
-
-            let groups = nodes.group_by_type();
-            assert_eq!(groups.get("User"), Some(&vec![1, 2, 3]));
-            assert_eq!(groups.get("Project"), Some(&vec![100, 200, 300]));
         }
 
         #[test]
@@ -1437,121 +1120,8 @@ mod tests {
         }
     }
 
-    mod extract_value_tests {
+    mod from_batches_data_type_tests {
         use super::*;
-
-        #[test]
-        fn extract_uint64_as_int64() {
-            let batch = make_batch(vec![(
-                "count",
-                Arc::new(UInt64Array::from(vec![100u64, 200, 300])),
-            )]);
-
-            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
-
-            assert_eq!(
-                result.rows()[0].get("count"),
-                Some(&ColumnValue::Int64(100))
-            );
-            assert_eq!(
-                result.rows()[1].get("count"),
-                Some(&ColumnValue::Int64(200))
-            );
-            assert_eq!(
-                result.rows()[2].get("count"),
-                Some(&ColumnValue::Int64(300))
-            );
-        }
-
-        #[test]
-        fn extract_timestamp_second() {
-            let arr = TimestampSecondArray::new(
-                vec![1704067200i64].into(), // 2024-01-01T00:00:00Z
-                None,
-            );
-            let batch = make_batch(vec![("ts", Arc::new(arr))]);
-
-            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
-
-            assert_eq!(
-                result.rows()[0].get("ts"),
-                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
-            );
-        }
-
-        #[test]
-        fn extract_timestamp_millisecond() {
-            let arr = TimestampMillisecondArray::new(
-                vec![1704067200000i64].into(), // 2024-01-01T00:00:00Z in ms
-                None,
-            );
-            let batch = make_batch(vec![("ts", Arc::new(arr))]);
-
-            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
-
-            assert_eq!(
-                result.rows()[0].get("ts"),
-                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
-            );
-        }
-
-        #[test]
-        fn extract_timestamp_microsecond() {
-            let arr = TimestampMicrosecondArray::new(
-                vec![1704067200000000i64].into(), // 2024-01-01T00:00:00Z in μs
-                None,
-            );
-            let batch = make_batch(vec![("ts", Arc::new(arr))]);
-
-            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
-
-            assert_eq!(
-                result.rows()[0].get("ts"),
-                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
-            );
-        }
-
-        #[test]
-        fn extract_timestamp_nanosecond() {
-            let arr = TimestampNanosecondArray::new(
-                vec![1704067200000000000i64].into(), // 2024-01-01T00:00:00Z in ns
-                None,
-            );
-            let batch = make_batch(vec![("ts", Arc::new(arr))]);
-
-            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
-
-            assert_eq!(
-                result.rows()[0].get("ts"),
-                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
-            );
-        }
-
-        #[test]
-        fn extract_null_timestamp_returns_null() {
-            let arr: TimestampSecondArray = vec![Some(1704067200i64), None].into_iter().collect();
-            let batch = make_batch(vec![("ts", Arc::new(arr))]);
-
-            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
-
-            assert_eq!(
-                result.rows()[0].get("ts"),
-                Some(&ColumnValue::String("2024-01-01T00:00:00Z".to_string()))
-            );
-            assert_eq!(result.rows()[1].get("ts"), Some(&ColumnValue::Null));
-        }
-
-        #[test]
-        fn extract_uint64_overflow_clamps_to_max() {
-            let batch = make_batch(vec![("big", Arc::new(UInt64Array::from(vec![u64::MAX])))]);
-
-            let result = QueryResult::from_batches(&[batch], &ResultContext::new());
-
-            assert_eq!(
-                result.rows()[0].get("big"),
-                Some(&ColumnValue::Int64(i64::MAX))
-            );
-        }
 
         #[test]
         fn mixed_data_types_in_batch() {

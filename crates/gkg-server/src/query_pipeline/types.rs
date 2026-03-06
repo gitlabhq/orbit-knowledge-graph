@@ -13,6 +13,7 @@ use crate::auth::Claims;
 use crate::redaction::{QueryResult, RedactionMessage, ResourceAuthorization};
 
 use super::error::PipelineError;
+use crate::query_pipeline::stages::SecurityError;
 
 pub struct PipelineRequest<'a, M: RedactionMessage> {
     pub claims: &'a Claims,
@@ -37,7 +38,7 @@ impl QueryPipelineContext {
 
     pub fn security_context(&self) -> Result<&SecurityContext, PipelineError> {
         self.security_context.as_ref().ok_or_else(|| {
-            super::stages::SecurityError("security context not yet available".into()).into()
+            PipelineError::Security(SecurityError("security context not yet available".into()))
         })
     }
 }
