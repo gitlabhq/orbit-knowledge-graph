@@ -9,7 +9,7 @@
 use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
-use crate::input::{Input, QueryType};
+use crate::input::{FilterOp, Input, QueryType};
 use ontology::Ontology;
 
 pub(crate) const BASE_SCHEMA_JSON: &str = include_str!("../../ontology/schema.json");
@@ -100,6 +100,8 @@ impl<'a> Validator<'a> {
         const MAX_DEPTH_CAP: u32 = 3;
         const MAX_NODES_CAP: usize = 5;
         const MAX_RELS_CAP: usize = 5;
+        const MAX_NODE_IDS: usize = 500;
+        const MAX_IN_VALUES: usize = 100;
 
         if input.nodes.len() > MAX_NODES_CAP {
             return Err(QueryError::DepthExceeded(format!(
@@ -128,6 +130,31 @@ impl<'a> Validator<'a> {
                 "max_depth ({}) must not exceed {MAX_DEPTH_CAP}",
                 path.max_depth
             )));
+        }
+        for node in &input.nodes {
+            if node.node_ids.len() > MAX_NODE_IDS {
+                return Err(QueryError::LimitExceeded(format!(
+                    "node_ids count ({}) for node \"{}\" must not exceed {MAX_NODE_IDS}",
+                    node.node_ids.len(),
+                    node.id
+                )));
+            }
+            for (prop, filter) in &node.filters {
+                if let Some(FilterOp::In) = filter.op {
+                    let len = filter
+                        .value
+                        .as_ref()
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    if len > MAX_IN_VALUES {
+                        return Err(QueryError::LimitExceeded(format!(
+                            "IN filter on \"{prop}\" for node \"{}\" has {len} values, must not exceed {MAX_IN_VALUES}",
+                            node.id
+                        )));
+                    }
+                }
+            }
         }
         Ok(())
     }

@@ -27,6 +27,9 @@ pub enum QueryError {
     #[error("depth exceeded: {0}")]
     DepthExceeded(String),
 
+    #[error("limit exceeded: {0}")]
+    LimitExceeded(String),
+
     #[error("lowering error: {0}")]
     Lowering(String),
 

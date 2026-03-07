@@ -2,7 +2,7 @@
 //!
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
-use crate::ast::{Cte, Expr, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, Node, Op, Query, TableRef};
 use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
@@ -10,10 +10,17 @@ use crate::input::QueryType;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// A query parameter with its ClickHouse type and JSON value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParamValue {
+    pub ch_type: ChType,
+    pub value: Value,
+}
+
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {
     pub sql: String,
-    pub params: HashMap<String, Value>,
+    pub params: HashMap<String, ParamValue>,
     pub result_context: ResultContext,
 }
 
@@ -69,7 +76,7 @@ impl std::fmt::Display for ParameterizedQuery {
         let re = Regex::new(r"\{(\w+):\w+\}").expect("valid regex");
         let result = re.replace_all(&self.sql, |caps: &regex::Captures| {
             let name = &caps[1];
-            match self.params.get(name) {
+            match self.params.get(name).map(|p| &p.value) {
                 Some(Value::String(s)) => format!("'{}'", s.replace('\'', "''")),
                 Some(Value::Bool(b)) => b.to_string(),
                 Some(Value::Number(n)) => n.to_string(),
@@ -99,7 +106,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct Context {
-    params: HashMap<String, Value>,
+    params: HashMap<String, ParamValue>,
 }
 
 impl Context {
@@ -168,15 +175,11 @@ impl Context {
 
         // FROM
         let from = self.emit_table_ref(&q.from)?;
-        parts.push(format!("FROM {}", from.sql));
+        parts.push(format!("FROM {from}"));
 
         // WHERE
-        let mut where_parts = from.type_conditions;
         if let Some(w) = &q.where_clause {
-            where_parts.push(self.emit_expr(w));
-        }
-        if !where_parts.is_empty() {
-            parts.push(format!("WHERE {}", where_parts.join(" AND ")));
+            parts.push(format!("WHERE {}", self.emit_expr(w)));
         }
 
         // GROUP BY
@@ -223,6 +226,7 @@ impl Context {
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Literal(v) => self.emit_literal(v),
+            Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => {
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
@@ -234,16 +238,66 @@ impl Context {
                     format!("{l} IN {r}")
                 } else {
                     // This is for binary ops like =, >, <=, etc.
-                    format!("({l} {} {r})", op.as_sql())
+                    format!("({l} {op} {r})")
                 }
             }
             Expr::UnaryOp { op, expr } => {
                 let e = self.emit_expr(expr);
                 if *op == Op::IsNull || *op == Op::IsNotNull {
-                    format!("({e} {})", op.as_sql())
+                    format!("({e} {op})")
                 } else {
-                    format!("({} {e})", op.as_sql())
+                    format!("({op} {e})")
                 }
+            }
+        }
+    }
+
+    fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
+        match v {
+            Value::Null => "NULL".into(),
+            // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
+            Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
+                let name = format!("p{}", self.params.len());
+                let placeholder = format!("{{{name}:{data_type}}}");
+                self.params.insert(
+                    name,
+                    ParamValue {
+                        ch_type: data_type,
+                        value: v.clone(),
+                    },
+                );
+                placeholder
+            }
+            // Scalar ChType with array value: expand element-by-element (Literal fallback).
+            Value::Array(arr) => {
+                let placeholders: Vec<_> = arr
+                    .iter()
+                    .map(|item| {
+                        let name = format!("p{}", self.params.len());
+                        let placeholder = format!("{{{name}:{data_type}}}");
+                        self.params.insert(
+                            name,
+                            ParamValue {
+                                ch_type: data_type,
+                                value: item.clone(),
+                            },
+                        );
+                        placeholder
+                    })
+                    .collect();
+                format!("({})", placeholders.join(", "))
+            }
+            _ => {
+                let name = format!("p{}", self.params.len());
+                let placeholder = format!("{{{name}:{data_type}}}");
+                self.params.insert(
+                    name,
+                    ParamValue {
+                        ch_type: data_type,
+                        value: v.clone(),
+                    },
+                );
+                placeholder
             }
         }
     }
@@ -254,119 +308,42 @@ impl Context {
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
-                    .map(|item| {
-                        let name = format!("p{}", self.params.len());
-                        let placeholder = format!("{{{name}:{}}}", ch_type(item));
-                        self.params.insert(name, item.clone());
-                        placeholder
-                    })
+                    .map(|item| self.emit_param(ChType::from_value(item), item))
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
-            _ => {
-                let name = format!("p{}", self.params.len());
-                let placeholder = format!("{{{name}:{}}}", ch_type(v));
-                self.params.insert(name, v.clone());
-                placeholder
-            }
+            _ => self.emit_param(ChType::from_value(v), v),
         }
     }
 
-    fn emit_table_ref(&mut self, t: &TableRef) -> Result<TableRefResult> {
+    fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
-            TableRef::Scan {
-                table,
-                alias,
-                type_filter,
-            } => {
-                let type_conditions = match type_filter {
-                    Some(types) if types.len() == 1 => {
-                        let param = format!("type_{alias}");
-                        let condition = format!("({alias}.relationship_kind = {{{param}:String}})");
-                        self.params.insert(param, Value::String(types[0].clone()));
-                        vec![condition]
-                    }
-                    Some(types) if types.len() > 1 => {
-                        let param = format!("type_{alias}");
-                        let condition =
-                            format!("({alias}.relationship_kind IN {{{param}:Array(String)}})");
-                        let arr =
-                            Value::Array(types.iter().map(|t| Value::String(t.clone())).collect());
-                        self.params.insert(param, arr);
-                        vec![condition]
-                    }
-                    _ => vec![],
-                };
-                Ok(TableRefResult {
-                    sql: format!("{table} AS {alias}"),
-                    type_conditions,
-                })
-            }
+            TableRef::Scan { table, alias } => Ok(format!("{table} AS {alias}")),
             TableRef::Join {
                 join_type,
                 left,
                 right,
                 on,
             } => {
-                let left_res = self.emit_table_ref(left)?;
-                let right_res = self.emit_table_ref(right)?;
+                let left_sql = self.emit_table_ref(left)?;
+                let right_sql = self.emit_table_ref(right)?;
                 let on_expr = self.emit_expr(on);
-
-                let on_clause = if right_res.type_conditions.is_empty() {
-                    on_expr
-                } else {
-                    format!(
-                        "({} AND {})",
-                        on_expr,
-                        right_res.type_conditions.join(" AND ")
-                    )
-                };
-
-                Ok(TableRefResult {
-                    sql: format!(
-                        "{} {} JOIN {} ON {}",
-                        left_res.sql,
-                        join_type.as_sql(),
-                        right_res.sql,
-                        on_clause
-                    ),
-                    type_conditions: left_res.type_conditions,
-                })
+                Ok(format!(
+                    "{left_sql} {join_type} JOIN {right_sql} ON {on_expr}"
+                ))
             }
             TableRef::Union { queries, alias } => {
                 let union_parts: Vec<String> = queries
                     .iter()
                     .map(|q| self.emit_query(q))
                     .collect::<Result<_>>()?;
-
-                Ok(TableRefResult {
-                    sql: format!("({}) AS {alias}", union_parts.join(" UNION ALL ")),
-                    type_conditions: vec![],
-                })
+                Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
             }
             TableRef::Subquery { query, alias } => {
                 let inner_sql = self.emit_query(query)?;
-                Ok(TableRefResult {
-                    sql: format!("({inner_sql}) AS {alias}"),
-                    type_conditions: vec![],
-                })
+                Ok(format!("({inner_sql}) AS {alias}"))
             }
         }
-    }
-}
-
-struct TableRefResult {
-    sql: String,
-    type_conditions: Vec<String>,
-}
-
-fn ch_type(v: &Value) -> &'static str {
-    match v {
-        Value::String(_) => "String",
-        Value::Number(n) if n.is_i64() => "Int64",
-        Value::Number(_) => "Float64",
-        Value::Bool(_) => "Bool",
-        _ => "String",
     }
 }
 
@@ -407,7 +384,10 @@ mod tests {
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
         );
-        assert_eq!(result.params.get("p0"), Some(&Value::from("User")));
+        assert_eq!(
+            result.params.get("p0").map(|p| &p.value),
+            Some(&Value::from("User"))
+        );
     }
 
     #[test]
@@ -554,49 +534,70 @@ mod tests {
 
     #[test]
     fn edge_type_filter() {
-        fn make_query(types: Vec<String>) -> Query {
-            Query {
-                select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
-                from: TableRef::join(
-                    JoinType::Inner,
-                    TableRef::scan("gl_user", "u"),
-                    TableRef::scan_with_filter("gl_edge", "e", types),
+        // Single type: equality in join ON clause
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::scan("gl_edge", "e"),
+                Expr::and(
                     Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
+                    Expr::eq(
+                        Expr::col("e", "relationship_kind"),
+                        Expr::string("AUTHORED"),
+                    ),
                 ),
-                ..Default::default()
-            }
-        }
-
-        // Single type: uses equality
-        let r = codegen(
-            &Node::Query(Box::new(make_query(vec!["AUTHORED".into()]))),
-            empty_ctx(),
-        )
-        .unwrap();
-        assert!(r.sql.contains("relationship_kind = {type_e:String})"));
+            ),
+            ..Default::default()
+        };
+        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            r.sql.contains("e.relationship_kind = {p0:String}"),
+            "{}",
+            r.sql
+        );
         assert_eq!(
-            r.params.get("type_e"),
+            r.params.get("p0").map(|p| &p.value),
             Some(&Value::String("AUTHORED".into()))
         );
 
-        // Multiple types: uses IN clause
-        let r = codegen(
-            &Node::Query(Box::new(make_query(vec![
-                "AUTHORED".into(),
-                "CONTAINS".into(),
-            ]))),
-            empty_ctx(),
+        // Multiple types: IN in join ON clause (uses col_in, matching production)
+        let type_filter = Expr::col_in(
+            "e",
+            "relationship_kind",
+            ChType::String,
+            vec![
+                Value::String("AUTHORED".into()),
+                Value::String("CONTAINS".into()),
+            ],
         )
         .unwrap();
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::scan("gl_edge", "e"),
+                Expr::and(
+                    Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
+                    type_filter,
+                ),
+            ),
+            ..Default::default()
+        };
+        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert!(
+            r.sql.contains("e.relationship_kind IN {p0:Array(String)}"),
+            "{}",
             r.sql
-                .contains("relationship_kind IN {type_e:Array(String)})")
         );
+        assert_eq!(r.params.len(), 1);
         assert_eq!(
-            r.params.get("type_e"),
+            r.params.get("p0").map(|p| &p.value),
             Some(&Value::Array(vec![
                 Value::String("AUTHORED".into()),
-                Value::String("CONTAINS".into())
+                Value::String("CONTAINS".into()),
             ]))
         );
     }

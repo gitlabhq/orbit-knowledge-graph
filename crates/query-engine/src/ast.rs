@@ -5,6 +5,8 @@
 
 use serde_json::Value;
 
+pub use gkg_utils::clickhouse::{ChScalar, ChType};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Expressions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,8 +16,10 @@ use serde_json::Value;
 pub enum Expr {
     /// Column reference → `table.column`
     Column { table: String, column: String },
-    /// Constant value → parameterized as `{p0:Type}`
+    /// Constant value → parameterized as `{pN:Type}`, type inferred from Value.
     Literal(Value),
+    /// Constant value with explicit ClickHouse type → `{pN:Type}`.
+    Param { data_type: ChType, value: Value },
     /// Function call → `NAME(arg1, arg2, ...)`
     /// Used for aggregates (COUNT, SUM) and ClickHouse functions (arrayConcat, has).
     FuncCall { name: String, args: Vec<Expr> },
@@ -33,49 +37,42 @@ pub enum Expr {
 }
 
 /// SQL operators for expressions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum Op {
     // Comparison
+    #[strum(serialize = "=")]
     Eq,
+    #[strum(serialize = "!=")]
     Ne,
+    #[strum(serialize = "<")]
     Lt,
+    #[strum(serialize = "<=")]
     Le,
+    #[strum(serialize = ">")]
     Gt,
+    #[strum(serialize = ">=")]
     Ge,
+    #[strum(serialize = "IN")]
     In,
+    #[strum(serialize = "LIKE")]
     Like,
+    #[strum(serialize = "ILIKE")]
     ILike,
     // Logical
+    #[strum(serialize = "AND")]
     And,
+    #[strum(serialize = "OR")]
     Or,
+    #[strum(serialize = "NOT")]
     Not,
     // Null checks
+    #[strum(serialize = "IS NULL")]
     IsNull,
+    #[strum(serialize = "IS NOT NULL")]
     IsNotNull,
     // Arithmetic
+    #[strum(serialize = "+")]
     Add,
-}
-
-impl Op {
-    pub fn as_sql(&self) -> &'static str {
-        match self {
-            Op::Eq => "=",
-            Op::Ne => "!=",
-            Op::Lt => "<",
-            Op::Le => "<=",
-            Op::Gt => ">",
-            Op::Ge => ">=",
-            Op::In => "IN",
-            Op::Like => "LIKE",
-            Op::ILike => "ILIKE",
-            Op::And => "AND",
-            Op::Or => "OR",
-            Op::Not => "NOT",
-            Op::IsNull => "IS NULL",
-            Op::IsNotNull => "IS NOT NULL",
-            Op::Add => "+",
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,14 +83,7 @@ impl Op {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
     /// Read from a physical table → `table AS alias`
-    /// If type_filter is set, adds filtering on relationship_kind column.
-    /// Single type: `alias.relationship_kind = {type_alias:String}`
-    /// Multiple types: `alias.relationship_kind IN ({type_alias:Array(String)})`
-    Scan {
-        table: String,
-        alias: String,
-        type_filter: Option<Vec<String>>,
-    },
+    Scan { table: String, alias: String },
     /// Combine two sources → `left JOIN_TYPE JOIN right ON condition`
     Join {
         join_type: JoinType,
@@ -114,23 +104,13 @@ pub enum TableRef {
 /// - Left: all rows from left, matching from right (NULLs if no match)
 /// - Right: all rows from right, matching from left
 /// - Full: all rows from both sides
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "UPPERCASE")]
 pub enum JoinType {
     Inner,
     Left,
     Right,
     Full,
-}
-
-impl JoinType {
-    pub fn as_sql(&self) -> &'static str {
-        match self {
-            JoinType::Inner => "INNER",
-            JoinType::Left => "LEFT",
-            JoinType::Right => "RIGHT",
-            JoinType::Full => "FULL",
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -218,7 +198,6 @@ impl Default for Query {
             from: TableRef::Scan {
                 table: String::new(),
                 alias: String::new(),
-                type_filter: None,
             },
             where_clause: None,
             group_by: vec![],
@@ -252,6 +231,27 @@ impl Expr {
 
     pub fn lit(value: impl Into<Value>) -> Self {
         Expr::Literal(value.into())
+    }
+
+    pub fn param(data_type: ChType, value: impl Into<Value>) -> Self {
+        Expr::Param {
+            data_type,
+            value: value.into(),
+        }
+    }
+
+    pub fn string(value: impl Into<String>) -> Self {
+        Expr::Param {
+            data_type: ChType::String,
+            value: Value::String(value.into()),
+        }
+    }
+
+    pub fn int(value: i64) -> Self {
+        Expr::Param {
+            data_type: ChType::Int64,
+            value: Value::Number(value.into()),
+        }
     }
 
     pub fn func(name: impl Into<String>, args: Vec<Expr>) -> Self {
@@ -300,6 +300,39 @@ impl Expr {
             .reduce(|a, b| Expr::binary(Op::Or, a, b))
     }
 
+    /// Match a column against a set of values.
+    /// 0 values → None, 1 value → Eq, N values → IN.
+    pub fn col_in(
+        table: impl Into<String>,
+        column: impl Into<String>,
+        data_type: ChType,
+        values: Vec<Value>,
+    ) -> Option<Self> {
+        match values.len() {
+            0 => None,
+            1 => Some(Expr::eq(
+                Expr::col(table, column),
+                Expr::Param {
+                    data_type,
+                    value: values.into_iter().next().unwrap(),
+                },
+            )),
+            _ => Some(Expr::binary(
+                Op::In,
+                Expr::col(table, column),
+                Expr::Param {
+                    data_type: data_type.to_array(),
+                    value: Value::Array(values),
+                },
+            )),
+        }
+    }
+
+    /// Combine two expressions with AND.
+    pub fn and(left: Expr, right: Expr) -> Expr {
+        Expr::binary(Op::And, left, right)
+    }
+
     /// Combine two expressions with OR.
     pub fn or(left: Expr, right: Expr) -> Expr {
         Expr::binary(Op::Or, left, right)
@@ -311,19 +344,6 @@ impl TableRef {
         TableRef::Scan {
             table: table.into(),
             alias: alias.into(),
-            type_filter: None,
-        }
-    }
-
-    pub fn scan_with_filter(
-        table: impl Into<String>,
-        alias: impl Into<String>,
-        type_filter: Vec<String>,
-    ) -> Self {
-        TableRef::Scan {
-            table: table.into(),
-            alias: alias.into(),
-            type_filter: Some(type_filter),
         }
     }
 

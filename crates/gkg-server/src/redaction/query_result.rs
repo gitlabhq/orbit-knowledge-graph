@@ -9,7 +9,7 @@ use query_engine::constants::{
 use query_engine::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
-use crate::arrow::{ArrowUtils, ColumnValue};
+use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 
 #[derive(Debug, Clone)]
 pub struct NodeRef {

@@ -1,12 +1,13 @@
 //! Query engine metrics.
 //!
-//! Seven counters track security-relevant events during query compilation.
+//! Eight counters track security-relevant events during query compilation.
 //! When no `MeterProvider` is configured, all instruments are no-ops.
 //!
 //! Counters fired internally by [`compile`](crate::compile):
 //! - `validation_failed` — malformed query structure (schema, reference, pagination)
 //! - `allowlist_rejected` — entity/column/relationship not in ontology (validation + normalization)
 //! - `depth_exceeded` — max_hops or max_depth exceeds the hard cap
+//! - `limit_exceeded` — node_ids count or IN filter value count exceeds cardinality cap
 //! - `pipeline_invariant_violated` — lowering/codegen hit a state the upstream stages should prevent
 //!
 //! Counters exported for the server layer to increment:
@@ -32,6 +33,7 @@ pub struct QueryEngineMetrics {
     pub timeout: Counter<u64>,
     pub rate_limited: Counter<u64>,
     pub depth_exceeded: Counter<u64>,
+    pub limit_exceeded: Counter<u64>,
     pub pipeline_invariant_violated: Counter<u64>,
 }
 
@@ -73,6 +75,13 @@ impl QueryEngineMetrics {
             .with_description("Traversal depth or hop count exceeded the hard cap")
             .build();
 
+        let limit_exceeded = meter
+            .u64_counter("qe.threat.limit_exceeded")
+            .with_description(
+                "Array cardinality cap exceeded (node_ids count or IN filter value count)",
+            )
+            .build();
+
         let pipeline_invariant_violated = meter
             .u64_counter("qe.internal.pipeline_invariant_violated")
             .with_description(
@@ -87,6 +96,7 @@ impl QueryEngineMetrics {
             timeout,
             rate_limited,
             depth_exceeded,
+            limit_exceeded,
             pipeline_invariant_violated,
         }
     }
@@ -108,6 +118,7 @@ fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
         QueryError::AllowlistRejected(_) => (&METRICS.allowlist_rejected, "ontology"),
         QueryError::Ontology(_) => (&METRICS.allowlist_rejected, "ontology_internal"),
         QueryError::DepthExceeded(_) => (&METRICS.depth_exceeded, "depth"),
+        QueryError::LimitExceeded(_) => (&METRICS.limit_exceeded, "limit"),
         QueryError::Security(_) => (&METRICS.auth_filter_missing, "security"),
         QueryError::Lowering(_) => (&METRICS.pipeline_invariant_violated, "lowering"),
         QueryError::Codegen(_) => (&METRICS.pipeline_invariant_violated, "codegen"),

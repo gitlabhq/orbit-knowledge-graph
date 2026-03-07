@@ -380,9 +380,9 @@ All user-supplied scalar values (node IDs, filter values like `state = 'opened'`
 ```sql
 SELECT u.id AS u_id, mr.id AS mr_id
 FROM gl_users AS u
-INNER JOIN gl_edges AS e0 ON (u.id = e0.source_id AND e0.relationship_kind = {type_e0:String})
+INNER JOIN gl_edges AS e0 ON (u.id = e0.source_id AND (e0.relationship_kind = {p0:String}))
 INNER JOIN gl_merge_requests AS mr ON (e0.target_id = mr.id)
-WHERE (u.username = {p0:String}) AND (mr.state = {p1:String})
+WHERE (u.username = {p1:String}) AND (mr.state = {p2:String})
 LIMIT 25
 ```
 
@@ -390,9 +390,9 @@ With parameters:
 
 ```json
 {
-  "type_e0": "AUTHORED",
-  "p0": "admin",
-  "p1": "merged"
+  "p0": "AUTHORED",
+  "p1": "admin",
+  "p2": "merged"
 }
 ```
 
@@ -422,6 +422,8 @@ Each relationship step has a hard-coded `max_hops` cap, and the schema enforces 
 - `max_hops` limited to 3 to prevent resource exhaustion
 - `limit` capped at 1000 results (default: 30)
 - Path `max_depth` limited to 3
+- `node_ids` capped at 500 per node selector
+- `IN` filter values capped at 100 per filter
 
 > **Note:** These limits will be tuned as we collect usage data.
 
@@ -479,11 +481,11 @@ The compilation step is a controlled JSON → AST → SQL translation. Free-form
 ```sql
 SELECT u.id AS u_id, mr.id AS mr_id
 FROM gl_users AS u
-INNER JOIN gl_edges AS e0 ON (u.id = e0.source_id AND e0.relationship_kind = {type_e0:String})
+INNER JOIN gl_edges AS e0 ON (u.id = e0.source_id AND (e0.relationship_kind = {p0:String}))
 INNER JOIN gl_merge_requests AS mr ON (e0.target_id = mr.id)
 WHERE startsWith(mr.traversal_path, {sec0:String})
-  AND (u.username = {p0:String})
-  AND (mr.state = {p1:String})
+  AND (u.username = {p1:String})
+  AND (mr.state = {p2:String})
 LIMIT 25
 ```
 
@@ -491,9 +493,9 @@ LIMIT 25
 
 ```json
 {
-  "type_e0": "AUTHORED",
+  "p0": "AUTHORED",
   "sec0": "1/",
-  "p0": "admin",
-  "p1": "merged"
+  "p1": "admin",
+  "p2": "merged"
 }
 ```

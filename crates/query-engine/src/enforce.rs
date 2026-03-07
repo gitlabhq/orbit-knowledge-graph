@@ -178,7 +178,7 @@ fn enforce_return_columns(
             q.select.insert(
                 insert_pos,
                 SelectExpr {
-                    expr: Expr::lit(entity.as_str()),
+                    expr: Expr::string(entity.as_str()),
                     alias: Some(type_col),
                 },
             );
@@ -256,15 +256,15 @@ mod tests {
         assert_eq!(q.select[2].alias, Some("_gkg_p_id".into()));
         assert_eq!(q.select[3].alias, Some("_gkg_p_type".into()));
 
-        if let Expr::Literal(v) = &q.select[1].expr {
-            assert_eq!(v.as_str(), Some("User"));
+        if let Expr::Param { value, .. } = &q.select[1].expr {
+            assert_eq!(value.as_str(), Some("User"));
         } else {
-            panic!("expected literal");
+            panic!("expected param");
         }
-        if let Expr::Literal(v) = &q.select[3].expr {
-            assert_eq!(v.as_str(), Some("Project"));
+        if let Expr::Param { value, .. } = &q.select[3].expr {
+            assert_eq!(value.as_str(), Some("Project"));
         } else {
-            panic!("expected literal");
+            panic!("expected param");
         }
     }
 
@@ -580,13 +580,13 @@ mod tests {
         assert_eq!(q.select[1].alias, Some("_gkg_d_id".into()));
         assert!(matches!(&q.select[1].expr, Expr::Column { column, .. } if column == "project_id"));
         assert_eq!(q.select[2].alias, Some("_gkg_d_type".into()));
-        assert!(matches!(&q.select[2].expr, Expr::Literal(v) if v == "Definition"));
+        assert!(matches!(&q.select[2].expr, Expr::Param { value, .. } if value == "Definition"));
 
         // Project: default id column + type literal (no separate pk needed)
         assert_eq!(q.select[3].alias, Some("_gkg_p_id".into()));
         assert!(matches!(&q.select[3].expr, Expr::Column { column, .. } if column == "id"));
         assert_eq!(q.select[4].alias, Some("_gkg_p_type".into()));
-        assert!(matches!(&q.select[4].expr, Expr::Literal(v) if v == "Project"));
+        assert!(matches!(&q.select[4].expr, Expr::Param { value, .. } if value == "Project"));
 
         assert_eq!(ctx.len(), 2);
         let d_node = ctx.get("d").unwrap();

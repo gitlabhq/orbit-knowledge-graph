@@ -6,8 +6,8 @@ use clickhouse_client::ArrowClickHouseClient;
 use futures::future::try_join_all;
 use query_engine::{DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryType, compile};
 
-use crate::arrow::{ArrowUtils, ColumnValue};
 use crate::redaction::{QueryResult, RedactionMessage};
+use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 
 use super::super::error::PipelineError;
 use super::super::metrics::PipelineObserver;
@@ -88,8 +88,8 @@ impl HydrationStage {
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
         let mut query = ctx.client.query(&compiled.base.sql);
-        for (key, value) in &compiled.base.params {
-            query = ArrowClickHouseClient::bind_param(query, key, value);
+        for (key, param) in &compiled.base.params {
+            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
         let batches = query
             .fetch_arrow()
