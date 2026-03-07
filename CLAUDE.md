@@ -69,7 +69,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `code-parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
 | `code-graph` | Builds in-memory property graphs from parsed code |
-| `utils` | Shared ClickHouse param types (`ChScalar`, `ChType`) and Arrow extraction utilities |
+| `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`) and Arrow extraction utilities |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming |
 | `gitaly-client` | Gitaly gRPC client, HMAC auth, GetArchive RPC |
 | `siphon-proto` | Protobuf types for CDC replication events |
