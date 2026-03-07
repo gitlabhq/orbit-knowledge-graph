@@ -133,7 +133,7 @@ impl<'a> Validator<'a> {
         }
         for node in &input.nodes {
             if node.node_ids.len() > MAX_NODE_IDS {
-                return Err(QueryError::DepthExceeded(format!(
+                return Err(QueryError::LimitExceeded(format!(
                     "node_ids count ({}) for node \"{}\" must not exceed {MAX_NODE_IDS}",
                     node.node_ids.len(),
                     node.id
@@ -148,7 +148,7 @@ impl<'a> Validator<'a> {
                         .map(|a| a.len())
                         .unwrap_or(0);
                     if len > MAX_IN_VALUES {
-                        return Err(QueryError::DepthExceeded(format!(
+                        return Err(QueryError::LimitExceeded(format!(
                             "IN filter on \"{prop}\" for node \"{}\" has {len} values, must not exceed {MAX_IN_VALUES}",
                             node.id
                         )));

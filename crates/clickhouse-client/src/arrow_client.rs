@@ -122,6 +122,7 @@ impl ArrowClickHouseClient {
                 }
             }
             Value::Bool(b) => query.param(key, *b),
+            Value::Null => query.param(key, Option::<String>::None),
             Value::Array(arr) => match ch_type {
                 ChType::Array(ChScalar::Int64) => {
                     let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_i64()).collect();

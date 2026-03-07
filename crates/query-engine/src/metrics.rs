@@ -108,6 +108,7 @@ fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
         QueryError::AllowlistRejected(_) => (&METRICS.allowlist_rejected, "ontology"),
         QueryError::Ontology(_) => (&METRICS.allowlist_rejected, "ontology_internal"),
         QueryError::DepthExceeded(_) => (&METRICS.depth_exceeded, "depth"),
+        QueryError::LimitExceeded(_) => (&METRICS.depth_exceeded, "limit"),
         QueryError::Security(_) => (&METRICS.auth_filter_missing, "security"),
         QueryError::Lowering(_) => (&METRICS.pipeline_invariant_violated, "lowering"),
         QueryError::Codegen(_) => (&METRICS.pipeline_invariant_violated, "codegen"),
