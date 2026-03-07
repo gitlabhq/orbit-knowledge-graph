@@ -5,67 +5,60 @@
 
 use tree_sitter as ts;
 
-/// Represents a pre-order traversal of tree-sitter nodes.
+/// Pre-order (depth-first) traversal of tree-sitter nodes using a cursor.
+///
+/// Zero heap allocation. Each node is visited exactly once going down and at
+/// most once going up (via `goto_parent`), giving O(N) amortized complexity
+/// where N is the number of nodes in the subtree.
 pub struct TsPre<'tree> {
     cursor: ts::TreeCursor<'tree>,
-    start_id: Option<usize>,
     current_depth: usize,
+    done: bool,
 }
 
 impl<'tree> TsPre<'tree> {
     pub fn new(node: &ts::Node<'tree>) -> Self {
         Self {
             cursor: node.walk(),
-            start_id: Some(node.id()),
             current_depth: 0,
+            done: false,
         }
     }
 
-    fn step_down(&mut self) -> bool {
-        if self.cursor.goto_first_child() {
-            self.current_depth += 1;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn trace_up(&mut self, start: usize) {
-        let cursor = &mut self.cursor;
-        while cursor.node().id() != start {
-            if cursor.goto_next_sibling() {
-                return;
-            }
-            self.current_depth -= 1;
-            if !cursor.goto_parent() {
-                break;
-            }
-        }
-        self.start_id = None;
-    }
-
-    /// Get the current depth of traversal
+    /// Get the current depth of traversal relative to the starting node.
     pub fn current_depth(&self) -> usize {
         self.current_depth
     }
 }
 
-/// Amortized time complexity is O(NlgN), depending on branching factor.
 impl<'tree> Iterator for TsPre<'tree> {
     type Item = ts::Node<'tree>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let start = self.start_id?;
-        let cursor = &mut self.cursor;
-        let inner = cursor.node();
-        let ret = Some(inner);
-
-        if self.step_down() {
-            return ret;
+        if self.done {
+            return None;
         }
 
-        self.trace_up(start);
-        ret
+        let node = self.cursor.node();
+
+        // Try to descend into the first child.
+        if self.cursor.goto_first_child() {
+            self.current_depth += 1;
+            return Some(node);
+        }
+
+        // No children — walk up until we find a sibling or return to start.
+        loop {
+            if self.cursor.goto_next_sibling() {
+                return Some(node);
+            }
+            if self.current_depth == 0 {
+                self.done = true;
+                return Some(node);
+            }
+            self.current_depth -= 1;
+            self.cursor.goto_parent();
+        }
     }
 }
 
