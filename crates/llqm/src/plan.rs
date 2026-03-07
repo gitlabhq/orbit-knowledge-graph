@@ -51,7 +51,7 @@ impl Schema {
             .position(|c| c.table_alias == table && c.name == name)
     }
 
-    pub(crate) fn merge(left: &Schema, right: &Schema) -> Schema {
+    pub fn merge(left: &Schema, right: &Schema) -> Schema {
         let mut columns = left.columns.clone();
         columns.extend(right.columns.iter().cloned());
         Schema { columns }
@@ -59,9 +59,13 @@ impl Schema {
 }
 
 /// A Substrait relation paired with its output schema.
+///
+/// This is the unit of composition between pipeline phases. Each phase
+/// takes a `TypedRel` and returns a new one, sharing the `PlanBuilder`
+/// for function registry consistency.
 pub struct TypedRel {
-    pub(crate) rel: Rel,
-    pub(crate) schema: Schema,
+    pub rel: Rel,
+    pub schema: Schema,
 }
 
 // ---------------------------------------------------------------------------
@@ -122,9 +126,9 @@ pub struct CteDef {
 
 /// A built Substrait plan ready for codegen or DataFusion consumption.
 pub struct Plan {
-    pub(crate) inner: SubstraitPlan,
+    pub inner: SubstraitPlan,
     /// CTEs for the WITH clause (not part of Substrait, stored as metadata).
-    pub(crate) ctes: Vec<CteDef>,
+    pub ctes: Vec<CteDef>,
 }
 
 impl Plan {

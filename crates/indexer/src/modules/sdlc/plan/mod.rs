@@ -1,7 +1,4 @@
-pub(crate) mod ast;
 pub(crate) mod codegen;
-#[allow(dead_code)] // v2 codegen is not wired in yet; used only from tests
-pub(crate) mod codegen_v2;
 pub(crate) mod input;
 pub(crate) mod lower;
 
@@ -11,22 +8,23 @@ use arrow::array::Array;
 use arrow::record_batch::RecordBatch;
 
 use super::checkpoint_store::Checkpoint;
-use ast::{Expr, Op, OrderExpr, Query};
+use input::ExtractPlan;
 
 /// Paginated ClickHouse extract query. Owns its cursor state and generates
 /// SQL on demand. Immutable: `advance` and `resume_from` return new instances.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct ExtractQuery {
-    base_query: Query,
+    extract_plan: ExtractPlan,
     sort_key_columns: Vec<String>,
     cursor_values: Vec<String>,
     batch_size: u64,
 }
 
 impl ExtractQuery {
-    pub fn new(base_query: Query, sort_key_columns: Vec<String>, batch_size: u64) -> Self {
+    pub fn new(extract_plan: ExtractPlan, batch_size: u64) -> Self {
+        let sort_key_columns = extract_plan.order_by.clone();
         Self {
-            base_query,
+            extract_plan,
             sort_key_columns,
             cursor_values: Vec::new(),
             batch_size,
@@ -34,23 +32,12 @@ impl ExtractQuery {
     }
 
     pub fn to_sql(&self) -> String {
-        let mut query = self.base_query.clone();
-
-        if let Some(cursor_expr) = self.build_cursor_expr() {
-            query.where_clause = Expr::and_all([query.where_clause, Some(cursor_expr)]);
-        }
-
-        query.order_by = self
-            .sort_key_columns
-            .iter()
-            .map(|column| OrderExpr {
-                expr: Expr::col("", column),
-            })
-            .collect();
-
-        query.limit = Some(self.batch_size);
-
-        codegen::emit_sql(&query)
+        codegen::emit_extract_sql(
+            &self.extract_plan,
+            self.batch_size,
+            &self.sort_key_columns,
+            &self.cursor_values,
+        )
     }
 
     pub fn advance(&self, batch: &RecordBatch) -> Self {
@@ -77,37 +64,6 @@ impl ExtractQuery {
 
     pub fn batch_size(&self) -> u64 {
         self.batch_size
-    }
-
-    /// Builds a DNF (disjunctive normal form) greater-than expression for
-    /// composite key cursor pagination. For keys `[c1, c2]` with values `[v1, v2]`:
-    /// `(c1 > 'v1') OR (c1 = 'v1' AND c2 > 'v2')`
-    fn build_cursor_expr(&self) -> Option<Expr> {
-        if self.cursor_values.is_empty() {
-            return None;
-        }
-
-        let disjuncts: Vec<Option<Expr>> = (0..self.sort_key_columns.len())
-            .map(|depth| {
-                let mut conjuncts: Vec<Option<Expr>> = Vec::with_capacity(depth + 1);
-
-                for prefix in 0..depth {
-                    conjuncts.push(Some(Expr::eq(
-                        Expr::col("", &self.sort_key_columns[prefix]),
-                        Expr::raw(format!("'{}'", self.cursor_values[prefix])),
-                    )));
-                }
-                conjuncts.push(Some(Expr::binary(
-                    Op::Gt,
-                    Expr::col("", &self.sort_key_columns[depth]),
-                    Expr::raw(format!("'{}'", self.cursor_values[depth])),
-                )));
-
-                Expr::and_all(conjuncts)
-            })
-            .collect();
-
-        Expr::or_all(disjuncts)
     }
 
     fn extract_cursor_values(&self, batch: &RecordBatch) -> Vec<String> {
@@ -138,13 +94,20 @@ pub(in crate::modules::sdlc) struct PipelinePlan {
 
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Transformation {
-    pub query: Query,
+    sql: String,
     pub destination_table: String,
 }
 
 impl Transformation {
+    pub fn new(sql: String, destination_table: String) -> Self {
+        Self {
+            sql,
+            destination_table,
+        }
+    }
+
     pub fn to_sql(&self) -> String {
-        codegen::emit_sql(&self.query)
+        self.sql.clone()
     }
 }
 
@@ -239,8 +202,8 @@ mod tests {
     use super::*;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
-    use ast::{SelectExpr, TableRef};
     use chrono::Utc;
+    use input::{ExtractColumn, ExtractSource};
     use std::sync::Arc;
 
     fn position_with_cursor(values: Vec<&str>) -> Checkpoint {
@@ -250,51 +213,33 @@ mod tests {
         }
     }
 
-    fn base_extract_query(sort_keys: Vec<&str>) -> Query {
-        Query {
-            select: vec![
-                SelectExpr::bare(Expr::col("", "id")),
-                SelectExpr::bare(Expr::col("", "name")),
-                SelectExpr::new(Expr::raw("_siphon_replicated_at"), "_version"),
-                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
+    fn simple_extract_plan(sort_keys: Vec<&str>) -> ExtractPlan {
+        ExtractPlan {
+            destination_table: "gl_test".to_string(),
+            columns: vec![
+                ExtractColumn::Bare("id".to_string()),
+                ExtractColumn::Bare("name".to_string()),
             ],
-            from: TableRef::scan("source_table", None),
-            where_clause: Some(
-                Expr::and_all([
-                    Some(Expr::binary(
-                        Op::Gt,
-                        Expr::raw("_siphon_replicated_at"),
-                        Expr::param("last_watermark", "String"),
-                    )),
-                    Some(Expr::binary(
-                        Op::Le,
-                        Expr::raw("_siphon_replicated_at"),
-                        Expr::param("watermark", "String"),
-                    )),
-                ])
-                .unwrap(),
-            ),
-            order_by: sort_keys
-                .iter()
-                .map(|k| OrderExpr {
-                    expr: Expr::raw(k.to_string()),
-                })
-                .collect(),
-            limit: None,
+            source: ExtractSource::Table("source_table".to_string()),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: sort_keys.iter().map(|s| s.to_string()).collect(),
+            namespaced: false,
+            traversal_path_filter: None,
+            additional_where: None,
         }
     }
 
     fn simple_query(sort_keys: Vec<&str>, batch_size: u64) -> ExtractQuery {
-        let sort_key_columns: Vec<String> = sort_keys.iter().map(|s| s.to_string()).collect();
-        ExtractQuery::new(base_extract_query(sort_keys), sort_key_columns, batch_size)
+        ExtractQuery::new(simple_extract_plan(sort_keys), batch_size)
     }
 
-    fn query_with_where(where_clause: &str, sort_keys: Vec<&str>) -> ExtractQuery {
-        let sort_key_columns: Vec<String> = sort_keys.iter().map(|s| s.to_string()).collect();
-        let mut base = base_extract_query(sort_keys);
-        base.where_clause =
-            Expr::and_all([base.where_clause, Some(Expr::raw(where_clause.to_string()))]);
-        ExtractQuery::new(base, sort_key_columns, 1000)
+    fn query_with_traversal(sort_keys: Vec<&str>) -> ExtractQuery {
+        let mut plan = simple_extract_plan(sort_keys);
+        plan.namespaced = true;
+        plan.traversal_path_filter =
+            Some("startsWith(traversal_path, {traversal_path:String})".to_string());
+        ExtractQuery::new(plan, 1000)
     }
 
     #[test]
@@ -304,9 +249,12 @@ mod tests {
         let sql = query.to_sql();
 
         assert!(query.is_first_page());
-        assert!(sql.contains("ORDER BY traversal_path, id"));
-        assert!(sql.contains("LIMIT 1000"));
-        assert!(!sql.contains("(traversal_path >"));
+        assert!(
+            sql.contains("ORDER BY traversal_path ASC, id ASC"),
+            "sql: {sql}"
+        );
+        assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
+        assert!(!sql.contains("(traversal_path >"), "sql: {sql}");
     }
 
     #[test]
@@ -315,22 +263,31 @@ mod tests {
 
         let sql = query.to_sql();
 
-        assert!(sql.contains("_siphon_replicated_at > {last_watermark:String}"));
-        assert!(sql.contains("_siphon_replicated_at <= {watermark:String}"));
-        assert!(sql.contains("_siphon_replicated_at AS _version"));
-        assert!(sql.contains("_siphon_deleted AS _deleted"));
+        assert!(
+            sql.contains("_siphon_replicated_at > {last_watermark:String}"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("_siphon_replicated_at <= {watermark:String}"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("_siphon_replicated_at AS _version"),
+            "sql: {sql}"
+        );
+        assert!(sql.contains("_siphon_deleted AS _deleted"), "sql: {sql}");
     }
 
     #[test]
     fn first_page_sql_includes_where_clause() {
-        let query = query_with_where(
-            "startsWith(traversal_path, {traversal_path:String})",
-            vec!["id"],
-        );
+        let query = query_with_traversal(vec!["id"]);
 
         let sql = query.to_sql();
 
-        assert!(sql.contains("startsWith(traversal_path, {traversal_path:String})"));
+        assert!(
+            sql.contains("startsWith(traversal_path, {traversal_path:String})"),
+            "sql: {sql}"
+        );
     }
 
     #[test]
@@ -345,7 +302,7 @@ mod tests {
             sql.contains("(id > '42')"),
             "expected cursor clause in SQL: {sql}"
         );
-        assert!(sql.contains("ORDER BY id LIMIT 1000"));
+        assert!(sql.contains("ORDER BY id ASC LIMIT 1000"), "sql: {sql}");
     }
 
     #[test]
@@ -357,7 +314,7 @@ mod tests {
 
         assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
         assert!(
-            sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
+            sql.contains("(traversal_path = '1/2/')") && sql.contains("(id > '42')"),
             "sql: {sql}"
         );
     }
@@ -412,18 +369,22 @@ mod tests {
 
     #[test]
     fn advanced_page_with_where_clause_includes_both_conditions() {
-        let query = query_with_where(
-            "startsWith(traversal_path, {traversal_path:String})",
-            vec!["traversal_path", "id"],
-        );
+        let mut plan = simple_extract_plan(vec!["traversal_path", "id"]);
+        plan.namespaced = true;
+        plan.traversal_path_filter =
+            Some("startsWith(traversal_path, {traversal_path:String})".to_string());
+        let query = ExtractQuery::new(plan, 1000);
         let advanced = query.resume_from(&position_with_cursor(vec!["1/2/", "42"]));
 
         let sql = advanced.to_sql();
 
-        assert!(sql.contains("startsWith(traversal_path, {traversal_path:String})"));
+        assert!(
+            sql.contains("startsWith(traversal_path, {traversal_path:String})"),
+            "sql: {sql}"
+        );
         assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
         assert!(
-            sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
+            sql.contains("(traversal_path = '1/2/')") && sql.contains("(id > '42')"),
             "sql: {sql}"
         );
     }
@@ -455,6 +416,12 @@ mod tests {
     #[test]
     fn order_by_columns_appear_in_sql() {
         let query = simple_query(vec!["traversal_path", "id"], 1000);
-        assert!(query.to_sql().contains("ORDER BY traversal_path, id"));
+        assert!(
+            query
+                .to_sql()
+                .contains("ORDER BY traversal_path ASC, id ASC"),
+            "sql: {}",
+            query.to_sql()
+        );
     }
 }

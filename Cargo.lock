@@ -5177,6 +5177,7 @@ dependencies = [
  "const_format",
  "gkg-utils",
  "jsonschema",
+ "llqm",
  "once_cell",
  "ontology",
  "opentelemetry",

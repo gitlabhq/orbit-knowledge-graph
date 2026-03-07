@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 gkg-utils = { path = "../utils" }
+llqm = { path = "../llqm" }
 ontology = { path = "../ontology" }
 once_cell = { workspace = true }
 opentelemetry = { workspace = true }
