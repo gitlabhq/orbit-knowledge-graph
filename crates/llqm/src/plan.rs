@@ -63,9 +63,61 @@ impl Schema {
 /// This is the unit of composition between pipeline phases. Each phase
 /// takes a `TypedRel` and returns a new one, sharing the `PlanBuilder`
 /// for function registry consistency.
+///
+/// Most methods are available both on `PlanBuilder` (takes `TypedRel` as arg)
+/// and on `TypedRel` itself (takes `&mut PlanBuilder` as arg) for chaining:
+///
+/// ```text
+/// b.read("gl_user", "u", &cols)
+///     .filter(&mut b, cond)
+///     .sort(&mut b, &keys)
+///     .project(&mut b, &items)
+///     .fetch(&b, 100, None)
+/// ```
 pub struct TypedRel {
     pub rel: Rel,
     pub schema: Schema,
+}
+
+impl TypedRel {
+    fn wrap(rel_type: rel::RelType, schema: Schema) -> Self {
+        Self {
+            rel: Rel {
+                rel_type: Some(rel_type),
+            },
+            schema,
+        }
+    }
+
+    /// Chainable: `WHERE condition`
+    pub fn filter(self, b: &mut PlanBuilder, condition: Expr) -> Self {
+        b.filter(self, condition)
+    }
+
+    /// Chainable: `SELECT expr1 AS alias1, ...`
+    pub fn project(self, b: &mut PlanBuilder, exprs: &[(Expr, &str)]) -> Self {
+        b.project(self, exprs)
+    }
+
+    /// Chainable: `ORDER BY key1 dir1, ...`
+    pub fn sort(self, b: &mut PlanBuilder, keys: &[(Expr, SortDir)]) -> Self {
+        b.sort(self, keys)
+    }
+
+    /// Chainable: `LIMIT count [OFFSET offset]`
+    pub fn fetch(self, b: &PlanBuilder, count: u64, offset: Option<u64>) -> Self {
+        b.fetch(self, count, offset)
+    }
+
+    /// Chainable: `self JOIN right ON condition`
+    pub fn join(self, b: &mut PlanBuilder, jt: JoinType, right: TypedRel, on: Expr) -> Self {
+        b.join(jt, self, right, on)
+    }
+
+    /// Chainable: wrap as `(SELECT ...) AS alias`
+    pub fn subquery(self, b: &mut PlanBuilder, alias: &str) -> Self {
+        b.subquery(self, alias)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -189,42 +241,20 @@ impl PlanBuilder {
                 .collect(),
         };
 
-        let base_schema = NamedStruct {
-            names: columns.iter().map(|(n, _)| (*n).into()).collect(),
-            r#struct: Some(r#type::Struct {
-                types: columns
-                    .iter()
-                    .map(|(_, dt)| to_substrait_type(dt.clone()))
-                    .collect(),
-                ..Default::default()
-            }),
-        };
-
-        let metadata = serde_json::json!({ "alias": alias });
-        let advanced = ext::AdvancedExtension {
-            optimization: vec![prost_types::Any {
-                type_url: "llqm/read_metadata".into(),
-                value: serde_json::to_vec(&metadata).expect("json serialization"),
-            }],
-            enhancement: None,
-        };
-
         let read = ReadRel {
-            base_schema: Some(base_schema),
+            base_schema: Some(build_named_struct(columns)),
             read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
                 names: vec![table.into()],
                 advanced_extension: None,
             })),
-            advanced_extension: Some(advanced),
+            advanced_extension: Some(make_metadata(
+                "llqm/read_metadata",
+                serde_json::json!({ "alias": alias }),
+            )),
             ..Default::default()
         };
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Read(Box::new(read))),
-            },
-            schema,
-        }
+        TypedRel::wrap(rel::RelType::Read(Box::new(read)), schema)
     }
 
     /// Raw FROM clause: `FROM <raw_from_sql>`
@@ -245,42 +275,20 @@ impl PlanBuilder {
                 .collect(),
         };
 
-        let base_schema = NamedStruct {
-            names: columns.iter().map(|(n, _)| (*n).into()).collect(),
-            r#struct: Some(r#type::Struct {
-                types: columns
-                    .iter()
-                    .map(|(_, dt)| to_substrait_type(dt.clone()))
-                    .collect(),
-                ..Default::default()
-            }),
-        };
-
-        let metadata = serde_json::json!({ "raw_from": raw_from });
-        let advanced = ext::AdvancedExtension {
-            optimization: vec![prost_types::Any {
-                type_url: "llqm/read_metadata".into(),
-                value: serde_json::to_vec(&metadata).expect("json serialization"),
-            }],
-            enhancement: None,
-        };
-
         let read = ReadRel {
-            base_schema: Some(base_schema),
+            base_schema: Some(build_named_struct(columns)),
             read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
                 names: vec!["__raw".into()],
                 advanced_extension: None,
             })),
-            advanced_extension: Some(advanced),
+            advanced_extension: Some(make_metadata(
+                "llqm/read_metadata",
+                serde_json::json!({ "raw_from": raw_from }),
+            )),
             ..Default::default()
         };
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Read(Box::new(read))),
-            },
-            schema,
-        }
+        TypedRel::wrap(rel::RelType::Read(Box::new(read)), schema)
     }
 
     /// `left JOIN right ON condition`
@@ -291,75 +299,48 @@ impl PlanBuilder {
         right: TypedRel,
         on: Expr,
     ) -> TypedRel {
-        let TypedRel {
-            rel: left_rel,
-            schema: left_schema,
-        } = left;
-        let TypedRel {
-            rel: right_rel,
-            schema: right_schema,
-        } = right;
-
-        let merged = Schema::merge(&left_schema, &right_schema);
+        let merged = Schema::merge(&left.schema, &right.schema);
         let resolved_on = self.resolve_expr(&on, &merged);
 
         let join = proto::JoinRel {
-            left: Some(Box::new(left_rel)),
-            right: Some(Box::new(right_rel)),
+            left: Some(Box::new(left.rel)),
+            right: Some(Box::new(right.rel)),
             expression: Some(Box::new(resolved_on)),
             r#type: to_substrait_join_type(join_type) as i32,
             ..Default::default()
         };
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Join(Box::new(join))),
-            },
-            schema: merged,
-        }
+        TypedRel::wrap(rel::RelType::Join(Box::new(join)), merged)
     }
 
     /// `WHERE condition`
     pub fn filter(&mut self, input: TypedRel, condition: Expr) -> TypedRel {
-        let TypedRel {
-            rel: input_rel,
-            schema: input_schema,
-        } = input;
-        let resolved = self.resolve_expr(&condition, &input_schema);
+        let resolved = self.resolve_expr(&condition, &input.schema);
+        let schema = input.schema;
 
         let filter = FilterRel {
-            input: Some(Box::new(input_rel)),
+            input: Some(Box::new(input.rel)),
             condition: Some(Box::new(resolved)),
             ..Default::default()
         };
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Filter(Box::new(filter))),
-            },
-            schema: input_schema,
-        }
+        TypedRel::wrap(rel::RelType::Filter(Box::new(filter)), schema)
     }
 
     /// `SELECT expr1 AS alias1, expr2 AS alias2, ...`
     ///
     /// Each `(Expr, &str)` pair is an expression and its output alias.
     pub fn project(&mut self, input: TypedRel, exprs: &[(Expr, &str)]) -> TypedRel {
-        let TypedRel {
-            rel: input_rel,
-            schema: input_schema,
-        } = input;
-
         let resolved: Vec<Expression> = exprs
             .iter()
-            .map(|(e, _)| self.resolve_expr(e, &input_schema))
+            .map(|(e, _)| self.resolve_expr(e, &input.schema))
             .collect();
 
         let output_schema = Schema {
             columns: exprs
                 .iter()
                 .map(|(expr, alias)| {
-                    let data_type = infer_data_type(expr, &input_schema);
+                    let data_type = infer_data_type(expr, &input.schema);
                     let table_alias = infer_table(expr);
                     SchemaColumn {
                         table_alias,
@@ -370,7 +351,7 @@ impl PlanBuilder {
                 .collect(),
         };
 
-        let input_count = input_schema.columns.len();
+        let input_count = input.schema.columns.len();
         let emit = (input_count..input_count + exprs.len())
             .map(|i| i as i32)
             .collect();
@@ -382,30 +363,20 @@ impl PlanBuilder {
                 })),
                 ..Default::default()
             }),
-            input: Some(Box::new(input_rel)),
+            input: Some(Box::new(input.rel)),
             expressions: resolved,
             ..Default::default()
         };
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Project(Box::new(project))),
-            },
-            schema: output_schema,
-        }
+        TypedRel::wrap(rel::RelType::Project(Box::new(project)), output_schema)
     }
 
     /// `ORDER BY key1 dir1, key2 dir2, ...`
     pub fn sort(&mut self, input: TypedRel, keys: &[(Expr, SortDir)]) -> TypedRel {
-        let TypedRel {
-            rel: input_rel,
-            schema: input_schema,
-        } = input;
-
         let sort_fields: Vec<proto::SortField> = keys
             .iter()
             .map(|(expr, dir)| {
-                let resolved = self.resolve_expr(expr, &input_schema);
+                let resolved = self.resolve_expr(expr, &input.schema);
                 proto::SortField {
                     expr: Some(resolved),
                     sort_kind: Some(sort_field::SortKind::Direction(match dir {
@@ -417,40 +388,25 @@ impl PlanBuilder {
             .collect();
 
         let sort = SortRel {
-            input: Some(Box::new(input_rel)),
+            input: Some(Box::new(input.rel)),
             sorts: sort_fields,
             ..Default::default()
         };
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Sort(Box::new(sort))),
-            },
-            schema: input_schema,
-        }
+        TypedRel::wrap(rel::RelType::Sort(Box::new(sort)), input.schema)
     }
 
     /// `LIMIT count [OFFSET offset]`
     #[allow(deprecated)] // FetchRel count/offset fields are deprecated but simpler
     pub fn fetch(&self, input: TypedRel, count: u64, offset: Option<u64>) -> TypedRel {
-        let TypedRel {
-            rel: input_rel,
-            schema: input_schema,
-        } = input;
-
         let fetch = FetchRel {
-            input: Some(Box::new(input_rel)),
+            input: Some(Box::new(input.rel)),
             count_mode: Some(fetch_rel::CountMode::Count(count as i64)),
             offset_mode: offset.map(|o| fetch_rel::OffsetMode::Offset(o as i64)),
             ..Default::default()
         };
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Fetch(Box::new(fetch))),
-            },
-            schema: input_schema,
-        }
+        TypedRel::wrap(rel::RelType::Fetch(Box::new(fetch)), input.schema)
     }
 
     /// `SELECT agg_exprs... FROM input GROUP BY group_exprs...`
@@ -468,25 +424,18 @@ impl PlanBuilder {
         group_exprs: &[(Expr, &str)],
         agg_exprs: &[(&str, &str, Vec<Expr>)],
     ) -> TypedRel {
-        let TypedRel {
-            rel: input_rel,
-            schema: input_schema,
-        } = input;
-
-        // Resolve grouping expressions and build expression_references
         let grouping_expressions: Vec<Expression> = group_exprs
             .iter()
-            .map(|(e, _)| self.resolve_expr(e, &input_schema))
+            .map(|(e, _)| self.resolve_expr(e, &input.schema))
             .collect();
         let expression_references: Vec<u32> = (0..group_exprs.len() as u32).collect();
 
-        // Resolve aggregate measures
         let measures: Vec<aggregate_rel::Measure> = agg_exprs
             .iter()
             .map(|(func_name, _alias, args)| {
                 let resolved_args: Vec<FunctionArgument> = args
                     .iter()
-                    .map(|a| make_value_arg(self.resolve_expr(a, &input_schema)))
+                    .map(|a| make_value_arg(self.resolve_expr(a, &input.schema)))
                     .collect();
                 let anchor = self.functions.ensure(func_name);
                 aggregate_rel::Measure {
@@ -511,25 +460,13 @@ impl PlanBuilder {
             expression_references,
         };
 
-        let agg = AggregateRel {
-            input: Some(Box::new(input_rel)),
-            groupings: vec![grouping],
-            measures,
-            grouping_expressions,
-            ..Default::default()
-        };
-
-        // Build output schema: group columns, then aggregate columns
+        // Build output schema: group columns first, then aggregate columns
         let mut output_columns: Vec<SchemaColumn> = group_exprs
             .iter()
-            .map(|(expr, alias)| {
-                let data_type = infer_data_type(expr, &input_schema);
-                let table_alias = infer_table(expr);
-                SchemaColumn {
-                    table_alias,
-                    name: (*alias).into(),
-                    data_type,
-                }
+            .map(|(expr, alias)| SchemaColumn {
+                table_alias: infer_table(expr),
+                name: (*alias).into(),
+                data_type: infer_data_type(expr, &input.schema),
             })
             .collect();
         for (_func_name, alias, _args) in agg_exprs {
@@ -540,14 +477,20 @@ impl PlanBuilder {
             });
         }
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Aggregate(Box::new(agg))),
-            },
-            schema: Schema {
+        let agg = AggregateRel {
+            input: Some(Box::new(input.rel)),
+            groupings: vec![grouping],
+            measures,
+            grouping_expressions,
+            ..Default::default()
+        };
+
+        TypedRel::wrap(
+            rel::RelType::Aggregate(Box::new(agg)),
+            Schema {
                 columns: output_columns,
             },
-        }
+        )
     }
 
     /// `UNION ALL` of multiple typed relations.
@@ -580,28 +523,17 @@ impl PlanBuilder {
         };
         let rels: Vec<Rel> = inputs.into_iter().map(|t| t.rel).collect();
 
-        let metadata = serde_json::json!({ "alias": alias, "column_names": col_names });
-        let advanced = ext::AdvancedExtension {
-            optimization: vec![prost_types::Any {
-                type_url: "llqm/set_metadata".into(),
-                value: serde_json::to_vec(&metadata).expect("json serialization"),
-            }],
-            enhancement: None,
-        };
-
         let set = SetRel {
             inputs: rels,
             op: set_rel::SetOp::UnionAll as i32,
-            advanced_extension: Some(advanced),
+            advanced_extension: Some(make_metadata(
+                "llqm/set_metadata",
+                serde_json::json!({ "alias": alias, "column_names": col_names }),
+            )),
             ..Default::default()
         };
 
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::Set(set)),
-            },
-            schema,
-        }
+        TypedRel::wrap(rel::RelType::Set(set), schema)
     }
 
     /// Wrap a `TypedRel` as a named derived table (subquery in FROM clause).
@@ -609,34 +541,17 @@ impl PlanBuilder {
     /// The `alias` is stored in metadata and the schema columns get updated
     /// to use the new alias as their table qualifier.
     pub fn subquery(&mut self, input: TypedRel, alias: &str) -> TypedRel {
-        let TypedRel {
-            rel: inner_rel,
-            schema: inner_schema,
-        } = input;
-
-        // Wrap in metadata so codegen can emit `(SELECT ...) AS alias`
         let metadata = serde_json::json!({ "subquery_alias": alias });
-        let advanced = ext::AdvancedExtension {
-            optimization: vec![prost_types::Any {
-                type_url: "llqm/subquery_metadata".into(),
-                value: serde_json::to_vec(&metadata).expect("json serialization"),
-            }],
-            enhancement: None,
-        };
 
-        // We store this as an ExtensionSingleRel that wraps the inner rel
         let ext_single = proto::ExtensionSingleRel {
             common: None,
-            input: Some(Box::new(inner_rel)),
-            detail: Some(prost_types::Any {
-                type_url: "llqm/subquery_metadata".into(),
-                value: serde_json::to_vec(&metadata).expect("json serialization"),
-            }),
+            input: Some(Box::new(input.rel)),
+            detail: Some(make_any("llqm/subquery_metadata", &metadata)),
         };
 
-        // Update schema to use the new alias
         let schema = Schema {
-            columns: inner_schema
+            columns: input
+                .schema
                 .columns
                 .iter()
                 .map(|c| SchemaColumn {
@@ -647,13 +562,7 @@ impl PlanBuilder {
                 .collect(),
         };
 
-        let _ = advanced; // used in ext_single instead
-        TypedRel {
-            rel: Rel {
-                rel_type: Some(rel::RelType::ExtensionSingle(Box::new(ext_single))),
-            },
-            schema,
-        }
+        TypedRel::wrap(rel::RelType::ExtensionSingle(Box::new(ext_single)), schema)
     }
 
     /// Finalize the plan. Output column names come from the root relation's schema.
@@ -807,7 +716,38 @@ impl PlanBuilder {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers: metadata
+// ---------------------------------------------------------------------------
+
+fn make_metadata(type_url: &str, json: serde_json::Value) -> ext::AdvancedExtension {
+    ext::AdvancedExtension {
+        optimization: vec![make_any(type_url, &json)],
+        enhancement: None,
+    }
+}
+
+fn make_any(type_url: &str, json: &serde_json::Value) -> prost_types::Any {
+    prost_types::Any {
+        type_url: type_url.into(),
+        value: serde_json::to_vec(json).expect("json serialization"),
+    }
+}
+
+fn build_named_struct(columns: &[(&str, DataType)]) -> NamedStruct {
+    NamedStruct {
+        names: columns.iter().map(|(n, _)| (*n).into()).collect(),
+        r#struct: Some(r#type::Struct {
+            types: columns
+                .iter()
+                .map(|(_, dt)| to_substrait_type(dt.clone()))
+                .collect(),
+            ..Default::default()
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers: expressions
 // ---------------------------------------------------------------------------
 
 fn make_field_ref(index: usize) -> Expression {

@@ -932,7 +932,9 @@ impl CodegenContext {
             .r#type
             .as_ref()
             .ok_or_else(|| CodegenError::MissingField("Cast.type".into()))?;
-        let type_str = substrait_type_to_ch_string(target_type);
+        let type_str = substrait_type_to_data_type(target_type)
+            .map(|dt| dt.to_string())
+            .unwrap_or_else(|| "String".into());
         Ok(format!("CAST({inner_sql} AS {type_str})"))
     }
 
@@ -1082,27 +1084,6 @@ fn substrait_type_to_data_type(t: &proto::Type) -> Option<DataType> {
     }
 }
 
-fn substrait_type_to_ch_string(t: &proto::Type) -> String {
-    match &t.kind {
-        Some(r#type::Kind::String(_)) => "String".into(),
-        Some(r#type::Kind::I64(_)) => "Int64".into(),
-        Some(r#type::Kind::Fp64(_)) => "Float64".into(),
-        Some(r#type::Kind::Bool(_)) => "Bool".into(),
-        Some(r#type::Kind::I32(_)) => "Int32".into(),
-        #[allow(deprecated)]
-        Some(r#type::Kind::Timestamp(_)) => "DateTime".into(),
-        Some(r#type::Kind::List(list)) => {
-            let inner = list
-                .r#type
-                .as_ref()
-                .map(|t| substrait_type_to_ch_string(t))
-                .unwrap_or_else(|| "String".into());
-            format!("Array({inner})")
-        }
-        _ => "String".into(),
-    }
-}
-
 fn binary_op_sql(name: &str) -> Option<&'static str> {
     match name {
         "equal" => Some("="),
@@ -1121,13 +1102,20 @@ fn binary_op_sql(name: &str) -> Option<&'static str> {
     }
 }
 
-fn infer_expr_type(expr: &Expression, schema: &Schema) -> DataType {
+fn resolve_field<'a>(expr: &Expression, schema: &'a Schema) -> Option<&'a SchemaColumn> {
     match &expr.rex_type {
         Some(expression::RexType::Selection(field_ref)) => get_field_index(field_ref)
             .ok()
-            .and_then(|i| schema.columns.get(i))
-            .map(|c| c.data_type.clone())
-            .unwrap_or(DataType::String),
+            .and_then(|i| schema.columns.get(i)),
+        _ => None,
+    }
+}
+
+fn infer_expr_type(expr: &Expression, schema: &Schema) -> DataType {
+    if let Some(col) = resolve_field(expr, schema) {
+        return col.data_type.clone();
+    }
+    match &expr.rex_type {
         Some(expression::RexType::Literal(lit)) => match &lit.literal_type {
             Some(LiteralType::String(_)) => DataType::String,
             Some(LiteralType::I64(_)) => DataType::Int64,
@@ -1140,14 +1128,9 @@ fn infer_expr_type(expr: &Expression, schema: &Schema) -> DataType {
 }
 
 fn infer_expr_table(expr: &Expression, schema: &Schema) -> String {
-    match &expr.rex_type {
-        Some(expression::RexType::Selection(field_ref)) => get_field_index(field_ref)
-            .ok()
-            .and_then(|i| schema.columns.get(i))
-            .map(|c| c.table_alias.clone())
-            .unwrap_or_default(),
-        _ => String::new(),
-    }
+    resolve_field(expr, schema)
+        .map(|c| c.table_alias.clone())
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -1160,51 +1143,54 @@ mod tests {
     use crate::expr::*;
     use crate::plan::PlanBuilder;
 
+    /// Build a plan from a closure and emit ClickHouse SQL.
+    fn build_and_emit(
+        f: impl FnOnce(&mut PlanBuilder) -> crate::plan::TypedRel,
+    ) -> ParameterizedQuery {
+        let mut b = PlanBuilder::new();
+        let root = f(&mut b);
+        let plan = b.build(root);
+        emit_clickhouse_sql(&plan).unwrap()
+    }
+
     #[test]
     fn simple_select_from_where_order_limit() {
-        let mut b = PlanBuilder::new();
-
-        let t = b.read(
-            "siphon_user",
-            "t",
-            &[
-                ("id", DataType::Int64),
-                ("name", DataType::String),
-                ("_siphon_replicated_at", DataType::String),
-                ("_siphon_deleted", DataType::Bool),
-            ],
-        );
-
-        let filtered = b.filter(
-            t,
-            and([
-                gt(
-                    col("t", "_siphon_replicated_at"),
-                    param("last_watermark", DataType::String),
-                ),
-                le(
-                    col("t", "_siphon_replicated_at"),
-                    param("watermark", DataType::String),
-                ),
-            ]),
-        );
-
-        let sorted = b.sort(filtered, &[(col("t", "id"), SortDir::Asc)]);
-
-        let projected = b.project(
-            sorted,
-            &[
-                (col("t", "id"), "id"),
-                (col("t", "name"), "name"),
-                (col("t", "_siphon_replicated_at"), "_version"),
-                (col("t", "_siphon_deleted"), "_deleted"),
-            ],
-        );
-
-        let limited = b.fetch(projected, 1000, None);
-        let plan = b.build(limited);
-
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "siphon_user",
+                "t",
+                &[
+                    ("id", DataType::Int64),
+                    ("name", DataType::String),
+                    ("_siphon_replicated_at", DataType::String),
+                    ("_siphon_deleted", DataType::Bool),
+                ],
+            )
+            .filter(
+                b,
+                and([
+                    gt(
+                        col("t", "_siphon_replicated_at"),
+                        param("last_watermark", DataType::String),
+                    ),
+                    le(
+                        col("t", "_siphon_replicated_at"),
+                        param("watermark", DataType::String),
+                    ),
+                ]),
+            )
+            .sort(b, &[(col("t", "id"), SortDir::Asc)])
+            .project(
+                b,
+                &[
+                    (col("t", "id"), "id"),
+                    (col("t", "name"), "name"),
+                    (col("t", "_siphon_replicated_at"), "_version"),
+                    (col("t", "_siphon_deleted"), "_deleted"),
+                ],
+            )
+            .fetch(b, 1000, None)
+        });
 
         assert_eq!(
             pq.sql,
@@ -1217,51 +1203,46 @@ mod tests {
              ORDER BY t.id ASC \
              LIMIT 1000"
         );
-        // Named params are NOT in the params map
         assert!(pq.params.is_empty());
     }
 
     #[test]
     fn join_with_literals() {
-        let mut b = PlanBuilder::new();
+        let pq = build_and_emit(|b| {
+            let users = b.read(
+                "gl_user",
+                "u",
+                &[("id", DataType::Int64), ("username", DataType::String)],
+            );
+            let edges = b.read(
+                "gl_edge",
+                "e0",
+                &[
+                    ("source_id", DataType::Int64),
+                    ("target_id", DataType::Int64),
+                    ("relationship_kind", DataType::String),
+                ],
+            );
 
-        let users = b.read(
-            "gl_user",
-            "u",
-            &[("id", DataType::Int64), ("username", DataType::String)],
-        );
-        let edges = b.read(
-            "gl_edge",
-            "e0",
-            &[
-                ("source_id", DataType::Int64),
-                ("target_id", DataType::Int64),
-                ("relationship_kind", DataType::String),
-            ],
-        );
-
-        let joined = b.join(
-            JoinType::Inner,
-            users,
-            edges,
-            and([
-                eq(col("u", "id"), col("e0", "source_id")),
-                eq(col("e0", "relationship_kind"), string("AUTHORED")),
-            ]),
-        );
-
-        let projected = b.project(
-            joined,
-            &[
-                (col("u", "username"), "username"),
-                (col("e0", "target_id"), "target_id"),
-            ],
-        );
-
-        let limited = b.fetch(projected, 25, None);
-        let plan = b.build(limited);
-
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+            users
+                .join(
+                    b,
+                    JoinType::Inner,
+                    edges,
+                    and([
+                        eq(col("u", "id"), col("e0", "source_id")),
+                        eq(col("e0", "relationship_kind"), string("AUTHORED")),
+                    ]),
+                )
+                .project(
+                    b,
+                    &[
+                        (col("u", "username"), "username"),
+                        (col("e0", "target_id"), "target_id"),
+                    ],
+                )
+                .fetch(b, 25, None)
+        });
 
         assert_eq!(
             pq.sql,
@@ -1277,83 +1258,76 @@ mod tests {
 
     #[test]
     fn three_way_join() {
-        let mut b = PlanBuilder::new();
+        let pq = build_and_emit(|b| {
+            let u = b.read(
+                "gl_user",
+                "u",
+                &[
+                    ("id", DataType::Int64),
+                    ("username", DataType::String),
+                    ("traversal_path", DataType::String),
+                ],
+            );
+            let e = b.read(
+                "gl_edge",
+                "e0",
+                &[
+                    ("source_id", DataType::Int64),
+                    ("target_id", DataType::Int64),
+                    ("relationship_kind", DataType::String),
+                    ("traversal_path", DataType::String),
+                ],
+            );
+            let n = b.read(
+                "gl_note",
+                "n",
+                &[
+                    ("id", DataType::Int64),
+                    ("confidential", DataType::Bool),
+                    ("traversal_path", DataType::String),
+                    ("created_at", DataType::String),
+                ],
+            );
 
-        let u = b.read(
-            "gl_user",
-            "u",
-            &[
-                ("id", DataType::Int64),
-                ("username", DataType::String),
-                ("traversal_path", DataType::String),
-            ],
-        );
-        let e = b.read(
-            "gl_edge",
-            "e0",
-            &[
-                ("source_id", DataType::Int64),
-                ("target_id", DataType::Int64),
-                ("relationship_kind", DataType::String),
-                ("traversal_path", DataType::String),
-            ],
-        );
-        let n = b.read(
-            "gl_note",
-            "n",
-            &[
-                ("id", DataType::Int64),
-                ("confidential", DataType::Bool),
-                ("traversal_path", DataType::String),
-                ("created_at", DataType::String),
-            ],
-        );
-
-        let j1 = b.join(
-            JoinType::Inner,
-            u,
-            e,
-            and([
-                starts_with(col("e0", "traversal_path"), col("u", "traversal_path")),
-                eq(col("u", "id"), col("e0", "source_id")),
-                eq(col("e0", "relationship_kind"), string("AUTHORED")),
-            ]),
-        );
-        let j2 = b.join(
-            JoinType::Inner,
-            j1,
-            n,
-            and([
-                starts_with(col("e0", "traversal_path"), col("n", "traversal_path")),
-                eq(col("e0", "target_id"), col("n", "id")),
-            ]),
-        );
-
-        let filtered = b.filter(
-            j2,
-            and([
-                eq(col("n", "confidential"), boolean(true)),
-                starts_with(
-                    col("n", "traversal_path"),
-                    param("traversal_path", DataType::String),
-                ),
-            ]),
-        );
-
-        let sorted = b.sort(filtered, &[(col("n", "created_at"), SortDir::Desc)]);
-
-        let projected = b.project(
-            sorted,
-            &[
-                (col("u", "username"), "u_username"),
-                (col("n", "confidential"), "n_confidential"),
-            ],
-        );
-
-        let limited = b.fetch(projected, 25, None);
-        let plan = b.build(limited);
-
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+            u.join(
+                b,
+                JoinType::Inner,
+                e,
+                and([
+                    starts_with(col("e0", "traversal_path"), col("u", "traversal_path")),
+                    eq(col("u", "id"), col("e0", "source_id")),
+                    eq(col("e0", "relationship_kind"), string("AUTHORED")),
+                ]),
+            )
+            .join(
+                b,
+                JoinType::Inner,
+                n,
+                and([
+                    starts_with(col("e0", "traversal_path"), col("n", "traversal_path")),
+                    eq(col("e0", "target_id"), col("n", "id")),
+                ]),
+            )
+            .filter(
+                b,
+                and([
+                    eq(col("n", "confidential"), boolean(true)),
+                    starts_with(
+                        col("n", "traversal_path"),
+                        param("traversal_path", DataType::String),
+                    ),
+                ]),
+            )
+            .sort(b, &[(col("n", "created_at"), SortDir::Desc)])
+            .project(
+                b,
+                &[
+                    (col("u", "username"), "u_username"),
+                    (col("n", "confidential"), "n_confidential"),
+                ],
+            )
+            .fetch(b, 25, None)
+        });
 
         assert!(pq.sql.contains("gl_user AS u INNER JOIN gl_edge AS e0"));
         assert!(pq.sql.contains("INNER JOIN gl_note AS n"));
@@ -1378,26 +1352,29 @@ mod tests {
 
     #[test]
     fn if_then_case_expression() {
-        let mut b = PlanBuilder::new();
-
-        let t = b.read(
-            "source_data",
-            "t",
-            &[("state", DataType::Int64), ("name", DataType::String)],
-        );
-
-        let state_expr = if_then(
-            vec![
-                (eq(col("t", "state"), int(0)), string("active")),
-                (eq(col("t", "state"), int(1)), string("blocked")),
-            ],
-            Some(string("unknown")),
-        );
-
-        let projected = b.project(t, &[(state_expr, "state"), (col("t", "name"), "name")]);
-
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "source_data",
+                "t",
+                &[("state", DataType::Int64), ("name", DataType::String)],
+            )
+            .project(
+                b,
+                &[
+                    (
+                        if_then(
+                            vec![
+                                (eq(col("t", "state"), int(0)), string("active")),
+                                (eq(col("t", "state"), int(1)), string("blocked")),
+                            ],
+                            Some(string("unknown")),
+                        ),
+                        "state",
+                    ),
+                    (col("t", "name"), "name"),
+                ],
+            )
+        });
 
         assert!(pq.sql.contains("CASE WHEN (t.state = {p0:Int64}) THEN {p1:String} WHEN (t.state = {p2:Int64}) THEN {p3:String} ELSE {p4:String} END AS state"));
         assert_eq!(pq.params["p0"].value, Value::Number(0.into()));
@@ -1407,17 +1384,15 @@ mod tests {
 
     #[test]
     fn is_not_null_filter() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "source_data",
-            "t",
-            &[("fk", DataType::Int64), ("id", DataType::Int64)],
-        );
-
-        let filtered = b.filter(t, is_not_null(col("t", "fk")));
-        let projected = b.project(filtered, &[(col("t", "id"), "id")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "source_data",
+                "t",
+                &[("fk", DataType::Int64), ("id", DataType::Int64)],
+            )
+            .filter(b, is_not_null(col("t", "fk")))
+            .project(b, &[(col("t", "id"), "id")])
+        });
 
         assert_eq!(
             pq.sql,
@@ -1427,23 +1402,21 @@ mod tests {
 
     #[test]
     fn in_list_expression() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "t",
-            "t",
-            &[("type", DataType::String), ("id", DataType::Int64)],
-        );
-
-        let filtered = b.filter(
-            t,
-            in_list(
-                col("t", "type"),
-                vec![string("A"), string("B"), string("C")],
-            ),
-        );
-        let projected = b.project(filtered, &[(col("t", "id"), "id")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "t",
+                "t",
+                &[("type", DataType::String), ("id", DataType::Int64)],
+            )
+            .filter(
+                b,
+                in_list(
+                    col("t", "type"),
+                    vec![string("A"), string("B"), string("C")],
+                ),
+            )
+            .project(b, &[(col("t", "id"), "id")])
+        });
 
         assert!(
             pq.sql
@@ -1456,20 +1429,18 @@ mod tests {
 
     #[test]
     fn function_call_starts_with() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "gl_note",
-            "n",
-            &[
-                ("id", DataType::Int64),
-                ("traversal_path", DataType::String),
-            ],
-        );
-
-        let filtered = b.filter(t, starts_with(col("n", "traversal_path"), string("1/2/")));
-        let projected = b.project(filtered, &[(col("n", "id"), "id")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "gl_note",
+                "n",
+                &[
+                    ("id", DataType::Int64),
+                    ("traversal_path", DataType::String),
+                ],
+            )
+            .filter(b, starts_with(col("n", "traversal_path"), string("1/2/")))
+            .project(b, &[(col("n", "id"), "id")])
+        });
 
         assert_eq!(
             pq.sql,
@@ -1480,23 +1451,21 @@ mod tests {
 
     #[test]
     fn cast_expression() {
-        let mut b = PlanBuilder::new();
-        let t = b.read("t", "t", &[("val", DataType::String)]);
-        let projected = b.project(t, &[(cast(col("t", "val"), DataType::Int64), "val_int")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read("t", "t", &[("val", DataType::String)])
+                .project(b, &[(cast(col("t", "val"), DataType::Int64), "val_int")])
+        });
 
         assert_eq!(pq.sql, "SELECT CAST(t.val AS Int64) AS val_int FROM t");
     }
 
     #[test]
     fn named_params_not_in_param_map() {
-        let mut b = PlanBuilder::new();
-        let t = b.read("t", "t", &[("a", DataType::String)]);
-        let filtered = b.filter(t, eq(col("t", "a"), param("my_param", DataType::String)));
-        let projected = b.project(filtered, &[(col("t", "a"), "a")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read("t", "t", &[("a", DataType::String)])
+                .filter(b, eq(col("t", "a"), param("my_param", DataType::String)))
+                .project(b, &[(col("t", "a"), "a")])
+        });
 
         assert!(pq.sql.contains("{my_param:String}"));
         assert!(pq.params.is_empty());
@@ -1504,23 +1473,21 @@ mod tests {
 
     #[test]
     fn select_alias_skipped_when_matches_column() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "siphon_user",
-            "siphon_user",
-            &[("id", DataType::Int64), ("name", DataType::String)],
-        );
-        let projected = b.project(
-            t,
-            &[
-                (col("siphon_user", "id"), "id"),
-                (col("siphon_user", "name"), "name"),
-            ],
-        );
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "siphon_user",
+                "siphon_user",
+                &[("id", DataType::Int64), ("name", DataType::String)],
+            )
+            .project(
+                b,
+                &[
+                    (col("siphon_user", "id"), "id"),
+                    (col("siphon_user", "name"), "name"),
+                ],
+            )
+        });
 
-        // When alias matches the column name after the dot, skip "AS alias"
         assert_eq!(
             pq.sql,
             "SELECT siphon_user.id, siphon_user.name FROM siphon_user"
@@ -1529,48 +1496,46 @@ mod tests {
 
     #[test]
     fn offset_emitted_when_nonzero() {
-        let mut b = PlanBuilder::new();
-        let t = b.read("t", "t", &[("id", DataType::Int64)]);
-        let projected = b.project(t, &[(col("t", "id"), "id")]);
-        let limited = b.fetch(projected, 10, Some(5));
-        let plan = b.build(limited);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read("t", "t", &[("id", DataType::Int64)])
+                .project(b, &[(col("t", "id"), "id")])
+                .fetch(b, 10, Some(5))
+        });
 
         assert_eq!(pq.sql, "SELECT t.id FROM t LIMIT 10 OFFSET 5");
     }
 
     #[test]
     fn raw_expr_emitted_verbatim() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "t",
-            "t",
-            &[("id", DataType::Int64), ("ver", DataType::String)],
-        );
-        let filtered = b.filter(
-            t,
-            and([
-                gt(
-                    raw("_siphon_replicated_at"),
-                    param("last_watermark", DataType::String),
-                ),
-                le(
-                    raw("_siphon_replicated_at"),
-                    param("watermark", DataType::String),
-                ),
-            ]),
-        );
-        let projected = b.project(
-            filtered,
-            &[
-                (raw("id"), "id"),
-                (raw("name"), "name"),
-                (raw("_siphon_replicated_at"), "_version"),
-            ],
-        );
-        let limited = b.fetch(projected, 1000, None);
-        let plan = b.build(limited);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "t",
+                "t",
+                &[("id", DataType::Int64), ("ver", DataType::String)],
+            )
+            .filter(
+                b,
+                and([
+                    gt(
+                        raw("_siphon_replicated_at"),
+                        param("last_watermark", DataType::String),
+                    ),
+                    le(
+                        raw("_siphon_replicated_at"),
+                        param("watermark", DataType::String),
+                    ),
+                ]),
+            )
+            .project(
+                b,
+                &[
+                    (raw("id"), "id"),
+                    (raw("name"), "name"),
+                    (raw("_siphon_replicated_at"), "_version"),
+                ],
+            )
+            .fetch(b, 1000, None)
+        });
 
         assert!(
             pq.sql.contains("_siphon_replicated_at AS _version"),
@@ -1595,14 +1560,13 @@ mod tests {
 
     #[test]
     fn read_raw_from_clause() {
-        let mut b = PlanBuilder::new();
-        let t = b.read_raw(
-            "siphon_projects p INNER JOIN traversal_paths tp ON p.id = tp.id",
-            &[("id", DataType::Int64), ("name", DataType::String)],
-        );
-        let projected = b.project(t, &[(raw("p.id"), "id"), (raw("p.name"), "name")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read_raw(
+                "siphon_projects p INNER JOIN traversal_paths tp ON p.id = tp.id",
+                &[("id", DataType::Int64), ("name", DataType::String)],
+            )
+            .project(b, &[(raw("p.id"), "id"), (raw("p.name"), "name")])
+        });
 
         assert!(
             pq.sql
@@ -1615,43 +1579,42 @@ mod tests {
 
     #[test]
     fn extract_query_pattern() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "siphon_users",
-            "siphon_users",
-            &[
-                ("id", DataType::Int64),
-                ("username", DataType::String),
-                ("_siphon_replicated_at", DataType::String),
-                ("_siphon_deleted", DataType::Bool),
-            ],
-        );
-        let filtered = b.filter(
-            t,
-            and([
-                gt(
-                    raw("_siphon_replicated_at"),
-                    param("last_watermark", DataType::String),
-                ),
-                le(
-                    raw("_siphon_replicated_at"),
-                    param("watermark", DataType::String),
-                ),
-            ]),
-        );
-        let sorted = b.sort(filtered, &[(raw("id"), SortDir::Asc)]);
-        let projected = b.project(
-            sorted,
-            &[
-                (raw("id"), "id"),
-                (raw("username"), "username"),
-                (raw("_siphon_replicated_at"), "_version"),
-                (raw("_siphon_deleted"), "_deleted"),
-            ],
-        );
-        let limited = b.fetch(projected, 1_000_000, None);
-        let plan = b.build(limited);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "siphon_users",
+                "siphon_users",
+                &[
+                    ("id", DataType::Int64),
+                    ("username", DataType::String),
+                    ("_siphon_replicated_at", DataType::String),
+                    ("_siphon_deleted", DataType::Bool),
+                ],
+            )
+            .filter(
+                b,
+                and([
+                    gt(
+                        raw("_siphon_replicated_at"),
+                        param("last_watermark", DataType::String),
+                    ),
+                    le(
+                        raw("_siphon_replicated_at"),
+                        param("watermark", DataType::String),
+                    ),
+                ]),
+            )
+            .sort(b, &[(raw("id"), SortDir::Asc)])
+            .project(
+                b,
+                &[
+                    (raw("id"), "id"),
+                    (raw("username"), "username"),
+                    (raw("_siphon_replicated_at"), "_version"),
+                    (raw("_siphon_deleted"), "_deleted"),
+                ],
+            )
+            .fetch(b, 1_000_000, None)
+        });
 
         assert!(pq.sql.contains("SELECT id AS id, username AS username, _siphon_replicated_at AS _version, _siphon_deleted AS _deleted"), "sql: {}", pq.sql);
         assert!(pq.sql.contains("FROM siphon_users"), "sql: {}", pq.sql);
@@ -1676,19 +1639,15 @@ mod tests {
 
     #[test]
     fn like_operator() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "gl_user",
-            "u",
-            &[
-                ("id", DataType::Int64),
-                ("username", DataType::String),
-            ],
-        );
-        let filtered = b.filter(t, like(col("u", "username"), string("%admin%")));
-        let projected = b.project(filtered, &[(col("u", "id"), "id")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "gl_user",
+                "u",
+                &[("id", DataType::Int64), ("username", DataType::String)],
+            )
+            .filter(b, like(col("u", "username"), string("%admin%")))
+            .project(b, &[(col("u", "id"), "id")])
+        });
 
         assert_eq!(
             pq.sql,
@@ -1699,30 +1658,28 @@ mod tests {
 
     #[test]
     fn ilike_operator() {
-        let mut b = PlanBuilder::new();
-        let t = b.read("gl_user", "u", &[("id", DataType::Int64), ("name", DataType::String)]);
-        let filtered = b.filter(t, ilike(col("u", "name"), string("%Test%")));
-        let projected = b.project(filtered, &[(col("u", "id"), "id")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read("gl_user", "u", &[("id", DataType::Int64), ("name", DataType::String)])
+                .filter(b, ilike(col("u", "name"), string("%Test%")))
+                .project(b, &[(col("u", "id"), "id")])
+        });
 
         assert!(pq.sql.contains("(u.name ILIKE {p0:String})"), "sql: {}", pq.sql);
     }
 
     #[test]
     fn in_operator_binary() {
-        let mut b = PlanBuilder::new();
-        let t = b.read("gl_user", "u", &[("id", DataType::Int64), ("label", DataType::String)]);
-        let filtered = b.filter(
-            t,
-            is_in(
-                col("u", "label"),
-                param("types", DataType::array(DataType::String)),
-            ),
-        );
-        let projected = b.project(filtered, &[(col("u", "id"), "id")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read("gl_user", "u", &[("id", DataType::Int64), ("label", DataType::String)])
+                .filter(
+                    b,
+                    is_in(
+                        col("u", "label"),
+                        param("types", DataType::array(DataType::String)),
+                    ),
+                )
+                .project(b, &[(col("u", "id"), "id")])
+        });
 
         assert_eq!(
             pq.sql,
@@ -1732,24 +1689,18 @@ mod tests {
 
     #[test]
     fn aggregate_group_by() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "nodes",
-            "n",
-            &[
-                ("id", DataType::Int64),
-                ("label", DataType::String),
-            ],
-        );
-
-        let agged = b.aggregate(
-            t,
-            &[(col("n", "label"), "type")],
-            &[("COUNT", "count", vec![col("n", "id")])],
-        );
-
-        let plan = b.build(agged);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            let t = b.read(
+                "nodes",
+                "n",
+                &[("id", DataType::Int64), ("label", DataType::String)],
+            );
+            b.aggregate(
+                t,
+                &[(col("n", "label"), "type")],
+                &[("COUNT", "count", vec![col("n", "id")])],
+            )
+        });
 
         assert_eq!(
             pq.sql,
@@ -1759,25 +1710,16 @@ mod tests {
 
     #[test]
     fn aggregate_with_having() {
-        let mut b = PlanBuilder::new();
-        let t = b.read("nodes", "n", &[("id", DataType::Int64), ("label", DataType::String)]);
-
-        let agged = b.aggregate(
-            t,
-            &[(col("n", "label"), "type")],
-            &[("COUNT", "count", vec![col("n", "id")])],
-        );
-
-        // HAVING: FilterRel on top of AggregateRel.
-        // Use raw() for the aggregate expression since n.id is not in the
-        // aggregate output schema.
-        let having = b.filter(
-            agged,
-            gt(raw("COUNT(n.id)"), int(5)),
-        );
-
-        let plan = b.build(having);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            let t = b.read("nodes", "n", &[("id", DataType::Int64), ("label", DataType::String)]);
+            let agged = b.aggregate(
+                t,
+                &[(col("n", "label"), "type")],
+                &[("COUNT", "count", vec![col("n", "id")])],
+            );
+            // HAVING: FilterRel on top of AggregateRel
+            b.filter(agged, gt(raw("COUNT(n.id)"), int(5)))
+        });
 
         assert!(pq.sql.contains("GROUP BY n.label"), "sql: {}", pq.sql);
         assert!(pq.sql.contains("HAVING (COUNT(n.id) > {p0:Int64})"), "sql: {}", pq.sql);
@@ -1786,20 +1728,16 @@ mod tests {
 
     #[test]
     fn aggregate_with_order_by_and_limit() {
-        let mut b = PlanBuilder::new();
-        let t = b.read("nodes", "n", &[("id", DataType::Int64), ("label", DataType::String)]);
-
-        let agged = b.aggregate(
-            t,
-            &[(col("n", "label"), "type")],
-            &[("COUNT", "count", vec![col("n", "id")])],
-        );
-        // Use raw() for ORDER BY aggregate reference
-        let sorted = b.sort(agged, &[(raw("COUNT(n.id)"), SortDir::Desc)]);
-        let limited = b.fetch(sorted, 10, None);
-
-        let plan = b.build(limited);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            let t = b.read("nodes", "n", &[("id", DataType::Int64), ("label", DataType::String)]);
+            b.aggregate(
+                t,
+                &[(col("n", "label"), "type")],
+                &[("COUNT", "count", vec![col("n", "id")])],
+            )
+            .sort(b, &[(raw("COUNT(n.id)"), SortDir::Desc)])
+            .fetch(b, 10, None)
+        });
 
         assert!(pq.sql.contains("GROUP BY n.label"), "sql: {}", pq.sql);
         assert!(pq.sql.contains("ORDER BY COUNT(n.id) DESC"), "sql: {}", pq.sql);
@@ -1808,19 +1746,17 @@ mod tests {
 
     #[test]
     fn union_all_as_derived_table() {
-        let mut b = PlanBuilder::new();
+        let pq = build_and_emit(|b| {
+            let p1 = b
+                .read("gl_edge", "e1", &[("source_id", DataType::Int64)])
+                .project(b, &[(col("e1", "source_id"), "id")]);
+            let p2 = b
+                .read("gl_edge", "e2", &[("source_id", DataType::Int64)])
+                .project(b, &[(col("e2", "source_id"), "id")]);
 
-        let e1 = b.read("gl_edge", "e1", &[("source_id", DataType::Int64)]);
-        let p1 = b.project(e1, &[(col("e1", "source_id"), "id")]);
-
-        let e2 = b.read("gl_edge", "e2", &[("source_id", DataType::Int64)]);
-        let p2 = b.project(e2, &[(col("e2", "source_id"), "id")]);
-
-        let union = b.union_all(vec![p1, p2], "all_edges");
-
-        let outer = b.project(union, &[(col("all_edges", "id"), "id")]);
-        let plan = b.build(outer);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+            b.union_all(vec![p1, p2], "all_edges")
+                .project(b, &[(col("all_edges", "id"), "id")])
+        });
 
         assert!(pq.sql.contains("UNION ALL"), "sql: {}", pq.sql);
         assert!(pq.sql.contains(") AS all_edges"), "sql: {}", pq.sql);
@@ -1828,23 +1764,20 @@ mod tests {
 
     #[test]
     fn subquery_in_from() {
-        let mut b = PlanBuilder::new();
-
-        let inner = b.read(
-            "gl_project",
-            "p",
-            &[("id", DataType::Int64), ("name", DataType::String)],
-        );
-        let inner_filtered = b.filter(inner, eq(col("p", "name"), string("test")));
-        let inner_projected = b.project(
-            inner_filtered,
-            &[(col("p", "id"), "id"), (col("p", "name"), "name")],
-        );
-
-        let sub = b.subquery(inner_projected, "sub");
-        let outer = b.project(sub, &[(col("sub", "id"), "id")]);
-        let plan = b.build(outer);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            b.read(
+                "gl_project",
+                "p",
+                &[("id", DataType::Int64), ("name", DataType::String)],
+            )
+            .filter(b, eq(col("p", "name"), string("test")))
+            .project(
+                b,
+                &[(col("p", "id"), "id"), (col("p", "name"), "name")],
+            )
+            .subquery(b, "sub")
+            .project(b, &[(col("sub", "id"), "id")])
+        });
 
         assert!(pq.sql.contains("(SELECT"), "expected subquery: {}", pq.sql);
         assert!(pq.sql.contains(") AS sub"), "expected alias: {}", pq.sql);
@@ -1853,42 +1786,36 @@ mod tests {
 
     #[test]
     fn subquery_in_join() {
-        let mut b = PlanBuilder::new();
+        let pq = build_and_emit(|b| {
+            // Inner subquery: deduplication via GROUP BY + HAVING
+            let e = b.read(
+                "gl_edge",
+                "e",
+                &[
+                    ("source_id", DataType::Int64),
+                    ("_deleted", DataType::Bool),
+                    ("_version", DataType::String),
+                ],
+            );
+            let deduped = b
+                .aggregate(
+                    e,
+                    &[(col("e", "source_id"), "source_id")],
+                    &[("argMax", "is_deleted", vec![col("e", "_deleted"), col("e", "_version")])],
+                )
+                .filter(b, eq(raw("argMax(e._deleted, e._version)"), boolean(false)))
+                .subquery(b, "deduped_e");
 
-        // Inner subquery: deduplication via GROUP BY + HAVING
-        let e = b.read(
-            "gl_edge",
-            "e",
-            &[
-                ("source_id", DataType::Int64),
-                ("_deleted", DataType::Bool),
-                ("_version", DataType::String),
-            ],
-        );
-        let agged = b.aggregate(
-            e,
-            &[(col("e", "source_id"), "source_id")],
-            &[("argMax", "is_deleted", vec![col("e", "_deleted"), col("e", "_version")])],
-        );
-        // Use raw() for the aggregate expression in HAVING since
-        // e._deleted / e._version are in the input schema, not the output.
-        let having = b.filter(
-            agged,
-            eq(raw("argMax(e._deleted, e._version)"), boolean(false)),
-        );
-        let deduped = b.subquery(having, "deduped_e");
-
-        // Outer: join user with deduped edges
-        let u = b.read("gl_user", "u", &[("id", DataType::Int64)]);
-        let joined = b.join(
-            JoinType::Inner,
-            u,
-            deduped,
-            eq(col("u", "id"), col("deduped_e", "source_id")),
-        );
-        let projected = b.project(joined, &[(col("u", "id"), "id")]);
-        let plan = b.build(projected);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+            // Outer: join user with deduped edges
+            b.read("gl_user", "u", &[("id", DataType::Int64)])
+                .join(
+                    b,
+                    JoinType::Inner,
+                    deduped,
+                    eq(col("u", "id"), col("deduped_e", "source_id")),
+                )
+                .project(b, &[(col("u", "id"), "id")])
+        });
 
         assert!(pq.sql.contains("INNER JOIN (SELECT"), "expected join with subquery: {}", pq.sql);
         assert!(pq.sql.contains("HAVING"), "expected HAVING in subquery: {}", pq.sql);
@@ -1897,28 +1824,27 @@ mod tests {
 
     #[test]
     fn cte_with_recursive() {
+        // CTE body
         let mut b1 = PlanBuilder::new();
+        let base = b1
+            .read("gl_project", "p", &[("id", DataType::Int64)])
+            .project(&mut b1, &[(col("p", "id"), "node_id")]);
+        let recursive = b1
+            .read("path_cte", "c", &[("node_id", DataType::Int64)])
+            .project(&mut b1, &[(col("c", "node_id"), "node_id")]);
+        let cte_root = b1
+            .union_all(vec![base, recursive], "cte_body")
+            .project(&mut b1, &[(col("cte_body", "node_id"), "node_id")]);
+        let cte_plan = b1.build(cte_root);
 
-        // CTE body: SELECT p.id AS node_id FROM gl_project AS p UNION ALL SELECT ...
-        let p = b1.read("gl_project", "p", &[("id", DataType::Int64)]);
-        let base_select = b1.project(p, &[(col("p", "id"), "node_id")]);
-
-        let c = b1.read("path_cte", "c", &[("node_id", DataType::Int64)]);
-        let recursive_select = b1.project(c, &[(col("c", "node_id"), "node_id")]);
-
-        let union = b1.union_all(vec![base_select, recursive_select], "cte_body");
-        // The union is the CTE body; build it as a standalone plan
-        let cte_projected = b1.project(union, &[(col("cte_body", "node_id"), "node_id")]);
-        let cte_plan = b1.build(cte_projected);
-
-        // Main query: SELECT r.node_id AS id FROM path_cte AS r LIMIT 10
+        // Main query
         let mut b2 = PlanBuilder::new();
-        let r = b2.read("path_cte", "r", &[("node_id", DataType::Int64)]);
-        let main_projected = b2.project(r, &[(col("r", "node_id"), "id")]);
-        let main_limited = b2.fetch(main_projected, 10, None);
-
+        let main_root = b2
+            .read("path_cte", "r", &[("node_id", DataType::Int64)])
+            .project(&mut b2, &[(col("r", "node_id"), "id")])
+            .fetch(&b2, 10, None);
         let plan = b2.build_with_ctes(
-            main_limited,
+            main_root,
             vec![crate::plan::CteDef {
                 name: "path_cte".into(),
                 plan: cte_plan,
@@ -1936,25 +1862,22 @@ mod tests {
 
     #[test]
     fn argmax_aggregate_function() {
-        let mut b = PlanBuilder::new();
-        let t = b.read(
-            "gl_edge",
-            "e",
-            &[
-                ("source_id", DataType::Int64),
-                ("_deleted", DataType::Bool),
-                ("_version", DataType::String),
-            ],
-        );
-
-        let agged = b.aggregate(
-            t,
-            &[(col("e", "source_id"), "source_id")],
-            &[("argMax", "is_deleted", vec![col("e", "_deleted"), col("e", "_version")])],
-        );
-
-        let plan = b.build(agged);
-        let pq = emit_clickhouse_sql(&plan).unwrap();
+        let pq = build_and_emit(|b| {
+            let t = b.read(
+                "gl_edge",
+                "e",
+                &[
+                    ("source_id", DataType::Int64),
+                    ("_deleted", DataType::Bool),
+                    ("_version", DataType::String),
+                ],
+            );
+            b.aggregate(
+                t,
+                &[(col("e", "source_id"), "source_id")],
+                &[("argMax", "is_deleted", vec![col("e", "_deleted"), col("e", "_version")])],
+            )
+        });
 
         assert_eq!(
             pq.sql,
