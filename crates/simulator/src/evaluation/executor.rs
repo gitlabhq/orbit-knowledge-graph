@@ -288,9 +288,9 @@ impl QueryExecutor {
                 column_names,
                 start.elapsed(),
                 compiled.base.sql,
-                    params_to_json(&compiled.base.params),
-                    Some(sampling_info),
-                ),
+                params_to_json(&compiled.base.params),
+                Some(sampling_info),
+            ),
             Err(e) => ExecutionResult::failure_with_sql(
                 name.to_string(),
                 format!("Execution failed: {}", e),

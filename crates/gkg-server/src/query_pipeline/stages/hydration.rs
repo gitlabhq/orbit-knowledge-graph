@@ -6,8 +6,8 @@ use clickhouse_client::ArrowClickHouseClient;
 use futures::future::try_join_all;
 use query_engine::{DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryType, compile};
 
-use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use crate::redaction::{QueryResult, RedactionMessage};
+use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 
 use super::super::error::PipelineError;
 use super::super::metrics::PipelineObserver;

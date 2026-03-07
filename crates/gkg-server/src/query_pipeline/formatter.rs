@@ -1,9 +1,9 @@
 use ontology::Ontology;
 use query_engine::{
-    QueryType, ResultContext, GKG_COLUMN_PREFIX, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN,
-    RELATIONSHIP_TYPE_COLUMN,
+    GKG_COLUMN_PREFIX, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, QueryType,
+    RELATIONSHIP_TYPE_COLUMN, ResultContext,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::redaction::{NodeRef, QueryResult, QueryResultRow};
 use gkg_utils::arrow::ColumnValue;
