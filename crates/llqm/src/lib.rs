@@ -1,7 +1,7 @@
 pub mod backend;
-pub mod frontend;
 pub mod ir;
 pub mod pass;
+pub mod pipeline;
 
 // Re-export core IR types at crate root for ergonomic use.
 // Downstream crates can use `llqm::expr`, `llqm::plan`, etc. without
@@ -12,3 +12,6 @@ pub use ir::substrait;
 
 // Re-export the ClickHouse backend as `llqm::codegen` for backward compat.
 pub use backend::clickhouse as codegen;
+
+// Re-export pipeline entry points.
+pub use pipeline::{Backend, Frontend, Pipeline};

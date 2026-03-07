@@ -4,17 +4,16 @@
 //! to enforce namespace-scoped access control. This is the defense-in-depth
 //! layer — even if a frontend forgets security filtering, this pass adds it.
 //!
-//! TODO: implement once the security context types are defined.
+//! TODO: implement Substrait tree walking + filter injection.
 
 use crate::ir::plan::Plan;
+use crate::pipeline::IrPass;
 
-/// Security context for traversal-path-based access control.
 #[derive(Debug, Clone)]
 pub struct SecurityContext {
     pub traversal_paths: Vec<String>,
 }
 
-/// Injects security predicates into the plan.
 pub struct SecurityPass {
     pub context: SecurityContext,
 }
@@ -25,7 +24,7 @@ pub enum SecurityError {
     NotImplemented,
 }
 
-impl super::Pass for SecurityPass {
+impl IrPass for SecurityPass {
     type Error = SecurityError;
 
     fn transform(&self, plan: Plan) -> Result<Plan, Self::Error> {
