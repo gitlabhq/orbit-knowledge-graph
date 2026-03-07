@@ -45,13 +45,19 @@ fn collect_schema_errors(
 /// Returns `None` if compatible, or `Some(reason)` describing the mismatch.
 fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<String> {
     match expected {
-        DataType::String
-        | DataType::Date
-        | DataType::DateTime
-        | DataType::Enum
-        | DataType::Uuid => {
+        DataType::String | DataType::Date | DataType::DateTime | DataType::Uuid => {
             if !value.is_string() {
                 return Some(format!("is {}, not a string", json_type_name(value)));
+            }
+        }
+        // Enums accept strings (string-based) or integers (int-based, coerced
+        // to string labels by normalization before lowering).
+        DataType::Enum => {
+            if !value.is_string() && !value.is_i64() && !value.is_u64() {
+                return Some(format!(
+                    "is {}, not a string or integer",
+                    json_type_name(value)
+                ));
             }
         }
         DataType::Int => match value {
@@ -524,6 +530,7 @@ mod tests {
                 [
                     ("username", DataType::String),
                     ("created_at", DataType::DateTime),
+                    ("user_type", DataType::Enum),
                 ],
             )
             .with_fields(
@@ -950,5 +957,37 @@ mod tests {
         )
         .unwrap();
         Validator::new(&ontology).check_references(&input).unwrap();
+    }
+
+    #[test]
+    fn accepts_string_on_enum_column() {
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "filters": {"user_type": "human"}}
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_int_on_enum_column() {
+        // Int-based enums pass validation; normalization coerces to string later.
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "filters": {"user_type": 0}}
+            }"#,
+        );
+    }
+
+    #[test]
+    fn rejects_bool_on_enum_column() {
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "filters": {"user_type": true}}
+            }"#,
+            "not a string or integer",
+        );
     }
 }
