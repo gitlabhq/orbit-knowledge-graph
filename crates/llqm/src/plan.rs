@@ -7,22 +7,22 @@ use std::collections::HashMap;
 
 use substrait::proto::{
     self, aggregate_rel,
-    expression::{
-        self, field_reference, literal::LiteralType, reference_segment, FieldReference, Literal,
-        ReferenceSegment, ScalarFunction,
-    },
+    expression::{self},
     extensions::{
-        self as ext,
         simple_extension_declaration::{ExtensionFunction, MappingType},
         SimpleExtensionDeclaration, SimpleExtensionUrn,
     },
-    fetch_rel, function_argument, join_rel, plan_rel, r#type, read_rel, rel, rel_common, set_rel,
-    sort_field, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
-    NamedStruct, Plan as SubstraitPlan, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot,
-    SetRel, SortRel,
+    fetch_rel, plan_rel, read_rel, rel, rel_common, set_rel, sort_field, AggregateFunction,
+    AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument, Plan as SubstraitPlan,
+    PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
 };
 
-use crate::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, SortDir, UnaryOp};
+use crate::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, SortDir};
+use crate::substrait::{
+    binary_op_substrait_name, bool_type, build_named_struct, make_any, make_field_ref,
+    make_literal_arg, make_metadata, make_scalar_fn, make_value_arg, string_type,
+    to_substrait_join_type, to_substrait_literal, to_substrait_type, unary_op_substrait_name,
+};
 
 // ---------------------------------------------------------------------------
 // Schema tracking
@@ -716,180 +716,8 @@ impl PlanBuilder {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers: metadata
+// Helpers (plan-level, not Substrait)
 // ---------------------------------------------------------------------------
-
-fn make_metadata(type_url: &str, json: serde_json::Value) -> ext::AdvancedExtension {
-    ext::AdvancedExtension {
-        optimization: vec![make_any(type_url, &json)],
-        enhancement: None,
-    }
-}
-
-fn make_any(type_url: &str, json: &serde_json::Value) -> prost_types::Any {
-    prost_types::Any {
-        type_url: type_url.into(),
-        value: serde_json::to_vec(json).expect("json serialization"),
-    }
-}
-
-fn build_named_struct(columns: &[(&str, DataType)]) -> NamedStruct {
-    NamedStruct {
-        names: columns.iter().map(|(n, _)| (*n).into()).collect(),
-        r#struct: Some(r#type::Struct {
-            types: columns
-                .iter()
-                .map(|(_, dt)| to_substrait_type(dt.clone()))
-                .collect(),
-            ..Default::default()
-        }),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers: expressions
-// ---------------------------------------------------------------------------
-
-fn make_field_ref(index: usize) -> Expression {
-    Expression {
-        rex_type: Some(expression::RexType::Selection(Box::new(FieldReference {
-            reference_type: Some(field_reference::ReferenceType::DirectReference(
-                ReferenceSegment {
-                    reference_type: Some(reference_segment::ReferenceType::StructField(Box::new(
-                        reference_segment::StructField {
-                            field: index as i32,
-                            child: None,
-                        },
-                    ))),
-                },
-            )),
-            root_type: Some(field_reference::RootType::RootReference(
-                field_reference::RootReference {},
-            )),
-        }))),
-    }
-}
-
-fn to_substrait_literal(lit: &LiteralValue) -> Literal {
-    let literal_type = match lit {
-        LiteralValue::String(s) => Some(LiteralType::String(s.clone())),
-        LiteralValue::Int64(n) => Some(LiteralType::I64(*n)),
-        LiteralValue::Float64(f) => Some(LiteralType::Fp64(*f)),
-        LiteralValue::Bool(b) => Some(LiteralType::Boolean(*b)),
-        LiteralValue::Null => Some(LiteralType::Null(proto::Type::default())),
-    };
-    Literal {
-        nullable: false,
-        type_variation_reference: 0,
-        literal_type,
-    }
-}
-
-fn make_literal_arg(lit: &LiteralValue) -> FunctionArgument {
-    FunctionArgument {
-        arg_type: Some(function_argument::ArgType::Value(Expression {
-            rex_type: Some(expression::RexType::Literal(to_substrait_literal(lit))),
-        })),
-    }
-}
-
-fn make_value_arg(expr: Expression) -> FunctionArgument {
-    FunctionArgument {
-        arg_type: Some(function_argument::ArgType::Value(expr)),
-    }
-}
-
-#[allow(deprecated)] // ScalarFunction.args is deprecated
-fn make_scalar_fn(
-    anchor: u32,
-    arguments: Vec<FunctionArgument>,
-    output_type: proto::Type,
-) -> Expression {
-    Expression {
-        rex_type: Some(expression::RexType::ScalarFunction(ScalarFunction {
-            function_reference: anchor,
-            arguments,
-            output_type: Some(output_type),
-            options: Vec::new(),
-            args: Vec::new(),
-        })),
-    }
-}
-
-fn to_substrait_type(dt: DataType) -> proto::Type {
-    let kind = match dt {
-        DataType::String => r#type::Kind::String(r#type::String {
-            nullability: r#type::Nullability::Required as i32,
-            type_variation_reference: 0,
-        }),
-        DataType::Int64 => r#type::Kind::I64(r#type::I64 {
-            nullability: r#type::Nullability::Required as i32,
-            type_variation_reference: 0,
-        }),
-        DataType::Float64 => r#type::Kind::Fp64(r#type::Fp64 {
-            nullability: r#type::Nullability::Required as i32,
-            type_variation_reference: 0,
-        }),
-        DataType::Bool => r#type::Kind::Bool(r#type::Boolean {
-            nullability: r#type::Nullability::Required as i32,
-            type_variation_reference: 0,
-        }),
-        DataType::Array(inner) => r#type::Kind::List(Box::new(r#type::List {
-            r#type: Some(Box::new(to_substrait_type(*inner))),
-            nullability: r#type::Nullability::Required as i32,
-            type_variation_reference: 0,
-        })),
-        #[allow(deprecated)]
-        DataType::DateTime => r#type::Kind::Timestamp(r#type::Timestamp {
-            nullability: r#type::Nullability::Required as i32,
-            type_variation_reference: 0,
-        }),
-    };
-    proto::Type { kind: Some(kind) }
-}
-
-fn bool_type() -> proto::Type {
-    to_substrait_type(DataType::Bool)
-}
-
-fn string_type() -> proto::Type {
-    to_substrait_type(DataType::String)
-}
-
-fn to_substrait_join_type(jt: JoinType) -> join_rel::JoinType {
-    match jt {
-        JoinType::Inner => join_rel::JoinType::Inner,
-        JoinType::Left => join_rel::JoinType::Left,
-        JoinType::Right => join_rel::JoinType::Right,
-        JoinType::Full => join_rel::JoinType::Outer,
-        JoinType::Cross => join_rel::JoinType::Inner,
-    }
-}
-
-fn binary_op_substrait_name(op: BinaryOp) -> &'static str {
-    match op {
-        BinaryOp::Eq => "equal",
-        BinaryOp::Ne => "not_equal",
-        BinaryOp::Lt => "lt",
-        BinaryOp::Le => "lte",
-        BinaryOp::Gt => "gt",
-        BinaryOp::Ge => "gte",
-        BinaryOp::And => "and",
-        BinaryOp::Or => "or",
-        BinaryOp::Add => "add",
-        BinaryOp::Like => "like",
-        BinaryOp::ILike => "ilike",
-        BinaryOp::In => "in",
-    }
-}
-
-fn unary_op_substrait_name(op: UnaryOp) -> &'static str {
-    match op {
-        UnaryOp::Not => "not",
-        UnaryOp::IsNull => "is_null",
-        UnaryOp::IsNotNull => "is_not_null",
-    }
-}
 
 fn infer_data_type(expr: &Expr, schema: &Schema) -> DataType {
     match expr {

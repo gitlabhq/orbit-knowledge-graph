@@ -7,18 +7,19 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 use substrait::proto::{
-    self, Expression, FunctionArgument, ReadRel, Rel, RelRoot,
+    self, Expression, FunctionArgument, Rel, RelRoot,
     expression::{
         self, FieldReference, Literal, ScalarFunction, field_reference, literal::LiteralType,
         reference_segment,
     },
     extensions::simple_extension_declaration::MappingType,
-    function_argument, join_rel, plan_rel, read_rel, rel, set_rel, sort_field, r#type,
+    function_argument, join_rel, plan_rel, read_rel, rel, set_rel, sort_field,
 };
 use thiserror::Error;
 
 use crate::expr::DataType;
 use crate::plan::{Plan, Schema, SchemaColumn};
+use crate::substrait::{get_read_metadata, schema_from_base, substrait_type_to_data_type};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -985,15 +986,6 @@ fn get_root(plan: &proto::Plan) -> Result<&RelRoot, CodegenError> {
     }
 }
 
-fn get_read_metadata(read: &ReadRel) -> Option<serde_json::Value> {
-    let ext = read.advanced_extension.as_ref()?;
-    let any = ext.optimization.first()?;
-    if any.type_url != "llqm/read_metadata" {
-        return None;
-    }
-    serde_json::from_slice(&any.value).ok()
-}
-
 fn emit_field_ref(field_ref: &FieldReference, schema: &Schema) -> Result<String, CodegenError> {
     let index = get_field_index(field_ref)?;
     let col = schema.columns.get(index).ok_or_else(|| {
@@ -1036,51 +1028,6 @@ fn extract_string_arg(arg: &FunctionArgument) -> Result<String, CodegenError> {
         _ => Err(CodegenError::UnsupportedExpression(
             "expected string literal argument".into(),
         )),
-    }
-}
-
-fn schema_from_base(base: &proto::NamedStruct, alias: &str) -> Schema {
-    let types = base
-        .r#struct
-        .as_ref()
-        .map(|s| &s.types)
-        .cloned()
-        .unwrap_or_default();
-
-    Schema {
-        columns: base
-            .names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| {
-                let data_type = types
-                    .get(i)
-                    .and_then(substrait_type_to_data_type)
-                    .unwrap_or(DataType::String);
-                SchemaColumn {
-                    table_alias: alias.into(),
-                    name: name.clone(),
-                    data_type,
-                }
-            })
-            .collect(),
-    }
-}
-
-fn substrait_type_to_data_type(t: &proto::Type) -> Option<DataType> {
-    match &t.kind {
-        Some(r#type::Kind::String(_)) => Some(DataType::String),
-        Some(r#type::Kind::I64(_)) => Some(DataType::Int64),
-        Some(r#type::Kind::Fp64(_)) => Some(DataType::Float64),
-        Some(r#type::Kind::Bool(_)) => Some(DataType::Bool),
-        Some(r#type::Kind::List(list)) => list
-            .r#type
-            .as_ref()
-            .and_then(|inner| substrait_type_to_data_type(inner))
-            .map(|inner_dt| DataType::Array(Box::new(inner_dt))),
-        #[allow(deprecated)]
-        Some(r#type::Kind::Timestamp(_)) => Some(DataType::DateTime),
-        _ => None,
     }
 }
 
