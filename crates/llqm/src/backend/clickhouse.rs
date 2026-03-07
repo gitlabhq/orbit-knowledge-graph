@@ -539,8 +539,10 @@ impl CodegenContext {
                 .unwrap_or_else(|| format!("_col{col_idx}"));
 
             // Check if we can skip the alias
-            let is_field_ref =
-                matches!(&grouping_expr.rex_type, Some(expression::RexType::Selection(_)));
+            let is_field_ref = matches!(
+                &grouping_expr.rex_type,
+                Some(expression::RexType::Selection(_))
+            );
             if is_field_ref && (expr_sql == alias || expr_sql.ends_with(&format!(".{alias}"))) {
                 select_items.push(expr_sql.clone());
             } else {
@@ -609,8 +611,7 @@ impl CodegenContext {
             return Err(CodegenError::MissingField("SetRel.inputs".into()));
         }
 
-        let op = set_rel::SetOp::try_from(set.op)
-            .unwrap_or(set_rel::SetOp::UnionAll);
+        let op = set_rel::SetOp::try_from(set.op).unwrap_or(set_rel::SetOp::UnionAll);
 
         if op != set_rel::SetOp::UnionAll {
             return Err(CodegenError::UnsupportedRelation(format!(
@@ -639,7 +640,11 @@ impl CodegenContext {
             .as_ref()
             .and_then(|v| v.get("column_names"))
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            });
 
         // Use stored names for union arm output, falling back to passed output_names
         let arm_names = stored_names.as_ref().or(output_names);
@@ -1622,26 +1627,38 @@ mod tests {
     #[test]
     fn ilike_operator() {
         let pq = build_and_emit(|b| {
-            b.read("gl_user", "u", &[("id", DataType::Int64), ("name", DataType::String)])
-                .filter(b, ilike(col("u", "name"), string("%Test%")))
-                .project(b, &[(col("u", "id"), "id")])
+            b.read(
+                "gl_user",
+                "u",
+                &[("id", DataType::Int64), ("name", DataType::String)],
+            )
+            .filter(b, ilike(col("u", "name"), string("%Test%")))
+            .project(b, &[(col("u", "id"), "id")])
         });
 
-        assert!(pq.sql.contains("(u.name ILIKE {p0:String})"), "sql: {}", pq.sql);
+        assert!(
+            pq.sql.contains("(u.name ILIKE {p0:String})"),
+            "sql: {}",
+            pq.sql
+        );
     }
 
     #[test]
     fn in_operator_binary() {
         let pq = build_and_emit(|b| {
-            b.read("gl_user", "u", &[("id", DataType::Int64), ("label", DataType::String)])
-                .filter(
-                    b,
-                    is_in(
-                        col("u", "label"),
-                        param("types", DataType::array(DataType::String)),
-                    ),
-                )
-                .project(b, &[(col("u", "id"), "id")])
+            b.read(
+                "gl_user",
+                "u",
+                &[("id", DataType::Int64), ("label", DataType::String)],
+            )
+            .filter(
+                b,
+                is_in(
+                    col("u", "label"),
+                    param("types", DataType::array(DataType::String)),
+                ),
+            )
+            .project(b, &[(col("u", "id"), "id")])
         });
 
         assert_eq!(
@@ -1674,7 +1691,11 @@ mod tests {
     #[test]
     fn aggregate_with_having() {
         let pq = build_and_emit(|b| {
-            let t = b.read("nodes", "n", &[("id", DataType::Int64), ("label", DataType::String)]);
+            let t = b.read(
+                "nodes",
+                "n",
+                &[("id", DataType::Int64), ("label", DataType::String)],
+            );
             let agged = b.aggregate(
                 t,
                 &[(col("n", "label"), "type")],
@@ -1685,14 +1706,26 @@ mod tests {
         });
 
         assert!(pq.sql.contains("GROUP BY n.label"), "sql: {}", pq.sql);
-        assert!(pq.sql.contains("HAVING (COUNT(n.id) > {p0:Int64})"), "sql: {}", pq.sql);
-        assert!(!pq.sql.contains("WHERE"), "HAVING should not produce WHERE: {}", pq.sql);
+        assert!(
+            pq.sql.contains("HAVING (COUNT(n.id) > {p0:Int64})"),
+            "sql: {}",
+            pq.sql
+        );
+        assert!(
+            !pq.sql.contains("WHERE"),
+            "HAVING should not produce WHERE: {}",
+            pq.sql
+        );
     }
 
     #[test]
     fn aggregate_with_order_by_and_limit() {
         let pq = build_and_emit(|b| {
-            let t = b.read("nodes", "n", &[("id", DataType::Int64), ("label", DataType::String)]);
+            let t = b.read(
+                "nodes",
+                "n",
+                &[("id", DataType::Int64), ("label", DataType::String)],
+            );
             b.aggregate(
                 t,
                 &[(col("n", "label"), "type")],
@@ -1703,7 +1736,11 @@ mod tests {
         });
 
         assert!(pq.sql.contains("GROUP BY n.label"), "sql: {}", pq.sql);
-        assert!(pq.sql.contains("ORDER BY COUNT(n.id) DESC"), "sql: {}", pq.sql);
+        assert!(
+            pq.sql.contains("ORDER BY COUNT(n.id) DESC"),
+            "sql: {}",
+            pq.sql
+        );
         assert!(pq.sql.contains("LIMIT 10"), "sql: {}", pq.sql);
     }
 
@@ -1734,17 +1771,18 @@ mod tests {
                 &[("id", DataType::Int64), ("name", DataType::String)],
             )
             .filter(b, eq(col("p", "name"), string("test")))
-            .project(
-                b,
-                &[(col("p", "id"), "id"), (col("p", "name"), "name")],
-            )
+            .project(b, &[(col("p", "id"), "id"), (col("p", "name"), "name")])
             .subquery(b, "sub")
             .project(b, &[(col("sub", "id"), "id")])
         });
 
         assert!(pq.sql.contains("(SELECT"), "expected subquery: {}", pq.sql);
         assert!(pq.sql.contains(") AS sub"), "expected alias: {}", pq.sql);
-        assert!(pq.sql.contains("gl_project AS p"), "expected inner table: {}", pq.sql);
+        assert!(
+            pq.sql.contains("gl_project AS p"),
+            "expected inner table: {}",
+            pq.sql
+        );
     }
 
     #[test]
@@ -1764,7 +1802,11 @@ mod tests {
                 .aggregate(
                     e,
                     &[(col("e", "source_id"), "source_id")],
-                    &[("argMax", "is_deleted", vec![col("e", "_deleted"), col("e", "_version")])],
+                    &[(
+                        "argMax",
+                        "is_deleted",
+                        vec![col("e", "_deleted"), col("e", "_version")],
+                    )],
                 )
                 .filter(b, eq(raw("argMax(e._deleted, e._version)"), boolean(false)))
                 .subquery(b, "deduped_e");
@@ -1780,9 +1822,21 @@ mod tests {
                 .project(b, &[(col("u", "id"), "id")])
         });
 
-        assert!(pq.sql.contains("INNER JOIN (SELECT"), "expected join with subquery: {}", pq.sql);
-        assert!(pq.sql.contains("HAVING"), "expected HAVING in subquery: {}", pq.sql);
-        assert!(pq.sql.contains(") AS deduped_e ON"), "expected subquery alias: {}", pq.sql);
+        assert!(
+            pq.sql.contains("INNER JOIN (SELECT"),
+            "expected join with subquery: {}",
+            pq.sql
+        );
+        assert!(
+            pq.sql.contains("HAVING"),
+            "expected HAVING in subquery: {}",
+            pq.sql
+        );
+        assert!(
+            pq.sql.contains(") AS deduped_e ON"),
+            "expected subquery alias: {}",
+            pq.sql
+        );
     }
 
     #[test]
@@ -1817,9 +1871,21 @@ mod tests {
 
         let pq = emit_clickhouse_sql(&plan).unwrap();
 
-        assert!(pq.sql.contains("WITH RECURSIVE"), "expected WITH RECURSIVE: {}", pq.sql);
-        assert!(pq.sql.contains("path_cte AS ("), "expected CTE name: {}", pq.sql);
-        assert!(pq.sql.contains("UNION ALL"), "expected UNION ALL in CTE body: {}", pq.sql);
+        assert!(
+            pq.sql.contains("WITH RECURSIVE"),
+            "expected WITH RECURSIVE: {}",
+            pq.sql
+        );
+        assert!(
+            pq.sql.contains("path_cte AS ("),
+            "expected CTE name: {}",
+            pq.sql
+        );
+        assert!(
+            pq.sql.contains("UNION ALL"),
+            "expected UNION ALL in CTE body: {}",
+            pq.sql
+        );
         assert!(pq.sql.contains("LIMIT 10"), "expected LIMIT: {}", pq.sql);
     }
 
@@ -1838,7 +1904,11 @@ mod tests {
             b.aggregate(
                 t,
                 &[(col("e", "source_id"), "source_id")],
-                &[("argMax", "is_deleted", vec![col("e", "_deleted"), col("e", "_version")])],
+                &[(
+                    "argMax",
+                    "is_deleted",
+                    vec![col("e", "_deleted"), col("e", "_version")],
+                )],
             )
         });
 

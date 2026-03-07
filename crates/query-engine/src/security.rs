@@ -8,7 +8,7 @@
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
 use llqm::expr::{self, Expr};
-use substrait::proto::{self, read_rel, rel, Rel};
+use substrait::proto::{self, Rel, read_rel, rel};
 
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};

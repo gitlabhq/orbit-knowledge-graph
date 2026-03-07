@@ -6,15 +6,15 @@
 use std::collections::HashMap;
 
 use substrait::proto::{
-    self, aggregate_rel,
+    self, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
+    Plan as SubstraitPlan, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
+    aggregate_rel,
     expression::{self},
     extensions::{
-        simple_extension_declaration::{ExtensionFunction, MappingType},
         SimpleExtensionDeclaration, SimpleExtensionUrn,
+        simple_extension_declaration::{ExtensionFunction, MappingType},
     },
-    fetch_rel, plan_rel, read_rel, rel, rel_common, set_rel, sort_field, AggregateFunction,
-    AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument, Plan as SubstraitPlan,
-    PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
+    fetch_rel, plan_rel, read_rel, rel, rel_common, set_rel, sort_field,
 };
 
 use crate::ir::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, SortDir};

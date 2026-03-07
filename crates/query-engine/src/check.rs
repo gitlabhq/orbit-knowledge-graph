@@ -11,7 +11,7 @@ use llqm::plan::Plan;
 
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::security::{should_apply_security_filter, SecurityContext};
+use crate::security::{SecurityContext, should_apply_security_filter};
 
 /// Verify post-compilation invariants on the final plan.
 ///
@@ -196,9 +196,10 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let plan = make_project_plan(false, &ctx);
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("missing valid traversal_path filter"));
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
     }
 
     #[test]
@@ -218,9 +219,10 @@ mod tests {
         let rel = b.project(rel, &[(expr::col("p", "id"), "p_id")]);
         let plan = b.build(rel);
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("missing valid traversal_path filter"));
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
     }
 
     #[test]

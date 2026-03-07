@@ -4,11 +4,11 @@ use llqm::codegen::emit_clickhouse_sql;
 use llqm::expr::*;
 use llqm::plan::PlanBuilder;
 
+use super::SOURCE_DATA_TABLE;
 use super::input::{
     EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan, ExtractSource, FkEdgeTransform,
     NodeColumn,
 };
-use super::SOURCE_DATA_TABLE;
 
 const VERSION_ALIAS: &str = "_version";
 const DELETED_ALIAS: &str = "_deleted";

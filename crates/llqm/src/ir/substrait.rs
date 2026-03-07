@@ -4,13 +4,12 @@
 //! Decoding: Substrait protobuf → `DataType`/`Schema` (used by `codegen.rs`).
 
 use substrait::proto::{
-    self,
+    self, Expression, FunctionArgument, NamedStruct, ReadRel,
     expression::{
-        self, field_reference, literal::LiteralType, reference_segment, FieldReference, Literal,
-        ReferenceSegment, ScalarFunction,
+        self, FieldReference, Literal, ReferenceSegment, ScalarFunction, field_reference,
+        literal::LiteralType, reference_segment,
     },
-    extensions as ext, function_argument, join_rel, r#type, Expression, FunctionArgument,
-    NamedStruct, ReadRel,
+    extensions as ext, function_argument, join_rel, r#type,
 };
 
 use crate::ir::expr::{BinaryOp, DataType, JoinType, LiteralValue, UnaryOp};

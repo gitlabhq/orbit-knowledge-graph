@@ -19,9 +19,6 @@ pub trait Pass {
 ///
 /// Passes execute in order; each receives the output of the previous one.
 /// Short-circuits on the first error.
-pub fn run_passes<E>(
-    plan: Plan,
-    passes: &[&dyn Pass<Error = E>],
-) -> Result<Plan, E> {
+pub fn run_passes<E>(plan: Plan, passes: &[&dyn Pass<Error = E>]) -> Result<Plan, E> {
     passes.iter().try_fold(plan, |p, pass| pass.transform(p))
 }
