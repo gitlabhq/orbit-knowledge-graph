@@ -1,0 +1,15 @@
+[package]
+name = "gkg-utils"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+arrow = { workspace = true }
+chrono = { workspace = true }
+enum-as-inner = { workspace = true }
+serde_json = { workspace = true }
+strum = { workspace = true }
+
+[lints]
+workspace = true

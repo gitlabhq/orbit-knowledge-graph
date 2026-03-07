@@ -6,7 +6,7 @@ use super::{ParameterSampler, QueryDefinition};
 use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
-use query_engine::{SecurityContext, compile};
+use query_engine::{ParamValue, SecurityContext, compile};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -288,9 +288,9 @@ impl QueryExecutor {
                 column_names,
                 start.elapsed(),
                 compiled.base.sql,
-                serde_json::to_value(&compiled.base.params).unwrap_or_default(),
-                Some(sampling_info),
-            ),
+                    params_to_json(&compiled.base.params),
+                    Some(sampling_info),
+                ),
             Err(e) => ExecutionResult::failure_with_sql(
                 name.to_string(),
                 format!("Execution failed: {}", e),
@@ -670,7 +670,7 @@ impl QueryExecutor {
                     .base
                     .params
                     .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .map(|(k, v)| (k.clone(), v.value.clone()))
                     .collect(),
             );
 
@@ -689,7 +689,7 @@ impl QueryExecutor {
                     column_names,
                     start.elapsed(),
                     compiled.base.sql,
-                    serde_json::to_value(&compiled.base.params).unwrap_or_default(),
+                    params_to_json(&compiled.base.params),
                     Some(sampling_info),
                 );
 
@@ -882,33 +882,35 @@ impl QueryExecutor {
 /// Substitute ClickHouse parameter placeholders with actual values.
 fn substitute_params_in_sql(
     sql: &str,
-    params: &std::collections::HashMap<String, serde_json::Value>,
+    params: &std::collections::HashMap<String, ParamValue>,
 ) -> String {
     let mut result = sql.to_string();
 
-    for (name, value) in params {
-        // Match patterns like {p0:String}, {p1:Int64}, etc.
-        let patterns = [
-            format!("{{{name}:String}}"),
-            format!("{{{name}:Int64}}"),
-            format!("{{{name}:Float64}}"),
-            format!("{{{name}:Bool}}"),
-        ];
+    for (name, param) in params {
+        let pattern = format!("{{{name}:{}}}", param.ch_type);
 
-        let replacement = match value {
+        let replacement = match &param.value {
             serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "''")),
             serde_json::Value::Number(n) => n.to_string(),
             serde_json::Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
             serde_json::Value::Null => "NULL".to_string(),
-            _ => value.to_string(),
+            other => other.to_string(),
         };
 
-        for pattern in &patterns {
-            result = result.replace(pattern, &replacement);
-        }
+        result = result.replace(&pattern, &replacement);
     }
 
     result
+}
+
+/// Convert `ParamValue` map to a JSON object with just the values (for serialization).
+fn params_to_json(params: &std::collections::HashMap<String, ParamValue>) -> serde_json::Value {
+    serde_json::Value::Object(
+        params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value.clone()))
+            .collect(),
+    )
 }
 
 /// Parse sample count from node_ids placeholder value.
@@ -966,10 +968,24 @@ mod tests {
 
     #[test]
     fn test_substitute_params() {
+        use gkg_utils::clickhouse::ChType;
+
         let sql = "SELECT * FROM users WHERE name = {p0:String} AND id = {p1:Int64}";
         let mut params = std::collections::HashMap::new();
-        params.insert("p0".to_string(), serde_json::json!("alice"));
-        params.insert("p1".to_string(), serde_json::json!(42));
+        params.insert(
+            "p0".to_string(),
+            ParamValue {
+                ch_type: ChType::String,
+                value: serde_json::json!("alice"),
+            },
+        );
+        params.insert(
+            "p1".to_string(),
+            ParamValue {
+                ch_type: ChType::Int64,
+                value: serde_json::json!(42),
+            },
+        );
 
         let result = substitute_params_in_sql(sql, &params);
         assert_eq!(

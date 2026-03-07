@@ -5,47 +5,7 @@
 
 use serde_json::Value;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ClickHouse parameter types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// ClickHouse types used in parameterized query placeholders (`{pN:Type}`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
-pub enum ChType {
-    String,
-    Int64,
-    Float64,
-    Bool,
-    #[strum(serialize = "Array(String)")]
-    ArrayString,
-    #[strum(serialize = "Array(Int64)")]
-    ArrayInt64,
-}
-
-impl ChType {
-    /// Infer ClickHouse type from a JSON value.
-    /// For arrays, inspects the first element to determine the element type.
-    pub fn from_value(v: &Value) -> Self {
-        match v {
-            Value::Number(n) if n.is_i64() => ChType::Int64,
-            Value::Number(_) => ChType::Float64,
-            Value::Bool(_) => ChType::Bool,
-            Value::Array(arr) => match arr.first() {
-                Some(Value::Number(n)) if n.is_i64() => ChType::ArrayInt64,
-                _ => ChType::ArrayString,
-            },
-            _ => ChType::String,
-        }
-    }
-
-    /// Promote a scalar type to its array equivalent.
-    pub fn to_array(self) -> Self {
-        match self {
-            ChType::Int64 => ChType::ArrayInt64,
-            _ => ChType::ArrayString,
-        }
-    }
-}
+pub use gkg_utils::clickhouse::{ChScalar, ChType};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Expressions

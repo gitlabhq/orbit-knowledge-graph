@@ -1,4 +1,3 @@
-pub(crate) mod arrow;
 pub mod auth;
 pub mod cli;
 pub mod cluster_health;

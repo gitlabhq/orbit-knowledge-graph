@@ -345,7 +345,12 @@ fn run_query(
                     label,
                     input,
                     sql: result.base.sql,
-                    params: result.base.params,
+                    params: result
+                        .base
+                        .params
+                        .into_iter()
+                        .map(|(k, v)| (k, v.value))
+                        .collect(),
                 }));
             }
             Err(e) => {

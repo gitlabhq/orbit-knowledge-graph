@@ -8,6 +8,7 @@ use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream;
 use futures::stream::BoxStream;
+use gkg_utils::clickhouse::{ChScalar, ChType};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -103,7 +104,12 @@ impl ArrowClickHouseClient {
         &self.client
     }
 
-    pub fn bind_param(query: ArrowQuery, key: &str, value: &Value) -> ArrowQuery {
+    /// Bind a named parameter to a query.
+    ///
+    /// `ch_type` carries the ClickHouse type from the query placeholder. For
+    /// scalar values the JSON `Value` variant determines the Rust type; for
+    /// arrays `ch_type` determines the element type for binding.
+    pub fn bind_param(query: ArrowQuery, key: &str, value: &Value, ch_type: &ChType) -> ArrowQuery {
         match value {
             Value::String(s) => query.param(key, s.as_str()),
             Value::Number(n) => {
@@ -116,13 +122,20 @@ impl ArrowClickHouseClient {
                 }
             }
             Value::Bool(b) => query.param(key, *b),
-            Value::Array(arr) => {
-                // Dispatch typed arrays based on first element.
-                let is_int = arr.first().is_some_and(|v| v.is_i64());
-                if is_int {
+            Value::Array(arr) => match ch_type {
+                ChType::Array(ChScalar::Int64) => {
                     let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_i64()).collect();
                     query.param(key, ints)
-                } else {
+                }
+                ChType::Array(ChScalar::Float64) => {
+                    let floats: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
+                    query.param(key, floats)
+                }
+                ChType::Array(ChScalar::Bool) => {
+                    let bools: Vec<bool> = arr.iter().filter_map(|v| v.as_bool()).collect();
+                    query.param(key, bools)
+                }
+                _ => {
                     let strings: Vec<String> = arr
                         .iter()
                         .map(|v| match v {
@@ -132,7 +145,7 @@ impl ArrowClickHouseClient {
                         .collect();
                     query.param(key, strings)
                 }
-            }
+            },
             _ => query.param(key, value.to_string()),
         }
     }

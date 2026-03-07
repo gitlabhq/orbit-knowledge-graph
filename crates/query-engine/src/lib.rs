@@ -47,7 +47,7 @@ pub mod validate;
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use check::check_ast;
 pub use codegen::{
-    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParameterizedQuery, codegen,
+    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
 };
 pub use constants::{
     EDGE_KINDS_COLUMN, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, NEIGHBOR_ID_COLUMN,
@@ -236,7 +236,7 @@ mod tests {
                 .base
                 .params
                 .values()
-                .any(|v| v == &serde_json::json!("AUTHORED")),
+                .any(|p| p.value == serde_json::json!("AUTHORED")),
             "expected AUTHORED in params: {:?}",
             result.base.params
         );
@@ -263,7 +263,7 @@ mod tests {
                 .base
                 .params
                 .values()
-                .any(|v| v == &serde_json::Value::Bool(true)),
+                .any(|p| p.value == serde_json::Value::Bool(true)),
             "expected boolean filter to remain true in params: {:?}",
             result.base.params
         );

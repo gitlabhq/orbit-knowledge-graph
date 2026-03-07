@@ -10,10 +10,17 @@ use crate::input::QueryType;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// A query parameter with its ClickHouse type and JSON value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParamValue {
+    pub ch_type: ChType,
+    pub value: Value,
+}
+
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {
     pub sql: String,
-    pub params: HashMap<String, Value>,
+    pub params: HashMap<String, ParamValue>,
     pub result_context: ResultContext,
 }
 
@@ -69,7 +76,7 @@ impl std::fmt::Display for ParameterizedQuery {
         let re = Regex::new(r"\{(\w+):\w+\}").expect("valid regex");
         let result = re.replace_all(&self.sql, |caps: &regex::Captures| {
             let name = &caps[1];
-            match self.params.get(name) {
+            match self.params.get(name).map(|p| &p.value) {
                 Some(Value::String(s)) => format!("'{}'", s.replace('\'', "''")),
                 Some(Value::Bool(b)) => b.to_string(),
                 Some(Value::Number(n)) => n.to_string(),
@@ -99,7 +106,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct Context {
-    params: HashMap<String, Value>,
+    params: HashMap<String, ParamValue>,
 }
 
 impl Context {
@@ -249,10 +256,16 @@ impl Context {
         match v {
             Value::Null => "NULL".into(),
             // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
-            Value::Array(_) if matches!(data_type, ChType::ArrayString | ChType::ArrayInt64) => {
+            Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
                 let name = format!("p{}", self.params.len());
                 let placeholder = format!("{{{name}:{data_type}}}");
-                self.params.insert(name, v.clone());
+                self.params.insert(
+                    name,
+                    ParamValue {
+                        ch_type: data_type,
+                        value: v.clone(),
+                    },
+                );
                 placeholder
             }
             // Scalar ChType with array value: expand element-by-element (Literal fallback).
@@ -262,7 +275,13 @@ impl Context {
                     .map(|item| {
                         let name = format!("p{}", self.params.len());
                         let placeholder = format!("{{{name}:{data_type}}}");
-                        self.params.insert(name, item.clone());
+                        self.params.insert(
+                            name,
+                            ParamValue {
+                                ch_type: data_type,
+                                value: item.clone(),
+                            },
+                        );
                         placeholder
                     })
                     .collect();
@@ -271,7 +290,13 @@ impl Context {
             _ => {
                 let name = format!("p{}", self.params.len());
                 let placeholder = format!("{{{name}:{data_type}}}");
-                self.params.insert(name, v.clone());
+                self.params.insert(
+                    name,
+                    ParamValue {
+                        ch_type: data_type,
+                        value: v.clone(),
+                    },
+                );
                 placeholder
             }
         }
@@ -359,7 +384,10 @@ mod tests {
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
         );
-        assert_eq!(result.params.get("p0"), Some(&Value::from("User")));
+        assert_eq!(
+            result.params.get("p0").map(|p| &p.value),
+            Some(&Value::from("User"))
+        );
     }
 
     #[test]
@@ -529,7 +557,10 @@ mod tests {
             "{}",
             r.sql
         );
-        assert_eq!(r.params.get("p0"), Some(&Value::String("AUTHORED".into())));
+        assert_eq!(
+            r.params.get("p0").map(|p| &p.value),
+            Some(&Value::String("AUTHORED".into()))
+        );
 
         // Multiple types: IN in join ON clause
         let q = Query {
