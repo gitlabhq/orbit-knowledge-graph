@@ -524,10 +524,11 @@ impl Ontology {
     /// Look up a field's [`DataType`] on a node.
     ///
     /// Returns `None` if the node or field doesn't exist. Reserved columns
-    /// (e.g. `id`) return `Some(DataType::Int)`.
+    /// listed in [`NODE_RESERVED_COLUMNS`] (currently just `id`) are always
+    /// `DataType::Int`.
     #[must_use]
     pub fn get_field_type(&self, node_name: &str, field_name: &str) -> Option<DataType> {
-        if field_name == "id" {
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
             return Some(DataType::Int);
         }
         let node = self.nodes.get(node_name)?;

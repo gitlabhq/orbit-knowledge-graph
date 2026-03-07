@@ -55,7 +55,7 @@ fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<Str
             }
         }
         DataType::Int => match value {
-            serde_json::Value::Number(n) if n.is_i64() => {}
+            serde_json::Value::Number(n) if n.is_i64() || n.is_u64() => {}
             serde_json::Value::Number(_) => {
                 return Some("is a float, not an integer".to_string());
             }
@@ -813,6 +813,17 @@ mod tests {
             r#"{
                 "query_type": "search",
                 "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 42}}
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_large_u64_on_int_column() {
+        // u64 values beyond i64::MAX are still valid integers
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}
             }"#,
         );
     }
