@@ -221,11 +221,8 @@ mod tests {
         );
         assert!(result.base.sql.contains("INNER JOIN gl_note AS n ON"));
         assert!(
-            result
-                .base
-                .sql
-                .contains("e0.relationship_kind = {type_e0:String}"),
-            "expected relationship_kind: {}",
+            result.base.sql.contains("e0.relationship_kind ="),
+            "expected relationship_kind filter: {}",
             result.base.sql
         );
         assert!(
@@ -234,9 +231,14 @@ mod tests {
             result.base.sql
         );
         assert!(result.base.sql.contains("LIMIT 25"));
-        assert_eq!(
-            result.base.params.get("type_e0"),
-            Some(&serde_json::json!("AUTHORED"))
+        assert!(
+            result
+                .base
+                .params
+                .values()
+                .any(|v| v == &serde_json::json!("AUTHORED")),
+            "expected AUTHORED in params: {:?}",
+            result.base.params
         );
     }
 

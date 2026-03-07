@@ -168,15 +168,11 @@ impl Context {
 
         // FROM
         let from = self.emit_table_ref(&q.from)?;
-        parts.push(format!("FROM {}", from.sql));
+        parts.push(format!("FROM {from}"));
 
         // WHERE
-        let mut where_parts = from.type_conditions;
         if let Some(w) = &q.where_clause {
-            where_parts.push(self.emit_expr(w));
-        }
-        if !where_parts.is_empty() {
-            parts.push(format!("WHERE {}", where_parts.join(" AND ")));
+            parts.push(format!("WHERE {}", self.emit_expr(w)));
         }
 
         // GROUP BY
@@ -287,89 +283,35 @@ impl Context {
         }
     }
 
-    fn emit_table_ref(&mut self, t: &TableRef) -> Result<TableRefResult> {
+    fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
-            TableRef::Scan {
-                table,
-                alias,
-                type_filter,
-            } => {
-                let type_conditions = match type_filter {
-                    Some(types) if types.len() == 1 => {
-                        let param = format!("type_{alias}");
-                        let condition = format!("({alias}.relationship_kind = {{{param}:String}})");
-                        self.params.insert(param, Value::String(types[0].clone()));
-                        vec![condition]
-                    }
-                    Some(types) if types.len() > 1 => {
-                        let param = format!("type_{alias}");
-                        let condition =
-                            format!("({alias}.relationship_kind IN {{{param}:Array(String)}})");
-                        let arr =
-                            Value::Array(types.iter().map(|t| Value::String(t.clone())).collect());
-                        self.params.insert(param, arr);
-                        vec![condition]
-                    }
-                    _ => vec![],
-                };
-                Ok(TableRefResult {
-                    sql: format!("{table} AS {alias}"),
-                    type_conditions,
-                })
-            }
+            TableRef::Scan { table, alias } => Ok(format!("{table} AS {alias}")),
             TableRef::Join {
                 join_type,
                 left,
                 right,
                 on,
             } => {
-                let left_res = self.emit_table_ref(left)?;
-                let right_res = self.emit_table_ref(right)?;
+                let left_sql = self.emit_table_ref(left)?;
+                let right_sql = self.emit_table_ref(right)?;
                 let on_expr = self.emit_expr(on);
-
-                let on_clause = if right_res.type_conditions.is_empty() {
-                    on_expr
-                } else {
-                    format!(
-                        "({} AND {})",
-                        on_expr,
-                        right_res.type_conditions.join(" AND ")
-                    )
-                };
-
-                Ok(TableRefResult {
-                    sql: format!(
-                        "{} {} JOIN {} ON {}",
-                        left_res.sql, join_type, right_res.sql, on_clause
-                    ),
-                    type_conditions: left_res.type_conditions,
-                })
+                Ok(format!(
+                    "{left_sql} {join_type} JOIN {right_sql} ON {on_expr}"
+                ))
             }
             TableRef::Union { queries, alias } => {
                 let union_parts: Vec<String> = queries
                     .iter()
                     .map(|q| self.emit_query(q))
                     .collect::<Result<_>>()?;
-
-                Ok(TableRefResult {
-                    sql: format!("({}) AS {alias}", union_parts.join(" UNION ALL ")),
-                    type_conditions: vec![],
-                })
+                Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
             }
             TableRef::Subquery { query, alias } => {
                 let inner_sql = self.emit_query(query)?;
-                Ok(TableRefResult {
-                    sql: format!("({inner_sql}) AS {alias}"),
-                    type_conditions: vec![],
-                })
+                Ok(format!("({inner_sql}) AS {alias}"))
             }
         }
     }
-}
-
-struct TableRefResult {
-    sql: String,
-    type_conditions: Vec<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -556,50 +498,63 @@ mod tests {
 
     #[test]
     fn edge_type_filter() {
-        fn make_query(types: Vec<String>) -> Query {
-            Query {
-                select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
-                from: TableRef::join(
-                    JoinType::Inner,
-                    TableRef::scan("gl_user", "u"),
-                    TableRef::scan_with_filter("gl_edge", "e", types),
+        // Single type: equality in join ON clause
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::scan("gl_edge", "e"),
+                Expr::binary(
+                    Op::And,
                     Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
+                    Expr::eq(
+                        Expr::col("e", "relationship_kind"),
+                        Expr::param(ChType::String, "AUTHORED"),
+                    ),
                 ),
-                ..Default::default()
-            }
-        }
-
-        // Single type: uses equality
-        let r = codegen(
-            &Node::Query(Box::new(make_query(vec!["AUTHORED".into()]))),
-            empty_ctx(),
-        )
-        .unwrap();
-        assert!(r.sql.contains("relationship_kind = {type_e:String})"));
-        assert_eq!(
-            r.params.get("type_e"),
-            Some(&Value::String("AUTHORED".into()))
+            ),
+            ..Default::default()
+        };
+        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            r.sql.contains("e.relationship_kind = {p0:String}"),
+            "{}",
+            r.sql
         );
+        assert_eq!(r.params.get("p0"), Some(&Value::String("AUTHORED".into())));
 
-        // Multiple types: uses IN clause
-        let r = codegen(
-            &Node::Query(Box::new(make_query(vec![
-                "AUTHORED".into(),
-                "CONTAINS".into(),
-            ]))),
-            empty_ctx(),
-        )
-        .unwrap();
+        // Multiple types: IN in join ON clause
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::scan("gl_edge", "e"),
+                Expr::binary(
+                    Op::And,
+                    Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
+                    Expr::binary(
+                        Op::In,
+                        Expr::col("e", "relationship_kind"),
+                        Expr::param(
+                            ChType::String,
+                            Value::Array(vec![
+                                Value::String("AUTHORED".into()),
+                                Value::String("CONTAINS".into()),
+                            ]),
+                        ),
+                    ),
+                ),
+            ),
+            ..Default::default()
+        };
+        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert!(
             r.sql
-                .contains("relationship_kind IN {type_e:Array(String)})")
-        );
-        assert_eq!(
-            r.params.get("type_e"),
-            Some(&Value::Array(vec![
-                Value::String("AUTHORED".into()),
-                Value::String("CONTAINS".into())
-            ]))
+                .contains("e.relationship_kind IN ({p0:String}, {p1:String})"),
+            "{}",
+            r.sql
         );
     }
 

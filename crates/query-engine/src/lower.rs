@@ -461,19 +461,24 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
 
     let edge_alias = "e";
 
-    let edge_table = edge_scan(edge_alias, &type_filter);
+    let (edge_table, edge_type_cond) = edge_scan(edge_alias, &type_filter);
+
+    let mut join_cond = source_join_cond_with_kind(
+        &center_node.id,
+        edge_alias,
+        center_entity,
+        neighbors_config.direction,
+        center_node.has_traversal_path,
+    );
+    if let Some(tc) = edge_type_cond {
+        join_cond = Expr::binary(Op::And, join_cond, tc);
+    }
 
     let from = TableRef::join(
         JoinType::Inner,
         TableRef::scan(&center_table, &center_node.id),
         edge_table,
-        source_join_cond_with_kind(
-            &center_node.id,
-            edge_alias,
-            center_entity,
-            neighbors_config.direction,
-            center_node.has_traversal_path,
-        ),
+        join_cond,
     );
 
     let neighbor_id_expr = match neighbors_config.direction {
@@ -557,7 +562,7 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
     let (start_col, end_col) = direction.edge_columns();
 
     // Build chain: e1 -> e2 -> e3 -> ...
-    let mut from = edge_scan("e1", type_filter);
+    let (mut from, first_type_cond) = edge_scan("e1", type_filter);
 
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
@@ -565,13 +570,12 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
         // No traversal_path condition between consecutive edges: cross-namespace
         // relationships (e.g. RELATED_TO, CLOSES) can link entities in different
         // namespaces, so consecutive edges may have different paths.
-        let join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
-        from = TableRef::join(
-            JoinType::Inner,
-            from,
-            edge_scan(&curr, type_filter),
-            join_cond,
-        );
+        let (edge_table, edge_type_cond) = edge_scan(&curr, type_filter);
+        let mut join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
+        if let Some(tc) = edge_type_cond {
+            join_cond = Expr::binary(Op::And, join_cond, tc);
+        }
+        from = TableRef::join(JoinType::Inner, from, edge_table, join_cond);
     }
 
     Query {
@@ -585,15 +589,31 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
             ),
         ],
         from,
+        where_clause: first_type_cond,
         ..Default::default()
     }
 }
 
-fn edge_scan(alias: &str, type_filter: &Option<Vec<String>>) -> TableRef {
-    match type_filter {
-        Some(types) => TableRef::scan_with_filter(EDGE_TABLE, alias, types.clone()),
-        None => TableRef::scan(EDGE_TABLE, alias),
-    }
+/// Returns `(table_ref, type_condition)` for an edge table scan.
+/// The type condition should be folded into the JOIN ON or WHERE clause.
+fn edge_scan(alias: &str, type_filter: &Option<Vec<String>>) -> (TableRef, Option<Expr>) {
+    let table = TableRef::scan(EDGE_TABLE, alias);
+    let cond = match type_filter {
+        Some(types) if types.len() == 1 => Some(Expr::eq(
+            Expr::col(alias, "relationship_kind"),
+            Expr::param(ChType::String, types[0].clone()),
+        )),
+        Some(types) if types.len() > 1 => {
+            let arr = Value::Array(types.iter().map(|t| Value::String(t.clone())).collect());
+            Some(Expr::binary(
+                Op::In,
+                Expr::col(alias, "relationship_kind"),
+                Expr::param(ChType::String, arr),
+            ))
+        }
+        _ => None,
+    };
+    (table, cond)
 }
 
 fn type_filter(types: &[String]) -> Option<Vec<String>> {
@@ -668,18 +688,17 @@ fn build_joins(
             edge_aliases.insert(i, alias.clone());
 
             let from_node = find_node(nodes, &rel.from)?;
-            let edge = edge_scan(&alias, &type_filter(&rel.types));
-            result = TableRef::join(
-                JoinType::Inner,
-                result,
-                edge,
-                source_join_cond(
-                    &rel.from,
-                    &alias,
-                    rel.direction,
-                    from_node.has_traversal_path,
-                ),
+            let (edge, edge_type_cond) = edge_scan(&alias, &type_filter(&rel.types));
+            let mut join_cond = source_join_cond(
+                &rel.from,
+                &alias,
+                rel.direction,
+                from_node.has_traversal_path,
             );
+            if let Some(tc) = edge_type_cond {
+                join_cond = Expr::binary(Op::And, join_cond, tc);
+            }
+            result = TableRef::join(JoinType::Inner, result, edge, join_cond);
             result = TableRef::join(
                 JoinType::Inner,
                 result,
@@ -1641,47 +1660,61 @@ mod tests {
 
     #[test]
     fn test_type_filter_variants() {
-        fn extract_edge_type_filter(from: &TableRef) -> Option<Vec<String>> {
-            match from {
-                TableRef::Scan { type_filter, .. } => type_filter.clone(),
-                TableRef::Join { left, right, .. } => {
-                    extract_edge_type_filter(left).or_else(|| extract_edge_type_filter(right))
-                }
-                TableRef::Union { .. } | TableRef::Subquery { .. } => None,
+        /// Check if an expression tree contains `relationship_kind = Param(value)`
+        /// or `relationship_kind IN Param(value)`.
+        fn has_type_filter(expr: &Expr) -> bool {
+            match expr {
+                Expr::BinaryOp { op, left, right } => match (op, left.as_ref(), right.as_ref()) {
+                    (Op::Eq, Expr::Column { column, .. }, Expr::Param { .. })
+                    | (Op::In, Expr::Column { column, .. }, Expr::Param { .. })
+                        if column == "relationship_kind" =>
+                    {
+                        true
+                    }
+                    _ => has_type_filter(left) || has_type_filter(right),
+                },
+                _ => false,
             }
         }
 
-        // Single type
+        fn extract_join_on(from: &TableRef) -> Option<&Expr> {
+            match from {
+                TableRef::Join { on, left, .. } => {
+                    // Left-deep tree: recurse left to find innermost (edge) join
+                    extract_join_on(left).or(Some(on))
+                }
+                _ => None,
+            }
+        }
+
+        // Single type — join ON should contain relationship_kind filter
         let q = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        assert_eq!(
-            extract_edge_type_filter(&q.from),
-            Some(vec!["AUTHORED".into()])
-        );
+        let on = extract_join_on(&q.from).expect("expected join");
+        assert!(has_type_filter(on), "expected type filter in join ON");
 
-        // Multiple types
+        // Multiple types — should use IN
         let q = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":["AUTHORED","CONTAINS"],"from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        assert_eq!(
-            extract_edge_type_filter(&q.from),
-            Some(vec!["AUTHORED".into(), "CONTAINS".into()])
-        );
+        let on = extract_join_on(&q.from).expect("expected join");
+        assert!(has_type_filter(on), "expected type filter in join ON");
 
-        // Wildcard - no filter
+        // Wildcard — no type filter
         let q = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"*","from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        assert_eq!(extract_edge_type_filter(&q.from), None);
+        let on = extract_join_on(&q.from).expect("expected join");
+        assert!(!has_type_filter(on), "wildcard should not have type filter");
     }
 }
