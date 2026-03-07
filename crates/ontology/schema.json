@@ -252,7 +252,8 @@
           "type": "array",
           "description": "Specific node IDs to filter by",
           "items": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "minItems": 1,
           "maxItems": 500
@@ -292,11 +293,13 @@
       "properties": {
         "start": {
           "type": "integer",
-          "description": "Start of ID range (inclusive)"
+          "description": "Start of ID range (inclusive)",
+          "minimum": 1
         },
         "end": {
           "type": "integer",
-          "description": "End of ID range (inclusive)"
+          "description": "End of ID range (inclusive)",
+          "minimum": 1
         }
       }
     },
@@ -314,11 +317,15 @@
       ]
     },
     "FilterValue": {
-      "description": "A filter value - can be integer, string, boolean, or list",
+      "description": "A filter value - can be integer, number, string, boolean, or list",
       "oneOf": [
         {
           "type": "integer",
           "description": "Integer value"
+        },
+        {
+          "type": "number",
+          "description": "Floating-point value"
         },
         {
           "type": "string",
