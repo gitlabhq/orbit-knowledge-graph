@@ -317,15 +317,11 @@
       ]
     },
     "FilterValue": {
-      "description": "A filter value - can be integer, number, string, boolean, or list",
+      "description": "A filter value - can be a number (integer or float), string, boolean, or list",
       "oneOf": [
         {
-          "type": "integer",
-          "description": "Integer value"
-        },
-        {
           "type": "number",
-          "description": "Floating-point value"
+          "description": "Numeric value (integer or floating-point)"
         },
         {
           "type": "string",
