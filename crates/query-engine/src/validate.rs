@@ -9,8 +9,8 @@
 use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
-use crate::input::{FilterOp, Input, QueryType};
-use ontology::Ontology;
+use crate::input::{FilterOp, Input, InputFilter, QueryType};
+use ontology::{DataType, Ontology};
 
 pub(crate) const BASE_SCHEMA_JSON: &str = include_str!("../../ontology/schema.json");
 
@@ -37,6 +37,54 @@ fn collect_schema_errors(
         Ok(())
     } else {
         Err(QueryError::Validation(errors.join("; ")))
+    }
+}
+
+/// Check whether a JSON value is compatible with an ontology `DataType`.
+///
+/// Returns `None` if compatible, or `Some(reason)` describing the mismatch.
+fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<String> {
+    match expected {
+        DataType::String
+        | DataType::Date
+        | DataType::DateTime
+        | DataType::Enum
+        | DataType::Uuid => {
+            if !value.is_string() {
+                return Some(format!("is {}, not a string", json_type_name(value)));
+            }
+        }
+        DataType::Int => match value {
+            serde_json::Value::Number(n) if n.is_i64() => {}
+            serde_json::Value::Number(_) => {
+                return Some("is a float, not an integer".to_string());
+            }
+            _ => {
+                return Some(format!("is {}, not an integer", json_type_name(value)));
+            }
+        },
+        DataType::Float => {
+            if !value.is_number() {
+                return Some(format!("is {}, not a number", json_type_name(value)));
+            }
+        }
+        DataType::Bool => {
+            if !value.is_boolean() {
+                return Some(format!("is {}, not a boolean", json_type_name(value)));
+            }
+        }
+    }
+    None
+}
+
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "an array",
+        serde_json::Value::Object(_) => "an object",
     }
 }
 
@@ -86,6 +134,7 @@ impl<'a> Validator<'a> {
         self.check_path(input)?;
         self.check_neighbors(input)?;
         self.check_depth(input)?;
+        self.check_filter_types(input)?;
         // Run after individual reference checks so "undefined node X" errors
         // take priority over "node Y is unreferenced".
         self.check_unreferenced_nodes(input)?;
@@ -153,6 +202,80 @@ impl<'a> Validator<'a> {
                             node.id
                         )));
                     }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate that filter values are compatible with the ontology column type.
+    ///
+    /// For scalar ops (eq, gt, lt, ...) the JSON value must match the column's
+    /// DataType. For `in`, every element of the JSON array must match. Ops that
+    /// carry no value (`is_null`, `is_not_null`) are skipped. Filters on
+    /// unknown entities or fields are skipped — `check_ontology` catches those.
+    fn check_filter_types(&self, input: &Input) -> Result<()> {
+        for node in &input.nodes {
+            let Some(entity) = node.entity.as_deref() else {
+                continue;
+            };
+            for (prop, filter) in &node.filters {
+                let Some(data_type) = self.ontology.get_field_type(entity, prop) else {
+                    continue;
+                };
+                self.check_one_filter(entity, prop, filter, data_type)?;
+            }
+        }
+        for rel in &input.relationships {
+            for (prop, filter) in &rel.filters {
+                // Relationship filters don't have an entity context for type
+                // lookup yet — skip for now. Property-name validation is
+                // already handled by the ontology schema.
+                let _ = (prop, filter);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_one_filter(
+        &self,
+        entity: &str,
+        prop: &str,
+        filter: &InputFilter,
+        data_type: DataType,
+    ) -> Result<()> {
+        let op = filter.op.unwrap_or(FilterOp::Eq);
+
+        // Ops without a value — nothing to type-check.
+        if matches!(op, FilterOp::IsNull | FilterOp::IsNotNull) {
+            return Ok(());
+        }
+
+        let Some(value) = filter.value.as_ref() else {
+            return Ok(());
+        };
+
+        match op {
+            FilterOp::In => {
+                let Some(arr) = value.as_array() else {
+                    return Err(QueryError::Validation(format!(
+                        "filter on \"{prop}\" for {entity}: \"in\" requires an array value"
+                    )));
+                };
+                for (i, elem) in arr.iter().enumerate() {
+                    if let Some(reason) = check_value_type(elem, data_type) {
+                        return Err(QueryError::Validation(format!(
+                            "filter on \"{prop}\" for {entity}: element [{i}] {reason}, \
+                             expected {data_type}"
+                        )));
+                    }
+                }
+            }
+            _ => {
+                if let Some(reason) = check_value_type(value, data_type) {
+                    return Err(QueryError::Validation(format!(
+                        "filter on \"{prop}\" for {entity}: value {reason}, expected {data_type}"
+                    )));
                 }
             }
         }
@@ -403,7 +526,13 @@ mod tests {
                     ("created_at", DataType::DateTime),
                 ],
             )
-            .with_fields("Note", [("confidential", DataType::Bool)])
+            .with_fields(
+                "Note",
+                [
+                    ("confidential", DataType::Bool),
+                    ("noteable_id", DataType::Int),
+                ],
+            )
             .with_fields("Project", [("name", DataType::String)])
     }
 
@@ -664,5 +793,151 @@ mod tests {
                 "aggregations": [{"function": "count", "target": "p", "alias": "total"}]
             }"#,
         );
+    }
+
+    // ── Filter type validation ──────────────────────────────────────
+
+    #[test]
+    fn accepts_string_filter_on_string_column() {
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "filters": {"username": "alice"}}
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_int_filter_on_int_column() {
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 42}}
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_bool_filter_on_bool_column() {
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "n", "entity": "Note", "filters": {"confidential": true}}
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_string_in_filter() {
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {
+                    "id": "u", "entity": "User",
+                    "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
+                }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_int_in_filter() {
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {
+                    "id": "n", "entity": "Note",
+                    "filters": {"noteable_id": {"op": "in", "value": [1, 2, 3]}}
+                }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_is_null_without_value_check() {
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {
+                    "id": "u", "entity": "User",
+                    "filters": {"username": {"op": "is_null"}}
+                }
+            }"#,
+        );
+    }
+
+    #[test]
+    fn rejects_int_on_string_column() {
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "filters": {"username": 42}}
+            }"#,
+            "expected String",
+        );
+    }
+
+    #[test]
+    fn rejects_string_on_int_column() {
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": "abc"}}
+            }"#,
+            "expected Int",
+        );
+    }
+
+    #[test]
+    fn rejects_string_on_bool_column() {
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "n", "entity": "Note", "filters": {"confidential": "yes"}}
+            }"#,
+            "expected Bool",
+        );
+    }
+
+    #[test]
+    fn rejects_mixed_type_in_array() {
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "node": {
+                    "id": "n", "entity": "Note",
+                    "filters": {"noteable_id": {"op": "in", "value": [1, "two", 3]}}
+                }
+            }"#,
+            "element [1]",
+        );
+    }
+
+    #[test]
+    fn rejects_float_on_int_column() {
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 3.14}}
+            }"#,
+            "is a float, not an integer",
+        );
+    }
+
+    #[test]
+    fn accepts_int_on_float_column() {
+        // Integers are valid for float columns (widening).
+        let ontology = Ontology::new()
+            .with_nodes(["Metric"])
+            .with_fields("Metric", [("score", DataType::Float)]);
+
+        let input = parse_input(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "m", "entity": "Metric", "filters": {"score": 42}}
+            }"#,
+        )
+        .unwrap();
+        Validator::new(&ontology).check_references(&input).unwrap();
     }
 }
