@@ -23,7 +23,7 @@ axum = { workspace = true }
 clap = { workspace = true }
 config = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
-gkg-utils = { workspace = true }
+gkg-utils = { path = "../utils" }
 health-check = { path = "../health-check" }
 indexer = { path = "../indexer" }
 ontology = { path = "../ontology" }

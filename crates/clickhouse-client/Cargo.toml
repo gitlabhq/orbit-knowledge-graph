@@ -9,7 +9,7 @@ default = []
 testkit = []
 
 [dependencies]
-gkg-utils = { workspace = true }
+gkg-utils = { path = "../utils" }
 arrow = { workspace = true }
 arrow-ipc = { workspace = true }
 bytes = { workspace = true }

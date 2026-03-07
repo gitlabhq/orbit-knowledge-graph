@@ -124,7 +124,6 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 rustls = { version = "0.23.36", default-features = false, features = ["ring"] }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
-gkg-utils = { path = "crates/utils" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
