@@ -17,9 +17,9 @@ use substrait::proto::{
 };
 use thiserror::Error;
 
-use crate::expr::DataType;
-use crate::plan::{Plan, Schema, SchemaColumn};
-use crate::substrait::{get_read_metadata, schema_from_base, substrait_type_to_data_type};
+use crate::ir::expr::DataType;
+use crate::ir::plan::{Plan, Schema, SchemaColumn};
+use crate::ir::substrait::{get_read_metadata, schema_from_base, substrait_type_to_data_type};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -1081,14 +1081,30 @@ fn infer_expr_table(expr: &Expression, schema: &Schema) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Backend trait impl
+// ---------------------------------------------------------------------------
+
+/// ClickHouse SQL backend — zero-config unit struct.
+pub struct ClickHouseBackend;
+
+impl super::Backend for ClickHouseBackend {
+    type Output = ParameterizedQuery;
+    type Error = CodegenError;
+
+    fn emit(&self, plan: &Plan) -> Result<Self::Output, Self::Error> {
+        emit_clickhouse_sql(plan)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::expr::*;
-    use crate::plan::PlanBuilder;
+    use crate::ir::expr::*;
+    use crate::ir::plan::PlanBuilder;
 
     /// Build a plan from a closure and emit ClickHouse SQL.
     fn build_and_emit(
@@ -1792,7 +1808,7 @@ mod tests {
             .fetch(&b2, 10, None);
         let plan = b2.build_with_ctes(
             main_root,
-            vec![crate::plan::CteDef {
+            vec![crate::ir::plan::CteDef {
                 name: "path_cte".into(),
                 plan: cte_plan,
                 recursive: true,

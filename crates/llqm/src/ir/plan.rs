@@ -17,8 +17,8 @@ use substrait::proto::{
     PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
 };
 
-use crate::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, SortDir};
-use crate::substrait::{
+use crate::ir::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, SortDir};
+use crate::ir::substrait::{
     binary_op_substrait_name, bool_type, build_named_struct, make_any, make_field_ref,
     make_literal_arg, make_metadata, make_scalar_fn, make_value_arg, string_type,
     to_substrait_join_type, to_substrait_literal, to_substrait_type, unary_op_substrait_name,

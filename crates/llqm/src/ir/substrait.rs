@@ -13,8 +13,8 @@ use substrait::proto::{
     NamedStruct, ReadRel,
 };
 
-use crate::expr::{BinaryOp, DataType, JoinType, LiteralValue, UnaryOp};
-use crate::plan::{Schema, SchemaColumn};
+use crate::ir::expr::{BinaryOp, DataType, JoinType, LiteralValue, UnaryOp};
+use crate::ir::plan::{Schema, SchemaColumn};
 
 // ---------------------------------------------------------------------------
 // Metadata construction
