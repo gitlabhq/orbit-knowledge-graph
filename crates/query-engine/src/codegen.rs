@@ -248,6 +248,14 @@ impl Context {
     fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
         match v {
             Value::Null => "NULL".into(),
+            // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
+            Value::Array(_) if matches!(data_type, ChType::ArrayString | ChType::ArrayInt64) => {
+                let name = format!("p{}", self.params.len());
+                let placeholder = format!("{{{name}:{data_type}}}");
+                self.params.insert(name, v.clone());
+                placeholder
+            }
+            // Scalar ChType with array value: expand element-by-element (Literal fallback).
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()

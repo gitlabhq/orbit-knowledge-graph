@@ -117,14 +117,21 @@ impl ArrowClickHouseClient {
             }
             Value::Bool(b) => query.param(key, *b),
             Value::Array(arr) => {
-                let strings: Vec<String> = arr
-                    .iter()
-                    .map(|v| match v {
-                        Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    })
-                    .collect();
-                query.param(key, strings)
+                // Dispatch typed arrays based on first element.
+                let is_int = arr.first().is_some_and(|v| v.is_i64());
+                if is_int {
+                    let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_i64()).collect();
+                    query.param(key, ints)
+                } else {
+                    let strings: Vec<String> = arr
+                        .iter()
+                        .map(|v| match v {
+                            Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        })
+                        .collect();
+                    query.param(key, strings)
+                }
             }
             _ => query.param(key, value.to_string()),
         }

@@ -254,7 +254,8 @@
           "items": {
             "type": "integer"
           },
-          "minItems": 1
+          "minItems": 1,
+          "maxItems": 500
         },
         "id_range": {
           "$ref": "#/$defs/IdRange",
@@ -363,7 +364,8 @@
               "value": {
                 "type": "array",
                 "items": { "$ref": "#/$defs/FilterValue" },
-                "minItems": 1
+                "minItems": 1,
+                "maxItems": 100
               }
             }
           }
