@@ -521,6 +521,23 @@ impl Ontology {
         )))
     }
 
+    /// Look up a field's [`DataType`] on a node.
+    ///
+    /// Returns `None` if the node or field doesn't exist. Reserved columns
+    /// listed in [`NODE_RESERVED_COLUMNS`] (currently just `id`) are always
+    /// `DataType::Int`.
+    #[must_use]
+    pub fn get_field_type(&self, node_name: &str, field_name: &str) -> Option<DataType> {
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
+            return Some(DataType::Int);
+        }
+        let node = self.nodes.get(node_name)?;
+        node.fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .map(|f| f.data_type)
+    }
+
     /// Validate that a type is a valid node label or edge type.
     ///
     /// # Errors
