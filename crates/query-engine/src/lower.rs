@@ -7,9 +7,18 @@
 //! finalization builds the Substrait plan.
 
 use gkg_utils::clickhouse::ChType;
-use llqm::expr::{self, DataType, Expr, SortDir};
+use llqm::expr::{self, BinaryOp as LlqmBinaryOp, DataType, Expr, SortDir};
 use llqm::plan::{CteDef, PlanBuilder, TypedRel};
 use serde_json::Value;
+
+/// Helper: combine two exprs with AND.
+fn and2(left: Expr, right: Expr) -> Expr {
+    Expr::BinaryOp {
+        op: LlqmBinaryOp::And,
+        left: Box::new(left),
+        right: Box::new(right),
+    }
+}
 
 use crate::constants::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN};
 use crate::error::{QueryError, Result};
@@ -35,6 +44,21 @@ pub type SelectItem = (Expr, String);
 /// An aggregate measure: (function_name, output_alias, arguments).
 pub type AggItem = (String, String, Vec<Expr>);
 
+/// An unbuilt CTE: holds a TypedRel + PlanBuilder so security can modify
+/// the rel before finalize builds it into a Plan.
+///
+/// The `root_rel` is the base relation (read + where filters) that security
+/// can wrap with traversal_path filters. The optional `projections` and `limit`
+/// are applied by finalize() after security injection.
+pub struct UnbuiltCte {
+    pub name: String,
+    pub builder: PlanBuilder,
+    pub root_rel: TypedRel,
+    pub projections: Vec<SelectItem>,
+    pub limit: Option<u64>,
+    pub recursive: bool,
+}
+
 /// Intermediate query representation produced by `lower()`.
 ///
 /// Pipeline phases (enforce, security) modify this before `finalize()` assembles
@@ -59,8 +83,8 @@ pub struct LoweredQuery {
     pub limit: Option<u64>,
     /// OFFSET.
     pub offset: Option<u64>,
-    /// CTEs for WITH clause.
-    pub ctes: Vec<CteDef>,
+    /// Unbuilt CTEs — security can modify these before finalize builds them.
+    pub ctes: Vec<UnbuiltCte>,
 }
 
 /// Lower validated input into a `LoweredQuery`.
@@ -78,8 +102,8 @@ pub fn lower(input: &Input) -> Result<LoweredQuery> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Build a read for a node table. The schema includes all columns that might
-/// be referenced (user columns + id + traversal_path).
-fn read_node(b: &mut PlanBuilder, node: &InputNode) -> Result<TypedRel> {
+/// be referenced (user columns + id + traversal_path + extra columns).
+fn read_node(b: &mut PlanBuilder, node: &InputNode, extra_columns: &[&str]) -> Result<TypedRel> {
     let table = resolve_table(node)?;
     let mut columns: Vec<(&str, DataType)> = vec![
         (DEFAULT_PRIMARY_KEY, DataType::Int64),
@@ -109,6 +133,13 @@ fn read_node(b: &mut PlanBuilder, node: &InputNode) -> Result<TypedRel> {
             .any(|(n, _)| *n == node.redaction_id_column.as_str())
     {
         columns.push((&node.redaction_id_column, DataType::Int64));
+    }
+
+    // Add extra columns (e.g. order_by columns)
+    for col in extra_columns {
+        if !columns.iter().any(|(n, _)| *n == *col) {
+            columns.push((col, DataType::String));
+        }
     }
 
     // We need to use owned strings for columns since node.filters keys are Strings
@@ -169,8 +200,15 @@ fn ch_type_to_data_type(ct: &ChType) -> DataType {
         ChType::Int64 => DataType::Int64,
         ChType::Float64 => DataType::Float64,
         ChType::Bool => DataType::Bool,
-        ChType::Array(inner) => DataType::Array(Box::new(ch_type_to_data_type(inner))),
-        ChType::DateTime => DataType::DateTime,
+        ChType::Array(scalar) => {
+            let inner = match scalar {
+                gkg_utils::clickhouse::ChScalar::String => DataType::String,
+                gkg_utils::clickhouse::ChScalar::Int64 => DataType::Int64,
+                gkg_utils::clickhouse::ChScalar::Float64 => DataType::Float64,
+                gkg_utils::clickhouse::ChScalar::Bool => DataType::Bool,
+            };
+            DataType::Array(Box::new(inner))
+        }
     }
 }
 
@@ -227,7 +265,7 @@ fn value_to_literal(v: &Value, _dt: &DataType) -> Expr {
         Value::Bool(b) => expr::boolean(*b),
         Value::Array(arr) => {
             // For IN clause: convert to InList
-            let items: Vec<Expr> = arr
+            let _items: Vec<Expr> = arr
                 .iter()
                 .map(|item| match item {
                     Value::String(s) => expr::string(s),
@@ -317,7 +355,8 @@ fn edge_type_filter_expr(alias: &str, type_filter: &Option<Vec<String>>) -> Opti
 
 fn lower_traversal(input: &Input) -> Result<LoweredQuery> {
     let mut b = PlanBuilder::new();
-    let (base_rel, edge_aliases) = build_joins(&mut b, &input.nodes, &input.relationships)?;
+    let extra = extra_columns_for_order_by(input);
+    let (base_rel, edge_aliases) = build_joins(&mut b, &input.nodes, &input.relationships, &extra)?;
 
     // Build WHERE clause from user filters
     let where_expr = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
@@ -366,9 +405,17 @@ fn add_edge_select_items(
     rels: &[InputRelationship],
     edge_aliases: &HashMap<usize, String>,
 ) {
-    for (i, _rel) in rels.iter().enumerate() {
+    for (i, rel) in rels.iter().enumerate() {
         if let Some(alias) = edge_aliases.get(&i) {
-            projections.extend(edge_select_items(alias));
+            if rel.max_hops > 1 {
+                // Multi-hop: only traversal_path and depth are available from the union subquery
+                projections.push((
+                    expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                    format!("{alias}_path"),
+                ));
+            } else {
+                projections.extend(edge_select_items(alias));
+            }
         }
     }
 }
@@ -379,7 +426,8 @@ fn add_edge_select_items(
 
 fn lower_aggregation(input: &Input) -> Result<LoweredQuery> {
     let mut b = PlanBuilder::new();
-    let (base_rel, edge_aliases) = build_joins(&mut b, &input.nodes, &input.relationships)?;
+    let extra = extra_columns_for_order_by(input);
+    let (base_rel, edge_aliases) = build_joins(&mut b, &input.nodes, &input.relationships, &extra)?;
 
     let where_expr = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
     let base_rel = match where_expr {
@@ -498,12 +546,12 @@ fn lower_path_finding(input: &Input) -> Result<LoweredQuery> {
     );
 
     // Filter on start node IDs
-    let base_rel = match id_filter(&start.id, DEFAULT_PRIMARY_KEY, &start.node_ids) {
+    let cte_root_rel = match id_filter(&start.id, DEFAULT_PRIMARY_KEY, &start.node_ids) {
         Some(cond) => cte_builder.filter(base_rel, cond),
         None => base_rel,
     };
 
-    // Project base CTE columns
+    // CTE projection columns — applied by finalize after security filtering
     let start_id = expr::col(&start.id, DEFAULT_PRIMARY_KEY);
     let start_tuple = expr::func("tuple", vec![start_id.clone(), expr::string(start_entity)]);
     let empty_string_array = expr::func(
@@ -511,31 +559,24 @@ fn lower_path_finding(input: &Input) -> Result<LoweredQuery> {
         vec![expr::func("array", vec![expr::string("")]), expr::int(0)],
     );
 
-    let base_rel = cte_builder.project(
-        base_rel,
-        &[
-            (start_id.clone(), "node_id"),
-            (expr::func("array", vec![start_id]), "path_ids"),
-            (expr::func("array", vec![start_tuple]), "path"),
-            (empty_string_array, "edge_kinds"),
-            (expr::int(0), "depth"),
-        ],
-    );
-    let base_rel = cte_builder.fetch(base_rel, 1000, None);
-    let base_plan = cte_builder.build(base_rel);
+    let cte_projections: Vec<SelectItem> = vec![
+        (start_id.clone(), "node_id".to_string()),
+        (expr::func("array", vec![start_id]), "path_ids".to_string()),
+        (expr::func("array", vec![start_tuple]), "path".to_string()),
+        (empty_string_array, "edge_kinds".to_string()),
+        (expr::int(0), "depth".to_string()),
+    ];
 
     // Forward recursive branch
-    let forward_plan =
+    let _forward_plan =
         path_recursive_branch_plan(path.max_depth, true, &end.node_ids, &path.rel_types);
     // Reverse recursive branch
-    let reverse_plan =
+    let _reverse_plan =
         path_recursive_branch_plan(path.max_depth, false, &end.node_ids, &path.rel_types);
 
-    // The recursive CTE needs UNION ALL of base + forward + reverse.
-    // In llqm, we store these as separate CTEs that codegen assembles.
-    // Actually, the current CTE model uses `base.union_all = [forward, reverse]`.
-    // We need to build a single CTE plan that unions base + forward + reverse.
-    // Let's use the CTE with recursive flag.
+    // TODO: The recursive CTE needs UNION ALL of base + forward + reverse branches.
+    // This requires extending llqm's CTE support. For now, we store the base
+    // query as an UnbuiltCte so security can filter it before finalize builds it.
 
     // Build the final query
     let mut b = PlanBuilder::new();
@@ -583,19 +624,14 @@ fn lower_path_finding(input: &Input) -> Result<LoweredQuery> {
     let sort_keys = vec![(expr::col("paths", "depth"), SortDir::Asc)];
     let (limit, offset) = pagination(input);
 
-    // Build CTEs
-    let ctes = vec![CteDef {
+    let ctes = vec![UnbuiltCte {
         name: "paths".to_string(),
-        plan: base_plan,
+        builder: cte_builder,
+        root_rel: cte_root_rel,
+        projections: cte_projections,
+        limit: Some(1000),
         recursive: true,
     }];
-
-    // TODO: The recursive CTE needs union_all of base + forward + reverse branches.
-    // This requires extending llqm's CTE support. For now, we store additional branch
-    // plans and handle them in finalization.
-    // Actually, we need to think about this differently. The old AST stored
-    // `base.union_all = [forward, reverse]`. In llqm, a CTE is a single Plan.
-    // We need to support UNION ALL within a CTE plan.
 
     Ok(LoweredQuery {
         builder: b,
@@ -763,11 +799,7 @@ fn lower_neighbors(input: &Input) -> Result<LoweredQuery> {
         center_node.has_traversal_path,
     );
     if let Some(tc) = edge_type_filter_expr(edge_alias, &tf) {
-        join_cond = expr::BinaryOp {
-            op: expr::BinaryOp::And,
-            left: Box::new(join_cond),
-            right: Box::new(tc),
-        };
+        join_cond = and2(join_cond, tc);
     }
 
     let base_rel = b.join(llqm::expr::JoinType::Inner, center, edge, join_cond);
@@ -873,11 +905,7 @@ fn build_hop_arm(
         let next_edge = read_edge(b, &curr);
         let mut join_cond = expr::eq(expr::col(&prev, end_col), expr::col(&curr, start_col));
         if let Some(tc) = edge_type_filter_expr(&curr, type_filter) {
-            join_cond = Expr::BinaryOp {
-                op: expr::BinaryOp::And,
-                left: Box::new(join_cond),
-                right: Box::new(tc),
-            };
+            join_cond = and2(join_cond, tc);
         }
         rel = b.join(llqm::expr::JoinType::Inner, rel, next_edge, join_cond);
     }
@@ -910,6 +938,7 @@ fn build_joins(
     b: &mut PlanBuilder,
     nodes: &[InputNode],
     rels: &[InputRelationship],
+    extra_columns: &HashMap<String, Vec<String>>,
 ) -> Result<(TypedRel, HashMap<usize, String>)> {
     let start = match rels.first() {
         Some(r) => find_node(nodes, &r.from)?,
@@ -918,11 +947,35 @@ fn build_joins(
             .ok_or_else(|| QueryError::Lowering("no nodes in input".into()))?,
     };
 
-    let mut result = read_node(b, start)?;
+    let start_extra: Vec<&str> = extra_columns
+        .get(&start.id)
+        .map(|v| v.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
+    let mut result = read_node(b, start, &start_extra)?;
     let mut edge_aliases = HashMap::new();
+    let mut joined_nodes: HashSet<String> = HashSet::new();
+    joined_nodes.insert(start.id.clone());
 
     for (i, rel) in rels.iter().enumerate() {
         let target = find_node(nodes, &rel.to)?;
+
+        // If the source node hasn't been joined yet, read and join it first.
+        if !joined_nodes.contains(&rel.from) {
+            let from_node = find_node(nodes, &rel.from)?;
+            let from_extra: Vec<&str> = extra_columns
+                .get(&from_node.id)
+                .map(|v| v.iter().map(|s| s.as_str()).collect())
+                .unwrap_or_default();
+            let from_rel = read_node(b, from_node, &from_extra)?;
+            // Cross join — the ON condition linking this node comes from the edge join below
+            result = b.join(
+                llqm::expr::JoinType::Cross,
+                result,
+                from_rel,
+                expr::boolean(true),
+            );
+            joined_nodes.insert(rel.from.clone());
+        }
 
         if rel.max_hops > 1 {
             // Multi-hop: UNION ALL subquery
@@ -938,27 +991,24 @@ fn build_joins(
                 expr::col(&alias, from_col),
             );
             if from_node.has_traversal_path {
-                source_cond = Expr::BinaryOp {
-                    op: expr::BinaryOp::And,
-                    left: Box::new(edge_path_starts_with(&alias, &rel.from)),
-                    right: Box::new(source_cond),
-                };
+                source_cond = and2(edge_path_starts_with(&alias, &rel.from), source_cond);
             }
             result = b.join(llqm::expr::JoinType::Inner, result, union, source_cond);
 
-            let mut target_rel = read_node(b, target)?;
+            let target_extra: Vec<&str> = extra_columns
+                .get(&target.id)
+                .map(|v| v.iter().map(|s| s.as_str()).collect())
+                .unwrap_or_default();
+            let target_rel = read_node(b, target, &target_extra)?;
             let mut target_cond = expr::eq(
                 expr::col(&alias, to_col),
                 expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
             );
             if target.has_traversal_path {
-                target_cond = Expr::BinaryOp {
-                    op: expr::BinaryOp::And,
-                    left: Box::new(edge_path_starts_with(&alias, &rel.to)),
-                    right: Box::new(target_cond),
-                };
+                target_cond = and2(edge_path_starts_with(&alias, &rel.to), target_cond);
             }
             result = b.join(llqm::expr::JoinType::Inner, result, target_rel, target_cond);
+            joined_nodes.insert(rel.to.clone());
         } else {
             // Single-hop: direct edge join
             let alias = format!("e{i}");
@@ -974,18 +1024,19 @@ fn build_joins(
                 from_node.has_traversal_path,
             );
             if let Some(tc) = edge_type_filter_expr(&alias, &tf) {
-                join_cond = Expr::BinaryOp {
-                    op: expr::BinaryOp::And,
-                    left: Box::new(join_cond),
-                    right: Box::new(tc),
-                };
+                join_cond = and2(join_cond, tc);
             }
             result = b.join(llqm::expr::JoinType::Inner, result, edge, join_cond);
 
-            let target_rel = read_node(b, target)?;
+            let target_extra: Vec<&str> = extra_columns
+                .get(&target.id)
+                .map(|v| v.iter().map(|s| s.as_str()).collect())
+                .unwrap_or_default();
+            let target_rel = read_node(b, target, &target_extra)?;
             let target_cond =
                 target_join_cond(&alias, &rel.to, rel.direction, target.has_traversal_path);
             result = b.join(llqm::expr::JoinType::Inner, result, target_rel, target_cond);
+            joined_nodes.insert(rel.to.clone());
         }
     }
 
@@ -1014,11 +1065,7 @@ fn source_join_cond(node: &str, edge: &str, dir: Direction, with_path: bool) -> 
         ]),
     };
     if with_path {
-        Expr::BinaryOp {
-            op: expr::BinaryOp::And,
-            left: Box::new(edge_path_starts_with(edge, node)),
-            right: Box::new(id_cond),
-        }
+        and2(edge_path_starts_with(edge, node), id_cond)
     } else {
         id_cond
     }
@@ -1032,14 +1079,13 @@ fn source_join_cond_with_kind(
     with_path: bool,
 ) -> Expr {
     let id_and_kind = |id_col: &str, kind_col: &str| -> Expr {
-        Expr::BinaryOp {
-            op: expr::BinaryOp::And,
-            left: Box::new(expr::eq(
+        and2(
+            expr::eq(
                 expr::col(node, DEFAULT_PRIMARY_KEY),
                 expr::col(edge, id_col),
-            )),
-            right: Box::new(expr::eq(expr::col(edge, kind_col), expr::string(entity))),
-        }
+            ),
+            expr::eq(expr::col(edge, kind_col), expr::string(entity)),
+        )
     };
 
     let id_cond = match dir {
@@ -1051,11 +1097,7 @@ fn source_join_cond_with_kind(
         ]),
     };
     if with_path {
-        Expr::BinaryOp {
-            op: expr::BinaryOp::And,
-            left: Box::new(edge_path_starts_with(edge, node)),
-            right: Box::new(id_cond),
-        }
+        and2(edge_path_starts_with(edge, node), id_cond)
     } else {
         id_cond
     }
@@ -1083,11 +1125,7 @@ fn target_join_cond(edge: &str, node: &str, dir: Direction, with_path: bool) -> 
         ]),
     };
     if with_path {
-        Expr::BinaryOp {
-            op: expr::BinaryOp::And,
-            left: Box::new(edge_path_starts_with(edge, node)),
-            right: Box::new(id_cond),
-        }
+        and2(edge_path_starts_with(edge, node), id_cond)
     } else {
         id_cond
     }
@@ -1144,6 +1182,18 @@ fn build_full_where(
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Build a map of node_id → extra columns needed (e.g. order_by columns).
+fn extra_columns_for_order_by(input: &Input) -> HashMap<String, Vec<String>> {
+    let mut extra: HashMap<String, Vec<String>> = HashMap::new();
+    if let Some(ob) = &input.order_by {
+        extra
+            .entry(ob.node.clone())
+            .or_default()
+            .push(ob.property.clone());
+    }
+    extra
+}
+
 fn find_node<'a>(nodes: &'a [InputNode], id: &str) -> Result<&'a InputNode> {
     nodes
         .iter()
@@ -1163,47 +1213,54 @@ fn resolve_table(node: &InputNode) -> Result<String> {
 
 /// Assemble a `LoweredQuery` into a final llqm `Plan`.
 ///
-/// Applies the remaining plan operations in order:
-/// 1. Aggregate (if group_by/agg_measures are non-empty)
-/// 2. Sort
-/// 3. Project
-/// 4. Fetch (limit/offset)
-/// 5. Build with CTEs
+/// For non-aggregation queries: filter → sort → project → fetch → build.
+/// For aggregation queries: aggregate(group_by + projections + measures) → sort → fetch → build.
 pub fn finalize(mut lq: LoweredQuery) -> llqm::plan::Plan {
     let mut rel = lq.base_rel;
+    let is_agg = !lq.group_by.is_empty() || !lq.agg_measures.is_empty();
 
-    // For aggregation queries, build the aggregate first
-    if !lq.group_by.is_empty() || !lq.agg_measures.is_empty() {
-        let group_refs: Vec<(&Expr, &str)> =
-            lq.group_by.iter().map(|(e, a)| (e, a.as_str())).collect();
-        let group_exprs: Vec<(Expr, &str)> = lq
+    if is_agg {
+        // For aggregation: merge group_by + enforce projections into the aggregate.
+        // The aggregate output schema becomes the final SELECT.
+        // Projections added by enforce (like _gkg_u_id) are group_by items too.
+        let mut all_group: Vec<(Expr, &str)> = lq
             .group_by
             .iter()
             .map(|(e, a)| (e.clone(), a.as_str()))
             .collect();
+
+        // Add enforce projections that aren't already in group_by
+        for (e, a) in &lq.projections {
+            if !all_group.iter().any(|(_, ga)| *ga == a.as_str()) {
+                all_group.push((e.clone(), a.as_str()));
+            }
+        }
+
         let agg_exprs: Vec<(&str, &str, Vec<Expr>)> = lq
             .agg_measures
             .iter()
             .map(|(f, a, args)| (f.as_str(), a.as_str(), args.clone()))
             .collect();
-        rel = lq.builder.aggregate(rel, &group_exprs, &agg_exprs);
-    }
+        rel = lq.builder.aggregate(rel, &all_group, &agg_exprs);
 
-    // Sort
-    if !lq.sort_keys.is_empty() {
-        let keys: Vec<(Expr, SortDir)> = lq.sort_keys;
-        let key_refs: Vec<(Expr, SortDir)> = keys;
-        rel = lq.builder.sort(rel, &key_refs);
-    }
+        // Sort (on aggregate output)
+        if !lq.sort_keys.is_empty() {
+            rel = lq.builder.sort(rel, &lq.sort_keys);
+        }
+    } else {
+        // Non-aggregation: sort → project → fetch
+        if !lq.sort_keys.is_empty() {
+            rel = lq.builder.sort(rel, &lq.sort_keys);
+        }
 
-    // Project (if there are projections)
-    if !lq.projections.is_empty() {
-        let proj_refs: Vec<(Expr, &str)> = lq
-            .projections
-            .iter()
-            .map(|(e, a)| (e.clone(), a.as_str()))
-            .collect();
-        rel = lq.builder.project(rel, &proj_refs);
+        if !lq.projections.is_empty() {
+            let proj_refs: Vec<(Expr, &str)> = lq
+                .projections
+                .iter()
+                .map(|(e, a)| (e.clone(), a.as_str()))
+                .collect();
+            rel = lq.builder.project(rel, &proj_refs);
+        }
     }
 
     // Fetch (limit/offset)
@@ -1211,11 +1268,34 @@ pub fn finalize(mut lq: LoweredQuery) -> llqm::plan::Plan {
         rel = lq.builder.fetch(rel, limit, lq.offset);
     }
 
-    // Build
+    // Build CTEs from unbuilt state: apply projections + limit, then build
     if lq.ctes.is_empty() {
         lq.builder.build(rel)
     } else {
-        lq.builder.build_with_ctes(rel, lq.ctes)
+        let built_ctes: Vec<CteDef> = lq
+            .ctes
+            .into_iter()
+            .map(|mut uc| {
+                let mut cte_rel = uc.root_rel;
+                if !uc.projections.is_empty() {
+                    let proj_refs: Vec<(Expr, &str)> = uc
+                        .projections
+                        .iter()
+                        .map(|(e, a)| (e.clone(), a.as_str()))
+                        .collect();
+                    cte_rel = uc.builder.project(cte_rel, &proj_refs);
+                }
+                if let Some(limit) = uc.limit {
+                    cte_rel = uc.builder.fetch(cte_rel, limit, None);
+                }
+                CteDef {
+                    name: uc.name,
+                    plan: uc.builder.build(cte_rel),
+                    recursive: uc.recursive,
+                }
+            })
+            .collect();
+        lq.builder.build_with_ctes(rel, built_ctes)
     }
 }
 

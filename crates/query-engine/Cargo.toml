@@ -7,6 +7,7 @@ edition = "2024"
 gkg-utils = { path = "../utils" }
 llqm = { path = "../llqm" }
 ontology = { path = "../ontology" }
+substrait = "0.62"
 once_cell = { workspace = true }
 opentelemetry = { workspace = true }
 regex = { workspace = true }

@@ -9,10 +9,12 @@
 //! For path finding queries, the start node's ID is added to the base query and
 //! the end node's ID is added to the final query.
 
-use crate::ast::{Expr, Node, Query, SelectExpr};
+use llqm::expr;
+
 use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::Result;
 use crate::input::{EntityAuthConfig, Input, QueryType};
+use crate::lower::LoweredQuery;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use std::collections::{HashMap, HashSet};
 
@@ -91,7 +93,12 @@ impl ResultContext {
     }
 }
 
-pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
+/// Enforce redaction return columns on a `LoweredQuery`.
+///
+/// Adds `_gkg_{alias}_id` and `_gkg_{alias}_type` columns to `lq.projections`.
+/// For aggregation queries, also adds the redaction ID expr to `lq.group_by`.
+/// For entities with non-default redaction IDs, adds a separate `_gkg_{alias}_pk`.
+pub fn enforce_return(lq: &mut LoweredQuery, input: &Input) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth = input.entity_auth.clone();
 
@@ -107,19 +114,6 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
         QueryType::PathFinding => HashSet::new(),
     };
 
-    match node {
-        Node::Query(q) => enforce_return_columns(q, input, &selectable_nodes, &mut ctx)?,
-    }
-
-    Ok(ctx)
-}
-
-fn enforce_return_columns(
-    q: &mut Query,
-    input: &Input,
-    selectable_nodes: &HashSet<&str>,
-    ctx: &mut ResultContext,
-) -> Result<()> {
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
 
@@ -134,65 +128,59 @@ fn enforce_return_columns(
         let id_col = redaction_node.id_column.clone();
         let type_col = redaction_node.type_column.clone();
 
-        // When the auth ID column differs from "id" (e.g. Definition uses
-        // "project_id" for authorization), emit a separate pk column so
-        // hydration can still look up the entity by its own row ID.
         let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
 
+        // When the auth ID column differs from "id", emit a separate pk column
+        // so hydration can still look up the entity by its own row ID.
         if needs_separate_pk {
-            let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+            let has_pk = lq.projections.iter().any(|(_, a)| *a == pk_col);
             if !has_pk {
-                q.select.push(SelectExpr {
-                    expr: Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                    alias: Some(pk_col),
-                });
+                lq.projections
+                    .push((expr::col(&node.id, DEFAULT_PRIMARY_KEY), pk_col));
             }
         }
 
-        let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
-        let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+        let has_id = lq.projections.iter().any(|(_, a)| *a == id_col);
+        let has_type = lq.projections.iter().any(|(_, a)| *a == type_col);
 
         if !has_id {
-            let id_expr = Expr::col(&node.id, &node.redaction_id_column);
-            q.select.push(SelectExpr {
-                expr: id_expr.clone(),
-                alias: Some(id_col.clone()),
-            });
+            let id_expr = expr::col(&node.id, &node.redaction_id_column);
+            lq.projections.push((id_expr.clone(), id_col.clone()));
+
             // Push down id column to aggregation group by if not already present.
             if input.query_type == QueryType::Aggregation
-                && !q.group_by.is_empty()
-                && !q.group_by.contains(&id_expr)
+                && !lq.group_by.is_empty()
+                && !lq.group_by.iter().any(|(e, _)| *e == id_expr)
             {
-                q.group_by.push(id_expr);
+                lq.group_by.push((id_expr, id_col.clone()));
             }
         }
 
         if !has_type {
-            let insert_pos = q
-                .select
+            // Insert type column right after the id column.
+            let insert_pos = lq
+                .projections
                 .iter()
-                .position(|s| s.alias.as_ref() == Some(&id_col))
+                .position(|(_, a)| *a == id_col)
                 .map(|i| i + 1)
-                .unwrap_or(q.select.len());
+                .unwrap_or(lq.projections.len());
 
-            q.select.insert(
-                insert_pos,
-                SelectExpr {
-                    expr: Expr::string(entity.as_str()),
-                    alias: Some(type_col),
-                },
-            );
+            lq.projections
+                .insert(insert_pos, (expr::string(entity.as_str()), type_col));
         }
     }
-    Ok(())
+
+    Ok(ctx)
 }
 
 #[cfg(test)]
 #[allow(irrefutable_let_patterns)]
 mod tests {
     use super::*;
-    use crate::ast::{JoinType, TableRef};
     use crate::input::{InputNode, QueryType};
+    use crate::lower::SelectItem;
+    use llqm::expr::DataType;
+    use llqm::plan::PlanBuilder;
 
     fn test_input() -> Input {
         Input {
@@ -214,132 +202,96 @@ mod tests {
         }
     }
 
-    fn two_table_from() -> TableRef {
-        TableRef::join(
-            JoinType::Inner,
-            TableRef::scan("gl_user", "u"),
-            TableRef::scan("gl_project", "p"),
-            Expr::lit(true),
-        )
+    fn make_base_lq(projections: Vec<SelectItem>) -> LoweredQuery {
+        let mut b = PlanBuilder::new();
+        let u = b.read(
+            "gl_user",
+            "u",
+            &[
+                ("id", DataType::Int64),
+                ("username", DataType::String),
+                ("traversal_path", DataType::String),
+            ],
+        );
+        let p = b.read(
+            "gl_project",
+            "p",
+            &[
+                ("id", DataType::Int64),
+                ("name", DataType::String),
+                ("traversal_path", DataType::String),
+            ],
+        );
+        let joined = b.join(
+            llqm::expr::JoinType::Inner,
+            u,
+            p,
+            expr::eq(expr::col("u", "id"), expr::col("p", "id")),
+        );
+        LoweredQuery {
+            builder: b,
+            base_rel: joined,
+            projections,
+            group_by: vec![],
+            agg_measures: vec![],
+            sort_keys: vec![],
+            limit: Some(30),
+            offset: None,
+            ctes: vec![],
+        }
     }
 
     #[test]
     fn adds_type_columns_after_id_columns() {
-        let query = Query {
-            select: vec![
-                SelectExpr {
-                    expr: Expr::col("u", "id"),
-                    alias: Some("_gkg_u_id".into()),
-                },
-                SelectExpr {
-                    expr: Expr::col("p", "id"),
-                    alias: Some("_gkg_p_id".into()),
-                },
-            ],
-            from: two_table_from(),
-            limit: Some(30),
-            ..Default::default()
-        };
-
+        let projections = vec![
+            (expr::col("u", "id"), "_gkg_u_id".to_string()),
+            (expr::col("p", "id"), "_gkg_p_id".to_string()),
+        ];
+        let mut lq = make_base_lq(projections);
         let input = test_input();
-        let mut node = Node::Query(Box::new(query));
 
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut lq, &input).unwrap();
 
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 4);
-        assert_eq!(q.select[0].alias, Some("_gkg_u_id".into()));
-        assert_eq!(q.select[1].alias, Some("_gkg_u_type".into()));
-        assert_eq!(q.select[2].alias, Some("_gkg_p_id".into()));
-        assert_eq!(q.select[3].alias, Some("_gkg_p_type".into()));
-
-        if let Expr::Param { value, .. } = &q.select[1].expr {
-            assert_eq!(value.as_str(), Some("User"));
-        } else {
-            panic!("expected param");
-        }
-        if let Expr::Param { value, .. } = &q.select[3].expr {
-            assert_eq!(value.as_str(), Some("Project"));
-        } else {
-            panic!("expected param");
-        }
+        assert_eq!(lq.projections.len(), 4);
+        assert_eq!(lq.projections[0].1, "_gkg_u_id");
+        assert_eq!(lq.projections[1].1, "_gkg_u_type");
+        assert_eq!(lq.projections[2].1, "_gkg_p_id");
+        assert_eq!(lq.projections[3].1, "_gkg_p_type");
     }
 
     #[test]
     fn skips_existing_type_columns() {
-        let query = Query {
-            select: vec![
-                SelectExpr {
-                    expr: Expr::col("u", "id"),
-                    alias: Some("_gkg_u_id".into()),
-                },
-                SelectExpr {
-                    expr: Expr::lit("User"),
-                    alias: Some("_gkg_u_type".into()),
-                },
-                SelectExpr {
-                    expr: Expr::col("p", "id"),
-                    alias: Some("_gkg_p_id".into()),
-                },
-            ],
-            from: two_table_from(),
-            limit: Some(30),
-            ..Default::default()
-        };
-
+        let projections = vec![
+            (expr::col("u", "id"), "_gkg_u_id".to_string()),
+            (expr::string("User"), "_gkg_u_type".to_string()),
+            (expr::col("p", "id"), "_gkg_p_id".to_string()),
+        ];
+        let mut lq = make_base_lq(projections);
         let input = test_input();
-        let mut node = Node::Query(Box::new(query));
 
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut lq, &input).unwrap();
 
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 4);
-        assert_eq!(q.select[0].alias, Some("_gkg_u_id".into()));
-        assert_eq!(q.select[1].alias, Some("_gkg_u_type".into()));
-        assert_eq!(q.select[2].alias, Some("_gkg_p_id".into()));
-        assert_eq!(q.select[3].alias, Some("_gkg_p_type".into()));
+        assert_eq!(lq.projections.len(), 4);
+        assert_eq!(lq.projections[0].1, "_gkg_u_id");
+        assert_eq!(lq.projections[1].1, "_gkg_u_type");
+        assert_eq!(lq.projections[2].1, "_gkg_p_id");
+        assert_eq!(lq.projections[3].1, "_gkg_p_type");
     }
 
     #[test]
     fn adds_id_and_type_columns_when_missing() {
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "username"),
-                alias: Some("name".into()),
-            }],
-            from: two_table_from(),
-            limit: Some(30),
-            ..Default::default()
-        };
-
+        let projections = vec![(expr::col("u", "username"), "name".to_string())];
+        let mut lq = make_base_lq(projections);
         let input = test_input();
-        let mut node = Node::Query(Box::new(query));
 
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut lq, &input).unwrap();
 
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 5);
-        assert_eq!(q.select[0].alias, Some("name".into()));
-        assert_eq!(q.select[1].alias, Some("_gkg_u_id".into()));
-        assert_eq!(q.select[2].alias, Some("_gkg_u_type".into()));
-        assert_eq!(q.select[3].alias, Some("_gkg_p_id".into()));
-        assert_eq!(q.select[4].alias, Some("_gkg_p_type".into()));
-
-        if let Expr::Column { table, column } = &q.select[1].expr {
-            assert_eq!(table, "u");
-            assert_eq!(column, "id");
-        } else {
-            panic!("expected column expression for _gkg_u_id");
-        }
+        assert_eq!(lq.projections.len(), 5);
+        assert_eq!(lq.projections[0].1, "name");
+        assert_eq!(lq.projections[1].1, "_gkg_u_id");
+        assert_eq!(lq.projections[2].1, "_gkg_u_type");
+        assert_eq!(lq.projections[3].1, "_gkg_p_id");
+        assert_eq!(lq.projections[4].1, "_gkg_p_type");
     }
 
     #[test]
@@ -352,39 +304,36 @@ mod tests {
             ..Input::default()
         };
 
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: Some("n_id".into()),
-            }],
-            from: TableRef::scan("kg_node", "n"),
+        let mut b = PlanBuilder::new();
+        let rel = b.read(
+            "kg_node",
+            "n",
+            &[("id", DataType::Int64), ("label", DataType::String)],
+        );
+        let mut lq = LoweredQuery {
+            builder: b,
+            base_rel: rel,
+            projections: vec![(expr::col("n", "id"), "n_id".to_string())],
+            group_by: vec![],
+            agg_measures: vec![],
+            sort_keys: vec![],
             limit: Some(30),
-            ..Default::default()
+            offset: None,
+            ctes: vec![],
         };
 
-        let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input).unwrap();
+        let ctx = enforce_return(&mut lq, &input).unwrap();
 
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 1);
+        assert_eq!(lq.projections.len(), 1);
         assert!(ctx.is_empty());
     }
 
     #[test]
     fn builds_result_context() {
         let input = test_input();
-        let query = Query {
-            select: vec![],
-            from: two_table_from(),
-            limit: Some(30),
-            ..Default::default()
-        };
+        let mut lq = make_base_lq(vec![]);
 
-        let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input).unwrap();
+        let ctx = enforce_return(&mut lq, &input).unwrap();
 
         assert_eq!(ctx.len(), 2);
 
@@ -428,47 +377,33 @@ mod tests {
             ..Input::default()
         };
 
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "id"),
-                alias: Some("u_id".into()),
-            }],
-            from: TableRef::scan("kg_user", "u"),
-            group_by: vec![Expr::col("u", "id")],
+        let mut b = PlanBuilder::new();
+        let rel = b.read(
+            "gl_user",
+            "u",
+            &[("id", DataType::Int64), ("username", DataType::String)],
+        );
+        let mut lq = LoweredQuery {
+            builder: b,
+            base_rel: rel,
+            projections: vec![(expr::col("u", "id"), "u_id".to_string())],
+            group_by: vec![(expr::col("u", "id"), "u_id".to_string())],
+            agg_measures: vec![],
+            sort_keys: vec![],
             limit: Some(10),
-            ..Default::default()
+            offset: None,
+            ctes: vec![],
         };
 
-        let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
+        let ctx = enforce_return(&mut lq, &input).unwrap();
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
-        assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
-        );
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
-        );
-        assert_eq!(q.group_by.len(), 1); // u.id already present, no duplicate added
+        assert_eq!(lq.projections.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
+        assert!(lq.projections.iter().any(|(_, a)| a == "_gkg_u_id"));
+        assert!(lq.projections.iter().any(|(_, a)| a == "_gkg_u_type"));
+        assert!(!lq.projections.iter().any(|(_, a)| a == "_gkg_n_id"));
+        assert!(!lq.projections.iter().any(|(_, a)| a == "_gkg_n_type"));
+        assert_eq!(lq.group_by.len(), 1); // u.id already present, no duplicate added
 
         // Context should only have the group_by node
         assert_eq!(ctx.len(), 1);
@@ -506,45 +441,73 @@ mod tests {
             ..Input::default()
         };
 
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "username"),
-                alias: Some("u_username".into()),
-            }],
-            from: TableRef::scan("gl_user", "u"),
-            group_by: vec![Expr::col("u", "username")],
+        let mut b = PlanBuilder::new();
+        let rel = b.read(
+            "gl_user",
+            "u",
+            &[("id", DataType::Int64), ("username", DataType::String)],
+        );
+        let mut lq = LoweredQuery {
+            builder: b,
+            base_rel: rel,
+            projections: vec![(expr::col("u", "username"), "u_username".to_string())],
+            group_by: vec![(expr::col("u", "username"), "u_username".to_string())],
+            agg_measures: vec![],
+            sort_keys: vec![],
             limit: Some(10),
-            ..Default::default()
+            offset: None,
+            ctes: vec![],
         };
 
-        let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
+        enforce_return(&mut lq, &input).unwrap();
 
         assert!(
-            q.group_by.contains(&Expr::col("u", "id")),
+            lq.group_by.iter().any(|(e, _)| *e == expr::col("u", "id")),
             "redaction id column must be in GROUP BY: {:?}",
-            q.group_by
+            lq.group_by
         );
-        assert_eq!(q.group_by.len(), 2); // username + id
+        assert_eq!(lq.group_by.len(), 2); // username + id
     }
 
     #[test]
     fn uses_correct_redaction_id_column_per_node() {
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_definition", "d"),
-                TableRef::scan("gl_project", "p"),
-                Expr::lit(true),
-            ),
+        let mut b = PlanBuilder::new();
+        let d = b.read(
+            "gl_definition",
+            "d",
+            &[
+                ("id", DataType::Int64),
+                ("project_id", DataType::Int64),
+                ("name", DataType::String),
+                ("traversal_path", DataType::String),
+            ],
+        );
+        let p = b.read(
+            "gl_project",
+            "p",
+            &[
+                ("id", DataType::Int64),
+                ("name", DataType::String),
+                ("traversal_path", DataType::String),
+            ],
+        );
+        let joined = b.join(
+            llqm::expr::JoinType::Inner,
+            d,
+            p,
+            expr::eq(expr::col("d", "id"), expr::col("p", "id")),
+        );
+        let mut lq = LoweredQuery {
+            builder: b,
+            base_rel: joined,
+            projections: vec![],
+            group_by: vec![],
+            agg_measures: vec![],
+            sort_keys: vec![],
             limit: Some(10),
-            ..Default::default()
-        }));
+            offset: None,
+            ctes: vec![],
+        };
 
         let input = Input {
             nodes: vec![
@@ -566,27 +529,23 @@ mod tests {
             ..Input::default()
         };
 
-        let ctx = enforce_return(&mut node, &input).unwrap();
+        let ctx = enforce_return(&mut lq, &input).unwrap();
 
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 5);
+        assert_eq!(lq.projections.len(), 5);
 
         // Definition: pk column (d.id) + auth id column (d.project_id) + type literal
-        assert_eq!(q.select[0].alias, Some("_gkg_d_pk".into()));
-        assert!(matches!(&q.select[0].expr, Expr::Column { column, .. } if column == "id"));
-        assert_eq!(q.select[1].alias, Some("_gkg_d_id".into()));
-        assert!(matches!(&q.select[1].expr, Expr::Column { column, .. } if column == "project_id"));
-        assert_eq!(q.select[2].alias, Some("_gkg_d_type".into()));
-        assert!(matches!(&q.select[2].expr, Expr::Param { value, .. } if value == "Definition"));
+        assert_eq!(lq.projections[0].1, "_gkg_d_pk");
+        assert_eq!(lq.projections[0].0, expr::col("d", "id"));
+        assert_eq!(lq.projections[1].1, "_gkg_d_id");
+        assert_eq!(lq.projections[1].0, expr::col("d", "project_id"));
+        assert_eq!(lq.projections[2].1, "_gkg_d_type");
+        assert_eq!(lq.projections[2].0, expr::string("Definition"));
 
         // Project: default id column + type literal (no separate pk needed)
-        assert_eq!(q.select[3].alias, Some("_gkg_p_id".into()));
-        assert!(matches!(&q.select[3].expr, Expr::Column { column, .. } if column == "id"));
-        assert_eq!(q.select[4].alias, Some("_gkg_p_type".into()));
-        assert!(matches!(&q.select[4].expr, Expr::Param { value, .. } if value == "Project"));
+        assert_eq!(lq.projections[3].1, "_gkg_p_id");
+        assert_eq!(lq.projections[3].0, expr::col("p", "id"));
+        assert_eq!(lq.projections[4].1, "_gkg_p_type");
+        assert_eq!(lq.projections[4].0, expr::string("Project"));
 
         assert_eq!(ctx.len(), 2);
         let d_node = ctx.get("d").unwrap();
@@ -601,7 +560,6 @@ mod tests {
 
     #[test]
     fn path_finding_uses_gkg_path_column() {
-        use crate::ast::Cte;
         use crate::input::InputPath;
 
         let input = Input {
@@ -632,42 +590,28 @@ mod tests {
             ..Input::default()
         };
 
-        // Path finding generates a Query with unrolled CTEs
-        let mut query = Node::Query(Box::new(Query {
-            ctes: vec![
-                Cte::new(
-                    "d0",
-                    Query {
-                        select: vec![SelectExpr {
-                            expr: Expr::col("start", "id"),
-                            alias: Some("node_id".into()),
-                        }],
-                        from: TableRef::scan("gl_project", "start"),
-                        ..Default::default()
-                    },
-                ),
-                Cte::new(
-                    "d1",
-                    Query {
-                        from: TableRef::scan("d0", "p"),
-                        ..Default::default()
-                    },
-                ),
-            ],
-            select: vec![SelectExpr {
-                expr: Expr::col("all_paths", "path"),
-                alias: Some("_gkg_path".into()),
-            }],
-            from: TableRef::scan("gl_project", "end"),
+        let mut b = PlanBuilder::new();
+        let rel = b.read(
+            "gl_project",
+            "start",
+            &[("id", DataType::Int64), ("name", DataType::String)],
+        );
+        let mut lq = LoweredQuery {
+            builder: b,
+            base_rel: rel,
+            projections: vec![(expr::col("paths", "path"), "_gkg_path".to_string())],
+            group_by: vec![],
+            agg_measures: vec![],
+            sort_keys: vec![],
             limit: Some(30),
-            ..Default::default()
-        }));
+            offset: None,
+            ctes: vec![],
+        };
 
-        let ctx = enforce_return(&mut query, &input).unwrap();
+        let ctx = enforce_return(&mut lq, &input).unwrap();
 
         // Path finding queries use _gkg_path column for redaction data.
         // No additional _gkg_* columns are added by enforce_return.
-        // The ResultContext is empty but has query_type set for path extraction.
         assert!(ctx.is_empty());
         assert_eq!(ctx.query_type, Some(QueryType::PathFinding));
     }
@@ -679,35 +623,42 @@ mod tests {
                 id: "p".to_string(),
                 entity: Some("Project".to_string()),
                 table: Some("gl_project".to_string()),
-                // redaction_id_column defaults to "id" — same as DEFAULT_PRIMARY_KEY
                 ..Default::default()
             }],
             ..Input::default()
         };
 
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("p", "name"),
-                alias: Some("p_name".into()),
-            }],
-            from: TableRef::scan("gl_project", "p"),
-            ..Default::default()
+        let mut b = PlanBuilder::new();
+        let rel = b.read(
+            "gl_project",
+            "p",
+            &[
+                ("id", DataType::Int64),
+                ("name", DataType::String),
+                ("traversal_path", DataType::String),
+            ],
+        );
+        let mut lq = LoweredQuery {
+            builder: b,
+            base_rel: rel,
+            projections: vec![(expr::col("p", "name"), "p_name".to_string())],
+            group_by: vec![],
+            agg_measures: vec![],
+            sort_keys: vec![],
+            limit: None,
+            offset: None,
+            ctes: vec![],
         };
 
-        let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut lq, &input).unwrap();
 
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"_gkg_p_id".to_string()));
-        assert!(aliases.contains(&&"_gkg_p_type".to_string()));
+        let aliases: Vec<_> = lq.projections.iter().map(|(_, a)| a.as_str()).collect();
+        assert!(aliases.contains(&"_gkg_p_id"));
+        assert!(aliases.contains(&"_gkg_p_type"));
         assert!(
-            !aliases.contains(&&"_gkg_p_pk".to_string()),
+            !aliases.contains(&"_gkg_p_pk"),
             "default entity (redaction_id_column == id) should not emit _gkg_p_pk"
         );
-        assert_eq!(q.select.len(), 3); // p_name + _gkg_p_id + _gkg_p_type
+        assert_eq!(lq.projections.len(), 3); // p_name + _gkg_p_id + _gkg_p_type
     }
 }

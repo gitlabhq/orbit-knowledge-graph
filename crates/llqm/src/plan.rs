@@ -559,6 +559,13 @@ impl PlanBuilder {
     pub fn union_all(&mut self, inputs: Vec<TypedRel>, alias: &str) -> TypedRel {
         assert!(!inputs.is_empty(), "union_all requires at least one input");
 
+        let col_names: Vec<String> = inputs[0]
+            .schema
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
         let schema = Schema {
             columns: inputs[0]
                 .schema
@@ -573,7 +580,7 @@ impl PlanBuilder {
         };
         let rels: Vec<Rel> = inputs.into_iter().map(|t| t.rel).collect();
 
-        let metadata = serde_json::json!({ "alias": alias });
+        let metadata = serde_json::json!({ "alias": alias, "column_names": col_names });
         let advanced = ext::AdvancedExtension {
             optimization: vec![prost_types::Any {
                 type_url: "llqm/set_metadata".into(),

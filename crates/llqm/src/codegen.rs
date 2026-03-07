@@ -223,9 +223,7 @@ impl QueryParts {
             sql.push_str(&format!(" LIMIT {limit}"));
         }
 
-        if let Some(offset) = self.offset
-            && offset > 0
-        {
+        if let Some(offset) = self.offset {
             sql.push_str(&format!(" OFFSET {offset}"));
         }
 
@@ -506,7 +504,7 @@ impl CodegenContext {
             parts.limit = Some(*c);
         }
         if let Some(OffsetMode::Offset(o)) = &fetch.offset_mode
-            && *o > 0
+            && *o >= 0
         {
             parts.offset = Some(*o);
         }
@@ -635,13 +633,23 @@ impl CodegenContext {
             .and_then(|v| v.get("alias"))
             .and_then(|v| v.as_str());
 
+        // Extract stored column names from metadata (if any)
+        let stored_names: Option<Vec<String>> = metadata
+            .as_ref()
+            .and_then(|v| v.get("column_names"))
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+
+        // Use stored names for union arm output, falling back to passed output_names
+        let arm_names = stored_names.as_ref().or(output_names);
+
         // Generate each input as a full SELECT statement
         let first_input = &set.inputs[0];
-        let (first_parts, first_schema) = self.emit_query(first_input, output_names)?;
+        let (first_parts, first_schema) = self.emit_query(first_input, arm_names)?;
         let mut union_sql = first_parts.to_sql();
 
         for input in &set.inputs[1..] {
-            let (input_parts, _) = self.emit_query(input, output_names)?;
+            let (input_parts, _) = self.emit_query(input, arm_names)?;
             union_sql.push_str(&format!(" UNION ALL {}", input_parts.to_sql()));
         }
 
