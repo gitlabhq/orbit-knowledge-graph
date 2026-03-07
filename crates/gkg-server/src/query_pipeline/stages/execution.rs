@@ -29,8 +29,8 @@ impl<M: RedactionMessage> PipelineStage<M> for ExecutionStage {
         let params = &compiled.base.params;
 
         let mut query = ctx.client.query(sql);
-        for (key, value) in params.iter() {
-            query = ArrowClickHouseClient::bind_param(query, key, value);
+        for (key, param) in params.iter() {
+            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
         let batches = obs.check(
             query

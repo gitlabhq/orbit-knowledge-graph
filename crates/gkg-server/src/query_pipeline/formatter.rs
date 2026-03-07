@@ -5,8 +5,8 @@ use query_engine::{
 };
 use serde_json::{Value, json};
 
-use crate::arrow::ColumnValue;
 use crate::redaction::{NodeRef, QueryResult, QueryResultRow};
+use gkg_utils::arrow::ColumnValue;
 
 pub trait ResultFormatter: Send + Sync {
     fn format(

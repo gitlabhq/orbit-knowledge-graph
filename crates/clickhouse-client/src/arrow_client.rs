@@ -8,6 +8,7 @@ use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream;
 use futures::stream::BoxStream;
+use gkg_utils::clickhouse::{ChScalar, ChType};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -103,7 +104,12 @@ impl ArrowClickHouseClient {
         &self.client
     }
 
-    pub fn bind_param(query: ArrowQuery, key: &str, value: &Value) -> ArrowQuery {
+    /// Bind a named parameter to a query.
+    ///
+    /// `ch_type` carries the ClickHouse type from the query placeholder. For
+    /// scalar values the JSON `Value` variant determines the Rust type; for
+    /// arrays `ch_type` determines the element type for binding.
+    pub fn bind_param(query: ArrowQuery, key: &str, value: &Value, ch_type: &ChType) -> ArrowQuery {
         match value {
             Value::String(s) => query.param(key, s.as_str()),
             Value::Number(n) => {
@@ -116,18 +122,54 @@ impl ArrowClickHouseClient {
                 }
             }
             Value::Bool(b) => query.param(key, *b),
-            Value::Array(arr) => {
-                let strings: Vec<String> = arr
-                    .iter()
-                    .map(|v| match v {
-                        Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    })
-                    .collect();
-                query.param(key, strings)
-            }
+            Value::Null => query.param(key, Option::<String>::None),
+            Value::Array(arr) => match ch_type {
+                ChType::Array(ChScalar::Int64) => {
+                    let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_i64()).collect();
+                    warn_on_dropped_elements(key, "Int64", arr.len(), ints.len());
+                    query.param(key, ints)
+                }
+                ChType::Array(ChScalar::Float64) => {
+                    let floats: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
+                    warn_on_dropped_elements(key, "Float64", arr.len(), floats.len());
+                    query.param(key, floats)
+                }
+                ChType::Array(ChScalar::Bool) => {
+                    let bools: Vec<bool> = arr.iter().filter_map(|v| v.as_bool()).collect();
+                    warn_on_dropped_elements(key, "Bool", arr.len(), bools.len());
+                    query.param(key, bools)
+                }
+                _ => {
+                    let strings: Vec<String> = arr
+                        .iter()
+                        .map(|v| match v {
+                            Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        })
+                        .collect();
+                    query.param(key, strings)
+                }
+            },
             _ => query.param(key, value.to_string()),
         }
+    }
+}
+
+/// Log a warning when array binding silently drops elements that don't
+/// match the expected scalar type (e.g. a string in an Int64 array).
+///
+/// In practice this should never fire: the query engine's `check_filter_types`
+/// validates values against the ontology column type, and the lowerer builds
+/// homogeneous arrays. This is purely defensive for `bind_param`'s public API.
+fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize) {
+    if bound != input {
+        warn!(
+            param = key,
+            scalar,
+            input,
+            bound,
+            "bind_param: array had elements that could not be converted, dropped values"
+        );
     }
 }
 

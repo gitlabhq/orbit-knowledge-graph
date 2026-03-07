@@ -27,6 +27,7 @@ tabled = "0.20"
 
 # Internal crates
 clickhouse-client = { path = "../clickhouse-client" }
+gkg-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 

@@ -1046,6 +1046,7 @@ dependencies = [
  "bytes",
  "clickhouse",
  "futures",
+ "gkg-utils",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2795,6 +2796,7 @@ dependencies = [
  "enum-as-inner",
  "futures",
  "gitlab-client",
+ "gkg-utils",
  "health-check",
  "indexer",
  "integration-testkit",
@@ -2832,6 +2834,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "gkg-utils"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "chrono",
+ "enum-as-inner",
+ "serde_json",
+ "strum",
 ]
 
 [[package]]
@@ -5151,6 +5164,7 @@ name = "query-engine"
 version = "0.1.0"
 dependencies = [
  "const_format",
+ "gkg-utils",
  "jsonschema",
  "once_cell",
  "ontology",
@@ -6153,6 +6167,7 @@ dependencies = [
  "clap",
  "clickhouse",
  "clickhouse-client",
+ "gkg-utils",
  "indicatif",
  "ontology",
  "parquet",

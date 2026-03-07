@@ -22,6 +22,7 @@ members = [
   "crates/gitlab-client",
   "crates/xtask",
   "crates/integration-testkit",
+  "crates/utils",
 ]
 
 [workspace.dependencies]
