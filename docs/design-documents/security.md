@@ -190,9 +190,10 @@ In addition to authorization filtering, the query engine implements further safe
 
 **Detection and Monitoring**:
 
-- **Metric**: `gkg.query.depth_limit_exceeded` (counter) - queries rejected for exceeding depth limit.
-- **Metric**: `gkg.query.timeout` (counter) - queries that timed out.
-- **Metric**: `gkg.query.rate_limited` (counter) - queries rejected due to rate limiting.
+- **Metric**: `qe.threat.depth_exceeded` (counter) — queries rejected for exceeding traversal depth or hop cap.
+- **Metric**: `qe.threat.limit_exceeded` (counter) — queries rejected for exceeding array cardinality caps (node_ids, IN filter values).
+- **Metric**: `qe.threat.timeout` (counter) — queries that timed out.
+- **Metric**: `qe.threat.rate_limited` (counter) — queries rejected due to rate limiting.
 - **Alert**: Trigger warning if timeout rate exceeds 5% of total queries.
 
 ## Layer 3: Final Redaction Layer via Rails Authorization

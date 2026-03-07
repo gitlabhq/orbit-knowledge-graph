@@ -128,6 +128,7 @@ The query engine fires counters during compilation to track security-relevant re
 | `qe.threat.timeout` | Counter | `reason` | Query compilation or execution exceeded deadline (server layer) |
 | `qe.threat.rate_limited` | Counter | `reason` | Caller throttled before compilation (server layer) |
 | `qe.threat.depth_exceeded` | Counter | `reason` (depth) | Traversal depth or hop count exceeded the hard cap |
+| `qe.threat.limit_exceeded` | Counter | `reason` (limit) | Array cardinality cap exceeded (node_ids count or IN filter value count) |
 | `qe.internal.pipeline_invariant_violated` | Counter | `reason` (lowering/codegen) | Lowering or codegen hit a state upstream validation should have prevented |
 
 **Shared Infrastructure Metrics:**

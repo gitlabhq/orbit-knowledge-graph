@@ -126,14 +126,17 @@ impl ArrowClickHouseClient {
             Value::Array(arr) => match ch_type {
                 ChType::Array(ChScalar::Int64) => {
                     let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_i64()).collect();
+                    warn_on_dropped_elements(key, "Int64", arr.len(), ints.len());
                     query.param(key, ints)
                 }
                 ChType::Array(ChScalar::Float64) => {
                     let floats: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
+                    warn_on_dropped_elements(key, "Float64", arr.len(), floats.len());
                     query.param(key, floats)
                 }
                 ChType::Array(ChScalar::Bool) => {
                     let bools: Vec<bool> = arr.iter().filter_map(|v| v.as_bool()).collect();
+                    warn_on_dropped_elements(key, "Bool", arr.len(), bools.len());
                     query.param(key, bools)
                 }
                 _ => {
@@ -149,6 +152,24 @@ impl ArrowClickHouseClient {
             },
             _ => query.param(key, value.to_string()),
         }
+    }
+}
+
+/// Log a warning when array binding silently drops elements that don't
+/// match the expected scalar type (e.g. a string in an Int64 array).
+///
+/// In practice this should never fire: the query engine's `check_filter_types`
+/// validates values against the ontology column type, and the lowerer builds
+/// homogeneous arrays. This is purely defensive for `bind_param`'s public API.
+fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize) {
+    if bound != input {
+        warn!(
+            param = key,
+            scalar,
+            input,
+            bound,
+            "bind_param: array had elements that could not be converted, dropped values"
+        );
     }
 }
 
