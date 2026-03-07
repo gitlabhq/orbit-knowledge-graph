@@ -562,7 +562,17 @@ mod tests {
             Some(&Value::String("AUTHORED".into()))
         );
 
-        // Multiple types: IN in join ON clause
+        // Multiple types: IN in join ON clause (uses col_in, matching production)
+        let type_filter = Expr::col_in(
+            "e",
+            "relationship_kind",
+            ChType::String,
+            vec![
+                Value::String("AUTHORED".into()),
+                Value::String("CONTAINS".into()),
+            ],
+        )
+        .unwrap();
         let q = Query {
             select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
             from: TableRef::join(
@@ -571,27 +581,24 @@ mod tests {
                 TableRef::scan("gl_edge", "e"),
                 Expr::and(
                     Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
-                    Expr::binary(
-                        Op::In,
-                        Expr::col("e", "relationship_kind"),
-                        Expr::param(
-                            ChType::String,
-                            Value::Array(vec![
-                                Value::String("AUTHORED".into()),
-                                Value::String("CONTAINS".into()),
-                            ]),
-                        ),
-                    ),
+                    type_filter,
                 ),
             ),
             ..Default::default()
         };
         let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert!(
-            r.sql
-                .contains("e.relationship_kind IN ({p0:String}, {p1:String})"),
+            r.sql.contains("e.relationship_kind IN {p0:Array(String)}"),
             "{}",
             r.sql
+        );
+        assert_eq!(r.params.len(), 1);
+        assert_eq!(
+            r.params.get("p0").map(|p| &p.value),
+            Some(&Value::Array(vec![
+                Value::String("AUTHORED".into()),
+                Value::String("CONTAINS".into()),
+            ]))
         );
     }
 
