@@ -8,8 +8,6 @@
 
 use serde_json::Value;
 
-#[cfg(test)]
-use crate::ast::ChType;
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
@@ -145,10 +143,7 @@ mod tests {
         // Manually construct a startsWith with a path not in the security context
         let wrong_filter = Expr::func(
             STARTS_WITH_FNAME,
-            vec![
-                Expr::col("p", TRAVERSAL_PATH_COLUMN),
-                Expr::param(ChType::String, "99/"),
-            ],
+            vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("99/")],
         );
         let node = project_query(Some(wrong_filter));
         let err = check_ast(&node, &ctx).unwrap_err();
@@ -227,7 +222,7 @@ mod tests {
             STARTS_WITH_FNAME,
             vec![
                 Expr::col("p", TRAVERSAL_PATH_COLUMN),
-                Expr::param(ChType::String, "42/43/"),
+                Expr::string("42/43/"),
             ],
         );
         inner.where_clause = Some(filter);
@@ -267,7 +262,7 @@ mod tests {
             STARTS_WITH_FNAME,
             vec![
                 Expr::col("p", TRAVERSAL_PATH_COLUMN),
-                Expr::param(ChType::String, "42/43/"),
+                Expr::string("42/43/"),
             ],
         );
         let inner = Query {
@@ -312,10 +307,7 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let filter = Expr::func(
             STARTS_WITH_FNAME,
-            vec![
-                Expr::col("u", TRAVERSAL_PATH_COLUMN),
-                Expr::param(ChType::String, "1/"),
-            ],
+            vec![Expr::col("u", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
         );
         let node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -412,7 +404,7 @@ mod tests {
             STARTS_WITH_FNAME,
             vec![
                 Expr::col("p", TRAVERSAL_PATH_COLUMN),
-                Expr::param(ChType::String, "42/43/"),
+                Expr::string("42/43/"),
             ],
         );
         let node = Node::Query(Box::new(Query {
@@ -449,10 +441,7 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let filter = Expr::func(
             STARTS_WITH_FNAME,
-            vec![
-                Expr::col("e", TRAVERSAL_PATH_COLUMN),
-                Expr::param(ChType::String, "1/"),
-            ],
+            vec![Expr::col("e", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
         );
         let node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -496,14 +485,14 @@ mod tests {
             STARTS_WITH_FNAME,
             vec![
                 Expr::col("e", TRAVERSAL_PATH_COLUMN),
-                Expr::param(ChType::String, "42/43/"),
+                Expr::string("42/43/"),
             ],
         );
         let arm_filter = Expr::func(
             STARTS_WITH_FNAME,
             vec![
                 Expr::col("e1", TRAVERSAL_PATH_COLUMN),
-                Expr::param(ChType::String, "42/43/"),
+                Expr::string("42/43/"),
             ],
         );
         let node = Node::Query(Box::new(Query {

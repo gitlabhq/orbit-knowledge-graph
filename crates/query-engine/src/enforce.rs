@@ -9,7 +9,7 @@
 //! For path finding queries, the start node's ID is added to the base query and
 //! the end node's ID is added to the final query.
 
-use crate::ast::{ChType, Expr, Node, Query, SelectExpr};
+use crate::ast::{Expr, Node, Query, SelectExpr};
 use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::Result;
 use crate::input::{EntityAuthConfig, Input, QueryType};
@@ -178,7 +178,7 @@ fn enforce_return_columns(
             q.select.insert(
                 insert_pos,
                 SelectExpr {
-                    expr: Expr::param(ChType::String, entity.as_str()),
+                    expr: Expr::string(entity.as_str()),
                     alias: Some(type_col),
                 },
             );

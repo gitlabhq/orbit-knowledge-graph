@@ -263,6 +263,20 @@ impl Expr {
         }
     }
 
+    pub fn string(value: impl Into<String>) -> Self {
+        Expr::Param {
+            data_type: ChType::String,
+            value: Value::String(value.into()),
+        }
+    }
+
+    pub fn int(value: i64) -> Self {
+        Expr::Param {
+            data_type: ChType::Int64,
+            value: Value::Number(value.into()),
+        }
+    }
+
     pub fn func(name: impl Into<String>, args: Vec<Expr>) -> Self {
         Expr::FuncCall {
             name: name.into(),
@@ -307,6 +321,39 @@ impl Expr {
             .into_iter()
             .flatten()
             .reduce(|a, b| Expr::binary(Op::Or, a, b))
+    }
+
+    /// Match a column against a set of values.
+    /// 0 values → None, 1 value → Eq, N values → IN.
+    pub fn col_in(
+        table: impl Into<String>,
+        column: impl Into<String>,
+        data_type: ChType,
+        values: Vec<Value>,
+    ) -> Option<Self> {
+        match values.len() {
+            0 => None,
+            1 => Some(Expr::eq(
+                Expr::col(table, column),
+                Expr::Param {
+                    data_type,
+                    value: values.into_iter().next().unwrap(),
+                },
+            )),
+            _ => Some(Expr::binary(
+                Op::In,
+                Expr::col(table, column),
+                Expr::Param {
+                    data_type,
+                    value: Value::Array(values),
+                },
+            )),
+        }
+    }
+
+    /// Combine two expressions with AND.
+    pub fn and(left: Expr, right: Expr) -> Expr {
+        Expr::binary(Op::And, left, right)
     }
 
     /// Combine two expressions with OR.

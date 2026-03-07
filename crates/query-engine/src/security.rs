@@ -7,7 +7,7 @@
 //! - 1 path: `startsWith(path)`
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
-use crate::ast::{ChType, Expr, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
 use once_cell::sync::Lazy;
@@ -113,7 +113,7 @@ fn build_path_filter(alias: &str, paths: &[String]) -> Expr {
             let prefix = lowest_common_prefix(paths);
             let prefix_filter = starts_with_expr(alias, &prefix);
             match Expr::or_all(paths.iter().map(|p| Some(starts_with_expr(alias, p)))) {
-                Some(or_filters) => Expr::binary(Op::And, prefix_filter, or_filters),
+                Some(or_filters) => Expr::and(prefix_filter, or_filters),
                 None => prefix_filter,
             }
         }
@@ -146,10 +146,7 @@ fn lowest_common_prefix(paths: &[String]) -> String {
 fn starts_with_expr(alias: &str, path: &str) -> Expr {
     Expr::func(
         "startsWith",
-        vec![
-            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-            Expr::param(ChType::String, path),
-        ],
+        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
     )
 }
 
@@ -208,7 +205,7 @@ fn should_apply_security_filter(table: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{JoinType, SelectExpr};
+    use crate::ast::{JoinType, Op, SelectExpr};
     use ontology::constants::EDGE_TABLE;
 
     fn simple_query() -> Node {

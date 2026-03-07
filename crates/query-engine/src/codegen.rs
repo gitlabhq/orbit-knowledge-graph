@@ -505,12 +505,11 @@ mod tests {
                 JoinType::Inner,
                 TableRef::scan("gl_user", "u"),
                 TableRef::scan("gl_edge", "e"),
-                Expr::binary(
-                    Op::And,
+                Expr::and(
                     Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
                     Expr::eq(
                         Expr::col("e", "relationship_kind"),
-                        Expr::param(ChType::String, "AUTHORED"),
+                        Expr::string("AUTHORED"),
                     ),
                 ),
             ),
@@ -531,8 +530,7 @@ mod tests {
                 JoinType::Inner,
                 TableRef::scan("gl_user", "u"),
                 TableRef::scan("gl_edge", "e"),
-                Expr::binary(
-                    Op::And,
+                Expr::and(
                     Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
                     Expr::binary(
                         Op::In,

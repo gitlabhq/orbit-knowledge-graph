@@ -189,7 +189,7 @@ fn agg_expr(agg: &InputAggregation) -> Expr {
     let arg = match (&agg.property, &agg.target) {
         (Some(prop), Some(target)) => Expr::col(target, prop),
         (None, Some(target)) => Expr::col(target, DEFAULT_PRIMARY_KEY),
-        _ => Expr::param(ChType::Int64, 1),
+        _ => Expr::int(1),
     };
     Expr::func(agg.function.as_sql(), vec![arg])
 }
@@ -266,19 +266,13 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 /// Base query for path finding CTE.
 fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_entity: &str) -> Query {
     let start_id = Expr::col(start_alias, DEFAULT_PRIMARY_KEY);
-    let start_tuple = Expr::func(
-        "tuple",
-        vec![start_id.clone(), Expr::param(ChType::String, start_entity)],
-    );
+    let start_tuple = Expr::func("tuple", vec![start_id.clone(), Expr::string(start_entity)]);
 
     // Empty Array(String) — typed via arrayResize so ClickHouse infers the schema.
     // The start node has no incoming edge, so the array starts empty.
     let empty_string_array = Expr::func(
         "arrayResize",
-        vec![
-            Expr::func("array", vec![Expr::param(ChType::String, "")]),
-            Expr::param(ChType::Int64, 0),
-        ],
+        vec![Expr::func("array", vec![Expr::string("")]), Expr::int(0)],
     );
 
     Query {
@@ -287,7 +281,7 @@ fn path_base_query(start_ids: &[i64], table: &str, start_alias: &str, start_enti
             SelectExpr::new(Expr::func("array", vec![start_id]), "path_ids"),
             SelectExpr::new(Expr::func("array", vec![start_tuple]), "path"),
             SelectExpr::new(empty_string_array, "edge_kinds"),
-            SelectExpr::new(Expr::param(ChType::Int64, 0), "depth"),
+            SelectExpr::new(Expr::int(0), "depth"),
         ],
         from: TableRef::scan(table, start_alias),
         where_clause: id_filter(start_alias, DEFAULT_PRIMARY_KEY, start_ids),
@@ -321,11 +315,7 @@ fn path_recursive_branch(
     );
 
     // depth < max_depth
-    let depth_check = Expr::binary(
-        Op::Lt,
-        Expr::col("p", "depth"),
-        Expr::param(ChType::Int64, max_depth as i64),
-    );
+    let depth_check = Expr::binary(Op::Lt, Expr::col("p", "depth"), Expr::int(max_depth as i64));
 
     // cycle detection: NOT has(path_ids, next_node)
     let cycle_check = Expr::unary(
@@ -342,10 +332,7 @@ fn path_recursive_branch(
     } else {
         let target_array = Expr::func(
             "array",
-            target_ids
-                .iter()
-                .map(|id| Expr::param(ChType::Int64, *id))
-                .collect(),
+            target_ids.iter().map(|id| Expr::int(*id)).collect(),
         );
         Some(Expr::unary(
             Op::Not,
@@ -354,28 +341,12 @@ fn path_recursive_branch(
     };
 
     // relationship type filter
-    let rel_filter = if rel_types.is_empty() {
-        None
-    } else if rel_types.len() == 1 {
-        Some(Expr::eq(
-            Expr::col("e", "relationship_kind"),
-            Expr::param(ChType::String, rel_types[0].clone()),
-        ))
-    } else {
-        Some(Expr::binary(
-            Op::In,
-            Expr::col("e", "relationship_kind"),
-            Expr::param(
-                ChType::String,
-                serde_json::Value::Array(
-                    rel_types
-                        .iter()
-                        .map(|t| serde_json::Value::String(t.clone()))
-                        .collect(),
-                ),
-            ),
-        ))
-    };
+    let rel_filter = Expr::col_in(
+        "e",
+        "relationship_kind",
+        ChType::String,
+        rel_types.iter().map(|t| Value::String(t.clone())).collect(),
+    );
 
     // Combine all conditions
     let where_clause =
@@ -414,11 +385,7 @@ fn path_recursive_branch(
             "edge_kinds",
         ),
         SelectExpr::new(
-            Expr::binary(
-                Op::Add,
-                Expr::col("p", "depth"),
-                Expr::param(ChType::Int64, 1i64),
-            ),
+            Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::int(1)),
             "depth",
         ),
     ];
@@ -471,7 +438,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         center_node.has_traversal_path,
     );
     if let Some(tc) = edge_type_cond {
-        join_cond = Expr::binary(Op::And, join_cond, tc);
+        join_cond = Expr::and(join_cond, tc);
     }
 
     let from = TableRef::join(
@@ -573,7 +540,7 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
         let (edge_table, edge_type_cond) = edge_scan(&curr, type_filter);
         let mut join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
         if let Some(tc) = edge_type_cond {
-            join_cond = Expr::binary(Op::And, join_cond, tc);
+            join_cond = Expr::and(join_cond, tc);
         }
         from = TableRef::join(JoinType::Inner, from, edge_table, join_cond);
     }
@@ -582,7 +549,7 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
         select: vec![
             SelectExpr::new(Expr::col("e1", start_col), "start_id"),
             SelectExpr::new(Expr::col(format!("e{depth}"), end_col), "end_id"),
-            SelectExpr::new(Expr::param(ChType::Int64, depth as i64), "depth"),
+            SelectExpr::new(Expr::int(depth as i64), "depth"),
             SelectExpr::new(
                 Expr::col("e1", TRAVERSAL_PATH_COLUMN),
                 TRAVERSAL_PATH_COLUMN,
@@ -598,21 +565,14 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
 /// The type condition should be folded into the JOIN ON or WHERE clause.
 fn edge_scan(alias: &str, type_filter: &Option<Vec<String>>) -> (TableRef, Option<Expr>) {
     let table = TableRef::scan(EDGE_TABLE, alias);
-    let cond = match type_filter {
-        Some(types) if types.len() == 1 => Some(Expr::eq(
-            Expr::col(alias, "relationship_kind"),
-            Expr::param(ChType::String, types[0].clone()),
-        )),
-        Some(types) if types.len() > 1 => {
-            let arr = Value::Array(types.iter().map(|t| Value::String(t.clone())).collect());
-            Some(Expr::binary(
-                Op::In,
-                Expr::col(alias, "relationship_kind"),
-                Expr::param(ChType::String, arr),
-            ))
-        }
-        _ => None,
-    };
+    let cond = type_filter.as_ref().and_then(|types| {
+        Expr::col_in(
+            alias,
+            "relationship_kind",
+            ChType::String,
+            types.iter().map(|t| Value::String(t.clone())).collect(),
+        )
+    });
     (table, cond)
 }
 
@@ -660,11 +620,7 @@ fn build_joins(
                 Expr::col(&alias, from_col),
             );
             if from_node.has_traversal_path {
-                source_cond = Expr::binary(
-                    Op::And,
-                    edge_path_starts_with(&alias, &rel.from),
-                    source_cond,
-                );
+                source_cond = Expr::and(edge_path_starts_with(&alias, &rel.from), source_cond);
             }
             result = TableRef::join(JoinType::Inner, result, union, source_cond);
 
@@ -673,8 +629,7 @@ fn build_joins(
                 Expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
             );
             if target.has_traversal_path {
-                target_cond =
-                    Expr::binary(Op::And, edge_path_starts_with(&alias, &rel.to), target_cond);
+                target_cond = Expr::and(edge_path_starts_with(&alias, &rel.to), target_cond);
             }
             result = TableRef::join(
                 JoinType::Inner,
@@ -696,7 +651,7 @@ fn build_joins(
                 from_node.has_traversal_path,
             );
             if let Some(tc) = edge_type_cond {
-                join_cond = Expr::binary(Op::And, join_cond, tc);
+                join_cond = Expr::and(join_cond, tc);
             }
             result = TableRef::join(JoinType::Inner, result, edge, join_cond);
             result = TableRef::join(
@@ -738,7 +693,7 @@ fn source_join_cond(node: &str, edge: &str, dir: Direction, with_path: bool) -> 
         ),
     };
     if with_path {
-        Expr::binary(Op::And, edge_path_starts_with(edge, node), id_cond)
+        Expr::and(edge_path_starts_with(edge, node), id_cond)
     } else {
         id_cond
     }
@@ -756,16 +711,12 @@ fn source_join_cond_with_kind(
     with_path: bool,
 ) -> Expr {
     let id_and_kind = |id_col, kind_col| {
-        Expr::binary(
-            Op::And,
+        Expr::and(
             Expr::eq(
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
                 Expr::col(edge, id_col),
             ),
-            Expr::eq(
-                Expr::col(edge, kind_col),
-                Expr::param(ChType::String, entity),
-            ),
+            Expr::eq(Expr::col(edge, kind_col), Expr::string(entity)),
         )
     };
 
@@ -778,7 +729,7 @@ fn source_join_cond_with_kind(
         ),
     };
     if with_path {
-        Expr::binary(Op::And, edge_path_starts_with(edge, node), id_cond)
+        Expr::and(edge_path_starts_with(edge, node), id_cond)
     } else {
         id_cond
     }
@@ -809,7 +760,7 @@ fn target_join_cond(edge: &str, node: &str, dir: Direction, with_path: bool) -> 
         ),
     };
     if with_path {
-        Expr::binary(Op::And, edge_path_starts_with(edge, node), id_cond)
+        Expr::and(edge_path_starts_with(edge, node), id_cond)
     } else {
         id_cond
     }
@@ -833,12 +784,12 @@ fn build_full_where(
             conds.push(Expr::binary(
                 Op::Ge,
                 Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                Expr::param(ChType::Int64, r.start),
+                Expr::int(r.start),
             ));
             conds.push(Expr::binary(
                 Op::Le,
                 Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                Expr::param(ChType::Int64, r.end),
+                Expr::int(r.end),
             ));
         }
         for (prop, filter) in &node.filters {
@@ -857,7 +808,7 @@ fn build_full_where(
                 conds.push(Expr::binary(
                     Op::Ge,
                     Expr::col(alias, "depth"),
-                    Expr::param(ChType::Int64, rel.min_hops as i64),
+                    Expr::int(rel.min_hops as i64),
                 ));
             }
         }
@@ -867,21 +818,12 @@ fn build_full_where(
 }
 
 fn id_filter(table: &str, col: &str, ids: &[i64]) -> Option<Expr> {
-    match ids.len() {
-        0 => None,
-        1 => Some(Expr::eq(
-            Expr::col(table, col),
-            Expr::param(ChType::Int64, ids[0]),
-        )),
-        _ => {
-            let arr = Value::Array(ids.iter().map(|&id| Value::from(id)).collect());
-            Some(Expr::binary(
-                Op::In,
-                Expr::col(table, col),
-                Expr::param(ChType::Int64, arr),
-            ))
-        }
-    }
+    Expr::col_in(
+        table,
+        col,
+        ChType::Int64,
+        ids.iter().map(|&id| Value::from(id)).collect(),
+    )
 }
 
 fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
@@ -908,11 +850,7 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
 
 fn like_pattern(col: Expr, filter: &InputFilter, prefix: &str, suffix: &str) -> Expr {
     let s = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-    Expr::binary(
-        Op::Like,
-        col,
-        Expr::param(ChType::String, format!("{prefix}{s}{suffix}")),
-    )
+    Expr::binary(Op::Like, col, Expr::string(format!("{prefix}{s}{suffix}")))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
