@@ -1,5 +1,7 @@
 pub(crate) mod ast;
 pub(crate) mod codegen;
+#[allow(dead_code)] // v2 codegen is not wired in yet; used only from tests
+pub(crate) mod codegen_v2;
 pub(crate) mod input;
 pub(crate) mod lower;
 

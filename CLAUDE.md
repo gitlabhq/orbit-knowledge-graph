@@ -79,6 +79,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `cli` | Local `gkg index` and `gkg query` commands |
 | `simulator` | Fake data generation + query correctness evaluation |
 | `datalake-generator` | Synthetic GitLab data for load testing |
+| `llqm` | Substrait-based query IR with ergonomic builder and ClickHouse SQL codegen |
 
 ## Code quality
 
