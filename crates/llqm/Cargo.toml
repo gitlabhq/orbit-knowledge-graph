@@ -9,5 +9,9 @@ substrait = "0.62"
 prost-types = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+[[test]]
+name = "prototype_lowering"
+path = "test/prototype_lowering.rs"
+
 [lints]
 workspace = true
