@@ -698,11 +698,11 @@ mod tests {
         plan.extend_aggregate_groups(vec![(col("u", "id"), "_gkg_u_id".into())]);
 
         // Verify the aggregate now has 2 group-by expressions
-        if let Rel::Fetch(f) = &plan.root {
-            if let Rel::Aggregate(a) = &*f.input {
-                assert_eq!(a.group_by.len(), 2);
-                return;
-            }
+        if let Rel::Fetch(f) = &plan.root
+            && let Rel::Aggregate(a) = &*f.input
+        {
+            assert_eq!(a.group_by.len(), 2);
+            return;
         }
         panic!("expected Fetch(Aggregate(...))");
     }
