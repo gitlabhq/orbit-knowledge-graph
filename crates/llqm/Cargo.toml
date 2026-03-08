@@ -9,6 +9,5 @@ substrait = "0.62"
 prost-types = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
 [lints]
 workspace = true

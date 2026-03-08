@@ -6,15 +6,15 @@
 use std::collections::HashMap;
 
 use substrait::proto::{
-    self, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
-    Plan as SubstraitPlan, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
-    aggregate_rel,
+    self, aggregate_rel,
     expression::{self},
     extensions::{
-        SimpleExtensionDeclaration, SimpleExtensionUrn,
         simple_extension_declaration::{ExtensionFunction, MappingType},
+        SimpleExtensionDeclaration, SimpleExtensionUrn,
     },
-    fetch_rel, plan_rel, read_rel, rel, rel_common, set_rel, sort_field,
+    fetch_rel, plan_rel, read_rel, rel, rel_common, set_rel, sort_field, AggregateFunction,
+    AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument, Plan as SubstraitPlan,
+    PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
 };
 
 use crate::ir::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, SortDir};
@@ -124,15 +124,21 @@ impl TypedRel {
 // Extension function registry
 // ---------------------------------------------------------------------------
 
-struct FunctionRegistry {
+pub struct FunctionRegistry {
     urn: SimpleExtensionUrn,
     declarations: Vec<SimpleExtensionDeclaration>,
     anchors: HashMap<String, u32>,
     next_anchor: u32,
 }
 
+impl Default for FunctionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FunctionRegistry {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             urn: SimpleExtensionUrn {
                 extension_urn_anchor: 1,
@@ -146,7 +152,7 @@ impl FunctionRegistry {
 
     /// Return the anchor for `name`, registering it if new.
     #[allow(deprecated)] // extension_uri_reference is deprecated but required by prost
-    fn ensure(&mut self, name: &str) -> u32 {
+    pub fn ensure(&mut self, name: &str) -> u32 {
         if let Some(&anchor) = self.anchors.get(name) {
             return anchor;
         }
@@ -162,6 +168,134 @@ impl FunctionRegistry {
         });
         self.anchors.insert(name.into(), anchor);
         anchor
+    }
+
+    /// Reconstruct a registry from an existing plan's extensions.
+    pub fn from_plan(plan: &SubstraitPlan) -> Self {
+        let mut reg = Self::new();
+        for ext in &plan.extensions {
+            if let Some(MappingType::ExtensionFunction(f)) = &ext.mapping_type {
+                reg.anchors.insert(f.name.clone(), f.function_anchor);
+                reg.next_anchor = reg.next_anchor.max(f.function_anchor + 1);
+                reg.declarations.push(ext.clone());
+            }
+        }
+        if let Some(urn) = plan.extension_urns.first() {
+            reg.urn = urn.clone();
+        }
+        reg
+    }
+
+    pub fn into_declarations(self) -> (SimpleExtensionUrn, Vec<SimpleExtensionDeclaration>) {
+        (self.urn, self.declarations)
+    }
+}
+
+/// Resolve an `Expr` to a Substrait `Expression` using the given registry and schema.
+///
+/// This is the same logic as `PlanBuilder::resolve_expr` but usable outside
+/// the builder — e.g. by `Plan::inject_filter` for IR passes.
+pub fn resolve_expr(fns: &mut FunctionRegistry, expr: &Expr, schema: &Schema) -> Expression {
+    match expr {
+        Expr::Column { table, name } => {
+            let index = schema.find(table, name).unwrap_or_else(|| {
+                let available: Vec<String> = schema
+                    .columns
+                    .iter()
+                    .map(|c| format!("{}.{}", c.table_alias, c.name))
+                    .collect();
+                panic!("column {table}.{name} not found in schema; available: {available:?}")
+            });
+            make_field_ref(index)
+        }
+        Expr::Literal(lit) => Expression {
+            rex_type: Some(expression::RexType::Literal(to_substrait_literal(lit))),
+        },
+        Expr::Param { name, data_type } => {
+            let anchor = fns.ensure("__param");
+            make_scalar_fn(
+                anchor,
+                vec![
+                    make_literal_arg(&LiteralValue::String(name.clone())),
+                    make_literal_arg(&LiteralValue::String(data_type.to_string())),
+                ],
+                to_substrait_type(data_type.clone()),
+            )
+        }
+        Expr::BinaryOp { op, left, right } => {
+            let l = resolve_expr(fns, left, schema);
+            let r = resolve_expr(fns, right, schema);
+            let fn_name = binary_op_substrait_name(*op);
+            let anchor = fns.ensure(fn_name);
+            make_scalar_fn(
+                anchor,
+                vec![make_value_arg(l), make_value_arg(r)],
+                bool_type(),
+            )
+        }
+        Expr::UnaryOp { op, operand } => {
+            let inner = resolve_expr(fns, operand, schema);
+            let fn_name = unary_op_substrait_name(*op);
+            let anchor = fns.ensure(fn_name);
+            make_scalar_fn(anchor, vec![make_value_arg(inner)], bool_type())
+        }
+        Expr::FuncCall { name, args } => {
+            let resolved_args: Vec<FunctionArgument> = args
+                .iter()
+                .map(|a| make_value_arg(resolve_expr(fns, a, schema)))
+                .collect();
+            let anchor = fns.ensure(name);
+            make_scalar_fn(anchor, resolved_args, string_type())
+        }
+        Expr::Cast { expr, target_type } => {
+            let inner = resolve_expr(fns, expr, schema);
+            Expression {
+                rex_type: Some(expression::RexType::Cast(Box::new(expression::Cast {
+                    input: Some(Box::new(inner)),
+                    r#type: Some(to_substrait_type(target_type.clone())),
+                    failure_behavior: expression::cast::FailureBehavior::ThrowException as i32,
+                }))),
+            }
+        }
+        Expr::IfThen { ifs, else_expr } => {
+            let clauses: Vec<expression::if_then::IfClause> = ifs
+                .iter()
+                .map(|(cond, then)| expression::if_then::IfClause {
+                    r#if: Some(resolve_expr(fns, cond, schema)),
+                    then: Some(resolve_expr(fns, then, schema)),
+                })
+                .collect();
+            let else_resolved = else_expr
+                .as_ref()
+                .map(|e| Box::new(resolve_expr(fns, e, schema)));
+            Expression {
+                rex_type: Some(expression::RexType::IfThen(Box::new(expression::IfThen {
+                    ifs: clauses,
+                    r#else: else_resolved,
+                }))),
+            }
+        }
+        Expr::InList { expr, list } => {
+            let value = resolve_expr(fns, expr, schema);
+            let options: Vec<Expression> =
+                list.iter().map(|e| resolve_expr(fns, e, schema)).collect();
+            Expression {
+                rex_type: Some(expression::RexType::SingularOrList(Box::new(
+                    expression::SingularOrList {
+                        value: Some(Box::new(value)),
+                        options,
+                    },
+                ))),
+            }
+        }
+        Expr::Raw(sql) => {
+            let anchor = fns.ensure("__raw_sql");
+            make_scalar_fn(
+                anchor,
+                vec![make_literal_arg(&LiteralValue::String(sql.clone()))],
+                string_type(),
+            )
+        }
     }
 }
 
@@ -192,6 +326,212 @@ impl Plan {
     /// Consume into the raw Substrait plan.
     pub fn into_substrait_plan(self) -> SubstraitPlan {
         self.inner
+    }
+
+    /// Get the root `Rel` of the plan.
+    pub fn root_rel(&self) -> Option<&Rel> {
+        self.inner
+            .relations
+            .first()
+            .and_then(|pr| match &pr.rel_type {
+                Some(plan_rel::RelType::Root(root)) => root.input.as_ref(),
+                _ => None,
+            })
+    }
+
+    /// Get a mutable reference to the root `Rel`.
+    fn root_rel_mut(&mut self) -> Option<&mut Rel> {
+        self.inner
+            .relations
+            .first_mut()
+            .and_then(|pr| match &mut pr.rel_type {
+                Some(plan_rel::RelType::Root(root)) => root.input.as_mut(),
+                _ => None,
+            })
+    }
+
+    /// Collect `(table_name, alias)` pairs from all ReadRels whose table name
+    /// satisfies `predicate`. Walks the full Substrait tree.
+    pub fn filterable_aliases(&self, predicate: fn(&str) -> bool) -> Vec<(String, String)> {
+        let mut aliases = Vec::new();
+        if let Some(root) = self.root_rel() {
+            walk_rel_for_aliases(root, predicate, &mut aliases);
+        }
+        aliases
+    }
+
+    /// Inject a filter expression on top of the root rel.
+    ///
+    /// Resolves the `Expr` using the plan's existing function registry.
+    /// Column references in the filter should use `Expr::Raw("alias.col")`
+    /// since positional schema resolution doesn't apply to finalized plans.
+    /// After injection, the plan's extensions are updated with any new
+    /// function declarations (e.g. `startsWith`).
+    pub fn inject_filter(&mut self, condition: Expr) {
+        let schema = collect_schema_from_rel(self.root_rel().expect("plan has a root rel"));
+        let mut fns = FunctionRegistry::from_plan(&self.inner);
+        let resolved = resolve_expr(&mut fns, &condition, &schema);
+
+        // Wrap root rel with FilterRel
+        let root_rel = self.root_rel_mut().expect("plan has a root rel");
+        let existing = std::mem::take(root_rel);
+        *root_rel = Rel {
+            rel_type: Some(rel::RelType::Filter(Box::new(FilterRel {
+                input: Some(Box::new(existing)),
+                condition: Some(Box::new(resolved)),
+                ..Default::default()
+            }))),
+        };
+
+        // Update extensions with any new functions registered
+        let (urn, declarations) = fns.into_declarations();
+        self.inner.extension_urns = vec![urn];
+        self.inner.extensions = declarations;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Substrait tree walking (for Plan mutation API)
+// ---------------------------------------------------------------------------
+
+fn walk_rel_for_aliases(
+    rel: &Rel,
+    predicate: fn(&str) -> bool,
+    aliases: &mut Vec<(String, String)>,
+) {
+    match &rel.rel_type {
+        Some(rel::RelType::Read(read)) => {
+            if let Some((table, alias)) = extract_table_and_alias(read)
+                && predicate(&table)
+            {
+                aliases.push((table, alias));
+            }
+        }
+        Some(rel::RelType::Filter(f)) => {
+            if let Some(input) = &f.input {
+                walk_rel_for_aliases(input, predicate, aliases);
+            }
+        }
+        Some(rel::RelType::Project(p)) => {
+            if let Some(input) = &p.input {
+                walk_rel_for_aliases(input, predicate, aliases);
+            }
+        }
+        Some(rel::RelType::Join(j)) => {
+            if let Some(left) = &j.left {
+                walk_rel_for_aliases(left, predicate, aliases);
+            }
+            if let Some(right) = &j.right {
+                walk_rel_for_aliases(right, predicate, aliases);
+            }
+        }
+        Some(rel::RelType::Fetch(f)) => {
+            if let Some(input) = &f.input {
+                walk_rel_for_aliases(input, predicate, aliases);
+            }
+        }
+        Some(rel::RelType::Sort(s)) => {
+            if let Some(input) = &s.input {
+                walk_rel_for_aliases(input, predicate, aliases);
+            }
+        }
+        Some(rel::RelType::Aggregate(a)) => {
+            if let Some(input) = &a.input {
+                walk_rel_for_aliases(input, predicate, aliases);
+            }
+        }
+        // Don't recurse into SetRel (UNION ALL) — arms are derived tables
+        // secured transitively through join conditions.
+        Some(rel::RelType::Set(_)) => {}
+        _ => {}
+    }
+}
+
+/// Extract `(table_name, alias)` from a ReadRel's metadata and NamedTable.
+fn extract_table_and_alias(read: &ReadRel) -> Option<(String, String)> {
+    let alias = read
+        .advanced_extension
+        .as_ref()
+        .and_then(|adv| adv.optimization.first())
+        .and_then(|opt| serde_json::from_slice::<serde_json::Value>(&opt.value).ok())
+        .and_then(|meta| meta.get("alias").and_then(|v| v.as_str()).map(String::from))?;
+
+    let table = match &read.read_type {
+        Some(read_rel::ReadType::NamedTable(nt)) => nt.names.first().cloned(),
+        _ => None,
+    }?;
+
+    Some((table, alias))
+}
+
+/// Build a synthetic schema from all ReadRels in the tree.
+/// Used by `inject_filter` to resolve column references in filter expressions.
+fn collect_schema_from_rel(rel: &Rel) -> Schema {
+    let mut columns = Vec::new();
+    collect_schema_walk(rel, &mut columns);
+    Schema { columns }
+}
+
+fn collect_schema_walk(rel: &Rel, columns: &mut Vec<SchemaColumn>) {
+    match &rel.rel_type {
+        Some(rel::RelType::Read(read)) => {
+            if let Some((_, alias)) = extract_table_and_alias(read)
+                && let Some(base) = &read.base_schema
+            {
+                let types = base
+                    .r#struct
+                    .as_ref()
+                    .map(|s| &s.types)
+                    .cloned()
+                    .unwrap_or_default();
+                for (i, name) in base.names.iter().enumerate() {
+                    let data_type = types
+                        .get(i)
+                        .and_then(crate::ir::substrait::substrait_type_to_data_type)
+                        .unwrap_or(DataType::String);
+                    columns.push(SchemaColumn {
+                        table_alias: alias.clone(),
+                        name: name.clone(),
+                        data_type,
+                    });
+                }
+            }
+        }
+        Some(rel::RelType::Filter(f)) => {
+            if let Some(input) = &f.input {
+                collect_schema_walk(input, columns);
+            }
+        }
+        Some(rel::RelType::Project(p)) => {
+            if let Some(input) = &p.input {
+                collect_schema_walk(input, columns);
+            }
+        }
+        Some(rel::RelType::Join(j)) => {
+            if let Some(left) = &j.left {
+                collect_schema_walk(left, columns);
+            }
+            if let Some(right) = &j.right {
+                collect_schema_walk(right, columns);
+            }
+        }
+        Some(rel::RelType::Fetch(f)) => {
+            if let Some(input) = &f.input {
+                collect_schema_walk(input, columns);
+            }
+        }
+        Some(rel::RelType::Sort(s)) => {
+            if let Some(input) = &s.input {
+                collect_schema_walk(input, columns);
+            }
+        }
+        Some(rel::RelType::Aggregate(a)) => {
+            if let Some(input) = &a.input {
+                collect_schema_walk(input, columns);
+            }
+        }
+        Some(rel::RelType::Set(_)) => {}
+        _ => {}
     }
 }
 
@@ -599,119 +939,10 @@ impl PlanBuilder {
         plan
     }
 
-    // -- Expression resolution ----------------------------------------------
+    // -- Expression resolution (delegates to standalone fn) ------------------
 
     fn resolve_expr(&mut self, expr: &Expr, schema: &Schema) -> Expression {
-        match expr {
-            Expr::Column { table, name } => {
-                let index = schema.find(table, name).unwrap_or_else(|| {
-                    let available: Vec<String> = schema
-                        .columns
-                        .iter()
-                        .map(|c| format!("{}.{}", c.table_alias, c.name))
-                        .collect();
-                    panic!("column {table}.{name} not found in schema; available: {available:?}")
-                });
-                make_field_ref(index)
-            }
-
-            Expr::Literal(lit) => Expression {
-                rex_type: Some(expression::RexType::Literal(to_substrait_literal(lit))),
-            },
-
-            Expr::Param { name, data_type } => {
-                let anchor = self.functions.ensure("__param");
-                make_scalar_fn(
-                    anchor,
-                    vec![
-                        make_literal_arg(&LiteralValue::String(name.clone())),
-                        make_literal_arg(&LiteralValue::String(data_type.to_string())),
-                    ],
-                    to_substrait_type(data_type.clone()),
-                )
-            }
-
-            Expr::BinaryOp { op, left, right } => {
-                let l = self.resolve_expr(left, schema);
-                let r = self.resolve_expr(right, schema);
-                let fn_name = binary_op_substrait_name(*op);
-                let anchor = self.functions.ensure(fn_name);
-                make_scalar_fn(
-                    anchor,
-                    vec![make_value_arg(l), make_value_arg(r)],
-                    bool_type(),
-                )
-            }
-
-            Expr::UnaryOp { op, operand } => {
-                let inner = self.resolve_expr(operand, schema);
-                let fn_name = unary_op_substrait_name(*op);
-                let anchor = self.functions.ensure(fn_name);
-                make_scalar_fn(anchor, vec![make_value_arg(inner)], bool_type())
-            }
-
-            Expr::FuncCall { name, args } => {
-                let resolved_args: Vec<FunctionArgument> = args
-                    .iter()
-                    .map(|a| make_value_arg(self.resolve_expr(a, schema)))
-                    .collect();
-                let anchor = self.functions.ensure(name);
-                make_scalar_fn(anchor, resolved_args, string_type())
-            }
-
-            Expr::Cast { expr, target_type } => {
-                let inner = self.resolve_expr(expr, schema);
-                Expression {
-                    rex_type: Some(expression::RexType::Cast(Box::new(expression::Cast {
-                        input: Some(Box::new(inner)),
-                        r#type: Some(to_substrait_type(target_type.clone())),
-                        failure_behavior: expression::cast::FailureBehavior::ThrowException as i32,
-                    }))),
-                }
-            }
-
-            Expr::IfThen { ifs, else_expr } => {
-                let clauses: Vec<expression::if_then::IfClause> = ifs
-                    .iter()
-                    .map(|(cond, then)| expression::if_then::IfClause {
-                        r#if: Some(self.resolve_expr(cond, schema)),
-                        then: Some(self.resolve_expr(then, schema)),
-                    })
-                    .collect();
-                let else_resolved = else_expr
-                    .as_ref()
-                    .map(|e| Box::new(self.resolve_expr(e, schema)));
-                Expression {
-                    rex_type: Some(expression::RexType::IfThen(Box::new(expression::IfThen {
-                        ifs: clauses,
-                        r#else: else_resolved,
-                    }))),
-                }
-            }
-
-            Expr::InList { expr, list } => {
-                let value = self.resolve_expr(expr, schema);
-                let options: Vec<Expression> =
-                    list.iter().map(|e| self.resolve_expr(e, schema)).collect();
-                Expression {
-                    rex_type: Some(expression::RexType::SingularOrList(Box::new(
-                        expression::SingularOrList {
-                            value: Some(Box::new(value)),
-                            options,
-                        },
-                    ))),
-                }
-            }
-
-            Expr::Raw(sql) => {
-                let anchor = self.functions.ensure("__raw_sql");
-                make_scalar_fn(
-                    anchor,
-                    vec![make_literal_arg(&LiteralValue::String(sql.clone()))],
-                    string_type(),
-                )
-            }
-        }
+        resolve_expr(&mut self.functions, expr, schema)
     }
 }
 
