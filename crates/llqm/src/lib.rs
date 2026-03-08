@@ -2,6 +2,7 @@ pub mod backend;
 pub mod ir;
 pub mod pass;
 pub mod pipeline;
+pub mod v2;
 
 // Re-export core IR types at crate root for ergonomic use.
 // Downstream crates can use `llqm::expr`, `llqm::plan`, etc. without
