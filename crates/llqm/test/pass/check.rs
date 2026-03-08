@@ -9,9 +9,9 @@
 //! anchors and `__raw_sql` wrappers, this one directly pattern-matches on
 //! `Expr::Column` and `Expr::FuncCall`.
 
-use super::security::{GL_TABLE_PREFIX, SKIP_TABLES, SecurityContext, TRAVERSAL_PATH_COLUMN};
+use super::security::{SecurityContext, GL_TABLE_PREFIX, SKIP_TABLES, TRAVERSAL_PATH_COLUMN};
 use llqm::ir::expr::Expr;
-use llqm::ir::plan::{Plan, Rel, RelKind};
+use llqm::ir::plan::{Plan, RelKind};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CheckError {
@@ -33,7 +33,21 @@ pub fn check_plan(plan: &Plan, ctx: &SecurityContext) -> Result<(), CheckError> 
     let aliases = plan.filterable_aliases(should_check);
 
     for (_, alias) in &aliases {
-        if !rel_has_valid_filter(&plan.root, alias, ctx) {
+        let mut found = false;
+        plan.root.walk(&mut |r| {
+            if found {
+                return false;
+            }
+            if let RelKind::Filter { condition } = &r.kind {
+                if expr_has_valid_starts_with(condition, alias, ctx) {
+                    found = true;
+                    return false;
+                }
+            }
+            // Don't recurse into UnionAll arms
+            !matches!(r.kind, RelKind::UnionAll { .. })
+        });
+        if !found {
             return Err(CheckError::MissingFilter {
                 alias: alias.clone(),
             });
@@ -49,32 +63,6 @@ pub fn check_plan(plan: &Plan, ctx: &SecurityContext) -> Result<(), CheckError> 
 
 fn should_check(table: &str) -> bool {
     table.starts_with(GL_TABLE_PREFIX) && !SKIP_TABLES.contains(&table)
-}
-
-// ---------------------------------------------------------------------------
-// Rel-tree walking
-// ---------------------------------------------------------------------------
-
-fn rel_has_valid_filter(rel: &Rel, alias: &str, ctx: &SecurityContext) -> bool {
-    match &rel.kind {
-        RelKind::Filter { condition } => {
-            if expr_has_valid_starts_with(condition, alias, ctx) {
-                return true;
-            }
-            rel_has_valid_filter(&rel.inputs[0], alias, ctx)
-        }
-        RelKind::Project { .. }
-        | RelKind::Fetch { .. }
-        | RelKind::Sort { .. }
-        | RelKind::Aggregate { .. }
-        | RelKind::Subquery { .. }
-        | RelKind::Distinct => rel_has_valid_filter(&rel.inputs[0], alias, ctx),
-        RelKind::Join { .. } => {
-            rel_has_valid_filter(&rel.inputs[0], alias, ctx)
-                || rel_has_valid_filter(&rel.inputs[1], alias, ctx)
-        }
-        RelKind::Read { .. } | RelKind::UnionAll { .. } => false,
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,10 +154,9 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let plan = make_plan("gl_project", "p");
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -178,10 +165,9 @@ mod tests {
         let mut plan = make_plan("gl_project", "p");
         plan.inject_filter(col("p", TRAVERSAL_PATH_COLUMN).starts_with(string("99/")));
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]

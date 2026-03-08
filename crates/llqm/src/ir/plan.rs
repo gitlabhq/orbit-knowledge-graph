@@ -492,19 +492,16 @@ fn walk_rel_for_aliases(
     predicate: &impl Fn(&str) -> bool,
     aliases: &mut Vec<(String, String)>,
 ) {
-    match &rel.kind {
+    rel.walk(&mut |r| match &r.kind {
         RelKind::Read { table, alias, .. } if table != RAW_FROM_TAG && predicate(table) => {
             aliases.push((table.clone(), alias.clone()));
+            true
         }
         // Don't recurse into UnionAll — arms are derived tables
         // secured transitively through join conditions.
-        RelKind::UnionAll { .. } => {}
-        _ => {
-            for child in &rel.inputs {
-                walk_rel_for_aliases(child, predicate, aliases);
-            }
-        }
-    }
+        RelKind::UnionAll { .. } => false,
+        _ => true,
+    });
 }
 
 #[cfg(test)]
