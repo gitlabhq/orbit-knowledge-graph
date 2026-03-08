@@ -1,0 +1,195 @@
+# Minimal GitLab for local GKG development via Caproni
+# ~4GB RAM target. PG with logical replication for Siphon.
+# Stock CNG images from registry (no local build needed).
+
+global:
+  hosts:
+    domain: gitlab.test
+    https: true
+    gitlab:
+      name: gitlab.test
+      https: true
+
+  ingress:
+    configureCertmanager: false
+    class: nginx
+    tls:
+      enabled: true
+
+  kas:
+    enabled: false
+
+  psql:
+    serviceName: postgresql
+    password:
+      secret: gitlab-postgresql-password
+      key: postgresql-password
+
+  gitaly:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 200Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+
+  extraEnv:
+    SKIP_CLICKHOUSE_SCHEMA_VERSION_CHECK: "YesReally"
+    KNOWLEDGE_GRAPH_GRPC_ENDPOINT: "dns:///gkg-webserver.default.svc.cluster.local:50054"
+    GITLAB_LICENSE_MODE: "test"
+    CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"
+
+  appConfig:
+    enableUsagePing: false
+    enableSeatLink: false
+    lfs:
+      bucket: gitlab-lfs
+    packages:
+      enabled: false
+    gitlab_kas:
+      enabled: false
+
+nginx-ingress:
+  enabled: true
+
+prometheus:
+  install: false
+
+gitlab-runner:
+  install: false
+
+registry:
+  enabled: false
+
+installCertmanager: false
+
+gitlab:
+  gitlab-pages:
+    enabled: false
+
+  webservice:
+    replicaCount: 1
+    minReplicas: 1
+    maxReplicas: 1
+    workerProcesses: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 768Mi
+      limits:
+        cpu: 750m
+        memory: 2.5Gi
+
+  sidekiq:
+    replicaCount: 1
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 384Mi
+      limits:
+        cpu: 300m
+        memory: 2Gi
+
+  gitlab-shell:
+    replicaCount: 1
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 96Mi
+
+  gitaly:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 200Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+    persistence:
+      size: 5Gi
+
+  gitlab-exporter:
+    enabled: false
+
+  toolbox:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 2Gi
+
+  migrations:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 1Gi
+      limits:
+        cpu: 1
+        memory: 3Gi
+
+postgresql:
+  install: true
+  auth:
+    username: gitlab
+    database: gitlabhq_production
+  primary:
+    extendedConfiguration: |
+      wal_level = logical
+      max_replication_slots = 4
+      max_wal_senders = 4
+    persistence:
+      size: 2Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 512Mi
+      limits:
+        cpu: 250m
+        memory: 1024Mi
+    initdb:
+      scripts:
+        init-extensions.sql: |
+          CREATE EXTENSION IF NOT EXISTS pg_trgm;
+          CREATE EXTENSION IF NOT EXISTS btree_gist;
+          CREATE EXTENSION IF NOT EXISTS plpgsql;
+        init-replication.sql: |
+          ALTER USER gitlab REPLICATION;
+  metrics:
+    enabled: false
+
+redis:
+  install: true
+  master:
+    persistence:
+      size: 1Gi
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  metrics:
+    enabled: false
+
+minio:
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 256Mi

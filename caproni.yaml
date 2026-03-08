@@ -1,0 +1,66 @@
+version: 2
+
+cluster:
+  driver: colima
+  network:
+    hostname: gitlab.test
+    additional_hostnames:
+      - gkg.test
+  colima:
+    memory: 16GiB
+    cores: 4
+
+repositories:
+  gitlab:
+    repository: https://gitlab.com/gitlab-org/gitlab.git
+    directory: /Users/angelo.rivera/gitlab/gdk/gitlab
+
+deployers:
+  gitlab:
+    type: helm
+    helm:
+      namespace: gitlab
+      values_file: ./helm/gitlab-values.yaml
+      repository:
+        name: gitlab
+        url: https://charts.gitlab.io
+      release:
+        name: gitlab
+        chart: gitlab/gitlab
+
+reloaders:
+  gitlab:
+    type: mirror
+    repository: gitlab
+    edit_mode: true
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gitlab-webservice-default
+        container: webservice
+      network:
+        outgoing:
+          ignore_localhost: true
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/etc/gitlab"
+          - "^/etc/gitlab-secrets"
+          - "^/srv/gitlab-shell"
+          - "^/srv/gitlab/config/database\\.yml"
+          - "^/srv/gitlab/config/cable\\.yml"
+          - "^/srv/gitlab/config/resque\\.yml"
+          - "^/srv/gitlab/config/redis\\."
+          - "^/srv/gitlab/config/secrets\\.yml"
+          - "^/srv/gitlab/config/gitlab\\.yml"
+      edit_mode_processes:
+        workhorse:
+          command: workhorse/gitlab-workhorse -developmentMode -documentRoot public -listenAddr 0.0.0.0:8181 -authBackend http://localhost:8080
+          port: 8181
+        rails:
+          command: env KNOWLEDGE_GRAPH_GRPC_ENDPOINT=localhost:50054 bundle exec puma -C config/puma.rb -b tcp://0.0.0.0:8080
+          port: 8080
+        vite:
+          command: sh -c 'lsof -ti:3038 | xargs kill -9 2>/dev/null; sleep 1; VITE_RUBY_PORT=3038 VITE_RUBY_HOST=127.0.0.1 exec node_modules/.bin/vite --mode development'
+          port: 3038

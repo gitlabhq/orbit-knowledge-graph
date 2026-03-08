@@ -1,0 +1,191 @@
+# Caproni local dev values — hybrid mode
+#
+# Host (GDK): PostgreSQL, ClickHouse
+# In-cluster: NATS, Siphon, GKG server
+# Siphon replicates from GDK PG via host.docker.internal (socat proxy)
+
+gcp:
+  project: ""
+  region: ""
+  cluster: ""
+
+secrets:
+  enabled: false
+
+gitlab-runner:
+  enabled: false
+
+postgres:
+  host: host.docker.internal
+  port: 5432
+  database: gitlabhq_development
+  user: gitlab
+
+clickhouse:
+  datalake:
+    host: host.docker.internal
+    port: 8123
+    nativePort: 9001
+    database: gitlab_clickhouse_development
+    user: default
+    ssl: false
+  graph:
+    host: host.docker.internal
+    port: 8123
+    database: gkg_development
+    user: default
+    ssl: false
+
+nats:
+  enabled: true
+  streamName: siphon_stream_main_db
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 1Gi
+  container:
+    image:
+      repository: nats
+      tag: "2.11-alpine"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  natsBox:
+    enabled: false
+
+producer:
+  enabled: true
+  applicationIdentifier: "gkg-caproni-producer"
+  publicationName: "siphon_publication_gdk"
+  slotName: "siphon_slot_gdk"
+  advisoryLockId: 144324
+  maxColumnSizeBytes: 8000000
+  memoryBufferSize: 104857600
+  initialDataSnapshotThreadsPerTable: 3
+  snapshotMemoryBufferSize: 10485760
+  logLevel: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+consumer:
+  enabled: true
+  applicationIdentifier: "gkg-caproni-consumer"
+  replicas: 1
+  logLevel: info
+  insertBatchSize: 10000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+tableMappings:
+  - table: namespaces
+    schema: public
+    subject: namespaces
+    target: siphon_namespaces
+  - table: projects
+    schema: public
+    subject: projects
+    target: siphon_projects
+  - table: issues
+    schema: public
+    subject: issues
+    target: siphon_issues
+  - table: merge_requests
+    schema: public
+    subject: merge_requests
+    target: siphon_merge_requests
+  - table: users
+    schema: public
+    subject: users
+    target: siphon_users
+  - table: members
+    schema: public
+    subject: members
+    target: siphon_members
+  - table: labels
+    schema: public
+    subject: labels
+    target: siphon_labels
+  - table: milestones
+    schema: public
+    subject: milestones
+    target: siphon_milestones
+  - table: notes
+    schema: public
+    subject: notes
+    target: siphon_notes
+  - table: knowledge_graph_enabled_namespaces
+    schema: public
+    subject: knowledge_graph_enabled_namespaces
+    target: siphon_knowledge_graph_enabled_namespaces
+  - table: namespace_details
+    schema: public
+    subject: namespace_details
+    target: siphon_namespace_details
+
+gkgServer:
+  logLevel: "info,gkg_server=debug"
+  image:
+    repository: gkg-server
+    tag: dev
+    pullPolicy: Never
+  dispatcher:
+    enabled: false
+  indexer:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  webserver:
+    enabled: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  healthCheck:
+    enabled: true
+    replicas: 1
+    namespace: default
+    services:
+      - gkg-indexer
+      - gkg-webserver
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+gitlab:
+  enabled: true
+  baseUrl: "http://gitlab-webservice-default.gitlab.svc.cluster.local:8181"
+
+otel:
+  enabled: false
