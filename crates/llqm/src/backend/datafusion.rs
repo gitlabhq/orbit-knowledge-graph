@@ -11,8 +11,11 @@ pub use substrait::EncodeError;
 
 pub struct DataFusionBackend;
 
-impl DataFusionBackend {
-    pub fn emit(&self, plan: &Plan) -> Result<::substrait::proto::Plan, EncodeError> {
+impl crate::pipeline::Backend for DataFusionBackend {
+    type Output = ::substrait::proto::Plan;
+    type Error = EncodeError;
+
+    fn emit(&self, plan: &Plan) -> Result<Self::Output, Self::Error> {
         substrait::encode(plan)
     }
 }
@@ -22,6 +25,7 @@ mod tests {
     use super::*;
     use crate::ir::expr::*;
     use crate::ir::plan::{CteDef, Rel};
+    use crate::pipeline::Backend;
 
     #[test]
     fn passthrough_returns_substrait_plan() {

@@ -218,10 +218,10 @@ pub fn encode(plan: &Plan) -> Result<proto::Plan, EncodeError> {
         return Err(EncodeError::UnsupportedCtes);
     }
 
-    let mut ctx = EncodeContext::new();
-    let root_rel = encode_rel(&mut ctx, &plan.root)?;
+    let mut fns = FunctionRegistry::new();
+    let root_rel = encode_rel(&mut fns, &plan.root)?;
 
-    let (urn, declarations) = ctx.functions.into_declarations();
+    let (urn, declarations) = fns.into_declarations();
 
     #[allow(deprecated)]
     Ok(proto::Plan {
@@ -239,24 +239,9 @@ pub fn encode(plan: &Plan) -> Result<proto::Plan, EncodeError> {
 }
 
 // ---------------------------------------------------------------------------
-// Encode context (function registry + schema tracking)
+// Function registry for Substrait extension declarations
 // ---------------------------------------------------------------------------
 
-struct EncodeContext {
-    functions: FunctionRegistry,
-}
-
-impl EncodeContext {
-    fn new() -> Self {
-        Self {
-            functions: FunctionRegistry::new(),
-        }
-    }
-}
-
-/// Minimal function registry — identical to the one in `ir/plan.rs` but
-/// private to this module. We don't reuse `ir::plan::FunctionRegistry`
-/// to avoid coupling encode to the plan layer.
 struct FunctionRegistry {
     urn: proto::extensions::SimpleExtensionUrn,
     declarations: Vec<proto::extensions::SimpleExtensionDeclaration>,
@@ -364,17 +349,17 @@ fn schema_from_read(read: &v2::ReadRel) -> Schema {
 // Rel encoding
 // ---------------------------------------------------------------------------
 
-fn encode_rel(ctx: &mut EncodeContext, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+fn encode_rel(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
     match rel {
         v2::Rel::Read(r) => encode_read(r),
-        v2::Rel::Filter(f) => encode_filter(ctx, f),
-        v2::Rel::Project(p) => encode_project(ctx, p),
-        v2::Rel::Join(j) => encode_join(ctx, j),
-        v2::Rel::Sort(s) => encode_sort(ctx, s),
-        v2::Rel::Fetch(f) => encode_fetch(ctx, f),
-        v2::Rel::Aggregate(a) => encode_aggregate(ctx, a),
-        v2::Rel::UnionAll(u) => encode_union_all(ctx, u),
-        v2::Rel::Subquery(s) => encode_subquery(ctx, s),
+        v2::Rel::Filter(f) => encode_filter(fns, f),
+        v2::Rel::Project(p) => encode_project(fns, p),
+        v2::Rel::Join(j) => encode_join(fns, j),
+        v2::Rel::Sort(s) => encode_sort(fns, s),
+        v2::Rel::Fetch(f) => encode_fetch(fns, f),
+        v2::Rel::Aggregate(a) => encode_aggregate(fns, a),
+        v2::Rel::UnionAll(u) => encode_union_all(fns, u),
+        v2::Rel::Subquery(s) => encode_subquery(fns, s),
     }
 }
 
@@ -412,10 +397,10 @@ fn encode_read(read: &v2::ReadRel) -> Result<Rel, EncodeError> {
     })
 }
 
-fn encode_filter(ctx: &mut EncodeContext, filter: &v2::FilterRel) -> Result<Rel, EncodeError> {
-    let input = encode_rel(ctx, &filter.input)?;
+fn encode_filter(fns: &mut FunctionRegistry, filter: &v2::FilterRel) -> Result<Rel, EncodeError> {
+    let input = encode_rel(fns, &filter.input)?;
     let schema = collect_schema(&filter.input);
-    let condition = encode_expr(ctx, &filter.condition, &schema)?;
+    let condition = encode_expr(fns, &filter.condition, &schema)?;
 
     Ok(Rel {
         rel_type: Some(rel::RelType::Filter(Box::new(FilterRel {
@@ -426,15 +411,18 @@ fn encode_filter(ctx: &mut EncodeContext, filter: &v2::FilterRel) -> Result<Rel,
     })
 }
 
-fn encode_project(ctx: &mut EncodeContext, project: &v2::ProjectRel) -> Result<Rel, EncodeError> {
-    let input = encode_rel(ctx, &project.input)?;
+fn encode_project(
+    fns: &mut FunctionRegistry,
+    project: &v2::ProjectRel,
+) -> Result<Rel, EncodeError> {
+    let input = encode_rel(fns, &project.input)?;
     let schema = collect_schema(&project.input);
     let input_count = schema.columns.len();
 
     let expressions: Vec<Expression> = project
         .expressions
         .iter()
-        .map(|(e, _)| encode_expr(ctx, e, &schema))
+        .map(|(e, _)| encode_expr(fns, e, &schema))
         .collect::<Result<_, _>>()?;
 
     let emit = (input_count..input_count + project.expressions.len())
@@ -456,13 +444,13 @@ fn encode_project(ctx: &mut EncodeContext, project: &v2::ProjectRel) -> Result<R
     })
 }
 
-fn encode_join(ctx: &mut EncodeContext, join: &v2::JoinRel) -> Result<Rel, EncodeError> {
-    let left = encode_rel(ctx, &join.left)?;
-    let right = encode_rel(ctx, &join.right)?;
+fn encode_join(fns: &mut FunctionRegistry, join: &v2::JoinRel) -> Result<Rel, EncodeError> {
+    let left = encode_rel(fns, &join.left)?;
+    let right = encode_rel(fns, &join.right)?;
     let left_schema = collect_schema(&join.left);
     let right_schema = collect_schema(&join.right);
     let merged = Schema::merge(&left_schema, &right_schema);
-    let condition = encode_expr(ctx, &join.condition, &merged)?;
+    let condition = encode_expr(fns, &join.condition, &merged)?;
 
     Ok(Rel {
         rel_type: Some(rel::RelType::Join(Box::new(proto::JoinRel {
@@ -475,15 +463,15 @@ fn encode_join(ctx: &mut EncodeContext, join: &v2::JoinRel) -> Result<Rel, Encod
     })
 }
 
-fn encode_sort(ctx: &mut EncodeContext, sort: &v2::SortRel) -> Result<Rel, EncodeError> {
-    let input = encode_rel(ctx, &sort.input)?;
+fn encode_sort(fns: &mut FunctionRegistry, sort: &v2::SortRel) -> Result<Rel, EncodeError> {
+    let input = encode_rel(fns, &sort.input)?;
     let schema = collect_schema(&sort.input);
 
     let sorts: Vec<proto::SortField> = sort
         .sorts
         .iter()
         .map(|s| {
-            let expr = encode_expr(ctx, &s.expr, &schema)?;
+            let expr = encode_expr(fns, &s.expr, &schema)?;
             Ok(proto::SortField {
                 expr: Some(expr),
                 sort_kind: Some(sort_field::SortKind::Direction(match s.direction {
@@ -506,8 +494,8 @@ fn encode_sort(ctx: &mut EncodeContext, sort: &v2::SortRel) -> Result<Rel, Encod
 }
 
 #[allow(deprecated)]
-fn encode_fetch(ctx: &mut EncodeContext, fetch: &v2::FetchRel) -> Result<Rel, EncodeError> {
-    let input = encode_rel(ctx, &fetch.input)?;
+fn encode_fetch(fns: &mut FunctionRegistry, fetch: &v2::FetchRel) -> Result<Rel, EncodeError> {
+    let input = encode_rel(fns, &fetch.input)?;
 
     Ok(Rel {
         rel_type: Some(rel::RelType::Fetch(Box::new(FetchRel {
@@ -522,14 +510,17 @@ fn encode_fetch(ctx: &mut EncodeContext, fetch: &v2::FetchRel) -> Result<Rel, En
 }
 
 #[allow(deprecated)]
-fn encode_aggregate(ctx: &mut EncodeContext, agg: &v2::AggregateRel) -> Result<Rel, EncodeError> {
-    let input = encode_rel(ctx, &agg.input)?;
+fn encode_aggregate(
+    fns: &mut FunctionRegistry,
+    agg: &v2::AggregateRel,
+) -> Result<Rel, EncodeError> {
+    let input = encode_rel(fns, &agg.input)?;
     let schema = collect_schema(&agg.input);
 
     let grouping_expressions: Vec<Expression> = agg
         .group_by
         .iter()
-        .map(|e| encode_expr(ctx, e, &schema))
+        .map(|e| encode_expr(fns, e, &schema))
         .collect::<Result<_, _>>()?;
 
     let expression_references: Vec<u32> = (0..agg.group_by.len() as u32).collect();
@@ -537,7 +528,7 @@ fn encode_aggregate(ctx: &mut EncodeContext, agg: &v2::AggregateRel) -> Result<R
     let measures: Vec<aggregate_rel::Measure> = agg
         .measures
         .iter()
-        .map(|m| encode_measure(ctx, m, &schema))
+        .map(|m| encode_measure(fns, m, &schema))
         .collect::<Result<_, _>>()?;
 
     let grouping = aggregate_rel::Grouping {
@@ -558,20 +549,20 @@ fn encode_aggregate(ctx: &mut EncodeContext, agg: &v2::AggregateRel) -> Result<R
 
 #[allow(deprecated)]
 fn encode_measure(
-    ctx: &mut EncodeContext,
+    fns: &mut FunctionRegistry,
     measure: &Measure,
     schema: &Schema,
 ) -> Result<aggregate_rel::Measure, EncodeError> {
     let arguments: Vec<FunctionArgument> = measure
         .args
         .iter()
-        .map(|a| Ok(make_value_arg(encode_expr(ctx, a, schema)?)))
+        .map(|a| Ok(make_value_arg(encode_expr(fns, a, schema)?)))
         .collect::<Result<_, EncodeError>>()?;
 
-    let anchor = ctx.functions.ensure(&measure.function);
+    let anchor = fns.ensure(&measure.function);
 
     let filter = match &measure.filter {
-        Some(f) => Some(encode_expr(ctx, f, schema)?),
+        Some(f) => Some(encode_expr(fns, f, schema)?),
         None => None,
     };
 
@@ -590,11 +581,14 @@ fn encode_measure(
     })
 }
 
-fn encode_union_all(ctx: &mut EncodeContext, union: &v2::UnionAllRel) -> Result<Rel, EncodeError> {
+fn encode_union_all(
+    fns: &mut FunctionRegistry,
+    union: &v2::UnionAllRel,
+) -> Result<Rel, EncodeError> {
     let inputs: Vec<Rel> = union
         .inputs
         .iter()
-        .map(|r| encode_rel(ctx, r))
+        .map(|r| encode_rel(fns, r))
         .collect::<Result<_, _>>()?;
 
     let col_names: Vec<String> = if let Some(first) = union.inputs.first() {
@@ -617,10 +611,10 @@ fn encode_union_all(ctx: &mut EncodeContext, union: &v2::UnionAllRel) -> Result<
 }
 
 fn encode_subquery(
-    ctx: &mut EncodeContext,
+    fns: &mut FunctionRegistry,
     subquery: &v2::SubqueryRel,
 ) -> Result<Rel, EncodeError> {
-    let input = encode_rel(ctx, &subquery.input)?;
+    let input = encode_rel(fns, &subquery.input)?;
     let metadata = serde_json::json!({ "subquery_alias": subquery.alias });
 
     Ok(Rel {
@@ -639,7 +633,7 @@ fn encode_subquery(
 // ---------------------------------------------------------------------------
 
 fn encode_expr(
-    ctx: &mut EncodeContext,
+    fns: &mut FunctionRegistry,
     expr: &Expr,
     schema: &Schema,
 ) -> Result<Expression, EncodeError> {
@@ -658,7 +652,7 @@ fn encode_expr(
             rex_type: Some(expression::RexType::Literal(to_substrait_literal(lit))),
         }),
         Expr::Param { name, data_type } => {
-            let anchor = ctx.functions.ensure("__param");
+            let anchor = fns.ensure("__param");
             Ok(make_scalar_fn(
                 anchor,
                 vec![
@@ -669,10 +663,10 @@ fn encode_expr(
             ))
         }
         Expr::BinaryOp { op, left, right } => {
-            let l = encode_expr(ctx, left, schema)?;
-            let r = encode_expr(ctx, right, schema)?;
+            let l = encode_expr(fns, left, schema)?;
+            let r = encode_expr(fns, right, schema)?;
             let fn_name = binary_op_substrait_name(*op);
-            let anchor = ctx.functions.ensure(fn_name);
+            let anchor = fns.ensure(fn_name);
             Ok(make_scalar_fn(
                 anchor,
                 vec![make_value_arg(l), make_value_arg(r)],
@@ -680,9 +674,9 @@ fn encode_expr(
             ))
         }
         Expr::UnaryOp { op, operand } => {
-            let inner = encode_expr(ctx, operand, schema)?;
+            let inner = encode_expr(fns, operand, schema)?;
             let fn_name = unary_op_substrait_name(*op);
-            let anchor = ctx.functions.ensure(fn_name);
+            let anchor = fns.ensure(fn_name);
             Ok(make_scalar_fn(
                 anchor,
                 vec![make_value_arg(inner)],
@@ -692,13 +686,13 @@ fn encode_expr(
         Expr::FuncCall { name, args } => {
             let resolved_args: Vec<FunctionArgument> = args
                 .iter()
-                .map(|a| Ok(make_value_arg(encode_expr(ctx, a, schema)?)))
+                .map(|a| Ok(make_value_arg(encode_expr(fns, a, schema)?)))
                 .collect::<Result<_, EncodeError>>()?;
-            let anchor = ctx.functions.ensure(name);
+            let anchor = fns.ensure(name);
             Ok(make_scalar_fn(anchor, resolved_args, string_type()))
         }
         Expr::Cast { expr, target_type } => {
-            let inner = encode_expr(ctx, expr, schema)?;
+            let inner = encode_expr(fns, expr, schema)?;
             Ok(Expression {
                 rex_type: Some(expression::RexType::Cast(Box::new(expression::Cast {
                     input: Some(Box::new(inner)),
@@ -712,13 +706,13 @@ fn encode_expr(
                 .iter()
                 .map(|(cond, then)| {
                     Ok(expression::if_then::IfClause {
-                        r#if: Some(encode_expr(ctx, cond, schema)?),
-                        then: Some(encode_expr(ctx, then, schema)?),
+                        r#if: Some(encode_expr(fns, cond, schema)?),
+                        then: Some(encode_expr(fns, then, schema)?),
                     })
                 })
                 .collect::<Result<_, EncodeError>>()?;
             let else_resolved = match else_expr {
-                Some(e) => Some(Box::new(encode_expr(ctx, e, schema)?)),
+                Some(e) => Some(Box::new(encode_expr(fns, e, schema)?)),
                 None => None,
             };
             Ok(Expression {
@@ -729,10 +723,10 @@ fn encode_expr(
             })
         }
         Expr::InList { expr, list } => {
-            let value = encode_expr(ctx, expr, schema)?;
+            let value = encode_expr(fns, expr, schema)?;
             let options: Vec<Expression> = list
                 .iter()
-                .map(|e| encode_expr(ctx, e, schema))
+                .map(|e| encode_expr(fns, e, schema))
                 .collect::<Result<_, _>>()?;
             Ok(Expression {
                 rex_type: Some(expression::RexType::SingularOrList(Box::new(
@@ -744,7 +738,7 @@ fn encode_expr(
             })
         }
         Expr::Raw(sql) => {
-            let anchor = ctx.functions.ensure("__raw_sql");
+            let anchor = fns.ensure("__raw_sql");
             Ok(make_scalar_fn(
                 anchor,
                 vec![make_literal_arg(&LiteralValue::String(sql.clone()))],

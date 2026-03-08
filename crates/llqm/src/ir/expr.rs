@@ -173,19 +173,26 @@ pub enum JoinType {
 // ---------------------------------------------------------------------------
 
 macro_rules! binop {
-    ($(#[$attr:meta])* $name:ident, $op:expr) => {
-        $(#[$attr])*
+    ($name:ident, $op:expr) => {
+        #[allow(clippy::should_implement_trait)]
         pub fn $name(self, right: Expr) -> Expr {
-            Expr::BinaryOp { op: $op, left: Box::new(self), right: Box::new(right) }
+            Expr::BinaryOp {
+                op: $op,
+                left: Box::new(self),
+                right: Box::new(right),
+            }
         }
     };
 }
 
 macro_rules! unop {
-    ($(#[$attr:meta])* $name:ident, $op:expr) => {
-        $(#[$attr])*
+    ($name:ident, $op:expr) => {
+        #[allow(clippy::should_implement_trait)]
         pub fn $name(self) -> Expr {
-            Expr::UnaryOp { op: $op, operand: Box::new(self) }
+            Expr::UnaryOp {
+                op: $op,
+                operand: Box::new(self),
+            }
         }
     };
 }
@@ -199,20 +206,12 @@ impl Expr {
     binop!(ge, BinaryOp::Ge);
     binop!(and, BinaryOp::And);
     binop!(or, BinaryOp::Or);
-    binop!(
-        #[allow(clippy::should_implement_trait)]
-        add,
-        BinaryOp::Add
-    );
+    binop!(add, BinaryOp::Add);
     binop!(like, BinaryOp::Like);
     binop!(ilike, BinaryOp::ILike);
     binop!(is_in, BinaryOp::In);
 
-    unop!(
-        #[allow(clippy::should_implement_trait)]
-        not,
-        UnaryOp::Not
-    );
+    unop!(not, UnaryOp::Not);
     unop!(is_null, UnaryOp::IsNull);
     unop!(is_not_null, UnaryOp::IsNotNull);
 

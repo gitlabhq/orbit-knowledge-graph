@@ -40,9 +40,8 @@ pub struct ReadRel {
     pub columns: Vec<ColumnDef>,
 }
 
-/// Raw FROM clause — escape hatch for verbatim SQL in the FROM position.
-#[derive(Debug, Clone)]
-pub struct RawFrom(pub String);
+/// Sentinel table name for raw FROM clauses.
+pub const RAW_FROM_TAG: &str = "__raw_from";
 
 #[derive(Debug, Clone)]
 pub struct ColumnDef {

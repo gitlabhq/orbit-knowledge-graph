@@ -13,5 +13,9 @@ thiserror = { workspace = true }
 name = "prototype_lowering"
 path = "test/prototype_lowering.rs"
 
+[[test]]
+name = "pass_tests"
+path = "test/pass_tests.rs"
+
 [lints]
 workspace = true

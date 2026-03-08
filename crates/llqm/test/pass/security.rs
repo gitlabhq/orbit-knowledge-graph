@@ -11,8 +11,8 @@
 //! - 1 path:  `startsWith(alias.traversal_path, path)`
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
-use crate::ir::expr::{self, Expr};
-use crate::ir::plan::Plan;
+use llqm::ir::expr::{self, Expr};
+use llqm::ir::plan::Plan;
 
 pub const GL_TABLE_PREFIX: &str = "gl_";
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
@@ -149,9 +149,9 @@ fn validate_traversal_path(path: &str, org_id: i64) -> Result<(), SecurityError>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::clickhouse::emit_clickhouse_sql;
-    use crate::ir::expr::*;
-    use crate::ir::plan::Rel;
+    use llqm::backend::clickhouse::emit_clickhouse_sql;
+    use llqm::ir::expr::*;
+    use llqm::ir::plan::Rel;
 
     fn make_plan(table: &str, alias: &str) -> Plan {
         Rel::read(
@@ -365,7 +365,7 @@ mod tests {
 
         let plan = Rel::read("base", "b", &[("node_id", DataType::Int64)])
             .project(&[(col("b", "node_id"), "node_id")])
-            .into_plan_with_ctes(vec![crate::ir::plan::CteDef {
+            .into_plan_with_ctes(vec![llqm::ir::plan::CteDef {
                 name: "base".into(),
                 plan: cte_plan,
                 recursive: false,

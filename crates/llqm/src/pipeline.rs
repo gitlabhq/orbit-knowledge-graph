@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use crate::ir::plan::Plan;
 
 // ---------------------------------------------------------------------------
@@ -63,26 +61,17 @@ pub trait EmitPass<O> {
 // Pipeline
 // ---------------------------------------------------------------------------
 
-pub struct Pipeline<Phase> {
-    _phase: PhantomData<Phase>,
-    phase: Phase,
-}
+pub struct Pipeline<Phase>(Phase);
 
 // --- Empty → .input(frontend, raw_input) → FrontendPhase ---
 
 impl Pipeline<Empty> {
     pub fn new() -> Self {
-        Pipeline {
-            _phase: PhantomData,
-            phase: Empty,
-        }
+        Pipeline(Empty)
     }
 
     pub fn input<F: Frontend>(self, frontend: F, raw: F::Input) -> Pipeline<FrontendPhase<F>> {
-        Pipeline {
-            _phase: PhantomData,
-            phase: FrontendPhase(frontend, raw),
-        }
+        Pipeline(FrontendPhase(frontend, raw))
     }
 }
 
@@ -99,21 +88,15 @@ impl<F: Frontend> Pipeline<FrontendPhase<F>> {
     where
         P: FrontendPass<F::Input>,
     {
-        let FrontendPhase(frontend, input) = self.phase;
+        let FrontendPhase(frontend, input) = self.0;
         let input = p.transform(input)?;
-        Ok(Pipeline {
-            _phase: PhantomData,
-            phase: FrontendPhase(frontend, input),
-        })
+        Ok(Pipeline(FrontendPhase(frontend, input)))
     }
 
     pub fn lower(self) -> Result<Pipeline<IrPhase>, F::Error> {
-        let FrontendPhase(frontend, input) = self.phase;
+        let FrontendPhase(frontend, input) = self.0;
         let plan = frontend.lower(input)?;
-        Ok(Pipeline {
-            _phase: PhantomData,
-            phase: IrPhase(plan),
-        })
+        Ok(Pipeline(IrPhase(plan)))
     }
 }
 
@@ -121,26 +104,20 @@ impl<F: Frontend> Pipeline<FrontendPhase<F>> {
 
 impl Pipeline<IrPhase> {
     pub fn pass<P: IrPass>(self, p: &P) -> Result<Self, P::Error> {
-        let plan = p.transform(self.phase.0)?;
-        Ok(Pipeline {
-            _phase: PhantomData,
-            phase: IrPhase(plan),
-        })
+        let plan = p.transform(self.0 .0)?;
+        Ok(Pipeline(IrPhase(plan)))
     }
 
     pub fn emit<B: Backend>(
         self,
         backend: &B,
     ) -> Result<Pipeline<EmittedPhase<B::Output>>, B::Error> {
-        let output = backend.emit(&self.phase.0)?;
-        Ok(Pipeline {
-            _phase: PhantomData,
-            phase: EmittedPhase(output),
-        })
+        let output = backend.emit(&self.0 .0)?;
+        Ok(Pipeline(EmittedPhase(output)))
     }
 
     pub fn plan(&self) -> &Plan {
-        &self.phase.0
+        &self.0 .0
     }
 }
 
@@ -148,15 +125,12 @@ impl Pipeline<IrPhase> {
 
 impl<O> Pipeline<EmittedPhase<O>> {
     pub fn pass<P: EmitPass<O>>(self, p: &P) -> Result<Self, P::Error> {
-        let output = p.transform(self.phase.0)?;
-        Ok(Pipeline {
-            _phase: PhantomData,
-            phase: EmittedPhase(output),
-        })
+        let output = p.transform(self.0 .0)?;
+        Ok(Pipeline(EmittedPhase(output)))
     }
 
     pub fn finish(self) -> O {
-        self.phase.0
+        self.0 .0
     }
 }
 

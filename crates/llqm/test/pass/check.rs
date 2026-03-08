@@ -9,9 +9,9 @@
 //! anchors and `__raw_sql` wrappers, this one directly pattern-matches on
 //! `Expr::Column` and `Expr::FuncCall`.
 
-use crate::ir::expr::Expr;
-use crate::ir::plan::{Plan, Rel};
-use crate::pass::security::{GL_TABLE_PREFIX, SKIP_TABLES, SecurityContext, TRAVERSAL_PATH_COLUMN};
+use super::security::{SecurityContext, GL_TABLE_PREFIX, SKIP_TABLES, TRAVERSAL_PATH_COLUMN};
+use llqm::ir::expr::Expr;
+use llqm::ir::plan::{Plan, Rel};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CheckError {
@@ -126,11 +126,11 @@ fn is_valid_starts_with_args(args: &[Expr], alias: &str, ctx: &SecurityContext) 
 
 #[cfg(test)]
 mod tests {
+    use super::super::security::SecurityPass;
     use super::*;
-    use crate::backend::clickhouse::emit_clickhouse_sql;
-    use crate::ir::expr::*;
-    use crate::ir::plan::{CteDef, Rel};
-    use crate::pass::security::SecurityPass;
+    use llqm::backend::clickhouse::emit_clickhouse_sql;
+    use llqm::ir::expr::*;
+    use llqm::ir::plan::{CteDef, Rel};
 
     fn make_plan(table: &str, alias: &str) -> Plan {
         Rel::read(
@@ -164,10 +164,9 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let plan = make_plan("gl_project", "p");
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -176,10 +175,9 @@ mod tests {
         let mut plan = make_plan("gl_project", "p");
         plan.inject_filter(col("p", TRAVERSAL_PATH_COLUMN).starts_with(string("99/")));
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
