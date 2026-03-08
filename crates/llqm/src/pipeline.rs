@@ -163,9 +163,9 @@ impl<O> Pipeline<EmittedPhase<O>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::clickhouse::ClickHouseBackend;
+    use crate::backend::clickhouse::{emit_clickhouse_sql, ClickHouseBackend};
     use crate::ir::expr::*;
-    use crate::ir::plan::PlanBuilder;
+    use crate::ir::plan::Rel;
 
     // -- Minimal test frontend --
 
@@ -186,16 +186,14 @@ mod tests {
         type Error = TestError;
 
         fn lower(&self, input: Self::Input) -> Result<Plan, Self::Error> {
-            let mut b = PlanBuilder::new();
-            let rel = b
-                .read(
-                    &input.table,
-                    "t",
-                    &[("id", DataType::Int64), ("name", DataType::String)],
-                )
-                .filter(&mut b, eq(col("t", "name"), string(&input.filter_value)))
-                .project(&mut b, &[(col("t", "id"), "id")]);
-            Ok(b.build(rel))
+            Ok(Rel::read(
+                &input.table,
+                "t",
+                &[("id", DataType::Int64), ("name", DataType::String)],
+            )
+            .filter(col("t", "name").eq(string(&input.filter_value)))
+            .project(&[(col("t", "id"), "id")])
+            .into_plan())
         }
     }
 

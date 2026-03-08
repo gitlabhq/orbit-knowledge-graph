@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ir::expr::{self, DataType, Expr, JoinType, SortDir};
-use crate::v2::plan::{CteDef, Measure, Plan, Rel};
+use crate::ir::plan::{CteDef, Measure, Plan, Rel};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants (mirrors ontology::constants + query-engine::constants)
@@ -1078,7 +1078,7 @@ fn find_node<'a>(nodes: &'a [InputNode], id: &str) -> Result<&'a InputNode, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::backend::clickhouse::emit_clickhouse_sql;
+    use crate::backend::clickhouse::emit_clickhouse_sql;
 
     fn emit(input: &Input) -> String {
         let plan = lower(input).unwrap();

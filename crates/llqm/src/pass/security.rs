@@ -1,15 +1,18 @@
-//! Security context injection pass.
+//! v2 security context injection pass.
 //!
-//! Walks the Substrait plan tree and injects traversal-path predicates
-//! to enforce namespace-scoped access control.
+//! Walks the v2 `Rel` tree and injects `startsWith(alias.traversal_path, path)`
+//! predicates for namespace-scoped access control.
+//!
+//! Unlike the old pass (which uses `Expr::Raw` because Substrait's positional
+//! resolution can't accept late-injected column references), this pass uses
+//! `Expr::Column` directly — the v2 plan stores expressions symbolically.
 //!
 //! Path filtering strategy:
-//! - 1 path: `startsWith(alias.traversal_path, path)`
+//! - 1 path:  `startsWith(alias.traversal_path, path)`
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
 use crate::ir::expr::{self, Expr};
 use crate::ir::plan::Plan;
-use crate::pipeline::IrPass;
 
 pub const GL_TABLE_PREFIX: &str = "gl_";
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
@@ -33,10 +36,6 @@ impl SecurityContext {
     }
 }
 
-pub struct SecurityPass {
-    pub context: SecurityContext,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum SecurityError {
     #[error("invalid traversal_path format: '{0}' (expected pattern like '1/2/3/')")]
@@ -49,32 +48,32 @@ pub enum SecurityError {
     OrgMismatch { path: String, org_id: i64 },
 }
 
-impl IrPass for SecurityPass {
-    type Error = SecurityError;
+pub struct SecurityPass {
+    pub context: SecurityContext,
+}
 
-    fn transform(&self, mut plan: Plan) -> Result<Plan, Self::Error> {
-        let aliases = plan.filterable_aliases(should_filter);
-        if !aliases.is_empty() {
-            let conds: Vec<Expr> = aliases
-                .iter()
-                .map(|(_, alias)| build_path_filter(alias, &self.context.traversal_paths))
-                .collect();
-            plan.inject_filter(expr::and(conds));
-        }
+impl SecurityPass {
+    pub fn transform(&self, mut plan: Plan) -> Result<Plan, SecurityError> {
+        inject_filters(&mut plan, &self.context.traversal_paths);
 
         for cte in &mut plan.ctes {
-            let cte_aliases = cte.plan.filterable_aliases(should_filter);
-            if !cte_aliases.is_empty() {
-                let conds: Vec<Expr> = cte_aliases
-                    .iter()
-                    .map(|(_, alias)| build_path_filter(alias, &self.context.traversal_paths))
-                    .collect();
-                cte.plan.inject_filter(expr::and(conds));
-            }
+            inject_filters(&mut cte.plan, &self.context.traversal_paths);
         }
 
         Ok(plan)
     }
+}
+
+fn inject_filters(plan: &mut Plan, paths: &[String]) {
+    let aliases = plan.filterable_aliases(should_filter);
+    if aliases.is_empty() {
+        return;
+    }
+    let conds: Vec<Expr> = aliases
+        .iter()
+        .map(|(_, alias)| build_path_filter(alias, paths))
+        .collect();
+    plan.inject_filter(expr::and(conds));
 }
 
 fn should_filter(table: &str) -> bool {
@@ -89,7 +88,7 @@ fn build_path_filter(alias: &str, paths: &[String]) -> Expr {
             let prefix = lowest_common_prefix(paths);
             let prefix_filter = starts_with_expr(alias, &prefix);
             let or_filters = expr::or(paths.iter().map(|p| starts_with_expr(alias, p)));
-            expr::and([prefix_filter, or_filters])
+            prefix_filter.and(or_filters)
         }
     }
 }
@@ -113,13 +112,9 @@ fn lowest_common_prefix(paths: &[String]) -> String {
     }
 }
 
+/// Build `startsWith(alias.traversal_path, path)` using a proper `Expr::Column`.
 fn starts_with_expr(alias: &str, path: &str) -> Expr {
-    // Use raw() for the column reference since we're injecting into a
-    // finalized plan — positional schema resolution doesn't apply here.
-    expr::starts_with(
-        expr::raw(&format!("{alias}.{TRAVERSAL_PATH_COLUMN}")),
-        expr::string(path),
-    )
+    expr::col(alias, TRAVERSAL_PATH_COLUMN).starts_with(expr::string(path))
 }
 
 fn validate_traversal_path(path: &str, org_id: i64) -> Result<(), SecurityError> {
@@ -154,28 +149,25 @@ fn validate_traversal_path(path: &str, org_id: i64) -> Result<(), SecurityError>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::clickhouse::ClickHouseBackend;
+    use crate::backend::clickhouse::emit_clickhouse_sql;
     use crate::ir::expr::*;
-    use crate::ir::plan::PlanBuilder;
-    use crate::pipeline::{Backend, IrPass};
+    use crate::ir::plan::Rel;
 
     fn make_plan(table: &str, alias: &str) -> Plan {
-        let mut b = PlanBuilder::new();
-        let rel = b
-            .read(
-                table,
-                alias,
-                &[
-                    ("id", DataType::Int64),
-                    (TRAVERSAL_PATH_COLUMN, DataType::String),
-                ],
-            )
-            .project(&mut b, &[(col(alias, "id"), "id")]);
-        b.build(rel)
+        Rel::read(
+            table,
+            alias,
+            &[
+                ("id", DataType::Int64),
+                (TRAVERSAL_PATH_COLUMN, DataType::String),
+            ],
+        )
+        .project(&[(col(alias, "id"), "id")])
+        .into_plan()
     }
 
     fn emit_sql(plan: &Plan) -> String {
-        ClickHouseBackend.emit(plan).unwrap().sql
+        emit_clickhouse_sql(plan).unwrap().sql
     }
 
     // -- Context validation --
@@ -206,21 +198,27 @@ mod tests {
     // -- Path filter expressions --
 
     #[test]
-    fn single_path() {
+    fn single_path_uses_starts_with() {
         let e = build_path_filter("u", &["42/43/".into()]);
-        assert!(matches!(e, Expr::FuncCall { ref name, .. } if name == "startsWith"));
+        assert!(
+            matches!(e, Expr::FuncCall { ref name, .. } if name == "startsWith"),
+            "expected startsWith, got: {e:?}"
+        );
     }
 
     #[test]
-    fn multiple_paths() {
+    fn multiple_paths_uses_lcp_and_or() {
         let e = build_path_filter("u", &["1/2/4/".into(), "1/2/5/".into()]);
-        assert!(matches!(
-            e,
-            Expr::BinaryOp {
-                op: BinaryOp::And,
-                ..
-            }
-        ));
+        assert!(
+            matches!(
+                e,
+                Expr::BinaryOp {
+                    op: BinaryOp::And,
+                    ..
+                }
+            ),
+            "expected AND, got: {e:?}"
+        );
     }
 
     #[test]
@@ -234,6 +232,23 @@ mod tests {
         assert_eq!(lowest_common_prefix(&["42/".into()]), "42/");
     }
 
+    // -- Uses Expr::Column, not Expr::Raw --
+
+    #[test]
+    fn filter_uses_column_not_raw() {
+        let e = starts_with_expr("p", "42/");
+        if let Expr::FuncCall { args, .. } = &e {
+            assert!(
+                matches!(&args[0], Expr::Column { table, name }
+                    if table == "p" && name == TRAVERSAL_PATH_COLUMN),
+                "expected Expr::Column, got: {:?}",
+                args[0]
+            );
+        } else {
+            panic!("expected FuncCall, got: {e:?}");
+        }
+    }
+
     // -- Plan injection --
 
     #[test]
@@ -244,7 +259,7 @@ mod tests {
 
         let sql = emit_sql(&plan);
         assert!(sql.contains("startsWith"), "sql: {sql}");
-        assert!(sql.contains("traversal_path"), "sql: {sql}");
+        assert!(sql.contains("p.traversal_path"), "sql: {sql}");
     }
 
     #[test]
@@ -272,69 +287,60 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let pass = SecurityPass { context: ctx };
 
-        let mut b = PlanBuilder::new();
-        let p = b.read(
+        let plan = Rel::read(
             "gl_project",
             "p",
             &[
                 ("id", DataType::Int64),
                 (TRAVERSAL_PATH_COLUMN, DataType::String),
             ],
-        );
-        let mr = b.read(
-            "gl_merge_request",
-            "mr",
-            &[
-                ("id", DataType::Int64),
-                (TRAVERSAL_PATH_COLUMN, DataType::String),
-            ],
-        );
-        let joined = p
-            .join(
-                &mut b,
-                JoinType::Inner,
-                mr,
-                eq(col("p", "id"), col("mr", "id")),
-            )
-            .project(&mut b, &[(col("p", "id"), "id")]);
-        let plan = b.build(joined);
+        )
+        .join(
+            JoinType::Inner,
+            Rel::read(
+                "gl_merge_request",
+                "mr",
+                &[
+                    ("id", DataType::Int64),
+                    (TRAVERSAL_PATH_COLUMN, DataType::String),
+                ],
+            ),
+            col("p", "id").eq(col("mr", "id")),
+        )
+        .project(&[(col("p", "id"), "id")])
+        .into_plan();
 
         let plan = pass.transform(plan).unwrap();
         let sql = emit_sql(&plan);
 
-        // Both p and mr should get startsWith filters
         assert!(sql.contains("p.traversal_path"), "sql: {sql}");
         assert!(sql.contains("mr.traversal_path"), "sql: {sql}");
     }
 
     #[test]
     fn join_skips_user_in_mixed() {
-        let mut b = PlanBuilder::new();
-        let u = b.read(
+        let plan = Rel::read(
             "gl_user",
             "u",
             &[
                 ("id", DataType::Int64),
                 (TRAVERSAL_PATH_COLUMN, DataType::String),
             ],
-        );
-        let mr = b.read(
-            "gl_merge_request",
-            "mr",
-            &[
-                ("id", DataType::Int64),
-                (TRAVERSAL_PATH_COLUMN, DataType::String),
-            ],
-        );
-        let joined = u
-            .join(
-                &mut b,
-                JoinType::Inner,
-                mr,
-                eq(col("u", "id"), col("mr", "id")),
-            )
-            .project(&mut b, &[(col("u", "id"), "id")]);
-        let plan = b.build(joined);
+        )
+        .join(
+            JoinType::Inner,
+            Rel::read(
+                "gl_merge_request",
+                "mr",
+                &[
+                    ("id", DataType::Int64),
+                    (TRAVERSAL_PATH_COLUMN, DataType::String),
+                ],
+            ),
+            col("u", "id").eq(col("mr", "id")),
+        )
+        .project(&[(col("u", "id"), "id")])
+        .into_plan();
 
         let aliases = plan.filterable_aliases(should_filter);
         assert_eq!(aliases.len(), 1);
@@ -342,31 +348,53 @@ mod tests {
     }
 
     #[test]
-    fn end_to_end_via_pipeline() {
-        use crate::pipeline::{Frontend, Pipeline};
-
-        struct TestFrontend;
-        impl Frontend for TestFrontend {
-            type Input = ();
-            type Error = SecurityError;
-            fn lower(&self, _: ()) -> Result<Plan, Self::Error> {
-                Ok(make_plan("gl_project", "p"))
-            }
-        }
-
+    fn cte_gets_filter() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let pass = SecurityPass { context: ctx };
 
-        let pq = Pipeline::new()
-            .input(TestFrontend, ())
-            .lower()
-            .unwrap()
-            .pass(&pass)
-            .unwrap()
-            .emit(&ClickHouseBackend)
-            .unwrap()
-            .finish();
+        let cte_plan = Rel::read(
+            "gl_project",
+            "p",
+            &[
+                ("id", DataType::Int64),
+                (TRAVERSAL_PATH_COLUMN, DataType::String),
+            ],
+        )
+        .project(&[(col("p", "id"), "node_id")])
+        .into_plan();
 
-        assert!(pq.sql.contains("startsWith"), "sql: {}", pq.sql);
+        let plan = Rel::read("base", "b", &[("node_id", DataType::Int64)])
+            .project(&[(col("b", "node_id"), "node_id")])
+            .into_plan_with_ctes(vec![crate::ir::plan::CteDef {
+                name: "base".into(),
+                plan: cte_plan,
+                recursive: false,
+            }]);
+
+        let plan = pass.transform(plan).unwrap();
+        let sql = emit_sql(&plan);
+        assert!(
+            sql.contains("startsWith"),
+            "CTE should have startsWith: {sql}"
+        );
+        assert!(
+            sql.contains("p.traversal_path"),
+            "CTE should reference p.traversal_path: {sql}"
+        );
+    }
+
+    #[test]
+    fn multiple_paths_emits_lcp_optimization() {
+        let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
+        let pass = SecurityPass { context: ctx };
+        let plan = pass.transform(make_plan("gl_project", "p")).unwrap();
+
+        let sql = emit_sql(&plan);
+        // Should have both LCP check and individual path checks
+        let starts_with_count = sql.matches("startsWith").count();
+        assert!(
+            starts_with_count >= 3,
+            "expected 3+ startsWith (LCP + 2 paths), got {starts_with_count}: {sql}"
+        );
     }
 }

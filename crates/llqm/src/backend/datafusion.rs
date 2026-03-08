@@ -1,45 +1,33 @@
-//! DataFusion backend — Substrait passthrough.
+//! v2 DataFusion backend — encodes a v2 `Plan` to Substrait protobuf.
 //!
 //! DataFusion natively consumes Substrait plans via `datafusion-substrait`,
-//! so this backend simply unwraps the IR plan into its raw Substrait form.
-
-use substrait::proto::Plan as SubstraitPlan;
+//! so this backend encodes the v2 plan into its Substrait form.
+//! All Substrait construction is delegated to `v2::substrait::encode`.
 
 use crate::ir::plan::Plan;
+use crate::ir::substrait as v2_substrait;
 
-/// DataFusion backend — passes through the raw Substrait plan.
+pub use v2_substrait::EncodeError;
+
 pub struct DataFusionBackend;
 
-impl super::Backend for DataFusionBackend {
-    type Output = SubstraitPlan;
-    type Error = DataFusionError;
-
-    fn emit(&self, plan: &Plan) -> Result<Self::Output, Self::Error> {
-        if !plan.ctes.is_empty() {
-            return Err(DataFusionError::UnsupportedCtes);
-        }
-        Ok(plan.substrait_plan().clone())
+impl DataFusionBackend {
+    pub fn emit(&self, plan: &Plan) -> Result<::substrait::proto::Plan, EncodeError> {
+        v2_substrait::encode(plan)
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DataFusionError {
-    #[error("CTEs are not supported in the DataFusion backend (use the ClickHouse backend)")]
-    UnsupportedCtes,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
     use crate::ir::expr::*;
-    use crate::ir::plan::PlanBuilder;
+    use crate::ir::plan::{CteDef, Rel};
 
     #[test]
     fn passthrough_returns_substrait_plan() {
-        let mut b = PlanBuilder::new();
-        let root = b.read("t", "t", &[("id", DataType::Int64)]);
-        let plan = b.build(root);
+        let plan = Rel::read("t", "t", &[("id", DataType::Int64)])
+            .project(&[(col("t", "id"), "id")])
+            .into_plan();
 
         let result = DataFusionBackend.emit(&plan).unwrap();
         assert_eq!(result.relations.len(), 1);
@@ -47,21 +35,37 @@ mod tests {
 
     #[test]
     fn rejects_ctes() {
-        let mut b = PlanBuilder::new();
-        let root = b.read("t", "t", &[("id", DataType::Int64)]);
-        let plan = b.build_with_ctes(
-            root,
-            vec![crate::ir::plan::CteDef {
-                name: "cte".into(),
-                plan: {
-                    let mut b2 = PlanBuilder::new();
-                    let r = b2.read("t", "t", &[("id", DataType::Int64)]);
-                    b2.build(r)
-                },
+        let cte_plan = Rel::read("t", "t", &[("id", DataType::Int64)])
+            .project(&[(col("t", "id"), "id")])
+            .into_plan();
+
+        let plan = Rel::read("base", "b", &[("id", DataType::Int64)])
+            .project(&[(col("b", "id"), "id")])
+            .into_plan_with_ctes(vec![CteDef {
+                name: "base".into(),
+                plan: cte_plan,
                 recursive: false,
-            }],
-        );
+            }]);
 
         assert!(DataFusionBackend.emit(&plan).is_err());
+    }
+
+    #[test]
+    fn join_encodes_correctly() {
+        let plan = Rel::read("gl_project", "p", &[("id", DataType::Int64)])
+            .join(
+                JoinType::Inner,
+                Rel::read("gl_merge_request", "mr", &[("project_id", DataType::Int64)]),
+                col("p", "id").eq(col("mr", "project_id")),
+            )
+            .project(&[(col("p", "id"), "id")])
+            .into_plan();
+
+        let result = DataFusionBackend.emit(&plan).unwrap();
+        assert_eq!(result.relations.len(), 1);
+        assert!(
+            !result.extensions.is_empty(),
+            "should have function extensions"
+        );
     }
 }

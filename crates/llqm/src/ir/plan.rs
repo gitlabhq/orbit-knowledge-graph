@@ -1,981 +1,719 @@
-//! Plan builder that produces Substrait plans from the expression DSL.
+//! Relation tree and chainable query builder.
 //!
-//! The builder tracks schemas so column references use names (`col("u", "id")`)
-//! that get resolved to positional Substrait field references automatically.
+//! The plan is an abstract relation tree composed of [`Rel`] nodes that store
+//! [`Expr`](crate::ir::expr::Expr) expressions directly — no positional
+//! resolution, no Substrait types. Backends walk the tree to emit SQL or
+//! encode to Substrait for DataFusion.
+//!
+//! ```text
+//! Rel::read("gl_project", "p", &[("id", Int64), ("name", String)])
+//!     .filter(eq(col("p", "id"), int(42)))
+//!     .project(&[(col("p", "name"), "name")])
+//!     .fetch(10, None)
+//!     .into_plan()
+//! ```
 
-use std::collections::HashMap;
-
-use substrait::proto::{
-    self, aggregate_rel,
-    expression::{self},
-    extensions::{
-        simple_extension_declaration::{ExtensionFunction, MappingType},
-        SimpleExtensionDeclaration, SimpleExtensionUrn,
-    },
-    fetch_rel, plan_rel, read_rel, rel, rel_common, set_rel, sort_field, AggregateFunction,
-    AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument, Plan as SubstraitPlan,
-    PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
-};
-
-use crate::ir::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, SortDir};
-use crate::ir::substrait::{
-    binary_op_substrait_name, bool_type, build_named_struct, make_any, make_field_ref,
-    make_literal_arg, make_metadata, make_scalar_fn, make_value_arg, string_type,
-    to_substrait_join_type, to_substrait_literal, to_substrait_type, unary_op_substrait_name,
-};
+use crate::ir::expr::{DataType, Expr, JoinType, SortDir};
 
 // ---------------------------------------------------------------------------
-// Schema tracking
+// Relation tree
 // ---------------------------------------------------------------------------
 
-/// A column in a relation's output schema.
+/// A node in the relation tree.
 #[derive(Debug, Clone)]
-pub struct SchemaColumn {
-    pub table_alias: String,
+pub enum Rel {
+    Read(ReadRel),
+    Filter(FilterRel),
+    Project(ProjectRel),
+    Join(JoinRel),
+    Sort(SortRel),
+    Fetch(FetchRel),
+    Aggregate(AggregateRel),
+    UnionAll(UnionAllRel),
+    Subquery(SubqueryRel),
+}
+
+#[derive(Debug, Clone)]
+pub struct ReadRel {
+    pub table: String,
+    pub alias: String,
+    pub columns: Vec<ColumnDef>,
+}
+
+/// Raw FROM clause — escape hatch for verbatim SQL in the FROM position.
+#[derive(Debug, Clone)]
+pub struct RawFrom(pub String);
+
+#[derive(Debug, Clone)]
+pub struct ColumnDef {
     pub name: String,
     pub data_type: DataType,
 }
 
-/// Output schema of a relation, used for resolving named column references
-/// to positional Substrait field indices.
 #[derive(Debug, Clone)]
-pub struct Schema {
-    pub columns: Vec<SchemaColumn>,
+pub struct FilterRel {
+    pub input: Box<Rel>,
+    pub condition: Expr,
 }
 
-impl Schema {
-    /// Find a column by table alias and name, returning its index.
-    pub fn find(&self, table: &str, name: &str) -> Option<usize> {
-        self.columns
-            .iter()
-            .position(|c| c.table_alias == table && c.name == name)
-    }
-
-    pub fn merge(left: &Schema, right: &Schema) -> Schema {
-        let mut columns = left.columns.clone();
-        columns.extend(right.columns.iter().cloned());
-        Schema { columns }
-    }
+#[derive(Debug, Clone)]
+pub struct ProjectRel {
+    pub input: Box<Rel>,
+    pub expressions: Vec<(Expr, String)>,
 }
 
-/// A Substrait relation paired with its output schema.
-///
-/// This is the unit of composition between pipeline phases. Each phase
-/// takes a `TypedRel` and returns a new one, sharing the `PlanBuilder`
-/// for function registry consistency.
-///
-/// Most methods are available both on `PlanBuilder` (takes `TypedRel` as arg)
-/// and on `TypedRel` itself (takes `&mut PlanBuilder` as arg) for chaining:
-///
-/// ```text
-/// b.read("gl_user", "u", &cols)
-///     .filter(&mut b, cond)
-///     .sort(&mut b, &keys)
-///     .project(&mut b, &items)
-///     .fetch(&b, 100, None)
-/// ```
-pub struct TypedRel {
-    pub rel: Rel,
-    pub schema: Schema,
+#[derive(Debug, Clone)]
+pub struct JoinRel {
+    pub left: Box<Rel>,
+    pub right: Box<Rel>,
+    pub join_type: JoinType,
+    pub condition: Expr,
 }
 
-impl TypedRel {
-    fn wrap(rel_type: rel::RelType, schema: Schema) -> Self {
+#[derive(Debug, Clone)]
+pub struct SortRel {
+    pub input: Box<Rel>,
+    pub sorts: Vec<SortSpec>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SortSpec {
+    pub expr: Expr,
+    pub direction: SortDir,
+}
+
+#[derive(Debug, Clone)]
+pub struct FetchRel {
+    pub input: Box<Rel>,
+    pub limit: u64,
+    pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AggregateRel {
+    pub input: Box<Rel>,
+    pub group_by: Vec<Expr>,
+    pub measures: Vec<Measure>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Measure {
+    pub function: String,
+    pub args: Vec<Expr>,
+    pub alias: String,
+    pub filter: Option<Expr>,
+}
+
+impl Measure {
+    pub fn new(function: &str, args: &[Expr], alias: &str) -> Self {
         Self {
-            rel: Rel {
-                rel_type: Some(rel_type),
-            },
-            schema,
+            function: function.into(),
+            args: args.to_vec(),
+            alias: alias.into(),
+            filter: None,
         }
     }
 
-    /// Chainable: `WHERE condition`
-    pub fn filter(self, b: &mut PlanBuilder, condition: Expr) -> Self {
-        b.filter(self, condition)
+    pub fn with_filter(mut self, filter: Expr) -> Self {
+        self.filter = Some(filter);
+        self
     }
+}
 
-    /// Chainable: `SELECT expr1 AS alias1, ...`
-    pub fn project(self, b: &mut PlanBuilder, exprs: &[(Expr, &str)]) -> Self {
-        b.project(self, exprs)
-    }
+#[derive(Debug, Clone)]
+pub struct UnionAllRel {
+    pub inputs: Vec<Rel>,
+    pub alias: String,
+}
 
-    /// Chainable: `ORDER BY key1 dir1, ...`
-    pub fn sort(self, b: &mut PlanBuilder, keys: &[(Expr, SortDir)]) -> Self {
-        b.sort(self, keys)
-    }
-
-    /// Chainable: `LIMIT count [OFFSET offset]`
-    pub fn fetch(self, b: &PlanBuilder, count: u64, offset: Option<u64>) -> Self {
-        b.fetch(self, count, offset)
-    }
-
-    /// Chainable: `self JOIN right ON condition`
-    pub fn join(self, b: &mut PlanBuilder, jt: JoinType, right: TypedRel, on: Expr) -> Self {
-        b.join(jt, self, right, on)
-    }
-
-    /// Chainable: wrap as `(SELECT ...) AS alias`
-    pub fn subquery(self, b: &mut PlanBuilder, alias: &str) -> Self {
-        b.subquery(self, alias)
-    }
+#[derive(Debug, Clone)]
+pub struct SubqueryRel {
+    pub input: Box<Rel>,
+    pub alias: String,
 }
 
 // ---------------------------------------------------------------------------
-// Extension function registry
+// Chainable API
 // ---------------------------------------------------------------------------
 
-pub struct FunctionRegistry {
-    urn: SimpleExtensionUrn,
-    declarations: Vec<SimpleExtensionDeclaration>,
-    anchors: HashMap<String, u32>,
-    next_anchor: u32,
-}
-
-impl Default for FunctionRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FunctionRegistry {
-    pub fn new() -> Self {
-        Self {
-            urn: SimpleExtensionUrn {
-                extension_urn_anchor: 1,
-                urn: "urn:llqm:functions".into(),
-            },
-            declarations: Vec::new(),
-            anchors: HashMap::new(),
-            next_anchor: 1,
-        }
-    }
-
-    /// Return the anchor for `name`, registering it if new.
-    #[allow(deprecated)] // extension_uri_reference is deprecated but required by prost
-    pub fn ensure(&mut self, name: &str) -> u32 {
-        if let Some(&anchor) = self.anchors.get(name) {
-            return anchor;
-        }
-        let anchor = self.next_anchor;
-        self.next_anchor += 1;
-        self.declarations.push(SimpleExtensionDeclaration {
-            mapping_type: Some(MappingType::ExtensionFunction(ExtensionFunction {
-                extension_uri_reference: 0,
-                extension_urn_reference: self.urn.extension_urn_anchor,
-                function_anchor: anchor,
-                name: name.into(),
-            })),
-        });
-        self.anchors.insert(name.into(), anchor);
-        anchor
-    }
-
-    /// Reconstruct a registry from an existing plan's extensions.
-    pub fn from_plan(plan: &SubstraitPlan) -> Self {
-        let mut reg = Self::new();
-        for ext in &plan.extensions {
-            if let Some(MappingType::ExtensionFunction(f)) = &ext.mapping_type {
-                reg.anchors.insert(f.name.clone(), f.function_anchor);
-                reg.next_anchor = reg.next_anchor.max(f.function_anchor + 1);
-                reg.declarations.push(ext.clone());
-            }
-        }
-        if let Some(urn) = plan.extension_urns.first() {
-            reg.urn = urn.clone();
-        }
-        reg
-    }
-
-    pub fn into_declarations(self) -> (SimpleExtensionUrn, Vec<SimpleExtensionDeclaration>) {
-        (self.urn, self.declarations)
-    }
-}
-
-/// Resolve an `Expr` to a Substrait `Expression` using the given registry and schema.
-///
-/// This is the same logic as `PlanBuilder::resolve_expr` but usable outside
-/// the builder — e.g. by `Plan::inject_filter` for IR passes.
-pub fn resolve_expr(fns: &mut FunctionRegistry, expr: &Expr, schema: &Schema) -> Expression {
-    match expr {
-        Expr::Column { table, name } => {
-            let index = schema.find(table, name).unwrap_or_else(|| {
-                let available: Vec<String> = schema
-                    .columns
-                    .iter()
-                    .map(|c| format!("{}.{}", c.table_alias, c.name))
-                    .collect();
-                panic!("column {table}.{name} not found in schema; available: {available:?}")
-            });
-            make_field_ref(index)
-        }
-        Expr::Literal(lit) => Expression {
-            rex_type: Some(expression::RexType::Literal(to_substrait_literal(lit))),
-        },
-        Expr::Param { name, data_type } => {
-            let anchor = fns.ensure("__param");
-            make_scalar_fn(
-                anchor,
-                vec![
-                    make_literal_arg(&LiteralValue::String(name.clone())),
-                    make_literal_arg(&LiteralValue::String(data_type.to_string())),
-                ],
-                to_substrait_type(data_type.clone()),
-            )
-        }
-        Expr::BinaryOp { op, left, right } => {
-            let l = resolve_expr(fns, left, schema);
-            let r = resolve_expr(fns, right, schema);
-            let fn_name = binary_op_substrait_name(*op);
-            let anchor = fns.ensure(fn_name);
-            make_scalar_fn(
-                anchor,
-                vec![make_value_arg(l), make_value_arg(r)],
-                bool_type(),
-            )
-        }
-        Expr::UnaryOp { op, operand } => {
-            let inner = resolve_expr(fns, operand, schema);
-            let fn_name = unary_op_substrait_name(*op);
-            let anchor = fns.ensure(fn_name);
-            make_scalar_fn(anchor, vec![make_value_arg(inner)], bool_type())
-        }
-        Expr::FuncCall { name, args } => {
-            let resolved_args: Vec<FunctionArgument> = args
+impl Rel {
+    /// Table scan: `FROM table AS alias`
+    pub fn read(table: &str, alias: &str, columns: &[(&str, DataType)]) -> Self {
+        Rel::Read(ReadRel {
+            table: table.into(),
+            alias: alias.into(),
+            columns: columns
                 .iter()
-                .map(|a| make_value_arg(resolve_expr(fns, a, schema)))
-                .collect();
-            let anchor = fns.ensure(name);
-            make_scalar_fn(anchor, resolved_args, string_type())
-        }
-        Expr::Cast { expr, target_type } => {
-            let inner = resolve_expr(fns, expr, schema);
-            Expression {
-                rex_type: Some(expression::RexType::Cast(Box::new(expression::Cast {
-                    input: Some(Box::new(inner)),
-                    r#type: Some(to_substrait_type(target_type.clone())),
-                    failure_behavior: expression::cast::FailureBehavior::ThrowException as i32,
-                }))),
-            }
-        }
-        Expr::IfThen { ifs, else_expr } => {
-            let clauses: Vec<expression::if_then::IfClause> = ifs
-                .iter()
-                .map(|(cond, then)| expression::if_then::IfClause {
-                    r#if: Some(resolve_expr(fns, cond, schema)),
-                    then: Some(resolve_expr(fns, then, schema)),
+                .map(|(name, dt)| ColumnDef {
+                    name: (*name).into(),
+                    data_type: dt.clone(),
                 })
-                .collect();
-            let else_resolved = else_expr
-                .as_ref()
-                .map(|e| Box::new(resolve_expr(fns, e, schema)));
-            Expression {
-                rex_type: Some(expression::RexType::IfThen(Box::new(expression::IfThen {
-                    ifs: clauses,
-                    r#else: else_resolved,
-                }))),
-            }
-        }
-        Expr::InList { expr, list } => {
-            let value = resolve_expr(fns, expr, schema);
-            let options: Vec<Expression> =
-                list.iter().map(|e| resolve_expr(fns, e, schema)).collect();
-            Expression {
-                rex_type: Some(expression::RexType::SingularOrList(Box::new(
-                    expression::SingularOrList {
-                        value: Some(Box::new(value)),
-                        options,
-                    },
-                ))),
-            }
-        }
-        Expr::Raw(sql) => {
-            let anchor = fns.ensure("__raw_sql");
-            make_scalar_fn(
-                anchor,
-                vec![make_literal_arg(&LiteralValue::String(sql.clone()))],
-                string_type(),
-            )
+                .collect(),
+        })
+    }
+
+    /// Raw FROM clause: verbatim SQL in the FROM position.
+    ///
+    /// Columns define the output schema for downstream references.
+    /// Column references use empty table alias (unqualified).
+    pub fn read_raw(raw_from: &str, columns: &[(&str, DataType)]) -> Self {
+        Rel::Read(ReadRel {
+            table: RawFrom::TAG.into(),
+            alias: String::new(),
+            columns: columns
+                .iter()
+                .map(|(name, dt)| ColumnDef {
+                    name: (*name).into(),
+                    data_type: dt.clone(),
+                })
+                .collect(),
+        })
+        .with_raw_from(raw_from)
+    }
+
+    /// `WHERE condition`
+    pub fn filter(self, condition: Expr) -> Self {
+        Rel::Filter(FilterRel {
+            input: Box::new(self),
+            condition,
+        })
+    }
+
+    /// `SELECT expr1 AS alias1, expr2 AS alias2, ...`
+    pub fn project(self, exprs: &[(Expr, &str)]) -> Self {
+        Rel::Project(ProjectRel {
+            input: Box::new(self),
+            expressions: exprs
+                .iter()
+                .map(|(e, a)| (e.clone(), (*a).into()))
+                .collect(),
+        })
+    }
+
+    /// `self JOIN right ON condition`
+    pub fn join(self, join_type: JoinType, right: Rel, condition: Expr) -> Self {
+        Rel::Join(JoinRel {
+            left: Box::new(self),
+            right: Box::new(right),
+            join_type,
+            condition,
+        })
+    }
+
+    /// `ORDER BY key1 dir1, key2 dir2, ...`
+    pub fn sort(self, keys: &[(Expr, SortDir)]) -> Self {
+        Rel::Sort(SortRel {
+            input: Box::new(self),
+            sorts: keys
+                .iter()
+                .map(|(e, d)| SortSpec {
+                    expr: e.clone(),
+                    direction: *d,
+                })
+                .collect(),
+        })
+    }
+
+    /// `LIMIT count [OFFSET offset]`
+    pub fn fetch(self, limit: u64, offset: Option<u64>) -> Self {
+        Rel::Fetch(FetchRel {
+            input: Box::new(self),
+            limit,
+            offset,
+        })
+    }
+
+    /// `SELECT agg(args) AS alias, ... FROM self GROUP BY group_exprs`
+    pub fn aggregate(self, group_by: &[Expr], measures: &[Measure]) -> Self {
+        Rel::Aggregate(AggregateRel {
+            input: Box::new(self),
+            group_by: group_by.to_vec(),
+            measures: measures.to_vec(),
+        })
+    }
+
+    /// `UNION ALL` of multiple relations, aliased for outer references.
+    pub fn union_all(inputs: Vec<Rel>, alias: &str) -> Self {
+        assert!(!inputs.is_empty(), "union_all requires at least one input");
+        Rel::UnionAll(UnionAllRel {
+            inputs,
+            alias: alias.into(),
+        })
+    }
+
+    /// Wrap as `(SELECT ...) AS alias` derived table.
+    pub fn subquery(self, alias: &str) -> Self {
+        Rel::Subquery(SubqueryRel {
+            input: Box::new(self),
+            alias: alias.into(),
+        })
+    }
+}
+
+impl RawFrom {
+    pub const TAG: &str = "__raw_from";
+}
+
+// Attach raw_from metadata. Stored as a Subquery wrapping a Read with
+// a sentinel table name, so the backend can detect it.
+impl Rel {
+    fn with_raw_from(self, raw_from: &str) -> Self {
+        // We encode raw_from as a special ReadRel where table == TAG
+        // and alias is the raw SQL. This avoids needing extra fields.
+        if let Rel::Read(mut r) = self {
+            r.table = RawFrom::TAG.into();
+            r.alias = raw_from.into();
+            Rel::Read(r)
+        } else {
+            self
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Plan wrapper
+// Plan
 // ---------------------------------------------------------------------------
 
-/// A Common Table Expression (CTE) for WITH clauses.
+/// A complete query plan: a relation tree with output column names and CTEs.
+#[derive(Debug, Clone)]
+pub struct Plan {
+    pub root: Rel,
+    pub output_names: Vec<String>,
+    pub ctes: Vec<CteDef>,
+}
+
+/// A Common Table Expression for WITH clauses.
+#[derive(Debug, Clone)]
 pub struct CteDef {
     pub name: String,
     pub plan: Plan,
     pub recursive: bool,
 }
 
-/// A built Substrait plan ready for codegen or DataFusion consumption.
-pub struct Plan {
-    pub inner: SubstraitPlan,
-    /// CTEs for the WITH clause (not part of Substrait, stored as metadata).
-    pub ctes: Vec<CteDef>,
+impl Rel {
+    /// Finalize into a [`Plan`]. Output names are derived from the top-level
+    /// relation (project aliases, read columns, etc.).
+    pub fn into_plan(self) -> Plan {
+        let output_names = self.output_names();
+        Plan {
+            root: self,
+            output_names,
+            ctes: Vec::new(),
+        }
+    }
+
+    /// Finalize into a [`Plan`] with explicit output names.
+    pub fn into_plan_named(self, names: &[&str]) -> Plan {
+        Plan {
+            root: self,
+            output_names: names.iter().map(|n| (*n).into()).collect(),
+            ctes: Vec::new(),
+        }
+    }
+
+    /// Finalize into a [`Plan`] with CTEs.
+    pub fn into_plan_with_ctes(self, ctes: Vec<CteDef>) -> Plan {
+        let output_names = self.output_names();
+        Plan {
+            root: self,
+            output_names,
+            ctes,
+        }
+    }
+
+    /// Derive output column names from the relation tree.
+    pub fn output_names(&self) -> Vec<String> {
+        match self {
+            Rel::Read(r) => r.columns.iter().map(|c| c.name.clone()).collect(),
+            Rel::Project(p) => p
+                .expressions
+                .iter()
+                .map(|(_, alias)| alias.clone())
+                .collect(),
+            Rel::Filter(f) => f.input.output_names(),
+            Rel::Sort(s) => s.input.output_names(),
+            Rel::Fetch(f) => f.input.output_names(),
+            Rel::Aggregate(a) => {
+                let mut names: Vec<String> = a
+                    .group_by
+                    .iter()
+                    .map(|e| match e {
+                        Expr::Column { name, .. } => name.clone(),
+                        _ => "_expr".into(),
+                    })
+                    .collect();
+                names.extend(a.measures.iter().map(|m| m.alias.clone()));
+                names
+            }
+            Rel::Join(j) => {
+                let mut names = j.left.output_names();
+                names.extend(j.right.output_names());
+                names
+            }
+            Rel::UnionAll(u) => {
+                if let Some(first) = u.inputs.first() {
+                    first.output_names()
+                } else {
+                    Vec::new()
+                }
+            }
+            Rel::Subquery(s) => s.input.output_names(),
+        }
+    }
 }
 
+// ---------------------------------------------------------------------------
+// Plan mutation API (for passes)
+// ---------------------------------------------------------------------------
+
 impl Plan {
-    /// Access the raw Substrait plan (e.g. for `datafusion-substrait`).
-    pub fn substrait_plan(&self) -> &SubstraitPlan {
-        &self.inner
-    }
-
-    /// Consume into the raw Substrait plan.
-    pub fn into_substrait_plan(self) -> SubstraitPlan {
-        self.inner
-    }
-
-    /// Get the root `Rel` of the plan.
-    pub fn root_rel(&self) -> Option<&Rel> {
-        self.inner
-            .relations
-            .first()
-            .and_then(|pr| match &pr.rel_type {
-                Some(plan_rel::RelType::Root(root)) => root.input.as_ref(),
-                _ => None,
-            })
-    }
-
-    /// Get a mutable reference to the root `Rel`.
-    fn root_rel_mut(&mut self) -> Option<&mut Rel> {
-        self.inner
-            .relations
-            .first_mut()
-            .and_then(|pr| match &mut pr.rel_type {
-                Some(plan_rel::RelType::Root(root)) => root.input.as_mut(),
-                _ => None,
-            })
-    }
-
-    /// Collect `(table_name, alias)` pairs from all ReadRels whose table name
-    /// satisfies `predicate`. Walks the full Substrait tree.
+    /// Collect `(table_name, alias)` pairs for all ReadRels whose table name
+    /// satisfies `predicate`.
     pub fn filterable_aliases(&self, predicate: fn(&str) -> bool) -> Vec<(String, String)> {
         let mut aliases = Vec::new();
-        if let Some(root) = self.root_rel() {
-            walk_rel_for_aliases(root, predicate, &mut aliases);
-        }
+        walk_rel_for_aliases(&self.root, predicate, &mut aliases);
         aliases
     }
 
     /// Inject a filter expression on top of the root rel.
-    ///
-    /// Resolves the `Expr` using the plan's existing function registry.
-    /// Column references in the filter should use `Expr::Raw("alias.col")`
-    /// since positional schema resolution doesn't apply to finalized plans.
-    /// After injection, the plan's extensions are updated with any new
-    /// function declarations (e.g. `startsWith`).
     pub fn inject_filter(&mut self, condition: Expr) {
-        let schema = collect_schema_from_rel(self.root_rel().expect("plan has a root rel"));
-        let mut fns = FunctionRegistry::from_plan(&self.inner);
-        let resolved = resolve_expr(&mut fns, &condition, &schema);
+        let existing = self.take_root();
+        self.root = Rel::Filter(FilterRel {
+            input: Box::new(existing),
+            condition,
+        });
+    }
 
-        // Wrap root rel with FilterRel
-        let root_rel = self.root_rel_mut().expect("plan has a root rel");
-        let existing = std::mem::take(root_rel);
-        *root_rel = Rel {
-            rel_type: Some(rel::RelType::Filter(Box::new(FilterRel {
-                input: Some(Box::new(existing)),
-                condition: Some(Box::new(resolved)),
-                ..Default::default()
-            }))),
-        };
+    /// Add projection items to the outermost `Project`. If the root isn't a
+    /// `Project` (or is wrapped in `Fetch`/`Sort`), the items are appended to
+    /// the existing project or a new project is created.
+    ///
+    /// `position` controls where items are inserted: `None` appends, `Some(fn)`
+    /// calls the function to find the insert index for each item.
+    pub fn extend_project(&mut self, items: Vec<(Expr, String)>) {
+        self.mutate_project(|exprs| {
+            for (e, alias) in items {
+                if !exprs.iter().any(|(_, a)| *a == alias) {
+                    exprs.push((e, alias));
+                }
+            }
+        });
+    }
 
-        // Update extensions with any new functions registered
-        let (urn, declarations) = fns.into_declarations();
-        self.inner.extension_urns = vec![urn];
-        self.inner.extensions = declarations;
+    /// Insert a projection item immediately after the item whose alias matches
+    /// `after`. Falls back to appending if `after` is not found.
+    pub fn insert_project_after(&mut self, after: &str, item: (Expr, String)) {
+        self.mutate_project(|exprs| {
+            if exprs.iter().any(|(_, a)| *a == item.1) {
+                return;
+            }
+            let pos = exprs
+                .iter()
+                .position(|(_, a)| a == after)
+                .map(|i| i + 1)
+                .unwrap_or(exprs.len());
+            exprs.insert(pos, item);
+        });
+    }
+
+    /// Add group-by expressions to the `Aggregate` node in the tree.
+    /// Walks through `Fetch`/`Sort`/`Filter` to find it.
+    pub fn extend_aggregate_groups(&mut self, items: Vec<(Expr, String)>) {
+        fn walk(rel: &mut Rel, items: &[(Expr, String)]) -> bool {
+            match rel {
+                Rel::Aggregate(a) => {
+                    for (e, _) in items {
+                        if !a.group_by.iter().any(|g| g == e) {
+                            a.group_by.push(e.clone());
+                        }
+                    }
+                    true
+                }
+                Rel::Fetch(f) => walk(&mut f.input, items),
+                Rel::Sort(s) => walk(&mut s.input, items),
+                Rel::Filter(f) => walk(&mut f.input, items),
+                _ => false,
+            }
+        }
+        walk(&mut self.root, &items);
+    }
+
+    fn take_root(&mut self) -> Rel {
+        std::mem::replace(
+            &mut self.root,
+            Rel::Read(ReadRel {
+                table: String::new(),
+                alias: String::new(),
+                columns: Vec::new(),
+            }),
+        )
+    }
+
+    /// Mutate the outermost project's expression list. Walks through Fetch/Sort
+    /// to find it. If no project exists, wraps the root in one.
+    fn mutate_project(&mut self, f: impl FnOnce(&mut Vec<(Expr, String)>)) {
+        fn find_project(rel: &mut Rel) -> Option<&mut Vec<(Expr, String)>> {
+            match rel {
+                Rel::Project(p) => Some(&mut p.expressions),
+                Rel::Fetch(fe) => find_project(&mut fe.input),
+                Rel::Sort(s) => find_project(&mut s.input),
+                _ => None,
+            }
+        }
+
+        if let Some(exprs) = find_project(&mut self.root) {
+            f(exprs);
+        } else {
+            // Wrap root in a project
+            let existing = self.take_root();
+            let mut expressions = Vec::new();
+            f(&mut expressions);
+            self.root = Rel::Project(ProjectRel {
+                input: Box::new(existing),
+                expressions,
+            });
+        }
+
+        // Keep output_names in sync
+        self.output_names = self.root.output_names();
     }
 }
-
-// ---------------------------------------------------------------------------
-// Substrait tree walking (for Plan mutation API)
-// ---------------------------------------------------------------------------
 
 fn walk_rel_for_aliases(
     rel: &Rel,
     predicate: fn(&str) -> bool,
     aliases: &mut Vec<(String, String)>,
 ) {
-    match &rel.rel_type {
-        Some(rel::RelType::Read(read)) => {
-            if let Some((table, alias)) = extract_table_and_alias(read)
-                && predicate(&table)
-            {
-                aliases.push((table, alias));
+    match rel {
+        Rel::Read(r) if r.table != RawFrom::TAG => {
+            if predicate(&r.table) {
+                aliases.push((r.table.clone(), r.alias.clone()));
             }
         }
-        Some(rel::RelType::Filter(f)) => {
-            if let Some(input) = &f.input {
-                walk_rel_for_aliases(input, predicate, aliases);
-            }
+        Rel::Read(_) => {}
+        Rel::Filter(f) => walk_rel_for_aliases(&f.input, predicate, aliases),
+        Rel::Project(p) => walk_rel_for_aliases(&p.input, predicate, aliases),
+        Rel::Join(j) => {
+            walk_rel_for_aliases(&j.left, predicate, aliases);
+            walk_rel_for_aliases(&j.right, predicate, aliases);
         }
-        Some(rel::RelType::Project(p)) => {
-            if let Some(input) = &p.input {
-                walk_rel_for_aliases(input, predicate, aliases);
-            }
-        }
-        Some(rel::RelType::Join(j)) => {
-            if let Some(left) = &j.left {
-                walk_rel_for_aliases(left, predicate, aliases);
-            }
-            if let Some(right) = &j.right {
-                walk_rel_for_aliases(right, predicate, aliases);
-            }
-        }
-        Some(rel::RelType::Fetch(f)) => {
-            if let Some(input) = &f.input {
-                walk_rel_for_aliases(input, predicate, aliases);
-            }
-        }
-        Some(rel::RelType::Sort(s)) => {
-            if let Some(input) = &s.input {
-                walk_rel_for_aliases(input, predicate, aliases);
-            }
-        }
-        Some(rel::RelType::Aggregate(a)) => {
-            if let Some(input) = &a.input {
-                walk_rel_for_aliases(input, predicate, aliases);
-            }
-        }
-        // Don't recurse into SetRel (UNION ALL) — arms are derived tables
+        Rel::Sort(s) => walk_rel_for_aliases(&s.input, predicate, aliases),
+        Rel::Fetch(f) => walk_rel_for_aliases(&f.input, predicate, aliases),
+        Rel::Aggregate(a) => walk_rel_for_aliases(&a.input, predicate, aliases),
+        Rel::Subquery(s) => walk_rel_for_aliases(&s.input, predicate, aliases),
+        // Don't recurse into UnionAll — arms are derived tables
         // secured transitively through join conditions.
-        Some(rel::RelType::Set(_)) => {}
-        _ => {}
+        Rel::UnionAll(_) => {}
     }
 }
 
-/// Extract `(table_name, alias)` from a ReadRel's metadata and NamedTable.
-fn extract_table_and_alias(read: &ReadRel) -> Option<(String, String)> {
-    let alias = read
-        .advanced_extension
-        .as_ref()
-        .and_then(|adv| adv.optimization.first())
-        .and_then(|opt| serde_json::from_slice::<serde_json::Value>(&opt.value).ok())
-        .and_then(|meta| meta.get("alias").and_then(|v| v.as_str()).map(String::from))?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::expr::*;
 
-    let table = match &read.read_type {
-        Some(read_rel::ReadType::NamedTable(nt)) => nt.names.first().cloned(),
-        _ => None,
-    }?;
-
-    Some((table, alias))
-}
-
-/// Build a synthetic schema from all ReadRels in the tree.
-/// Used by `inject_filter` to resolve column references in filter expressions.
-fn collect_schema_from_rel(rel: &Rel) -> Schema {
-    let mut columns = Vec::new();
-    collect_schema_walk(rel, &mut columns);
-    Schema { columns }
-}
-
-fn collect_schema_walk(rel: &Rel, columns: &mut Vec<SchemaColumn>) {
-    match &rel.rel_type {
-        Some(rel::RelType::Read(read)) => {
-            if let Some((_, alias)) = extract_table_and_alias(read)
-                && let Some(base) = &read.base_schema
-            {
-                let types = base
-                    .r#struct
-                    .as_ref()
-                    .map(|s| &s.types)
-                    .cloned()
-                    .unwrap_or_default();
-                for (i, name) in base.names.iter().enumerate() {
-                    let data_type = types
-                        .get(i)
-                        .and_then(crate::ir::substrait::substrait_type_to_data_type)
-                        .unwrap_or(DataType::String);
-                    columns.push(SchemaColumn {
-                        table_alias: alias.clone(),
-                        name: name.clone(),
-                        data_type,
-                    });
-                }
-            }
-        }
-        Some(rel::RelType::Filter(f)) => {
-            if let Some(input) = &f.input {
-                collect_schema_walk(input, columns);
-            }
-        }
-        Some(rel::RelType::Project(p)) => {
-            if let Some(input) = &p.input {
-                collect_schema_walk(input, columns);
-            }
-        }
-        Some(rel::RelType::Join(j)) => {
-            if let Some(left) = &j.left {
-                collect_schema_walk(left, columns);
-            }
-            if let Some(right) = &j.right {
-                collect_schema_walk(right, columns);
-            }
-        }
-        Some(rel::RelType::Fetch(f)) => {
-            if let Some(input) = &f.input {
-                collect_schema_walk(input, columns);
-            }
-        }
-        Some(rel::RelType::Sort(s)) => {
-            if let Some(input) = &s.input {
-                collect_schema_walk(input, columns);
-            }
-        }
-        Some(rel::RelType::Aggregate(a)) => {
-            if let Some(input) = &a.input {
-                collect_schema_walk(input, columns);
-            }
-        }
-        Some(rel::RelType::Set(_)) => {}
-        _ => {}
-    }
-}
-
-// ---------------------------------------------------------------------------
-// PlanBuilder
-// ---------------------------------------------------------------------------
-
-/// Builds Substrait plans from the expression DSL.
-///
-/// # Recommended relation ordering
-///
-/// ```text
-/// read / join  ->  filter  ->  sort  ->  project  ->  fetch
-/// ```
-///
-/// This produces the simplest SQL. All field references in filter, sort, and
-/// project resolve against the same base schema (the read/join output).
-pub struct PlanBuilder {
-    functions: FunctionRegistry,
-}
-
-impl Default for PlanBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PlanBuilder {
-    pub fn new() -> Self {
-        Self {
-            functions: FunctionRegistry::new(),
-        }
-    }
-
-    // -- Relation builders --------------------------------------------------
-
-    /// Table scan: `FROM table AS alias`
-    pub fn read(&mut self, table: &str, alias: &str, columns: &[(&str, DataType)]) -> TypedRel {
-        let schema = Schema {
-            columns: columns
-                .iter()
-                .map(|(name, dt)| SchemaColumn {
-                    table_alias: alias.into(),
-                    name: (*name).into(),
-                    data_type: dt.clone(),
-                })
-                .collect(),
-        };
-
-        let read = ReadRel {
-            base_schema: Some(build_named_struct(columns)),
-            read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
-                names: vec![table.into()],
-                advanced_extension: None,
-            })),
-            advanced_extension: Some(make_metadata(
-                "llqm/read_metadata",
-                serde_json::json!({ "alias": alias }),
-            )),
-            ..Default::default()
-        };
-
-        TypedRel::wrap(rel::RelType::Read(Box::new(read)), schema)
-    }
-
-    /// Raw FROM clause: `FROM <raw_from_sql>`
-    ///
-    /// Escape hatch for migration from raw SQL. The `raw_from` string is
-    /// emitted verbatim as the FROM clause. The `columns` parameter defines
-    /// the output schema for column resolution in downstream relations.
-    /// Columns have empty table alias (unqualified).
-    pub fn read_raw(&mut self, raw_from: &str, columns: &[(&str, DataType)]) -> TypedRel {
-        let schema = Schema {
-            columns: columns
-                .iter()
-                .map(|(name, dt)| SchemaColumn {
-                    table_alias: String::new(),
-                    name: (*name).into(),
-                    data_type: dt.clone(),
-                })
-                .collect(),
-        };
-
-        let read = ReadRel {
-            base_schema: Some(build_named_struct(columns)),
-            read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
-                names: vec!["__raw".into()],
-                advanced_extension: None,
-            })),
-            advanced_extension: Some(make_metadata(
-                "llqm/read_metadata",
-                serde_json::json!({ "raw_from": raw_from }),
-            )),
-            ..Default::default()
-        };
-
-        TypedRel::wrap(rel::RelType::Read(Box::new(read)), schema)
-    }
-
-    /// `left JOIN right ON condition`
-    pub fn join(
-        &mut self,
-        join_type: JoinType,
-        left: TypedRel,
-        right: TypedRel,
-        on: Expr,
-    ) -> TypedRel {
-        let merged = Schema::merge(&left.schema, &right.schema);
-        let resolved_on = self.resolve_expr(&on, &merged);
-
-        let join = proto::JoinRel {
-            left: Some(Box::new(left.rel)),
-            right: Some(Box::new(right.rel)),
-            expression: Some(Box::new(resolved_on)),
-            r#type: to_substrait_join_type(join_type) as i32,
-            ..Default::default()
-        };
-
-        TypedRel::wrap(rel::RelType::Join(Box::new(join)), merged)
-    }
-
-    /// `WHERE condition`
-    pub fn filter(&mut self, input: TypedRel, condition: Expr) -> TypedRel {
-        let resolved = self.resolve_expr(&condition, &input.schema);
-        let schema = input.schema;
-
-        let filter = FilterRel {
-            input: Some(Box::new(input.rel)),
-            condition: Some(Box::new(resolved)),
-            ..Default::default()
-        };
-
-        TypedRel::wrap(rel::RelType::Filter(Box::new(filter)), schema)
-    }
-
-    /// `SELECT expr1 AS alias1, expr2 AS alias2, ...`
-    ///
-    /// Each `(Expr, &str)` pair is an expression and its output alias.
-    pub fn project(&mut self, input: TypedRel, exprs: &[(Expr, &str)]) -> TypedRel {
-        let resolved: Vec<Expression> = exprs
-            .iter()
-            .map(|(e, _)| self.resolve_expr(e, &input.schema))
-            .collect();
-
-        let output_schema = Schema {
-            columns: exprs
-                .iter()
-                .map(|(expr, alias)| {
-                    let data_type = infer_data_type(expr, &input.schema);
-                    let table_alias = infer_table(expr);
-                    SchemaColumn {
-                        table_alias,
-                        name: (*alias).into(),
-                        data_type,
-                    }
-                })
-                .collect(),
-        };
-
-        let input_count = input.schema.columns.len();
-        let emit = (input_count..input_count + exprs.len())
-            .map(|i| i as i32)
-            .collect();
-
-        let project = ProjectRel {
-            common: Some(RelCommon {
-                emit_kind: Some(rel_common::EmitKind::Emit(rel_common::Emit {
-                    output_mapping: emit,
-                })),
-                ..Default::default()
-            }),
-            input: Some(Box::new(input.rel)),
-            expressions: resolved,
-            ..Default::default()
-        };
-
-        TypedRel::wrap(rel::RelType::Project(Box::new(project)), output_schema)
-    }
-
-    /// `ORDER BY key1 dir1, key2 dir2, ...`
-    pub fn sort(&mut self, input: TypedRel, keys: &[(Expr, SortDir)]) -> TypedRel {
-        let sort_fields: Vec<proto::SortField> = keys
-            .iter()
-            .map(|(expr, dir)| {
-                let resolved = self.resolve_expr(expr, &input.schema);
-                proto::SortField {
-                    expr: Some(resolved),
-                    sort_kind: Some(sort_field::SortKind::Direction(match dir {
-                        SortDir::Asc => sort_field::SortDirection::AscNullsLast as i32,
-                        SortDir::Desc => sort_field::SortDirection::DescNullsLast as i32,
-                    })),
-                }
-            })
-            .collect();
-
-        let sort = SortRel {
-            input: Some(Box::new(input.rel)),
-            sorts: sort_fields,
-            ..Default::default()
-        };
-
-        TypedRel::wrap(rel::RelType::Sort(Box::new(sort)), input.schema)
-    }
-
-    /// `LIMIT count [OFFSET offset]`
-    #[allow(deprecated)] // FetchRel count/offset fields are deprecated but simpler
-    pub fn fetch(&self, input: TypedRel, count: u64, offset: Option<u64>) -> TypedRel {
-        let fetch = FetchRel {
-            input: Some(Box::new(input.rel)),
-            count_mode: Some(fetch_rel::CountMode::Count(count as i64)),
-            offset_mode: offset.map(|o| fetch_rel::OffsetMode::Offset(o as i64)),
-            ..Default::default()
-        };
-
-        TypedRel::wrap(rel::RelType::Fetch(Box::new(fetch)), input.schema)
-    }
-
-    /// `SELECT agg_exprs... FROM input GROUP BY group_exprs...`
-    ///
-    /// `group_exprs` are `(Expr, &str)` pairs: the grouping expression and its
-    /// output alias. `agg_exprs` are `(&str, &str, Vec<Expr>)` triples:
-    /// function name, output alias, and arguments.
-    ///
-    /// The output schema contains the grouping columns first, then the
-    /// aggregate columns.
-    #[allow(deprecated)] // AggregateFunction.args
-    pub fn aggregate(
-        &mut self,
-        input: TypedRel,
-        group_exprs: &[(Expr, &str)],
-        agg_exprs: &[(&str, &str, Vec<Expr>)],
-    ) -> TypedRel {
-        let grouping_expressions: Vec<Expression> = group_exprs
-            .iter()
-            .map(|(e, _)| self.resolve_expr(e, &input.schema))
-            .collect();
-        let expression_references: Vec<u32> = (0..group_exprs.len() as u32).collect();
-
-        let measures: Vec<aggregate_rel::Measure> = agg_exprs
-            .iter()
-            .map(|(func_name, _alias, args)| {
-                let resolved_args: Vec<FunctionArgument> = args
-                    .iter()
-                    .map(|a| make_value_arg(self.resolve_expr(a, &input.schema)))
-                    .collect();
-                let anchor = self.functions.ensure(func_name);
-                aggregate_rel::Measure {
-                    measure: Some(AggregateFunction {
-                        function_reference: anchor,
-                        arguments: resolved_args,
-                        output_type: Some(string_type()),
-                        phase: proto::AggregationPhase::InitialToResult as i32,
-                        sorts: Vec::new(),
-                        invocation: proto::aggregate_function::AggregationInvocation::All as i32,
-                        options: Vec::new(),
-                        args: Vec::new(),
-                    }),
-                    filter: None,
-                }
-            })
-            .collect();
-
-        #[allow(deprecated)]
-        let grouping = aggregate_rel::Grouping {
-            grouping_expressions: Vec::new(),
-            expression_references,
-        };
-
-        // Build output schema: group columns first, then aggregate columns
-        let mut output_columns: Vec<SchemaColumn> = group_exprs
-            .iter()
-            .map(|(expr, alias)| SchemaColumn {
-                table_alias: infer_table(expr),
-                name: (*alias).into(),
-                data_type: infer_data_type(expr, &input.schema),
-            })
-            .collect();
-        for (_func_name, alias, _args) in agg_exprs {
-            output_columns.push(SchemaColumn {
-                table_alias: String::new(),
-                name: (*alias).into(),
-                data_type: DataType::String,
-            });
-        }
-
-        let agg = AggregateRel {
-            input: Some(Box::new(input.rel)),
-            groupings: vec![grouping],
-            measures,
-            grouping_expressions,
-            ..Default::default()
-        };
-
-        TypedRel::wrap(
-            rel::RelType::Aggregate(Box::new(agg)),
-            Schema {
-                columns: output_columns,
-            },
+    #[test]
+    fn chainable_select() {
+        let plan = Rel::read(
+            "users",
+            "u",
+            &[("id", DataType::Int64), ("name", DataType::String)],
         )
+        .filter(eq(col("u", "id"), int(42)))
+        .project(&[(col("u", "name"), "name")])
+        .fetch(10, None)
+        .into_plan();
+
+        assert_eq!(plan.output_names, vec!["name"]);
     }
 
-    /// `UNION ALL` of multiple typed relations.
-    ///
-    /// All inputs must have compatible schemas. The output schema is taken
-    /// from the first input, with column table aliases updated to the union's
-    /// alias. The `alias` is stored in metadata for codegen to emit
-    /// `(...) AS alias` when used as a derived table.
-    pub fn union_all(&mut self, inputs: Vec<TypedRel>, alias: &str) -> TypedRel {
-        assert!(!inputs.is_empty(), "union_all requires at least one input");
+    #[test]
+    fn chainable_join() {
+        let projects = Rel::read("gl_project", "p", &[("id", DataType::Int64)]);
+        let mrs = Rel::read("gl_merge_request", "mr", &[("project_id", DataType::Int64)]);
 
-        let col_names: Vec<String> = inputs[0]
-            .schema
-            .columns
-            .iter()
-            .map(|c| c.name.clone())
-            .collect();
+        let plan = projects
+            .join(
+                JoinType::Inner,
+                mrs,
+                eq(col("p", "id"), col("mr", "project_id")),
+            )
+            .project(&[(col("p", "id"), "id")])
+            .into_plan();
 
-        let schema = Schema {
-            columns: inputs[0]
-                .schema
-                .columns
-                .iter()
-                .map(|c| SchemaColumn {
-                    table_alias: alias.into(),
-                    name: c.name.clone(),
-                    data_type: c.data_type.clone(),
-                })
-                .collect(),
-        };
-        let rels: Vec<Rel> = inputs.into_iter().map(|t| t.rel).collect();
-
-        let set = SetRel {
-            inputs: rels,
-            op: set_rel::SetOp::UnionAll as i32,
-            advanced_extension: Some(make_metadata(
-                "llqm/set_metadata",
-                serde_json::json!({ "alias": alias, "column_names": col_names }),
-            )),
-            ..Default::default()
-        };
-
-        TypedRel::wrap(rel::RelType::Set(set), schema)
+        assert_eq!(plan.output_names, vec!["id"]);
     }
 
-    /// Wrap a `TypedRel` as a named derived table (subquery in FROM clause).
-    ///
-    /// The `alias` is stored in metadata and the schema columns get updated
-    /// to use the new alias as their table qualifier.
-    pub fn subquery(&mut self, input: TypedRel, alias: &str) -> TypedRel {
-        let metadata = serde_json::json!({ "subquery_alias": alias });
+    #[test]
+    fn chainable_aggregate() {
+        let plan = Rel::read(
+            "gl_project",
+            "p",
+            &[("namespace_id", DataType::Int64), ("id", DataType::Int64)],
+        )
+        .aggregate(
+            &[col("p", "namespace_id")],
+            &[Measure::new("count", &[col("p", "id")], "cnt")],
+        )
+        .into_plan();
 
-        let ext_single = proto::ExtensionSingleRel {
-            common: None,
-            input: Some(Box::new(input.rel)),
-            detail: Some(make_any("llqm/subquery_metadata", &metadata)),
-        };
-
-        let schema = Schema {
-            columns: input
-                .schema
-                .columns
-                .iter()
-                .map(|c| SchemaColumn {
-                    table_alias: alias.into(),
-                    name: c.name.clone(),
-                    data_type: c.data_type.clone(),
-                })
-                .collect(),
-        };
-
-        TypedRel::wrap(rel::RelType::ExtensionSingle(Box::new(ext_single)), schema)
+        assert_eq!(plan.output_names, vec!["namespace_id", "cnt"]);
     }
 
-    /// Finalize the plan. Output column names come from the root relation's schema.
-    pub fn build(self, root: TypedRel) -> Plan {
-        let output_names: Vec<String> =
-            root.schema.columns.iter().map(|c| c.name.clone()).collect();
+    #[test]
+    fn chainable_union_all() {
+        let a = Rel::read("t1", "a", &[("id", DataType::Int64)]);
+        let b = Rel::read("t2", "b", &[("id", DataType::Int64)]);
 
-        #[allow(deprecated)]
-        let plan = SubstraitPlan {
-            extension_uris: Vec::new(),
-            extension_urns: vec![self.functions.urn],
-            extensions: self.functions.declarations,
-            relations: vec![PlanRel {
-                rel_type: Some(plan_rel::RelType::Root(RelRoot {
-                    input: Some(root.rel),
-                    names: output_names,
-                })),
-            }],
-            ..Default::default()
-        };
+        let plan = Rel::union_all(vec![a, b], "combined")
+            .project(&[(col("combined", "id"), "id")])
+            .into_plan();
 
-        Plan {
-            inner: plan,
-            ctes: Vec::new(),
+        assert_eq!(plan.output_names, vec!["id"]);
+    }
+
+    #[test]
+    fn filterable_aliases() {
+        let projects = Rel::read(
+            "gl_project",
+            "p",
+            &[
+                ("id", DataType::Int64),
+                ("traversal_path", DataType::String),
+            ],
+        );
+        let users = Rel::read("gl_user", "u", &[("id", DataType::Int64)]);
+        let other = Rel::read("custom", "c", &[("id", DataType::Int64)]);
+
+        let plan = projects
+            .join(JoinType::Inner, users, eq(col("p", "id"), col("u", "id")))
+            .join(JoinType::Inner, other, eq(col("p", "id"), col("c", "id")))
+            .into_plan();
+
+        let gl_aliases = plan.filterable_aliases(|t| t.starts_with("gl_"));
+        assert_eq!(gl_aliases.len(), 2);
+        assert!(gl_aliases.iter().any(|(t, _)| t == "gl_project"));
+        assert!(gl_aliases.iter().any(|(t, _)| t == "gl_user"));
+    }
+
+    #[test]
+    fn inject_filter() {
+        let mut plan = Rel::read("gl_project", "p", &[("id", DataType::Int64)])
+            .project(&[(col("p", "id"), "id")])
+            .into_plan();
+
+        plan.inject_filter(eq(col("p", "id"), int(1)));
+
+        assert!(matches!(plan.root, Rel::Filter(_)));
+    }
+
+    #[test]
+    fn cte_plan() {
+        let cte_plan = Rel::read(
+            "gl_project",
+            "p",
+            &[("id", DataType::Int64), ("name", DataType::String)],
+        )
+        .project(&[(col("p", "id"), "node_id")])
+        .into_plan();
+
+        let plan = Rel::read("base", "b", &[("node_id", DataType::Int64)])
+            .project(&[(col("b", "node_id"), "node_id")])
+            .into_plan_with_ctes(vec![CteDef {
+                name: "base".into(),
+                plan: cte_plan,
+                recursive: false,
+            }]);
+
+        assert_eq!(plan.ctes.len(), 1);
+        assert_eq!(plan.ctes[0].name, "base");
+    }
+
+    #[test]
+    fn subquery() {
+        let plan = Rel::read("gl_project", "p", &[("id", DataType::Int64)])
+            .project(&[(col("p", "id"), "id")])
+            .subquery("sq")
+            .project(&[(col("sq", "id"), "id")])
+            .into_plan();
+
+        assert_eq!(plan.output_names, vec!["id"]);
+        assert!(matches!(plan.root, Rel::Project(_)));
+    }
+
+    #[test]
+    fn extend_project_appends() {
+        let mut plan = Rel::read(
+            "gl_user",
+            "u",
+            &[("id", DataType::Int64), ("name", DataType::String)],
+        )
+        .project(&[(col("u", "name"), "name")])
+        .fetch(10, None)
+        .into_plan();
+
+        plan.extend_project(vec![
+            (col("u", "id"), "_gkg_u_id".into()),
+            (string("User"), "_gkg_u_type".into()),
+        ]);
+
+        assert_eq!(plan.output_names, vec!["name", "_gkg_u_id", "_gkg_u_type"]);
+    }
+
+    #[test]
+    fn extend_project_deduplicates() {
+        let mut plan = Rel::read("t", "t", &[("id", DataType::Int64)])
+            .project(&[(col("t", "id"), "id")])
+            .into_plan();
+
+        plan.extend_project(vec![(col("t", "id"), "id".into())]);
+        assert_eq!(plan.output_names, vec!["id"]);
+    }
+
+    #[test]
+    fn insert_project_after() {
+        let mut plan = Rel::read("t", "t", &[("id", DataType::Int64)])
+            .project(&[(col("t", "id"), "_gkg_u_id")])
+            .into_plan();
+
+        plan.insert_project_after("_gkg_u_id", (string("User"), "_gkg_u_type".into()));
+
+        assert_eq!(plan.output_names, vec!["_gkg_u_id", "_gkg_u_type"]);
+    }
+
+    #[test]
+    fn extend_aggregate_groups() {
+        let mut plan = Rel::read(
+            "gl_user",
+            "u",
+            &[("id", DataType::Int64), ("username", DataType::String)],
+        )
+        .aggregate(
+            &[col("u", "username")],
+            &[Measure::new("count", &[col("u", "id")], "cnt")],
+        )
+        .fetch(10, None)
+        .into_plan();
+
+        plan.extend_aggregate_groups(vec![(col("u", "id"), "_gkg_u_id".into())]);
+
+        // Verify the aggregate now has 2 group-by expressions
+        if let Rel::Fetch(f) = &plan.root {
+            if let Rel::Aggregate(a) = &*f.input {
+                assert_eq!(a.group_by.len(), 2);
+                return;
+            }
         }
+        panic!("expected Fetch(Aggregate(...))");
     }
 
-    /// Finalize the plan with CTEs in the WITH clause.
-    ///
-    /// Each `CteDef` produces a `WITH [RECURSIVE] name AS (SELECT ...)` prefix.
-    pub fn build_with_ctes(self, root: TypedRel, ctes: Vec<CteDef>) -> Plan {
-        let mut plan = self.build(root);
-        plan.ctes = ctes;
-        plan
-    }
+    #[test]
+    fn extend_project_creates_project_when_missing() {
+        let mut plan = Rel::read("t", "t", &[("id", DataType::Int64)]).into_plan();
 
-    // -- Expression resolution (delegates to standalone fn) ------------------
+        plan.extend_project(vec![(col("t", "id"), "_gkg_t_id".into())]);
 
-    fn resolve_expr(&mut self, expr: &Expr, schema: &Schema) -> Expression {
-        resolve_expr(&mut self.functions, expr, schema)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers (plan-level, not Substrait)
-// ---------------------------------------------------------------------------
-
-fn infer_data_type(expr: &Expr, schema: &Schema) -> DataType {
-    match expr {
-        Expr::Column { table, name } => schema
-            .find(table, name)
-            .map(|i| schema.columns[i].data_type.clone())
-            .unwrap_or(DataType::String),
-        Expr::Literal(LiteralValue::String(_)) | Expr::Param { .. } => DataType::String,
-        Expr::Literal(LiteralValue::Int64(_)) => DataType::Int64,
-        Expr::Literal(LiteralValue::Float64(_)) => DataType::Float64,
-        Expr::Literal(LiteralValue::Bool(_)) => DataType::Bool,
-        Expr::Literal(LiteralValue::Null) => DataType::String,
-        Expr::Cast { target_type, .. } => target_type.clone(),
-        Expr::BinaryOp { op, .. } => match op {
-            BinaryOp::Add => DataType::Int64,
-            _ => DataType::Bool,
-        },
-        Expr::FuncCall { .. } | Expr::IfThen { .. } | Expr::InList { .. } | Expr::Raw(_) => {
-            DataType::String
-        }
-        Expr::UnaryOp { .. } => DataType::Bool,
-    }
-}
-
-fn infer_table(expr: &Expr) -> String {
-    match expr {
-        Expr::Column { table, .. } => table.clone(),
-        _ => String::new(),
+        assert!(matches!(plan.root, Rel::Project(_)));
+        assert_eq!(plan.output_names, vec!["_gkg_t_id"]);
     }
 }
