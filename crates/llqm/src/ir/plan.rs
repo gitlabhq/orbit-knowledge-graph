@@ -31,6 +31,7 @@ pub enum Rel {
     Aggregate(AggregateRel),
     UnionAll(UnionAllRel),
     Subquery(SubqueryRel),
+    Distinct(DistinctRel),
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +144,11 @@ pub struct SubqueryRel {
     pub alias: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct DistinctRel {
+    pub input: Box<Rel>,
+}
+
 // ---------------------------------------------------------------------------
 // Chainable API
 // ---------------------------------------------------------------------------
@@ -246,6 +252,51 @@ impl Rel {
             alias: alias.into(),
         })
     }
+
+    /// `SELECT DISTINCT ...`
+    pub fn distinct(self) -> Self {
+        Rel::Distinct(DistinctRel {
+            input: Box::new(self),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tree traversal
+// ---------------------------------------------------------------------------
+
+impl Rel {
+    /// Returns the direct child relations of this node.
+    pub fn inputs(&self) -> Vec<&Rel> {
+        match self {
+            Rel::Read(_) => vec![],
+            Rel::Filter(f) => vec![&f.input],
+            Rel::Project(p) => vec![&p.input],
+            Rel::Join(j) => vec![&j.left, &j.right],
+            Rel::Sort(s) => vec![&s.input],
+            Rel::Fetch(f) => vec![&f.input],
+            Rel::Aggregate(a) => vec![&a.input],
+            Rel::UnionAll(u) => u.inputs.iter().collect(),
+            Rel::Subquery(s) => vec![&s.input],
+            Rel::Distinct(d) => vec![&d.input],
+        }
+    }
+
+    /// Returns mutable references to direct child relations.
+    pub fn inputs_mut(&mut self) -> Vec<&mut Rel> {
+        match self {
+            Rel::Read(_) => vec![],
+            Rel::Filter(f) => vec![&mut f.input],
+            Rel::Project(p) => vec![&mut p.input],
+            Rel::Join(j) => vec![&mut j.left, &mut j.right],
+            Rel::Sort(s) => vec![&mut s.input],
+            Rel::Fetch(f) => vec![&mut f.input],
+            Rel::Aggregate(a) => vec![&mut a.input],
+            Rel::UnionAll(u) => u.inputs.iter_mut().collect(),
+            Rel::Subquery(s) => vec![&mut s.input],
+            Rel::Distinct(d) => vec![&mut d.input],
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,41 +352,72 @@ impl Rel {
 
     /// Derive output column names from the relation tree.
     pub fn output_names(&self) -> Vec<String> {
+        self.output_columns()
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect()
+    }
+
+    /// Derive `(table_alias, column_name)` pairs from the relation tree.
+    ///
+    /// Used by `output_names()` (drops the alias) and by the Substrait
+    /// encoder (needs aliases for positional column resolution).
+    pub fn output_columns(&self) -> Vec<(String, String)> {
         match self {
-            Rel::Read(r) => r.columns.iter().map(|c| c.name.clone()).collect(),
+            Rel::Read(r) => r
+                .columns
+                .iter()
+                .map(|c| (r.alias.clone(), c.name.clone()))
+                .collect(),
             Rel::Project(p) => p
                 .expressions
                 .iter()
-                .map(|(_, alias)| alias.clone())
+                .map(|(expr, alias)| {
+                    let table = match expr {
+                        Expr::Column { table, .. } => table.clone(),
+                        _ => String::new(),
+                    };
+                    (table, alias.clone())
+                })
                 .collect(),
-            Rel::Filter(f) => f.input.output_names(),
-            Rel::Sort(s) => s.input.output_names(),
-            Rel::Fetch(f) => f.input.output_names(),
+            Rel::Filter(f) => f.input.output_columns(),
+            Rel::Sort(s) => s.input.output_columns(),
+            Rel::Fetch(f) => f.input.output_columns(),
             Rel::Aggregate(a) => {
-                let mut names: Vec<String> = a
+                let mut cols: Vec<(String, String)> = a
                     .group_by
                     .iter()
                     .map(|e| match e {
-                        Expr::Column { name, .. } => name.clone(),
-                        _ => "_expr".into(),
+                        Expr::Column { table, name } => (table.clone(), name.clone()),
+                        _ => (String::new(), "_expr".into()),
                     })
                     .collect();
-                names.extend(a.measures.iter().map(|m| m.alias.clone()));
-                names
+                cols.extend(a.measures.iter().map(|m| (String::new(), m.alias.clone())));
+                cols
             }
             Rel::Join(j) => {
-                let mut names = j.left.output_names();
-                names.extend(j.right.output_names());
-                names
+                let mut cols = j.left.output_columns();
+                cols.extend(j.right.output_columns());
+                cols
             }
             Rel::UnionAll(u) => {
                 if let Some(first) = u.inputs.first() {
-                    first.output_names()
+                    first
+                        .output_columns()
+                        .into_iter()
+                        .map(|(_, name)| (u.alias.clone(), name))
+                        .collect()
                 } else {
                     Vec::new()
                 }
             }
-            Rel::Subquery(s) => s.input.output_names(),
+            Rel::Subquery(s) => s
+                .input
+                .output_columns()
+                .into_iter()
+                .map(|(_, name)| (s.alias.clone(), name))
+                .collect(),
+            Rel::Distinct(d) => d.input.output_columns(),
         }
     }
 }
@@ -347,9 +429,9 @@ impl Rel {
 impl Plan {
     /// Collect `(table_name, alias)` pairs for all ReadRels whose table name
     /// satisfies `predicate`.
-    pub fn filterable_aliases(&self, predicate: fn(&str) -> bool) -> Vec<(String, String)> {
+    pub fn filterable_aliases(&self, predicate: impl Fn(&str) -> bool) -> Vec<(String, String)> {
         let mut aliases = Vec::new();
-        walk_rel_for_aliases(&self.root, predicate, &mut aliases);
+        walk_rel_for_aliases(&self.root, &predicate, &mut aliases);
         aliases
     }
 
@@ -456,29 +538,21 @@ impl Plan {
 
 fn walk_rel_for_aliases(
     rel: &Rel,
-    predicate: fn(&str) -> bool,
+    predicate: &impl Fn(&str) -> bool,
     aliases: &mut Vec<(String, String)>,
 ) {
     match rel {
-        Rel::Read(r) if r.table != RAW_FROM_TAG => {
-            if predicate(&r.table) {
-                aliases.push((r.table.clone(), r.alias.clone()));
-            }
+        Rel::Read(r) if r.table != RAW_FROM_TAG && predicate(&r.table) => {
+            aliases.push((r.table.clone(), r.alias.clone()));
         }
-        Rel::Read(_) => {}
-        Rel::Filter(f) => walk_rel_for_aliases(&f.input, predicate, aliases),
-        Rel::Project(p) => walk_rel_for_aliases(&p.input, predicate, aliases),
-        Rel::Join(j) => {
-            walk_rel_for_aliases(&j.left, predicate, aliases);
-            walk_rel_for_aliases(&j.right, predicate, aliases);
-        }
-        Rel::Sort(s) => walk_rel_for_aliases(&s.input, predicate, aliases),
-        Rel::Fetch(f) => walk_rel_for_aliases(&f.input, predicate, aliases),
-        Rel::Aggregate(a) => walk_rel_for_aliases(&a.input, predicate, aliases),
-        Rel::Subquery(s) => walk_rel_for_aliases(&s.input, predicate, aliases),
         // Don't recurse into UnionAll — arms are derived tables
         // secured transitively through join conditions.
         Rel::UnionAll(_) => {}
+        _ => {
+            for child in rel.inputs() {
+                walk_rel_for_aliases(child, predicate, aliases);
+            }
+        }
     }
 }
 

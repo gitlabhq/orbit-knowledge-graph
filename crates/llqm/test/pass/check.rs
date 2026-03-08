@@ -9,7 +9,7 @@
 //! anchors and `__raw_sql` wrappers, this one directly pattern-matches on
 //! `Expr::Column` and `Expr::FuncCall`.
 
-use super::security::{SecurityContext, GL_TABLE_PREFIX, SKIP_TABLES, TRAVERSAL_PATH_COLUMN};
+use super::security::{GL_TABLE_PREFIX, SKIP_TABLES, SecurityContext, TRAVERSAL_PATH_COLUMN};
 use llqm::ir::expr::Expr;
 use llqm::ir::plan::{Plan, Rel};
 
@@ -71,6 +71,7 @@ fn rel_has_valid_filter(rel: &Rel, alias: &str, ctx: &SecurityContext) -> bool {
             rel_has_valid_filter(&j.left, alias, ctx) || rel_has_valid_filter(&j.right, alias, ctx)
         }
         Rel::Subquery(s) => rel_has_valid_filter(&s.input, alias, ctx),
+        Rel::Distinct(d) => rel_has_valid_filter(&d.input, alias, ctx),
         Rel::Read(_) | Rel::UnionAll(_) => false,
     }
 }
@@ -164,9 +165,10 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let plan = make_plan("gl_project", "p");
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("missing valid traversal_path filter"));
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
     }
 
     #[test]
@@ -175,9 +177,10 @@ mod tests {
         let mut plan = make_plan("gl_project", "p");
         plan.inject_filter(col("p", TRAVERSAL_PATH_COLUMN).starts_with(string("99/")));
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("missing valid traversal_path filter"));
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
     }
 
     #[test]

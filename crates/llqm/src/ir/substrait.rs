@@ -8,14 +8,15 @@
 use std::collections::HashMap;
 
 use substrait::proto::{
-    self, aggregate_rel, expression,
-    expression::{
-        field_reference, literal::LiteralType, reference_segment, FieldReference, Literal,
-        ReferenceSegment, ScalarFunction,
-    },
-    extensions as ext, fetch_rel, join_rel, plan_rel, r#type, read_rel, rel, rel_common, set_rel,
-    sort_field, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
+    self, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
     NamedStruct, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
+    aggregate_rel, expression,
+    expression::{
+        FieldReference, Literal, ReferenceSegment, ScalarFunction, field_reference,
+        literal::LiteralType, reference_segment,
+    },
+    extensions as ext, fetch_rel, join_rel, plan_rel, read_rel, rel, rel_common, set_rel,
+    sort_field, r#type,
 };
 
 use crate::ir::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, UnaryOp};
@@ -181,6 +182,10 @@ fn binary_op_substrait_name(op: BinaryOp) -> &'static str {
         BinaryOp::And => "and",
         BinaryOp::Or => "or",
         BinaryOp::Add => "add",
+        BinaryOp::Sub => "subtract",
+        BinaryOp::Mul => "multiply",
+        BinaryOp::Div => "divide",
+        BinaryOp::Mod => "modulus",
         BinaryOp::Like => "like",
         BinaryOp::ILike => "ilike",
         BinaryOp::In => "in",
@@ -210,6 +215,9 @@ pub enum EncodeError {
 
     #[error("CTEs are not supported in Substrait encoding (use ClickHouse backend)")]
     UnsupportedCtes,
+
+    #[error("DISTINCT is not supported in Substrait encoding (use ClickHouse backend)")]
+    UnsupportedDistinct,
 }
 
 /// Encode a `Plan` into a `substrait::proto::Plan`.
@@ -332,19 +340,6 @@ impl Schema {
     }
 }
 
-fn schema_from_read(read: &v2::ReadRel) -> Schema {
-    Schema {
-        columns: read
-            .columns
-            .iter()
-            .map(|c| SchemaColumn {
-                table_alias: read.alias.clone(),
-                name: c.name.clone(),
-            })
-            .collect(),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Rel encoding
 // ---------------------------------------------------------------------------
@@ -360,6 +355,7 @@ fn encode_rel(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeEr
         v2::Rel::Aggregate(a) => encode_aggregate(fns, a),
         v2::Rel::UnionAll(u) => encode_union_all(fns, u),
         v2::Rel::Subquery(s) => encode_subquery(fns, s),
+        v2::Rel::Distinct(_) => Err(EncodeError::UnsupportedDistinct),
     }
 }
 
@@ -749,86 +745,16 @@ fn encode_expr(
 }
 
 // ---------------------------------------------------------------------------
-// Schema collection (walks Rel tree)
+// Schema collection (delegates to Rel::output_columns)
 // ---------------------------------------------------------------------------
 
 fn collect_schema(rel: &v2::Rel) -> Schema {
-    match rel {
-        v2::Rel::Read(r) => schema_from_read(r),
-        v2::Rel::Filter(f) => collect_schema(&f.input),
-        v2::Rel::Sort(s) => collect_schema(&s.input),
-        v2::Rel::Fetch(f) => collect_schema(&f.input),
-        v2::Rel::Project(p) => Schema {
-            columns: p
-                .expressions
-                .iter()
-                .map(|(expr, alias)| SchemaColumn {
-                    table_alias: match expr {
-                        Expr::Column { table, .. } => table.clone(),
-                        _ => String::new(),
-                    },
-                    name: alias.clone(),
-                })
-                .collect(),
-        },
-        v2::Rel::Join(j) => {
-            let left = collect_schema(&j.left);
-            let right = collect_schema(&j.right);
-            Schema::merge(&left, &right)
-        }
-        v2::Rel::Aggregate(a) => {
-            let mut columns: Vec<SchemaColumn> = a
-                .group_by
-                .iter()
-                .map(|e| SchemaColumn {
-                    table_alias: match e {
-                        Expr::Column { table, .. } => table.clone(),
-                        _ => String::new(),
-                    },
-                    name: match e {
-                        Expr::Column { name, .. } => name.clone(),
-                        _ => "_expr".into(),
-                    },
-                })
-                .collect();
-            columns.extend(a.measures.iter().map(|m| SchemaColumn {
-                table_alias: String::new(),
-                name: m.alias.clone(),
-            }));
-            Schema { columns }
-        }
-        v2::Rel::UnionAll(u) => {
-            if let Some(first) = u.inputs.first() {
-                let inner = collect_schema(first);
-                Schema {
-                    columns: inner
-                        .columns
-                        .into_iter()
-                        .map(|c| SchemaColumn {
-                            table_alias: u.alias.clone(),
-                            name: c.name,
-                        })
-                        .collect(),
-                }
-            } else {
-                Schema {
-                    columns: Vec::new(),
-                }
-            }
-        }
-        v2::Rel::Subquery(s) => {
-            let inner = collect_schema(&s.input);
-            Schema {
-                columns: inner
-                    .columns
-                    .into_iter()
-                    .map(|c| SchemaColumn {
-                        table_alias: s.alias.clone(),
-                        name: c.name,
-                    })
-                    .collect(),
-            }
-        }
+    Schema {
+        columns: rel
+            .output_columns()
+            .into_iter()
+            .map(|(table_alias, name)| SchemaColumn { table_alias, name })
+            .collect(),
     }
 }
 

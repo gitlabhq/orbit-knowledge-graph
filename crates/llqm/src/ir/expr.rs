@@ -110,6 +110,10 @@ pub enum BinaryOp {
     And,
     Or,
     Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
     Like,
     ILike,
     In,
@@ -127,6 +131,10 @@ impl BinaryOp {
             Self::And => "AND",
             Self::Or => "OR",
             Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
+            Self::Mod => "%",
             Self::Like => "LIKE",
             Self::ILike => "ILIKE",
             Self::In => "IN",
@@ -198,6 +206,10 @@ impl Expr {
     binop!(and, BinaryOp::And);
     binop!(or, BinaryOp::Or);
     binop!(add, BinaryOp::Add);
+    binop!(sub, BinaryOp::Sub);
+    binop!(mul, BinaryOp::Mul);
+    binop!(div, BinaryOp::Div);
+    binop!(modulo, BinaryOp::Mod);
     binop!(like, BinaryOp::Like);
     binop!(ilike, BinaryOp::ILike);
     binop!(is_in, BinaryOp::In);

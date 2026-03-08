@@ -10,8 +10,8 @@ use thiserror::Error;
 
 use crate::ir::expr::{BinaryOp, Expr, JoinType, LiteralValue, SortDir, UnaryOp};
 use crate::ir::plan::{
-    AggregateRel, FetchRel, FilterRel, JoinRel, Plan, ProjectRel, ReadRel, Rel, SortRel,
-    SubqueryRel, UnionAllRel, RAW_FROM_TAG,
+    AggregateRel, DistinctRel, FetchRel, FilterRel, JoinRel, Plan, ProjectRel, RAW_FROM_TAG,
+    ReadRel, Rel, SortRel, SubqueryRel, UnionAllRel,
 };
 
 // ---------------------------------------------------------------------------
@@ -92,6 +92,7 @@ pub fn emit_clickhouse_sql(plan: &Plan) -> Result<ParameterizedQuery, CodegenErr
 struct CodegenContext {
     params: HashMap<String, ParamValue>,
     param_counter: usize,
+    subquery_counter: usize,
 }
 
 impl CodegenContext {
@@ -99,6 +100,7 @@ impl CodegenContext {
         Self {
             params: HashMap::new(),
             param_counter: 0,
+            subquery_counter: 0,
         }
     }
 
@@ -106,6 +108,12 @@ impl CodegenContext {
         let name = format!("p{}", self.param_counter);
         self.param_counter += 1;
         name
+    }
+
+    fn next_subquery_alias(&mut self) -> String {
+        let alias = format!("_sub{}", self.subquery_counter);
+        self.subquery_counter += 1;
+        alias
     }
 }
 
@@ -205,6 +213,7 @@ impl CodegenContext {
             Rel::Aggregate(a) => self.emit_aggregate(a, output_names),
             Rel::UnionAll(u) => self.emit_union_all(u, output_names),
             Rel::Subquery(s) => self.emit_subquery(s, output_names),
+            Rel::Distinct(d) => self.emit_distinct(d, output_names),
         }
     }
 
@@ -400,7 +409,12 @@ impl CodegenContext {
                 .iter()
                 .map(|a| self.emit_expr(a))
                 .collect::<Result<_, _>>()?;
-            let measure_sql = format!("{}({})", measure.function, args.join(", "));
+            let mut measure_sql = format!("{}({})", measure.function, args.join(", "));
+
+            if let Some(filter) = &measure.filter {
+                let filter_sql = self.emit_expr(filter)?;
+                measure_sql = format!("{measure_sql} FILTER (WHERE {filter_sql})");
+            }
 
             select_items.push(format!("{measure_sql} AS {alias}"));
             col_names.push(alias);
@@ -458,6 +472,20 @@ impl CodegenContext {
         ))
     }
 
+    fn emit_distinct(
+        &mut self,
+        distinct: &DistinctRel,
+        output_names: Option<&Vec<String>>,
+    ) -> Result<(QueryParts, Vec<String>), CodegenError> {
+        let (mut parts, col_names) = self.emit_query(&distinct.input, output_names)?;
+        if parts.select.is_empty() {
+            parts.select.push("DISTINCT *".into());
+        } else if let Some(first) = parts.select.first_mut() {
+            *first = format!("DISTINCT {first}");
+        }
+        Ok((parts, col_names))
+    }
+
     /// Emit a relation as a FROM-clause item. Simple reads, joins, unions, and
     /// subqueries are inlined. Everything else gets wrapped in a subquery.
     fn emit_from_item(&mut self, rel: &Rel) -> Result<(QueryParts, Vec<String>), CodegenError> {
@@ -468,9 +496,10 @@ impl CodegenContext {
             _ => {
                 let (inner_parts, cols) = self.emit_query(rel, None)?;
                 let sql = inner_parts.to_sql();
+                let alias = self.next_subquery_alias();
                 Ok((
                     QueryParts {
-                        from: format!("({sql}) AS _sub"),
+                        from: format!("({sql}) AS {alias}"),
                         ..Default::default()
                     },
                     cols,

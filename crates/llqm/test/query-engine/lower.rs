@@ -1526,14 +1526,12 @@ mod tests {
         let mut plan = lower(&input).unwrap();
 
         // Simulate security injecting a traversal_path filter on the CTE
-        plan.ctes[0].plan.inject_filter(
-            expr::col("s", "traversal_path").starts_with(expr::string("42/")),
-        );
+        plan.ctes[0]
+            .plan
+            .inject_filter(expr::col("s", "traversal_path").starts_with(expr::string("42/")));
 
         // Also inject on the main query
-        plan.inject_filter(
-            expr::col("e", "traversal_path").starts_with(expr::string("42/")),
-        );
+        plan.inject_filter(expr::col("e", "traversal_path").starts_with(expr::string("42/")));
 
         let pq = emit_clickhouse_sql(&plan).unwrap();
         assert!(pq.sql.contains("startsWith"), "sql: {}", pq.sql);
