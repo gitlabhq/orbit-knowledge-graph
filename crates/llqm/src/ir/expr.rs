@@ -172,127 +172,49 @@ pub enum JoinType {
 // Chainable methods
 // ---------------------------------------------------------------------------
 
+macro_rules! binop {
+    ($(#[$attr:meta])* $name:ident, $op:expr) => {
+        $(#[$attr])*
+        pub fn $name(self, right: Expr) -> Expr {
+            Expr::BinaryOp { op: $op, left: Box::new(self), right: Box::new(right) }
+        }
+    };
+}
+
+macro_rules! unop {
+    ($(#[$attr:meta])* $name:ident, $op:expr) => {
+        $(#[$attr])*
+        pub fn $name(self) -> Expr {
+            Expr::UnaryOp { op: $op, operand: Box::new(self) }
+        }
+    };
+}
+
 impl Expr {
-    // -- Comparison --
+    binop!(eq, BinaryOp::Eq);
+    binop!(ne, BinaryOp::Ne);
+    binop!(lt, BinaryOp::Lt);
+    binop!(le, BinaryOp::Le);
+    binop!(gt, BinaryOp::Gt);
+    binop!(ge, BinaryOp::Ge);
+    binop!(and, BinaryOp::And);
+    binop!(or, BinaryOp::Or);
+    binop!(
+        #[allow(clippy::should_implement_trait)]
+        add,
+        BinaryOp::Add
+    );
+    binop!(like, BinaryOp::Like);
+    binop!(ilike, BinaryOp::ILike);
+    binop!(is_in, BinaryOp::In);
 
-    pub fn eq(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Eq,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    pub fn ne(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Ne,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    pub fn lt(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Lt,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    pub fn le(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Le,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    pub fn gt(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Gt,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    pub fn ge(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Ge,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    // -- Logical --
-
-    pub fn and(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::And,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    pub fn or(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Or,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn not(self) -> Expr {
-        Expr::UnaryOp {
-            op: UnaryOp::Not,
-            operand: Box::new(self),
-        }
-    }
-
-    // -- Null checks --
-
-    pub fn is_null(self) -> Expr {
-        Expr::UnaryOp {
-            op: UnaryOp::IsNull,
-            operand: Box::new(self),
-        }
-    }
-
-    pub fn is_not_null(self) -> Expr {
-        Expr::UnaryOp {
-            op: UnaryOp::IsNotNull,
-            operand: Box::new(self),
-        }
-    }
-
-    // -- Pattern matching --
-
-    pub fn like(self, pattern: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Like,
-            left: Box::new(self),
-            right: Box::new(pattern),
-        }
-    }
-
-    pub fn ilike(self, pattern: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::ILike,
-            left: Box::new(self),
-            right: Box::new(pattern),
-        }
-    }
-
-    // -- Set membership --
-
-    /// `self IN set_expr` (binary IN, e.g. against an array parameter).
-    pub fn is_in(self, set: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::In,
-            left: Box::new(self),
-            right: Box::new(set),
-        }
-    }
+    unop!(
+        #[allow(clippy::should_implement_trait)]
+        not,
+        UnaryOp::Not
+    );
+    unop!(is_null, UnaryOp::IsNull);
+    unop!(is_not_null, UnaryOp::IsNotNull);
 
     /// `self IN (v1, v2, ...)` (expanded list).
     pub fn in_list(self, list: Vec<Expr>) -> Expr {
@@ -302,27 +224,12 @@ impl Expr {
         }
     }
 
-    // -- Arithmetic --
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn add(self, right: Expr) -> Expr {
-        Expr::BinaryOp {
-            op: BinaryOp::Add,
-            left: Box::new(self),
-            right: Box::new(right),
-        }
-    }
-
-    // -- Type conversion --
-
     pub fn cast(self, target_type: DataType) -> Expr {
         Expr::Cast {
             expr: Box::new(self),
             target_type,
         }
     }
-
-    // -- Convenience --
 
     /// `startsWith(self, prefix)`
     pub fn starts_with(self, prefix: Expr) -> Expr {
@@ -378,103 +285,18 @@ pub fn param(name: &str, data_type: DataType) -> Expr {
     }
 }
 
-pub fn eq(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::Eq,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-pub fn ne(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::Ne,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-pub fn lt(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::Lt,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-pub fn le(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::Le,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-pub fn gt(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::Gt,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-pub fn ge(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::Ge,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
 /// Fold expressions with `AND`. Requires at least one expression.
 pub fn and(exprs: impl IntoIterator<Item = Expr>) -> Expr {
     let mut iter = exprs.into_iter();
     let first = iter.next().expect("and() requires at least one expression");
-    iter.fold(first, |acc, e| Expr::BinaryOp {
-        op: BinaryOp::And,
-        left: Box::new(acc),
-        right: Box::new(e),
-    })
+    iter.fold(first, |acc, e| acc.and(e))
 }
 
 /// Fold expressions with `OR`. Requires at least one expression.
 pub fn or(exprs: impl IntoIterator<Item = Expr>) -> Expr {
     let mut iter = exprs.into_iter();
     let first = iter.next().expect("or() requires at least one expression");
-    iter.fold(first, |acc, e| Expr::BinaryOp {
-        op: BinaryOp::Or,
-        left: Box::new(acc),
-        right: Box::new(e),
-    })
-}
-
-pub fn not(expr: Expr) -> Expr {
-    Expr::UnaryOp {
-        op: UnaryOp::Not,
-        operand: Box::new(expr),
-    }
-}
-
-pub fn is_null(expr: Expr) -> Expr {
-    Expr::UnaryOp {
-        op: UnaryOp::IsNull,
-        operand: Box::new(expr),
-    }
-}
-
-pub fn is_not_null(expr: Expr) -> Expr {
-    Expr::UnaryOp {
-        op: UnaryOp::IsNotNull,
-        operand: Box::new(expr),
-    }
-}
-
-pub fn add(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::Add,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
+    iter.fold(first, |acc, e| acc.or(e))
 }
 
 /// Generic function call.
@@ -482,13 +304,6 @@ pub fn func(name: &str, args: Vec<Expr>) -> Expr {
     Expr::FuncCall {
         name: name.into(),
         args,
-    }
-}
-
-pub fn cast(expr: Expr, target_type: DataType) -> Expr {
-    Expr::Cast {
-        expr: Box::new(expr),
-        target_type,
     }
 }
 
@@ -500,43 +315,6 @@ pub fn if_then(ifs: Vec<(Expr, Expr)>, else_expr: Option<Expr>) -> Expr {
     }
 }
 
-/// `expr IN (v1, v2, ...)`
-pub fn in_list(expr: Expr, list: Vec<Expr>) -> Expr {
-    Expr::InList {
-        expr: Box::new(expr),
-        list,
-    }
-}
-
-/// Convenience: `startsWith(expr, prefix)`
-pub fn starts_with(expr: Expr, prefix: Expr) -> Expr {
-    func("startsWith", vec![expr, prefix])
-}
-
-pub fn like(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::Like,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-pub fn ilike(left: Expr, right: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::ILike,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-pub fn is_in(expr: Expr, set: Expr) -> Expr {
-    Expr::BinaryOp {
-        op: BinaryOp::In,
-        left: Box::new(expr),
-        right: Box::new(set),
-    }
-}
-
 /// Verbatim SQL fragment — escape hatch for migration from raw SQL.
 ///
 /// Only usable with ClickHouse codegen, not DataFusion.
@@ -545,21 +323,11 @@ pub fn raw(sql: &str) -> Expr {
 }
 
 /// Fold expressions with `AND`, returning `None` if empty.
-/// Filters out `None` items.
 pub fn and_opt(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
-    exprs.into_iter().flatten().reduce(|acc, e| Expr::BinaryOp {
-        op: BinaryOp::And,
-        left: Box::new(acc),
-        right: Box::new(e),
-    })
+    exprs.into_iter().flatten().reduce(|acc, e| acc.and(e))
 }
 
 /// Fold expressions with `OR`, returning `None` if empty.
-/// Filters out `None` items.
 pub fn or_opt(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
-    exprs.into_iter().flatten().reduce(|acc, e| Expr::BinaryOp {
-        op: BinaryOp::Or,
-        left: Box::new(acc),
-        right: Box::new(e),
-    })
+    exprs.into_iter().flatten().reduce(|acc, e| acc.or(e))
 }

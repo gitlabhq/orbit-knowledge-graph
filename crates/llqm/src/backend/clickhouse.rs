@@ -631,14 +631,8 @@ mod tests {
             ],
         )
         .filter(and([
-            gt(
-                col("t", "_siphon_replicated_at"),
-                param("last_watermark", DataType::String),
-            ),
-            le(
-                col("t", "_siphon_replicated_at"),
-                param("watermark", DataType::String),
-            ),
+            col("t", "_siphon_replicated_at").gt(param("last_watermark", DataType::String)),
+            col("t", "_siphon_replicated_at").le(param("watermark", DataType::String)),
         ]))
         .sort(&[(col("t", "id"), SortDir::Asc)])
         .project(&[
@@ -671,7 +665,7 @@ mod tests {
     #[test]
     fn parameterized_literals() {
         let plan = Rel::read("users", "u", &[("id", DataType::Int64)])
-            .filter(eq(col("u", "id"), int(42)))
+            .filter(col("u", "id").eq(int(42)))
             .project(&[(col("u", "id"), "id")])
             .into_plan();
 
@@ -693,7 +687,7 @@ mod tests {
             .join(
                 JoinType::Inner,
                 mrs,
-                eq(col("p", "id"), col("mr", "project_id")),
+                col("p", "id").eq(col("mr", "project_id")),
             )
             .project(&[(col("p", "id"), "project_id"), (col("mr", "id"), "mr_id")])
             .into_plan();
@@ -734,7 +728,7 @@ mod tests {
             &[col("p", "namespace_id")],
             &[Measure::new("count", &[col("p", "id")], "cnt")],
         )
-        .filter(gt(func("count", vec![col("p", "id")]), int(5)))
+        .filter(func("count", vec![col("p", "id")]).gt(int(5)))
         .into_plan();
 
         let pq = emit(&plan);
@@ -797,7 +791,7 @@ mod tests {
     #[test]
     fn raw_expr() {
         let plan = Rel::read("t", "t", &[("id", DataType::Int64)])
-            .filter(eq(raw("t.custom_col"), int(1)))
+            .filter(raw("t.custom_col").eq(int(1)))
             .project(&[(col("t", "id"), "id")])
             .into_plan();
 
@@ -808,7 +802,7 @@ mod tests {
     #[test]
     fn cast_expr() {
         let plan = Rel::read("t", "t", &[("id", DataType::Int64)])
-            .project(&[(cast(col("t", "id"), DataType::String), "id_str")])
+            .project(&[(col("t", "id").cast(DataType::String), "id_str")])
             .into_plan();
 
         let pq = emit(&plan);
@@ -820,7 +814,7 @@ mod tests {
         let plan = Rel::read("t", "t", &[("status", DataType::Int64)])
             .project(&[(
                 if_then(
-                    vec![(eq(col("t", "status"), int(1)), string("active"))],
+                    vec![(col("t", "status").eq(int(1)), string("active"))],
                     Some(string("inactive")),
                 ),
                 "label",
@@ -836,7 +830,7 @@ mod tests {
     #[test]
     fn in_list_expr() {
         let plan = Rel::read("t", "t", &[("id", DataType::Int64)])
-            .filter(in_list(col("t", "id"), vec![int(1), int(2), int(3)]))
+            .filter(col("t", "id").in_list(vec![int(1), int(2), int(3)]))
             .project(&[(col("t", "id"), "id")])
             .into_plan();
 
@@ -847,7 +841,7 @@ mod tests {
     #[test]
     fn starts_with_function() {
         let plan = Rel::read("gl_project", "p", &[("traversal_path", DataType::String)])
-            .filter(starts_with(col("p", "traversal_path"), string("42/")))
+            .filter(col("p", "traversal_path").starts_with(string("42/")))
             .project(&[(col("p", "traversal_path"), "traversal_path")])
             .into_plan();
 
@@ -869,12 +863,12 @@ mod tests {
             .join(
                 JoinType::Inner,
                 mr,
-                eq(col("p", "id"), col("mr", "project_id")),
+                col("p", "id").eq(col("mr", "project_id")),
             )
             .join(
                 JoinType::Left,
                 u,
-                eq(col("mr", "project_id"), col("u", "id")),
+                col("mr", "project_id").eq(col("u", "id")),
             )
             .project(&[(col("p", "id"), "pid")])
             .into_plan();

@@ -8,15 +8,14 @@
 use std::collections::HashMap;
 
 use substrait::proto::{
-    self, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
-    NamedStruct, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
-    aggregate_rel, expression,
+    self, aggregate_rel, expression,
     expression::{
-        FieldReference, Literal, ReferenceSegment, ScalarFunction, field_reference,
-        literal::LiteralType, reference_segment,
+        field_reference, literal::LiteralType, reference_segment, FieldReference, Literal,
+        ReferenceSegment, ScalarFunction,
     },
-    extensions as ext, fetch_rel, join_rel, plan_rel, read_rel, rel, rel_common, set_rel,
-    sort_field, r#type,
+    extensions as ext, fetch_rel, join_rel, plan_rel, r#type, read_rel, rel, rel_common, set_rel,
+    sort_field, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
+    NamedStruct, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
 };
 
 use crate::ir::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, UnaryOp};
@@ -26,21 +25,21 @@ use crate::ir::plan::{self as v2, Measure, Plan, RawFrom};
 // Low-level Substrait protobuf helpers
 // ---------------------------------------------------------------------------
 
-pub fn make_metadata(type_url: &str, json: serde_json::Value) -> ext::AdvancedExtension {
+fn make_metadata(type_url: &str, json: serde_json::Value) -> ext::AdvancedExtension {
     ext::AdvancedExtension {
         optimization: vec![make_any(type_url, &json)],
         enhancement: None,
     }
 }
 
-pub fn make_any(type_url: &str, json: &serde_json::Value) -> prost_types::Any {
+fn make_any(type_url: &str, json: &serde_json::Value) -> prost_types::Any {
     prost_types::Any {
         type_url: type_url.into(),
         value: serde_json::to_vec(json).expect("json serialization"),
     }
 }
 
-pub fn build_named_struct(columns: &[(&str, DataType)]) -> NamedStruct {
+fn build_named_struct(columns: &[(&str, DataType)]) -> NamedStruct {
     NamedStruct {
         names: columns.iter().map(|(n, _)| (*n).into()).collect(),
         r#struct: Some(r#type::Struct {
@@ -53,7 +52,7 @@ pub fn build_named_struct(columns: &[(&str, DataType)]) -> NamedStruct {
     }
 }
 
-pub fn make_field_ref(index: usize) -> Expression {
+fn make_field_ref(index: usize) -> Expression {
     Expression {
         rex_type: Some(expression::RexType::Selection(Box::new(FieldReference {
             reference_type: Some(field_reference::ReferenceType::DirectReference(
@@ -73,7 +72,7 @@ pub fn make_field_ref(index: usize) -> Expression {
     }
 }
 
-pub fn to_substrait_literal(lit: &LiteralValue) -> Literal {
+fn to_substrait_literal(lit: &LiteralValue) -> Literal {
     let literal_type = match lit {
         LiteralValue::String(s) => Some(LiteralType::String(s.clone())),
         LiteralValue::Int64(n) => Some(LiteralType::I64(*n)),
@@ -88,7 +87,7 @@ pub fn to_substrait_literal(lit: &LiteralValue) -> Literal {
     }
 }
 
-pub fn make_literal_arg(lit: &LiteralValue) -> substrait::proto::FunctionArgument {
+fn make_literal_arg(lit: &LiteralValue) -> substrait::proto::FunctionArgument {
     substrait::proto::FunctionArgument {
         arg_type: Some(substrait::proto::function_argument::ArgType::Value(
             Expression {
@@ -98,14 +97,14 @@ pub fn make_literal_arg(lit: &LiteralValue) -> substrait::proto::FunctionArgumen
     }
 }
 
-pub fn make_value_arg(expr: Expression) -> substrait::proto::FunctionArgument {
+fn make_value_arg(expr: Expression) -> substrait::proto::FunctionArgument {
     substrait::proto::FunctionArgument {
         arg_type: Some(substrait::proto::function_argument::ArgType::Value(expr)),
     }
 }
 
 #[allow(deprecated)]
-pub fn make_scalar_fn(
+fn make_scalar_fn(
     anchor: u32,
     arguments: Vec<FunctionArgument>,
     output_type: proto::Type,
@@ -121,7 +120,7 @@ pub fn make_scalar_fn(
     }
 }
 
-pub fn to_substrait_type(dt: DataType) -> proto::Type {
+fn to_substrait_type(dt: DataType) -> proto::Type {
     let kind = match dt {
         DataType::String => r#type::Kind::String(r#type::String {
             nullability: r#type::Nullability::Required as i32,
@@ -153,15 +152,15 @@ pub fn to_substrait_type(dt: DataType) -> proto::Type {
     proto::Type { kind: Some(kind) }
 }
 
-pub fn bool_type() -> proto::Type {
+fn bool_type() -> proto::Type {
     to_substrait_type(DataType::Bool)
 }
 
-pub fn string_type() -> proto::Type {
+fn string_type() -> proto::Type {
     to_substrait_type(DataType::String)
 }
 
-pub fn to_substrait_join_type(jt: JoinType) -> join_rel::JoinType {
+fn to_substrait_join_type(jt: JoinType) -> join_rel::JoinType {
     match jt {
         JoinType::Inner => join_rel::JoinType::Inner,
         JoinType::Left => join_rel::JoinType::Left,
@@ -171,7 +170,7 @@ pub fn to_substrait_join_type(jt: JoinType) -> join_rel::JoinType {
     }
 }
 
-pub fn binary_op_substrait_name(op: BinaryOp) -> &'static str {
+fn binary_op_substrait_name(op: BinaryOp) -> &'static str {
     match op {
         BinaryOp::Eq => "equal",
         BinaryOp::Ne => "not_equal",
@@ -188,7 +187,7 @@ pub fn binary_op_substrait_name(op: BinaryOp) -> &'static str {
     }
 }
 
-pub fn unary_op_substrait_name(op: UnaryOp) -> &'static str {
+fn unary_op_substrait_name(op: UnaryOp) -> &'static str {
     match op {
         UnaryOp::Not => "not",
         UnaryOp::IsNull => "is_null",
@@ -386,40 +385,31 @@ fn encode_read(read: &v2::ReadRel) -> Result<Rel, EncodeError> {
         .map(|c| (c.name.as_str(), c.data_type.clone()))
         .collect();
 
-    if read.table == RawFrom::TAG {
-        // Raw FROM clause
-        let substrait_read = ReadRel {
-            base_schema: Some(build_named_struct(&columns)),
-            read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
-                names: vec!["__raw".into()],
-                advanced_extension: None,
-            })),
-            advanced_extension: Some(make_metadata(
-                "llqm/read_metadata",
-                serde_json::json!({ "raw_from": read.alias }),
-            )),
-            ..Default::default()
-        };
-        Ok(Rel {
-            rel_type: Some(rel::RelType::Read(Box::new(substrait_read))),
-        })
+    let is_raw = read.table == RawFrom::TAG;
+    let (table_name, metadata) = if is_raw {
+        (
+            "__raw".into(),
+            serde_json::json!({ "raw_from": read.alias }),
+        )
     } else {
-        let substrait_read = ReadRel {
-            base_schema: Some(build_named_struct(&columns)),
-            read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
-                names: vec![read.table.clone()],
-                advanced_extension: None,
-            })),
-            advanced_extension: Some(make_metadata(
-                "llqm/read_metadata",
-                serde_json::json!({ "alias": read.alias }),
-            )),
-            ..Default::default()
-        };
-        Ok(Rel {
-            rel_type: Some(rel::RelType::Read(Box::new(substrait_read))),
-        })
-    }
+        (
+            read.table.clone(),
+            serde_json::json!({ "alias": read.alias }),
+        )
+    };
+
+    let substrait_read = ReadRel {
+        base_schema: Some(build_named_struct(&columns)),
+        read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
+            names: vec![table_name],
+            advanced_extension: None,
+        })),
+        advanced_extension: Some(make_metadata("llqm/read_metadata", metadata)),
+        ..Default::default()
+    };
+    Ok(Rel {
+        rel_type: Some(rel::RelType::Read(Box::new(substrait_read))),
+    })
 }
 
 fn encode_filter(ctx: &mut EncodeContext, filter: &v2::FilterRel) -> Result<Rel, EncodeError> {
@@ -854,6 +844,24 @@ mod tests {
     use crate::ir::expr::*;
     use crate::ir::plan::{CteDef, Measure, Rel as V2Rel};
 
+    fn extension_fn_names(plan: &proto::Plan) -> Vec<String> {
+        plan.extensions
+            .iter()
+            .filter_map(|ext| {
+                if let Some(
+                    proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
+                        f,
+                    ),
+                ) = &ext.mapping_type
+                {
+                    Some(f.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     #[test]
     fn encode_simple_read() {
         let plan = V2Rel::read("gl_project", "p", &[("id", DataType::Int64)])
@@ -886,24 +894,11 @@ mod tests {
         let substrait_plan = encode(&plan).unwrap();
         assert_eq!(substrait_plan.relations.len(), 1);
 
-        // Should have registered "equal" function
-        let fn_names: Vec<&str> = substrait_plan
-            .extensions
-            .iter()
-            .filter_map(|ext| {
-                if let Some(
-                    proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
-                        f,
-                    ),
-                ) = &ext.mapping_type
-                {
-                    Some(f.name.as_str())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert!(fn_names.contains(&"equal"), "functions: {fn_names:?}");
+        let fn_names = extension_fn_names(&substrait_plan);
+        assert!(
+            fn_names.contains(&"equal".into()),
+            "functions: {fn_names:?}"
+        );
     }
 
     #[test]
@@ -946,23 +941,11 @@ mod tests {
 
         let substrait_plan = encode(&plan).unwrap();
 
-        let fn_names: Vec<&str> = substrait_plan
-            .extensions
-            .iter()
-            .filter_map(|ext| {
-                if let Some(
-                    proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
-                        f,
-                    ),
-                ) = &ext.mapping_type
-                {
-                    Some(f.name.as_str())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert!(fn_names.contains(&"count"), "functions: {fn_names:?}");
+        let fn_names = extension_fn_names(&substrait_plan);
+        assert!(
+            fn_names.contains(&"count".into()),
+            "functions: {fn_names:?}"
+        );
     }
 
     #[test]
@@ -1039,26 +1022,13 @@ mod tests {
 
         let substrait_plan = encode(&plan).unwrap();
 
-        let fn_names: Vec<&str> = substrait_plan
-            .extensions
-            .iter()
-            .filter_map(|ext| {
-                if let Some(
-                    proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
-                        f,
-                    ),
-                ) = &ext.mapping_type
-                {
-                    Some(f.name.as_str())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert!(fn_names.contains(&"gt"), "functions: {fn_names:?}");
-        assert!(fn_names.contains(&"like"), "functions: {fn_names:?}");
-        assert!(fn_names.contains(&"is_not_null"), "functions: {fn_names:?}");
-        assert!(fn_names.contains(&"upper"), "functions: {fn_names:?}");
+        let fn_names = extension_fn_names(&substrait_plan);
+        for expected in ["gt", "like", "is_not_null", "upper"] {
+            assert!(
+                fn_names.contains(&expected.into()),
+                "missing {expected}: {fn_names:?}"
+            );
+        }
     }
 
     #[test]

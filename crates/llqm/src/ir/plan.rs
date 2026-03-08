@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! Rel::read("gl_project", "p", &[("id", Int64), ("name", String)])
-//!     .filter(eq(col("p", "id"), int(42)))
+//!     .filter(col("p", "id").eq(int(42)))
 //!     .project(&[(col("p", "name"), "name")])
 //!     .fetch(10, None)
 //!     .into_plan()
@@ -519,7 +519,7 @@ mod tests {
             "u",
             &[("id", DataType::Int64), ("name", DataType::String)],
         )
-        .filter(eq(col("u", "id"), int(42)))
+        .filter(col("u", "id").eq(int(42)))
         .project(&[(col("u", "name"), "name")])
         .fetch(10, None)
         .into_plan();
@@ -536,7 +536,7 @@ mod tests {
             .join(
                 JoinType::Inner,
                 mrs,
-                eq(col("p", "id"), col("mr", "project_id")),
+                col("p", "id").eq(col("mr", "project_id")),
             )
             .project(&[(col("p", "id"), "id")])
             .into_plan();
@@ -586,8 +586,8 @@ mod tests {
         let other = Rel::read("custom", "c", &[("id", DataType::Int64)]);
 
         let plan = projects
-            .join(JoinType::Inner, users, eq(col("p", "id"), col("u", "id")))
-            .join(JoinType::Inner, other, eq(col("p", "id"), col("c", "id")))
+            .join(JoinType::Inner, users, col("p", "id").eq(col("u", "id")))
+            .join(JoinType::Inner, other, col("p", "id").eq(col("c", "id")))
             .into_plan();
 
         let gl_aliases = plan.filterable_aliases(|t| t.starts_with("gl_"));
@@ -602,7 +602,7 @@ mod tests {
             .project(&[(col("p", "id"), "id")])
             .into_plan();
 
-        plan.inject_filter(eq(col("p", "id"), int(1)));
+        plan.inject_filter(col("p", "id").eq(int(1)));
 
         assert!(matches!(plan.root, Rel::Filter(_)));
     }
