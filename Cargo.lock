@@ -3469,7 +3469,6 @@ dependencies = [
  "arrow",
  "clickhouse-client",
  "futures",
- "gkg-utils",
  "query-engine",
  "serde_json",
  "testcontainers",

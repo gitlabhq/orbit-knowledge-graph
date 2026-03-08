@@ -7,7 +7,6 @@ edition = "2024"
 arrow = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 futures = { workspace = true }
-gkg-utils = { path = "../utils" }
 query-engine = { path = "../query-engine" }
 serde_json = { workspace = true }
 testcontainers = { workspace = true }

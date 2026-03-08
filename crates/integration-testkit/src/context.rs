@@ -4,7 +4,6 @@ use std::time::Duration;
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfiguration};
-use gkg_utils::clickhouse::{ChScalar, ChType};
 use query_engine::ParameterizedQuery;
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
@@ -80,8 +79,7 @@ impl TestContext {
         let mut query = client.query(&pq.sql);
 
         for (name, param) in &pq.params {
-            let ch_type = parse_ch_type(&param.ch_type);
-            query = ArrowClickHouseClient::bind_param(query, name, &param.value, &ch_type);
+            query = ArrowClickHouseClient::bind_param(query, name, &param.value, &param.ch_type);
         }
 
         query
@@ -200,20 +198,5 @@ impl TestContext {
                     .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
             }
         }
-    }
-}
-
-fn parse_ch_type(s: &str) -> ChType {
-    match s {
-        "String" => ChType::String,
-        "Int64" => ChType::Int64,
-        "Float64" => ChType::Float64,
-        "Bool" => ChType::Bool,
-        "Array(String)" => ChType::Array(ChScalar::String),
-        "Array(Int64)" => ChType::Array(ChScalar::Int64),
-        "Array(Float64)" => ChType::Array(ChScalar::Float64),
-        "Array(Bool)" => ChType::Array(ChScalar::Bool),
-        // DateTime and other types bind as strings
-        _ => ChType::String,
     }
 }
