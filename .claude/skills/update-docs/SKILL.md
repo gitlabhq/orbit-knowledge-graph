@@ -43,7 +43,7 @@ Use `glab` to check epics, issues, and MRs for context on what shipped recently.
 - Security model changes not in `security.md`
 - Crate renames, splits, or new crates not reflected in `CLAUDE.md`
 - People or epic changes not in `README.md`
-- Stale IPs or secrets in `docs/dev/INFRASTRUCTURE.md`
+- Stale IPs or secrets in `docs/dev/sandbox/INFRASTRUCTURE.md`
 
 ## Fixing
 

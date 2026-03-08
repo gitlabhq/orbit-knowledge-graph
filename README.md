@@ -132,7 +132,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | [Internal program page](https://internal.gitlab.com/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/) | R&D PMO program landing page ([source](https://gitlab.com/gitlab-com/content-sites/internal-handbook/blob/main/content/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/_index.md)) |
 | [orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and summary (Feb 3-5, 2026): architecture, indexing, query engine, infra, DIP, deployment, billing |
 | [Readiness reviews (old)](https://gitlab.com/gitlab-com/gl-infra/readiness) | Legacy readiness repo. Siphon review [MR !231](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/231) (open, 78 comments), NATS review [MR !240](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/240) (merged). |
-| In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) and [RUNBOOK.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/RUNBOOK.md) -- GCP sandbox environment details and operational runbook (dev/sandbox only) |
+| In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/sandbox/INFRASTRUCTURE.md) and [RUNBOOK.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/sandbox/RUNBOOK.md) -- GCP sandbox environment details and operational runbook (dev/sandbox only) |
 
 ---
 
@@ -161,7 +161,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | Domain | `gitlab.gkg.dev` |
 | Secrets | GCP Secret Manager -> External Secrets Operator |
 
-See [`docs/dev/INFRASTRUCTURE.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) for full details.
+See [`docs/dev/sandbox/INFRASTRUCTURE.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/sandbox/INFRASTRUCTURE.md) for full details.
 
 ### Staging (gitlab-helmfiles managed)
 
@@ -262,7 +262,7 @@ Jerome Ng (@jeromezng, usage billing system architect).
 
 | Runbook | Location |
 |---|---|
-| Dev/sandbox runbook | [`docs/dev/RUNBOOK.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/RUNBOOK.md) |
+| Dev/sandbox runbook | [`docs/dev/sandbox/RUNBOOK.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/sandbox/RUNBOOK.md) |
 | Production runbook | TODO |
 
 ### Observability

@@ -15,7 +15,10 @@ Documentation lives in three tiers:
 
 1. **SSOT** — `README.md` (project overview, repos, epics, infra, people, helm charts)
 2. **Design documents** — `docs/design-documents/` (architecture, data model, security, querying, indexing, schema, observability)
-3. **Dev guides** — `docs/dev/` (local development, infrastructure, runbook, e2e)
+3. **Dev guides** — `docs/dev/` with index at `docs/dev/README.md`:
+   - `docs/dev/local/gdk.md` — GDK-native local development (no K8s)
+   - `docs/dev/e2e.md` — E2E testing harness
+   - `docs/dev/sandbox/` — GCP sandbox ops
 
 `AGENTS.md` and `CLAUDE.md` must be identical (CI enforces this).
 
@@ -38,7 +41,7 @@ Use `AGENTS.md` "Where to find things" as your index. Examples of drift to watch
 - MR changes the query DSL or proto definitions → `docs/design-documents/querying/` may describe old behavior
 - MR modifies auth or redaction logic → `docs/design-documents/security.md` may be stale
 - MR adds a CI job or changes enforcement → `AGENTS.md` "What CI enforces" list is incomplete
-- MR changes Helm charts or infra → `README.md` Helm Charts table and `docs/dev/INFRASTRUCTURE.md` may drift
+- MR changes Helm charts or infra → `README.md` Helm Charts table and `docs/dev/sandbox/INFRASTRUCTURE.md` may drift
 - MR adds a new ontology node or edge → `docs/design-documents/data_model.md` may need the new type documented
 - MR renames a config key, CLI flag, or file path → any doc referencing the old name is now broken
 

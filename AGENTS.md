@@ -49,10 +49,11 @@ Integration tests need Docker: `mise test:integration`.
 | Schema fixtures | `fixtures/schema/` |
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
 | Server config structure | `crates/gkg-server/src/config.rs` |
-| Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
-| Local development guide | `docs/dev/local-development.md` |
-| GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
-| Operational runbook | `docs/dev/RUNBOOK.md` |
+| Dev guides index | `docs/dev/README.md` |
+| Local dev (GDK-native) | `docs/dev/local/gdk.md` |
+| GCP sandbox infra | `docs/dev/sandbox/INFRASTRUCTURE.md` |
+| Sandbox runbook | `docs/dev/sandbox/RUNBOOK.md` |
+| Sandbox GitLab instance | `docs/dev/sandbox/GITLAB_INSTANCE.md` |
 | Helm charts (dev) | `helm-dev/gkg/`, `helm-dev/observability/` |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |

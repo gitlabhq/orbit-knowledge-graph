@@ -17,4 +17,4 @@ See the [project README](../README.md) for local development setup with GDK and 
 
 ## Sandbox Deployment
 
-See [docs/dev/RUNBOOK.md](../docs/dev/RUNBOOK.md) for GCP sandbox operations.
+See [docs/dev/sandbox/RUNBOOK.md](../docs/dev/sandbox/RUNBOOK.md) for GCP sandbox operations.

@@ -24,6 +24,9 @@ datalake-generator-report.json
 # Tilt secrets (contains passwords)
 .tilt-secrets
 
+# Local env overrides
+.env.local
+
 # Dev logs, pid files, and runtime artifacts
 .dev/
 
