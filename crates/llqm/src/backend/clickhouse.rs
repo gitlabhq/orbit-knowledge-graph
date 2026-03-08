@@ -10,8 +10,8 @@ use thiserror::Error;
 
 use crate::ir::expr::{BinaryOp, Expr, JoinType, LiteralValue, SortDir, UnaryOp};
 use crate::ir::plan::{
-    AggregateRel, FetchRel, FilterRel, JoinRel, Plan, ProjectRel, RawFrom, ReadRel, Rel, SortRel,
-    SubqueryRel, UnionAllRel,
+    AggregateRel, FetchRel, FilterRel, JoinRel, Plan, ProjectRel, ReadRel, Rel, SortRel,
+    SubqueryRel, UnionAllRel, RAW_FROM_TAG,
 };
 
 // ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ impl CodegenContext {
 
     fn emit_read(&mut self, read: &ReadRel) -> Result<(QueryParts, Vec<String>), CodegenError> {
         // Raw FROM clause
-        if read.table == RawFrom::TAG {
+        if read.table == RAW_FROM_TAG {
             let col_names = read.columns.iter().map(|c| c.name.clone()).collect();
             return Ok((
                 QueryParts {

@@ -6,6 +6,4 @@ pub use ir::expr;
 pub use ir::plan;
 pub use ir::substrait;
 
-pub use backend::clickhouse as codegen;
-
 pub use pipeline::{Backend, Frontend, Pipeline};

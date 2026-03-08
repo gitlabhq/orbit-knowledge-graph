@@ -157,8 +157,8 @@ impl Rel {
     /// Column references use empty table alias (unqualified).
     pub fn read_raw(raw_from: &str, columns: &[(&str, DataType)]) -> Self {
         Rel::Read(ReadRel {
-            table: RawFrom::TAG.into(),
-            alias: String::new(),
+            table: RAW_FROM_TAG.into(),
+            alias: raw_from.into(),
             columns: columns
                 .iter()
                 .map(|(name, dt)| ColumnDef {
@@ -167,7 +167,6 @@ impl Rel {
                 })
                 .collect(),
         })
-        .with_raw_from(raw_from)
     }
 
     /// `WHERE condition`
@@ -249,25 +248,7 @@ impl Rel {
     }
 }
 
-impl RawFrom {
-    pub const TAG: &str = "__raw_from";
-}
 
-// Attach raw_from metadata. Stored as a Subquery wrapping a Read with
-// a sentinel table name, so the backend can detect it.
-impl Rel {
-    fn with_raw_from(self, raw_from: &str) -> Self {
-        // We encode raw_from as a special ReadRel where table == TAG
-        // and alias is the raw SQL. This avoids needing extra fields.
-        if let Rel::Read(mut r) = self {
-            r.table = RawFrom::TAG.into();
-            r.alias = raw_from.into();
-            Rel::Read(r)
-        } else {
-            self
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Plan
@@ -484,7 +465,7 @@ fn walk_rel_for_aliases(
     aliases: &mut Vec<(String, String)>,
 ) {
     match rel {
-        Rel::Read(r) if r.table != RawFrom::TAG => {
+        Rel::Read(r) if r.table != RAW_FROM_TAG => {
             if predicate(&r.table) {
                 aliases.push((r.table.clone(), r.alias.clone()));
             }

@@ -19,7 +19,7 @@ use substrait::proto::{
 };
 
 use crate::ir::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, UnaryOp};
-use crate::ir::plan::{self as v2, Measure, Plan, RawFrom};
+use crate::ir::plan::{self as v2, Measure, Plan, RAW_FROM_TAG};
 
 // ---------------------------------------------------------------------------
 // Low-level Substrait protobuf helpers
@@ -370,7 +370,7 @@ fn encode_read(read: &v2::ReadRel) -> Result<Rel, EncodeError> {
         .map(|c| (c.name.as_str(), c.data_type.clone()))
         .collect();
 
-    let is_raw = read.table == RawFrom::TAG;
+    let is_raw = read.table == RAW_FROM_TAG;
     let (table_name, metadata) = if is_raw {
         (
             "__raw".into(),
