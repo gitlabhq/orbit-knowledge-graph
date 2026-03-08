@@ -3395,7 +3395,6 @@ dependencies = [
  "gitlab-client",
  "integration-testkit",
  "internment",
- "llqm",
  "moka",
  "ontology",
  "opentelemetry",
@@ -5178,7 +5177,6 @@ dependencies = [
  "const_format",
  "gkg-utils",
  "jsonschema",
- "llqm",
  "once_cell",
  "ontology",
  "opentelemetry",
@@ -5187,7 +5185,6 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
- "substrait",
  "thiserror 2.0.18",
 ]
 
