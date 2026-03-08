@@ -430,8 +430,9 @@ fn source_join_cond_with_kind(
     let id_cond = match dir {
         Direction::Outgoing => id_and_kind("source_id", "source_kind"),
         Direction::Incoming => id_and_kind("target_id", "target_kind"),
-        Direction::Both => id_and_kind("source_id", "source_kind")
-            .or(id_and_kind("target_id", "target_kind")),
+        Direction::Both => {
+            id_and_kind("source_id", "source_kind").or(id_and_kind("target_id", "target_kind"))
+        }
     };
     if with_path {
         edge_path_starts_with(edge, node).and(id_cond)
@@ -545,8 +546,8 @@ fn build_joins(
             let union = build_hop_union_all(rel, &alias);
             let (from_col, to_col) = rel.direction.union_columns();
 
-            let mut source_cond = expr::col(&rel.from, DEFAULT_PRIMARY_KEY)
-                .eq(expr::col(&alias, from_col));
+            let mut source_cond =
+                expr::col(&rel.from, DEFAULT_PRIMARY_KEY).eq(expr::col(&alias, from_col));
             if from_node.has_traversal_path {
                 source_cond = edge_path_starts_with(&alias, &rel.from).and(source_cond);
             }
@@ -557,8 +558,8 @@ fn build_joins(
                 .map(|v| v.iter().map(|s| s.as_str()).collect::<Vec<_>>())
                 .unwrap_or_default();
             let target_rel = read_node(target, &target_extra)?;
-            let mut target_cond = expr::col(&alias, to_col)
-                .eq(expr::col(&rel.to, DEFAULT_PRIMARY_KEY));
+            let mut target_cond =
+                expr::col(&alias, to_col).eq(expr::col(&rel.to, DEFAULT_PRIMARY_KEY));
             if target.has_traversal_path {
                 target_cond = edge_path_starts_with(&alias, &rel.to).and(target_cond);
             }
@@ -623,9 +624,7 @@ fn build_full_where(
                 conds.push(filter_expr(alias, prop, filter));
             }
             if rel.max_hops > 1 && rel.min_hops > 1 {
-                conds.push(
-                    expr::col(alias, "depth").ge(expr::int(rel.min_hops as i64)),
-                );
+                conds.push(expr::col(alias, "depth").ge(expr::int(rel.min_hops as i64)));
             }
         }
     }
@@ -832,8 +831,7 @@ fn lower_path_finding(input: &Input) -> Result<Plan, String> {
         ],
     );
 
-    let join_cond = expr::col("paths", "node_id")
-        .eq(expr::col(&end.id, DEFAULT_PRIMARY_KEY));
+    let join_cond = expr::col("paths", "node_id").eq(expr::col(&end.id, DEFAULT_PRIMARY_KEY));
     let joined = paths.join(JoinType::Inner, end_rel, join_cond);
 
     let rel = match id_filter(&end.id, DEFAULT_PRIMARY_KEY, &end.node_ids) {
@@ -905,9 +903,7 @@ fn path_recursive_branch(
             "array",
             target_ids.iter().map(|id| expr::int(*id)).collect(),
         );
-        conds.push(
-            expr::func("has", vec![target_array, expr::col("p", "node_id")]).not(),
-        );
+        conds.push(expr::func("has", vec![target_array, expr::col("p", "node_id")]).not());
     }
 
     if let Some(filter) = edge_type_filter_expr("e", &type_filter(rel_types)) {

@@ -11,7 +11,7 @@
 
 use crate::ir::expr::Expr;
 use crate::ir::plan::{Plan, Rel};
-use crate::pass::security::{SecurityContext, GL_TABLE_PREFIX, SKIP_TABLES, TRAVERSAL_PATH_COLUMN};
+use crate::pass::security::{GL_TABLE_PREFIX, SKIP_TABLES, SecurityContext, TRAVERSAL_PATH_COLUMN};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CheckError {
@@ -164,9 +164,10 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let plan = make_plan("gl_project", "p");
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("missing valid traversal_path filter"));
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
     }
 
     #[test]
@@ -175,9 +176,10 @@ mod tests {
         let mut plan = make_plan("gl_project", "p");
         plan.inject_filter(col("p", TRAVERSAL_PATH_COLUMN).starts_with(string("99/")));
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("missing valid traversal_path filter"));
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
     }
 
     #[test]
