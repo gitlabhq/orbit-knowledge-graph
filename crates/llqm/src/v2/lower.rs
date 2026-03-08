@@ -4,13 +4,15 @@
 //! API. NOT production code — this is a stress test of v2 API expressiveness.
 //! The real lowerer lives in query-engine and will be ported once v2 is stable.
 //!
-//! Covers: traversal/search, aggregation, path-finding (recursive CTE),
-//! neighbors, multi-hop union, single-hop joins.
+//! Each `lower_*` function builds a complete `Plan` directly — no intermediate
+//! accumulator struct. Post-lowering passes (enforce, security) operate on the
+//! `Plan` via tree-surgery methods: `extend_project`, `insert_project_after`,
+//! `extend_aggregate_groups`, `inject_filter`.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::ir::expr::{self, DataType, Expr, JoinType, SortDir};
-use crate::v2::plan::{CteDef, Plan, Rel};
+use crate::v2::plan::{CteDef, Measure, Plan, Rel};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants (mirrors ontology::constants + query-engine::constants)
@@ -223,39 +225,10 @@ impl Default for Input {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LoweredQuery — intermediate representation between lower and finalize
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub type SelectItem = (Expr, String);
-pub type AggItem = (String, String, Vec<Expr>);
-
-/// Unbuilt CTE: base rel that security can modify before finalize applies
-/// projections and limit.
-pub struct UnbuiltCte {
-    pub name: String,
-    pub root_rel: Rel,
-    pub projections: Vec<SelectItem>,
-    pub limit: Option<u64>,
-    pub recursive: bool,
-}
-
-/// Intermediate query representation produced by `lower()`.
-pub struct LoweredQuery {
-    pub base_rel: Rel,
-    pub projections: Vec<SelectItem>,
-    pub group_by: Vec<SelectItem>,
-    pub agg_measures: Vec<AggItem>,
-    pub sort_keys: Vec<(Expr, SortDir)>,
-    pub limit: Option<u64>,
-    pub offset: Option<u64>,
-    pub ctes: Vec<UnbuiltCte>,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub fn lower(input: &Input) -> Result<LoweredQuery, String> {
+pub fn lower(input: &Input) -> Result<Plan, String> {
     match input.query_type {
         QueryType::Traversal | QueryType::Search => lower_traversal(input),
         QueryType::Aggregation => lower_aggregation(input),
@@ -299,7 +272,6 @@ fn read_node(node: &InputNode, extra_columns: &[&str]) -> Result<Rel, String> {
         }
     }
 
-    // Lifetime: column specs need owned strings for filter keys
     let col_specs: Vec<(String, DataType)> = columns
         .iter()
         .map(|(n, dt)| (n.to_string(), dt.clone()))
@@ -338,7 +310,7 @@ fn edge_path_starts_with(edge_alias: &str, node_alias: &str) -> Expr {
     )
 }
 
-fn edge_select_items(alias: &str) -> Vec<SelectItem> {
+fn edge_select_items(alias: &str) -> Vec<(Expr, String)> {
     EDGE_RESERVED_COLUMNS
         .iter()
         .zip(EDGE_ALIAS_SUFFIXES.iter())
@@ -707,71 +679,66 @@ fn build_full_where(
 // Traversal & Search
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_traversal(input: &Input) -> Result<LoweredQuery, String> {
+fn lower_traversal(input: &Input) -> Result<Plan, String> {
     let extra = extra_columns_for_order_by(input);
     let (base_rel, edge_aliases) = build_joins(&input.nodes, &input.relationships, &extra)?;
 
     let where_expr = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
-    let base_rel = match where_expr {
+    let mut rel = match where_expr {
         Some(cond) => base_rel.filter(cond),
         None => base_rel,
     };
 
-    let mut projections: Vec<SelectItem> = Vec::new();
+    // Sort before project (sort columns may not be in the projection)
+    if let Some(ob) = &input.order_by {
+        rel = rel.sort(&[(expr::col(&ob.node, &ob.property), ob.direction.into())]);
+    }
+
+    // Build projections
+    let mut proj_owned: Vec<(Expr, String)> = Vec::new();
     for node in &input.nodes {
         if let Some(cols) = &node.columns {
             for col in cols {
-                projections.push((expr::col(&node.id, col), format!("{}_{col}", node.id)));
+                proj_owned.push((expr::col(&node.id, col), format!("{}_{col}", node.id)));
             }
         }
     }
-    add_edge_select_items(&mut projections, &input.relationships, &edge_aliases);
-
-    let sort_keys = input.order_by.as_ref().map_or(vec![], |ob| {
-        vec![(expr::col(&ob.node, &ob.property), ob.direction.into())]
-    });
-
-    Ok(LoweredQuery {
-        base_rel,
-        projections,
-        group_by: vec![],
-        agg_measures: vec![],
-        sort_keys,
-        limit: Some(input.limit as u64),
-        offset: None,
-        ctes: vec![],
-    })
-}
-
-fn add_edge_select_items(
-    projections: &mut Vec<SelectItem>,
-    rels: &[InputRelationship],
-    edge_aliases: &HashMap<usize, String>,
-) {
-    for (i, rel) in rels.iter().enumerate() {
+    for (i, input_rel) in input.relationships.iter().enumerate() {
         if let Some(alias) = edge_aliases.get(&i) {
-            if rel.max_hops > 1 {
-                projections.push((
+            if input_rel.max_hops > 1 {
+                proj_owned.push((
                     expr::col(alias, TRAVERSAL_PATH_COLUMN),
                     format!("{alias}_path"),
                 ));
             } else {
-                projections.extend(edge_select_items(alias));
+                proj_owned.extend(edge_select_items(alias));
             }
         }
     }
+
+    if !proj_owned.is_empty() {
+        let proj_refs: Vec<(Expr, &str)> = proj_owned
+            .iter()
+            .map(|(e, a)| (e.clone(), a.as_str()))
+            .collect();
+        rel = rel.project(&proj_refs);
+    }
+
+    rel = rel.fetch(input.limit as u64, None);
+
+    Ok(rel.into_plan())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Aggregation
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_aggregation(input: &Input) -> Result<LoweredQuery, String> {
+fn lower_aggregation(input: &Input) -> Result<Plan, String> {
     let extra = extra_columns_for_order_by(input);
     let (base_rel, edge_aliases) = build_joins(&input.nodes, &input.relationships, &extra)?;
 
     let where_expr = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
-    let base_rel = match where_expr {
+    let rel = match where_expr {
         Some(cond) => base_rel.filter(cond),
         None => base_rel,
     };
@@ -782,56 +749,44 @@ fn lower_aggregation(input: &Input) -> Result<LoweredQuery, String> {
         .filter_map(|agg| agg.group_by.clone())
         .collect();
 
-    let mut group_by: Vec<SelectItem> = Vec::new();
-    let mut projections: Vec<SelectItem> = Vec::new();
-
+    let mut group_exprs: Vec<Expr> = Vec::new();
     for node in &input.nodes {
         if !group_by_node_ids.contains(&node.id) {
             continue;
         }
         if let Some(cols) = &node.columns {
             for col in cols {
-                let e = expr::col(&node.id, col);
-                let alias = format!("{}_{col}", node.id);
-                group_by.push((e.clone(), alias.clone()));
-                projections.push((e, alias));
+                group_exprs.push(expr::col(&node.id, col));
             }
         }
     }
 
-    let mut agg_measures: Vec<AggItem> = Vec::new();
-    for agg in &input.aggregations {
-        let func_name = agg.function.clone();
-        let alias = agg
-            .alias
-            .clone()
-            .unwrap_or_else(|| func_name.to_lowercase());
-        let args = vec![agg_arg_expr(agg)];
-        agg_measures.push((func_name, alias, args));
+    let measures: Vec<Measure> = input
+        .aggregations
+        .iter()
+        .map(|agg| {
+            let alias = agg
+                .alias
+                .clone()
+                .unwrap_or_else(|| agg.function.to_lowercase());
+            Measure::new(&agg.function, &[agg_arg_expr(agg)], &alias)
+        })
+        .collect();
+
+    let mut rel = rel.aggregate(&group_exprs, &measures);
+
+    // Sort on aggregate result
+    if let Some(s) = &input.aggregation_sort
+        && s.agg_index < input.aggregations.len()
+    {
+        let agg = &input.aggregations[s.agg_index];
+        let agg_expr = expr::func(&agg.function, vec![agg_arg_expr(agg)]);
+        rel = rel.sort(&[(agg_expr, s.direction.into())]);
     }
 
-    let sort_keys = input
-        .aggregation_sort
-        .as_ref()
-        .filter(|s| s.agg_index < input.aggregations.len())
-        .map_or(vec![], |s| {
-            let agg = &input.aggregations[s.agg_index];
-            let func_name = agg.function.clone();
-            let args = vec![agg_arg_expr(agg)];
-            let agg_expr = expr::func(&func_name, args);
-            vec![(agg_expr, s.direction.into())]
-        });
+    rel = rel.fetch(input.limit as u64, None);
 
-    Ok(LoweredQuery {
-        base_rel,
-        projections,
-        group_by,
-        agg_measures,
-        sort_keys,
-        limit: Some(input.limit as u64),
-        offset: None,
-        ctes: vec![],
-    })
+    Ok(rel.into_plan())
 }
 
 fn agg_arg_expr(agg: &InputAggregation) -> Expr {
@@ -846,7 +801,7 @@ fn agg_arg_expr(agg: &InputAggregation) -> Expr {
 // Path Finding (recursive CTE)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_path_finding(input: &Input) -> Result<LoweredQuery, String> {
+fn lower_path_finding(input: &Input) -> Result<Plan, String> {
     let path = input.path.as_ref().ok_or("path config missing")?;
 
     let start = find_node(&input.nodes, &path.from)?;
@@ -861,7 +816,7 @@ fn lower_path_finding(input: &Input) -> Result<LoweredQuery, String> {
         .ok_or_else(|| format!("node '{}' has no table", end.id))?;
     let start_entity = start.entity.as_deref().ok_or("start node has no entity")?;
 
-    // Base query for CTE: start node scan
+    // CTE base: start node scan with optional id filter
     let cte_base = Rel::read(
         start_table,
         &start.id,
@@ -870,8 +825,7 @@ fn lower_path_finding(input: &Input) -> Result<LoweredQuery, String> {
             (TRAVERSAL_PATH_COLUMN, DataType::String),
         ],
     );
-
-    let cte_root_rel = match id_filter(&start.id, DEFAULT_PRIMARY_KEY, &start.node_ids) {
+    let cte_base = match id_filter(&start.id, DEFAULT_PRIMARY_KEY, &start.node_ids) {
         Some(cond) => cte_base.filter(cond),
         None => cte_base,
     };
@@ -883,15 +837,19 @@ fn lower_path_finding(input: &Input) -> Result<LoweredQuery, String> {
         vec![expr::func("array", vec![expr::string("")]), expr::int(0)],
     );
 
-    let cte_projections: Vec<SelectItem> = vec![
-        (start_id.clone(), "node_id".to_string()),
-        (expr::func("array", vec![start_id]), "path_ids".to_string()),
-        (expr::func("array", vec![start_tuple]), "path".to_string()),
-        (empty_string_array, "edge_kinds".to_string()),
-        (expr::int(0), "depth".to_string()),
-    ];
+    let cte_rel = cte_base
+        .project(&[
+            (start_id.clone(), "node_id"),
+            (expr::func("array", vec![start_id]), "path_ids"),
+            (expr::func("array", vec![start_tuple]), "path"),
+            (empty_string_array, "edge_kinds"),
+            (expr::int(0), "depth"),
+        ])
+        .fetch(1000, None);
 
-    // Forward and reverse recursive branches (built as standalone plans)
+    let cte_plan = cte_rel.into_plan();
+
+    // Forward and reverse recursive branches
     let _forward = path_recursive_branch(path.max_depth, true, &end.node_ids, &path.rel_types);
     let _reverse = path_recursive_branch(path.max_depth, false, &end.node_ids, &path.rel_types);
 
@@ -922,40 +880,26 @@ fn lower_path_finding(input: &Input) -> Result<LoweredQuery, String> {
     );
     let joined = paths.join(JoinType::Inner, end_rel, join_cond);
 
-    let base_rel = match id_filter(&end.id, DEFAULT_PRIMARY_KEY, &end.node_ids) {
+    let rel = match id_filter(&end.id, DEFAULT_PRIMARY_KEY, &end.node_ids) {
         Some(cond) => joined.filter(cond),
         None => joined,
     };
 
-    let projections = vec![
-        (expr::col("paths", "path"), "_gkg_path".to_string()),
-        (
-            expr::col("paths", "edge_kinds"),
-            "_gkg_edge_kinds".to_string(),
-        ),
-        (expr::col("paths", "depth"), "depth".to_string()),
-    ];
+    let plan = rel
+        .sort(&[(expr::col("paths", "depth"), SortDir::Asc)])
+        .project(&[
+            (expr::col("paths", "path"), "_gkg_path"),
+            (expr::col("paths", "edge_kinds"), "_gkg_edge_kinds"),
+            (expr::col("paths", "depth"), "depth"),
+        ])
+        .fetch(input.limit as u64, None)
+        .into_plan_with_ctes(vec![CteDef {
+            name: "paths".into(),
+            plan: cte_plan,
+            recursive: true,
+        }]);
 
-    let sort_keys = vec![(expr::col("paths", "depth"), SortDir::Asc)];
-
-    let ctes = vec![UnbuiltCte {
-        name: "paths".to_string(),
-        root_rel: cte_root_rel,
-        projections: cte_projections,
-        limit: Some(1000),
-        recursive: true,
-    }];
-
-    Ok(LoweredQuery {
-        base_rel,
-        projections,
-        group_by: vec![],
-        agg_measures: vec![],
-        sort_keys,
-        limit: Some(input.limit as u64),
-        offset: None,
-        ctes,
-    })
+    Ok(plan)
 }
 
 fn path_recursive_branch(
@@ -1014,15 +958,13 @@ fn path_recursive_branch(
         conds.push(filter);
     }
 
-    let filtered = joined.filter(expr::and(conds));
-
     let next_node_id = expr::col("e", next_id_col);
     let next_tuple = expr::func(
         "tuple",
         vec![next_node_id.clone(), expr::col("e", next_type_col)],
     );
 
-    filtered.project(&[
+    joined.filter(expr::and(conds)).project(&[
         (next_node_id, "node_id"),
         (
             expr::func(
@@ -1062,7 +1004,7 @@ fn path_recursive_branch(
 // Neighbors
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_neighbors(input: &Input) -> Result<LoweredQuery, String> {
+fn lower_neighbors(input: &Input) -> Result<Plan, String> {
     let neighbors_config = input.neighbors.as_ref().ok_or("neighbors config missing")?;
 
     let center_node = find_node(&input.nodes, &neighbors_config.node)?;
@@ -1099,12 +1041,11 @@ fn lower_neighbors(input: &Input) -> Result<LoweredQuery, String> {
         join_cond = and2(join_cond, tc);
     }
 
-    let base_rel = center.join(JoinType::Inner, edge, join_cond);
+    let mut rel = center.join(JoinType::Inner, edge, join_cond);
 
-    let base_rel = match id_filter(&center_node.id, DEFAULT_PRIMARY_KEY, &center_node.node_ids) {
-        Some(cond) => base_rel.filter(cond),
-        None => base_rel,
-    };
+    if let Some(cond) = id_filter(&center_node.id, DEFAULT_PRIMARY_KEY, &center_node.node_ids) {
+        rel = rel.filter(cond);
+    }
 
     let neighbor_id_expr = match neighbors_config.direction {
         Direction::Outgoing => expr::col(edge_alias, "target_id"),
@@ -1138,112 +1079,22 @@ fn lower_neighbors(input: &Input) -> Result<LoweredQuery, String> {
         ),
     };
 
-    let projections = vec![
-        (neighbor_id_expr, NEIGHBOR_ID_COLUMN.to_string()),
-        (neighbor_type_expr, NEIGHBOR_TYPE_COLUMN.to_string()),
+    if let Some(ob) = &input.order_by {
+        rel = rel.sort(&[(expr::col(&ob.node, &ob.property), ob.direction.into())]);
+    }
+
+    rel = rel.project(&[
+        (neighbor_id_expr, NEIGHBOR_ID_COLUMN),
+        (neighbor_type_expr, NEIGHBOR_TYPE_COLUMN),
         (
             expr::col(edge_alias, "relationship_kind"),
-            RELATIONSHIP_TYPE_COLUMN.to_string(),
+            RELATIONSHIP_TYPE_COLUMN,
         ),
-    ];
+    ]);
 
-    let sort_keys = input.order_by.as_ref().map_or(vec![], |ob| {
-        vec![(expr::col(&ob.node, &ob.property), ob.direction.into())]
-    });
+    rel = rel.fetch(input.limit as u64, None);
 
-    Ok(LoweredQuery {
-        base_rel,
-        projections,
-        group_by: vec![],
-        agg_measures: vec![],
-        sort_keys,
-        limit: Some(input.limit as u64),
-        offset: None,
-        ctes: vec![],
-    })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Finalize: LoweredQuery → Plan
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub fn finalize(lq: LoweredQuery) -> Plan {
-    let mut rel = lq.base_rel;
-    let is_agg = !lq.group_by.is_empty() || !lq.agg_measures.is_empty();
-
-    if is_agg {
-        let group_exprs: Vec<Expr> = lq.group_by.iter().map(|(e, _)| e.clone()).collect();
-
-        let measures: Vec<crate::v2::plan::Measure> = lq
-            .agg_measures
-            .iter()
-            .map(|(func, alias, args)| crate::v2::plan::Measure::new(func, args, alias))
-            .collect();
-
-        rel = rel.aggregate(&group_exprs, &measures);
-
-        if !lq.sort_keys.is_empty() {
-            let sort_refs: Vec<(Expr, SortDir)> = lq.sort_keys;
-            rel = rel.sort(
-                &sort_refs
-                    .iter()
-                    .map(|(e, d)| (e.clone(), *d))
-                    .collect::<Vec<_>>(),
-            );
-        }
-    } else {
-        if !lq.sort_keys.is_empty() {
-            let sort_refs: Vec<(Expr, SortDir)> = lq.sort_keys;
-            rel = rel.sort(
-                &sort_refs
-                    .iter()
-                    .map(|(e, d)| (e.clone(), *d))
-                    .collect::<Vec<_>>(),
-            );
-        }
-
-        if !lq.projections.is_empty() {
-            let proj_refs: Vec<(Expr, &str)> = lq
-                .projections
-                .iter()
-                .map(|(e, a)| (e.clone(), a.as_str()))
-                .collect();
-            rel = rel.project(&proj_refs);
-        }
-    }
-
-    if let Some(limit) = lq.limit {
-        rel = rel.fetch(limit, lq.offset);
-    }
-
-    if lq.ctes.is_empty() {
-        rel.into_plan()
-    } else {
-        let built_ctes: Vec<CteDef> = lq
-            .ctes
-            .into_iter()
-            .map(|uc| {
-                let mut cte_rel = uc.root_rel;
-                if !uc.projections.is_empty() {
-                    let proj_refs: Vec<(Expr, &str)> = uc
-                        .projections
-                        .iter()
-                        .map(|(e, a)| (e.clone(), a.as_str()))
-                        .collect();
-                    cte_rel = cte_rel.project(&proj_refs);
-                }
-                if let Some(limit) = uc.limit {
-                    cte_rel = cte_rel.fetch(limit, None);
-                }
-                CteDef {
-                    name: uc.name,
-                    plan: cte_rel.into_plan(),
-                    recursive: uc.recursive,
-                }
-            })
-            .collect();
-        rel.into_plan_with_ctes(built_ctes)
-    }
+    Ok(rel.into_plan())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1278,8 +1129,7 @@ mod tests {
     use crate::v2::backend::clickhouse::emit_clickhouse_sql;
 
     fn emit(input: &Input) -> String {
-        let lq = lower(input).unwrap();
-        let plan = finalize(lq);
+        let plan = lower(input).unwrap();
         let pq = emit_clickhouse_sql(&plan).unwrap();
         pq.sql
     }
@@ -1590,7 +1440,7 @@ mod tests {
     }
 
     #[test]
-    fn finalize_preserves_cte_structure() {
+    fn path_finding_plan_structure() {
         let input = Input {
             query_type: QueryType::PathFinding,
             nodes: vec![
@@ -1619,13 +1469,125 @@ mod tests {
             ..Default::default()
         };
 
-        let lq = lower(&input).unwrap();
-        assert_eq!(lq.ctes.len(), 1);
-        assert!(lq.ctes[0].recursive);
-
-        let plan = finalize(lq);
+        let plan = lower(&input).unwrap();
         assert_eq!(plan.ctes.len(), 1);
         assert_eq!(plan.ctes[0].name, "paths");
         assert!(plan.ctes[0].recursive);
+    }
+
+    #[test]
+    fn enforce_can_extend_project() {
+        let input = Input {
+            query_type: QueryType::Search,
+            nodes: vec![InputNode {
+                id: "u".into(),
+                entity: Some("User".into()),
+                table: Some("gl_user".into()),
+                columns: Some(vec!["username".into()]),
+                ..Default::default()
+            }],
+            limit: 10,
+            ..Default::default()
+        };
+
+        let mut plan = lower(&input).unwrap();
+        assert_eq!(plan.output_names, vec!["u_username"]);
+
+        // Simulate what enforce does: add redaction columns
+        plan.extend_project(vec![(expr::col("u", "id"), "_gkg_u_id".into())]);
+        plan.insert_project_after("_gkg_u_id", (expr::string("User"), "_gkg_u_type".into()));
+
+        assert_eq!(
+            plan.output_names,
+            vec!["u_username", "_gkg_u_id", "_gkg_u_type"]
+        );
+
+        // Verify it still emits valid SQL
+        let pq = emit_clickhouse_sql(&plan).unwrap();
+        assert!(pq.sql.contains("_gkg_u_id"), "sql: {}", pq.sql);
+        assert!(pq.sql.contains("_gkg_u_type"), "sql: {}", pq.sql);
+    }
+
+    #[test]
+    fn enforce_can_extend_aggregate() {
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![InputNode {
+                id: "u".into(),
+                entity: Some("User".into()),
+                table: Some("gl_user".into()),
+                columns: Some(vec!["username".into()]),
+                ..Default::default()
+            }],
+            aggregations: vec![InputAggregation {
+                function: "COUNT".into(),
+                target: Some("u".into()),
+                group_by: Some("u".into()),
+                property: None,
+                alias: Some("cnt".into()),
+            }],
+            limit: 10,
+            ..Default::default()
+        };
+
+        let mut plan = lower(&input).unwrap();
+
+        // Simulate enforce adding u.id to group_by
+        plan.extend_aggregate_groups(vec![(expr::col("u", "id"), "_gkg_u_id".into())]);
+
+        // Verify valid SQL with the extra group-by
+        let pq = emit_clickhouse_sql(&plan).unwrap();
+        assert!(pq.sql.contains("GROUP BY"), "sql: {}", pq.sql);
+        assert!(pq.sql.contains("u.id"), "sql: {}", pq.sql);
+    }
+
+    #[test]
+    fn security_can_inject_filter_on_cte() {
+        let input = Input {
+            query_type: QueryType::PathFinding,
+            nodes: vec![
+                InputNode {
+                    id: "s".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    node_ids: vec![1],
+                    has_traversal_path: true,
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "e".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    node_ids: vec![2],
+                    has_traversal_path: true,
+                    ..Default::default()
+                },
+            ],
+            path: Some(InputPath {
+                from: "s".into(),
+                to: "e".into(),
+                max_depth: 3,
+                rel_types: vec![],
+            }),
+            limit: 10,
+            ..Default::default()
+        };
+
+        let mut plan = lower(&input).unwrap();
+
+        // Simulate security injecting a traversal_path filter on the CTE
+        plan.ctes[0].plan.inject_filter(expr::starts_with(
+            expr::col("s", "traversal_path"),
+            expr::string("42/"),
+        ));
+
+        // Also inject on the main query
+        plan.inject_filter(expr::starts_with(
+            expr::col("e", "traversal_path"),
+            expr::string("42/"),
+        ));
+
+        let pq = emit_clickhouse_sql(&plan).unwrap();
+        assert!(pq.sql.contains("startsWith"), "sql: {}", pq.sql);
     }
 }

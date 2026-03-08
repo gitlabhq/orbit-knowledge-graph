@@ -377,18 +377,105 @@ impl Plan {
 
     /// Inject a filter expression on top of the root rel.
     pub fn inject_filter(&mut self, condition: Expr) {
-        let existing = std::mem::replace(
+        let existing = self.take_root();
+        self.root = Rel::Filter(FilterRel {
+            input: Box::new(existing),
+            condition,
+        });
+    }
+
+    /// Add projection items to the outermost `Project`. If the root isn't a
+    /// `Project` (or is wrapped in `Fetch`/`Sort`), the items are appended to
+    /// the existing project or a new project is created.
+    ///
+    /// `position` controls where items are inserted: `None` appends, `Some(fn)`
+    /// calls the function to find the insert index for each item.
+    pub fn extend_project(&mut self, items: Vec<(Expr, String)>) {
+        self.mutate_project(|exprs| {
+            for (e, alias) in items {
+                if !exprs.iter().any(|(_, a)| *a == alias) {
+                    exprs.push((e, alias));
+                }
+            }
+        });
+    }
+
+    /// Insert a projection item immediately after the item whose alias matches
+    /// `after`. Falls back to appending if `after` is not found.
+    pub fn insert_project_after(&mut self, after: &str, item: (Expr, String)) {
+        self.mutate_project(|exprs| {
+            if exprs.iter().any(|(_, a)| *a == item.1) {
+                return;
+            }
+            let pos = exprs
+                .iter()
+                .position(|(_, a)| a == after)
+                .map(|i| i + 1)
+                .unwrap_or(exprs.len());
+            exprs.insert(pos, item);
+        });
+    }
+
+    /// Add group-by expressions to the `Aggregate` node in the tree.
+    /// Walks through `Fetch`/`Sort`/`Filter` to find it.
+    pub fn extend_aggregate_groups(&mut self, items: Vec<(Expr, String)>) {
+        fn walk(rel: &mut Rel, items: &[(Expr, String)]) -> bool {
+            match rel {
+                Rel::Aggregate(a) => {
+                    for (e, _) in items {
+                        if !a.group_by.iter().any(|g| g == e) {
+                            a.group_by.push(e.clone());
+                        }
+                    }
+                    true
+                }
+                Rel::Fetch(f) => walk(&mut f.input, items),
+                Rel::Sort(s) => walk(&mut s.input, items),
+                Rel::Filter(f) => walk(&mut f.input, items),
+                _ => false,
+            }
+        }
+        walk(&mut self.root, &items);
+    }
+
+    fn take_root(&mut self) -> Rel {
+        std::mem::replace(
             &mut self.root,
             Rel::Read(ReadRel {
                 table: String::new(),
                 alias: String::new(),
                 columns: Vec::new(),
             }),
-        );
-        self.root = Rel::Filter(FilterRel {
-            input: Box::new(existing),
-            condition,
-        });
+        )
+    }
+
+    /// Mutate the outermost project's expression list. Walks through Fetch/Sort
+    /// to find it. If no project exists, wraps the root in one.
+    fn mutate_project(&mut self, f: impl FnOnce(&mut Vec<(Expr, String)>)) {
+        fn find_project(rel: &mut Rel) -> Option<&mut Vec<(Expr, String)>> {
+            match rel {
+                Rel::Project(p) => Some(&mut p.expressions),
+                Rel::Fetch(fe) => find_project(&mut fe.input),
+                Rel::Sort(s) => find_project(&mut s.input),
+                _ => None,
+            }
+        }
+
+        if let Some(exprs) = find_project(&mut self.root) {
+            f(exprs);
+        } else {
+            // Wrap root in a project
+            let existing = self.take_root();
+            let mut expressions = Vec::new();
+            f(&mut expressions);
+            self.root = Rel::Project(ProjectRel {
+                input: Box::new(existing),
+                expressions,
+            });
+        }
+
+        // Keep output_names in sync
+        self.output_names = self.root.output_names();
     }
 }
 
@@ -552,5 +639,81 @@ mod tests {
 
         assert_eq!(plan.output_names, vec!["id"]);
         assert!(matches!(plan.root, Rel::Project(_)));
+    }
+
+    #[test]
+    fn extend_project_appends() {
+        let mut plan = Rel::read(
+            "gl_user",
+            "u",
+            &[("id", DataType::Int64), ("name", DataType::String)],
+        )
+        .project(&[(col("u", "name"), "name")])
+        .fetch(10, None)
+        .into_plan();
+
+        plan.extend_project(vec![
+            (col("u", "id"), "_gkg_u_id".into()),
+            (string("User"), "_gkg_u_type".into()),
+        ]);
+
+        assert_eq!(plan.output_names, vec!["name", "_gkg_u_id", "_gkg_u_type"]);
+    }
+
+    #[test]
+    fn extend_project_deduplicates() {
+        let mut plan = Rel::read("t", "t", &[("id", DataType::Int64)])
+            .project(&[(col("t", "id"), "id")])
+            .into_plan();
+
+        plan.extend_project(vec![(col("t", "id"), "id".into())]);
+        assert_eq!(plan.output_names, vec!["id"]);
+    }
+
+    #[test]
+    fn insert_project_after() {
+        let mut plan = Rel::read("t", "t", &[("id", DataType::Int64)])
+            .project(&[(col("t", "id"), "_gkg_u_id")])
+            .into_plan();
+
+        plan.insert_project_after("_gkg_u_id", (string("User"), "_gkg_u_type".into()));
+
+        assert_eq!(plan.output_names, vec!["_gkg_u_id", "_gkg_u_type"]);
+    }
+
+    #[test]
+    fn extend_aggregate_groups() {
+        let mut plan = Rel::read(
+            "gl_user",
+            "u",
+            &[("id", DataType::Int64), ("username", DataType::String)],
+        )
+        .aggregate(
+            &[col("u", "username")],
+            &[Measure::new("count", &[col("u", "id")], "cnt")],
+        )
+        .fetch(10, None)
+        .into_plan();
+
+        plan.extend_aggregate_groups(vec![(col("u", "id"), "_gkg_u_id".into())]);
+
+        // Verify the aggregate now has 2 group-by expressions
+        if let Rel::Fetch(f) = &plan.root {
+            if let Rel::Aggregate(a) = &*f.input {
+                assert_eq!(a.group_by.len(), 2);
+                return;
+            }
+        }
+        panic!("expected Fetch(Aggregate(...))");
+    }
+
+    #[test]
+    fn extend_project_creates_project_when_missing() {
+        let mut plan = Rel::read("t", "t", &[("id", DataType::Int64)]).into_plan();
+
+        plan.extend_project(vec![(col("t", "id"), "_gkg_t_id".into())]);
+
+        assert!(matches!(plan.root, Rel::Project(_)));
+        assert_eq!(plan.output_names, vec!["_gkg_t_id"]);
     }
 }
