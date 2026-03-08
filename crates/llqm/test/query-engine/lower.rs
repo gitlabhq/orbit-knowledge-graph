@@ -6,8 +6,7 @@
 //!
 //! Each `lower_*` function builds a complete `Plan` directly — no intermediate
 //! accumulator struct. Post-lowering passes (enforce, security) operate on the
-//! `Plan` via tree-surgery methods: `extend_project`, `insert_project_after`,
-//! `extend_aggregate_groups`, `inject_filter`.
+//! `Plan` via generic traversal: `walk_mut`, `transform_rels`.
 
 #![allow(dead_code)]
 
@@ -1423,117 +1422,5 @@ mod tests {
         assert_eq!(plan.ctes.len(), 1);
         assert_eq!(plan.ctes[0].name, "paths");
         assert!(plan.ctes[0].recursive);
-    }
-
-    #[test]
-    fn enforce_can_extend_project() {
-        let input = Input {
-            query_type: QueryType::Search,
-            nodes: vec![InputNode {
-                id: "u".into(),
-                entity: Some("User".into()),
-                table: Some("gl_user".into()),
-                columns: Some(vec!["username".into()]),
-                ..Default::default()
-            }],
-            limit: 10,
-            ..Default::default()
-        };
-
-        let mut plan = lower(&input).unwrap();
-        assert_eq!(plan.output_names, vec!["u_username"]);
-
-        // Simulate what enforce does: add redaction columns
-        plan.extend_project(vec![(expr::col("u", "id"), "_gkg_u_id".into())]);
-        plan.insert_project_after("_gkg_u_id", (expr::string("User"), "_gkg_u_type".into()));
-
-        assert_eq!(
-            plan.output_names,
-            vec!["u_username", "_gkg_u_id", "_gkg_u_type"]
-        );
-
-        // Verify it still emits valid SQL
-        let pq = emit_clickhouse_sql(&plan).unwrap();
-        assert!(pq.sql.contains("_gkg_u_id"), "sql: {}", pq.sql);
-        assert!(pq.sql.contains("_gkg_u_type"), "sql: {}", pq.sql);
-    }
-
-    #[test]
-    fn enforce_can_extend_aggregate() {
-        let input = Input {
-            query_type: QueryType::Aggregation,
-            nodes: vec![InputNode {
-                id: "u".into(),
-                entity: Some("User".into()),
-                table: Some("gl_user".into()),
-                columns: Some(vec!["username".into()]),
-                ..Default::default()
-            }],
-            aggregations: vec![InputAggregation {
-                function: "COUNT".into(),
-                target: Some("u".into()),
-                group_by: Some("u".into()),
-                property: None,
-                alias: Some("cnt".into()),
-            }],
-            limit: 10,
-            ..Default::default()
-        };
-
-        let mut plan = lower(&input).unwrap();
-
-        // Simulate enforce adding u.id to group_by
-        plan.extend_aggregate_groups(vec![(expr::col("u", "id"), "_gkg_u_id".into())]);
-
-        // Verify valid SQL with the extra group-by
-        let pq = emit_clickhouse_sql(&plan).unwrap();
-        assert!(pq.sql.contains("GROUP BY"), "sql: {}", pq.sql);
-        assert!(pq.sql.contains("u.id"), "sql: {}", pq.sql);
-    }
-
-    #[test]
-    fn security_can_inject_filter_on_cte() {
-        let input = Input {
-            query_type: QueryType::PathFinding,
-            nodes: vec![
-                InputNode {
-                    id: "s".into(),
-                    entity: Some("Project".into()),
-                    table: Some("gl_project".into()),
-                    node_ids: vec![1],
-                    has_traversal_path: true,
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "e".into(),
-                    entity: Some("Project".into()),
-                    table: Some("gl_project".into()),
-                    node_ids: vec![2],
-                    has_traversal_path: true,
-                    ..Default::default()
-                },
-            ],
-            path: Some(InputPath {
-                from: "s".into(),
-                to: "e".into(),
-                max_depth: 3,
-                rel_types: vec![],
-            }),
-            limit: 10,
-            ..Default::default()
-        };
-
-        let mut plan = lower(&input).unwrap();
-
-        // Simulate security injecting a traversal_path filter on the CTE
-        plan.ctes[0]
-            .plan
-            .inject_filter(expr::col("s", "traversal_path").starts_with(expr::string("42/")));
-
-        // Also inject on the main query
-        plan.inject_filter(expr::col("e", "traversal_path").starts_with(expr::string("42/")));
-
-        let pq = emit_clickhouse_sql(&plan).unwrap();
-        assert!(pq.sql.contains("startsWith"), "sql: {}", pq.sql);
     }
 }

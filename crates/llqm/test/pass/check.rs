@@ -9,7 +9,7 @@
 //! anchors and `__raw_sql` wrappers, this one directly pattern-matches on
 //! `Expr::Column` and `Expr::FuncCall`.
 
-use super::security::{SecurityContext, GL_TABLE_PREFIX, SKIP_TABLES, TRAVERSAL_PATH_COLUMN};
+use super::security::{GL_TABLE_PREFIX, SKIP_TABLES, SecurityContext, TRAVERSAL_PATH_COLUMN};
 use llqm::ir::expr::Expr;
 use llqm::ir::plan::{Plan, RelKind};
 
@@ -30,11 +30,19 @@ impl CheckPass {
 }
 
 pub fn check_plan(plan: &Plan, ctx: &SecurityContext) -> Result<(), CheckError> {
-    let aliases = plan.filterable_aliases(should_check);
+    let mut aliases = Vec::new();
+    plan.walk_rels(&mut |r| {
+        if let RelKind::Read { table, alias, .. } = &r.kind {
+            if should_check(table) {
+                aliases.push(alias.clone());
+            }
+        }
+        true
+    });
 
-    for (_, alias) in &aliases {
+    for alias in &aliases {
         let mut found = false;
-        plan.root.walk(&mut |r| {
+        plan.walk_rels(&mut |r| {
             if found {
                 return false;
             }
@@ -44,18 +52,13 @@ pub fn check_plan(plan: &Plan, ctx: &SecurityContext) -> Result<(), CheckError> 
                     return false;
                 }
             }
-            // Don't recurse into UnionAll arms
-            !matches!(r.kind, RelKind::UnionAll { .. })
+            true
         });
         if !found {
             return Err(CheckError::MissingFilter {
                 alias: alias.clone(),
             });
         }
-    }
-
-    for cte in &plan.ctes {
-        check_plan(&cte.plan, ctx)?;
     }
 
     Ok(())
@@ -157,20 +160,31 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let plan = make_plan("gl_project", "p");
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("missing valid traversal_path filter"));
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
     }
 
     #[test]
     fn fails_with_wrong_path() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut plan = make_plan("gl_project", "p");
-        plan.inject_filter(col("p", TRAVERSAL_PATH_COLUMN).starts_with(string("99/")));
+        let plan = Rel::read(
+            "gl_project",
+            "p",
+            &[
+                ("id", DataType::Int64),
+                (TRAVERSAL_PATH_COLUMN, DataType::String),
+            ],
+        )
+        .filter(col("p", TRAVERSAL_PATH_COLUMN).starts_with(string("99/")))
+        .project(&[(col("p", "id"), "id")])
+        .into_plan();
         let err = check_plan(&plan, &ctx).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("missing valid traversal_path filter"));
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter")
+        );
     }
 
     #[test]

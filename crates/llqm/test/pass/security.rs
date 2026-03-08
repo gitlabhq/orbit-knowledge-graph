@@ -12,7 +12,7 @@
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
 use llqm::ir::expr::{self, Expr};
-use llqm::ir::plan::Plan;
+use llqm::ir::plan::{Plan, RelKind};
 
 pub const GL_TABLE_PREFIX: &str = "gl_";
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
@@ -53,27 +53,21 @@ pub struct SecurityPass {
 }
 
 impl SecurityPass {
-    pub fn transform(&self, mut plan: Plan) -> Result<Plan, SecurityError> {
-        inject_filters(&mut plan, &self.context.traversal_paths);
-
-        for cte in &mut plan.ctes {
-            inject_filters(&mut cte.plan, &self.context.traversal_paths);
-        }
-
-        Ok(plan)
+    pub fn transform(&self, plan: Plan) -> Result<Plan, SecurityError> {
+        let paths = &self.context.traversal_paths;
+        Ok(plan.transform_rels(&mut |rel| {
+            let cond = match &rel.kind {
+                RelKind::Read { table, alias, .. } if should_filter(table) => {
+                    Some(build_path_filter(alias, paths))
+                }
+                _ => None,
+            };
+            match cond {
+                Some(c) => rel.filter(c),
+                None => rel,
+            }
+        }))
     }
-}
-
-fn inject_filters(plan: &mut Plan, paths: &[String]) {
-    let aliases = plan.filterable_aliases(should_filter);
-    if aliases.is_empty() {
-        return;
-    }
-    let conds: Vec<Expr> = aliases
-        .iter()
-        .map(|(_, alias)| build_path_filter(alias, paths))
-        .collect();
-    plan.inject_filter(expr::and(conds));
 }
 
 fn should_filter(table: &str) -> bool {
@@ -319,6 +313,9 @@ mod tests {
 
     #[test]
     fn join_skips_user_in_mixed() {
+        let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let pass = SecurityPass { context: ctx };
+
         let plan = Rel::read(
             "gl_user",
             "u",
@@ -342,9 +339,13 @@ mod tests {
         .project(&[(col("u", "id"), "id")])
         .into_plan();
 
-        let aliases = plan.filterable_aliases(should_filter);
-        assert_eq!(aliases.len(), 1);
-        assert_eq!(aliases[0].1, "mr");
+        let plan = pass.transform(plan).unwrap();
+        let sql = emit_sql(&plan);
+        assert!(sql.contains("mr.traversal_path"), "sql: {sql}");
+        assert!(
+            !sql.contains("u.traversal_path"),
+            "should skip gl_user: {sql}"
+        );
     }
 
     #[test]

@@ -790,4 +790,125 @@ mod tests {
         // Should not have visited all 7 nodes
         assert!(transform_count < 7);
     }
+
+    // -----------------------------------------------------------------------
+    // Plan mutation via walk_mut / transform_rels
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn walk_mut_extends_project() {
+        let mut plan = Rel::read(
+            "gl_user",
+            "u",
+            &[("id", DataType::Int64), ("name", DataType::String)],
+        )
+        .project(&[(col("u", "name"), "name")])
+        .fetch(10, None)
+        .into_plan();
+
+        assert_eq!(plan.output_names, vec!["name"]);
+
+        plan.root.walk_mut(&mut |r| {
+            if let RelKind::Project { expressions } = &mut r.kind {
+                expressions.push((col("u", "id"), "_gkg_u_id".into()));
+                expressions.push((string("User"), "_gkg_u_type".into()));
+                return false;
+            }
+            matches!(r.kind, RelKind::Fetch { .. } | RelKind::Sort { .. })
+        });
+        plan.output_names = plan.root.output_names();
+
+        assert_eq!(plan.output_names, vec!["name", "_gkg_u_id", "_gkg_u_type"]);
+    }
+
+    #[test]
+    fn walk_mut_extends_aggregate_groups() {
+        use crate::ir::plan::Measure;
+
+        let mut plan = Rel::read(
+            "gl_user",
+            "u",
+            &[("id", DataType::Int64), ("username", DataType::String)],
+        )
+        .aggregate(
+            &[col("u", "username")],
+            &[Measure::new("count", &[col("u", "id")], "cnt")],
+        )
+        .fetch(10, None)
+        .into_plan();
+
+        plan.root.walk_mut(&mut |r| {
+            if let RelKind::Aggregate { group_by, .. } = &mut r.kind {
+                let item = col("u", "id");
+                if !group_by.contains(&item) {
+                    group_by.push(item);
+                }
+                return false;
+            }
+            matches!(
+                r.kind,
+                RelKind::Fetch { .. } | RelKind::Sort { .. } | RelKind::Filter { .. }
+            )
+        });
+
+        if let RelKind::Fetch { .. } = &plan.root.kind {
+            if let RelKind::Aggregate { group_by, .. } = &plan.root.inputs[0].kind {
+                assert_eq!(group_by.len(), 2);
+                return;
+            }
+        }
+        panic!("expected Fetch(Aggregate(...))");
+    }
+
+    #[test]
+    fn transform_rels_injects_filters_on_reads() {
+        let cte_plan = Rel::read(
+            "gl_project",
+            "p",
+            &[
+                ("id", DataType::Int64),
+                ("traversal_path", DataType::String),
+            ],
+        )
+        .project(&[(col("p", "id"), "node_id")])
+        .into_plan();
+
+        let plan = Rel::read(
+            "gl_issue",
+            "i",
+            &[
+                ("id", DataType::Int64),
+                ("traversal_path", DataType::String),
+            ],
+        )
+        .project(&[(col("i", "id"), "id")])
+        .into_plan_with_ctes(vec![CteDef {
+            name: "base".into(),
+            plan: cte_plan,
+            recursive: false,
+        }]);
+
+        let plan = plan.transform_rels(&mut |rel| {
+            let cond = match &rel.kind {
+                RelKind::Read { table, alias, .. } if table.starts_with("gl_") => {
+                    Some(col(alias, "traversal_path").starts_with(string("42/")))
+                }
+                _ => None,
+            };
+            match cond {
+                Some(c) => rel.filter(c),
+                None => rel,
+            }
+        });
+
+        // Both root and CTE should have filters injected
+        let mut filter_count = 0;
+        plan.walk_rels(&mut |r| {
+            if matches!(r.kind, RelKind::Filter { .. }) {
+                filter_count += 1;
+            }
+            true
+        });
+        assert_eq!(filter_count, 2);
+    }
 }
