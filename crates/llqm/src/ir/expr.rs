@@ -88,6 +88,15 @@ pub enum LiteralValue {
     Null,
 }
 
+impl LiteralValue {
+    pub fn as_string(&self) -> Option<&str> {
+        match self {
+            LiteralValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
 /// Binary operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
