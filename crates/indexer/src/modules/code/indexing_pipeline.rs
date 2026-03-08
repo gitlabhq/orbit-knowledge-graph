@@ -9,6 +9,7 @@ use code_graph::loading::DirectoryFileSource;
 use tempfile::TempDir;
 use tracing::{debug, info, warn};
 
+use super::archive;
 use super::arrow_converter::ArrowConverter;
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
@@ -61,14 +62,23 @@ impl CodeIndexingPipeline {
             .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
 
         let fetch_start = Instant::now();
-        self.repository_service
-            .extract_repository(&request.repository, temp_dir.path(), &request.commit_sha)
+        let archive_path = self
+            .repository_service
+            .fetch_archive(&request.repository, temp_dir.path(), &request.commit_sha)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))
-            .record_error_stage(&self.metrics, "repository_extract")?;
+            .map_err(|e| HandlerError::Processing(format!("failed to fetch repository: {e}")))
+            .record_error_stage(&self.metrics, "repository_fetch")?;
         self.metrics
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
+
+        let extract_start = Instant::now();
+        archive::unpack_archive(&archive_path, temp_dir.path())
+            .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))
+            .record_error_stage(&self.metrics, "repository_extract")?;
+        self.metrics
+            .repository_extract_duration
+            .record(extract_start.elapsed().as_secs_f64(), &[]);
 
         let indexed_at = Utc::now();
         self.run_indexing(
@@ -173,7 +183,6 @@ impl CodeIndexingPipeline {
             .record_files_processed(graph_data.file_nodes.len() as u64, "parsed");
         self.metrics.record_node_counts(&graph_data);
 
-        let write_start = Instant::now();
         self.write_graph_data(
             context,
             project_id,
@@ -183,9 +192,6 @@ impl CodeIndexingPipeline {
             &graph_data,
         )
         .await?;
-        self.metrics
-            .write_duration
-            .record(write_start.elapsed().as_secs_f64(), &[]);
 
         if let Err(error) = self
             .stale_data_cleaner

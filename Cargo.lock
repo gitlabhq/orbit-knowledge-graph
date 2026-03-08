@@ -3408,6 +3408,7 @@ dependencies = [
  "sha2",
  "siphon-proto",
  "smallvec",
+ "tar",
  "tempfile",
  "testcontainers",
  "testcontainers-modules",

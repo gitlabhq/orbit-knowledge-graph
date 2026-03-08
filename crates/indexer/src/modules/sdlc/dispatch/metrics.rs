@@ -87,8 +87,9 @@ impl DispatchMetrics {
             .add(count, &[KeyValue::new("dispatcher", dispatcher.to_owned())]);
     }
 
-    pub fn record_query_duration(&self, duration: f64) {
-        self.query_duration.record(duration, &[]);
+    pub fn record_query_duration(&self, query: &str, duration: f64) {
+        self.query_duration
+            .record(duration, &[KeyValue::new("query", query.to_owned())]);
     }
 
     pub fn record_error(&self, dispatcher: &str, stage: &str) {

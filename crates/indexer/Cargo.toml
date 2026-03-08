@@ -31,6 +31,7 @@ prost-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 siphon-proto = { path = "../siphon-proto" }
+tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
