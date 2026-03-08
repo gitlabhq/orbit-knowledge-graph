@@ -11,7 +11,7 @@
 
 use super::security::{GL_TABLE_PREFIX, SKIP_TABLES, SecurityContext, TRAVERSAL_PATH_COLUMN};
 use llqm::ir::expr::Expr;
-use llqm::ir::plan::{Plan, Rel};
+use llqm::ir::plan::{Plan, Rel, RelKind};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CheckError {
@@ -56,23 +56,24 @@ fn should_check(table: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 fn rel_has_valid_filter(rel: &Rel, alias: &str, ctx: &SecurityContext) -> bool {
-    match rel {
-        Rel::Filter(f) => {
-            if expr_has_valid_starts_with(&f.condition, alias, ctx) {
+    match &rel.kind {
+        RelKind::Filter { condition } => {
+            if expr_has_valid_starts_with(condition, alias, ctx) {
                 return true;
             }
-            rel_has_valid_filter(&f.input, alias, ctx)
+            rel_has_valid_filter(&rel.inputs[0], alias, ctx)
         }
-        Rel::Project(p) => rel_has_valid_filter(&p.input, alias, ctx),
-        Rel::Fetch(f) => rel_has_valid_filter(&f.input, alias, ctx),
-        Rel::Sort(s) => rel_has_valid_filter(&s.input, alias, ctx),
-        Rel::Aggregate(a) => rel_has_valid_filter(&a.input, alias, ctx),
-        Rel::Join(j) => {
-            rel_has_valid_filter(&j.left, alias, ctx) || rel_has_valid_filter(&j.right, alias, ctx)
+        RelKind::Project { .. }
+        | RelKind::Fetch { .. }
+        | RelKind::Sort { .. }
+        | RelKind::Aggregate { .. }
+        | RelKind::Subquery { .. }
+        | RelKind::Distinct => rel_has_valid_filter(&rel.inputs[0], alias, ctx),
+        RelKind::Join { .. } => {
+            rel_has_valid_filter(&rel.inputs[0], alias, ctx)
+                || rel_has_valid_filter(&rel.inputs[1], alias, ctx)
         }
-        Rel::Subquery(s) => rel_has_valid_filter(&s.input, alias, ctx),
-        Rel::Distinct(d) => rel_has_valid_filter(&d.input, alias, ctx),
-        Rel::Read(_) | Rel::UnionAll(_) => false,
+        RelKind::Read { .. } | RelKind::UnionAll { .. } => false,
     }
 }
 

@@ -345,42 +345,44 @@ impl Schema {
 // ---------------------------------------------------------------------------
 
 fn encode_rel(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
-    match rel {
-        v2::Rel::Read(r) => encode_read(r),
-        v2::Rel::Filter(f) => encode_filter(fns, f),
-        v2::Rel::Project(p) => encode_project(fns, p),
-        v2::Rel::Join(j) => encode_join(fns, j),
-        v2::Rel::Sort(s) => encode_sort(fns, s),
-        v2::Rel::Fetch(f) => encode_fetch(fns, f),
-        v2::Rel::Aggregate(a) => encode_aggregate(fns, a),
-        v2::Rel::UnionAll(u) => encode_union_all(fns, u),
-        v2::Rel::Subquery(s) => encode_subquery(fns, s),
-        v2::Rel::Distinct(_) => Err(EncodeError::UnsupportedDistinct),
+    match &rel.kind {
+        v2::RelKind::Read { .. } => encode_read(rel),
+        v2::RelKind::Filter { .. } => encode_filter(fns, rel),
+        v2::RelKind::Project { .. } => encode_project(fns, rel),
+        v2::RelKind::Join { .. } => encode_join(fns, rel),
+        v2::RelKind::Sort { .. } => encode_sort(fns, rel),
+        v2::RelKind::Fetch { .. } => encode_fetch(fns, rel),
+        v2::RelKind::Aggregate { .. } => encode_aggregate(fns, rel),
+        v2::RelKind::UnionAll { .. } => encode_union_all(fns, rel),
+        v2::RelKind::Subquery { .. } => encode_subquery(fns, rel),
+        v2::RelKind::Distinct => Err(EncodeError::UnsupportedDistinct),
     }
 }
 
-fn encode_read(read: &v2::ReadRel) -> Result<Rel, EncodeError> {
-    let columns: Vec<(&str, DataType)> = read
-        .columns
+fn encode_read(rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::Read {
+        table,
+        alias,
+        columns,
+    } = &rel.kind
+    else {
+        unreachable!()
+    };
+
+    let col_pairs: Vec<(&str, DataType)> = columns
         .iter()
         .map(|c| (c.name.as_str(), c.data_type.clone()))
         .collect();
 
-    let is_raw = read.table == RAW_FROM_TAG;
+    let is_raw = table == RAW_FROM_TAG;
     let (table_name, metadata) = if is_raw {
-        (
-            "__raw".into(),
-            serde_json::json!({ "raw_from": read.alias }),
-        )
+        ("__raw".into(), serde_json::json!({ "raw_from": alias }))
     } else {
-        (
-            read.table.clone(),
-            serde_json::json!({ "alias": read.alias }),
-        )
+        (table.clone(), serde_json::json!({ "alias": alias }))
     };
 
     let substrait_read = ReadRel {
-        base_schema: Some(build_named_struct(&columns)),
+        base_schema: Some(build_named_struct(&col_pairs)),
         read_type: Some(read_rel::ReadType::NamedTable(read_rel::NamedTable {
             names: vec![table_name],
             advanced_extension: None,
@@ -393,10 +395,13 @@ fn encode_read(read: &v2::ReadRel) -> Result<Rel, EncodeError> {
     })
 }
 
-fn encode_filter(fns: &mut FunctionRegistry, filter: &v2::FilterRel) -> Result<Rel, EncodeError> {
-    let input = encode_rel(fns, &filter.input)?;
-    let schema = collect_schema(&filter.input);
-    let condition = encode_expr(fns, &filter.condition, &schema)?;
+fn encode_filter(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::Filter { condition } = &rel.kind else {
+        unreachable!()
+    };
+    let input = encode_rel(fns, &rel.inputs[0])?;
+    let schema = collect_schema(&rel.inputs[0]);
+    let condition = encode_expr(fns, condition, &schema)?;
 
     Ok(Rel {
         rel_type: Some(rel::RelType::Filter(Box::new(FilterRel {
@@ -407,21 +412,20 @@ fn encode_filter(fns: &mut FunctionRegistry, filter: &v2::FilterRel) -> Result<R
     })
 }
 
-fn encode_project(
-    fns: &mut FunctionRegistry,
-    project: &v2::ProjectRel,
-) -> Result<Rel, EncodeError> {
-    let input = encode_rel(fns, &project.input)?;
-    let schema = collect_schema(&project.input);
+fn encode_project(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::Project { expressions } = &rel.kind else {
+        unreachable!()
+    };
+    let input = encode_rel(fns, &rel.inputs[0])?;
+    let schema = collect_schema(&rel.inputs[0]);
     let input_count = schema.columns.len();
 
-    let expressions: Vec<Expression> = project
-        .expressions
+    let encoded_expressions: Vec<Expression> = expressions
         .iter()
         .map(|(e, _)| encode_expr(fns, e, &schema))
         .collect::<Result<_, _>>()?;
 
-    let emit = (input_count..input_count + project.expressions.len())
+    let emit = (input_count..input_count + expressions.len())
         .map(|i| i as i32)
         .collect();
 
@@ -434,37 +438,46 @@ fn encode_project(
                 ..Default::default()
             }),
             input: Some(Box::new(input)),
-            expressions,
+            expressions: encoded_expressions,
             ..Default::default()
         }))),
     })
 }
 
-fn encode_join(fns: &mut FunctionRegistry, join: &v2::JoinRel) -> Result<Rel, EncodeError> {
-    let left = encode_rel(fns, &join.left)?;
-    let right = encode_rel(fns, &join.right)?;
-    let left_schema = collect_schema(&join.left);
-    let right_schema = collect_schema(&join.right);
+fn encode_join(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::Join {
+        join_type,
+        condition,
+    } = &rel.kind
+    else {
+        unreachable!()
+    };
+    let left = encode_rel(fns, &rel.inputs[0])?;
+    let right = encode_rel(fns, &rel.inputs[1])?;
+    let left_schema = collect_schema(&rel.inputs[0]);
+    let right_schema = collect_schema(&rel.inputs[1]);
     let merged = Schema::merge(&left_schema, &right_schema);
-    let condition = encode_expr(fns, &join.condition, &merged)?;
+    let condition = encode_expr(fns, condition, &merged)?;
 
     Ok(Rel {
         rel_type: Some(rel::RelType::Join(Box::new(proto::JoinRel {
             left: Some(Box::new(left)),
             right: Some(Box::new(right)),
             expression: Some(Box::new(condition)),
-            r#type: to_substrait_join_type(join.join_type) as i32,
+            r#type: to_substrait_join_type(*join_type) as i32,
             ..Default::default()
         }))),
     })
 }
 
-fn encode_sort(fns: &mut FunctionRegistry, sort: &v2::SortRel) -> Result<Rel, EncodeError> {
-    let input = encode_rel(fns, &sort.input)?;
-    let schema = collect_schema(&sort.input);
+fn encode_sort(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::Sort { sorts } = &rel.kind else {
+        unreachable!()
+    };
+    let input = encode_rel(fns, &rel.inputs[0])?;
+    let schema = collect_schema(&rel.inputs[0]);
 
-    let sorts: Vec<proto::SortField> = sort
-        .sorts
+    let encoded_sorts: Vec<proto::SortField> = sorts
         .iter()
         .map(|s| {
             let expr = encode_expr(fns, &s.expr, &schema)?;
@@ -483,46 +496,45 @@ fn encode_sort(fns: &mut FunctionRegistry, sort: &v2::SortRel) -> Result<Rel, En
     Ok(Rel {
         rel_type: Some(rel::RelType::Sort(Box::new(SortRel {
             input: Some(Box::new(input)),
-            sorts,
+            sorts: encoded_sorts,
             ..Default::default()
         }))),
     })
 }
 
 #[allow(deprecated)]
-fn encode_fetch(fns: &mut FunctionRegistry, fetch: &v2::FetchRel) -> Result<Rel, EncodeError> {
-    let input = encode_rel(fns, &fetch.input)?;
+fn encode_fetch(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::Fetch { limit, offset } = &rel.kind else {
+        unreachable!()
+    };
+    let input = encode_rel(fns, &rel.inputs[0])?;
 
     Ok(Rel {
         rel_type: Some(rel::RelType::Fetch(Box::new(FetchRel {
             input: Some(Box::new(input)),
-            count_mode: Some(fetch_rel::CountMode::Count(fetch.limit as i64)),
-            offset_mode: fetch
-                .offset
-                .map(|o| fetch_rel::OffsetMode::Offset(o as i64)),
+            count_mode: Some(fetch_rel::CountMode::Count(*limit as i64)),
+            offset_mode: offset.map(|o| fetch_rel::OffsetMode::Offset(o as i64)),
             ..Default::default()
         }))),
     })
 }
 
 #[allow(deprecated)]
-fn encode_aggregate(
-    fns: &mut FunctionRegistry,
-    agg: &v2::AggregateRel,
-) -> Result<Rel, EncodeError> {
-    let input = encode_rel(fns, &agg.input)?;
-    let schema = collect_schema(&agg.input);
+fn encode_aggregate(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::Aggregate { group_by, measures } = &rel.kind else {
+        unreachable!()
+    };
+    let input = encode_rel(fns, &rel.inputs[0])?;
+    let schema = collect_schema(&rel.inputs[0]);
 
-    let grouping_expressions: Vec<Expression> = agg
-        .group_by
+    let grouping_expressions: Vec<Expression> = group_by
         .iter()
         .map(|e| encode_expr(fns, e, &schema))
         .collect::<Result<_, _>>()?;
 
-    let expression_references: Vec<u32> = (0..agg.group_by.len() as u32).collect();
+    let expression_references: Vec<u32> = (0..group_by.len() as u32).collect();
 
-    let measures: Vec<aggregate_rel::Measure> = agg
-        .measures
+    let encoded_measures: Vec<aggregate_rel::Measure> = measures
         .iter()
         .map(|m| encode_measure(fns, m, &schema))
         .collect::<Result<_, _>>()?;
@@ -536,7 +548,7 @@ fn encode_aggregate(
         rel_type: Some(rel::RelType::Aggregate(Box::new(AggregateRel {
             input: Some(Box::new(input)),
             groupings: vec![grouping],
-            measures,
+            measures: encoded_measures,
             grouping_expressions,
             ..Default::default()
         }))),
@@ -577,17 +589,18 @@ fn encode_measure(
     })
 }
 
-fn encode_union_all(
-    fns: &mut FunctionRegistry,
-    union: &v2::UnionAllRel,
-) -> Result<Rel, EncodeError> {
-    let inputs: Vec<Rel> = union
+fn encode_union_all(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::UnionAll { alias } = &rel.kind else {
+        unreachable!()
+    };
+
+    let inputs: Vec<Rel> = rel
         .inputs
         .iter()
         .map(|r| encode_rel(fns, r))
         .collect::<Result<_, _>>()?;
 
-    let col_names: Vec<String> = if let Some(first) = union.inputs.first() {
+    let col_names: Vec<String> = if let Some(first) = rel.inputs.first() {
         first.output_names().into_iter().collect()
     } else {
         Vec::new()
@@ -599,19 +612,19 @@ fn encode_union_all(
             op: set_rel::SetOp::UnionAll as i32,
             advanced_extension: Some(make_metadata(
                 "llqm/set_metadata",
-                serde_json::json!({ "alias": union.alias, "column_names": col_names }),
+                serde_json::json!({ "alias": alias, "column_names": col_names }),
             )),
             ..Default::default()
         })),
     })
 }
 
-fn encode_subquery(
-    fns: &mut FunctionRegistry,
-    subquery: &v2::SubqueryRel,
-) -> Result<Rel, EncodeError> {
-    let input = encode_rel(fns, &subquery.input)?;
-    let metadata = serde_json::json!({ "subquery_alias": subquery.alias });
+fn encode_subquery(fns: &mut FunctionRegistry, rel: &v2::Rel) -> Result<Rel, EncodeError> {
+    let v2::RelKind::Subquery { alias } = &rel.kind else {
+        unreachable!()
+    };
+    let input = encode_rel(fns, &rel.inputs[0])?;
+    let metadata = serde_json::json!({ "subquery_alias": alias });
 
     Ok(Rel {
         rel_type: Some(rel::RelType::ExtensionSingle(Box::new(

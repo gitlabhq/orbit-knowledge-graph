@@ -9,10 +9,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::ir::expr::{BinaryOp, Expr, JoinType, LiteralValue, SortDir, UnaryOp};
-use crate::ir::plan::{
-    AggregateRel, DistinctRel, FetchRel, FilterRel, JoinRel, Plan, ProjectRel, RAW_FROM_TAG,
-    ReadRel, Rel, SortRel, SubqueryRel, UnionAllRel,
-};
+use crate::ir::plan::{Plan, RAW_FROM_TAG, Rel, RelKind};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -203,40 +200,48 @@ impl CodegenContext {
         rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        match rel {
-            Rel::Read(r) => self.emit_read(r),
-            Rel::Filter(f) => self.emit_filter(f, output_names),
-            Rel::Project(p) => self.emit_project(p, output_names),
-            Rel::Join(j) => self.emit_join(j),
-            Rel::Sort(s) => self.emit_sort(s, output_names),
-            Rel::Fetch(f) => self.emit_fetch(f, output_names),
-            Rel::Aggregate(a) => self.emit_aggregate(a, output_names),
-            Rel::UnionAll(u) => self.emit_union_all(u, output_names),
-            Rel::Subquery(s) => self.emit_subquery(s, output_names),
-            Rel::Distinct(d) => self.emit_distinct(d, output_names),
+        match &rel.kind {
+            RelKind::Read { .. } => self.emit_read(rel),
+            RelKind::Filter { .. } => self.emit_filter(rel, output_names),
+            RelKind::Project { .. } => self.emit_project(rel, output_names),
+            RelKind::Join { .. } => self.emit_join(rel),
+            RelKind::Sort { .. } => self.emit_sort(rel, output_names),
+            RelKind::Fetch { .. } => self.emit_fetch(rel, output_names),
+            RelKind::Aggregate { .. } => self.emit_aggregate(rel, output_names),
+            RelKind::UnionAll { .. } => self.emit_union_all(rel, output_names),
+            RelKind::Subquery { .. } => self.emit_subquery(rel, output_names),
+            RelKind::Distinct => self.emit_distinct(rel, output_names),
         }
     }
 
-    fn emit_read(&mut self, read: &ReadRel) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        // Raw FROM clause
-        if read.table == RAW_FROM_TAG {
-            let col_names = read.columns.iter().map(|c| c.name.clone()).collect();
+    fn emit_read(&mut self, rel: &Rel) -> Result<(QueryParts, Vec<String>), CodegenError> {
+        let RelKind::Read {
+            table,
+            alias,
+            columns,
+        } = &rel.kind
+        else {
+            unreachable!()
+        };
+
+        if table == RAW_FROM_TAG {
+            let col_names = columns.iter().map(|c| c.name.clone()).collect();
             return Ok((
                 QueryParts {
-                    from: read.alias.clone(),
+                    from: alias.clone(),
                     ..Default::default()
                 },
                 col_names,
             ));
         }
 
-        let from = if read.alias.is_empty() || read.alias == read.table {
-            read.table.clone()
+        let from = if alias.is_empty() || alias == table {
+            table.clone()
         } else {
-            format!("{} AS {}", read.table, read.alias)
+            format!("{} AS {}", table, alias)
         };
 
-        let col_names = read.columns.iter().map(|c| c.name.clone()).collect();
+        let col_names = columns.iter().map(|c| c.name.clone()).collect();
 
         Ok((
             QueryParts {
@@ -249,14 +254,19 @@ impl CodegenContext {
 
     fn emit_filter(
         &mut self,
-        filter: &FilterRel,
+        rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        // Detect HAVING: filter on top of aggregate
-        let is_having = matches!(&*filter.input, Rel::Aggregate(_));
+        let RelKind::Filter { condition } = &rel.kind else {
+            unreachable!()
+        };
+        let input = &rel.inputs[0];
 
-        let (mut parts, col_names) = self.emit_query(&filter.input, output_names)?;
-        let condition_sql = self.emit_expr(&filter.condition)?;
+        // Detect HAVING: filter on top of aggregate
+        let is_having = matches!(input.kind, RelKind::Aggregate { .. });
+
+        let (mut parts, col_names) = self.emit_query(input, output_names)?;
+        let condition_sql = self.emit_expr(condition)?;
 
         if is_having {
             parts.having = Some(condition_sql);
@@ -269,23 +279,22 @@ impl CodegenContext {
 
     fn emit_project(
         &mut self,
-        project: &ProjectRel,
+        rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        let (mut parts, _) = self.emit_query(&project.input, None)?;
+        let RelKind::Project { expressions } = &rel.kind else {
+            unreachable!()
+        };
+        let (mut parts, _) = self.emit_query(&rel.inputs[0], None)?;
 
-        let names = output_names.cloned().unwrap_or_else(|| {
-            project
-                .expressions
-                .iter()
-                .map(|(_, alias)| alias.clone())
-                .collect()
-        });
+        let names = output_names
+            .cloned()
+            .unwrap_or_else(|| expressions.iter().map(|(_, alias)| alias.clone()).collect());
 
         let mut select_items = Vec::new();
         let mut col_names = Vec::new();
 
-        for (i, (expr, default_alias)) in project.expressions.iter().enumerate() {
+        for (i, (expr, default_alias)) in expressions.iter().enumerate() {
             let expr_sql = self.emit_expr(expr)?;
             let alias = names
                 .get(i)
@@ -306,11 +315,18 @@ impl CodegenContext {
         Ok((parts, col_names))
     }
 
-    fn emit_join(&mut self, join: &JoinRel) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        let (left_parts, left_cols) = self.emit_from_item(&join.left)?;
-        let (right_parts, right_cols) = self.emit_from_item(&join.right)?;
+    fn emit_join(&mut self, rel: &Rel) -> Result<(QueryParts, Vec<String>), CodegenError> {
+        let RelKind::Join {
+            join_type,
+            condition,
+        } = &rel.kind
+        else {
+            unreachable!()
+        };
+        let (left_parts, left_cols) = self.emit_from_item(&rel.inputs[0])?;
+        let (right_parts, right_cols) = self.emit_from_item(&rel.inputs[1])?;
 
-        let join_type_str = match join.join_type {
+        let join_type_str = match join_type {
             JoinType::Inner => "INNER JOIN",
             JoinType::Left => "LEFT JOIN",
             JoinType::Right => "RIGHT JOIN",
@@ -318,7 +334,7 @@ impl CodegenContext {
             JoinType::Cross => "CROSS JOIN",
         };
 
-        let on_sql = self.emit_expr(&join.condition)?;
+        let on_sql = self.emit_expr(condition)?;
 
         let from = format!(
             "{} {join_type_str} {} ON {on_sql}",
@@ -340,12 +356,15 @@ impl CodegenContext {
 
     fn emit_sort(
         &mut self,
-        sort: &SortRel,
+        rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        let (mut parts, col_names) = self.emit_query(&sort.input, output_names)?;
+        let RelKind::Sort { sorts } = &rel.kind else {
+            unreachable!()
+        };
+        let (mut parts, col_names) = self.emit_query(&rel.inputs[0], output_names)?;
 
-        for spec in &sort.sorts {
+        for spec in sorts {
             let expr_sql = self.emit_expr(&spec.expr)?;
             let dir = match spec.direction {
                 SortDir::Asc => "ASC",
@@ -359,21 +378,27 @@ impl CodegenContext {
 
     fn emit_fetch(
         &mut self,
-        fetch: &FetchRel,
+        rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        let (mut parts, col_names) = self.emit_query(&fetch.input, output_names)?;
-        parts.limit = Some(fetch.limit);
-        parts.offset = fetch.offset;
+        let RelKind::Fetch { limit, offset } = &rel.kind else {
+            unreachable!()
+        };
+        let (mut parts, col_names) = self.emit_query(&rel.inputs[0], output_names)?;
+        parts.limit = Some(*limit);
+        parts.offset = *offset;
         Ok((parts, col_names))
     }
 
     fn emit_aggregate(
         &mut self,
-        agg: &AggregateRel,
+        rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        let (mut parts, _) = self.emit_query(&agg.input, None)?;
+        let RelKind::Aggregate { group_by, measures } = &rel.kind else {
+            unreachable!()
+        };
+        let (mut parts, _) = self.emit_query(&rel.inputs[0], None)?;
 
         let names = output_names.cloned().unwrap_or_default();
         let mut select_items = Vec::new();
@@ -381,7 +406,7 @@ impl CodegenContext {
         let mut col_names = Vec::new();
         let mut col_idx = 0;
 
-        for group_expr in &agg.group_by {
+        for group_expr in group_by {
             let expr_sql = self.emit_expr(group_expr)?;
             let alias = names
                 .get(col_idx)
@@ -398,7 +423,7 @@ impl CodegenContext {
             col_idx += 1;
         }
 
-        for measure in &agg.measures {
+        for measure in measures {
             let alias = names
                 .get(col_idx)
                 .cloned()
@@ -429,17 +454,20 @@ impl CodegenContext {
 
     fn emit_union_all(
         &mut self,
-        union: &UnionAllRel,
+        rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        if union.inputs.is_empty() {
+        let RelKind::UnionAll { alias } = &rel.kind else {
+            unreachable!()
+        };
+        if rel.inputs.is_empty() {
             return Err(CodegenError::MissingField("UnionAll.inputs".into()));
         }
 
-        let (first_parts, first_cols) = self.emit_query(&union.inputs[0], output_names)?;
+        let (first_parts, first_cols) = self.emit_query(&rel.inputs[0], output_names)?;
         let mut union_sql = first_parts.to_sql();
 
-        for input in &union.inputs[1..] {
+        for input in &rel.inputs[1..] {
             let (input_parts, _) = self.emit_query(input, output_names)?;
             union_sql.push_str(&format!(" UNION ALL {}", input_parts.to_sql()));
         }
@@ -448,7 +476,7 @@ impl CodegenContext {
 
         Ok((
             QueryParts {
-                from: format!("({union_sql}) AS {}", union.alias),
+                from: format!("({union_sql}) AS {alias}"),
                 ..Default::default()
             },
             col_names,
@@ -457,15 +485,18 @@ impl CodegenContext {
 
     fn emit_subquery(
         &mut self,
-        subquery: &SubqueryRel,
+        rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        let (inner_parts, inner_cols) = self.emit_query(&subquery.input, output_names)?;
+        let RelKind::Subquery { alias } = &rel.kind else {
+            unreachable!()
+        };
+        let (inner_parts, inner_cols) = self.emit_query(&rel.inputs[0], output_names)?;
         let inner_sql = inner_parts.to_sql();
 
         Ok((
             QueryParts {
-                from: format!("({inner_sql}) AS {}", subquery.alias),
+                from: format!("({inner_sql}) AS {alias}"),
                 ..Default::default()
             },
             inner_cols,
@@ -474,10 +505,10 @@ impl CodegenContext {
 
     fn emit_distinct(
         &mut self,
-        distinct: &DistinctRel,
+        rel: &Rel,
         output_names: Option<&Vec<String>>,
     ) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        let (mut parts, col_names) = self.emit_query(&distinct.input, output_names)?;
+        let (mut parts, col_names) = self.emit_query(&rel.inputs[0], output_names)?;
         if parts.select.is_empty() {
             parts.select.push("DISTINCT *".into());
         } else if let Some(first) = parts.select.first_mut() {
@@ -489,10 +520,11 @@ impl CodegenContext {
     /// Emit a relation as a FROM-clause item. Simple reads, joins, unions, and
     /// subqueries are inlined. Everything else gets wrapped in a subquery.
     fn emit_from_item(&mut self, rel: &Rel) -> Result<(QueryParts, Vec<String>), CodegenError> {
-        match rel {
-            Rel::Read(_) | Rel::Join(_) | Rel::UnionAll(_) | Rel::Subquery(_) => {
-                self.emit_query(rel, None)
-            }
+        match &rel.kind {
+            RelKind::Read { .. }
+            | RelKind::Join { .. }
+            | RelKind::UnionAll { .. }
+            | RelKind::Subquery { .. } => self.emit_query(rel, None),
             _ => {
                 let (inner_parts, cols) = self.emit_query(rel, None)?;
                 let sql = inner_parts.to_sql();
