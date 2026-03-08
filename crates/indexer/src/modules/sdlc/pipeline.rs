@@ -85,7 +85,6 @@ impl Pipeline {
         let params = self.build_query_params(&checkpoint.watermark, context);
 
         let mut total_rows: u64 = 0;
-        let mut batch_count: u64 = 0;
         extract_query = extract_query.resume_from(&checkpoint);
 
         if !extract_query.is_first_page() {
@@ -107,7 +106,6 @@ impl Pipeline {
             }
 
             let rows_in_batch: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-            batch_count += 1;
             total_rows += rows_in_batch;
 
             self.transform_and_write(
@@ -153,12 +151,8 @@ impl Pipeline {
             })?;
 
         let elapsed = started_at.elapsed();
-        self.metrics.record_pipeline_completion(
-            &plan.name,
-            elapsed.as_secs_f64(),
-            total_rows,
-            batch_count,
-        );
+        self.metrics
+            .record_pipeline_completion(&plan.name, elapsed.as_secs_f64(), total_rows);
         self.metrics
             .record_watermark_lag(&plan.name, &context.watermark);
 
@@ -166,7 +160,6 @@ impl Pipeline {
             info!(
                 pipeline = %plan.name,
                 total_rows,
-                batch_count,
                 elapsed_ms = elapsed.as_millis() as u64,
                 "pipeline completed"
             );
@@ -198,9 +191,14 @@ impl Pipeline {
             let query_start = Instant::now();
             match self.datalake.query_batches(sql, params.clone()).await {
                 Ok(batches) => {
-                    self.metrics.record_datalake_query_duration(
+                    let bytes: u64 = batches
+                        .iter()
+                        .map(|b| b.get_array_memory_size() as u64)
+                        .sum();
+                    self.metrics.record_datalake_query(
                         pipeline_name,
                         query_start.elapsed().as_secs_f64(),
+                        bytes,
                     );
                     return Ok(batches);
                 }

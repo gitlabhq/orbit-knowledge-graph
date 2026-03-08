@@ -11,8 +11,8 @@ pub struct CodeMetrics {
     pub(super) events_processed: Counter<u64>,
     pub(super) handler_duration: Histogram<f64>,
     pub(super) repository_fetch_duration: Histogram<f64>,
+    pub(super) repository_extract_duration: Histogram<f64>,
     pub(super) indexing_duration: Histogram<f64>,
-    pub(super) write_duration: Histogram<f64>,
     pub(super) files_processed: Counter<u64>,
     pub(super) nodes_indexed: Counter<u64>,
     pub(super) errors: Counter<u64>,
@@ -40,7 +40,14 @@ impl CodeMetrics {
         let repository_fetch_duration = meter
             .f64_histogram("indexer.code.repository.fetch.duration")
             .with_unit("s")
-            .with_description("Duration of fetching and extracting a repository from Gitaly")
+            .with_description("Duration of fetching a repository archive from Gitaly")
+            .with_boundaries(DURATION_BUCKETS.to_vec())
+            .build();
+
+        let repository_extract_duration = meter
+            .f64_histogram("indexer.code.repository.extract.duration")
+            .with_unit("s")
+            .with_description("Duration of extracting a repository archive to disk")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
@@ -48,13 +55,6 @@ impl CodeMetrics {
             .f64_histogram("indexer.code.indexing.duration")
             .with_unit("s")
             .with_description("Duration of code-graph parsing and analysis")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let write_duration = meter
-            .f64_histogram("indexer.code.write.duration")
-            .with_unit("s")
-            .with_description("Duration of writing all graph tables to ClickHouse")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
@@ -77,8 +77,8 @@ impl CodeMetrics {
             events_processed,
             handler_duration,
             repository_fetch_duration,
+            repository_extract_duration,
             indexing_duration,
-            write_duration,
             files_processed,
             nodes_indexed,
             errors,

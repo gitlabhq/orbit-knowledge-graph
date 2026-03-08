@@ -6,7 +6,7 @@ use hyper_util::rt::TokioIo;
 use regex::Regex;
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use tokio::net::UnixStream;
 use tonic::Request;
@@ -179,11 +179,11 @@ impl GitalyClient {
         Ok(resp.into_inner().exists)
     }
 
-    pub async fn pull_and_extract_repository(
+    pub async fn fetch_archive(
         &self,
         target_dir: &Path,
         commit_id: Option<&str>,
-    ) -> Result<(), GitalyError> {
+    ) -> Result<PathBuf, GitalyError> {
         let mut client = RepositoryServiceClient::new(self.channel.clone());
 
         let mut req = Request::new(crate::proto::GetArchiveRequest {
@@ -213,10 +213,19 @@ impl GitalyClient {
                 .map_err(|e| GitalyError::Io(e.to_string()))?;
         }
 
-        let file = File::open(&tar_path).map_err(|e| GitalyError::Io(e.to_string()))?;
+        Ok(tar_path)
+    }
+
+    pub async fn pull_and_extract_repository(
+        &self,
+        target_dir: &Path,
+        commit_id: Option<&str>,
+    ) -> Result<(), GitalyError> {
+        let archive_path = self.fetch_archive(target_dir, commit_id).await?;
+        let file = File::open(&archive_path).map_err(|e| GitalyError::Io(e.to_string()))?;
         let mut archive = tar::Archive::new(file);
         extract_archive(&mut archive, target_dir)?;
-        std::fs::remove_file(&tar_path).map_err(|e| GitalyError::Io(e.to_string()))?;
+        std::fs::remove_file(&archive_path).map_err(|e| GitalyError::Io(e.to_string()))?;
         Ok(())
     }
 

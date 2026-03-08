@@ -165,7 +165,7 @@ impl ProjectCodeDispatcher {
                 DispatchError::new(error)
             })?;
         self.metrics
-            .record_query_duration(query_start.elapsed().as_secs_f64());
+            .record_query_duration("pending_projects", query_start.elapsed().as_secs_f64());
 
         i64::extract_column(&batches, 0).map_err(DispatchError::new)
     }

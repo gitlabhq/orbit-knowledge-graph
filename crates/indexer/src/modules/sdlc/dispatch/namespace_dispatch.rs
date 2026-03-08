@@ -87,7 +87,7 @@ impl NamespaceDispatcher {
                 DispatchError::new(error)
             })?;
         self.metrics
-            .record_query_duration(query_start.elapsed().as_secs_f64());
+            .record_query_duration("enabled_namespaces", query_start.elapsed().as_secs_f64());
 
         let namespace_ids = i64::extract_column(&arrow_batches, 0).map_err(DispatchError::new)?;
         let organization_ids =
