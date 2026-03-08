@@ -1,8 +1,8 @@
-//! Prototype lowering: Input → v2 Plan.
+//! Prototype lowering: Input → Plan.
 //!
-//! Replicates query-engine's `lower.rs` patterns using the v2 `Rel` chainable
-//! API. NOT production code — this is a stress test of v2 API expressiveness.
-//! The real lowerer lives in query-engine and will be ported once v2 is stable.
+//! Replicates query-engine's `lower.rs` patterns using the `Rel` chainable
+//! API. NOT production code — this is a stress test of API expressiveness.
+//! The real lowerer lives in query-engine.
 //!
 //! Each `lower_*` function builds a complete `Plan` directly — no intermediate
 //! accumulator struct. Post-lowering passes (enforce, security) operate on the

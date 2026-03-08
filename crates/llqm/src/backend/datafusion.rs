@@ -1,19 +1,19 @@
-//! v2 DataFusion backend — encodes a v2 `Plan` to Substrait protobuf.
+//! DataFusion backend — encodes a `Plan` to Substrait protobuf.
 //!
 //! DataFusion natively consumes Substrait plans via `datafusion-substrait`,
-//! so this backend encodes the v2 plan into its Substrait form.
-//! All Substrait construction is delegated to `v2::substrait::encode`.
+//! so this backend encodes the plan into its Substrait form.
+//! All Substrait construction is delegated to `ir::substrait::encode`.
 
 use crate::ir::plan::Plan;
-use crate::ir::substrait as v2_substrait;
+use crate::ir::substrait;
 
-pub use v2_substrait::EncodeError;
+pub use substrait::EncodeError;
 
 pub struct DataFusionBackend;
 
 impl DataFusionBackend {
     pub fn emit(&self, plan: &Plan) -> Result<::substrait::proto::Plan, EncodeError> {
-        v2_substrait::encode(plan)
+        substrait::encode(plan)
     }
 }
 

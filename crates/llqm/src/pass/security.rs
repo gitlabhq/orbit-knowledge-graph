@@ -1,11 +1,11 @@
-//! v2 security context injection pass.
+//! Security context injection pass.
 //!
-//! Walks the v2 `Rel` tree and injects `startsWith(alias.traversal_path, path)`
+//! Walks the `Rel` tree and injects `startsWith(alias.traversal_path, path)`
 //! predicates for namespace-scoped access control.
 //!
 //! Unlike the old pass (which uses `Expr::Raw` because Substrait's positional
 //! resolution can't accept late-injected column references), this pass uses
-//! `Expr::Column` directly — the v2 plan stores expressions symbolically.
+//! `Expr::Column` directly — the plan stores expressions symbolically.
 //!
 //! Path filtering strategy:
 //! - 1 path:  `startsWith(alias.traversal_path, path)`

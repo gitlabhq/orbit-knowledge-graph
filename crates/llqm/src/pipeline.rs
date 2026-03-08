@@ -163,7 +163,7 @@ impl<O> Pipeline<EmittedPhase<O>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::clickhouse::{emit_clickhouse_sql, ClickHouseBackend};
+    use crate::backend::clickhouse::ClickHouseBackend;
     use crate::ir::expr::*;
     use crate::ir::plan::Rel;
 

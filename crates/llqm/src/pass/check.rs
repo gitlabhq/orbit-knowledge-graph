@@ -1,6 +1,6 @@
-//! Post-compilation safety check for v2 plans.
+//! Post-compilation safety check.
 //!
-//! Walks the v2 `Rel`/`Expr` tree to verify that every `gl_*` table alias
+//! Walks the `Rel`/`Expr` tree to verify that every `gl_*` table alias
 //! (except skip tables) has a `startsWith(alias.traversal_path, path)` predicate
 //! whose path literal is consistent with the security context.
 //!
@@ -11,9 +11,7 @@
 
 use crate::ir::expr::Expr;
 use crate::ir::plan::{Plan, Rel};
-use crate::pass::security::{
-    SecurityContext, GL_TABLE_PREFIX, SKIP_TABLES, TRAVERSAL_PATH_COLUMN,
-};
+use crate::pass::security::{SecurityContext, GL_TABLE_PREFIX, SKIP_TABLES, TRAVERSAL_PATH_COLUMN};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CheckError {

@@ -212,7 +212,7 @@ pub enum EncodeError {
     UnsupportedCtes,
 }
 
-/// Encode a v2 `Plan` into a `substrait::proto::Plan`.
+/// Encode a `Plan` into a `substrait::proto::Plan`.
 pub fn encode(plan: &Plan) -> Result<proto::Plan, EncodeError> {
     if !plan.ctes.is_empty() {
         return Err(EncodeError::UnsupportedCtes);
@@ -256,7 +256,7 @@ impl EncodeContext {
 
 /// Minimal function registry — identical to the one in `ir/plan.rs` but
 /// private to this module. We don't reuse `ir::plan::FunctionRegistry`
-/// to avoid coupling v2 encode to the old plan layer.
+/// to avoid coupling encode to the plan layer.
 struct FunctionRegistry {
     urn: proto::extensions::SimpleExtensionUrn,
     declarations: Vec<proto::extensions::SimpleExtensionDeclaration>,
@@ -496,9 +496,7 @@ fn encode_sort(ctx: &mut EncodeContext, sort: &v2::SortRel) -> Result<Rel, Encod
             Ok(proto::SortField {
                 expr: Some(expr),
                 sort_kind: Some(sort_field::SortKind::Direction(match s.direction {
-                    crate::ir::expr::SortDir::Asc => {
-                        sort_field::SortDirection::AscNullsLast as i32
-                    }
+                    crate::ir::expr::SortDir::Asc => sort_field::SortDirection::AscNullsLast as i32,
                     crate::ir::expr::SortDir::Desc => {
                         sort_field::SortDirection::DescNullsLast as i32
                     }
@@ -766,7 +764,7 @@ fn encode_expr(
 }
 
 // ---------------------------------------------------------------------------
-// Schema collection (walks v2 Rel tree)
+// Schema collection (walks Rel tree)
 // ---------------------------------------------------------------------------
 
 fn collect_schema(rel: &v2::Rel) -> Schema {
