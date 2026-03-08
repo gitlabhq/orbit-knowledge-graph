@@ -70,17 +70,20 @@ fn should_check(table: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 fn expr_has_valid_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> bool {
-    match expr {
-        Expr::FuncCall { name, args } if name == "startsWith" => {
-            is_valid_starts_with_args(args, alias, ctx)
+    let mut found = false;
+    expr.walk(&mut |e| {
+        if found {
+            return false;
         }
-        // Recurse through AND / OR
-        Expr::BinaryOp { left, right, .. } => {
-            expr_has_valid_starts_with(left, alias, ctx)
-                || expr_has_valid_starts_with(right, alias, ctx)
+        if let Expr::FuncCall { name, args } = e {
+            if name == "startsWith" && is_valid_starts_with_args(args, alias, ctx) {
+                found = true;
+                return false;
+            }
         }
-        _ => false,
-    }
+        true
+    });
+    found
 }
 
 /// Check if `startsWith` args match `(alias.traversal_path, valid_path_literal)`.
