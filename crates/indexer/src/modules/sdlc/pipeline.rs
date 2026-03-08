@@ -354,7 +354,7 @@ mod tests {
     use crate::modules::sdlc::checkpoint_store::CheckpointError;
     use crate::modules::sdlc::datalake::DatalakeError;
     use crate::modules::sdlc::plan::ExtractQuery;
-    use crate::modules::sdlc::plan::input::{ExtractColumn, ExtractPlan, ExtractSource};
+    use crate::modules::sdlc::plan::ast::{Expr, Op, Query, SelectExpr, TableRef};
     use crate::modules::sdlc::test_fixtures::test_metrics;
     use crate::testkit::MockDestination;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
@@ -363,32 +363,55 @@ mod tests {
     use std::sync::Mutex;
 
     fn simple_extract_query(batch_size: u64) -> ExtractQuery {
-        let extract_plan = ExtractPlan {
-            destination_table: "gl_test".to_string(),
-            columns: vec![
-                ExtractColumn::Bare("id".to_string()),
-                ExtractColumn::Bare("name".to_string()),
+        let base_query = Query {
+            select: vec![
+                SelectExpr::bare(Expr::col("", "id")),
+                SelectExpr::bare(Expr::col("", "name")),
+                SelectExpr::new(Expr::raw("_siphon_replicated_at"), "_version"),
+                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
             ],
-            source: ExtractSource::Table("source_table".to_string()),
-            watermark: "_siphon_replicated_at".to_string(),
-            deleted: "_siphon_deleted".to_string(),
-            order_by: vec!["id".to_string()],
-            namespaced: false,
-            traversal_path_filter: None,
-            additional_where: None,
+            from: TableRef::scan("source_table", None),
+            where_clause: Some(
+                Expr::and_all([
+                    Some(Expr::binary(
+                        Op::Gt,
+                        Expr::raw("_siphon_replicated_at"),
+                        Expr::param("last_watermark", "String"),
+                    )),
+                    Some(Expr::binary(
+                        Op::Le,
+                        Expr::raw("_siphon_replicated_at"),
+                        Expr::param("watermark", "String"),
+                    )),
+                ])
+                .unwrap(),
+            ),
+            order_by: vec![],
+            limit: None,
         };
 
-        ExtractQuery::new(extract_plan, batch_size)
+        ExtractQuery::new(base_query, vec!["id".to_string()], batch_size)
     }
 
     fn simple_plan(name: &str) -> PipelinePlan {
+        let transform_query = Query {
+            select: vec![
+                SelectExpr::bare(Expr::col("", "id")),
+                SelectExpr::bare(Expr::col("", "name")),
+            ],
+            from: TableRef::scan(SOURCE_DATA_TABLE, None),
+            where_clause: None,
+            order_by: vec![],
+            limit: None,
+        };
+
         PipelinePlan {
             name: name.to_string(),
             extract_query: simple_extract_query(1000),
-            transforms: vec![Transformation::new(
-                format!("SELECT id AS id, name AS name FROM {SOURCE_DATA_TABLE}"),
-                format!("gl_{}", name.to_lowercase()),
-            )],
+            transforms: vec![Transformation {
+                query: transform_query,
+                destination_table: format!("gl_{}", name.to_lowercase()),
+            }],
         }
     }
 

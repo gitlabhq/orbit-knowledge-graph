@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! JSON → Schema Validate → Parse → Validate → Lower → Enforce → Security → Finalize → Check → Codegen → SQL
+//! JSON → Schema Validate → Parse → Validate → Lower → Security → Check → Codegen → SQL
 //! ```
 //!
 //! # Example
@@ -31,6 +31,7 @@
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
+pub mod ast;
 pub mod check;
 pub mod codegen;
 pub mod constants;
@@ -43,7 +44,8 @@ pub mod normalize;
 pub mod security;
 pub mod validate;
 
-pub use check::check_plan;
+pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+pub use check::check_ast;
 pub use codegen::{
     CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
 };
@@ -91,12 +93,11 @@ pub fn compile(
 ) -> Result<CompiledQueryContext> {
     let input = validated_input(json_input, ontology).count_err()?;
 
-    let mut lq = lower(&input).count_err()?;
-    let result_context = enforce_return(&mut lq, &input)?;
-    apply_security_context(&mut lq, ctx).count_err()?;
-    let plan = lower::finalize(lq);
-    check_plan(&plan, ctx).count_err()?;
-    let base = codegen(&plan, result_context).count_err()?;
+    let mut node = lower(&input).count_err()?;
+    let result_context = enforce_return(&mut node, &input)?;
+    apply_security_context(&mut node, ctx).count_err()?;
+    check_ast(&node, ctx).count_err()?;
+    let base = codegen(&node, result_context).count_err()?;
 
     let hydration = build_hydration_plan(&input);
     let query_type = input.query_type;
@@ -165,6 +166,36 @@ mod tests {
             .with_fields("Group", [("name", DataType::String)])
     }
 
+    /// Compile JSON and return the AST without generating SQL.
+    #[must_use = "the compiled AST should be used"]
+    pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> Result<Node> {
+        let v = validate::Validator::new(ontology);
+        let value = v.check_json(json_input)?;
+        v.check_ontology(&value)?;
+        let input: Input = serde_json::from_value(value)?;
+        v.check_references(&input)?;
+        let input = normalize::normalize(input, ontology)?;
+        let node = lower::lower(&input)?;
+        Ok(node)
+    }
+
+    #[test]
+    fn compile_to_ast_works() {
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+
+        let node = compile_to_ast(json, &test_ontology()).unwrap();
+        let Node::Query(ref q) = node else {
+            panic!("expected Query");
+        };
+        assert_eq!(q.limit, Some(10));
+        // lower() still returns full columns in this stage; slim SELECT comes later
+        assert!(!q.select.is_empty());
+    }
+
     #[test]
     fn traversal_query() {
         let json = r#"{
@@ -190,7 +221,7 @@ mod tests {
         );
         assert!(result.base.sql.contains("INNER JOIN gl_note AS n ON"));
         assert!(
-            result.base.sql.contains("relationship_kind"),
+            result.base.sql.contains("e0.relationship_kind ="),
             "expected relationship_kind filter: {}",
             result.base.sql
         );
@@ -267,19 +298,68 @@ mod tests {
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
 
         // Recursive CTE named "paths"
+        assert!(result.base.sql.contains("WITH RECURSIVE paths AS"));
+        assert!(result.base.sql.contains("UNION ALL"));
+
+        // Verify recursive structure references "paths"
         assert!(
-            result.base.sql.contains("WITH RECURSIVE paths AS"),
-            "sql: {}",
-            result.base.sql
+            result.base.sql.contains("FROM paths"),
+            "recursive branches should reference paths CTE"
         );
 
-        // Verify path construction
+        // Verify cycle detection and early termination
         assert!(
-            result.base.sql.contains("_gkg_path"),
-            "sql: {}",
-            result.base.sql
+            result.base.sql.matches("NOT has").count() >= 2,
+            "should have cycle detection and early termination"
         );
-        assert!(result.base.result_context.query_type == Some(QueryType::PathFinding));
+
+        // Verify path construction with full materialization
+        assert!(
+            result.base.sql.contains("arrayConcat"),
+            "paths should be extended"
+        );
+        assert!(
+            result.base.sql.contains("tuple"),
+            "path nodes should be typed tuples"
+        );
+        // Verify path limit to prevent memory explosion
+        assert!(
+            result.base.sql.contains("LIMIT 1000"),
+            "should limit paths to prevent memory issues"
+        );
+    }
+
+    #[test]
+    fn path_finding_depth_control() {
+        // Verify max_depth is used in the recursive CTE
+        let shallow = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
+                {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
+        }"#;
+
+        let deep = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
+                {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#;
+
+        let shallow_result = compile(shallow, &test_ontology(), &test_ctx()).unwrap();
+        let deep_result = compile(deep, &test_ontology(), &test_ctx()).unwrap();
+
+        // Both use recursive CTE
+        assert!(shallow_result.base.sql.contains("WITH RECURSIVE paths AS"));
+        assert!(deep_result.base.sql.contains("WITH RECURSIVE paths AS"));
+
+        // Depth limit is in WHERE clause (p.depth < N)
+        assert!(shallow_result.base.sql.contains("p.depth < {p"));
+        assert!(deep_result.base.sql.contains("p.depth < {p"));
     }
 
     #[test]
@@ -318,11 +398,7 @@ mod tests {
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
         assert!(result.base.sql.contains("WHERE"));
         assert!(result.base.sql.contains(">="));
-        assert!(
-            result.base.sql.contains("IN") || result.base.sql.contains("in"),
-            "sql: {}",
-            result.base.sql
-        );
+        assert!(result.base.sql.contains("IN"));
         assert!(result.base.sql.contains("LIKE"));
     }
 
@@ -494,6 +570,7 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
         let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+        // Schema validation catches invalid entity types
         assert!(
             err.to_string().contains("NonexistentType")
                 && err.to_string().contains("is not one of"),
@@ -612,10 +689,12 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Search with columns SQL: {}", result.base.sql);
 
+        // Structural query still includes all columns (slim SELECT not yet implemented)
         assert!(result.base.sql.contains("_gkg_u_id"));
         assert!(result.base.sql.contains("_gkg_u_type"));
         assert!(result.base.sql.contains("u_username"));
 
+        // Static hydration disabled — base query already carries all columns
         assert!(matches!(result.hydration, HydrationPlan::None));
     }
 
@@ -634,9 +713,11 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Search with wildcard SQL: {}", result.base.sql);
 
+        // Structural query still includes all columns (slim SELECT not yet implemented)
         assert!(result.base.sql.contains("_gkg_u_id"));
         assert!(result.base.sql.contains("_gkg_u_type"));
 
+        // Static hydration disabled — base query already carries all columns
         assert!(matches!(result.hydration, HydrationPlan::None));
     }
 
@@ -655,12 +736,14 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Traversal with columns SQL: {}", result.base.sql);
 
+        // Structural query still includes all columns (slim SELECT not yet implemented)
         assert!(result.base.sql.contains("_gkg_u_id"));
         assert!(result.base.sql.contains("_gkg_u_type"));
         assert!(result.base.sql.contains("_gkg_p_id"));
         assert!(result.base.sql.contains("_gkg_p_type"));
         assert!(result.base.sql.contains("u_username"));
 
+        // Static hydration disabled — base query already carries all columns
         assert!(matches!(result.hydration, HydrationPlan::None));
     }
 
@@ -680,10 +763,14 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Aggregation SQL: {}", result.base.sql);
 
+        // Aggregation queries only add mandatory columns for group_by nodes (u)
+        // The target node (mr) is aggregated so doesn't get individual row columns
         assert!(result.base.sql.contains("_gkg_u_id"));
         assert!(result.base.sql.contains("_gkg_u_type"));
+        // MR is aggregated, not returned as individual rows
         assert!(!result.base.sql.contains("_gkg_mr_id"));
         assert!(!result.base.sql.contains("_gkg_mr_type"));
+        // Should have the aggregation
         assert!(result.base.sql.contains("COUNT"));
         assert!(result.base.sql.contains("GROUP BY"));
     }
@@ -702,7 +789,11 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Path finding SQL: {}", result.base.sql);
 
+        // Path finding queries use _gkg_path column (Array of tuples)
+        // which contains all node IDs and types along the path
         assert!(result.base.sql.contains("_gkg_path"));
+        // The columns selection on nodes is ignored for path finding
+        // because the result is a path, not individual node rows
         assert!(result.base.result_context.query_type == Some(QueryType::PathFinding));
     }
 
@@ -759,16 +850,19 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Multi-hop SQL: {}", result.base.sql);
 
+        // Should generate a union subquery with multiple arms (one per hop count)
         assert!(
             result.base.sql.contains("UNION ALL"),
             "expected UNION ALL for unrolled multi-hop: {}",
             result.base.sql
         );
+        // Should have the hop_e0 union subquery aliased
         assert!(
             result.base.sql.contains("AS hop_e0"),
             "expected hop_e0 subquery alias: {}",
             result.base.sql
         );
+        // Should have depth column for filtering
         assert!(
             result.base.sql.contains("AS depth"),
             "expected depth column: {}",
@@ -797,6 +891,7 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Min-hops SQL: {}", result.base.sql);
 
+        // Should have depth >= 2 filter
         assert!(
             result.base.sql.contains("hop_e0.depth"),
             "expected depth reference: {}",
@@ -825,6 +920,7 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Single-hop SQL: {}", result.base.sql);
 
+        // Should NOT generate a recursive CTE for single hop
         assert!(
             !result.base.sql.contains("WITH RECURSIVE"),
             "single hop should not generate CTE: {}",
@@ -854,6 +950,7 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Multi-hop aggregation SQL: {}", result.base.sql);
 
+        // Should generate union subquery for multi-hop in aggregation queries
         assert!(
             result.base.sql.contains("UNION ALL"),
             "aggregation should support multi-hop with union: {}",
@@ -911,6 +1008,7 @@ mod ontology_integration_tests {
         let ontology = load_test_ontology();
         let ctx = test_ctx();
 
+        // Search: range → LIMIT + OFFSET
         let result = compile(
             r#"{
                 "query_type": "search",
@@ -924,6 +1022,7 @@ mod ontology_integration_tests {
         assert!(result.base.sql.contains("LIMIT 10"), "{}", result.base.sql);
         assert!(result.base.sql.contains("OFFSET 40"), "{}", result.base.sql);
 
+        // Traversal with ordering
         let result = compile(
             r#"{
                 "query_type": "traversal",
@@ -944,6 +1043,7 @@ mod ontology_integration_tests {
         assert!(result.base.sql.contains("ORDER BY"));
         assert!(result.base.sql.contains("DESC"));
 
+        // Mutual exclusion: limit + range rejected
         let err = compile(
             r#"{
                 "query_type": "search",
@@ -957,6 +1057,7 @@ mod ontology_integration_tests {
         .unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)), "{err}");
 
+        // end == start rejected
         let err = compile(
             r#"{
                 "query_type": "search",
@@ -969,6 +1070,7 @@ mod ontology_integration_tests {
         .unwrap_err();
         assert!(err.to_string().contains("must be greater than"), "{err}");
 
+        // window > 1000 rejected
         let err = compile(
             r#"{
                 "query_type": "search",
@@ -981,6 +1083,7 @@ mod ontology_integration_tests {
         .unwrap_err();
         assert!(err.to_string().contains("must not exceed 1000"), "{err}");
 
+        // window == 1000 accepted
         assert!(
             compile(
                 r#"{

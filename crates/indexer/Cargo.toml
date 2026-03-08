@@ -23,7 +23,6 @@ futures = { workspace = true }
 gitaly-client = { path = "../gitaly-client" }
 gitlab-client = { workspace = true }
 moka = { workspace = true }
-llqm = { path = "../llqm" }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }

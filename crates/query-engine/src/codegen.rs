@@ -1,10 +1,10 @@
-//! Codegen: Plan → SQL
+//! Codegen: AST → SQL
 //!
-//! Delegates to llqm's ClickHouse SQL codegen and wraps the result with
-//! query-engine metadata (result context, hydration plan).
+//! Pure transformation from AST to parameterized ClickHouse SQL.
 
+use crate::ast::{ChType, Cte, Expr, Node, Op, Query, TableRef};
 use crate::enforce::ResultContext;
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
 use serde_json::Value;
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 /// A query parameter with its ClickHouse type and JSON value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParamValue {
-    pub ch_type: String,
+    pub ch_type: ChType,
     pub value: Value,
 }
 
@@ -89,41 +89,272 @@ impl std::fmt::Display for ParameterizedQuery {
     }
 }
 
-/// Generate a `ParameterizedQuery` from a finalized llqm `Plan` and a `ResultContext`.
-pub fn codegen(
-    plan: &llqm::plan::Plan,
-    result_context: ResultContext,
-) -> Result<ParameterizedQuery> {
-    let llqm_pq = llqm::codegen::emit_clickhouse_sql(plan)
-        .map_err(|e| QueryError::Codegen(format!("llqm codegen failed: {e}")))?;
-
-    // Convert llqm ParamValues to query-engine ParamValues
-    let params = llqm_pq
-        .params
-        .into_iter()
-        .map(|(name, pv)| {
-            (
-                name,
-                ParamValue {
-                    ch_type: pv.ch_type,
-                    value: pv.value,
-                },
-            )
-        })
-        .collect();
-
+pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
+    let mut ctx = Context::new();
+    let sql = match ast {
+        Node::Query(q) => ctx.emit_query(q)?,
+    };
     Ok(ParameterizedQuery {
-        sql: llqm_pq.sql,
-        params,
+        sql,
+        params: ctx.params,
         result_context,
     })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Code generation context
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct Context {
+    params: HashMap<String, ParamValue>,
+}
+
+impl Context {
+    fn new() -> Self {
+        Self {
+            params: HashMap::new(),
+        }
+    }
+
+    fn emit_query(&mut self, q: &Query) -> Result<String> {
+        let mut parts = Vec::new();
+
+        // SET statements (must come before WITH for recursive CTEs)
+        for (key, value) in &q.set_statements {
+            parts.push(format!("SET {key} = {value};"));
+        }
+
+        // WITH clause (CTEs)
+        if !q.ctes.is_empty() {
+            parts.push(self.emit_ctes(&q.ctes)?);
+        }
+
+        // SELECT, FROM, WHERE, GROUP BY, HAVING, UNION ALL, ORDER BY, LIMIT, OFFSET
+        parts.push(self.emit_query_body(q)?);
+
+        Ok(parts.join(" "))
+    }
+
+    fn emit_ctes(&mut self, ctes: &[Cte]) -> Result<String> {
+        let has_recursive = ctes.iter().any(|c| c.recursive);
+        let keyword = if has_recursive {
+            "WITH RECURSIVE"
+        } else {
+            "WITH"
+        };
+
+        let cte_parts: Vec<String> = ctes
+            .iter()
+            .map(|cte| {
+                let inner = self.emit_query_body(&cte.query)?;
+                Ok(format!("{} AS ({})", cte.name, inner))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(format!("{} {}", keyword, cte_parts.join(", ")))
+    }
+
+    /// Emit the query body (SELECT through LIMIT/OFFSET, including UNION ALL).
+    /// Used by both `emit_query` (top-level) and CTE definitions.
+    fn emit_query_body(&mut self, q: &Query) -> Result<String> {
+        let mut parts = Vec::new();
+
+        // SELECT
+        let select_items: Vec<_> = q
+            .select
+            .iter()
+            .map(|sel| {
+                let expr = self.emit_expr(&sel.expr);
+                match &sel.alias {
+                    Some(alias) => format!("{expr} AS {alias}"),
+                    None => expr,
+                }
+            })
+            .collect();
+        parts.push(format!("SELECT {}", select_items.join(", ")));
+
+        // FROM
+        let from = self.emit_table_ref(&q.from)?;
+        parts.push(format!("FROM {from}"));
+
+        // WHERE
+        if let Some(w) = &q.where_clause {
+            parts.push(format!("WHERE {}", self.emit_expr(w)));
+        }
+
+        // GROUP BY
+        if !q.group_by.is_empty() {
+            let groups: Vec<_> = q.group_by.iter().map(|g| self.emit_expr(g)).collect();
+            parts.push(format!("GROUP BY {}", groups.join(", ")));
+        }
+
+        // HAVING
+        if let Some(h) = &q.having {
+            parts.push(format!("HAVING {}", self.emit_expr(h)));
+        }
+
+        // UNION ALL
+        for union_q in &q.union_all {
+            parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
+        }
+
+        // ORDER BY
+        if !q.order_by.is_empty() {
+            let orders: Vec<_> = q
+                .order_by
+                .iter()
+                .map(|o| {
+                    let dir = if o.desc { "DESC" } else { "ASC" };
+                    format!("{} {dir}", self.emit_expr(&o.expr))
+                })
+                .collect();
+            parts.push(format!("ORDER BY {}", orders.join(", ")));
+        }
+
+        // LIMIT / OFFSET
+        if let Some(limit) = q.limit {
+            parts.push(format!("LIMIT {limit}"));
+        }
+        if let Some(offset) = q.offset {
+            parts.push(format!("OFFSET {offset}"));
+        }
+
+        Ok(parts.join(" "))
+    }
+
+    fn emit_expr(&mut self, e: &Expr) -> String {
+        match e {
+            Expr::Column { table, column } => format!("{table}.{column}"),
+            Expr::Literal(v) => self.emit_literal(v),
+            Expr::Param { data_type, value } => self.emit_param(*data_type, value),
+            Expr::FuncCall { name, args } => {
+                let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
+                format!("{}({})", name, args.join(", "))
+            }
+            Expr::BinaryOp { op, left, right } => {
+                let l = self.emit_expr(left);
+                let r = self.emit_expr(right);
+                if *op == Op::In {
+                    format!("{l} IN {r}")
+                } else {
+                    // This is for binary ops like =, >, <=, etc.
+                    format!("({l} {op} {r})")
+                }
+            }
+            Expr::UnaryOp { op, expr } => {
+                let e = self.emit_expr(expr);
+                if *op == Op::IsNull || *op == Op::IsNotNull {
+                    format!("({e} {op})")
+                } else {
+                    format!("({op} {e})")
+                }
+            }
+        }
+    }
+
+    fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
+        match v {
+            Value::Null => "NULL".into(),
+            // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
+            Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
+                let name = format!("p{}", self.params.len());
+                let placeholder = format!("{{{name}:{data_type}}}");
+                self.params.insert(
+                    name,
+                    ParamValue {
+                        ch_type: data_type,
+                        value: v.clone(),
+                    },
+                );
+                placeholder
+            }
+            // Scalar ChType with array value: expand element-by-element (Literal fallback).
+            Value::Array(arr) => {
+                let placeholders: Vec<_> = arr
+                    .iter()
+                    .map(|item| {
+                        let name = format!("p{}", self.params.len());
+                        let placeholder = format!("{{{name}:{data_type}}}");
+                        self.params.insert(
+                            name,
+                            ParamValue {
+                                ch_type: data_type,
+                                value: item.clone(),
+                            },
+                        );
+                        placeholder
+                    })
+                    .collect();
+                format!("({})", placeholders.join(", "))
+            }
+            _ => {
+                let name = format!("p{}", self.params.len());
+                let placeholder = format!("{{{name}:{data_type}}}");
+                self.params.insert(
+                    name,
+                    ParamValue {
+                        ch_type: data_type,
+                        value: v.clone(),
+                    },
+                );
+                placeholder
+            }
+        }
+    }
+
+    fn emit_literal(&mut self, v: &Value) -> String {
+        match v {
+            Value::Null => "NULL".into(),
+            Value::Array(arr) => {
+                let placeholders: Vec<_> = arr
+                    .iter()
+                    .map(|item| self.emit_param(ChType::from_value(item), item))
+                    .collect();
+                format!("({})", placeholders.join(", "))
+            }
+            _ => self.emit_param(ChType::from_value(v), v),
+        }
+    }
+
+    fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
+        match t {
+            TableRef::Scan { table, alias } => Ok(format!("{table} AS {alias}")),
+            TableRef::Join {
+                join_type,
+                left,
+                right,
+                on,
+            } => {
+                let left_sql = self.emit_table_ref(left)?;
+                let right_sql = self.emit_table_ref(right)?;
+                let on_expr = self.emit_expr(on);
+                Ok(format!(
+                    "{left_sql} {join_type} JOIN {right_sql} ON {on_expr}"
+                ))
+            }
+            TableRef::Union { queries, alias } => {
+                let union_parts: Vec<String> = queries
+                    .iter()
+                    .map(|q| self.emit_query(q))
+                    .collect::<Result<_>>()?;
+                Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
+            }
+            TableRef::Subquery { query, alias } => {
+                let inner_sql = self.emit_query(query)?;
+                Ok(format!("({inner_sql}) AS {alias}"))
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llqm::expr::{self, DataType};
-    use llqm::plan::PlanBuilder;
+    use crate::ast::{JoinType, OrderExpr, SelectExpr};
 
     fn empty_ctx() -> ResultContext {
         ResultContext::new()
@@ -131,56 +362,244 @@ mod tests {
 
     #[test]
     fn simple_select() {
-        let mut b = PlanBuilder::new();
-        let rel = b.read(
-            "nodes",
-            "n",
-            &[("id", DataType::Int64), ("label", DataType::String)],
-        );
-        let rel = b.filter(rel, expr::eq(expr::col("n", "label"), expr::string("User")));
-        let rel = b.project(
-            rel,
-            &[
-                (expr::col("n", "id"), "node_id"),
-                (expr::col("n", "label"), "node_type"),
+        let q = Query {
+            select: vec![
+                SelectExpr {
+                    expr: Expr::col("n", "id"),
+                    alias: Some("node_id".into()),
+                },
+                SelectExpr {
+                    expr: Expr::col("n", "label"),
+                    alias: Some("node_type".into()),
+                },
             ],
-        );
-        let rel = b.fetch(rel, 10, None);
-        let plan = b.build(rel);
+            from: TableRef::scan("nodes", "n"),
+            where_clause: Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
+            limit: Some(10),
+            ..Default::default()
+        };
 
-        let result = codegen(&plan, empty_ctx()).unwrap();
-        assert!(result.sql.contains("SELECT"), "sql: {}", result.sql);
-        assert!(result.sql.contains("nodes AS n"), "sql: {}", result.sql);
-        assert!(result.sql.contains("LIMIT 10"), "sql: {}", result.sql);
-        assert!(result.sql.contains("WHERE"), "sql: {}", result.sql);
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
+        );
+        assert_eq!(
+            result.params.get("p0").map(|p| &p.value),
+            Some(&Value::from("User"))
+        );
     }
 
     #[test]
     fn with_join() {
-        let mut b = PlanBuilder::new();
-        let n = b.read("nodes", "n", &[("id", DataType::Int64)]);
-        let e = b.read(
-            "edges",
-            "e",
-            &[("source_id", DataType::Int64), ("label", DataType::String)],
-        );
-        let joined = b.join(
-            llqm::expr::JoinType::Inner,
-            n,
-            e,
-            expr::eq(expr::col("n", "id"), expr::col("e", "source_id")),
-        );
-        let rel = b.project(
-            joined,
-            &[
-                (expr::col("n", "id"), "node_id"),
-                (expr::col("e", "label"), "rel_type"),
+        let q = Query {
+            select: vec![
+                SelectExpr {
+                    expr: Expr::col("n", "id"),
+                    alias: Some("node_id".into()),
+                },
+                SelectExpr {
+                    expr: Expr::col("e", "label"),
+                    alias: Some("rel_type".into()),
+                },
             ],
-        );
-        let plan = b.build(rel);
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("nodes", "n"),
+                TableRef::scan("edges", "e"),
+                Expr::eq(Expr::col("n", "id"), Expr::col("e", "source_id")),
+            ),
+            ..Default::default()
+        };
 
-        let result = codegen(&plan, empty_ctx()).unwrap();
-        assert!(result.sql.contains("INNER JOIN"), "sql: {}", result.sql);
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.id AS node_id, e.label AS rel_type FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id)"
+        );
+    }
+
+    #[test]
+    fn aggregation() {
+        let q = Query {
+            select: vec![
+                SelectExpr {
+                    expr: Expr::col("n", "label"),
+                    alias: Some("type".into()),
+                },
+                SelectExpr {
+                    expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                    alias: Some("count".into()),
+                },
+            ],
+            from: TableRef::scan("nodes", "n"),
+            group_by: vec![Expr::col("n", "label")],
+            order_by: vec![OrderExpr {
+                expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                desc: true,
+            }],
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label ORDER BY COUNT(n.id) DESC"
+        );
+    }
+
+    #[test]
+    fn in_operator() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            where_clause: Some(Expr::binary(
+                Op::In,
+                Expr::col("n", "label"),
+                Expr::lit(Value::Array(vec![
+                    Value::from("User"),
+                    Value::from("Project"),
+                    Value::from("Group"),
+                ])),
+            )),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.id FROM nodes AS n WHERE n.label IN ({p0:String}, {p1:String}, {p2:String})"
+        );
+    }
+
+    #[test]
+    fn and_or_conditions() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            where_clause: Expr::and_all([
+                Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
+                Expr::or_all([
+                    Some(Expr::binary(
+                        Op::Gt,
+                        Expr::col("n", "created_at"),
+                        Expr::lit("2024-01-01"),
+                    )),
+                    Some(Expr::unary(Op::IsNull, Expr::col("n", "deleted_at"))),
+                ]),
+            ]),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.id FROM nodes AS n WHERE ((n.label = {p0:String}) AND ((n.created_at > {p1:String}) OR (n.deleted_at IS NULL)))"
+        );
+    }
+
+    #[test]
+    fn literals() {
+        let mut ctx = Context::new();
+
+        assert_eq!(ctx.emit_literal(&Value::from("hello")), "{p0:String}");
+        assert_eq!(ctx.emit_literal(&Value::from(42)), "{p1:Int64}");
+        assert_eq!(ctx.emit_literal(&Value::from(true)), "{p2:Bool}");
+        assert_eq!(ctx.emit_literal(&Value::Null), "NULL");
+        assert_eq!(
+            ctx.emit_literal(&Value::Array(vec![Value::from(1), Value::from(2)])),
+            "({p3:Int64}, {p4:Int64})"
+        );
+    }
+
+    #[test]
+    fn unary_ops() {
+        let mut ctx = Context::new();
+
+        assert_eq!(
+            ctx.emit_expr(&Expr::unary(Op::IsNull, Expr::col("t", "deleted_at"))),
+            "(t.deleted_at IS NULL)"
+        );
+        assert_eq!(
+            ctx.emit_expr(&Expr::unary(Op::Not, Expr::col("t", "active"))),
+            "(NOT t.active)"
+        );
+    }
+
+    #[test]
+    fn edge_type_filter() {
+        // Single type: equality in join ON clause
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::scan("gl_edge", "e"),
+                Expr::and(
+                    Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
+                    Expr::eq(
+                        Expr::col("e", "relationship_kind"),
+                        Expr::string("AUTHORED"),
+                    ),
+                ),
+            ),
+            ..Default::default()
+        };
+        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            r.sql.contains("e.relationship_kind = {p0:String}"),
+            "{}",
+            r.sql
+        );
+        assert_eq!(
+            r.params.get("p0").map(|p| &p.value),
+            Some(&Value::String("AUTHORED".into()))
+        );
+
+        // Multiple types: IN in join ON clause (uses col_in, matching production)
+        let type_filter = Expr::col_in(
+            "e",
+            "relationship_kind",
+            ChType::String,
+            vec![
+                Value::String("AUTHORED".into()),
+                Value::String("CONTAINS".into()),
+            ],
+        )
+        .unwrap();
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::scan("gl_edge", "e"),
+                Expr::and(
+                    Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
+                    type_filter,
+                ),
+            ),
+            ..Default::default()
+        };
+        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            r.sql.contains("e.relationship_kind IN {p0:Array(String)}"),
+            "{}",
+            r.sql
+        );
+        assert_eq!(r.params.len(), 1);
+        assert_eq!(
+            r.params.get("p0").map(|p| &p.value),
+            Some(&Value::Array(vec![
+                Value::String("AUTHORED".into()),
+                Value::String("CONTAINS".into()),
+            ]))
+        );
     }
 
     #[test]
@@ -188,26 +607,277 @@ mod tests {
         let mut ctx = ResultContext::new();
         ctx.add_node("u", "User");
 
-        let mut b = PlanBuilder::new();
-        let rel = b.read("nodes", "n", &[("id", DataType::Int64)]);
-        let rel = b.project(rel, &[(expr::col("n", "id"), "id")]);
-        let plan = b.build(rel);
+        let q = Query {
+            select: vec![],
+            from: TableRef::scan("nodes", "n"),
+            ..Default::default()
+        };
 
-        let result = codegen(&plan, ctx).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), ctx).unwrap();
         assert_eq!(result.result_context.len(), 1);
         assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
     }
 
     #[test]
     fn offset_clause() {
-        let mut b = PlanBuilder::new();
-        let rel = b.read("nodes", "n", &[("id", DataType::Int64)]);
-        let rel = b.project(rel, &[(expr::col("n", "id"), "id")]);
-        let rel = b.fetch(rel, 10, Some(40));
-        let plan = b.build(rel);
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            limit: Some(10),
+            offset: Some(40),
+            ..Default::default()
+        };
 
-        let result = codegen(&plan, empty_ctx()).unwrap();
-        assert!(result.sql.contains("LIMIT 10"), "sql: {}", result.sql);
-        assert!(result.sql.contains("OFFSET 40"), "sql: {}", result.sql);
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(result.sql, "SELECT n.id FROM nodes AS n LIMIT 10 OFFSET 40");
+
+        // limit without offset
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            limit: Some(30),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(result.sql.contains("LIMIT 30"));
+        assert!(!result.sql.contains("OFFSET"));
+    }
+
+    #[test]
+    fn having_clause() {
+        let q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("n", "label"), "type"),
+                SelectExpr::new(Expr::func("COUNT", vec![Expr::col("n", "id")]), "count"),
+            ],
+            from: TableRef::scan("nodes", "n"),
+            group_by: vec![Expr::col("n", "label")],
+            having: Some(Expr::binary(
+                Op::Gt,
+                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::lit(5),
+            )),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label HAVING (COUNT(n.id) > {p0:Int64})"
+        );
+    }
+
+    #[test]
+    fn having_without_group_by() {
+        let q = Query {
+            select: vec![SelectExpr::new(
+                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                "total",
+            )],
+            from: TableRef::scan("nodes", "n"),
+            having: Some(Expr::binary(
+                Op::Gt,
+                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::lit(0),
+            )),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(result.sql.contains("HAVING"));
+        assert!(!result.sql.contains("GROUP BY"));
+    }
+
+    #[test]
+    fn subquery_in_from() {
+        let inner = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "id"), "id"),
+                SelectExpr::new(Expr::col("p", "name"), "name"),
+            ],
+            from: TableRef::scan("gl_project", "p"),
+            where_clause: Some(Expr::eq(Expr::col("p", "name"), Expr::lit("test"))),
+            ..Default::default()
+        };
+
+        let outer = Query {
+            select: vec![SelectExpr::new(Expr::col("sub", "id"), "id")],
+            from: TableRef::subquery(inner, "sub"),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("(SELECT"),
+            "expected subquery: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains(") AS sub"),
+            "expected alias: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("gl_project AS p"),
+            "expected inner table: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn subquery_in_join() {
+        let inner = Query {
+            select: vec![SelectExpr::new(Expr::col("e", "source_id"), "source_id")],
+            from: TableRef::scan("gl_edge", "e"),
+            group_by: vec![Expr::col("e", "source_id")],
+            having: Some(Expr::eq(
+                Expr::func(
+                    "argMax",
+                    vec![Expr::col("e", "_deleted"), Expr::col("e", "_version")],
+                ),
+                Expr::lit(false),
+            )),
+            ..Default::default()
+        };
+
+        let outer = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_user", "u"),
+                TableRef::subquery(inner, "deduped_e"),
+                Expr::eq(Expr::col("u", "id"), Expr::col("deduped_e", "source_id")),
+            ),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("INNER JOIN (SELECT"),
+            "expected join with subquery: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("HAVING"),
+            "expected HAVING in subquery: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains(") AS deduped_e ON"),
+            "expected subquery alias: {}",
+            result.sql
+        );
+    }
+
+    // ── UNION ALL tests ─────────────────────────────────────────────
+
+    #[test]
+    fn union_all_in_cte_body() {
+        use crate::ast::Cte;
+
+        let q = Query {
+            ctes: vec![Cte {
+                name: "path_cte".into(),
+                query: Box::new(Query {
+                    select: vec![SelectExpr::new(Expr::col("p", "id"), "node_id")],
+                    from: TableRef::scan("gl_project", "p"),
+                    union_all: vec![Query {
+                        select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],
+                        from: TableRef::scan("path_cte", "c"),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+                recursive: true,
+            }],
+            select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
+            from: TableRef::scan("path_cte", "r"),
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("WITH RECURSIVE"),
+            "expected WITH RECURSIVE: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "expected UNION ALL in CTE body: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn union_all_in_top_level_query() {
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+            from: TableRef::scan("gl_user", "u"),
+            union_all: vec![Query {
+                select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
+                from: TableRef::scan("gl_project", "p"),
+                ..Default::default()
+            }],
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "expected UNION ALL: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("LIMIT 10"),
+            "LIMIT should apply to full UNION result: {}",
+            result.sql
+        );
+        let union_pos = result.sql.find("UNION ALL").unwrap();
+        let limit_pos = result.sql.find("LIMIT").unwrap();
+        assert!(union_pos < limit_pos, "UNION ALL must precede LIMIT");
+    }
+
+    #[test]
+    fn table_ref_union_emits_derived_table() {
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("all_edges", "id"), "id")],
+            from: TableRef::Union {
+                queries: vec![
+                    Query {
+                        select: vec![SelectExpr::new(Expr::col("e1", "source"), "id")],
+                        from: TableRef::scan("gl_edge", "e1"),
+                        ..Default::default()
+                    },
+                    Query {
+                        select: vec![SelectExpr::new(Expr::col("e2", "source"), "id")],
+                        from: TableRef::scan("gl_edge", "e2"),
+                        ..Default::default()
+                    },
+                ],
+                alias: "all_edges".into(),
+            },
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("UNION ALL"),
+            "expected UNION ALL: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains(") AS all_edges"),
+            "expected derived table alias: {}",
+            result.sql
+        );
     }
 }

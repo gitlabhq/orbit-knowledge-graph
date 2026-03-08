@@ -217,9 +217,11 @@ impl<'a> Validator<'a> {
     /// Validate that filter values are compatible with the ontology column type.
     ///
     /// For scalar ops (eq, gt, lt, ...) the JSON value must match the column's
-    /// DataType. For `in`, every element of the JSON array must match. Ops that
-    /// carry no value (`is_null`, `is_not_null`) are skipped. Filters on
-    /// unknown entities or fields are skipped — `check_ontology` catches those.
+    /// DataType. For `in`, every element of the JSON array must match; the
+    /// first mismatched element returns a `QueryError::Validation` and the
+    /// query is rejected. Ops that carry no value (`is_null`, `is_not_null`)
+    /// are skipped. Filters on unknown entities or fields are skipped —
+    /// `check_ontology` catches those.
     fn check_filter_types(&self, input: &Input) -> Result<()> {
         for node in &input.nodes {
             let Some(entity) = node.entity.as_deref() else {
@@ -230,14 +232,6 @@ impl<'a> Validator<'a> {
                     continue;
                 };
                 self.check_one_filter(entity, prop, filter, data_type)?;
-            }
-        }
-        for rel in &input.relationships {
-            for (prop, filter) in &rel.filters {
-                // Relationship filters don't have an entity context for type
-                // lookup yet — skip for now. Property-name validation is
-                // already handled by the ontology schema.
-                let _ = (prop, filter);
             }
         }
         Ok(())
@@ -988,6 +982,41 @@ mod tests {
                 "node": {"id": "u", "entity": "User", "filters": {"user_type": true}}
             }"#,
             "not a string or integer",
+        );
+    }
+
+    #[test]
+    fn filter_type_mismatch_fails_closed() {
+        let ontology = test_ontology();
+        let validator = Validator::new(&ontology);
+
+        // Scalar op: wrong type must produce Err, not silently pass.
+        let input = parse_input(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": "bad"}}
+            }"#,
+        )
+        .unwrap();
+        assert!(
+            validator.check_references(&input).is_err(),
+            "scalar type mismatch must reject the query"
+        );
+
+        // IN op: one bad element among valid ones must produce Err.
+        let input = parse_input(
+            r#"{
+                "query_type": "search",
+                "node": {
+                    "id": "n", "entity": "Note",
+                    "filters": {"noteable_id": {"op": "in", "value": [1, "bad", 3]}}
+                }
+            }"#,
+        )
+        .unwrap();
+        assert!(
+            validator.check_references(&input).is_err(),
+            "IN filter with a mismatched element must reject the query"
         );
     }
 }

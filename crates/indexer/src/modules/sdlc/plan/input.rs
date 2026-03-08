@@ -76,7 +76,6 @@ pub(in crate::modules::sdlc) enum EdgeFilter {
     TypeIn { column: String, types: Vec<String> },
 }
 
-#[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct ExtractPlan {
     pub destination_table: String,
     pub columns: Vec<ExtractColumn>,
@@ -89,7 +88,6 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
     pub additional_where: Option<String>,
 }
 
-#[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) enum ExtractColumn {
     Bare(String),
     ToString(String),
@@ -103,7 +101,6 @@ impl ExtractColumn {
     }
 }
 
-#[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) enum ExtractSource {
     Table(String),
     Raw(String),
