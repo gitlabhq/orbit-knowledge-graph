@@ -1,11 +1,12 @@
 //! Expression DSL for building query plans.
 //!
-//! Expressions use named column references (`col("u", "id")`) that get resolved
-//! to positional Substrait field references during plan building.
+//! Expressions use named column references (`col("u", "id")`) that stay
+//! symbolic throughout the IR. Backends resolve them directly (ClickHouse
+//! emits `table.column`, Substrait maps to positional field references).
 
 use std::fmt;
 
-/// Column data type, mapping to Substrait types and ClickHouse parameter types.
+/// Column data type used for schema definitions and parameter declarations.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DataType {
     String,
@@ -39,8 +40,8 @@ impl fmt::Display for DataType {
 
 /// Expression tree for building query plans.
 ///
-/// Uses named column references that get resolved to positional Substrait
-/// field references during plan building.
+/// Uses named column references that stay symbolic throughout the IR.
+/// Backends resolve them at emit time.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// Qualified column reference: `table_alias.column_name`
@@ -139,16 +140,6 @@ pub enum UnaryOp {
     Not,
     IsNull,
     IsNotNull,
-}
-
-impl UnaryOp {
-    pub fn as_sql(self) -> &'static str {
-        match self {
-            Self::Not => "NOT",
-            Self::IsNull => "IS NULL",
-            Self::IsNotNull => "IS NOT NULL",
-        }
-    }
 }
 
 /// Sort direction.

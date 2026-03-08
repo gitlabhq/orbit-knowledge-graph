@@ -49,6 +49,18 @@ pub struct ColumnDef {
     pub data_type: DataType,
 }
 
+impl ColumnDef {
+    fn from_pairs(columns: &[(&str, DataType)]) -> Vec<Self> {
+        columns
+            .iter()
+            .map(|(name, dt)| Self {
+                name: (*name).into(),
+                data_type: dt.clone(),
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FilterRel {
     pub input: Box<Rel>,
@@ -141,13 +153,7 @@ impl Rel {
         Rel::Read(ReadRel {
             table: table.into(),
             alias: alias.into(),
-            columns: columns
-                .iter()
-                .map(|(name, dt)| ColumnDef {
-                    name: (*name).into(),
-                    data_type: dt.clone(),
-                })
-                .collect(),
+            columns: ColumnDef::from_pairs(columns),
         })
     }
 
@@ -159,13 +165,7 @@ impl Rel {
         Rel::Read(ReadRel {
             table: RAW_FROM_TAG.into(),
             alias: raw_from.into(),
-            columns: columns
-                .iter()
-                .map(|(name, dt)| ColumnDef {
-                    name: (*name).into(),
-                    data_type: dt.clone(),
-                })
-                .collect(),
+            columns: ColumnDef::from_pairs(columns),
         })
     }
 
@@ -247,8 +247,6 @@ impl Rel {
         })
     }
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Plan
@@ -364,12 +362,9 @@ impl Plan {
         });
     }
 
-    /// Add projection items to the outermost `Project`. If the root isn't a
-    /// `Project` (or is wrapped in `Fetch`/`Sort`), the items are appended to
-    /// the existing project or a new project is created.
-    ///
-    /// `position` controls where items are inserted: `None` appends, `Some(fn)`
-    /// calls the function to find the insert index for each item.
+    /// Append projection items to the outermost `Project`. Walks through
+    /// `Fetch`/`Sort` to find it. If no project exists, wraps the root in one.
+    /// Duplicates (by alias) are skipped.
     pub fn extend_project(&mut self, items: Vec<(Expr, String)>) {
         self.mutate_project(|exprs| {
             for (e, alias) in items {
