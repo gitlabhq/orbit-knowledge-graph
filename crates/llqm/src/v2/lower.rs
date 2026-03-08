@@ -304,10 +304,8 @@ fn read_edge(alias: &str) -> Rel {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn edge_path_starts_with(edge_alias: &str, node_alias: &str) -> Expr {
-    expr::starts_with(
-        expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-        expr::col(node_alias, TRAVERSAL_PATH_COLUMN),
-    )
+    expr::col(edge_alias, TRAVERSAL_PATH_COLUMN)
+        .starts_with(expr::col(node_alias, TRAVERSAL_PATH_COLUMN))
 }
 
 fn edge_select_items(alias: &str) -> Vec<(Expr, String)> {
@@ -323,17 +321,17 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     let val = || literal_from_val(filter.value.as_ref());
 
     match filter.op {
-        None | Some(FilterOp::Eq) => expr::eq(col, val()),
-        Some(FilterOp::Gt) => expr::gt(col, val()),
-        Some(FilterOp::Lt) => expr::lt(col, val()),
-        Some(FilterOp::Gte) => expr::ge(col, val()),
-        Some(FilterOp::Lte) => expr::le(col, val()),
-        Some(FilterOp::In) => expr::is_in(col, val()),
+        None | Some(FilterOp::Eq) => col.eq(val()),
+        Some(FilterOp::Gt) => col.gt(val()),
+        Some(FilterOp::Lt) => col.lt(val()),
+        Some(FilterOp::Gte) => col.ge(val()),
+        Some(FilterOp::Lte) => col.le(val()),
+        Some(FilterOp::In) => col.is_in(val()),
         Some(FilterOp::Contains) => like_pattern(col, filter, "%", "%"),
         Some(FilterOp::StartsWith) => like_pattern(col, filter, "", "%"),
         Some(FilterOp::EndsWith) => like_pattern(col, filter, "%", ""),
-        Some(FilterOp::IsNull) => expr::is_null(col),
-        Some(FilterOp::IsNotNull) => expr::is_not_null(col),
+        Some(FilterOp::IsNull) => col.is_null(),
+        Some(FilterOp::IsNotNull) => col.is_not_null(),
     }
 }
 
@@ -342,7 +340,7 @@ fn like_pattern(col: Expr, filter: &InputFilter, prefix: &str, suffix: &str) -> 
         Some(LiteralVal::Str(s)) => s.as_str(),
         _ => "",
     };
-    expr::like(col, expr::string(&format!("{prefix}{s}{suffix}")))
+    col.like(expr::string(&format!("{prefix}{s}{suffix}")))
 }
 
 fn literal_from_val(v: Option<&LiteralVal>) -> Expr {
@@ -366,10 +364,10 @@ fn literal_from_val(v: Option<&LiteralVal>) -> Expr {
 fn id_filter(table: &str, col: &str, ids: &[i64]) -> Option<Expr> {
     match ids.len() {
         0 => None,
-        1 => Some(expr::eq(expr::col(table, col), expr::int(ids[0]))),
+        1 => Some(expr::col(table, col).eq(expr::int(ids[0]))),
         _ => {
             let list: Vec<Expr> = ids.iter().map(|&id| expr::int(id)).collect();
-            Some(expr::in_list(expr::col(table, col), list))
+            Some(expr::col(table, col).in_list(list))
         }
     }
 }
@@ -384,21 +382,15 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
 
 fn edge_type_filter_expr(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr> {
     let types = type_filter.as_ref()?;
+    let kind = expr::col(alias, "relationship_kind");
     match types.len() {
         0 => None,
-        1 => Some(expr::eq(
-            expr::col(alias, "relationship_kind"),
-            expr::string(&types[0]),
-        )),
+        1 => Some(kind.eq(expr::string(&types[0]))),
         _ => {
             let list: Vec<Expr> = types.iter().map(|t| expr::string(t)).collect();
-            Some(expr::in_list(expr::col(alias, "relationship_kind"), list))
+            Some(kind.in_list(list))
         }
     }
-}
-
-fn and2(left: Expr, right: Expr) -> Expr {
-    expr::and([left, right])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -406,28 +398,17 @@ fn and2(left: Expr, right: Expr) -> Expr {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn source_join_cond(node: &str, edge: &str, dir: Direction, with_path: bool) -> Expr {
+    let node_id = expr::col(node, DEFAULT_PRIMARY_KEY);
     let id_cond = match dir {
-        Direction::Outgoing => expr::eq(
-            expr::col(node, DEFAULT_PRIMARY_KEY),
-            expr::col(edge, "source_id"),
-        ),
-        Direction::Incoming => expr::eq(
-            expr::col(node, DEFAULT_PRIMARY_KEY),
-            expr::col(edge, "target_id"),
-        ),
-        Direction::Both => expr::or([
-            expr::eq(
-                expr::col(node, DEFAULT_PRIMARY_KEY),
-                expr::col(edge, "source_id"),
-            ),
-            expr::eq(
-                expr::col(node, DEFAULT_PRIMARY_KEY),
-                expr::col(edge, "target_id"),
-            ),
-        ]),
+        Direction::Outgoing => node_id.eq(expr::col(edge, "source_id")),
+        Direction::Incoming => node_id.eq(expr::col(edge, "target_id")),
+        Direction::Both => node_id
+            .clone()
+            .eq(expr::col(edge, "source_id"))
+            .or(node_id.eq(expr::col(edge, "target_id"))),
     };
     if with_path {
-        and2(edge_path_starts_with(edge, node), id_cond)
+        edge_path_starts_with(edge, node).and(id_cond)
     } else {
         id_cond
     }
@@ -441,53 +422,35 @@ fn source_join_cond_with_kind(
     with_path: bool,
 ) -> Expr {
     let id_and_kind = |id_col: &str, kind_col: &str| -> Expr {
-        and2(
-            expr::eq(
-                expr::col(node, DEFAULT_PRIMARY_KEY),
-                expr::col(edge, id_col),
-            ),
-            expr::eq(expr::col(edge, kind_col), expr::string(entity)),
-        )
+        expr::col(node, DEFAULT_PRIMARY_KEY)
+            .eq(expr::col(edge, id_col))
+            .and(expr::col(edge, kind_col).eq(expr::string(entity)))
     };
 
     let id_cond = match dir {
         Direction::Outgoing => id_and_kind("source_id", "source_kind"),
         Direction::Incoming => id_and_kind("target_id", "target_kind"),
-        Direction::Both => expr::or([
-            id_and_kind("source_id", "source_kind"),
-            id_and_kind("target_id", "target_kind"),
-        ]),
+        Direction::Both => id_and_kind("source_id", "source_kind")
+            .or(id_and_kind("target_id", "target_kind")),
     };
     if with_path {
-        and2(edge_path_starts_with(edge, node), id_cond)
+        edge_path_starts_with(edge, node).and(id_cond)
     } else {
         id_cond
     }
 }
 
 fn target_join_cond(edge: &str, node: &str, dir: Direction, with_path: bool) -> Expr {
+    let node_id = expr::col(node, DEFAULT_PRIMARY_KEY);
     let id_cond = match dir {
-        Direction::Outgoing => expr::eq(
-            expr::col(edge, "target_id"),
-            expr::col(node, DEFAULT_PRIMARY_KEY),
-        ),
-        Direction::Incoming => expr::eq(
-            expr::col(edge, "source_id"),
-            expr::col(node, DEFAULT_PRIMARY_KEY),
-        ),
-        Direction::Both => expr::or([
-            expr::eq(
-                expr::col(edge, "target_id"),
-                expr::col(node, DEFAULT_PRIMARY_KEY),
-            ),
-            expr::eq(
-                expr::col(edge, "source_id"),
-                expr::col(node, DEFAULT_PRIMARY_KEY),
-            ),
-        ]),
+        Direction::Outgoing => expr::col(edge, "target_id").eq(node_id),
+        Direction::Incoming => expr::col(edge, "source_id").eq(node_id),
+        Direction::Both => expr::col(edge, "target_id")
+            .eq(node_id.clone())
+            .or(expr::col(edge, "source_id").eq(node_id)),
     };
     if with_path {
-        and2(edge_path_starts_with(edge, node), id_cond)
+        edge_path_starts_with(edge, node).and(id_cond)
     } else {
         id_cond
     }
@@ -515,9 +478,9 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
         let next_edge = read_edge(&curr);
-        let mut join_cond = expr::eq(expr::col(&prev, end_col), expr::col(&curr, start_col));
+        let mut join_cond = expr::col(&prev, end_col).eq(expr::col(&curr, start_col));
         if let Some(tc) = edge_type_filter_expr(&curr, type_filter) {
-            join_cond = and2(join_cond, tc);
+            join_cond = join_cond.and(tc);
         }
         rel = rel.join(JoinType::Inner, next_edge, join_cond);
     }
@@ -582,12 +545,10 @@ fn build_joins(
             let union = build_hop_union_all(rel, &alias);
             let (from_col, to_col) = rel.direction.union_columns();
 
-            let mut source_cond = expr::eq(
-                expr::col(&rel.from, DEFAULT_PRIMARY_KEY),
-                expr::col(&alias, from_col),
-            );
+            let mut source_cond = expr::col(&rel.from, DEFAULT_PRIMARY_KEY)
+                .eq(expr::col(&alias, from_col));
             if from_node.has_traversal_path {
-                source_cond = and2(edge_path_starts_with(&alias, &rel.from), source_cond);
+                source_cond = edge_path_starts_with(&alias, &rel.from).and(source_cond);
             }
             result = result.join(JoinType::Inner, union, source_cond);
 
@@ -596,12 +557,10 @@ fn build_joins(
                 .map(|v| v.iter().map(|s| s.as_str()).collect::<Vec<_>>())
                 .unwrap_or_default();
             let target_rel = read_node(target, &target_extra)?;
-            let mut target_cond = expr::eq(
-                expr::col(&alias, to_col),
-                expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
-            );
+            let mut target_cond = expr::col(&alias, to_col)
+                .eq(expr::col(&rel.to, DEFAULT_PRIMARY_KEY));
             if target.has_traversal_path {
-                target_cond = and2(edge_path_starts_with(&alias, &rel.to), target_cond);
+                target_cond = edge_path_starts_with(&alias, &rel.to).and(target_cond);
             }
             result = result.join(JoinType::Inner, target_rel, target_cond);
             joined_nodes.insert(rel.to.clone());
@@ -619,7 +578,7 @@ fn build_joins(
                 from_node.has_traversal_path,
             );
             if let Some(tc) = edge_type_filter_expr(&alias, &tf) {
-                join_cond = and2(join_cond, tc);
+                join_cond = join_cond.and(tc);
             }
             result = result.join(JoinType::Inner, edge, join_cond);
 
@@ -664,10 +623,9 @@ fn build_full_where(
                 conds.push(filter_expr(alias, prop, filter));
             }
             if rel.max_hops > 1 && rel.min_hops > 1 {
-                conds.push(expr::ge(
-                    expr::col(alias, "depth"),
-                    expr::int(rel.min_hops as i64),
-                ));
+                conds.push(
+                    expr::col(alias, "depth").ge(expr::int(rel.min_hops as i64)),
+                );
             }
         }
     }
@@ -874,10 +832,8 @@ fn lower_path_finding(input: &Input) -> Result<Plan, String> {
         ],
     );
 
-    let join_cond = expr::eq(
-        expr::col("paths", "node_id"),
-        expr::col(&end.id, DEFAULT_PRIMARY_KEY),
-    );
+    let join_cond = expr::col("paths", "node_id")
+        .eq(expr::col(&end.id, DEFAULT_PRIMARY_KEY));
     let joined = paths.join(JoinType::Inner, end_rel, join_cond);
 
     let rel = match id_filter(&end.id, DEFAULT_PRIMARY_KEY, &end.node_ids) {
@@ -932,15 +888,16 @@ fn path_recursive_branch(
         "target_id"
     };
 
-    let join_cond = expr::eq(expr::col("p", "node_id"), expr::col("e", join_col));
+    let join_cond = expr::col("p", "node_id").eq(expr::col("e", join_col));
     let joined = paths.join(JoinType::Inner, edge, join_cond);
 
     let mut conds = vec![
-        expr::lt(expr::col("p", "depth"), expr::int(max_depth as i64)),
-        expr::not(expr::func(
+        expr::col("p", "depth").lt(expr::int(max_depth as i64)),
+        expr::func(
             "has",
             vec![expr::col("p", "path_ids"), expr::col("e", next_id_col)],
-        )),
+        )
+        .not(),
     ];
 
     if !target_ids.is_empty() {
@@ -948,10 +905,9 @@ fn path_recursive_branch(
             "array",
             target_ids.iter().map(|id| expr::int(*id)).collect(),
         );
-        conds.push(expr::not(expr::func(
-            "has",
-            vec![target_array, expr::col("p", "node_id")],
-        )));
+        conds.push(
+            expr::func("has", vec![target_array, expr::col("p", "node_id")]).not(),
+        );
     }
 
     if let Some(filter) = edge_type_filter_expr("e", &type_filter(rel_types)) {
@@ -996,7 +952,7 @@ fn path_recursive_branch(
             ),
             "edge_kinds",
         ),
-        (expr::add(expr::col("p", "depth"), expr::int(1)), "depth"),
+        (expr::col("p", "depth").add(expr::int(1)), "depth"),
     ])
 }
 
@@ -1038,7 +994,7 @@ fn lower_neighbors(input: &Input) -> Result<Plan, String> {
         center_node.has_traversal_path,
     );
     if let Some(tc) = edge_type_filter_expr(edge_alias, &tf) {
-        join_cond = and2(join_cond, tc);
+        join_cond = join_cond.and(tc);
     }
 
     let mut rel = center.join(JoinType::Inner, edge, join_cond);
@@ -1053,10 +1009,8 @@ fn lower_neighbors(input: &Input) -> Result<Plan, String> {
         Direction::Both => expr::func(
             "if",
             vec![
-                expr::eq(
-                    expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
-                    expr::col(edge_alias, "source_id"),
-                ),
+                expr::col(&center_node.id, DEFAULT_PRIMARY_KEY)
+                    .eq(expr::col(edge_alias, "source_id")),
                 expr::col(edge_alias, "target_id"),
                 expr::col(edge_alias, "source_id"),
             ],
@@ -1069,10 +1023,8 @@ fn lower_neighbors(input: &Input) -> Result<Plan, String> {
         Direction::Both => expr::func(
             "if",
             vec![
-                expr::eq(
-                    expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
-                    expr::col(edge_alias, "source_id"),
-                ),
+                expr::col(&center_node.id, DEFAULT_PRIMARY_KEY)
+                    .eq(expr::col(edge_alias, "source_id")),
                 expr::col(edge_alias, "target_kind"),
                 expr::col(edge_alias, "source_kind"),
             ],

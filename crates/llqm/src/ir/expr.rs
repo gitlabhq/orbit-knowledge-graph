@@ -160,7 +160,172 @@ pub enum JoinType {
 }
 
 // ---------------------------------------------------------------------------
-// Builder functions
+// Chainable methods
+// ---------------------------------------------------------------------------
+
+impl Expr {
+    // -- Comparison --
+
+    pub fn eq(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Eq,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    pub fn ne(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Ne,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    pub fn lt(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Lt,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    pub fn le(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Le,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    pub fn gt(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Gt,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    pub fn ge(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Ge,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    // -- Logical --
+
+    pub fn and(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::And,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    pub fn or(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Or,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn not(self) -> Expr {
+        Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(self),
+        }
+    }
+
+    // -- Null checks --
+
+    pub fn is_null(self) -> Expr {
+        Expr::UnaryOp {
+            op: UnaryOp::IsNull,
+            operand: Box::new(self),
+        }
+    }
+
+    pub fn is_not_null(self) -> Expr {
+        Expr::UnaryOp {
+            op: UnaryOp::IsNotNull,
+            operand: Box::new(self),
+        }
+    }
+
+    // -- Pattern matching --
+
+    pub fn like(self, pattern: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Like,
+            left: Box::new(self),
+            right: Box::new(pattern),
+        }
+    }
+
+    pub fn ilike(self, pattern: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::ILike,
+            left: Box::new(self),
+            right: Box::new(pattern),
+        }
+    }
+
+    // -- Set membership --
+
+    /// `self IN set_expr` (binary IN, e.g. against an array parameter).
+    pub fn is_in(self, set: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::In,
+            left: Box::new(self),
+            right: Box::new(set),
+        }
+    }
+
+    /// `self IN (v1, v2, ...)` (expanded list).
+    pub fn in_list(self, list: Vec<Expr>) -> Expr {
+        Expr::InList {
+            expr: Box::new(self),
+            list,
+        }
+    }
+
+    // -- Arithmetic --
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn add(self, right: Expr) -> Expr {
+        Expr::BinaryOp {
+            op: BinaryOp::Add,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
+    // -- Type conversion --
+
+    pub fn cast(self, target_type: DataType) -> Expr {
+        Expr::Cast {
+            expr: Box::new(self),
+            target_type,
+        }
+    }
+
+    // -- Convenience --
+
+    /// `startsWith(self, prefix)`
+    pub fn starts_with(self, prefix: Expr) -> Expr {
+        Expr::FuncCall {
+            name: "startsWith".into(),
+            args: vec![self, prefix],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Builder functions (free-standing — kept for multi-arg folding and backward compat)
 // ---------------------------------------------------------------------------
 
 /// Qualified column reference.
