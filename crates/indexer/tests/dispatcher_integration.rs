@@ -7,10 +7,9 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
-use indexer::dispatcher::Dispatcher;
+use indexer::dispatcher::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::modules::sdlc::dispatch::{
-    DispatchMetrics, GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher,
-    NamespaceDispatcherConfig,
+    GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher, NamespaceDispatcherConfig,
 };
 use indexer::nats::NatsConfiguration;
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};
@@ -194,9 +193,9 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         .await
         .unwrap();
     let datalake = context.clickhouse.config.build_client();
-    let metrics = DispatchMetrics::new();
+    let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
-    let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
+    let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
@@ -211,7 +210,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     ];
 
     let before = Utc::now();
-    indexer::dispatcher::run(&dispatchers, &*lock_service)
+    indexer::dispatcher::run(&tasks, &*lock_service)
         .await
         .unwrap();
     let after = Utc::now();

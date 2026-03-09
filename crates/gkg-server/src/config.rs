@@ -5,7 +5,7 @@ use gitlab_client::GitlabClientConfiguration;
 use health_check::HealthCheckConfig;
 use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
-use indexer::dispatcher::DispatchConfig;
+use indexer::dispatcher::ScheduleConfig;
 use indexer::nats::NatsConfiguration;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub gitlab: GitlabConfig,
     #[serde(default)]
-    pub dispatch: DispatchConfig,
+    pub schedule: ScheduleConfig,
     #[serde(default)]
     pub health_check: HealthCheckConfig,
     #[serde(default = "default_indexer_health_bind_address")]

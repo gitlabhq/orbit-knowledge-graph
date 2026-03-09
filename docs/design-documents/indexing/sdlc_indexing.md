@@ -187,7 +187,7 @@ Example NATS JetStream subjects:
 
 **Dispatch deduplication**
 
-The dispatcher publishes indexing requests to parameterized subjects (e.g. `sdlc.namespace.indexing.requested.<org>.<ns>`). The `GKG_INDEXER` stream is configured with `max_messages_per_subject: 1`, `discard_new_per_subject: true`, and `WorkQueue` retention. This means:
+The scheduler publishes indexing requests to parameterized subjects (e.g. `sdlc.namespace.indexing.requested.<org>.<ns>`). The `GKG_INDEXER` stream is configured with `max_messages_per_subject: 1`, `discard_new_per_subject: true`, and `WorkQueue` retention. This means:
 
 - If a message already exists for that subject (a handler hasn't acked yet), NATS rejects the publish as a duplicate.
 - When the handler acks, WorkQueue retention deletes the message, opening the slot for the next dispatch cycle.

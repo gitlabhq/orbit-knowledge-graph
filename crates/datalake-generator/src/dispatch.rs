@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
-use indexer::dispatcher::Dispatcher;
+use indexer::dispatcher::ScheduledTask;
+use indexer::dispatcher::ScheduledTaskMetrics;
 use indexer::modules::sdlc::dispatch::{
-    DispatchMetrics, GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher,
-    NamespaceDispatcherConfig,
+    GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher, NamespaceDispatcherConfig,
 };
 use tracing::info;
 
@@ -28,9 +28,9 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
         .context("dispatcher connect failed")?;
 
     let datalake = datalake_config.build_client();
-    let metrics = DispatchMetrics::new();
+    let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
-    let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
+    let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
@@ -44,7 +44,7 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
         )),
     ];
 
-    indexer::dispatcher::run(&dispatchers, &*lock_service)
+    indexer::dispatcher::run(&tasks, &*lock_service)
         .await
         .context("dispatch indexing failed")?;
 

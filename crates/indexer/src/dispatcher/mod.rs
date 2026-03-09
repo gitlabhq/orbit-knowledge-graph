@@ -1,36 +1,40 @@
+mod metrics;
+
+pub use metrics::ScheduledTaskMetrics;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use crate::configuration::DispatcherConfiguration;
-use crate::configuration::DispatchersConfiguration;
+use crate::configuration::ScheduleConfiguration;
+use crate::configuration::ScheduledTasksConfiguration;
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsConfiguration, NatsServices, NatsServicesImpl};
 
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-pub struct DispatchConfig {
+pub struct ScheduleConfig {
     #[serde(default)]
-    pub dispatchers: DispatchersConfiguration,
+    pub tasks: ScheduledTasksConfiguration,
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-pub struct DispatchError(String);
+pub struct TaskError(String);
 
-impl DispatchError {
+impl TaskError {
     pub fn new(error: impl std::fmt::Display) -> Self {
         Self(error.to_string())
     }
 }
 
 #[async_trait]
-pub trait Dispatcher: Send + Sync {
+pub trait ScheduledTask: Send + Sync {
     fn name(&self) -> &str;
 
-    fn dispatcher_config(&self) -> &DispatcherConfiguration;
+    fn schedule(&self) -> &ScheduleConfiguration;
 
-    async fn dispatch(&self) -> Result<(), DispatchError>;
+    async fn run(&self) -> Result<(), TaskError>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -62,34 +66,34 @@ pub async fn connect(
 }
 
 pub async fn run(
-    dispatchers: &[Box<dyn Dispatcher>],
+    tasks: &[Box<dyn ScheduledTask>],
     lock_service: &dyn LockService,
 ) -> Result<(), DispatcherError> {
-    for dispatcher in dispatchers {
-        let dispatcher_name = dispatcher.name();
-        let interval = dispatcher.dispatcher_config().interval();
+    for task in tasks {
+        let task_name = task.name();
+        let interval = task.schedule().interval();
 
         if let Some(interval) = interval {
-            let cadence_key = format!("cadence.{}", dispatcher_name);
+            let cadence_key = format!("cadence.{}", task_name);
             match lock_service.try_acquire(&cadence_key, interval).await {
                 Ok(true) => {}
                 Ok(false) => {
-                    info!(dispatcher = dispatcher_name, "skipping, within interval");
+                    info!(task = task_name, "skipping, within interval");
                     continue;
                 }
                 Err(error) => {
-                    warn!(dispatcher = dispatcher_name, %error, "cadence lock check failed");
+                    warn!(task = task_name, %error, "cadence lock check failed");
                     continue;
                 }
             }
         }
 
-        match dispatcher.dispatch().await {
+        match task.run().await {
             Ok(()) => {
-                info!(dispatcher = dispatcher_name, "dispatch completed");
+                info!(task = task_name, "task completed");
             }
             Err(error) => {
-                warn!(dispatcher = dispatcher_name, %error, "dispatch failed");
+                warn!(task = task_name, %error, "task failed");
             }
         }
     }
@@ -105,83 +109,83 @@ mod tests {
     use super::*;
     use crate::testkit::mocks::MockLockService;
 
-    struct StubDispatcher {
+    struct StubTask {
         name: &'static str,
-        config: DispatcherConfiguration,
-        dispatch_count: AtomicUsize,
+        config: ScheduleConfiguration,
+        run_count: AtomicUsize,
     }
 
-    impl StubDispatcher {
+    impl StubTask {
         fn new(name: &'static str, interval_secs: Option<u64>) -> Self {
             Self {
                 name,
-                config: DispatcherConfiguration { interval_secs },
-                dispatch_count: AtomicUsize::new(0),
+                config: ScheduleConfiguration { interval_secs },
+                run_count: AtomicUsize::new(0),
             }
         }
 
-        fn dispatched(&self) -> usize {
-            self.dispatch_count.load(Ordering::SeqCst)
+        fn run_count(&self) -> usize {
+            self.run_count.load(Ordering::SeqCst)
         }
     }
 
     #[async_trait]
-    impl Dispatcher for Arc<StubDispatcher> {
+    impl ScheduledTask for Arc<StubTask> {
         fn name(&self) -> &str {
             self.name
         }
 
-        fn dispatcher_config(&self) -> &DispatcherConfiguration {
+        fn schedule(&self) -> &ScheduleConfiguration {
             &self.config
         }
 
-        async fn dispatch(&self) -> Result<(), DispatchError> {
-            self.dispatch_count.fetch_add(1, Ordering::SeqCst);
+        async fn run(&self) -> Result<(), TaskError> {
+            self.run_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
 
     #[tokio::test]
-    async fn dispatchers_without_interval_always_run() {
+    async fn tasks_without_interval_always_run() {
         let lock_service = MockLockService::new();
-        let dispatcher = Arc::new(StubDispatcher::new("always", None));
-        let dispatchers: Vec<Box<dyn Dispatcher>> = vec![Box::new(Arc::clone(&dispatcher))];
+        let task = Arc::new(StubTask::new("always", None));
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&task))];
 
-        run(&dispatchers, &lock_service).await.unwrap();
-        run(&dispatchers, &lock_service).await.unwrap();
+        run(&tasks, &lock_service).await.unwrap();
+        run(&tasks, &lock_service).await.unwrap();
 
-        assert_eq!(dispatcher.dispatched(), 2);
+        assert_eq!(task.run_count(), 2);
     }
 
     #[tokio::test]
-    async fn interval_dispatcher_skips_when_within_cadence() {
+    async fn interval_task_skips_when_within_cadence() {
         let lock_service = MockLockService::new();
-        let hourly = Arc::new(StubDispatcher::new("hourly", Some(3600)));
-        let dispatchers: Vec<Box<dyn Dispatcher>> = vec![Box::new(Arc::clone(&hourly))];
+        let hourly = Arc::new(StubTask::new("hourly", Some(3600)));
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&hourly))];
 
-        run(&dispatchers, &lock_service).await.unwrap();
-        assert_eq!(hourly.dispatched(), 1);
+        run(&tasks, &lock_service).await.unwrap();
+        assert_eq!(hourly.run_count(), 1);
 
-        run(&dispatchers, &lock_service).await.unwrap();
+        run(&tasks, &lock_service).await.unwrap();
         assert_eq!(
-            hourly.dispatched(),
+            hourly.run_count(),
             1,
             "should skip when cadence lock is held"
         );
     }
 
     #[tokio::test]
-    async fn interval_does_not_affect_other_dispatchers() {
+    async fn interval_does_not_affect_other_tasks() {
         let lock_service = MockLockService::new();
-        let hourly = Arc::new(StubDispatcher::new("hourly", Some(3600)));
-        let always = Arc::new(StubDispatcher::new("always", None));
-        let dispatchers: Vec<Box<dyn Dispatcher>> =
+        let hourly = Arc::new(StubTask::new("hourly", Some(3600)));
+        let always = Arc::new(StubTask::new("always", None));
+        let tasks: Vec<Box<dyn ScheduledTask>> =
             vec![Box::new(Arc::clone(&hourly)), Box::new(Arc::clone(&always))];
 
-        run(&dispatchers, &lock_service).await.unwrap();
-        run(&dispatchers, &lock_service).await.unwrap();
+        run(&tasks, &lock_service).await.unwrap();
+        run(&tasks, &lock_service).await.unwrap();
 
-        assert_eq!(hourly.dispatched(), 1, "hourly should dispatch once");
-        assert_eq!(always.dispatched(), 2, "always should dispatch every time");
+        assert_eq!(hourly.run_count(), 1, "hourly should run once");
+        assert_eq!(always.run_count(), 2, "always should run every time");
     }
 }

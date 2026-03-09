@@ -51,7 +51,7 @@ use std::sync::Arc;
 use clickhouse::ClickHouseConfiguration;
 use clickhouse::ClickHouseDestination;
 use configuration::EngineConfiguration;
-use dispatcher::DispatchConfig;
+use dispatcher::ScheduleConfig;
 use engine::EngineBuilder;
 use gitlab_client::GitlabClientConfiguration;
 use handler::{HandlerInitError, HandlerRegistry};
@@ -79,7 +79,7 @@ pub struct IndexerConfig {
     #[serde(default)]
     pub gitlab: Option<GitlabClientConfiguration>,
     #[serde(default)]
-    pub dispatch: DispatchConfig,
+    pub schedule: ScheduleConfig,
     #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
 }
@@ -92,7 +92,7 @@ impl Default for IndexerConfig {
             datalake: ClickHouseConfiguration::default(),
             engine: EngineConfiguration::default(),
             gitlab: None,
-            dispatch: DispatchConfig::default(),
+            schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
         }
     }
