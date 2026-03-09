@@ -55,14 +55,11 @@ generation:
     User: 10
     Group: 2
 
-  subgroups:
-    max_depth: 2
-    per_group: 2
-    edge: CONTAINS
-    # Total groups: 2 × (1 + 2 + 4) = 14
-
   relationships:
     CONTAINS:
+      "Group -> Group":               # 2 levels x 2 per parent = 14 total groups
+        count: 2
+        max_depth: 2
       "Group -> Project": 2
 
     IN_PROJECT:

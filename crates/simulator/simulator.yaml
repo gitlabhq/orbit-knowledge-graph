@@ -54,12 +54,6 @@ generation:
     User: 10000                       # 10k users
     Group: 20                         # 20 top-level groups
 
-  subgroups:
-    max_depth: 3                      # 3 levels deep
-    per_group: 2                      # 2 subgroups per parent
-    edge: CONTAINS                    # edge type for Group -> Group hierarchy
-    # Total groups: 20 × (1 + 2 + 4 + 8) = 300
-
   # Node estimates (~10M nodes):
   # - 300 groups × 10 projects = 3k projects
   # - 3k × 100 MRs = 300k MRs
@@ -75,6 +69,9 @@ generation:
 
   relationships:
     CONTAINS:
+      "Group -> Group":               # Self-referential: 3 levels x 2 per parent = 300 total groups
+        count: 2
+        max_depth: 3
       "Group -> Project": 10          # 10 projects per group = 3k projects
 
     IN_PROJECT:

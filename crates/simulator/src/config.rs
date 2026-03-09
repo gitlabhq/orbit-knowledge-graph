@@ -257,40 +257,6 @@ pub struct ProjectionConfig {
     pub order_by: Vec<String>,
 }
 
-/// Subgroup hierarchy generation settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SubgroupConfig {
-    /// Maximum depth of subgroup hierarchy (0 = no subgroups).
-    #[serde(default)]
-    pub max_depth: usize,
-    /// Number of subgroups per parent group at each level.
-    #[serde(default = "default_subgroups_per_group")]
-    pub per_group: usize,
-    /// Edge type connecting parent and child namespace entities.
-    /// Must match an edge defined in the ontology (e.g., "CONTAINS").
-    #[serde(default = "default_subgroup_edge")]
-    pub edge: String,
-}
-
-fn default_subgroups_per_group() -> usize {
-    2
-}
-
-fn default_subgroup_edge() -> String {
-    crate::constants::DEFAULT_SUBGROUP_EDGE.to_string()
-}
-
-impl Default for SubgroupConfig {
-    fn default() -> Self {
-        Self {
-            max_depth: 0,
-            per_group: default_subgroups_per_group(),
-            edge: default_subgroup_edge(),
-        }
-    }
-}
-
 /// Data generation settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -327,11 +293,6 @@ pub struct GenerationConfig {
     /// all other entities.
     #[serde(default = "default_namespace_entity")]
     pub namespace_entity: String,
-
-    /// Subgroup hierarchy configuration.
-    /// Controls recursive namespace_entity -> namespace_entity generation.
-    #[serde(default)]
-    pub subgroups: SubgroupConfig,
 
     /// Association edges configuration.
     /// Creates edges between existing entities (e.g., AUTHORED, MEMBER_OF).
@@ -381,7 +342,6 @@ impl Default for GenerationConfig {
             roots: HashMap::new(),
             relationships: RelationshipConfig::default(),
             namespace_entity: default_namespace_entity(),
-            subgroups: SubgroupConfig::default(),
             associations: AssociationConfig::default(),
             batch_size: default_batch_size(),
             parallel: false,
@@ -395,20 +355,33 @@ impl Default for GenerationConfig {
 /// Can be either:
 /// - An integer count (e.g., 5 children per parent)
 /// - A fractional probability (e.g., 0.3 = 30% chance of creating edge)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum EdgeRatio {
     /// Fixed count of children per parent.
     Count(usize),
     /// Probability of creating the relationship (0.0-1.0).
     Probability(f64),
+    /// Recursive hierarchy: fixed count per parent, expanded to `max_depth` levels.
+    ///
+    /// Only valid for self-referential edges (source == target).
+    /// The dependency graph expands `A → A` into epsilon depth-level nodes:
+    /// `A → A@1 → A@2 → ... → A@max_depth`, each with `count` children per parent.
+    ///
+    /// ```yaml
+    /// CONTAINS:
+    ///   "Group -> Group":
+    ///     count: 2
+    ///     max_depth: 3
+    /// ```
+    Recursive { count: usize, max_depth: usize },
 }
 
 impl EdgeRatio {
     /// Sample a count from this ratio.
     pub fn sample(&self, rng: &mut impl Rng) -> usize {
         match self {
-            EdgeRatio::Count(n) => *n,
+            EdgeRatio::Count(n) | EdgeRatio::Recursive { count: n, .. } => *n,
             EdgeRatio::Probability(p) => {
                 if rng.gen_bool(*p) {
                     1
@@ -423,7 +396,7 @@ impl EdgeRatio {
     /// For counts, returns a value in range [count/2, count*1.5].
     pub fn sample_with_variance(&self, rng: &mut impl Rng) -> usize {
         match self {
-            EdgeRatio::Count(n) => {
+            EdgeRatio::Count(n) | EdgeRatio::Recursive { count: n, .. } => {
                 let min = (*n as f64 * 0.5).ceil() as usize;
                 let max = (*n as f64 * 1.5).ceil() as usize;
                 rng.gen_range(min.max(1)..=max.max(1))
