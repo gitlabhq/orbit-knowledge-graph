@@ -182,15 +182,22 @@ fn default_engine_type() -> String {
 }
 
 fn default_node_order_by() -> Vec<String> {
-    vec!["traversal_path".to_string(), "id".to_string()]
+    use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+    vec![
+        TRAVERSAL_PATH_COLUMN.to_string(),
+        DEFAULT_PRIMARY_KEY.to_string(),
+    ]
 }
 
 fn default_edge_order_by() -> Vec<String> {
+    use ontology::constants::{EDGE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN};
+    // Subset of EDGE_RESERVED_COLUMNS in query-optimal order.
+    // All values validated against EDGE_RESERVED_COLUMNS at startup.
     vec![
-        "traversal_path".to_string(),
-        "source_id".to_string(),
-        "source_kind".to_string(),
-        "relationship_kind".to_string(),
+        TRAVERSAL_PATH_COLUMN.to_string(),
+        EDGE_RESERVED_COLUMNS[2].to_string(), // source_id
+        EDGE_RESERVED_COLUMNS[3].to_string(), // source_kind
+        EDGE_RESERVED_COLUMNS[1].to_string(), // relationship_kind
     ]
 }
 
@@ -260,10 +267,18 @@ pub struct SubgroupConfig {
     /// Number of subgroups per parent group at each level.
     #[serde(default = "default_subgroups_per_group")]
     pub per_group: usize,
+    /// Edge type connecting parent and child namespace entities.
+    /// Must match an edge defined in the ontology (e.g., "CONTAINS").
+    #[serde(default = "default_subgroup_edge")]
+    pub edge: String,
 }
 
 fn default_subgroups_per_group() -> usize {
     2
+}
+
+fn default_subgroup_edge() -> String {
+    crate::constants::DEFAULT_SUBGROUP_EDGE.to_string()
 }
 
 impl Default for SubgroupConfig {
@@ -271,6 +286,7 @@ impl Default for SubgroupConfig {
         Self {
             max_depth: 0,
             per_group: default_subgroups_per_group(),
+            edge: default_subgroup_edge(),
         }
     }
 }
@@ -303,8 +319,17 @@ pub struct GenerationConfig {
     #[serde(default)]
     pub relationships: RelationshipConfig,
 
+    /// Entity type that defines the namespace hierarchy.
+    ///
+    /// This entity type gets namespace IDs (extending traversal paths)
+    /// instead of regular entity IDs. In GitLab's data model this is
+    /// "Group" — groups define the `org/ns1/ns2/` hierarchy that scopes
+    /// all other entities.
+    #[serde(default = "default_namespace_entity")]
+    pub namespace_entity: String,
+
     /// Subgroup hierarchy configuration.
-    /// Controls recursive Group -> Group generation.
+    /// Controls recursive namespace_entity -> namespace_entity generation.
     #[serde(default)]
     pub subgroups: SubgroupConfig,
 
@@ -338,6 +363,10 @@ fn default_organizations() -> u32 {
     2
 }
 
+fn default_namespace_entity() -> String {
+    crate::constants::DEFAULT_NAMESPACE_ENTITY.to_string()
+}
+
 fn default_batch_size() -> usize {
     10_000
 }
@@ -351,6 +380,7 @@ impl Default for GenerationConfig {
             organizations: default_organizations(),
             roots: HashMap::new(),
             relationships: RelationshipConfig::default(),
+            namespace_entity: default_namespace_entity(),
             subgroups: SubgroupConfig::default(),
             associations: AssociationConfig::default(),
             batch_size: default_batch_size(),
@@ -720,6 +750,38 @@ generation:
         assert_eq!(target, "Pipeline");
 
         assert!(RelationshipConfig::parse_variant_key("Invalid").is_none());
+    }
+
+    #[test]
+    fn test_namespace_entity_default() {
+        let config = Config::default();
+        assert_eq!(config.generation.namespace_entity, "Group");
+    }
+
+    #[test]
+    fn test_namespace_entity_custom() {
+        let yaml = r#"
+clickhouse:
+  url: http://localhost:8123
+generation:
+  namespace_entity: Namespace
+  organizations: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.generation.namespace_entity, "Namespace");
+    }
+
+    #[test]
+    fn test_namespace_entity_absent_uses_default() {
+        let yaml = r#"
+clickhouse:
+  url: http://localhost:8123
+generation:
+  organizations: 3
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.generation.namespace_entity, "Group");
+        assert_eq!(config.generation.organizations, 3);
     }
 
     #[test]

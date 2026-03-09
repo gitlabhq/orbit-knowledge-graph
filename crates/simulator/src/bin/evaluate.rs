@@ -81,7 +81,9 @@ async fn main() -> Result<()> {
 
     if !config.evaluation.skip_cache_warm {
         tracing::info!("Warming parameter cache...");
-        executor.warm_cache().await?;
+        executor
+            .warm_cache(&config.generation.namespace_entity)
+            .await?;
 
         let stats = executor.cache_stats();
         for (entity, count) in &stats {

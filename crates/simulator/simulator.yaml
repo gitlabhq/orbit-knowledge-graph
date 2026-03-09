@@ -48,6 +48,7 @@ generation:
 
   # Single org, scaled for ~100M edges with ~10M nodes
   organizations: 1
+  namespace_entity: Group
 
   roots:
     User: 10000                       # 10k users
@@ -56,6 +57,7 @@ generation:
   subgroups:
     max_depth: 3                      # 3 levels deep
     per_group: 2                      # 2 subgroups per parent
+    edge: CONTAINS                    # edge type for Group -> Group hierarchy
     # Total groups: 20 × (1 + 2 + 4 + 8) = 300
 
   # Node estimates (~10M nodes):
@@ -157,9 +159,6 @@ generation:
 
     HAS_LABEL:
       "WorkItem -> Label": 0.5
-
-    IN_GROUP:
-      "Project -> Group": 1
 
 evaluation:
   queries_path: fixtures/queries/sdlc_queries.json
