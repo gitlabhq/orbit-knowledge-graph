@@ -43,6 +43,8 @@ pub struct GitlabConfig {
     pub base_url: Option<String>,
     #[serde(default)]
     pub jwt: JwtConfig,
+    #[serde(default)]
+    pub resolve_host: Option<String>,
 }
 
 impl GitlabConfig {
@@ -52,6 +54,7 @@ impl GitlabConfig {
         Some(GitlabClientConfiguration {
             base_url,
             signing_key,
+            resolve_host: self.resolve_host.clone(),
         })
     }
 }
