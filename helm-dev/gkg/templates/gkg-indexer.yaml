@@ -28,9 +28,9 @@ data:
     engine:
       {{- toYaml .Values.engine | nindent 6 }}
     {{- end }}
-    {{- if .Values.dispatch }}
-    dispatch:
-      {{- toYaml .Values.dispatch | nindent 6 }}
+    {{- if .Values.schedule }}
+    schedule:
+      {{- toYaml .Values.schedule | nindent 6 }}
     {{- end }}
 ---
 apiVersion: apps/v1
@@ -50,7 +50,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-indexer") | nindent 8 }}
       annotations:
-        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitlab | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.engine | sha256sum }}-{{ toJson .Values.dispatch | sha256sum }}
+        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitlab | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.engine | sha256sum }}-{{ toJson .Values.schedule | sha256sum }}
     spec:
       enableServiceLinks: false
       securityContext:

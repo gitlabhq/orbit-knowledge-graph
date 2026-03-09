@@ -6,9 +6,9 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use super::metrics::DispatchMetrics;
-use crate::configuration::DispatcherConfiguration;
-use crate::dispatcher::{DispatchError, Dispatcher};
+use crate::configuration::ScheduleConfiguration;
+use crate::dispatcher::ScheduledTaskMetrics;
+use crate::dispatcher::{ScheduledTask, TaskError};
 use crate::nats::NatsServices;
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
@@ -16,19 +16,19 @@ use crate::types::{Envelope, Event};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GlobalDispatcherConfig {
     #[serde(flatten)]
-    pub dispatcher: DispatcherConfiguration,
+    pub schedule: ScheduleConfiguration,
 }
 
 pub struct GlobalDispatcher {
     nats: Arc<dyn NatsServices>,
-    metrics: DispatchMetrics,
+    metrics: ScheduledTaskMetrics,
     config: GlobalDispatcherConfig,
 }
 
 impl GlobalDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
-        metrics: DispatchMetrics,
+        metrics: ScheduledTaskMetrics,
         config: GlobalDispatcherConfig,
     ) -> Self {
         Self {
@@ -40,16 +40,16 @@ impl GlobalDispatcher {
 }
 
 #[async_trait]
-impl Dispatcher for GlobalDispatcher {
+impl ScheduledTask for GlobalDispatcher {
     fn name(&self) -> &str {
-        "sdlc.global"
+        "dispatch.sdlc.global"
     }
 
-    fn dispatcher_config(&self) -> &DispatcherConfiguration {
-        &self.config.dispatcher
+    fn schedule(&self) -> &ScheduleConfiguration {
+        &self.config.schedule
     }
 
-    async fn dispatch(&self) -> Result<(), DispatchError> {
+    async fn run(&self) -> Result<(), TaskError> {
         let start = Instant::now();
 
         let result = self.dispatch_inner().await;
@@ -63,13 +63,13 @@ impl Dispatcher for GlobalDispatcher {
 }
 
 impl GlobalDispatcher {
-    async fn dispatch_inner(&self) -> Result<(), DispatchError> {
+    async fn dispatch_inner(&self) -> Result<(), TaskError> {
         let envelope = Envelope::new(&GlobalIndexingRequest {
             watermark: Utc::now(),
         })
         .map_err(|error| {
             self.metrics.record_error(self.name(), "publish");
-            DispatchError::new(error)
+            TaskError::new(error)
         })?;
 
         match self
@@ -87,7 +87,7 @@ impl GlobalDispatcher {
             }
             Err(error) => {
                 self.metrics.record_error(self.name(), "publish");
-                return Err(DispatchError::new(error));
+                return Err(TaskError::new(error));
             }
         }
 

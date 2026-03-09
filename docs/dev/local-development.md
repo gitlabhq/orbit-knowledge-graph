@@ -115,7 +115,7 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
 GDK Host (localhost)                    Kubernetes Cluster
 ┌─────────────────────────┐            ┌─────────────────────────┐
 │ PostgreSQL :5432        │            │                         │
-│   ↓                     │            │ gkg-dispatcher (cron)   │
+│   ↓                     │            │ gkg-scheduler (cron)    │
 │ siphon-producer         │            │   ↓ publishes indexing  │
 │   ↓                     │            │   ↓ requests to NATS    │
 │ NATS :4222 ─────────────┼────────────┼── gkg-indexer           │

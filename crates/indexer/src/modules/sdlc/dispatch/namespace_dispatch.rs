@@ -6,10 +6,10 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use super::metrics::DispatchMetrics;
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::configuration::DispatcherConfiguration;
-use crate::dispatcher::{DispatchError, Dispatcher};
+use crate::configuration::ScheduleConfiguration;
+use crate::dispatcher::ScheduledTaskMetrics;
+use crate::dispatcher::{ScheduledTask, TaskError};
 use crate::nats::NatsServices;
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::Envelope;
@@ -25,13 +25,13 @@ WHERE _siphon_deleted = false
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
-    pub dispatcher: DispatcherConfiguration,
+    pub schedule: ScheduleConfiguration,
 }
 
 pub struct NamespaceDispatcher {
     nats: Arc<dyn NatsServices>,
     datalake: ArrowClickHouseClient,
-    metrics: DispatchMetrics,
+    metrics: ScheduledTaskMetrics,
     config: NamespaceDispatcherConfig,
 }
 
@@ -39,7 +39,7 @@ impl NamespaceDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
         datalake: ArrowClickHouseClient,
-        metrics: DispatchMetrics,
+        metrics: ScheduledTaskMetrics,
         config: NamespaceDispatcherConfig,
     ) -> Self {
         Self {
@@ -52,16 +52,16 @@ impl NamespaceDispatcher {
 }
 
 #[async_trait]
-impl Dispatcher for NamespaceDispatcher {
+impl ScheduledTask for NamespaceDispatcher {
     fn name(&self) -> &str {
-        "sdlc.namespace"
+        "dispatch.sdlc.namespace"
     }
 
-    fn dispatcher_config(&self) -> &DispatcherConfiguration {
-        &self.config.dispatcher
+    fn schedule(&self) -> &ScheduleConfiguration {
+        &self.config.schedule
     }
 
-    async fn dispatch(&self) -> Result<(), DispatchError> {
+    async fn run(&self) -> Result<(), TaskError> {
         let start = Instant::now();
 
         let result = self.dispatch_inner().await;
@@ -75,7 +75,7 @@ impl Dispatcher for NamespaceDispatcher {
 }
 
 impl NamespaceDispatcher {
-    async fn dispatch_inner(&self) -> Result<(), DispatchError> {
+    async fn dispatch_inner(&self) -> Result<(), TaskError> {
         let query_start = Instant::now();
         let arrow_batches = self
             .datalake
@@ -84,14 +84,13 @@ impl NamespaceDispatcher {
             .await
             .map_err(|error| {
                 self.metrics.record_error(self.name(), "query");
-                DispatchError::new(error)
+                TaskError::new(error)
             })?;
         self.metrics
             .record_query_duration("enabled_namespaces", query_start.elapsed().as_secs_f64());
 
-        let namespace_ids = i64::extract_column(&arrow_batches, 0).map_err(DispatchError::new)?;
-        let organization_ids =
-            i64::extract_column(&arrow_batches, 1).map_err(DispatchError::new)?;
+        let namespace_ids = i64::extract_column(&arrow_batches, 0).map_err(TaskError::new)?;
+        let organization_ids = i64::extract_column(&arrow_batches, 1).map_err(TaskError::new)?;
 
         debug!(
             enabled_namespaces = namespace_ids.len(),
@@ -112,7 +111,7 @@ impl NamespaceDispatcher {
             let topic = request.publish_topic();
             let envelope = Envelope::new(&request).map_err(|error| {
                 self.metrics.record_error(self.name(), "publish");
-                DispatchError::new(error)
+                TaskError::new(error)
             })?;
 
             match self.nats.publish(&topic, &envelope).await {
@@ -134,7 +133,7 @@ impl NamespaceDispatcher {
                 }
                 Err(error) => {
                     self.metrics.record_error(self.name(), "publish");
-                    return Err(DispatchError::new(error));
+                    return Err(TaskError::new(error));
                 }
             }
         }

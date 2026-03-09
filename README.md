@@ -35,7 +35,7 @@ flowchart LR
 - **GitLab Core** -- PostgreSQL (OLTP), Gitaly (Git storage), and Rails (application server). The source of all SDLC and code data. Handles authentication and authorization for graph queries.
 - **Data Insights Platform** -- Siphon (CDC) streams PostgreSQL logical replication events through NATS JetStream into ClickHouse.
 - **ClickHouse** -- Columnar database serving two logical databases on one instance: the datalake (raw CDC rows from Siphon) and the graph database (indexed property graph tables).
-- **Knowledge Graph (Orbit)** -- Rust service that transforms datalake rows into a property graph, parses code via Gitaly, and serves graph queries over gRPC. Single binary running as indexer, webserver, dispatcher, and health-check.
+- **Knowledge Graph (Orbit)** -- Rust service that transforms datalake rows into a property graph, parses code via Gitaly, and serves graph queries over gRPC. Single binary running as indexer, webserver, scheduler, and health-check.
 
 | Resource | Location |
 |---|---|
@@ -91,7 +91,7 @@ Filtered by `knowledge graph` label:
 
 | Repository | Purpose |
 |---|---|
-| [gitlab-org/orbit/knowledge-graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph) | Main GKG service -- 14 Rust crates covering parsing, indexing, query compilation, serving, and infrastructure. Single `gkg-server` binary runs in 4 modes (webserver, indexer, dispatcher, health-check). |
+| [gitlab-org/orbit/knowledge-graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph) | Main GKG service -- 14 Rust crates covering parsing, indexing, query compilation, serving, and infrastructure. Single `gkg-server` binary runs in 4 modes (webserver, indexer, scheduler, health-check). |
 | [gitlab-org/orbit/build-images](https://gitlab.com/gitlab-org/orbit/build-images) | CI builder images (Rust toolchain, pre-compiled tools, sccache) used by the knowledge-graph pipeline |
 | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Official production Helm chart for GKG (v1.0.0, application chart, uses [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks) patterns) |
 | [gitlab-org/orbit/documentation/orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and session notes (Feb 3-5, 2026) |

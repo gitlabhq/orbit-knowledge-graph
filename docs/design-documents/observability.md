@@ -36,7 +36,7 @@ Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrum
 
 **KG Indexer Service:**
 
-The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the core engine, `indexer_dispatch` for the dispatch scheduling loop, `indexer_sdlc` for the SDLC module, and `indexer_code` for the code indexing module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
+The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the core engine, `scheduler` for the scheduled task loop, `indexer_sdlc` for the SDLC module, and `indexer_code` for the code indexing module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
 
 *Engine metrics (`etl_engine`):*
 
@@ -54,16 +54,16 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 | `etl.destination.bytes.written` | Counter | bytes | `table` | Total bytes written to ClickHouse |
 | `etl.destination.write.errors` | Counter | count | `table` | Total failed writes to ClickHouse |
 
-*Dispatch metrics (`indexer_dispatch`):*
+*Scheduled task metrics (`scheduler`):*
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `indexer.dispatch.runs` | Counter | count | `dispatcher`, `outcome` (success/error) | Total dispatch runs by dispatcher |
-| `indexer.dispatch.duration` | Histogram | s | `dispatcher` | End-to-end duration of a dispatch cycle |
-| `indexer.dispatch.requests.published` | Counter | count | `dispatcher` | Namespace/global requests successfully published |
-| `indexer.dispatch.requests.skipped` | Counter | count | `dispatcher` | Requests skipped (already in-flight) |
-| `indexer.dispatch.query.duration` | Histogram | s | `query` | Duration of dispatch ClickHouse queries |
-| `indexer.dispatch.errors` | Counter | count | `dispatcher`, `stage` (publish/query) | Dispatch errors by stage |
+| `scheduler.task.runs` | Counter | count | `task`, `outcome` (success/error) | Total scheduled task runs |
+| `scheduler.task.duration` | Histogram | s | `task` | End-to-end duration of a scheduled task run |
+| `scheduler.task.requests.published` | Counter | count | `task` | Requests successfully published |
+| `scheduler.task.requests.skipped` | Counter | count | `task` | Requests skipped (already in-flight) |
+| `scheduler.task.query.duration` | Histogram | s | `query` | Duration of a scheduled task ClickHouse query |
+| `scheduler.task.errors` | Counter | count | `task`, `stage` (publish/query) | Scheduled task errors by stage |
 
 *SDLC module metrics (`indexer_sdlc`):*
 
