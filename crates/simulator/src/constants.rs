@@ -9,9 +9,6 @@
 /// Default entity type that defines the namespace hierarchy.
 pub const DEFAULT_NAMESPACE_ENTITY: &str = "Group";
 
-/// Default edge type connecting parent and child namespace entities.
-pub const DEFAULT_SUBGROUP_EDGE: &str = "CONTAINS";
-
 // --- Edge directionality naming convention ---
 
 /// Edge type that is always parent-to-child (exact match).

@@ -9,6 +9,9 @@ use anyhow::{Result, bail};
 use ontology::Ontology;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Separator between entity type and depth level in epsilon node names.
+const EPSILON_DEPTH_SEPARATOR: char = '@';
+
 #[derive(Debug, Clone)]
 pub struct ParentEdge {
     /// The edge relationship kind (e.g., "CONTAINS", "IN_PROJECT").
@@ -30,6 +33,9 @@ pub struct DependencyGraph {
     roots: HashSet<String>,
     /// Entity types that are parents (have children in relationships).
     parent_types: HashSet<String>,
+    /// Maps epsilon depth-level node names to their real entity type.
+    /// e.g., "Group@1" → "Group", "Group@2" → "Group"
+    epsilon_to_real: HashMap<String, String>,
 }
 
 impl DependencyGraph {
@@ -37,13 +43,26 @@ impl DependencyGraph {
         let mut parent_edges: HashMap<String, Vec<ParentEdge>> = HashMap::new();
         let mut roots: HashSet<String> = HashSet::new();
         let mut all_nodes: HashSet<String> = HashSet::new();
+        let mut epsilon_to_real: HashMap<String, String> = HashMap::new();
+        // Reverse index: real type → its epsilon names. Built in pass 1, used in pass 2
+        // to fan out children to all depth levels in O(1) per parent type.
+        let mut expanded_types: HashMap<String, Vec<String>> = HashMap::new();
 
         for node_type in config.roots.keys() {
             roots.insert(node_type.clone());
             all_nodes.insert(node_type.clone());
         }
 
-        // Build parent edges from relationships config
+        // Two-pass processing of relationships:
+        //
+        // Pass 1: Detect self-referential edges (source == target) with Recursive ratios
+        //         and expand them into epsilon depth-level nodes.
+        //         e.g., "Group -> Group" { count: 2, max_depth: 3 }
+        //         becomes: Group → Group@1 → Group@2 → Group@3
+        //
+        // Pass 2: Process all other edges normally, fanning out to epsilon levels
+        //         when a parent type was expanded in pass 1.
+
         for (edge_type, variants) in &config.relationships.edges {
             for (variant_key, ratio) in variants {
                 let (source, target) = RelationshipConfig::parse_variant_key(variant_key)
@@ -54,6 +73,87 @@ impl DependencyGraph {
                             edge_type
                         )
                     })?;
+
+                if source != target {
+                    continue;
+                }
+
+                let EdgeRatio::Recursive { count, max_depth } = ratio else {
+                    bail!(
+                        "Self-referential edge '{}: {} -> {}' requires {{ count, max_depth }} format. \
+                         Plain counts create cycles in the dependency graph.",
+                        edge_type,
+                        source,
+                        target,
+                    );
+                };
+
+                if source.contains(EPSILON_DEPTH_SEPARATOR) {
+                    bail!(
+                        "Entity type '{}' contains the epsilon separator '{}'. \
+                         This would collide with generated epsilon node names.",
+                        source,
+                        EPSILON_DEPTH_SEPARATOR,
+                    );
+                }
+
+                Self::validate_edge(ontology, edge_type, &source, &target)?;
+
+                let parent_to_child = Self::is_parent_to_child(edge_type);
+
+                for depth in 1..=*max_depth {
+                    let epsilon_name = format!("{}{}{}", source, EPSILON_DEPTH_SEPARATOR, depth);
+                    let parent_name = if depth == 1 {
+                        source.clone()
+                    } else {
+                        format!("{}{}{}", source, EPSILON_DEPTH_SEPARATOR, depth - 1)
+                    };
+
+                    epsilon_to_real.insert(epsilon_name.clone(), source.clone());
+                    expanded_types
+                        .entry(source.clone())
+                        .or_default()
+                        .push(epsilon_name.clone());
+                    all_nodes.insert(epsilon_name.clone());
+
+                    parent_edges
+                        .entry(epsilon_name)
+                        .or_default()
+                        .push(ParentEdge {
+                            edge_type: edge_type.clone(),
+                            parent_kind: parent_name,
+                            ratio: EdgeRatio::Count(*count),
+                            parent_to_child,
+                        });
+                }
+            }
+        }
+
+        // Pass 2: non-self-referential edges
+        for (edge_type, variants) in &config.relationships.edges {
+            for (variant_key, ratio) in variants {
+                let (source, target) = RelationshipConfig::parse_variant_key(variant_key)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Invalid variant key '{}' in edge type '{}'. Expected 'Source -> Target'.",
+                            variant_key,
+                            edge_type
+                        )
+                    })?;
+
+                if source == target {
+                    continue; // Handled in pass 1
+                }
+
+                if matches!(ratio, EdgeRatio::Recursive { .. }) {
+                    bail!(
+                        "Recursive {{ count, max_depth }} is only valid for self-referential edges \
+                         (source == target). Edge '{}: {} -> {}' has different source and target.",
+                        edge_type,
+                        source,
+                        target,
+                    );
+                }
 
                 Self::validate_edge(ontology, edge_type, &source, &target)?;
 
@@ -67,20 +167,51 @@ impl DependencyGraph {
                 all_nodes.insert(parent_kind.clone());
                 all_nodes.insert(child_kind.clone());
 
-                parent_edges
-                    .entry(child_kind)
-                    .or_default()
-                    .push(ParentEdge {
-                        edge_type: edge_type.clone(),
-                        parent_kind,
-                        ratio: ratio.clone(),
-                        parent_to_child,
-                    });
+                // If the parent was expanded into epsilon depth-level nodes,
+                // add parent edges from each epsilon level to the child.
+                // This ensures children (e.g., Project) are generated for every
+                // depth level of the hierarchy (Group, Group@1, Group@2, ...).
+                if let Some(epsilon_names) = expanded_types.get(&parent_kind) {
+                    parent_edges
+                        .entry(child_kind.clone())
+                        .or_default()
+                        .push(ParentEdge {
+                            edge_type: edge_type.clone(),
+                            parent_kind: parent_kind.clone(),
+                            ratio: ratio.clone(),
+                            parent_to_child,
+                        });
+
+                    for epsilon_name in epsilon_names {
+                        parent_edges
+                            .entry(child_kind.clone())
+                            .or_default()
+                            .push(ParentEdge {
+                                edge_type: edge_type.clone(),
+                                parent_kind: epsilon_name.clone(),
+                                ratio: ratio.clone(),
+                                parent_to_child,
+                            });
+                    }
+                } else {
+                    parent_edges
+                        .entry(child_kind)
+                        .or_default()
+                        .push(ParentEdge {
+                            edge_type: edge_type.clone(),
+                            parent_kind,
+                            ratio: ratio.clone(),
+                            parent_to_child,
+                        });
+                }
             }
         }
 
         for node in &all_nodes {
-            if !roots.contains(node) && !parent_edges.contains_key(node) {
+            if !roots.contains(node)
+                && !parent_edges.contains_key(node)
+                && !epsilon_to_real.contains_key(node)
+            {
                 bail!(
                     "Node type '{}' is neither a root nor has a parent relationship defined.",
                     node
@@ -101,6 +232,7 @@ impl DependencyGraph {
             parent_edges,
             roots,
             parent_types,
+            epsilon_to_real,
         })
     }
 
@@ -232,6 +364,25 @@ impl DependencyGraph {
     pub fn roots(&self) -> &HashSet<String> {
         &self.roots
     }
+
+    /// Resolve a possibly-epsilon node type to its real entity type.
+    /// Returns the input unchanged if it's not an epsilon node.
+    pub fn resolve_type<'a>(&'a self, node_type: &'a str) -> &'a str {
+        self.epsilon_to_real
+            .get(node_type)
+            .map(|s| s.as_str())
+            .unwrap_or(node_type)
+    }
+
+    /// Whether the given node type is an epsilon depth-level node.
+    pub fn is_epsilon(&self, node_type: &str) -> bool {
+        self.epsilon_to_real.contains_key(node_type)
+    }
+
+    /// Get the epsilon-to-real name mapping (for registry compaction).
+    pub fn epsilon_to_real(&self) -> &HashMap<String, String> {
+        &self.epsilon_to_real
+    }
 }
 
 #[cfg(test)]
@@ -343,5 +494,85 @@ mod tests {
                 .to_string()
                 .contains("Cyclic dependency")
         );
+    }
+
+    #[test]
+    fn test_epsilon_node_expansion() {
+        use crate::config::{GenerationConfig, RelationshipConfig};
+
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+
+        let mut roots = HashMap::new();
+        roots.insert("Group".to_string(), 2);
+
+        let mut rel_edges = HashMap::new();
+        let mut contains_variants = HashMap::new();
+        contains_variants.insert(
+            "Group -> Group".to_string(),
+            EdgeRatio::Recursive {
+                count: 2,
+                max_depth: 3,
+            },
+        );
+        contains_variants.insert("Group -> Project".to_string(), EdgeRatio::Count(3));
+        rel_edges.insert("CONTAINS".to_string(), contains_variants);
+
+        let config = GenerationConfig {
+            roots,
+            relationships: RelationshipConfig { edges: rel_edges },
+            ..Default::default()
+        };
+
+        let graph = DependencyGraph::build(&config, &ontology).unwrap();
+
+        // Epsilon nodes should exist
+        assert!(graph.is_epsilon("Group@1"));
+        assert!(graph.is_epsilon("Group@2"));
+        assert!(graph.is_epsilon("Group@3"));
+        assert!(!graph.is_epsilon("Group"));
+        assert!(!graph.is_epsilon("Project"));
+
+        // resolve_type maps epsilon to real
+        assert_eq!(graph.resolve_type("Group@1"), "Group");
+        assert_eq!(graph.resolve_type("Group@2"), "Group");
+        assert_eq!(graph.resolve_type("Group@3"), "Group");
+        assert_eq!(graph.resolve_type("Group"), "Group");
+        assert_eq!(graph.resolve_type("Project"), "Project");
+
+        // Generation order: Group before Group@1 before Group@2 before Group@3
+        let order = graph.generation_order();
+        let pos_group = order.iter().position(|x| x == "Group").unwrap();
+        let pos_g1 = order.iter().position(|x| x == "Group@1").unwrap();
+        let pos_g2 = order.iter().position(|x| x == "Group@2").unwrap();
+        let pos_g3 = order.iter().position(|x| x == "Group@3").unwrap();
+        let pos_project = order.iter().position(|x| x == "Project").unwrap();
+
+        assert!(pos_group < pos_g1);
+        assert!(pos_g1 < pos_g2);
+        assert!(pos_g2 < pos_g3);
+        // Project depends on Group + all epsilon levels, so after Group@3
+        assert!(pos_g3 < pos_project);
+
+        // Project should have parent edges from Group, Group@1, Group@2, Group@3
+        let project_parents = graph.parent_edges("Project").unwrap();
+        let parent_kinds: Vec<&str> = project_parents
+            .iter()
+            .map(|e| e.parent_kind.as_str())
+            .collect();
+        assert!(parent_kinds.contains(&"Group"));
+        assert!(parent_kinds.contains(&"Group@1"));
+        assert!(parent_kinds.contains(&"Group@2"));
+        assert!(parent_kinds.contains(&"Group@3"));
+
+        // Group@1 has parent edge from Group
+        let g1_parents = graph.parent_edges("Group@1").unwrap();
+        assert_eq!(g1_parents.len(), 1);
+        assert_eq!(g1_parents[0].parent_kind, "Group");
+        assert_eq!(g1_parents[0].ratio, EdgeRatio::Count(2));
+
+        // Group@2 has parent edge from Group@1
+        let g2_parents = graph.parent_edges("Group@2").unwrap();
+        assert_eq!(g2_parents.len(), 1);
+        assert_eq!(g2_parents[0].parent_kind, "Group@1");
     }
 }

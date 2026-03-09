@@ -127,12 +127,6 @@ impl Generator {
         if generation.batch_size == 0 {
             anyhow::bail!("generation.batch_size must be > 0");
         }
-        if generation.subgroups.max_depth > 0 && generation.subgroups.per_group == 0 {
-            anyhow::bail!(
-                "subgroups.per_group must be > 0 when subgroups.max_depth is {}",
-                generation.subgroups.max_depth
-            );
-        }
 
         // --- Ontology entity validation ---
 
@@ -145,24 +139,6 @@ impl Generator {
         // Validate namespace entity
         DependencyGraph::validate_node(ontology, &generation.namespace_entity)
             .map_err(|e| anyhow::anyhow!("namespace_entity: {}", e))?;
-
-        // Namespace entity must be a root when subgroups are configured
-        if generation.subgroups.max_depth > 0
-            && !generation.roots.contains_key(&generation.namespace_entity)
-        {
-            anyhow::bail!(
-                "namespace_entity '{}' must be listed in roots when subgroups.max_depth > 0. \
-                 Subgroup hierarchies are only generated for root namespace entities.",
-                generation.namespace_entity
-            );
-        }
-
-        // Validate subgroup edge type
-        if generation.subgroups.max_depth > 0 {
-            let ns = &generation.namespace_entity;
-            DependencyGraph::validate_edge(ontology, &generation.subgroups.edge, ns, ns)
-                .map_err(|e| anyhow::anyhow!("subgroups.edge: {}", e))?;
-        }
 
         // Validate relationship edge types + source/target variants
         for (edge_type, variants) in &generation.relationships.edges {
@@ -399,12 +375,14 @@ impl Generator {
         let mut rng = rand::thread_rng();
 
         for node_type in self.dependency_graph.generation_order() {
+            // Virtual nodes (e.g., "Group@1") resolve to real entity types for ontology lookup
+            let real_type = self.dependency_graph.resolve_type(node_type);
             let node = self
                 .ontology
                 .nodes()
-                .find(|n| n.name == *node_type)
+                .find(|n| n.name == real_type)
                 .ok_or_else(|| {
-                    anyhow::anyhow!("Node type '{}' not found in ontology", node_type)
+                    anyhow::anyhow!("Node type '{}' not found in ontology", real_type)
                 })?;
 
             if self.dependency_graph.is_root(node_type) {
@@ -419,21 +397,32 @@ impl Generator {
                 if count > 0 {
                     let (batches, edges) =
                         self.generate_root_entities(node, org_id, count, &mut registry, &mut rng)?;
-                    data.nodes.insert(node_type.clone(), batches);
+                    data.nodes
+                        .entry(real_type.to_string())
+                        .or_default()
+                        .extend(batches);
                     data.edges.extend(edges);
                 }
             } else if let Some(parent_edges) = self.dependency_graph.parent_edges(node_type) {
-                let (batches, edges) =
-                    self.generate_child_entities(node, parent_edges, &mut registry, &mut rng)?;
+                let (batches, edges) = self.generate_child_entities(
+                    node,
+                    node_type,
+                    parent_edges,
+                    &mut registry,
+                    &mut rng,
+                )?;
                 if !batches.is_empty() {
-                    data.nodes.insert(node_type.clone(), batches);
+                    data.nodes
+                        .entry(real_type.to_string())
+                        .or_default()
+                        .extend(batches);
                 }
                 data.edges.extend(edges);
             }
         }
 
-        // Compact registry to free traversal path memory before associations
-        registry.compact();
+        // Compact registry, merging epsilon entries into real type names
+        registry.compact_with_aliases(self.dependency_graph.epsilon_to_real());
 
         let association_edges = self.generate_association_edges(&registry, &mut rng);
         data.edges.extend(association_edges);
@@ -453,12 +442,13 @@ impl Generator {
         let mut rng = rand::thread_rng();
 
         for node_type in self.dependency_graph.generation_order() {
+            let real_type = self.dependency_graph.resolve_type(node_type);
             let node = self
                 .ontology
                 .nodes()
-                .find(|n| n.name == *node_type)
+                .find(|n| n.name == real_type)
                 .ok_or_else(|| {
-                    anyhow::anyhow!("Node type '{}' not found in ontology", node_type)
+                    anyhow::anyhow!("Node type '{}' not found in ontology", real_type)
                 })?;
 
             if self.dependency_graph.is_root(node_type) {
@@ -479,24 +469,31 @@ impl Generator {
                         &mut rng,
                         edge_writer,
                     )?;
-                    data.nodes.insert(node_type.clone(), batches);
+                    data.nodes
+                        .entry(real_type.to_string())
+                        .or_default()
+                        .extend(batches);
                 }
             } else if let Some(parent_edges) = self.dependency_graph.parent_edges(node_type) {
                 let batches = self.generate_child_entities_streaming(
                     node,
+                    node_type,
                     parent_edges,
                     &mut registry,
                     &mut rng,
                     edge_writer,
                 )?;
                 if !batches.is_empty() {
-                    data.nodes.insert(node_type.clone(), batches);
+                    data.nodes
+                        .entry(real_type.to_string())
+                        .or_default()
+                        .extend(batches);
                 }
             }
         }
 
-        // Compact registry to free traversal path memory before associations
-        registry.compact();
+        // Compact registry, merging epsilon entries into real type names
+        registry.compact_with_aliases(self.dependency_graph.epsilon_to_real());
 
         self.generate_association_edges_streaming(&registry, &mut rng, edge_writer)?;
 
@@ -518,7 +515,6 @@ impl Generator {
             self.config.generation.batch_size,
             self.config.generation.seed,
         );
-        let mut edges = Vec::new();
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
 
         for _ in 0..count {
@@ -537,58 +533,16 @@ impl Generator {
 
             builder.add_row(traversal_path.clone(), entity_id);
             let ctx = EntityContext::new(entity_id, traversal_path);
-            registry.add(&node.name, ctx.clone());
-
-            if is_namespace_entity && self.config.generation.subgroups.max_depth > 0 {
-                self.generate_subgroup_hierarchy(&ctx, 1, registry, &mut builder, &mut edges)?;
-            }
+            registry.add(&node.name, ctx);
         }
 
-        Ok((builder.finish(), edges))
-    }
-
-    /// Recursively generate sub-namespace hierarchy with CONTAINS edges.
-    fn generate_subgroup_hierarchy(
-        &self,
-        parent: &EntityContext,
-        depth: usize,
-        registry: &mut EntityRegistry,
-        builder: &mut BatchBuilder,
-        edges: &mut Vec<EdgeRecord>,
-    ) -> Result<()> {
-        let subgroup_config = &self.config.generation.subgroups;
-        if depth > subgroup_config.max_depth {
-            return Ok(());
-        }
-
-        let ns_entity = &self.config.generation.namespace_entity;
-        let edge_type = &self.config.generation.subgroups.edge;
-        for _ in 0..subgroup_config.per_group {
-            let ns_id = registry.next_namespace_id();
-            let traversal_path = format!("{}{}/", parent.traversal_path, ns_id);
-
-            builder.add_row(traversal_path.clone(), ns_id);
-            let ctx = EntityContext::new(ns_id, traversal_path);
-            registry.add(ns_entity, ctx.clone());
-
-            edges.push(EdgeRecord {
-                traversal_path: self.intern(&parent.traversal_path),
-                relationship_kind: self.intern(edge_type),
-                source: parent.id,
-                source_kind: self.intern(ns_entity),
-                target: ns_id,
-                target_kind: self.intern(ns_entity),
-            });
-
-            self.generate_subgroup_hierarchy(&ctx, depth + 1, registry, builder, edges)?;
-        }
-
-        Ok(())
+        Ok((builder.finish(), Vec::new()))
     }
 
     fn generate_child_entities(
         &self,
         node: &NodeEntity,
+        registry_key: &str,
         parent_edges: &[ParentEdge],
         registry: &mut EntityRegistry,
         rng: &mut impl Rng,
@@ -602,8 +556,10 @@ impl Generator {
         );
         let mut edges = Vec::new();
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
-        // Only store full context for parent types; leaves only need IDs for associations
-        let is_parent_type = self.dependency_graph.is_parent_type(&node.name);
+        // Only store full context for parent types; leaves only need IDs for associations.
+        // Check against registry_key (possibly epsilon) since the dependency graph
+        // references epsilon names as parents.
+        let is_parent_type = self.dependency_graph.is_parent_type(registry_key);
 
         for parent_edge in parent_edges {
             // Clone parent IDs and paths to avoid borrow conflict with registry.add()
@@ -614,9 +570,10 @@ impl Generator {
                 _ => continue,
             };
 
-            // Intern strings once per parent_edge type
+            // Intern strings using real type names (resolve epsilon) for edge records
             let rel_kind = self.intern(&parent_edge.edge_type);
-            let parent_kind_str = self.intern(&parent_edge.parent_kind);
+            let parent_real_type = self.dependency_graph.resolve_type(&parent_edge.parent_kind);
+            let parent_kind_str = self.intern(parent_real_type);
             let node_name_str = self.intern(&node.name);
 
             for (parent_id, parent_path) in &parents {
@@ -634,11 +591,12 @@ impl Generator {
 
                     builder.add_row(traversal_path.clone(), entity_id);
 
-                    // For leaf entities, only store ID (saves ~44 bytes per entity)
+                    // Store under registry_key (possibly epsilon) so entities at
+                    // different depth levels are kept separate during generation
                     if is_parent_type {
-                        registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
+                        registry.add(registry_key, EntityContext::new(entity_id, traversal_path));
                     } else {
-                        registry.add_id_only(&node.name, entity_id);
+                        registry.add_id_only(registry_key, entity_id);
                     }
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
@@ -718,16 +676,7 @@ impl Generator {
             let sample_len = sample_from.len();
 
             for &primary_id in iterate_over {
-                let edge_count = match &ratio {
-                    EdgeRatio::Count(n) => *n,
-                    EdgeRatio::Probability(p) => {
-                        if rng.gen_bool(*p) {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                };
+                let edge_count = ratio.sample(rng);
 
                 if edge_count == 0 {
                     continue;
@@ -768,7 +717,7 @@ impl Generator {
         count: usize,
         registry: &mut EntityRegistry,
         _rng: &mut impl Rng,
-        edge_writer: &mut StreamingEdgeWriter,
+        _edge_writer: &mut StreamingEdgeWriter,
     ) -> Result<Vec<RecordBatch>> {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::with_seed(
@@ -791,69 +740,16 @@ impl Generator {
 
             builder.add_row(traversal_path.clone(), entity_id);
             let ctx = EntityContext::new(entity_id, traversal_path);
-            registry.add(&node.name, ctx.clone());
-
-            if is_namespace_entity && self.config.generation.subgroups.max_depth > 0 {
-                self.generate_subgroup_hierarchy_streaming(
-                    &ctx,
-                    1,
-                    registry,
-                    &mut builder,
-                    edge_writer,
-                )?;
-            }
+            registry.add(&node.name, ctx);
         }
 
         Ok(builder.finish())
     }
 
-    fn generate_subgroup_hierarchy_streaming(
-        &self,
-        parent: &EntityContext,
-        depth: usize,
-        registry: &mut EntityRegistry,
-        builder: &mut BatchBuilder,
-        edge_writer: &mut StreamingEdgeWriter,
-    ) -> Result<()> {
-        let subgroup_config = &self.config.generation.subgroups;
-        if depth > subgroup_config.max_depth {
-            return Ok(());
-        }
-
-        let ns_entity = &self.config.generation.namespace_entity;
-        let edge_type = &self.config.generation.subgroups.edge;
-        for _ in 0..subgroup_config.per_group {
-            let ns_id = registry.next_namespace_id();
-            let traversal_path = format!("{}{}/", parent.traversal_path, ns_id);
-
-            builder.add_row(traversal_path.clone(), ns_id);
-            let ctx = EntityContext::new(ns_id, traversal_path);
-            registry.add(ns_entity, ctx.clone());
-
-            edge_writer.push(EdgeRecord {
-                traversal_path: self.intern(&parent.traversal_path),
-                relationship_kind: self.intern(edge_type),
-                source: parent.id,
-                source_kind: self.intern(ns_entity),
-                target: ns_id,
-                target_kind: self.intern(ns_entity),
-            })?;
-
-            self.generate_subgroup_hierarchy_streaming(
-                &ctx,
-                depth + 1,
-                registry,
-                builder,
-                edge_writer,
-            )?;
-        }
-
-        Ok(())
-    }
-
     fn generate_child_entities_streaming(
         &self,
         node: &NodeEntity,
+        registry_key: &str,
         parent_edges: &[ParentEdge],
         registry: &mut EntityRegistry,
         rng: &mut impl Rng,
@@ -867,7 +763,7 @@ impl Generator {
             self.config.generation.seed,
         );
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
-        let is_parent_type = self.dependency_graph.is_parent_type(&node.name);
+        let is_parent_type = self.dependency_graph.is_parent_type(registry_key);
 
         for parent_edge in parent_edges {
             let parents: Vec<_> = match registry.get(&parent_edge.parent_kind) {
@@ -878,7 +774,8 @@ impl Generator {
             };
 
             let rel_kind = self.intern(&parent_edge.edge_type);
-            let parent_kind_str = self.intern(&parent_edge.parent_kind);
+            let parent_real_type = self.dependency_graph.resolve_type(&parent_edge.parent_kind);
+            let parent_kind_str = self.intern(parent_real_type);
             let node_name_str = self.intern(&node.name);
 
             for (parent_id, parent_path) in &parents {
@@ -897,9 +794,9 @@ impl Generator {
                     builder.add_row(traversal_path.clone(), entity_id);
 
                     if is_parent_type {
-                        registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
+                        registry.add(registry_key, EntityContext::new(entity_id, traversal_path));
                     } else {
-                        registry.add_id_only(&node.name, entity_id);
+                        registry.add_id_only(registry_key, entity_id);
                     }
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
@@ -967,16 +864,7 @@ impl Generator {
             let sample_len = sample_from.len();
 
             for &primary_id in iterate_over {
-                let edge_count = match &ratio {
-                    EdgeRatio::Count(n) => *n,
-                    EdgeRatio::Probability(p) => {
-                        if rng.gen_bool(*p) {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                };
+                let edge_count = ratio.sample(rng);
 
                 if edge_count == 0 {
                     continue;
@@ -1020,23 +908,30 @@ impl Generator {
             println!("    {}: {} per org = {} total", node_type, count, total);
         }
 
-        if cfg.subgroups.max_depth > 0 {
-            let ns_entity = &cfg.namespace_entity;
-            let root_ns = cfg.roots.get(ns_entity).copied().unwrap_or(0);
-            let mut total_ns = root_ns;
-            let mut ns_at_level = root_ns;
-            for _ in 1..=cfg.subgroups.max_depth {
-                ns_at_level *= cfg.subgroups.per_group;
-                total_ns += ns_at_level;
+        // Show recursive hierarchy expansion for self-referential edges
+        for (edge_type, variants) in &cfg.relationships.edges {
+            for (variant_key, ratio) in variants {
+                if let EdgeRatio::Recursive { count, max_depth } = ratio
+                    && let Some((source, _)) =
+                        crate::config::RelationshipConfig::parse_variant_key(variant_key)
+                {
+                    let root_count = cfg.roots.get(&source).copied().unwrap_or(0);
+                    let mut total = root_count;
+                    let mut level_count = root_count;
+                    for _ in 1..=*max_depth {
+                        level_count *= count;
+                        total += level_count;
+                    }
+                    println!(
+                        "    (with {}: {} {} levels x {} per parent = {} total per org)",
+                        edge_type,
+                        source.to_lowercase(),
+                        max_depth,
+                        count,
+                        total,
+                    );
+                }
             }
-            println!(
-                "    (with sub-{}: {} levels x {} per parent = {} total {} per org)",
-                ns_entity.to_lowercase(),
-                cfg.subgroups.max_depth,
-                cfg.subgroups.per_group,
-                total_ns,
-                ns_entity.to_lowercase(),
-            );
         }
         println!();
 
@@ -1045,9 +940,14 @@ impl Generator {
             self.dependency_graph.generation_order().len()
         );
         for (i, node_type) in self.dependency_graph.generation_order().iter().enumerate() {
-            let is_root = self.dependency_graph.is_root(node_type);
-            let marker = if is_root { "(root)" } else { "" };
-            println!("    {}. {} {}", i + 1, node_type, marker);
+            let marker = if self.dependency_graph.is_root(node_type) {
+                " (root)"
+            } else if self.dependency_graph.is_epsilon(node_type) {
+                " (epsilon)"
+            } else {
+                ""
+            };
+            println!("    {}. {}{}", i + 1, node_type, marker);
         }
         println!();
 
@@ -1057,6 +957,9 @@ impl Generator {
                 let ratio_str = match ratio {
                     EdgeRatio::Count(n) => format!("{} per parent", n),
                     EdgeRatio::Probability(p) => format!("{:.0}% chance", p * 100.0),
+                    EdgeRatio::Recursive { count, max_depth } => {
+                        format!("{} per parent x {} depth levels", count, max_depth)
+                    }
                 };
                 println!("    {}: {} ({})", edge_type, variant, ratio_str);
             }
@@ -1074,7 +977,9 @@ impl Generator {
                         crate::config::IterationDirection::Source => "per source",
                     };
                     let ratio_str = match ratio {
-                        EdgeRatio::Count(n) => format!("{} {}", n, per_str),
+                        EdgeRatio::Count(n) | EdgeRatio::Recursive { count: n, .. } => {
+                            format!("{} {}", n, per_str)
+                        }
                         EdgeRatio::Probability(p) => {
                             format!("{:.0}% chance {}", p * 100.0, per_str)
                         }
@@ -1092,7 +997,7 @@ mod tests {
     use super::*;
     use crate::config::{
         AssociationConfig, AssociationEdgeValue, Config, EdgeRatio, GenerationConfig,
-        RelationshipConfig, SubgroupConfig,
+        RelationshipConfig,
     };
     use arrow::array::Array;
     use std::collections::{HashMap, HashSet};
@@ -1130,6 +1035,13 @@ mod tests {
 
         let mut rel_edges = HashMap::new();
         let mut contains_variants = HashMap::new();
+        contains_variants.insert(
+            "Group -> Group".to_string(),
+            EdgeRatio::Recursive {
+                count: 1,
+                max_depth: 1,
+            },
+        );
         contains_variants.insert("Group -> Project".to_string(), EdgeRatio::Count(3));
         rel_edges.insert("CONTAINS".to_string(), contains_variants);
 
@@ -1151,11 +1063,6 @@ mod tests {
                 roots,
                 relationships: RelationshipConfig { edges: rel_edges },
                 associations: AssociationConfig { edges: assoc_edges },
-                subgroups: SubgroupConfig {
-                    max_depth: 1,
-                    per_group: 1,
-                    ..Default::default()
-                },
                 batch_size: 100,
                 seed: Some(42),
                 ..Default::default()
@@ -1327,31 +1234,38 @@ mod tests {
     }
 
     #[test]
-    fn test_generator_subgroup_hierarchy_edges() {
+    fn test_generator_recursive_hierarchy_edges() {
         let (config, ontology) = test_config_and_ontology();
         let ns_entity = config.generation.namespace_entity.clone();
-        let subgroup_edge = config.generation.subgroups.edge.clone();
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
-        let subgroup_edges: Vec<_> = data
+        // Find CONTAINS Group→Group edges (the recursive hierarchy edges)
+        let hierarchy_edges: Vec<_> = data
             .edges
             .iter()
             .filter(|e| {
-                e.relationship_kind.as_ref() == subgroup_edge.as_str()
+                e.relationship_kind.as_ref() == "CONTAINS"
                     && e.source_kind.as_ref() == ns_entity.as_str()
                     && e.target_kind.as_ref() == ns_entity.as_str()
             })
             .collect();
 
-        // With 2 root groups and max_depth=1, per_group=1, should have 2 subgroup edges
-        assert_eq!(
-            subgroup_edges.len(),
-            2,
-            "Should have 1 {} {ns}->{ns} edge per root group",
-            subgroup_edge,
+        // With 2 root groups and { count: 1, max_depth: 1 }:
+        // sample_with_variance on count=1 gives range [1, 2], so expect 2-4 edges
+        assert!(
+            hierarchy_edges.len() >= 2 && hierarchy_edges.len() <= 4,
+            "Expected 2-4 CONTAINS {ns}->{ns} edges (2 roots x ~1 child), got {}",
+            hierarchy_edges.len(),
             ns = ns_entity
         );
+
+        // All edges should have valid structure
+        for edge in &hierarchy_edges {
+            assert_eq!(edge.source_kind.as_ref(), ns_entity.as_str());
+            assert_eq!(edge.target_kind.as_ref(), ns_entity.as_str());
+            assert_ne!(edge.source, edge.target, "Edge should not self-loop");
+        }
     }
 
     #[test]
@@ -1420,18 +1334,52 @@ mod tests {
     }
 
     #[test]
-    fn test_validation_rejects_unknown_subgroup_edge() {
+    fn test_validation_rejects_self_referential_without_recursive() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
         config.generation.roots.insert("Group".to_string(), 1);
-        config.generation.subgroups.max_depth = 1;
-        config.generation.subgroups.per_group = 1;
-        config.generation.subgroups.edge = "FAKE_EDGE".to_string();
+
+        let mut contains = HashMap::new();
+        contains.insert("Group -> Group".to_string(), EdgeRatio::Count(2));
+        config
+            .generation
+            .relationships
+            .edges
+            .insert("CONTAINS".to_string(), contains);
 
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
-            err.to_string().contains("subgroups.edge:") && err.to_string().contains("FAKE_EDGE"),
-            "Expected subgroups.edge validation error, got: {}",
+            err.to_string().contains("Self-referential")
+                && err.to_string().contains("count, max_depth"),
+            "Expected self-referential edge validation error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_validation_rejects_recursive_on_non_self_referential() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let mut config = Config::default();
+        config.generation.roots.insert("Group".to_string(), 1);
+
+        let mut contains = HashMap::new();
+        contains.insert(
+            "Group -> Project".to_string(),
+            EdgeRatio::Recursive {
+                count: 2,
+                max_depth: 3,
+            },
+        );
+        config
+            .generation
+            .relationships
+            .edges
+            .insert("CONTAINS".to_string(), contains);
+
+        let err = Generator::new(ontology, config).unwrap_err();
+        assert!(
+            err.to_string().contains("only valid for self-referential"),
+            "Expected non-self-referential Recursive validation error, got: {}",
             err
         );
     }
@@ -1510,40 +1458,6 @@ mod tests {
         assert!(
             err.to_string().contains("batch_size must be > 0"),
             "Expected batch_size validation error, got: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_validation_rejects_zero_per_group_with_subgroups() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let mut config = Config::default();
-        config.generation.roots.insert("Group".to_string(), 1);
-        config.generation.subgroups.max_depth = 2;
-        config.generation.subgroups.per_group = 0;
-
-        let err = Generator::new(ontology, config).unwrap_err();
-        assert!(
-            err.to_string().contains("per_group must be > 0"),
-            "Expected per_group validation error, got: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_validation_rejects_namespace_entity_not_in_roots_with_subgroups() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let mut config = Config::default();
-        // Only User in roots, but namespace_entity defaults to Group
-        config.generation.roots.insert("User".to_string(), 5);
-        config.generation.subgroups.max_depth = 1;
-        config.generation.subgroups.per_group = 2;
-
-        let err = Generator::new(ontology, config).unwrap_err();
-        assert!(
-            err.to_string().contains("namespace_entity")
-                && err.to_string().contains("must be listed in roots"),
-            "Expected namespace_entity-in-roots validation error, got: {}",
             err
         );
     }
