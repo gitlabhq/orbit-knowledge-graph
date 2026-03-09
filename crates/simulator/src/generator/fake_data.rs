@@ -458,3 +458,271 @@ impl FakeValue {
         FakeValue::String(Cow::Borrowed(s))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ontology::DataType;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_classify_enum_takes_priority() {
+        let mut enum_vals = BTreeMap::new();
+        enum_vals.insert(1, "open".to_string());
+        enum_vals.insert(2, "closed".to_string());
+
+        let field = Field {
+            name: "status".to_string(),
+            source: "status".to_string(),
+            data_type: DataType::String,
+            nullable: true,
+            enum_values: Some(enum_vals),
+            enum_type: ontology::EnumType::default(),
+        };
+
+        // Even though field name contains "status", enum_values takes priority
+        assert_eq!(FieldKind::classify(&field), FieldKind::Enum);
+    }
+
+    #[test]
+    fn test_classify_string_fields() {
+        let make = |name: &str| Field {
+            name: name.to_string(),
+            source: name.to_string(),
+            data_type: DataType::String,
+            nullable: true,
+            enum_values: None,
+            enum_type: ontology::EnumType::default(),
+        };
+
+        assert_eq!(FieldKind::classify(&make("name")), FieldKind::NameOrTitle);
+        assert_eq!(FieldKind::classify(&make("title")), FieldKind::NameOrTitle);
+        assert_eq!(
+            FieldKind::classify(&make("username")),
+            FieldKind::NameOrTitle
+        );
+        assert_eq!(FieldKind::classify(&make("email")), FieldKind::Email);
+        assert_eq!(FieldKind::classify(&make("web_url")), FieldKind::Url);
+        assert_eq!(FieldKind::classify(&make("avatar_url")), FieldKind::Url);
+        assert_eq!(FieldKind::classify(&make("file_path")), FieldKind::Path);
+        assert_eq!(FieldKind::classify(&make("sha")), FieldKind::ShaOrHash);
+        assert_eq!(FieldKind::classify(&make("base_sha")), FieldKind::ShaOrHash);
+        assert_eq!(
+            FieldKind::classify(&make("description")),
+            FieldKind::DescriptionOrBody
+        );
+        assert_eq!(
+            FieldKind::classify(&make("source_branch")),
+            FieldKind::RefOrBranch
+        );
+        assert_eq!(
+            FieldKind::classify(&make("target_ref")),
+            FieldKind::RefOrBranch
+        );
+        assert_eq!(
+            FieldKind::classify(&make("something_random")),
+            FieldKind::GenericString
+        );
+    }
+
+    #[test]
+    fn test_classify_int_fields() {
+        let make = |name: &str| Field {
+            name: name.to_string(),
+            source: name.to_string(),
+            data_type: DataType::Int,
+            nullable: false,
+            enum_values: None,
+            enum_type: ontology::EnumType::default(),
+        };
+
+        assert_eq!(FieldKind::classify(&make("iid")), FieldKind::Iid);
+        assert_eq!(FieldKind::classify(&make("weight")), FieldKind::Weight);
+        assert_eq!(
+            FieldKind::classify(&make("star_count")),
+            FieldKind::StarCount
+        );
+        assert_eq!(FieldKind::classify(&make("duration")), FieldKind::Duration);
+        assert_eq!(
+            FieldKind::classify(&make("some_count")),
+            FieldKind::GenericInt
+        );
+    }
+
+    #[test]
+    fn test_classify_bool_fields() {
+        let make = |name: &str| Field {
+            name: name.to_string(),
+            source: name.to_string(),
+            data_type: DataType::Bool,
+            nullable: false,
+            enum_values: None,
+            enum_type: ontology::EnumType::default(),
+        };
+
+        assert_eq!(FieldKind::classify(&make("archived")), FieldKind::Archived);
+        assert_eq!(
+            FieldKind::classify(&make("confidential")),
+            FieldKind::Confidential
+        );
+        assert_eq!(FieldKind::classify(&make("draft")), FieldKind::Draft);
+        assert_eq!(FieldKind::classify(&make("squash")), FieldKind::Squash);
+        assert_eq!(
+            FieldKind::classify(&make("is_admin")),
+            FieldKind::IsAdminOrAuditor
+        );
+        assert_eq!(
+            FieldKind::classify(&make("is_auditor")),
+            FieldKind::IsAdminOrAuditor
+        );
+        assert_eq!(
+            FieldKind::classify(&make("is_external")),
+            FieldKind::IsExternal
+        );
+        assert_eq!(
+            FieldKind::classify(&make("discussion_locked")),
+            FieldKind::DiscussionLocked
+        );
+        assert_eq!(
+            FieldKind::classify(&make("enabled")),
+            FieldKind::GenericBool
+        );
+    }
+
+    #[test]
+    fn test_classify_other_types() {
+        let make = |name: &str, dt: DataType| Field {
+            name: name.to_string(),
+            source: name.to_string(),
+            data_type: dt,
+            nullable: false,
+            enum_values: None,
+            enum_type: ontology::EnumType::default(),
+        };
+
+        assert_eq!(
+            FieldKind::classify(&make("score", DataType::Float)),
+            FieldKind::Float
+        );
+        assert_eq!(
+            FieldKind::classify(&make("created_at", DataType::DateTime)),
+            FieldKind::DateTime
+        );
+        assert_eq!(
+            FieldKind::classify(&make("due_date", DataType::Date)),
+            FieldKind::Date
+        );
+        assert_eq!(
+            FieldKind::classify(&make("uuid", DataType::Uuid)),
+            FieldKind::Uuid
+        );
+    }
+
+    #[test]
+    #[ignore = "audit helper: run manually to check heuristic coverage on ontology fields"]
+    fn test_classify_ontology_fields_no_generic_fallback() {
+        // Validate that every field in the real ontology classifies to
+        // something more specific than GenericString/GenericInt/GenericBool.
+        // If a new ontology field falls through to a generic kind, this test
+        // flags it so the heuristics can be updated.
+        let ontology = ontology::Ontology::load_embedded().expect("should load embedded ontology");
+
+        let mut generic_fields = Vec::new();
+        for node in ontology.nodes() {
+            for field in &node.fields {
+                let kind = FieldKind::classify(field);
+                match kind {
+                    FieldKind::GenericString | FieldKind::GenericInt | FieldKind::GenericBool => {
+                        generic_fields.push(format!(
+                            "{}.{} ({:?} -> {:?})",
+                            node.name, field.name, field.data_type, kind
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(
+            generic_fields.is_empty(),
+            "Fields classified as generic ({} total). Update fake_data.rs heuristics:\n  {}",
+            generic_fields.len(),
+            generic_fields.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn test_generate_produces_non_null_for_non_nullable() {
+        let field = Field {
+            name: "name".to_string(),
+            source: "name".to_string(),
+            data_type: DataType::String,
+            nullable: false,
+            enum_values: None,
+            enum_type: ontology::EnumType::default(),
+        };
+
+        let mut fvg = FakeValueGenerator::with_seed(42);
+        for _ in 0..1000 {
+            let val = fvg.generate(&field);
+            assert!(
+                !val.is_null(),
+                "Non-nullable field should never produce Null"
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_enum_uses_defined_values() {
+        let mut enum_vals = BTreeMap::new();
+        enum_vals.insert(1, "alpha".to_string());
+        enum_vals.insert(2, "beta".to_string());
+        enum_vals.insert(3, "gamma".to_string());
+
+        let field = Field {
+            name: "category".to_string(),
+            source: "category".to_string(),
+            data_type: DataType::Enum,
+            nullable: false,
+            enum_values: Some(enum_vals),
+            enum_type: ontology::EnumType::default(),
+        };
+
+        let mut fvg = FakeValueGenerator::with_seed(42);
+        let valid = ["alpha", "beta", "gamma"];
+
+        for _ in 0..100 {
+            match fvg.generate(&field) {
+                FakeValue::String(s) => {
+                    assert!(
+                        valid.contains(&s.as_ref()),
+                        "Enum value '{}' not in defined values",
+                        s
+                    );
+                }
+                other => panic!("Expected String, got {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_generate_deterministic_with_seed() {
+        let field = Field {
+            name: "name".to_string(),
+            source: "name".to_string(),
+            data_type: DataType::String,
+            nullable: false,
+            enum_values: None,
+            enum_type: ontology::EnumType::default(),
+        };
+
+        let mut fvg1 = FakeValueGenerator::with_seed(123);
+        let mut fvg2 = FakeValueGenerator::with_seed(123);
+
+        for _ in 0..50 {
+            let v1 = format!("{:?}", fvg1.generate(&field));
+            let v2 = format!("{:?}", fvg2.generate(&field));
+            assert_eq!(v1, v2, "Same seed should produce identical output");
+        }
+    }
+}

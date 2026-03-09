@@ -536,6 +536,58 @@ mod tests {
     }
 
     #[test]
+    fn test_entity_registry_compact() {
+        let mut registry = EntityRegistry::new(1);
+
+        // Add full contexts (parent entities)
+        registry.add("Group", EntityContext::root_group(1, 100));
+        registry.add("Group", EntityContext::root_group(1, 101));
+
+        // Add ID-only (leaf entities)
+        registry.add_id_only("MergeRequest", 500);
+        registry.add_id_only("MergeRequest", 501);
+
+        // Before compaction: full contexts accessible via get()
+        assert!(registry.get("Group").is_some());
+        assert_eq!(registry.count("Group"), 2);
+        assert_eq!(registry.count("MergeRequest"), 2);
+
+        // Compact
+        registry.compact();
+
+        // After compaction: all IDs accessible via get_ids_slice()
+        let group_ids = registry.get_ids_slice("Group").unwrap();
+        assert_eq!(group_ids, &[100, 101]);
+
+        let mr_ids = registry.get_ids_slice("MergeRequest").unwrap();
+        assert_eq!(mr_ids, &[500, 501]);
+
+        // get_ids() still works after compaction
+        assert_eq!(registry.get_ids("Group"), vec![100, 101]);
+
+        // total_count is preserved
+        assert_eq!(registry.total_count(), 4);
+    }
+
+    #[test]
+    fn test_entity_registry_compact_merges_full_and_id_only() {
+        let mut registry = EntityRegistry::new(1);
+
+        // Mix: some entities added as full, some as id-only, same type
+        registry.add("Project", EntityContext::new(10, "1/100/".to_string()));
+        registry.add_id_only("Project", 20);
+
+        assert_eq!(registry.count("Project"), 2);
+
+        registry.compact();
+
+        let ids = registry.get_ids_slice("Project").unwrap();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&10));
+        assert!(ids.contains(&20));
+    }
+
+    #[test]
     fn test_entity_registry_add_and_get() {
         let mut registry = EntityRegistry::new(1);
 

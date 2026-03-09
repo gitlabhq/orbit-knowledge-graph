@@ -4,6 +4,7 @@
 //! performs topological sort to determine generation order.
 
 use crate::config::{EdgeRatio, GenerationConfig, RelationshipConfig};
+use crate::constants::{PARENT_TO_CHILD_EDGE, PARENT_TO_CHILD_PREFIX};
 use anyhow::{Result, bail};
 use ontology::Ontology;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -108,7 +109,20 @@ impl DependencyGraph {
         self.parent_types.contains(node_type)
     }
 
-    fn validate_edge(
+    /// Validate that a node type exists in the ontology.
+    pub fn validate_node(ontology: &Ontology, node_type: &str) -> Result<()> {
+        if ontology.get_node(node_type).is_none() {
+            bail!(
+                "Node type '{}' not found in ontology. Available: {:?}",
+                node_type,
+                ontology.nodes().map(|n| &n.name).collect::<Vec<_>>()
+            );
+        }
+        Ok(())
+    }
+
+    /// Validate that an edge variant (type + source → target) exists in the ontology.
+    pub fn validate_edge(
         ontology: &Ontology,
         edge_type: &str,
         source: &str,
@@ -130,20 +144,19 @@ impl DependencyGraph {
         Ok(())
     }
 
-    // TODO: should be derived from the ontology
+    /// Determine edge directionality from the ontology naming convention.
+    ///
+    /// Parent-to-child edges (source is parent, target is child):
+    ///   - `CONTAINS` — Group→Group, Group→Project, etc.
+    ///   - `HAS_*`    — Pipeline→Stage, MergeRequest→Diff, etc.
+    ///
+    /// Child-to-parent edges (source is child, target is parent):
+    ///   - `IN_*`     — MergeRequest→Project, Note→Project, etc.
+    ///
+    /// All other edges are associations and should not appear in
+    /// the relationship config (they belong in associations).
     fn is_parent_to_child(edge_type: &str) -> bool {
-        matches!(
-            edge_type,
-            "CONTAINS"
-                | "HAS_STAGE"
-                | "HAS_JOB"
-                | "HAS_FILE"
-                | "HAS_NOTE"
-                | "HAS_LABEL"
-                | "HAS_FINDING"
-                | "HAS_IDENTIFIER"
-                | "HAS_DIFF"
-        )
+        edge_type == PARENT_TO_CHILD_EDGE || edge_type.starts_with(PARENT_TO_CHILD_PREFIX)
     }
 
     /// Kahn's algorithm
@@ -227,13 +240,30 @@ mod tests {
 
     #[test]
     fn test_is_parent_to_child() {
+        // CONTAINS is always parent-to-child
         assert!(DependencyGraph::is_parent_to_child("CONTAINS"));
+
+        // HAS_* edges are parent-to-child
         assert!(DependencyGraph::is_parent_to_child("HAS_STAGE"));
         assert!(DependencyGraph::is_parent_to_child("HAS_JOB"));
         assert!(DependencyGraph::is_parent_to_child("HAS_DIFF"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_FILE"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_NOTE"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_LABEL"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_FINDING"));
+        assert!(DependencyGraph::is_parent_to_child("HAS_IDENTIFIER"));
+        // Future HAS_* edges would also match automatically
+        assert!(DependencyGraph::is_parent_to_child("HAS_FUTURE_EDGE"));
+
+        // IN_* edges are child-to-parent (not parent-to-child)
         assert!(!DependencyGraph::is_parent_to_child("IN_PROJECT"));
         assert!(!DependencyGraph::is_parent_to_child("IN_GROUP"));
+        assert!(!DependencyGraph::is_parent_to_child("IN_MILESTONE"));
+
+        // Association edges are not parent-to-child
         assert!(!DependencyGraph::is_parent_to_child("AUTHORED"));
+        assert!(!DependencyGraph::is_parent_to_child("MEMBER_OF"));
+        assert!(!DependencyGraph::is_parent_to_child("ASSIGNED"));
     }
 
     #[test]

@@ -6,6 +6,7 @@ use anyhow::Result;
 use clickhouse::Row;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -48,8 +49,10 @@ impl ParameterSampler {
         // Use SAMPLE or ORDER BY RAND() with LIMIT for random sampling
         // ClickHouse's cityHash64(rand()) is efficient for random ordering
         let query = format!(
-            "SELECT id FROM {} ORDER BY cityHash64(rand()) LIMIT {}",
-            table_name, self.sample_size
+            "SELECT {pk} FROM {} ORDER BY cityHash64(rand()) LIMIT {}",
+            table_name,
+            self.sample_size,
+            pk = DEFAULT_PRIMARY_KEY
         );
 
         let ids: Vec<i64> = self
@@ -111,10 +114,15 @@ impl ParameterSampler {
         let table_name = ontology.table_name(entity)?;
 
         // Sample IDs that exist within the given traversal path
+        let escaped = traversal_path.replace('\'', "''");
         let query = format!(
-            "SELECT id FROM {} WHERE startsWith(traversal_path, '{}') \
+            "SELECT {pk} FROM {} WHERE startsWith({tp}, '{}') \
              ORDER BY cityHash64(rand()) LIMIT {}",
-            table_name, traversal_path, count
+            table_name,
+            escaped,
+            count,
+            pk = DEFAULT_PRIMARY_KEY,
+            tp = TRAVERSAL_PATH_COLUMN
         );
 
         let ids: Vec<i64> = self
@@ -145,9 +153,13 @@ impl ParameterSampler {
 
         // Sample IDs where traversal_path starts with "org_id/"
         let query = format!(
-            "SELECT id FROM {} WHERE startsWith(traversal_path, '{}/') \
+            "SELECT {pk} FROM {} WHERE startsWith({tp}, '{}/') \
              ORDER BY cityHash64(rand()) LIMIT {}",
-            table_name, org_id, count
+            table_name,
+            org_id,
+            count,
+            pk = DEFAULT_PRIMARY_KEY,
+            tp = TRAVERSAL_PATH_COLUMN
         );
 
         let ids: Vec<i64> = self
@@ -194,15 +206,22 @@ impl ParameterSampler {
         Ok(values)
     }
 
-    /// Sample traversal paths from the Group table.
+    /// Sample traversal paths from the namespace entity table.
     /// Returns (org_id, traversal_path) pairs.
     /// The first segment of traversal_path is the org_id.
-    pub async fn sample_traversal_paths(&self) -> Result<Vec<(i64, String)>> {
+    pub async fn sample_traversal_paths(
+        &self,
+        namespace_entity: &str,
+        ontology: &Ontology,
+    ) -> Result<Vec<(i64, String)>> {
+        let table_name = ontology.table_name(namespace_entity)?;
         let query = format!(
-            "SELECT traversal_path FROM gl_group \
-             WHERE traversal_path != '' \
+            "SELECT {tp} FROM {} \
+             WHERE {tp} != '' \
              ORDER BY cityHash64(rand()) LIMIT {}",
-            self.sample_size
+            table_name,
+            self.sample_size,
+            tp = TRAVERSAL_PATH_COLUMN
         );
 
         let rows: Vec<(i64, String)> = self

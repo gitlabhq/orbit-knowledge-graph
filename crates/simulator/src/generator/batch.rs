@@ -4,6 +4,7 @@ use super::fake_data::{FakeValue, FakeValueGenerator, FieldKind};
 use arrow::array::*;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
+use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use ontology::{DataType, Field, NodeEntity};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -59,7 +60,7 @@ impl BatchBuilder {
         let columns: Vec<ColumnData> = node
             .fields
             .iter()
-            .filter(|field| field.name != "traversal_path")
+            .filter(|field| field.name != TRAVERSAL_PATH_COLUMN)
             .map(|field| ColumnData {
                 kind: FieldKind::classify(field),
                 enum_values: field.enum_values.clone(),

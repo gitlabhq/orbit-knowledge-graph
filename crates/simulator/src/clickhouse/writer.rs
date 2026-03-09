@@ -10,6 +10,8 @@ use ontology::constants::EDGE_TABLE;
 use std::path::Path;
 use std::process::Command;
 
+use crate::constants::CLICKHOUSE_NATIVE_PORT;
+
 /// Writes data to ClickHouse with batched inserts.
 pub struct ClickHouseWriter {
     pub client: ArrowClickHouseClient,
@@ -79,8 +81,7 @@ impl ClickHouseWriter {
     }
 
     fn parse_port(&self) -> String {
-        // Default to native port 9000 for clickhouse-client
-        "9000".to_string()
+        CLICKHOUSE_NATIVE_PORT.to_string()
     }
 
     pub async fn write_batches(&self, table_name: &str, batches: &[RecordBatch]) -> Result<()> {
@@ -205,8 +206,9 @@ impl ClickHouseWriter {
             .client
             .inner()
             .query(&format!(
-                "SELECT relationship_kind, count() FROM {} GROUP BY relationship_kind ORDER BY count() DESC LIMIT 10",
-                EDGE_TABLE
+                "SELECT {rk}, count() FROM {} GROUP BY {rk} ORDER BY count() DESC LIMIT 10",
+                EDGE_TABLE,
+                rk = ontology::constants::EDGE_RESERVED_COLUMNS[1]
             ))
             .fetch_all()
             .await
