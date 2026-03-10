@@ -1,4 +1,30 @@
-use super::ast::{Expr, OrderExpr, Query, SelectExpr, TableRef};
+use super::ast::{Expr, InsertSelect, OrderExpr, Query, SelectExpr, TableRef};
+
+pub fn emit_insert_select(statement: &InsertSelect) -> String {
+    let mut sql = String::with_capacity(512);
+
+    sql.push_str("INSERT INTO ");
+    sql.push_str(&statement.insert.table);
+
+    if !statement.insert.columns.is_empty() {
+        sql.push_str(" (");
+        sql.push_str(&statement.insert.columns.join(", "));
+        sql.push(')');
+    }
+
+    sql.push_str(" SELECT ");
+    emit_select_list(&mut sql, &statement.query.select);
+
+    sql.push_str(" FROM ");
+    emit_table_ref(&mut sql, &statement.query.from);
+
+    if let Some(where_clause) = &statement.query.where_clause {
+        sql.push_str(" WHERE ");
+        emit_expr(&mut sql, where_clause);
+    }
+
+    sql
+}
 
 pub fn emit_sql(query: &Query) -> String {
     let mut sql = String::with_capacity(256);
@@ -118,7 +144,7 @@ fn emit_order_by(sql: &mut String, order_by: &[OrderExpr]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::sdlc::plan::ast::Op;
+    use crate::llqm_v1::ast::{Insert, InsertSelect, Op};
 
     #[test]
     fn simple_select_from() {
@@ -272,6 +298,56 @@ mod tests {
             emit_sql(&query),
             "SELECT CAST(NULLIF(unnest(string_to_array(ids, '/')), '') AS BIGINT) AS exploded_id FROM t"
         );
+    }
+
+    #[test]
+    fn insert_select_with_where() {
+        let statement = InsertSelect {
+            insert: Insert {
+                table: "gl_project".to_string(),
+                columns: vec![
+                    "id".to_string(),
+                    "name".to_string(),
+                    "_deleted".to_string(),
+                    "_version".to_string(),
+                ],
+            },
+            query: Query {
+                select: vec![
+                    SelectExpr::bare(Expr::col("", "id")),
+                    SelectExpr::bare(Expr::col("", "name")),
+                    SelectExpr::bare(Expr::raw("true")),
+                    SelectExpr::bare(Expr::raw("now64(6)")),
+                ],
+                from: TableRef::scan("gl_project", None),
+                where_clause: Some(Expr::binary(
+                    Op::And,
+                    Expr::func(
+                        "startsWith",
+                        vec![
+                            Expr::col("", "traversal_path"),
+                            Expr::param("traversal_path", "String"),
+                        ],
+                    ),
+                    Expr::binary(Op::Eq, Expr::col("", "_deleted"), Expr::raw("false")),
+                )),
+                order_by: vec![],
+                limit: None,
+            },
+        };
+
+        let sql = emit_insert_select(&statement);
+
+        assert!(
+            sql.starts_with("INSERT INTO gl_project (id, name, _deleted, _version) SELECT "),
+            "sql: {sql}"
+        );
+        assert!(sql.contains(", true, now64(6)"), "sql: {sql}");
+        assert!(
+            sql.contains("startsWith(traversal_path, {traversal_path:String})"),
+            "sql: {sql}"
+        );
+        assert!(sql.contains("(_deleted = false)"), "sql: {sql}");
     }
 
     #[test]

@@ -2,9 +2,10 @@
 
 use super::error::{ErrorCategory, ParsedError};
 use super::metadata::{ErrorInfo, QueryMetadata, QueryMetadataBuilder, QueryPlan, SampleData};
-use super::{ParameterSampler, QueryDefinition};
+use super::{ParameterSampler, QueryEntry};
 use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
+use futures::stream::{self, StreamExt};
 use ontology::Ontology;
 use query_engine::{ParamValue, SecurityContext, compile};
 use serde::{Deserialize, Serialize};
@@ -230,119 +231,14 @@ impl QueryExecutor {
             .map_err(|e| anyhow::anyhow!("Invalid security context: {}", e))
     }
 
-    /// Execute a single query with sampled parameters.
-    pub async fn execute_query(&mut self, name: &str, query: &QueryDefinition) -> ExecutionResult {
-        let start = Instant::now();
-
-        // Pick security context FIRST so we can sample IDs within its scope
-        let security_ctx = match self.random_security_context() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                return ExecutionResult::failure(
-                    name.to_string(),
-                    format!("Security context error: {}", e),
-                    start.elapsed(),
-                );
-            }
-        };
-
-        // Substitute parameters with sampled values within the security context path
-        let (substituted, sampling_info) =
-            match self.substitute_parameters(query, &security_ctx).await {
-                Ok(result) => result,
-                Err(e) => {
-                    return ExecutionResult::failure(
-                        name.to_string(),
-                        format!("Parameter substitution failed: {}", e),
-                        start.elapsed(),
-                    );
-                }
-            };
-
-        // Compile JSON to SQL
-        let json_str = match serde_json::to_string(&substituted) {
-            Ok(s) => s,
-            Err(e) => {
-                return ExecutionResult::failure(
-                    name.to_string(),
-                    format!("JSON serialization failed: {}", e),
-                    start.elapsed(),
-                );
-            }
-        };
-
-        let compiled = match compile(&json_str, &self.ontology, &security_ctx) {
-            Ok(c) => c,
-            Err(e) => {
-                return ExecutionResult::failure(
-                    name.to_string(),
-                    format!("Query compilation failed: {}", e),
-                    start.elapsed(),
-                );
-            }
-        };
-
-        // Build the final SQL with parameters substituted
-        let final_sql = substitute_params_in_sql(&compiled.base.sql, &compiled.base.params);
-
-        // Execute the query and get sample rows
-        match self.execute_sql_with_sample(&final_sql).await {
-            Ok((row_count, sample_rows, column_names)) => ExecutionResult::success(
-                name.to_string(),
-                row_count,
-                sample_rows,
-                column_names,
-                start.elapsed(),
-                compiled.base.sql,
-                params_to_json(&compiled.base.params),
-                Some(sampling_info),
-            ),
-            Err(e) => ExecutionResult::failure_with_sql(
-                name.to_string(),
-                format!("Execution failed: {}", e),
-                start.elapsed(),
-                Some(final_sql),
-            ),
-        }
-    }
-
-    /// Execute all queries and return results.
-    ///
-    /// Includes a small delay between queries to allow ClickHouse to recover
-    /// from memory pressure.
-    pub async fn execute_all(
-        &mut self,
-        queries: &std::collections::HashMap<String, QueryDefinition>,
-    ) -> Vec<ExecutionResult> {
-        let mut results = Vec::with_capacity(queries.len());
-
-        for (name, query) in queries {
-            let result = self.execute_query(name, query).await;
-
-            // If we hit a memory error, give ClickHouse time to recover
-            if !result.success
-                && let Some(ref err) = result.error
-                && (err.contains("MEMORY_LIMIT") || err.contains("network error"))
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            }
-
-            results.push(result);
-        }
-
-        results
-    }
-
     /// Substitute placeholder node_ids with sampled values within the security context.
     ///
     /// Returns the substituted query and sampling info for diagnostics.
     async fn substitute_parameters(
-        &mut self,
-        query: &QueryDefinition,
+        &self,
+        mut query_value: serde_json::Value,
         security_ctx: &SecurityContext,
     ) -> Result<(serde_json::Value, SamplingInfo)> {
-        let mut query_value = serde_json::to_value(query)?;
-
         // Get the first traversal path from the security context
         let traversal_path = security_ctx.traversal_paths.first().cloned();
 
@@ -392,10 +288,8 @@ impl QueryExecutor {
     /// Supports placeholder syntax:
     /// - `"$sample"` - sample 1 ID
     /// - `"$sample:N"` - sample N IDs (e.g., `"$sample:3"` for 3 IDs)
-    /// - `[123]` - legacy: array length determines sample count (1 ID)
-    /// - `[1, 2]` - legacy: sample 2 IDs
     async fn substitute_node_ids(
-        &mut self,
+        &self,
         obj: &mut serde_json::Map<String, serde_json::Value>,
         traversal_path: &Option<String>,
         security_ctx: &SecurityContext,
@@ -579,22 +473,48 @@ impl QueryExecutor {
         self.sampler.cache_stats()
     }
 
-    /// Execute a query and capture full metadata for debugging/analysis.
-    pub async fn execute_query_with_metadata(
-        &mut self,
-        name: &str,
-        query: &QueryDefinition,
+    /// Execute a single query with sampled parameters, returning metadata.
+    pub async fn execute_query(
+        &self,
+        key: &str,
+        entry: &QueryEntry,
     ) -> (ExecutionResult, QueryMetadata) {
         let start = Instant::now();
-        let original_query = serde_json::to_value(query).unwrap_or_default();
-        let mut builder = QueryMetadataBuilder::new(name).original_query(original_query.clone());
+        let display_name = format!("{} ({})", key, entry.desc);
+
+        let original_query = match entry.parse_query() {
+            Ok(v) => v,
+            Err(e) => {
+                let error_msg = format!("Invalid query JSON: {}", e);
+                let result = ExecutionResult::failure(
+                    display_name.clone(),
+                    error_msg.clone(),
+                    start.elapsed(),
+                );
+                let metadata = QueryMetadataBuilder::new(&display_name)
+                    .execution_time(start.elapsed())
+                    .failure(ErrorInfo {
+                        message: error_msg,
+                        category: "PARSE_ERROR".to_string(),
+                        code: None,
+                    })
+                    .build();
+                return (result, metadata);
+            }
+        };
+
+        let mut builder =
+            QueryMetadataBuilder::new(&display_name).original_query(original_query.clone());
 
         let security_ctx = match self.random_security_context() {
             Ok(ctx) => ctx,
             Err(e) => {
                 let error_msg = format!("Security context error: {}", e);
-                let result =
-                    ExecutionResult::failure(name.to_string(), error_msg.clone(), start.elapsed());
+                let result = ExecutionResult::failure(
+                    display_name.clone(),
+                    error_msg.clone(),
+                    start.elapsed(),
+                );
                 let metadata = builder
                     .execution_time(start.elapsed())
                     .failure(ErrorInfo {
@@ -608,14 +528,17 @@ impl QueryExecutor {
         };
 
         let (substituted, sampling_info) = match self
-            .substitute_parameters(query, &security_ctx)
+            .substitute_parameters(original_query, &security_ctx)
             .await
         {
             Ok(result) => result,
             Err(e) => {
                 let error_msg = format!("Parameter substitution failed: {}", e);
-                let result =
-                    ExecutionResult::failure(name.to_string(), error_msg.clone(), start.elapsed());
+                let result = ExecutionResult::failure(
+                    display_name.clone(),
+                    error_msg.clone(),
+                    start.elapsed(),
+                );
                 let metadata = builder
                     .execution_time(start.elapsed())
                     .failure(ErrorInfo {
@@ -634,8 +557,11 @@ impl QueryExecutor {
             Ok(s) => s,
             Err(e) => {
                 let error_msg = format!("JSON serialization failed: {}", e);
-                let result =
-                    ExecutionResult::failure(name.to_string(), error_msg.clone(), start.elapsed());
+                let result = ExecutionResult::failure(
+                    display_name.clone(),
+                    error_msg.clone(),
+                    start.elapsed(),
+                );
                 let metadata = builder
                     .execution_time(start.elapsed())
                     .failure(ErrorInfo {
@@ -652,8 +578,11 @@ impl QueryExecutor {
             Ok(c) => c,
             Err(e) => {
                 let error_msg = format!("Query compilation failed: {}", e);
-                let result =
-                    ExecutionResult::failure(name.to_string(), error_msg.clone(), start.elapsed());
+                let result = ExecutionResult::failure(
+                    display_name.clone(),
+                    error_msg.clone(),
+                    start.elapsed(),
+                );
                 let metadata = builder
                     .execution_time(start.elapsed())
                     .failure(ErrorInfo {
@@ -689,7 +618,7 @@ impl QueryExecutor {
                 let sample_data = self.fetch_sample_for_metadata(&final_sql).await;
 
                 let result = ExecutionResult::success(
-                    name.to_string(),
+                    display_name,
                     row_count,
                     sample_rows,
                     column_names,
@@ -712,7 +641,7 @@ impl QueryExecutor {
                 let error_msg = format!("Execution failed: {}", e);
                 let parsed = ParsedError::parse(&error_msg);
                 let result = ExecutionResult::failure_with_sql(
-                    name.to_string(),
+                    display_name,
                     error_msg.clone(),
                     start.elapsed(),
                     Some(final_sql),
@@ -730,15 +659,17 @@ impl QueryExecutor {
         }
     }
 
-    /// Execute all queries and return results with metadata.
-    pub async fn execute_all_with_metadata(
-        &mut self,
-        queries: &std::collections::HashMap<String, QueryDefinition>,
+    /// Execute all queries serially, returning results with metadata.
+    ///
+    /// Includes a small delay after memory/network errors to let ClickHouse recover.
+    pub async fn execute_all(
+        &self,
+        queries: &std::collections::HashMap<String, QueryEntry>,
     ) -> Vec<(ExecutionResult, QueryMetadata)> {
         let mut results = Vec::with_capacity(queries.len());
 
-        for (name, query) in queries {
-            let (result, metadata) = self.execute_query_with_metadata(name, query).await;
+        for (key, entry) in queries {
+            let (result, metadata) = self.execute_query(key, entry).await;
 
             if !result.success
                 && let Some(ref err) = result.error
@@ -751,6 +682,25 @@ impl QueryExecutor {
         }
 
         results
+    }
+
+    /// Execute all queries concurrently with a bounded concurrency limit.
+    ///
+    /// Unlike `execute_all`, this does NOT back off on memory errors — the
+    /// purpose is load testing under realistic conditions where multiple
+    /// queries hit ClickHouse simultaneously.
+    pub async fn execute_all_concurrent(
+        &self,
+        queries: &std::collections::HashMap<String, QueryEntry>,
+        concurrency: usize,
+    ) -> Vec<(ExecutionResult, QueryMetadata)> {
+        let query_list: Vec<_> = queries.iter().collect();
+
+        stream::iter(query_list)
+            .map(|(key, entry)| self.execute_query(key, entry))
+            .buffer_unordered(concurrency)
+            .collect()
+            .await
     }
 
     /// Get query plan using EXPLAIN.
@@ -924,23 +874,16 @@ fn params_to_json(params: &std::collections::HashMap<String, ParamValue>) -> ser
 /// Supports:
 /// - `"$sample"` -> 1
 /// - `"$sample:N"` -> N (e.g., `"$sample:3"` -> 3)
-/// - `[...]` array -> array length (legacy compatibility)
 fn parse_sample_count(value: Option<&serde_json::Value>) -> usize {
     let Some(v) = value else { return 1 };
 
-    // Check for string placeholder syntax
-    if let Some(s) = v.as_str() {
-        if s == "$sample" {
-            return 1;
-        }
-        if let Some(count_str) = s.strip_prefix("$sample:") {
-            return count_str.parse().unwrap_or(1);
-        }
-    }
+    let Some(s) = v.as_str() else { return 1 };
 
-    // Legacy: array length determines count
-    if let Some(arr) = v.as_array() {
-        return arr.len().max(1);
+    if s == "$sample" {
+        return 1;
+    }
+    if let Some(count_str) = s.strip_prefix("$sample:") {
+        return count_str.parse().unwrap_or(1);
     }
 
     1
@@ -952,7 +895,6 @@ mod tests {
 
     #[test]
     fn test_parse_sample_count() {
-        // Placeholder syntax
         assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample"))), 1);
         assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample:1"))), 1);
         assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample:3"))), 3);
@@ -961,14 +903,8 @@ mod tests {
             10
         );
 
-        // Legacy array syntax
-        assert_eq!(parse_sample_count(Some(&serde_json::json!([123]))), 1);
-        assert_eq!(parse_sample_count(Some(&serde_json::json!([1, 2]))), 2);
-        assert_eq!(parse_sample_count(Some(&serde_json::json!([1, 2, 3]))), 3);
-
         // Edge cases
         assert_eq!(parse_sample_count(None), 1);
-        assert_eq!(parse_sample_count(Some(&serde_json::json!([]))), 1);
         assert_eq!(parse_sample_count(Some(&serde_json::json!(42))), 1);
     }
 

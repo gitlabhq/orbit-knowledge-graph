@@ -10,7 +10,7 @@ mod report;
 mod sampler;
 
 pub use error::{ErrorCategory, ParsedError};
-pub use executor::{ExecutionResult, QueryExecutor, SampleRow, SamplingInfo};
+pub use executor::{ExecutionResult, QueryExecutor, SamplingInfo};
 pub use metadata::{
     ErrorInfo, QueryMetadata, QueryMetadataBuilder, QueryPlan, RunConfig, RunMetadata,
     RuntimeStats, SampleData,
@@ -23,45 +23,47 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-/// A single query definition from the SDLC queries file.
+/// A query entry from the queries YAML file.
+///
+/// Each entry has a stable key (`q1`..`qN`), a human-readable description,
+/// and the raw GKG query DSL as an inline JSON string.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueryDefinition {
-    pub query_type: String,
-    /// Single node for search queries.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node: Option<serde_json::Value>,
-    /// Multiple nodes for traversal/aggregation queries.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub nodes: Vec<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub relationships: Vec<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aggregations: Vec<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub order_by: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub aggregation_sort: Option<serde_json::Value>,
+pub struct QueryEntry {
+    /// Human-readable description of what this query tests.
+    pub desc: String,
+    /// Raw JSON query DSL string, passed to the query engine compiler.
+    pub query: String,
 }
 
-impl QueryDefinition {
-    /// Get all nodes (combines `node` and `nodes` fields).
-    pub fn all_nodes(&self) -> Vec<&serde_json::Value> {
-        let mut result: Vec<&serde_json::Value> = self.nodes.iter().collect();
-        if let Some(ref n) = self.node {
-            result.push(n);
-        }
-        result
+impl QueryEntry {
+    /// Parse the `query` JSON string into a `serde_json::Value`.
+    pub fn parse_query(&self) -> Result<serde_json::Value> {
+        serde_json::from_str(&self.query).map_err(Into::into)
     }
 }
 
-/// Load queries from a JSON file.
-pub fn load_queries(path: &Path) -> Result<HashMap<String, QueryDefinition>> {
-    let content = std::fs::read_to_string(path)?;
-    let queries: HashMap<String, QueryDefinition> = serde_json::from_str(&content)?;
+/// Load queries from a YAML file.
+///
+/// ```yaml
+/// q1:
+///   desc: List active users
+///   query: |
+///     {"query_type": "search", ...}
+/// ```
+pub fn load_queries(path: &Path) -> Result<HashMap<String, QueryEntry>> {
+    use anyhow::Context;
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read queries file: {}", path.display()))?;
+
+    let queries: HashMap<String, QueryEntry> = serde_yaml::from_str(&content)
+        .with_context(|| format!("Failed to parse queries file: {}", path.display()))?;
+
+    for (key, entry) in &queries {
+        entry
+            .parse_query()
+            .with_context(|| format!("Invalid JSON in query '{}' ({})", key, entry.desc))?;
+    }
     Ok(queries)
 }
 
@@ -72,24 +74,29 @@ pub struct QueryParameters {
     pub node_ids: HashMap<String, Vec<String>>,
 }
 
-/// Extract parameters that need sampling from a query definition.
-pub fn extract_parameters(query: &QueryDefinition) -> QueryParameters {
+/// Extract parameters that need sampling from a query's JSON value.
+pub fn extract_parameters(query_value: &serde_json::Value) -> QueryParameters {
     let mut params = QueryParameters::default();
 
-    for node in query.all_nodes() {
-        if let Some(obj) = node.as_object() {
-            // Check if this node has node_ids that are placeholders
-            if obj.contains_key("node_ids")
-                && let Some(entity) = obj.get("entity").and_then(|e| e.as_str())
-                && let Some(id) = obj.get("id").and_then(|i| i.as_str())
-            {
-                // Store the node alias and entity type
-                params
-                    .node_ids
-                    .entry(entity.to_string())
-                    .or_default()
-                    .push(id.to_string());
-            }
+    let mut all_nodes: Vec<&serde_json::Value> = Vec::new();
+    if let Some(nodes) = query_value.get("nodes").and_then(|n| n.as_array()) {
+        all_nodes.extend(nodes);
+    }
+    if let Some(node) = query_value.get("node") {
+        all_nodes.push(node);
+    }
+
+    for node in all_nodes {
+        if let Some(obj) = node.as_object()
+            && obj.contains_key("node_ids")
+            && let Some(entity) = obj.get("entity").and_then(|e| e.as_str())
+            && let Some(id) = obj.get("id").and_then(|i| i.as_str())
+        {
+            params
+                .node_ids
+                .entry(entity.to_string())
+                .or_default()
+                .push(id.to_string());
         }
     }
 
@@ -102,8 +109,7 @@ mod tests {
 
     #[test]
     fn test_extract_parameters() {
-        let query: QueryDefinition = serde_json::from_str(
-            r#"{
+        let json = r#"{
             "query_type": "traversal",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
@@ -113,12 +119,21 @@ mod tests {
                 {"type": "MERGED_BY", "from": "mr", "to": "merger"}
             ],
             "limit": 30
-        }"#,
-        )
-        .unwrap();
+        }"#;
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
 
-        let params = extract_parameters(&query);
+        let params = extract_parameters(&value);
         assert!(params.node_ids.contains_key("User"));
         assert_eq!(params.node_ids["User"], vec!["merger".to_string()]);
+    }
+
+    #[test]
+    fn test_query_entry_parse() {
+        let entry = QueryEntry {
+            desc: "test query".into(),
+            query: r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}}"#.into(),
+        };
+        let value = entry.parse_query().unwrap();
+        assert_eq!(value["query_type"], "search");
     }
 }

@@ -141,7 +141,7 @@ pub(crate) fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: boo
         ArrowDataType::Date32 => "Date",
         ArrowDataType::Date64 => "DateTime64(3)",
         ArrowDataType::Timestamp(_, _) => "DateTime64(3)",
-        _ => "String", // Fallback
+        other => panic!("unsupported Arrow type: {other:?}"),
     };
 
     if nullable {

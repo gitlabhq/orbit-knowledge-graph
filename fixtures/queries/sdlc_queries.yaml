@@ -1,12 +1,26 @@
-{
-    "List active users": {
+# SDLC query definitions for evaluation benchmarking.
+#
+# Each entry has a stable key (q1..qN), a human-readable description,
+# and the raw GKG query DSL as inline JSON.
+#
+# Placeholder syntax for sampled parameters:
+#   "$sample"   — sample 1 random ID from ClickHouse
+#   "$sample:N" — sample N random IDs
+
+q1:
+  desc: List active users
+  query: |
+    {
       "query_type": "search",
       "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
       "limit": 30,
       "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
-    },
-  
-    "Open merge requests in a project": {
+    }
+
+q2:
+  desc: Open merge requests in a project
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
@@ -17,9 +31,12 @@
       ],
       "limit": 25,
       "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"}
-    },
-  
-    "Draft MRs awaiting review": {
+    }
+
+q3:
+  desc: Draft MRs awaiting review
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened", "draft": true}},
@@ -29,9 +46,12 @@
         {"type": "AUTHORED", "from": "author", "to": "mr"}
       ],
       "limit": 20
-    },
-  
-    "MRs merged by a specific user": {
+    }
+
+q4:
+  desc: MRs merged by a specific user
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
@@ -42,9 +62,12 @@
       ],
       "limit": 30,
       "order_by": {"node": "mr", "property": "updated_at", "direction": "DESC"}
-    },
-  
-    "Count MRs per project": {
+    }
+
+q5:
+  desc: Count MRs per project
+  query: |
+    {
       "query_type": "aggregation",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest"},
@@ -58,9 +81,12 @@
       ],
       "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
       "limit": 10
-    },
-  
-    "Failed pipelines recently": {
+    }
+
+q6:
+  desc: Failed pipelines recently
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}},
@@ -71,9 +97,12 @@
       ],
       "limit": 30,
       "order_by": {"node": "pipe", "property": "created_at", "direction": "DESC"}
-    },
-  
-    "Pipeline success rate by project": {
+    }
+
+q7:
+  desc: Pipeline success rate by project
+  query: |
+    {
       "query_type": "aggregation",
       "nodes": [
         {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
@@ -86,9 +115,12 @@
         {"function": "count", "target": "pipe", "group_by": "p", "alias": "total_pipelines"}
       ],
       "limit": 20
-    },
-  
-    "Long-running pipelines": {
+    }
+
+q8:
+  desc: Long-running pipelines
+  query: |
+    {
       "query_type": "search",
       "node": {"id": "pipe", "entity": "Pipeline", "filters": {
         "status": "success",
@@ -96,9 +128,12 @@
       }},
       "limit": 20,
       "order_by": {"node": "pipe", "property": "duration", "direction": "DESC"}
-    },
-  
-    "Critical vulnerabilities detected": {
+    }
+
+q9:
+  desc: Critical vulnerabilities detected
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "v", "entity": "Vulnerability", "filters": {
@@ -112,9 +147,12 @@
       ],
       "limit": 30,
       "order_by": {"node": "v", "property": "detected_at", "direction": "DESC"}
-    },
-  
-    "Unresolved high-severity vulns by report type": {
+    }
+
+q10:
+  desc: Unresolved high-severity vulns by report type
+  query: |
+    {
       "query_type": "aggregation",
       "nodes": [
         {"id": "v", "entity": "Vulnerability", "filters": {
@@ -126,9 +164,12 @@
         {"function": "count", "target": "v", "alias": "vuln_count"}
       ],
       "limit": 10
-    },
-  
-    "Vulnerabilities fixed by MRs": {
+    }
+
+q11:
+  desc: Vulnerabilities fixed by MRs
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "v", "entity": "Vulnerability", "filters": {"state": "resolved"}},
@@ -138,9 +179,12 @@
         {"type": "FIXES", "from": "mr", "to": "v"}
       ],
       "limit": 25
-    },
-  
-    "Open work items (issues) by type": {
+    }
+
+q12:
+  desc: Open work items (issues) by type
+  query: |
+    {
       "query_type": "aggregation",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}}
@@ -149,16 +193,22 @@
         {"function": "count", "target": "wi", "alias": "count"}
       ],
       "limit": 10
-    },
-  
-    "Overdue work items": {
+    }
+
+q13:
+  desc: Overdue work items
+  query: |
+    {
       "query_type": "search",
       "node": {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
       "limit": 30,
       "order_by": {"node": "wi", "property": "due_date", "direction": "ASC"}
-    },
-  
-    "High weight work items assigned to user": {
+    }
+
+q14:
+  desc: High weight work items assigned to user
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {
@@ -171,9 +221,12 @@
         {"type": "ASSIGNED", "from": "wi", "to": "assignee"}
       ],
       "limit": 20
-    },
-  
-    "Work items closing MRs": {
+    }
+
+q15:
+  desc: Work items closing MRs
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
@@ -183,9 +236,12 @@
         {"type": "CLOSES", "from": "mr", "to": "wi"}
       ],
       "limit": 30
-    },
-  
-    "Notes (comments) on MRs by user": {
+    }
+
+q16:
+  desc: Notes (comments) on MRs by user
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "note", "entity": "Note", "filters": {"system": false, "noteable_type": "MergeRequest"}},
@@ -196,9 +252,12 @@
       ],
       "limit": 30,
       "order_by": {"node": "note", "property": "created_at", "direction": "DESC"}
-    },
-  
-    "Comment activity per user": {
+    }
+
+q17:
+  desc: Comment activity per user
+  query: |
+    {
       "query_type": "aggregation",
       "nodes": [
         {"id": "note", "entity": "Note", "filters": {"system": false}},
@@ -212,9 +271,12 @@
       ],
       "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
       "limit": 20
-    },
-  
-    "Projects in a group": {
+    }
+
+q18:
+  desc: Projects in a group
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "p", "entity": "Project", "filters": {"archived": false}},
@@ -225,9 +287,12 @@
       ],
       "limit": 30,
       "order_by": {"node": "p", "property": "last_activity_at", "direction": "DESC"}
-    },
-  
-    "Public projects": {
+    }
+
+q19:
+  desc: Public projects
+  query: |
+    {
       "query_type": "search",
       "node": {"id": "p", "entity": "Project", "filters": {
         "visibility_level": "public",
@@ -235,9 +300,12 @@
       }},
       "limit": 20,
       "order_by": {"node": "p", "property": "star_count", "direction": "DESC"}
-    },
-  
-    "User contributions - authored MRs": {
+    }
+
+q20:
+  desc: "User contributions: authored MRs"
+  query: |
+    {
       "query_type": "aggregation",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest"},
@@ -251,9 +319,12 @@
       ],
       "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
       "limit": 20
-    },
-  
-    "MR reviewers per project": {
+    }
+
+q21:
+  desc: MR reviewers per project
+  query: |
+    {
       "query_type": "aggregation",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest"},
@@ -268,9 +339,12 @@
         {"function": "count", "target": "reviewer", "group_by": "p", "alias": "reviewer_count"}
       ],
       "limit": 15
-    },
-  
-    "Work items in milestone": {
+    }
+
+q22:
+  desc: Work items in milestone
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
@@ -280,9 +354,12 @@
         {"type": "IN_MILESTONE", "from": "wi", "to": "m"}
       ],
       "limit": 30
-    },
-  
-    "Work items with specific label": {
+    }
+
+q23:
+  desc: Work items with specific label
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
@@ -292,9 +369,12 @@
         {"type": "HAS_LABEL", "from": "wi", "to": "lbl"}
       ],
       "limit": 30
-    },
-  
-    "Pipeline triggered by MR": {
+    }
+
+q24:
+  desc: Pipeline triggered by MR
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "pipe", "entity": "Pipeline", "filters": {"source": "merge_request_event"}},
@@ -305,33 +385,45 @@
       ],
       "limit": 10,
       "order_by": {"node": "pipe", "property": "created_at", "direction": "DESC"}
-    },
-  
-    "Shortest path between two projects": {
+    }
+
+q25:
+  desc: Shortest path between two projects
+  query: |
+    {
       "query_type": "path_finding",
       "nodes": [
         {"id": "start", "entity": "Project", "node_ids": "$sample"},
         {"id": "end", "entity": "Project", "node_ids": "$sample"}
       ],
       "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
-    },
-  
-    "Users by state": {
+    }
+
+q26:
+  desc: Users by state
+  query: |
+    {
       "query_type": "search",
       "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
       "limit": 20
-    },
-  
-    "Bot accounts": {
+    }
+
+q27:
+  desc: Bot accounts
+  query: |
+    {
       "query_type": "search",
       "node": {"id": "u", "entity": "User", "filters": {
         "user_type": {"op": "in", "value": ["project_bot", "service_account", "automation_bot"]}
       }},
       "limit": 30,
       "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
-    },
-  
-    "Confidential work items": {
+    }
+
+q28:
+  desc: Confidential work items
+  query: |
+    {
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {
@@ -344,9 +436,12 @@
         {"type": "IN_PROJECT", "from": "wi", "to": "p"}
       ],
       "limit": 20
-    },
-  
-    "SAST vulnerabilities by severity": {
+    }
+
+q29:
+  desc: SAST vulnerabilities by severity
+  query: |
+    {
       "query_type": "aggregation",
       "nodes": [
         {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
@@ -356,4 +451,3 @@
       ],
       "limit": 10
     }
-  }
