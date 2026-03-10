@@ -74,14 +74,23 @@ gdk psql -d gitlabhq_development -c "SHOW wal_level"
 ```
 
 > **Warning:** `gdk reconfigure` overwrites `gitlab.conf`, removing `wal_level = logical`.
-> You must re-add it after every reconfigure. If you forget and Siphon has already created
-> a replication slot, PostgreSQL will refuse to start with:
+> If Siphon has already created a replication slot, PostgreSQL will refuse to start with:
 >
 > ```plaintext
 > FATAL: logical replication slot "siphon_slot_main_db" exists, but wal_level < logical
 > ```
 >
-> The fix is to add `wal_level = logical` back to `gitlab.conf` and restart PostgreSQL.
+> To prevent this permanently, protect `gitlab.conf` from being overwritten by adding the
+> following to `$GDK_ROOT/gdk.yml`:
+>
+> ```yaml
+> gdk:
+>   protected_config_files:
+>   - 'postgresql/data/gitlab.conf'
+> ```
+>
+> If you've already lost the setting, re-add `wal_level = logical` to `gitlab.conf` and
+> restart PostgreSQL — see the troubleshooting section below.
 
 ### 3. Enable NATS and Siphon
 
@@ -528,6 +537,9 @@ restart:
 echo "wal_level = logical" >> $GDK_ROOT/postgresql/data/gitlab.conf
 gdk restart postgresql
 ```
+
+To prevent this from happening again, add `postgresql/data/gitlab.conf` to
+`protected_config_files` in `gdk.yml` (see [Enable PostgreSQL logical replication](#2-enable-postgresql-logical-replication)).
 
 **No data in siphon tables:**
 
