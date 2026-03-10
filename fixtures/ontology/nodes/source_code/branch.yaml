@@ -5,7 +5,7 @@ domain: source_code
 description: A Git branch in a repository
 label: name
 destination_table: gl_branch
-default_columns: [id, name, protected, default]
+default_columns: [id, name, protected, is_default]
 
 style:
   size: 28
@@ -41,9 +41,9 @@ properties:
     nullable: true
     description: "Whether the branch is protected."
 
-  default:
+  is_default:
     type: boolean
-    source: default
+    source: is_default
     nullable: true
     description: "Whether this is the default branch of the project."
 

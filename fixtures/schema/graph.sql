@@ -1,11 +1,23 @@
 -- Checkpoint table
 
-CREATE TABLE IF NOT EXISTS sdlc_checkpoint (
+CREATE TABLE IF NOT EXISTS checkpoint (
     key String,
     watermark DateTime64(6, 'UTC'),
     cursor_values String DEFAULT '',
-    _version DateTime64(6, 'UTC') DEFAULT now64()
+    _version DateTime64(6, 'UTC') DEFAULT now64(6)
 ) ENGINE = ReplacingMergeTree(_version) ORDER BY (key);
+
+-- Namespace deletion schedule
+
+CREATE TABLE IF NOT EXISTS namespace_deletion_schedule (
+    namespace_id Int64,
+    traversal_path String,
+    scheduled_deletion_date DateTime64(6, 'UTC'),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (namespace_id, traversal_path)
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- Graph node tables
 
@@ -369,6 +381,19 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     created_at DateTime64(6, 'UTC') DEFAULT now(),
     updated_at DateTime64(6, 'UTC') DEFAULT now(),
     detected_at Nullable(DateTime64(6, 'UTC')),
+    traversal_path String DEFAULT '0/',
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_branch (
+    id Int64,
+    project_id Int64,
+    name String DEFAULT '',
+    protected Nullable(Bool),
+    is_default Nullable(Bool),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false
