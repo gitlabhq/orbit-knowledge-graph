@@ -385,6 +385,52 @@ The indexer is long-running; stop it with Ctrl-C once you see the pipelines comp
 the logs (for example `pipeline completed pipeline=User`). On subsequent runs you can skip
 Step 1 and go straight to dispatch then index.
 
+## Keeping the graph up to date
+
+In production, `dispatch-indexing` and `indexer` run as separate long-lived pods — the
+indexer stays up consuming messages while dispatch triggers indexing on a schedule. Locally
+there is no equivalent, so both need to be run manually.
+
+For active development, run them in separate terminals alongside the server:
+
+**Terminal 1 — webserver:**
+
+```shell
+set -a && source .env.local && set +a
+mise run server:start
+```
+
+**Terminal 2 — indexer** (keep running; processes jobs as they arrive):
+
+```shell
+set -a && source .env.local && set +a
+cargo run -p gkg-server -- --mode indexer
+```
+
+**Terminal 3 — dispatch** (run once to queue work, then re-run whenever you want to
+re-sync after creating new data in GDK):
+
+```shell
+set -a && source .env.local && set +a
+cargo run -p gkg-server -- --mode dispatch-indexing
+```
+
+When you create issues, MRs, or other data in GDK, Siphon streams them into
+`gitlab_clickhouse_development` within seconds. Run dispatch-indexing again to queue those
+namespaces for re-indexing; the indexer picks them up automatically.
+
+To verify data is flowing end-to-end:
+
+```shell
+# Check siphon has picked up your new data
+clickhouse client --port 9001 \
+  --query "SELECT count() FROM gitlab_clickhouse_development.siphon_issues FINAL"
+
+# Check the graph has been indexed
+clickhouse client --port 9001 --database gkg_development \
+  --query "SELECT count() FROM gl_work_item FINAL"
+```
+
 ## Architecture
 
 ```plaintext
