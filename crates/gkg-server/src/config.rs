@@ -5,8 +5,8 @@ use gitlab_client::GitlabClientConfiguration;
 use health_check::HealthCheckConfig;
 use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
-use indexer::dispatcher::ScheduleConfig;
 use indexer::nats::NatsConfiguration;
+use indexer::scheduler::ScheduleConfig;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
 

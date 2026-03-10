@@ -7,11 +7,11 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
-use indexer::dispatcher::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::modules::sdlc::dispatch::{
     GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher, NamespaceDispatcherConfig,
 };
 use indexer::nats::NatsConfiguration;
+use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};
 use serde::Deserialize;
 use testcontainers::ImageExt;
@@ -189,7 +189,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
 
     context.given_enabled_namespaces([100, 200, 300]).await;
 
-    let services = indexer::dispatcher::connect(&context.nats_config())
+    let services = indexer::scheduler::connect(&context.nats_config())
         .await
         .unwrap();
     let datalake = context.clickhouse.config.build_client();
@@ -210,7 +210,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     ];
 
     let before = Utc::now();
-    indexer::dispatcher::run(&tasks, &*lock_service)
+    indexer::scheduler::run(&tasks, &*lock_service)
         .await
         .unwrap();
     let after = Utc::now();

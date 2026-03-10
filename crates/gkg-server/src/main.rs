@@ -10,10 +10,11 @@ use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use indexer::IndexerConfig;
-use indexer::dispatcher::ScheduledTask;
-use indexer::dispatcher::ScheduledTaskMetrics;
 use indexer::modules::code::dispatch::ProjectCodeDispatcher;
 use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use indexer::scheduler::ScheduledTask;
+use indexer::scheduler::ScheduledTaskMetrics;
+use indexer::scheduler::TableCleanup;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -38,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
 
     let result = match args.mode {
         Mode::DispatchIndexing => {
-            let services = indexer::dispatcher::connect(&config.nats).await?;
+            let services = indexer::scheduler::connect(&config.nats).await?;
             let graph = config.graph.build_client();
             let datalake = config.datalake.build_client();
             let metrics = ScheduledTaskMetrics::new();
@@ -57,12 +58,17 @@ async fn main() -> anyhow::Result<()> {
                 )),
                 Box::new(ProjectCodeDispatcher::new(
                     services.nats,
-                    graph,
-                    metrics,
+                    graph.clone(),
+                    metrics.clone(),
                     config.schedule.tasks.project_code.clone(),
                 )),
+                Box::new(TableCleanup::new(
+                    graph,
+                    metrics,
+                    config.schedule.tasks.table_cleanup.clone(),
+                )),
             ];
-            indexer::dispatcher::run(&tasks, &*lock_service)
+            indexer::scheduler::run(&tasks, &*lock_service)
                 .await
                 .map_err(Into::into)
         }

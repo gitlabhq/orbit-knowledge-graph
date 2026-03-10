@@ -8,6 +8,7 @@ use crate::modules::code::dispatch::ProjectCodeDispatcherConfig;
 use crate::modules::code::{ProjectCodeIndexingHandlerConfig, PushEventHandlerConfig};
 use crate::modules::sdlc::dispatch::{GlobalDispatcherConfig, NamespaceDispatcherConfig};
 use crate::modules::sdlc::{GlobalHandlerConfig, NamespaceHandlerConfig};
+use crate::scheduler::TableCleanupConfig;
 
 /// Per-handler engine configuration (retry policy, concurrency group).
 ///
@@ -86,6 +87,8 @@ pub struct ScheduledTasksConfiguration {
     pub namespace: NamespaceDispatcherConfig,
     #[serde(default)]
     pub project_code: ProjectCodeDispatcherConfig,
+    #[serde(default)]
+    pub table_cleanup: TableCleanupConfig,
 }
 
 /// ETL engine configuration.
