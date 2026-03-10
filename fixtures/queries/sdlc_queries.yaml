@@ -244,7 +244,7 @@ q16:
     {
       "query_type": "traversal",
       "nodes": [
-        {"id": "note", "entity": "Note", "filters": {"system": false, "noteable_type": "MergeRequest"}},
+        {"id": "note", "entity": "Note", "filters": {"noteable_type": "MergeRequest"}},
         {"id": "author", "entity": "User", "node_ids": "$sample"}
       ],
       "relationships": [
@@ -260,7 +260,7 @@ q17:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "note", "entity": "Note", "filters": {"system": false}},
+        {"id": "note", "entity": "Note"},
         {"id": "author", "entity": "User"}
       ],
       "relationships": [
