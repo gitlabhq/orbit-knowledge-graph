@@ -170,12 +170,11 @@ impl ColumnValues {
             (ColumnValues::String(vec), FakeValue::Null) => vec.push(None),
             (ColumnValues::Date32(vec), FakeValue::Date(v)) => vec.push(Some(*v)),
             (ColumnValues::Date32(vec), FakeValue::Null) => vec.push(None),
-            // Type mismatch fallback
-            (ColumnValues::Int64(vec), _) => vec.push(None),
-            (ColumnValues::Float64(vec), _) => vec.push(None),
-            (ColumnValues::Bool(vec), _) => vec.push(None),
-            (ColumnValues::String(vec), _) => vec.push(None),
-            (ColumnValues::Date32(vec), _) => vec.push(None),
+            (col, val) => panic!(
+                "type mismatch: column {:?} got {:?}",
+                std::mem::discriminant(col),
+                val
+            ),
         }
     }
 

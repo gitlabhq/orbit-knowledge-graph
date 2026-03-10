@@ -6169,6 +6169,7 @@ dependencies = [
  "clap",
  "clickhouse",
  "clickhouse-client",
+ "futures",
  "gkg-utils",
  "indicatif",
  "ontology",

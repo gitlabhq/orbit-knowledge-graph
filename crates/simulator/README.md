@@ -1,81 +1,60 @@
 # Simulator
 
-Streaming data generator and query evaluator for the GitLab Knowledge Graph. Generates fake SDLC data from ontology definitions and populates ClickHouse directly. Includes tools for correctness testing of SDLC queries.
+Streaming data generator and query evaluator for the GitLab Knowledge Graph. Generates fake SDLC data from ontology definitions, writes Parquet files, loads them into ClickHouse, and runs correctness tests against SDLC queries.
+
+All three binaries are config-driven via a YAML file (default `simulator.yaml`).
 
 ## Quick Start
 
 ```shell
-# Start ClickHouse and populate with fake data
-./scripts/run.sh populate
+# Generate fake data to Parquet files
+cargo run --bin generate
 
-# Or with custom parameters
-./scripts/run.sh populate --organizations 5 --nodes-per-type 500
+# Load Parquet data into ClickHouse
+cargo run --bin load
 
-# Evaluate SDLC queries against the generated data
-./scripts/run.sh evaluate
+# Run SDLC queries and collect statistics
+cargo run --bin evaluate
 ```
 
 ## Prerequisites
 
-- [Colima](https://github.com/abiosoft/colima) - Docker runtime for macOS
+- [Colima](https://github.com/abiosoft/colima) or Docker Desktop for ClickHouse
 - Docker CLI
 
 ```shell
 brew install colima docker
 ```
 
-## Usage
+## Binaries
 
-### Script Commands
+### generate
 
-```shell
-./scripts/run.sh start       # Start ClickHouse
-./scripts/run.sh stop        # Stop ClickHouse
-./scripts/run.sh clean       # Remove container and all data
-./scripts/run.sh restart     # Restart ClickHouse
-./scripts/run.sh status      # Show ClickHouse status and table stats
-./scripts/run.sh populate    # Start ClickHouse and populate with data
-./scripts/run.sh evaluate    # Run SDLC queries and collect statistics
-```
-
-### Populate Options
+Generates fake SDLC data to Parquet files based on the ontology and generation config.
 
 ```shell
-./scripts/run.sh populate --organizations 5              # 5 organizations
-./scripts/run.sh populate --nodes-per-type 500           # 500 nodes per type
-./scripts/run.sh populate --node-count User=1000         # Override specific types
-./scripts/run.sh populate --traversal-ids 5000           # More traversal IDs per org
-./scripts/run.sh populate --edges-per-source 5           # More edges per node
-./scripts/run.sh populate --dry-run                      # Preview plan only
+cargo run --bin generate                              # default config
+cargo run --bin generate -- --config my-config.yaml   # custom config
+cargo run --bin generate -- --dry-run                 # preview plan only
+cargo run --bin generate -- --force                   # regenerate even if data exists
 ```
 
-### Direct Binary
+### load
+
+Loads generated Parquet files into ClickHouse (creates tables, inserts data, adds indexes/projections).
 
 ```shell
-cargo run --bin simulate -- \
-    --ontology-path fixtures/ontology \
-    --clickhouse-url http://localhost:8123 \
-    --organizations 2 \
-    --traversal-ids 1000 \
-    --nodes-per-type 100 \
-    --node-count User=500 \
-    --edges-per-source 3
+cargo run --bin load                          # default config
+cargo run --bin load -- --no-schema           # skip table creation (reload data only)
+cargo run --bin load -- --no-data             # skip data loading (schema/indexes only)
+cargo run --bin load -- --no-indexes          # skip index creation
+cargo run --bin load -- --no-projections      # skip projection creation
+cargo run --bin load -- --use-cli             # use clickhouse-client CLI for loading
 ```
 
-### All CLI Options
+### evaluate
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--ontology-path` | `fixtures/ontology` | Path to ontology YAML files |
-| `--clickhouse-url` | `http://localhost:8123` | ClickHouse HTTP URL |
-| `--organizations` | 2 | Number of organizations to generate |
-| `--traversal-ids` | 1000 | Traversal IDs per organization |
-| `--max-traversal-depth` | 5 | Max depth of traversal ID hierarchy |
-| `--nodes-per-type` | 100 | Default nodes per node type |
-| `--node-count TYPE=N` | - | Override count for specific type (validated against ontology) |
-| `--edges-per-source` | 3 | Edges to generate per source node |
-| `--batch-size` | 10000 | Batch size for inserts |
-| `--dry-run` | false | Print plan without executing |
+Runs SDLC queries against the database and collects statistics. See [Query Evaluation](#query-evaluation) below.
 
 ## Architecture
 
@@ -114,52 +93,52 @@ Traversal IDs enable efficient row-level authorization using the GitLab namespac
 
 ## Query Evaluation
 
-The `evaluate` command runs SDLC queries against the database and collects statistics for correctness testing.
+The `evaluate` binary runs SDLC queries against the database and collects statistics for correctness testing. All settings live in the YAML config file (default `simulator.yaml`).
 
-### Basic Usage
-
-```shell
-# Run all SDLC queries
-./scripts/run.sh evaluate
-
-# Filter to specific queries
-./scripts/run.sh evaluate --filter "MR"
-
-# Output as markdown report
-./scripts/run.sh evaluate --format markdown --output report.md
-
-# Run multiple iterations
-./scripts/run.sh evaluate --iterations 5
-```
-
-### Direct Binary
+### Usage
 
 ```shell
-cargo run --bin evaluate -- \
-    --queries fixtures/queries/sdlc_queries.json \
-    --ontology fixtures/ontology \
-    --clickhouse-url http://localhost:8123 \
-    --sample-size 100 \
-    --format text
+# Run with default config
+cargo run --bin evaluate
+
+# Custom config file
+cargo run --bin evaluate -- --config simulator-slim.yaml
+
+# Verbose logging
+cargo run --bin evaluate -- --verbose
 ```
 
-### Evaluate Options
+### Evaluation Config
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--queries` | `fixtures/queries/sdlc_queries.json` | Path to queries JSON file |
-| `--ontology` | `fixtures/ontology` | Path to ontology directory |
-| `--clickhouse-url` | `http://localhost:8123` | ClickHouse HTTP URL |
-| `--sample-size` | 100 | IDs to sample per entity type |
-| `--format` | text | Output format: text, json, markdown |
-| `--output` | stdout | Write report to file |
-| `--iterations` | 1 | Run queries multiple times |
-| `--filter` | - | Only run queries matching pattern |
-| `--verbose` | false | Verbose logging |
+Settings go under the `evaluation` key in the YAML config:
+
+```yaml
+evaluation:
+  queries_path: fixtures/queries/sdlc_queries.yaml  # required
+  sample_size: 100
+  iterations: 1
+  concurrency: 1       # >1 for concurrent load testing
+  skip_cache_warm: false
+  filter: "MR"         # only run queries matching pattern
+  metadata_dir: metadata  # save query plans and params (optional)
+  output:
+    format: text       # text, json, markdown
+    path: report.md    # stdout if omitted
+```
+
+### Query File Format
+
+Queries are defined in YAML. Keys are stable identifiers (`q1`..`qN`), each with a `desc` and inline `query` (the raw GKG query DSL as a JSON string):
+
+```yaml
+q1:
+  desc: List users in org
+  query: '{"version":"1.1","query":{"nodes":[{"node_kind":"User","filters":[]}]}}'
+```
 
 ### How It Works
 
-1. **Parameter Sampling**: Queries with placeholder `node_ids` (e.g., `[42]`) are automatically substituted with real IDs sampled from the database.
+1. **Parameter Sampling**: Queries with `"$sample"` placeholders in `node_ids` are automatically substituted with real IDs sampled from the database.
 
 2. **Query Compilation**: JSON queries are compiled to SQL using the `query-engine` crate.
 

@@ -7,6 +7,7 @@ edition = "2024"
 # Workspace dependencies
 anyhow.workspace = true
 arrow.workspace = true
+futures.workspace = true
 chrono.workspace = true
 clap.workspace = true
 rayon.workspace = true
