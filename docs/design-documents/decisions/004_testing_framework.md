@@ -1,7 +1,7 @@
 ---
-title: "GKG ADR 004: File-based testing framework for the query pipeline"
+title: "GKG ADR 004: File-based testing framework for the query and indexing pipelines"
 creation-date: "2026-03-10"
-authors: [ "@michaelusa" ]
+authors: [ "@michaelangeloio" ]
 toc_hide: true
 ---
 
@@ -15,7 +15,11 @@ Proposed
 
 ## Context
 
-The integration test suite (`redaction_integration.rs`, `hydration_integration.rs`) has grown to ~2,500 lines of Rust across 60+ test functions. Every test follows the same six-stage pipeline:
+Two integration test suites have grown large enough that the boilerplate-to-signal ratio is a maintenance problem.
+
+### Query pipeline tests
+
+The query engine integration tests (`redaction_integration.rs`, `hydration_integration.rs`) total ~2,500 lines across 60+ test functions. Every test follows the same six-stage pipeline:
 
 1. Insert seed data into ClickHouse
 2. Compile a JSON query via the query engine
@@ -24,15 +28,29 @@ The integration test suite (`redaction_integration.rs`, `hydration_integration.r
 5. Run redaction, optionally hydration
 6. Assert on results (authorized IDs, tuples, path nodes, edge kinds)
 
-Each test is a standalone async Rust function with 30-60 lines of boilerplate. The functions are structurally identical -- they differ only in the query JSON, the allow/deny rules, and the assertions. Adding a new test requires writing Rust, recompiling, and understanding internal API types (`QueryResult`, `RecordBatch`, `SecurityContext`). The signal-to-noise ratio is poor: the interesting part of each test is ~5 lines of configuration buried in ~40 lines of setup and teardown.
+Each test is a standalone async Rust function with 30-60 lines of boilerplate. The interesting part -- the query JSON, allow/deny rules, and assertions -- is ~5 lines buried in ~40 lines of setup and teardown.
 
-The problem is separating test specifications from test infrastructure so that adding a test means writing a data file, not a Rust function.
+### Indexer SDLC tests
+
+The indexer SDLC integration tests (`sdlc_indexing_integration/`) total ~2,800 lines across 35+ subtests organized by entity type (projects, groups, merge requests, labels, CI pipelines, vulnerabilities, etc.). Every test follows the same three-stage pattern:
+
+1. Seed datalake tables with raw SQL INSERTs (Siphon tables that simulate CDC data arriving from PostgreSQL via NATS)
+2. Invoke the handler (get handler from registry, create envelope, call `handler.handle()`)
+3. Assert on graph tables (query `gl_*` graph tables, inspect Arrow `RecordBatch` columns, check `gl_edge` rows)
+
+The prerequisite data setup -- namespace, traversal paths, project, project traversal paths -- is repeated identically in ~80% of tests. The handler invocation ceremony (`get_namespace_handler` + `default_test_watermark` + `TestEnvelopeFactory::simple` + `create_namespace_payload` + `create_handler_context` + `handler.handle()`) is 6-8 identical lines in every test. Node assertions are manual Arrow `RecordBatch` inspection: query the graph table, downcast columns, compare values by row index. Edge assertions are the best-factored part, using `assert_edges_have_traversal_path` helpers that reduce 6-8 lines to one call.
+
+### Common problem
+
+Both suites are structurally identical within their domain but each test is a standalone Rust function. Adding a test for a new entity type or a new redaction scenario requires writing Rust, recompiling, and understanding internal API types. The goal is to separate test specifications from test infrastructure so that adding a test means writing a data file, not a Rust function.
 
 ## Decision
 
-Use KDL (KDL Document Language) with a custom command runner to define query pipeline integration tests as `.kdl` files. The runner interprets commands sequentially, wiring into the existing `TestContext` / `run_subtests!` infrastructure. A single Rust `#[test]` function discovers and executes all `.kdl` files in a directory.
+Use KDL (KDL Document Language) with custom command runners to define integration tests as `.kdl` files. Each runner interprets commands sequentially, wiring into the existing `TestContext` / `run_subtests!` infrastructure. A single Rust `#[test]` function per suite discovers and executes all `.kdl` files in its fixtures directory.
 
-### Command set
+Two separate runners share the same KDL parsing infrastructure but define different command sets for their respective pipelines.
+
+### Query pipeline commands
 
 | Command | Args | Children | Description |
 |---|---|---|---|
@@ -59,7 +77,21 @@ Use KDL (KDL Document Language) with a custom command runner to define query pip
 | `neighbor` | -- | `id`, `entity-type`, `property` children | Assert neighbor node |
 | `json-output` | -- | expected JSON children | Assert JSON serialization |
 
-### Full pipeline example
+### Indexer SDLC commands
+
+| Command | Args | Children | Description |
+|---|---|---|---|
+| `test` | name, `handler=`, `seed=` | -- | Test metadata. `handler` is `namespace` or `global`. `seed=` loads prerequisite SQL. |
+| `seed-sql` | raw SQL string | -- | Insert rows into datalake (Siphon) tables |
+| `handle` | `namespace=`, `organization=` | -- | Invoke the handler with a test envelope. Defaults: `organization=1`. |
+| `expect-nodes` | table name, `count=` | column children | Assert graph table rows. Children specify column expectations. |
+| `expect-edges` | relationship, source, target | -- | Assert edge count (shorthand for count=any) |
+| `expect-edge-count` | relationship, source, target, count | -- | Assert exact edge count |
+| `expect-edges-traversal` | relationship, source, target, path, count | -- | Assert edge count with traversal path match |
+| `expect-no-edges` | relationship, source, target | -- | Assert zero edges of this type |
+| `expect-column` | table, column, row-index, value | -- | Assert a specific cell value after querying the graph table |
+
+### Query pipeline example
 
 ```kdl
 test "path_finding_hydration_after_partial_redaction" seed="default"
@@ -86,7 +118,6 @@ allow "project" 1000 1001
 redact expect=1
 hydrate
 
-// Surviving path should be User 1 → Group 100 → Project 1000
 authorized-count 1
 
 path-node 0 {
@@ -104,6 +135,85 @@ path-node -1 {
 edge-kinds "MEMBER_OF" "CONTAINS"
 ```
 
+### Indexer SDLC example
+
+The following replaces `processes_labels_with_edges` (85 lines of Rust) with ~30 lines of KDL:
+
+```kdl
+test "processes_labels_with_edges" handler="namespace" seed="namespace_with_project"
+
+seed-sql """
+  INSERT INTO siphon_labels
+      (id, title, color, description, project_id, group_id, traversal_path, _siphon_replicated_at)
+  VALUES
+      (1, 'bug', '#ff0000', 'Bug reports', 1000, NULL, '1/100/', '2024-01-20 12:00:00'),
+      (2, 'feature', '#00ff00', 'New features', 1000, NULL, '1/100/', '2024-01-20 12:00:00'),
+      (3, 'priority', '#0000ff', 'Priority items', NULL, 100, '1/100/', '2024-01-20 12:00:00')
+"""
+
+handle namespace=100
+
+expect-nodes "gl_label" count=3 {
+    column "title" 0 "bug"
+    column "title" 1 "feature"
+    column "title" 2 "priority"
+    column "color" 0 "#ff0000"
+    column "color" 1 "#00ff00"
+    column "color" 2 "#0000ff"
+}
+
+expect-edges-traversal "IN_PROJECT" "Label" "Project" "1/100/" 2
+expect-edges-traversal "IN_GROUP" "Label" "Group" "1/100/" 1
+```
+
+The `seed="namespace_with_project"` reference loads a shared seed file containing the prerequisite namespace, traversal path, project, and project traversal path INSERTs that are currently duplicated in ~80% of SDLC tests. This single extraction eliminates the largest source of repetition in the indexer test suite.
+
+### Indexer SDLC example: merge request edges
+
+```kdl
+test "processes_merge_requests_closing_issues" handler="namespace" seed="namespace_with_project"
+
+seed-sql """
+  INSERT INTO siphon_issues (id, title, project_id, author_id, state_id, work_item_type_id, _siphon_replicated_at)
+  VALUES
+      (1, 'Bug: Login fails', 1000, 1, 1, 0, '2024-01-20 12:00:00'),
+      (2, 'Bug: Signup broken', 1000, 1, 1, 0, '2024-01-20 12:00:00')
+"""
+
+seed-sql """
+  INSERT INTO hierarchy_work_items
+      (id, title, author_id, state_id, work_item_type_id, confidential,
+       namespace_id, traversal_path, version, custom_status_id, system_defined_status_id)
+  VALUES
+      (1, 'Bug: Login fails', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0),
+      (2, 'Bug: Signup broken', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0)
+"""
+
+seed-sql """
+  INSERT INTO hierarchy_merge_requests
+      (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+       draft, squash, target_project_id, author_id, traversal_path, version)
+  VALUES
+      (10, 101, 'Fix login bug', 'Fixes login issue', 'fix-login', 'main', 3, 'merged',
+       false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),
+      (20, 102, 'Fix signup bug', 'Fixes signup issue', 'fix-signup', 'main', 3, 'merged',
+       false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00')
+"""
+
+seed-sql """
+  INSERT INTO siphon_merge_requests_closing_issues
+      (id, merge_request_id, issue_id, project_id, traversal_path,
+       created_at, updated_at, _siphon_replicated_at)
+  VALUES
+      (1, 10, 1, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+      (2, 20, 2, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')
+"""
+
+handle namespace=100
+
+expect-edges-traversal "CLOSES" "MergeRequest" "WorkItem" "1/100/" 2
+```
+
 ### Compile error example
 
 ```kdl
@@ -114,46 +224,31 @@ compile expect="error" """
 """
 ```
 
-### SQL assertion example
-
-```kdl
-test "column_selection_mandatory_columns" seed="default"
-
-compile """
-  {
-      "query_type": "search",
-      "node": {"id": "u", "entity": "User", "columns": ["username"]},
-      "limit": 10
-  }
-"""
-
-sql-contains "_gkg_u_id"
-sql-contains "_gkg_u_type"
-sql-contains "u_username"
-sql-not-contains "JOIN"
-
-execute expect=5
-allow "user" 1 2 3
-deny "user" 4 5
-redact expect=2
-authorized-ids "u" 1 2 3
-```
-
 ### Tests that stay as Rust
 
-Some tests are genuinely procedural and do not benefit from a declarative format:
+Some tests are genuinely procedural and do not benefit from a declarative format.
+
+**Query pipeline:**
 
 - **Hand-constructed Arrow batches:** `fail_closed_null_id_denies_row` and `fail_closed_null_type_denies_row` build `RecordBatch` objects directly without the query engine. No SQL, no pipeline.
 - **Complex error pattern matching:** Tests that call `compile().unwrap_err()` and match on specific error enum variants. KDL handles `expect="error"` for simple cases, but deep pattern matching on error enums is better in Rust.
 - **Heavy custom setup:** Tests like `cross_entity_id_collision_redaction` with elaborate seed data beyond `extra-sql`. If the setup logic has conditionals or loops, Rust is clearer.
 
-Estimated split: 70-80% of tests convert to KDL, 20-30% stay as Rust.
+**Indexer:**
+
+- **Code indexing tests:** These involve starting a real Gitaly container, creating Git repositories via shell commands inside the container, constructing protobuf `ReplicationEvent` messages, and running multi-step reindexing workflows. The procedural logic and external container dependency do not reduce to declarative fixtures.
+- **Engine, NATS, and dispatcher tests:** These test infrastructure-level concerns -- message flow, pub/sub, container lifecycle, concurrency, lock contention. They are inherently procedural.
+- **Watermarking tests:** Tests that verify incremental processing semantics (re-running the handler with a newer watermark updates only changed rows) require multiple handler invocations with different state, which the sequential command model can express but Rust is clearer for.
+
+Estimated split: 70-80% of query pipeline tests and ~80% of indexer SDLC tests convert to KDL. Engine, NATS, dispatcher, code indexing, and the procedural query tests stay as Rust.
 
 ## Why a datadriven command model
 
 The CockroachDB `datadriven` library established the pattern: sequential command blocks in a file, each producing output compared against expected values. You define what each command means; the framework handles file parsing and output comparison. CockroachDB uses this for SQL optimizer testing (`exec-sql`, `trace-sql`, `normalize`, `opt`), Pebble uses it for storage engine testing (`define`, `ingest`, `compact`, `iter`, `get`).
 
-The key property is that the framework is command-agnostic. Unlike `sqllogictest` -- which assumes a single-step pipeline (SQL in, rows out, compare) -- a command-based model supports intermediate stages. Our pipeline has stages that need configuration between steps: mock auth rules must be set between execution and redaction, assertions on path node properties happen after hydration, state can be reset mid-test. There is no way to express `allow "user" 1 2 3` in sqllogictest without encoding it as a fake SQL `SET` statement inside the `DB::run()` implementation, which fights the framework rather than using it.
+The key property is that the framework is command-agnostic. Unlike `sqllogictest` -- which assumes a single-step pipeline (SQL in, rows out, compare) -- a command-based model supports intermediate stages. The query pipeline has stages that need configuration between steps: mock auth rules must be set between execution and redaction, assertions on path node properties happen after hydration, state can be reset mid-test. The indexer pipeline has a simpler shape (seed, handle, assert) but the same need for structured multi-table assertions that sqllogictest cannot express.
+
+There is no way to express `allow "user" 1 2 3` or `expect-edges-traversal "IN_PROJECT" "Label" "Project" "1/100/" 2` in sqllogictest without encoding them as fake SQL `SET` statements inside the `DB::run()` implementation, which fights the framework rather than using it.
 
 `pg_regress` (PostgreSQL's two-file model: input SQL + expected output) has the same fundamental limitation -- SQL-only, no structured assertions, and the two-file coupling adds maintenance overhead. RegreSQL (parameterized SQL regression) is designed for application query testing, not pipeline testing.
 
@@ -172,6 +267,8 @@ path-node 0 {
 ```
 
 This reads like CLI invocations. The `kdl` crate (v6.x, maintained by the KDL spec authors) handles parsing, error messages with line numbers, and node ordering. Adding a new command requires only a new match arm in the runner -- no parser changes, no serde enum variants.
+
+The same property makes KDL work for the indexer's simpler pattern. Positional args handle the common case (`expect-edges-traversal "IN_PROJECT" "Label" "Project" "1/100/" 2`), while child blocks handle structured node assertions without requiring a separate assertion syntax.
 
 Four file formats were evaluated:
 
@@ -196,7 +293,11 @@ KDL provides the readability of raw text with the structural safety of a real pa
 
 ## CI integration
 
-The `.kdl` test files live in `crates/query-engine/tests/fixtures/` alongside the existing Rust integration tests. A single Rust `#[tokio::test]` function discovers all `.kdl` files via `glob`, parses each one, and runs the command sequence against a real ClickHouse testcontainer:
+Each suite has its own fixtures directory and test runner, but both share the same KDL parsing infrastructure (the `kdl` crate) and the `TestContext` from `integration-testkit`.
+
+### Query pipeline
+
+The `.kdl` test files live in `crates/query-engine/tests/fixtures/`. A single Rust `#[tokio::test]` function discovers all `.kdl` files via `glob`, parses each one, and runs the command sequence against a real ClickHouse testcontainer:
 
 ```rust
 #[tokio::test]
@@ -209,9 +310,33 @@ async fn kdl_integration_tests() {
 }
 ```
 
-This runs under `mise test:integration` and `cargo nextest` the same way existing integration tests do. No new CI job is needed -- the existing `integration-test` pipeline stage picks up the new test function automatically.
+Seed data lives in `crates/query-engine/tests/seeds/*.sql`. The existing `setup_test_data` and `setup_indirect_auth_data` functions are extracted into `default.sql` and `with_code_entities.sql` respectively.
 
-A separate validation-only test parses all `.kdl` files without executing them, catching syntax errors before the integration test stage:
+### Indexer SDLC
+
+The `.kdl` test files live in `crates/indexer/tests/fixtures/sdlc/`. The runner uses the existing `TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL])` setup and the `IndexerTestExt` trait for handler creation:
+
+```rust
+#[tokio::test]
+async fn kdl_sdlc_integration_tests() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    for path in glob("tests/fixtures/sdlc/**/*.kdl") {
+        let forked = ctx.fork(&test_name_from_path(&path)).await;
+        let doc = kdl::parse(std::fs::read_to_string(&path).unwrap()).unwrap();
+        run_kdl_indexer_test(&forked, &doc, &path).await;
+    }
+}
+```
+
+Each `.kdl` file gets a forked database via `ctx.fork()`, matching the existing `run_subtests!` pattern that gives each subtest an isolated database on the same ClickHouse container.
+
+Shared prerequisite data lives in `crates/indexer/tests/seeds/`. The most common seed -- namespace 100 with traversal path `1/100/`, project 1000 with traversal path `1/100/1000/` -- is extracted into `namespace_with_project.sql`, eliminating the INSERTs duplicated in ~80% of current tests. The `seed=` property loads this before the test's `seed-sql` blocks run.
+
+### Shared infrastructure
+
+Both runners run under `mise test:integration` and `cargo nextest`. No new CI job is needed -- the existing `integration-test` pipeline stage picks up the new test functions automatically.
+
+A separate validation-only test per suite parses all `.kdl` files without executing them, catching syntax errors before the integration test stage:
 
 ```rust
 #[test]
@@ -225,50 +350,55 @@ fn kdl_fixtures_parse() {
 
 This runs under `mise test:fast` / `cargo nextest --lib` as a unit test. A malformed `.kdl` file fails fast in the unit test stage, not 5 minutes into the integration test stage.
 
-During the transition period, both the original Rust tests and the new KDL tests run in CI. Once a Rust test has a KDL equivalent that passes, the Rust version is deleted. The remaining Rust tests (Arrow batch construction, error pattern matching) stay permanently.
-
-Seed data lives in `crates/query-engine/tests/seeds/*.sql`. The existing `setup_test_data` and `setup_indirect_auth_data` functions are extracted into `default.sql` and `with_code_entities.sql` respectively. The `seed=` property on the `test` command determines which seed file to load.
+During the transition period, both the original Rust tests and the new KDL tests run in CI. Once a Rust test has a KDL equivalent that passes, the Rust version is deleted.
 
 ## Known gaps
 
-The command set in this ADR covers the current test suite. As new pipeline features are added (aggregation queries, Cypher compilation, response formatting), new commands will be needed. Adding a command requires a match arm in the runner and a row in the command table above -- low cost, but the ADR cannot enumerate future commands.
+The command sets in this ADR cover the current test suites. As new pipeline features (aggregation queries, Cypher compilation, response formatting) or new entity types are added, new commands will be needed. Adding a command requires a match arm in the runner and a row in the command table above -- low cost, but the ADR cannot enumerate future commands.
 
-The `expect=` properties use exact values (`redact expect=2`). There is no mechanism for approximate matching, regex assertions, or ordered subset assertions. If a test needs "at least 3 rows" rather than "exactly 3 rows", it must be a Rust test. This could be addressed later with comparison operators (`expect>=3`) if the need arises.
+The `expect=` and `count=` properties use exact values. There is no mechanism for approximate matching, regex assertions, or ordered subset assertions. If a test needs "at least 3 rows" rather than "exactly 3 rows", it must be a Rust test. This could be addressed later with comparison operators (`expect>=3`) if the need arises.
 
 Error message assertions are limited. `compile expect="error"` asserts that compilation fails, but does not match on the error message or error type. Tests that need to distinguish between "invalid entity type" and "mutually exclusive parameters" must stay in Rust. A future `expect="error: substring"` extension is straightforward.
 
 `--rewrite` support (automatically updating expected values in `.kdl` files when test output changes) is not part of the initial implementation. The `kdl` crate preserves node structure but not whitespace formatting, so rewriting requires re-serializing the document. This is a medium-difficulty task, not a blocker.
 
-There is no parallelism within a single `.kdl` file -- commands execute sequentially, sharing a single `TestContext`. Parallelism comes from nextest running multiple test files concurrently (each in its own testcontainer). A file with 20 command blocks runs ~20x slower than a file with 1, which incentivizes keeping test files focused rather than combining unrelated test cases.
+There is no parallelism within a single `.kdl` file -- commands execute sequentially, sharing a single `TestContext`. Parallelism comes from nextest running multiple test files concurrently. For the indexer runner, each `.kdl` file gets a forked database (`ctx.fork()`), matching the existing `run_subtests!` model.
+
+The indexer runner depends on the `IndexerTestExt` trait and `HandlerRegistry` internals. If the handler registration API changes (new handler types, different configuration patterns), the runner needs updating. This coupling is the same as the existing Rust tests have -- the runner does not add new coupling, it just inherits the existing one.
+
+Column value assertions in the indexer runner compare string representations. ClickHouse returns typed data via Arrow, but the KDL format only has strings and numbers. The runner must handle type coercion (e.g., boolean columns returned as `UInt8` in Arrow, compared against `true`/`false` strings in KDL). Edge cases in type mapping could produce false failures until the coercion logic is comprehensive.
 
 ## Alternatives considered
 
 | Alternative | Why rejected |
 |---|---|
-| `sqllogictest` format | Assumes single-step SQL pipeline. No mechanism for mid-pipeline configuration or multi-stage assertions. The `sqllogictest-rs` crate's `AsyncDB` trait has a single `run(sql)` method -- there is no hook for "now configure auth rules" between steps. |
+| `sqllogictest` format | Assumes single-step SQL pipeline. No mechanism for mid-pipeline configuration or multi-stage assertions. The `sqllogictest-rs` crate's `AsyncDB` trait has a single `run(sql)` method -- there is no hook for "now configure auth rules" between steps, and no way to express "invoke this handler then check these graph tables". |
 | `pg_regress` two-file model | String diffing of full output, no structured assertions. Two-file coupling (input + expected) is maintenance overhead. Platform-dependent output formatting causes false failures. |
 | Raw text (datadriven-style) | Viable fallback. Blank-line sensitivity and no IDE support are the main downsides. If KDL adoption is a concern, this is the second choice -- the runner's command dispatch logic is identical, only the parser changes. |
-| Keep everything as Rust | The 30-60 lines of boilerplate per test, recompilation on every change, and the Rust knowledge requirement for test authors are real costs that scale linearly with test count. At 60+ tests, the maintenance burden is already significant; at 200+ tests (as more entity types are indexed), it would be worse. |
+| Keep everything as Rust | The 30-60 lines of boilerplate per test, recompilation on every change, and the Rust knowledge requirement for test authors are real costs that scale linearly with test count. At 95+ tests across both suites, the maintenance burden is already significant; as more entity types are indexed (new ontology YAML -> new indexer handlers -> new tests), it would be worse. |
+| Separate frameworks per suite | Using KDL for query tests and a different approach (e.g., YAML fixtures) for indexer tests. Rejected because the same team maintains both, the same `TestContext` underlies both, and having two test DSLs doubles the learning cost for no gain. |
 
 ## Consequences
 
 ### Dev-dependency budget
 
-Adding the `kdl` crate as a dev-dependency. The crate is well-maintained (v6.x, by the KDL spec authors) but younger than `toml` or `serde_yaml`. It compiles in ~2 seconds and has no transitive dependencies. It is a test-only dependency -- no production binary size impact, no `cargo audit` / `cargo deny` exposure in the release artifact.
+Adding the `kdl` crate as a dev-dependency to both `query-engine` and `indexer`. The crate is well-maintained (v6.x, by the KDL spec authors) but younger than `toml` or `serde_yaml`. It compiles in ~2 seconds and has no transitive dependencies. It is a test-only dependency -- no production binary size impact, no `cargo audit` / `cargo deny` exposure in the release artifact.
 
 ### Test authoring workflow
 
-Adding a new integration test changes from "write 40 lines of async Rust, recompile (~30s incremental), run" to "write 10 lines of KDL, run". The recompilation step is eliminated for test-only changes. This lowers the barrier for contributors who understand the query pipeline but are not fluent in Rust async patterns.
+Adding a new integration test changes from "write 40-85 lines of async Rust, recompile (~30s incremental), run" to "write 10-30 lines of KDL, run". The recompilation step is eliminated for test-only changes. This matters most for the indexer: when a new entity type is added to the ontology, the corresponding integration test is now a KDL file rather than a new Rust module with repeated prerequisite INSERTs.
 
-The tradeoff is that KDL is a format most engineers have not seen. The learning curve is minimal -- KDL reads like CLI commands -- but it is nonzero. The command table and examples in this ADR serve as the reference. The `kdl_fixtures_parse` unit test catches syntax errors immediately.
+The tradeoff is that KDL is a format most engineers have not seen. The learning curve is minimal -- KDL reads like CLI commands -- but it is nonzero. The command tables and examples in this ADR serve as the reference. The `kdl_fixtures_parse` unit test catches syntax errors immediately.
 
 ### Shared seed data
 
-Seed SQL files (`tests/seeds/*.sql`) become shared fixtures. Changes to seed data affect all tests that reference that seed. This is intentional -- it forces tests to be explicit about what data they need and prevents seed drift where each test has slightly different setup. The downside is that a seed change can break multiple tests at once. `extra-sql` provides an escape hatch for test-specific data without modifying the shared seed.
+Seed SQL files become shared fixtures in both suites. For the query engine: `crates/query-engine/tests/seeds/*.sql`. For the indexer: `crates/indexer/tests/seeds/*.sql` (with `namespace_with_project.sql` eliminating the namespace/project prerequisite duplication across ~80% of SDLC tests).
+
+Changes to seed data affect all tests that reference that seed. This is intentional -- it forces tests to be explicit about what data they need and prevents seed drift where each test has slightly different setup. The downside is that a seed change can break multiple tests at once. `extra-sql` / `seed-sql` provides an escape hatch for test-specific data without modifying the shared seed.
 
 ### Runner maintenance
 
-The KDL runner (~200 lines) is new infrastructure that depends on `TestContext` internals. Query engine refactors that change `QueryResult`, `SecurityContext`, or the redaction API will require runner updates. This couples the runner to the query engine's internal API surface. The alternative -- a stable public test API -- would be premature abstraction; the pipeline is still evolving.
+Two runners (~200 lines each) are new infrastructure. The query runner depends on `QueryResult`, `SecurityContext`, and the redaction API. The indexer runner depends on `IndexerTestExt`, `HandlerRegistry`, and `TestEnvelopeFactory`. Query engine or indexer refactors will require runner updates. This couples each runner to its respective crate's internal API surface. The alternative -- a stable public test API -- would be premature abstraction; both pipelines are still evolving.
 
 Command dispatch is a match arm per command. Adding a command is low-cost. Removing a command that existing `.kdl` files use will fail the `kdl_fixtures_parse` validation test immediately, not silently.
 
