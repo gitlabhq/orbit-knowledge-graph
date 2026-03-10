@@ -62,10 +62,6 @@ name = "ontology"
 expression = "LicenseRef-EE"
 license-files = []
 
-[[licenses.clarify]]
-name = "simulator"
-expression = "LicenseRef-EE"
-license-files = []
 
 [[licenses.clarify]]
 name = "indexer"

@@ -7,12 +7,19 @@ edition = "2024"
 name = "xtask"
 path = "src/main.rs"
 
-[lints]
-workspace = true
+[lints.rust]
+# Downgraded from workspace `forbid` to `deny` so the generator's
+# hot-path hex formatting can use #[allow(unsafe_code)] locally.
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
 
 [dependencies]
 clap = { workspace = true }
 anyhow = { workspace = true }
+arrow = { workspace = true }
+chrono = { workspace = true }
 const_format = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
@@ -28,3 +35,16 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 serde_json = { workspace = true }
 base64 = { workspace = true }
+rand = { workspace = true }
+parquet = { workspace = true }
+sqlformat = { workspace = true }
+tabled = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+indicatif = { workspace = true }
+rayon = { workspace = true }
+ontology = { path = "../ontology" }
+clickhouse = { workspace = true }
+clickhouse-client = { path = "../clickhouse-client" }
+gkg-utils = { path = "../utils" }
+query-engine = { path = "../query-engine" }

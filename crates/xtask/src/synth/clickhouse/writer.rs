@@ -1,7 +1,7 @@
 //! ClickHouse data writer with streaming batch inserts.
 
 use super::schema::SchemaGenerator;
-use crate::config::ClickHouseConfig;
+use crate::synth::config::ClickHouseConfig;
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
@@ -10,7 +10,7 @@ use ontology::constants::EDGE_TABLE;
 use std::path::Path;
 use std::process::Command;
 
-use crate::constants::CLICKHOUSE_NATIVE_PORT;
+use crate::synth::constants::CLICKHOUSE_NATIVE_PORT;
 
 /// Writes data to ClickHouse with batched inserts.
 pub struct ClickHouseWriter {

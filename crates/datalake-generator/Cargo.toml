@@ -15,7 +15,7 @@ chrono.workspace = true
 clap.workspace = true
 flate2 = "1"
 opentelemetry.workspace = true
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

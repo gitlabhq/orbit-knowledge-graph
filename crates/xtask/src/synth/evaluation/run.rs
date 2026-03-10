@@ -1,37 +1,101 @@
-//! CLI for query evaluation.
+//! Query evaluation runner.
 
+use super::{ExecutionResult, QueryExecutor, Report, ReportFormat, RunConfig, RunMetadata};
+use crate::synth::clickhouse::check_clickhouse_health;
+use crate::synth::config::Config;
 use anyhow::Result;
-use clap::Parser;
 use ontology::Ontology;
-use simulator::Config;
-use simulator::clickhouse::check_clickhouse_health;
-use simulator::evaluation::{
-    QueryExecutor, Report, ReportFormat, RunConfig, RunMetadata, load_queries,
-};
-use std::path::{Path, PathBuf};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
 
-#[derive(Parser)]
-#[command(name = "evaluate")]
-#[command(about = "Execute SDLC queries and collect statistics")]
-struct Args {
-    /// Path to YAML configuration file
-    #[arg(short, long, default_value = "simulator.yaml")]
-    config: PathBuf,
-
-    /// Verbose output
-    #[arg(short, long)]
-    verbose: bool,
+/// A query entry from the queries YAML file.
+///
+/// Each entry has a stable key (`q1`..`qN`), a human-readable description,
+/// and the raw GKG query DSL as an inline JSON string.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryEntry {
+    /// Human-readable description of what this query tests.
+    pub desc: String,
+    /// Raw JSON query DSL string, passed to the query engine compiler.
+    pub query: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
+impl QueryEntry {
+    /// Parse the `query` JSON string into a `serde_json::Value`.
+    pub fn parse_query(&self) -> Result<serde_json::Value> {
+        serde_json::from_str(&self.query).map_err(Into::into)
+    }
+}
 
-    let filter = if args.verbose {
-        "simulator=debug,info"
+/// Load queries from a YAML file.
+///
+/// ```yaml
+/// q1:
+///   desc: List active users
+///   query: |
+///     {"query_type": "search", ...}
+/// ```
+pub fn load_queries(path: &Path) -> Result<HashMap<String, QueryEntry>> {
+    use anyhow::Context;
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read queries file: {}", path.display()))?;
+
+    let queries: HashMap<String, QueryEntry> = serde_yaml::from_str(&content)
+        .with_context(|| format!("Failed to parse queries file: {}", path.display()))?;
+
+    for (key, entry) in &queries {
+        entry
+            .parse_query()
+            .with_context(|| format!("Invalid JSON in query '{}' ({})", key, entry.desc))?;
+    }
+    Ok(queries)
+}
+
+/// Parameters extracted from a query that need sampling.
+#[derive(Debug, Clone, Default)]
+pub struct QueryParameters {
+    /// Entity type -> list of node_ids fields that need sampling
+    pub node_ids: HashMap<String, Vec<String>>,
+}
+
+/// Extract parameters that need sampling from a query's JSON value.
+pub fn extract_parameters(query_value: &serde_json::Value) -> QueryParameters {
+    let mut params = QueryParameters::default();
+
+    let mut all_nodes: Vec<&serde_json::Value> = Vec::new();
+    if let Some(nodes) = query_value.get("nodes").and_then(|n| n.as_array()) {
+        all_nodes.extend(nodes);
+    }
+    if let Some(node) = query_value.get("node") {
+        all_nodes.push(node);
+    }
+
+    for node in all_nodes {
+        if let Some(obj) = node.as_object()
+            && obj.contains_key("node_ids")
+            && let Some(entity) = obj.get("entity").and_then(|e| e.as_str())
+            && let Some(id) = obj.get("id").and_then(|i| i.as_str())
+        {
+            params
+                .node_ids
+                .entry(entity.to_string())
+                .or_default()
+                .push(id.to_string());
+        }
+    }
+
+    params
+}
+
+pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+    let filter = if verbose {
+        "xtask=debug,info"
     } else {
-        "simulator=info,warn"
+        "xtask=info,warn"
     };
 
     tracing_subscriber::registry()
@@ -39,8 +103,8 @@ async fn main() -> Result<()> {
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter)))
         .init();
 
-    tracing::info!("Loading config from {:?}", args.config);
-    let config = Config::load(&args.config)?;
+    tracing::info!("Loading config from {:?}", config_path);
+    let config = Config::load(config_path)?;
     config.evaluation.validate()?;
 
     tracing::info!(
@@ -165,7 +229,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn log_result(result: &simulator::evaluation::ExecutionResult) {
+fn log_result(result: &ExecutionResult) {
     if result.success {
         tracing::debug!(
             "✓ {} - {} rows in {:.2}ms",
@@ -179,5 +243,40 @@ fn log_result(result: &simulator::evaluation::ExecutionResult) {
             result.query_name,
             result.error.as_deref().unwrap_or("unknown error")
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_parameters() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                {"id": "merger", "entity": "User", "node_ids": [42]}
+            ],
+            "relationships": [
+                {"type": "MERGED_BY", "from": "mr", "to": "merger"}
+            ],
+            "limit": 30
+        }"#;
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let params = extract_parameters(&value);
+        assert!(params.node_ids.contains_key("User"));
+        assert_eq!(params.node_ids["User"], vec!["merger".to_string()]);
+    }
+
+    #[test]
+    fn test_query_entry_parse() {
+        let entry = QueryEntry {
+            desc: "test query".into(),
+            query: r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}}"#.into(),
+        };
+        let value = entry.parse_query().unwrap();
+        assert_eq!(value["query_type"], "search");
     }
 }
