@@ -18,6 +18,11 @@ export GDK_ROOT=~/workspace/gdk  # adjust to your GDK root
 
 This overrides the default paths in `mise.toml` and the `.env.local` template below.
 
+> **Note:** `GDK_ROOT` support in `mise.toml` is tracked in
+> [!475](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/475)
+> and may not be merged yet. Until it is, set `GKG_GITLAB__JWT__VERIFYING_KEY`
+> explicitly in your `.env.local` as shown in the [Build and run](#build-and-run) section.
+
 ## GDK services setup
 
 ### 1. Enable ClickHouse
