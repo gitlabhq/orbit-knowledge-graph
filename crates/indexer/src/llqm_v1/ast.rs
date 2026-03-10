@@ -187,3 +187,15 @@ impl TableRef {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Insert {
+    pub table: String,
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InsertSelect {
+    pub insert: Insert,
+    pub query: Query,
+}

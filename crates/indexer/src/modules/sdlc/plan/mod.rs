@@ -1,7 +1,8 @@
-pub(crate) mod ast;
-pub(crate) mod codegen;
 pub(crate) mod input;
 pub(crate) mod lower;
+
+pub(crate) use crate::llqm_v1::ast;
+pub(crate) use crate::llqm_v1::codegen;
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 

@@ -33,6 +33,7 @@ pub mod engine;
 pub(crate) mod env;
 pub mod handler;
 pub mod health;
+pub mod llqm_v1;
 pub mod locking;
 pub mod metrics;
 pub mod modules;
