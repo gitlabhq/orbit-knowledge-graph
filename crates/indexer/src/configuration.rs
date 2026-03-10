@@ -8,6 +8,7 @@ use crate::modules::code::dispatch::ProjectCodeDispatcherConfig;
 use crate::modules::code::{ProjectCodeIndexingHandlerConfig, PushEventHandlerConfig};
 use crate::modules::sdlc::dispatch::{GlobalDispatcherConfig, NamespaceDispatcherConfig};
 use crate::modules::sdlc::{GlobalHandlerConfig, NamespaceHandlerConfig};
+use crate::scheduler::TableCleanupConfig;
 
 /// Per-handler engine configuration (retry policy, concurrency group).
 ///
@@ -59,33 +60,35 @@ pub struct HandlersConfiguration {
     pub code_project_reconciliation: ProjectCodeIndexingHandlerConfig,
 }
 
-/// Per-dispatcher configuration (cadence interval).
+/// Per-task schedule configuration (cadence interval).
 ///
-/// Each dispatcher embeds this via `#[serde(flatten)]` in its own typed config struct.
-/// The dispatcher loop reads it via `dispatcher.dispatcher_config()`.
+/// Each scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.
+/// The scheduler loop reads it via `task.schedule()`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DispatcherConfiguration {
-    /// Interval in seconds between dispatch runs.
-    /// When absent, the dispatcher runs every cycle.
+pub struct ScheduleConfiguration {
+    /// Interval in seconds between task runs.
+    /// When absent, the task runs every cycle.
     #[serde(default)]
     pub interval_secs: Option<u64>,
 }
 
-impl DispatcherConfiguration {
+impl ScheduleConfiguration {
     pub fn interval(&self) -> Option<Duration> {
         self.interval_secs.map(Duration::from_secs)
     }
 }
 
-/// Typed per-dispatcher configuration for all registered dispatchers.
+/// Typed per-task configuration for all registered scheduled tasks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DispatchersConfiguration {
+pub struct ScheduledTasksConfiguration {
     #[serde(default)]
     pub global: GlobalDispatcherConfig,
     #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
     #[serde(default)]
     pub project_code: ProjectCodeDispatcherConfig,
+    #[serde(default)]
+    pub table_cleanup: TableCleanupConfig,
 }
 
 /// ETL engine configuration.

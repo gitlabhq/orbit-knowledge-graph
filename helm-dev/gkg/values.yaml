@@ -128,8 +128,8 @@ engine:
       concurrency_group: code
       max_attempts: 1  # re-dispatched every 30 minutes, no need to retry
 
-dispatch:
-  dispatchers:
+schedule:
+  tasks:
     global: {}
     namespace: {}
     project_code:

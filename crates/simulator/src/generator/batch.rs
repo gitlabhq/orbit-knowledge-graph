@@ -1,9 +1,10 @@
 //! Dynamic RecordBatch builder from ontology definitions.
 
-use super::fake_data::{FakeValue, FakeValueGenerator, FieldKind};
+use super::fake_data::{FakeDataPools, FakeValue, FakeValueGenerator, FieldKind};
 use arrow::array::*;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
+use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use ontology::{DataType, Field, NodeEntity};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -44,8 +45,13 @@ enum ColumnValues {
 }
 
 impl BatchBuilder {
-    pub fn new(node: &NodeEntity, schema: Arc<Schema>, batch_size: usize) -> Self {
-        Self::with_seed(node, schema, batch_size, None)
+    pub fn new(
+        node: &NodeEntity,
+        schema: Arc<Schema>,
+        batch_size: usize,
+        pools: &'static FakeDataPools,
+    ) -> Self {
+        Self::with_seed(node, schema, batch_size, None, pools)
     }
 
     pub fn with_seed(
@@ -53,15 +59,16 @@ impl BatchBuilder {
         schema: Arc<Schema>,
         batch_size: usize,
         seed: Option<u64>,
+        pools: &'static FakeDataPools,
     ) -> Self {
         // Skip traversal_path - it's a system column handled separately
         // Pre-compute FieldKind once per field to avoid runtime string matching
         let columns: Vec<ColumnData> = node
             .fields
             .iter()
-            .filter(|field| field.name != "traversal_path")
+            .filter(|field| field.name != TRAVERSAL_PATH_COLUMN)
             .map(|field| ColumnData {
-                kind: FieldKind::classify(field),
+                kind: FieldKind::classify(field, pools),
                 enum_values: field.enum_values.clone(),
                 field: field.clone(),
                 values: ColumnValues::new(&field.data_type),
@@ -71,8 +78,8 @@ impl BatchBuilder {
         let primary_keys: HashSet<String> = node.primary_keys.iter().cloned().collect();
 
         let fake_gen = match seed {
-            Some(s) => FakeValueGenerator::fast_with_seed(s),
-            None => FakeValueGenerator::new_fast(),
+            Some(s) => FakeValueGenerator::fast_with_seed(s, pools),
+            None => FakeValueGenerator::new_fast(pools),
         };
 
         Self {
@@ -248,10 +255,14 @@ mod tests {
     #[test]
     fn test_batch_builder_single_batch() {
         use crate::arrow_schema::ToArrowSchema;
+        use crate::config::FakeDataConfig;
 
+        let pools = FakeDataPools::intern(
+            FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap(),
+        );
         let node = test_node();
         let schema = Arc::new(node.to_arrow_schema());
-        let mut builder = BatchBuilder::new(&node, schema, 100);
+        let mut builder = BatchBuilder::new(&node, schema, 100, pools);
 
         // Add some rows (less than batch_size)
         for i in 0..10 {
@@ -286,10 +297,14 @@ mod tests {
     #[test]
     fn test_batch_builder_multiple_batches() {
         use crate::arrow_schema::ToArrowSchema;
+        use crate::config::FakeDataConfig;
 
+        let pools = FakeDataPools::intern(
+            FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap(),
+        );
         let node = test_node();
         let schema = Arc::new(node.to_arrow_schema());
-        let mut builder = BatchBuilder::new(&node, schema, 5); // Small batch size
+        let mut builder = BatchBuilder::new(&node, schema, 5, pools); // Small batch size
 
         // Add 12 rows - should create 3 batches (5, 5, 2)
         for i in 0..12 {

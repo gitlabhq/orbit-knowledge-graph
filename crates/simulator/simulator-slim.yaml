@@ -1,0 +1,148 @@
+# Simulator configuration - slim (quick smoke test)
+#
+# ~50 nodes, ~200 edges. Runs in seconds.
+#
+# Workflow:
+#   1. Generate data:  cargo run --bin generate -- -c crates/simulator/simulator-slim.yaml
+#   2. Load to CH:     cargo run --bin load -- -c crates/simulator/simulator-slim.yaml
+#   3. Evaluate:       cargo run --bin evaluate -- -c crates/simulator/simulator-slim.yaml
+
+clickhouse:
+  url: http://localhost:8123
+  database: default
+
+  client:
+    send_timeout: 30
+    receive_timeout: 30
+    max_insert_block_size: 10000
+
+  schema:
+    engine: MergeTree
+    index_granularity: 8192
+
+    node_primary_key: [traversal_path, id]
+    node_order_by: [traversal_path, id]
+
+    edge_primary_key: [traversal_path, source_id, source_kind, target_id, target_kind]
+    edge_order_by: [traversal_path, source_id, source_kind, target_id, target_kind]
+
+    indexes:
+      - name: idx_relationship
+        table: edges
+        expression: relationship_kind
+        type: bloom_filter
+        granularity: 4
+
+    projections:
+      - name: by_target
+        table: edges
+        columns: [source_kind, source_id, relationship_kind, target_kind, target_id]
+        order_by: [target_id, target_kind, relationship_kind]
+
+generation:
+  ontology_path: fixtures/ontology
+  output_dir: gl_synthetic_data_slim
+  skip_if_present: false
+  parallel: false
+  batch_size: 1000
+
+  seed: 42
+  fake_data_path: fake_data.yaml
+
+  organizations: 1
+  namespace_entity: Group
+
+  roots:
+    User: 10
+    Group: 2
+
+  relationships:
+    CONTAINS:
+      "Group -> Group":               # 2 levels x 2 per parent = 14 total groups
+        count: 2
+        max_depth: 2
+      "Group -> Project": 2
+
+    IN_PROJECT:
+      "MergeRequest -> Project": 3
+      "WorkItem -> Project": 3
+      "Pipeline -> Project": 2
+      "Vulnerability -> Project": 1
+      "Finding -> Project": 1
+      "Milestone -> Project": 1
+      "Label -> Project": 1
+
+    HAS_STAGE:
+      "Pipeline -> Stage": 2
+
+    HAS_JOB:
+      "Stage -> Job": 2
+
+    HAS_DIFF:
+      "MergeRequest -> MergeRequestDiff": 1
+
+    HAS_FILE:
+      "MergeRequestDiff -> MergeRequestDiffFile": 2
+
+    HAS_NOTE:
+      "MergeRequest -> Note": 1
+      "WorkItem -> Note": 1
+
+    HAS_FINDING:
+      "Vulnerability -> Finding": 1
+
+    HAS_IDENTIFIER:
+      "Finding -> VulnerabilityIdentifier": 1
+
+  associations:
+    AUTHORED:
+      "User -> MergeRequest": 1
+      "User -> WorkItem": 1
+      "User -> Note": 1
+
+    MEMBER_OF:
+      "User -> Group": 2
+
+    ASSIGNED:
+      "User -> MergeRequest": 1
+      "User -> WorkItem": 1
+
+    REVIEWER:
+      "MergeRequest -> User":
+        ratio: 1
+        per: source
+
+    TRIGGERED:
+      "User -> Pipeline": 1
+      "MergeRequest -> Pipeline": 0.5
+
+    CREATOR:
+      "User -> Project": 1
+    OWNER:
+      "User -> Group": 1
+
+    MERGED_BY:
+      "MergeRequest -> User":
+        ratio: 1
+        per: source
+
+    CLOSES:
+      "MergeRequest -> WorkItem": 0.5
+
+    FIXES:
+      "MergeRequest -> Vulnerability": 0.1
+
+    IN_MILESTONE:
+      "WorkItem -> Milestone": 0.5
+
+    HAS_LABEL:
+      "WorkItem -> Label": 0.5
+
+evaluation:
+  queries_path: fixtures/queries/sdlc_queries.json
+  metadata_dir: ./evaluation_results_slim
+  sample_size: 10
+  iterations: 1
+  skip_cache_warm: false
+  output:
+    format: text

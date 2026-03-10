@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -129,12 +129,12 @@ impl RepositoryService for DirectGitalyRepositoryService {
         })
     }
 
-    async fn extract_repository(
+    async fn fetch_archive(
         &self,
         repository: &RepositoryInfo,
         target_dir: &Path,
         commit_id: &str,
-    ) -> Result<(), GitalyError> {
+    ) -> Result<PathBuf, GitalyError> {
         let config = GitalyRepositoryConfig {
             address: repository.gitaly_connection_info.address.clone(),
             storage: repository.gitaly_connection_info.storage.clone(),
@@ -142,7 +142,7 @@ impl RepositoryService for DirectGitalyRepositoryService {
             token: repository.gitaly_connection_info.token.clone(),
         };
         let client = GitalyClient::connect(config).await?;
-        RepositorySource::extract_to(&client, target_dir, Some(commit_id)).await
+        client.fetch_archive(target_dir, Some(commit_id)).await
     }
 }
 

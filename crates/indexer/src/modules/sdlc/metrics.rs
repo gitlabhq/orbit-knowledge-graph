@@ -9,10 +9,10 @@ use crate::metrics::DURATION_BUCKETS;
 pub struct SdlcMetrics {
     pub(super) pipeline_duration: Histogram<f64>,
     pub(super) pipeline_rows_processed: Counter<u64>,
-    pub(super) pipeline_batches_processed: Counter<u64>,
     pub(super) pipeline_errors: Counter<u64>,
     pub(super) handler_duration: Histogram<f64>,
     pub(super) datalake_query_duration: Histogram<f64>,
+    pub(super) datalake_query_bytes: Counter<u64>,
     pub(super) transform_duration: Histogram<f64>,
     pub(super) watermark_lag: Gauge<f64>,
 }
@@ -36,11 +36,6 @@ impl SdlcMetrics {
             .with_description("Total rows extracted and written by SDLC pipelines")
             .build();
 
-        let pipeline_batches_processed = meter
-            .u64_counter("indexer.sdlc.pipeline.batches.processed")
-            .with_description("Total Arrow batches processed by SDLC pipelines")
-            .build();
-
         let pipeline_errors = meter
             .u64_counter("indexer.sdlc.pipeline.errors")
             .with_description("Total SDLC pipeline failures")
@@ -58,6 +53,12 @@ impl SdlcMetrics {
             .with_unit("s")
             .with_description("Duration of ClickHouse datalake extraction queries")
             .with_boundaries(DURATION_BUCKETS.to_vec())
+            .build();
+
+        let datalake_query_bytes = meter
+            .u64_counter("indexer.sdlc.datalake.query.bytes")
+            .with_unit("By")
+            .with_description("Total bytes returned by ClickHouse datalake extraction queries")
             .build();
 
         let transform_duration = meter
@@ -78,10 +79,10 @@ impl SdlcMetrics {
         Self {
             pipeline_duration,
             pipeline_rows_processed,
-            pipeline_batches_processed,
             pipeline_errors,
             handler_duration,
             datalake_query_duration,
+            datalake_query_bytes,
             transform_duration,
             watermark_lag,
         }
@@ -99,22 +100,16 @@ impl SdlcMetrics {
         );
     }
 
-    pub(super) fn record_pipeline_completion(
-        &self,
-        entity: &str,
-        duration: f64,
-        rows: u64,
-        batches: u64,
-    ) {
+    pub(super) fn record_pipeline_completion(&self, entity: &str, duration: f64, rows: u64) {
         let labels = [KeyValue::new("entity", entity.to_owned())];
         self.pipeline_duration.record(duration, &labels);
         self.pipeline_rows_processed.add(rows, &labels);
-        self.pipeline_batches_processed.add(batches, &labels);
     }
 
-    pub(super) fn record_datalake_query_duration(&self, entity: &str, duration: f64) {
-        self.datalake_query_duration
-            .record(duration, &[KeyValue::new("entity", entity.to_owned())]);
+    pub(super) fn record_datalake_query(&self, entity: &str, duration: f64, bytes: u64) {
+        let labels = [KeyValue::new("entity", entity.to_owned())];
+        self.datalake_query_duration.record(duration, &labels);
+        self.datalake_query_bytes.add(bytes, &labels);
     }
 
     pub(super) fn record_transform_duration(&self, entity: &str, duration: f64) {

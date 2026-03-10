@@ -202,9 +202,15 @@ impl QueryExecutor {
     }
 
     /// Warm the parameter cache and sample security contexts.
-    pub async fn warm_cache(&mut self) -> Result<()> {
+    ///
+    /// `namespace_entity` specifies which entity type defines the namespace
+    /// hierarchy (typically "Group") — used to sample traversal paths.
+    pub async fn warm_cache(&mut self, namespace_entity: &str) -> Result<()> {
         self.sampler.warm_cache(&self.ontology).await?;
-        self.security_contexts = self.sampler.sample_traversal_paths().await?;
+        self.security_contexts = self
+            .sampler
+            .sample_traversal_paths(namespace_entity, &self.ontology)
+            .await?;
         Ok(())
     }
 

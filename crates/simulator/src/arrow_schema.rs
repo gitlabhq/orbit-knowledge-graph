@@ -1,6 +1,7 @@
 //! Dynamic Arrow schema generation from ontology entities.
 
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
+use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use ontology::{DataType, Field, NodeEntity};
 
 /// Extension trait to convert ontology types to Arrow types.
@@ -12,14 +13,14 @@ pub trait ToArrowSchema {
 impl ToArrowSchema for NodeEntity {
     fn to_arrow_schema(&self) -> Schema {
         let mut fields = vec![ArrowField::new(
-            "traversal_path",
+            TRAVERSAL_PATH_COLUMN,
             ArrowDataType::Utf8,
             false,
         )];
 
         for field in &self.fields {
             // Skip traversal_path if defined in ontology - it's a system column
-            if field.name == "traversal_path" {
+            if field.name == TRAVERSAL_PATH_COLUMN {
                 continue;
             }
             fields.push(field.to_arrow_field());
@@ -70,14 +71,32 @@ impl ToArrowType for DataType {
 /// - target_id: Int64 (target node ID)
 /// - target_kind: Utf8 (e.g., "MergeRequest", "Project")
 pub fn edge_schema() -> Schema {
-    Schema::new(vec![
-        ArrowField::new("traversal_path", ArrowDataType::Utf8, false),
-        ArrowField::new("relationship_kind", ArrowDataType::Utf8, false),
-        ArrowField::new("source_id", ArrowDataType::Int64, false),
-        ArrowField::new("source_kind", ArrowDataType::Utf8, false),
-        ArrowField::new("target_id", ArrowDataType::Int64, false),
-        ArrowField::new("target_kind", ArrowDataType::Utf8, false),
-    ])
+    use ontology::constants::EDGE_RESERVED_COLUMNS;
+
+    // Column types for each edge reserved column (in order).
+    // Validated by test_edge_schema_matches_ontology_constants.
+    const EDGE_COLUMN_TYPES: &[ArrowDataType] = &[
+        ArrowDataType::Utf8,  // traversal_path
+        ArrowDataType::Utf8,  // relationship_kind
+        ArrowDataType::Int64, // source_id
+        ArrowDataType::Utf8,  // source_kind
+        ArrowDataType::Int64, // target_id
+        ArrowDataType::Utf8,  // target_kind
+    ];
+
+    assert_eq!(
+        EDGE_RESERVED_COLUMNS.len(),
+        EDGE_COLUMN_TYPES.len(),
+        "EDGE_COLUMN_TYPES must match EDGE_RESERVED_COLUMNS length"
+    );
+
+    Schema::new(
+        EDGE_RESERVED_COLUMNS
+            .iter()
+            .zip(EDGE_COLUMN_TYPES.iter())
+            .map(|(name, dtype)| ArrowField::new(*name, dtype.clone(), false))
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// Convert Arrow schema to ClickHouse CREATE TABLE statement.
@@ -102,7 +121,10 @@ pub fn to_clickhouse_ddl(table_name: &str, schema: &Schema, order_by: &[&str]) -
 }
 
 /// Convert Arrow DataType to ClickHouse type string.
-fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> String {
+///
+/// This is the single source of truth for Arrow→ClickHouse type mapping.
+/// Used by both `to_clickhouse_ddl()` and `clickhouse::schema::SchemaGenerator`.
+pub(crate) fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> String {
     let base_type = match arrow_type {
         ArrowDataType::Boolean => "Bool",
         ArrowDataType::Int8 => "Int8",
@@ -117,8 +139,8 @@ fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> Strin
         ArrowDataType::Float64 => "Float64",
         ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => "String",
         ArrowDataType::Date32 => "Date",
-        ArrowDataType::Date64 => "DateTime64(6, 'UTC')",
-        ArrowDataType::Timestamp(_, _) => "DateTime64(6, 'UTC')",
+        ArrowDataType::Date64 => "DateTime64(3)",
+        ArrowDataType::Timestamp(_, _) => "DateTime64(3)",
         _ => "String", // Fallback
     };
 
@@ -200,6 +222,39 @@ mod tests {
                 "target_kind"
             ]
         );
+    }
+
+    #[test]
+    fn test_edge_schema_matches_ontology_constants() {
+        let schema = edge_schema();
+        let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+
+        assert_eq!(
+            field_names,
+            ontology::constants::EDGE_RESERVED_COLUMNS,
+            "edge_schema() columns must match ontology::constants::EDGE_RESERVED_COLUMNS"
+        );
+    }
+
+    #[test]
+    fn test_arrow_to_clickhouse_type_nullable() {
+        let ty = arrow_to_clickhouse_type(&ArrowDataType::Int64, true);
+        assert_eq!(ty, "Nullable(Int64)");
+
+        let ty = arrow_to_clickhouse_type(&ArrowDataType::Int64, false);
+        assert_eq!(ty, "Int64");
+    }
+
+    #[test]
+    fn test_arrow_to_clickhouse_type_datetime() {
+        let ty = arrow_to_clickhouse_type(&ArrowDataType::Date64, false);
+        assert_eq!(ty, "DateTime64(3)");
+
+        let ty = arrow_to_clickhouse_type(
+            &ArrowDataType::Timestamp(arrow::datatypes::TimeUnit::Millisecond, None),
+            false,
+        );
+        assert_eq!(ty, "DateTime64(3)");
     }
 
     #[test]

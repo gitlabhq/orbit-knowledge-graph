@@ -36,7 +36,7 @@ Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrum
 
 **KG Indexer Service:**
 
-The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the core engine, `indexer_dispatch` for the dispatch scheduling loop, `indexer_sdlc` for the SDLC module, and `indexer_code` for the code indexing module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
+The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the core engine, `scheduler` for the scheduled task loop, `indexer_sdlc` for the SDLC module, and `indexer_code` for the code indexing module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
 
 *Engine metrics (`etl_engine`):*
 
@@ -54,16 +54,16 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 | `etl.destination.bytes.written` | Counter | bytes | `table` | Total bytes written to ClickHouse |
 | `etl.destination.write.errors` | Counter | count | `table` | Total failed writes to ClickHouse |
 
-*Dispatch metrics (`indexer_dispatch`):*
+*Scheduled task metrics (`scheduler`):*
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `indexer.dispatch.runs` | Counter | count | `dispatcher`, `outcome` (success/error) | Total dispatch runs by dispatcher |
-| `indexer.dispatch.duration` | Histogram | s | `dispatcher` | End-to-end duration of a dispatch cycle |
-| `indexer.dispatch.requests.published` | Counter | count | `dispatcher` | Namespace/global requests successfully published |
-| `indexer.dispatch.requests.skipped` | Counter | count | `dispatcher` | Requests skipped (already in-flight) |
-| `indexer.dispatch.query.duration` | Histogram | s | | Duration of the enabled-namespaces ClickHouse query |
-| `indexer.dispatch.errors` | Counter | count | `dispatcher`, `stage` (publish/query) | Dispatch errors by stage |
+| `scheduler.task.runs` | Counter | count | `task`, `outcome` (success/error) | Total scheduled task runs |
+| `scheduler.task.duration` | Histogram | s | `task` | End-to-end duration of a scheduled task run |
+| `scheduler.task.requests.published` | Counter | count | `task` | Requests successfully published |
+| `scheduler.task.requests.skipped` | Counter | count | `task` | Requests skipped (already in-flight) |
+| `scheduler.task.query.duration` | Histogram | s | `query` | Duration of a scheduled task ClickHouse query |
+| `scheduler.task.errors` | Counter | count | `task`, `stage` (publish/query) | Scheduled task errors by stage |
 
 *SDLC module metrics (`indexer_sdlc`):*
 
@@ -71,10 +71,10 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 |---|---|---|---|---|
 | `indexer.sdlc.pipeline.duration` | Histogram | s | `entity` | End-to-end duration of an entity or edge pipeline run |
 | `indexer.sdlc.pipeline.rows.processed` | Counter | count | `entity` | Total rows extracted and written |
-| `indexer.sdlc.pipeline.batches.processed` | Counter | count | `entity` | Total Arrow batches processed |
 | `indexer.sdlc.pipeline.errors` | Counter | count | `entity`, `error_kind` | SDLC pipeline failures |
 | `indexer.sdlc.handler.duration` | Histogram | s | `handler` | Duration of a full handler invocation |
 | `indexer.sdlc.datalake.query.duration` | Histogram | s | `entity` | Duration of ClickHouse datalake extraction queries |
+| `indexer.sdlc.datalake.query.bytes` | Counter | bytes | `entity` | Total bytes returned by ClickHouse datalake extraction queries |
 | `indexer.sdlc.transform.duration` | Histogram | s | `entity` | Duration of DataFusion SQL transform per batch |
 | `indexer.sdlc.watermark.lag` | Gauge | s | `entity` | Seconds between the current watermark and wall clock (data freshness) |
 
@@ -84,9 +84,9 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 |---|---|---|---|---|
 | `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_branch, skipped_watermark, skipped_lock, skipped_project_not_found, error) | Total push events processed by the code handler |
 | `indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single push event |
-| `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of fetching and extracting a repository from Gitaly |
+| `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of fetching a repository archive from Gitaly |
+| `indexer.code.repository.extract.duration` | Histogram | s | | Duration of extracting a repository archive to disk |
 | `indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
-| `indexer.code.write.duration` | Histogram | s | | Duration of writing all graph tables to ClickHouse |
 | `indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
 | `indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
 | `indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, repository_extract, indexing, arrow_conversion, write, watermark) | Code indexing errors by pipeline stage |

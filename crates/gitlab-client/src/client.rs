@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -43,11 +45,51 @@ pub struct GitlabClient {
 impl GitlabClient {
     pub fn new(config: GitlabClientConfiguration) -> Result<Self, GitlabClientError> {
         let signing_key = BASE64.decode(&config.signing_key)?;
+        let http = Self::build_http_client(&config)?;
         Ok(Self {
-            http: reqwest::Client::new(),
+            http,
             base_url: config.base_url,
             signing_key,
         })
+    }
+
+    fn build_http_client(
+        config: &GitlabClientConfiguration,
+    ) -> Result<reqwest::Client, GitlabClientError> {
+        let mut builder = reqwest::Client::builder();
+
+        if let Some(resolve_host) = &config.resolve_host {
+            let parsed = reqwest::Url::parse(&config.base_url)
+                .map_err(|e| GitlabClientError::Unexpected(format!("invalid base_url: {e}")))?;
+            let domain = parsed
+                .host_str()
+                .ok_or_else(|| GitlabClientError::Unexpected("base_url has no host".into()))?;
+            let port = parsed.port_or_known_default().ok_or_else(|| {
+                GitlabClientError::Unexpected("base_url has no known default port".into())
+            })?;
+
+            let addr = std::net::ToSocketAddrs::to_socket_addrs(&(resolve_host.as_str(), port))
+                .map_err(|e| {
+                    GitlabClientError::Unexpected(format!("failed to resolve {resolve_host}: {e}"))
+                })?
+                .next()
+                .ok_or_else(|| {
+                    GitlabClientError::Unexpected(format!("no addresses found for {resolve_host}"))
+                })?;
+
+            debug!(
+                domain,
+                resolve_host,
+                addr = %addr,
+                "overriding DNS for base_url host"
+            );
+            // Port 0 tells reqwest to use the port from the request URL.
+            builder = builder.resolve(domain, SocketAddr::new(addr.ip(), 0));
+        }
+
+        builder
+            .build()
+            .map_err(|e| GitlabClientError::Unexpected(format!("failed to build HTTP client: {e}")))
     }
 
     pub async fn repository_info(
@@ -132,5 +174,65 @@ mod tests {
             jsonwebtoken::decode::<serde_json::Value>(&token, &decoding_key, &validation).unwrap();
         assert_eq!(decoded.claims["iss"], "gitlab");
         assert_eq!(decoded.claims["aud"], "gitlab-knowledge-graph");
+    }
+
+    fn install_crypto_provider() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    fn config_with_resolve(
+        base_url: &str,
+        resolve_host: Option<&str>,
+    ) -> GitlabClientConfiguration {
+        GitlabClientConfiguration {
+            base_url: base_url.to_string(),
+            signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+            resolve_host: resolve_host.map(String::from),
+        }
+    }
+
+    #[test]
+    fn build_http_client_without_resolve_host() {
+        install_crypto_provider();
+        let config = config_with_resolve("https://gitlab.example.com", None);
+        assert!(GitlabClient::build_http_client(&config).is_ok());
+    }
+
+    #[test]
+    fn build_http_client_with_resolve_host_localhost() {
+        install_crypto_provider();
+        let config = config_with_resolve("https://gitlab.example.com:11443", Some("localhost"));
+        assert!(GitlabClient::build_http_client(&config).is_ok());
+    }
+
+    #[test]
+    fn build_http_client_with_resolve_host_and_path() {
+        install_crypto_provider();
+        let config = config_with_resolve("https://gitlab.example.com/backend", Some("localhost"));
+        assert!(GitlabClient::build_http_client(&config).is_ok());
+    }
+
+    #[test]
+    fn build_http_client_rejects_invalid_base_url() {
+        let config = config_with_resolve("not a url", Some("localhost"));
+        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        assert!(err.to_string().contains("invalid base_url"));
+    }
+
+    #[test]
+    fn build_http_client_rejects_unknown_scheme() {
+        let config = config_with_resolve("custom://gitlab.example.com", Some("localhost"));
+        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        assert!(err.to_string().contains("no known default port"));
+    }
+
+    #[test]
+    fn build_http_client_rejects_unresolvable_host() {
+        let config = config_with_resolve(
+            "https://gitlab.example.com",
+            Some("this-host-definitely-does-not-exist.invalid"),
+        );
+        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        assert!(err.to_string().contains("failed to resolve"));
     }
 }

@@ -1,11 +1,11 @@
 //! Repository operations backed by the Rails internal API and Gitaly.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use gitaly_client::{GitalyClient, GitalyError, GitalyRepositoryConfig, RepositorySource};
+use gitaly_client::{GitalyClient, GitalyError, GitalyRepositoryConfig};
 use gitlab_client::{GitlabClient, GitlabClientError, RepositoryInfo};
 use moka::future::Cache;
 
@@ -21,12 +21,12 @@ fn gitaly_config_from(info: &RepositoryInfo) -> GitalyRepositoryConfig {
 #[async_trait]
 pub trait RepositoryService: Send + Sync {
     async fn repository_info(&self, project_id: i64) -> Result<RepositoryInfo, GitalyError>;
-    async fn extract_repository(
+    async fn fetch_archive(
         &self,
         repository: &RepositoryInfo,
         target_dir: &Path,
         commit_id: &str,
-    ) -> Result<(), GitalyError>;
+    ) -> Result<PathBuf, GitalyError>;
 }
 
 pub struct GitLabRepositoryService {
@@ -52,15 +52,15 @@ impl RepositoryService for GitLabRepositoryService {
             .map_err(gitlab_error_to_gitaly)
     }
 
-    async fn extract_repository(
+    async fn fetch_archive(
         &self,
         repository: &RepositoryInfo,
         target_dir: &Path,
         commit_id: &str,
-    ) -> Result<(), GitalyError> {
+    ) -> Result<PathBuf, GitalyError> {
         let config = gitaly_config_from(repository);
         let client = GitalyClient::connect(config).await?;
-        RepositorySource::extract_to(&client, target_dir, Some(commit_id)).await
+        client.fetch_archive(target_dir, Some(commit_id)).await
     }
 }
 
@@ -92,18 +92,18 @@ impl RepositoryService for CachingRepositoryService {
         Ok(info)
     }
 
-    async fn extract_repository(
+    async fn fetch_archive(
         &self,
         repository: &RepositoryInfo,
         target_dir: &Path,
         commit_id: &str,
-    ) -> Result<(), GitalyError> {
+    ) -> Result<PathBuf, GitalyError> {
         match self
             .inner
-            .extract_repository(repository, target_dir, commit_id)
+            .fetch_archive(repository, target_dir, commit_id)
             .await
         {
-            Ok(()) => Ok(()),
+            Ok(path) => Ok(path),
             Err(error) => {
                 self.cache.invalidate(&repository.project_id).await;
                 Err(error)
@@ -168,13 +168,13 @@ pub mod test_utils {
             Ok(make_repository_info(project_id, &default_branch))
         }
 
-        async fn extract_repository(
+        async fn fetch_archive(
             &self,
             _repository: &RepositoryInfo,
-            _target_dir: &Path,
+            target_dir: &Path,
             _commit_id: &str,
-        ) -> Result<(), GitalyError> {
-            Ok(())
+        ) -> Result<PathBuf, GitalyError> {
+            Ok(target_dir.join("repo.tar"))
         }
     }
 
@@ -210,17 +210,17 @@ pub mod test_utils {
             self.inner.repository_info(project_id).await
         }
 
-        async fn extract_repository(
+        async fn fetch_archive(
             &self,
             repository: &RepositoryInfo,
             target_dir: &Path,
             commit_id: &str,
-        ) -> Result<(), GitalyError> {
+        ) -> Result<PathBuf, GitalyError> {
             if *self.extract_should_fail.lock() {
                 return Err(GitalyError::Config("simulated gitaly failure".to_string()));
             }
             self.inner
-                .extract_repository(repository, target_dir, commit_id)
+                .fetch_archive(repository, target_dir, commit_id)
                 .await
         }
     }
@@ -288,10 +288,10 @@ mod tests {
         let info = service.repository_info(1).await.unwrap();
         assert_eq!(counting.repository_info_call_count(), 1);
 
-        // Simulate Gitaly failure during extract
+        // Simulate Gitaly failure during fetch
         counting.set_extract_should_fail(true);
         let result = service
-            .extract_repository(&info, Path::new("/tmp"), "abc123")
+            .fetch_archive(&info, Path::new("/tmp"), "abc123")
             .await;
         assert!(result.is_err());
 
@@ -310,9 +310,9 @@ mod tests {
         let info = service.repository_info(1).await.unwrap();
         assert_eq!(counting.repository_info_call_count(), 1);
 
-        // Successful extract should not invalidate cache
+        // Successful fetch should not invalidate cache
         service
-            .extract_repository(&info, Path::new("/tmp"), "abc123")
+            .fetch_archive(&info, Path::new("/tmp"), "abc123")
             .await
             .unwrap();
 

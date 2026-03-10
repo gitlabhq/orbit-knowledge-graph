@@ -45,18 +45,15 @@ generation:
   batch_size: 100000
 
   seed: 42
+  fake_data_path: fake_data.yaml
 
   # Single org, scaled for ~100M edges with ~10M nodes
   organizations: 1
+  namespace_entity: Group
 
   roots:
     User: 10000                       # 10k users
     Group: 20                         # 20 top-level groups
-
-  subgroups:
-    max_depth: 3                      # 3 levels deep
-    per_group: 2                      # 2 subgroups per parent
-    # Total groups: 20 × (1 + 2 + 4 + 8) = 300
 
   # Node estimates (~10M nodes):
   # - 300 groups × 10 projects = 3k projects
@@ -73,6 +70,9 @@ generation:
 
   relationships:
     CONTAINS:
+      "Group -> Group":               # Self-referential: 3 levels x 2 per parent = 300 total groups
+        count: 2
+        max_depth: 3
       "Group -> Project": 10          # 10 projects per group = 3k projects
 
     IN_PROJECT:
@@ -157,9 +157,6 @@ generation:
 
     HAS_LABEL:
       "WorkItem -> Label": 0.5
-
-    IN_GROUP:
-      "Project -> Group": 1
 
 evaluation:
   queries_path: fixtures/queries/sdlc_queries.json

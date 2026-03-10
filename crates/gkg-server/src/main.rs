@@ -10,9 +10,11 @@ use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use indexer::IndexerConfig;
-use indexer::dispatcher::Dispatcher;
 use indexer::modules::code::dispatch::ProjectCodeDispatcher;
-use indexer::modules::sdlc::dispatch::{DispatchMetrics, GlobalDispatcher, NamespaceDispatcher};
+use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use indexer::scheduler::ScheduledTask;
+use indexer::scheduler::ScheduledTaskMetrics;
+use indexer::scheduler::TableCleanup;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -37,31 +39,36 @@ async fn main() -> anyhow::Result<()> {
 
     let result = match args.mode {
         Mode::DispatchIndexing => {
-            let services = indexer::dispatcher::connect(&config.nats).await?;
+            let services = indexer::scheduler::connect(&config.nats).await?;
             let graph = config.graph.build_client();
             let datalake = config.datalake.build_client();
-            let metrics = DispatchMetrics::new();
+            let metrics = ScheduledTaskMetrics::new();
             let lock_service = services.lock_service.clone();
-            let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
+            let tasks: Vec<Box<dyn ScheduledTask>> = vec![
                 Box::new(GlobalDispatcher::new(
                     services.nats.clone(),
                     metrics.clone(),
-                    config.dispatch.dispatchers.global.clone(),
+                    config.schedule.tasks.global.clone(),
                 )),
                 Box::new(NamespaceDispatcher::new(
                     services.nats.clone(),
                     datalake.clone(),
                     metrics.clone(),
-                    config.dispatch.dispatchers.namespace.clone(),
+                    config.schedule.tasks.namespace.clone(),
                 )),
                 Box::new(ProjectCodeDispatcher::new(
                     services.nats,
+                    graph.clone(),
+                    metrics.clone(),
+                    config.schedule.tasks.project_code.clone(),
+                )),
+                Box::new(TableCleanup::new(
                     graph,
                     metrics,
-                    config.dispatch.dispatchers.project_code.clone(),
+                    config.schedule.tasks.table_cleanup.clone(),
                 )),
             ];
-            indexer::dispatcher::run(&dispatchers, &*lock_service)
+            indexer::scheduler::run(&tasks, &*lock_service)
                 .await
                 .map_err(Into::into)
         }
@@ -73,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
                 datalake: config.datalake.clone(),
                 engine: config.engine.clone(),
                 gitlab: config.gitlab_client_config(),
-                dispatch: config.dispatch.clone(),
+                schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
             };
             indexer::run(&indexer_config, shutdown)

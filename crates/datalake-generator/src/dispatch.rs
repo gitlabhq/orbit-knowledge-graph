@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use indexer::dispatcher::Dispatcher;
 use indexer::modules::sdlc::dispatch::{
-    DispatchMetrics, GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher,
-    NamespaceDispatcherConfig,
+    GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher, NamespaceDispatcherConfig,
 };
+use indexer::scheduler::ScheduledTask;
+use indexer::scheduler::ScheduledTaskMetrics;
 use tracing::info;
 
 use crate::config::SimulatorConfig;
@@ -23,14 +23,14 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
         password: config.datalake.password.clone(),
     };
 
-    let services = indexer::dispatcher::connect(&nats_config)
+    let services = indexer::scheduler::connect(&nats_config)
         .await
         .context("dispatcher connect failed")?;
 
     let datalake = datalake_config.build_client();
-    let metrics = DispatchMetrics::new();
+    let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
-    let dispatchers: Vec<Box<dyn Dispatcher>> = vec![
+    let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
@@ -44,7 +44,7 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
         )),
     ];
 
-    indexer::dispatcher::run(&dispatchers, &*lock_service)
+    indexer::scheduler::run(&tasks, &*lock_service)
         .await
         .context("dispatch indexing failed")?;
 

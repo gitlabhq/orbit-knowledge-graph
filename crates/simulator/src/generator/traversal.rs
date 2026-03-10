@@ -112,13 +112,34 @@ impl EntityRegistry {
     /// Compact the registry to only store IDs, freeing traversal path memory.
     /// Call this after relationship generation is complete, before associations.
     pub fn compact(&mut self) {
+        self.compact_with_aliases(&HashMap::new());
+    }
+
+    /// Compact the registry, merging epsilon node entries into their real type names.
+    ///
+    /// For example, with aliases `{"Group@1": "Group", "Group@2": "Group"}`,
+    /// entities stored under "Group@1" and "Group@2" get merged into "Group".
+    pub fn compact_with_aliases(&mut self, aliases: &HashMap<String, String>) {
         if self.compacted {
             return;
         }
-        // Convert full entities to IDs and merge with existing id-only entries
+        // Convert full entities to IDs and merge, resolving aliases
         for (node_type, contexts) in self.entities.drain() {
+            let real_type = aliases.get(&node_type).cloned().unwrap_or(node_type);
             let ids: Vec<i64> = contexts.into_iter().map(|c| c.id).collect();
-            self.ids_only.entry(node_type).or_default().extend(ids);
+            self.ids_only.entry(real_type).or_default().extend(ids);
+        }
+        // Also resolve aliases in existing id-only entries
+        let id_entries: Vec<_> = self.ids_only.keys().cloned().collect();
+        for key in id_entries {
+            if let Some(real_type) = aliases.get(&key)
+                && let Some(ids) = self.ids_only.remove(&key)
+            {
+                self.ids_only
+                    .entry(real_type.clone())
+                    .or_default()
+                    .extend(ids);
+            }
         }
         self.compacted = true;
     }
@@ -533,6 +554,103 @@ mod tests {
         assert_eq!(registry.next_entity_id(), 1);
         assert_eq!(registry.next_entity_id(), 2);
         assert_eq!(registry.next_entity_id(), 3);
+    }
+
+    #[test]
+    fn test_entity_registry_compact() {
+        let mut registry = EntityRegistry::new(1);
+
+        // Add full contexts (parent entities)
+        registry.add("Group", EntityContext::root_group(1, 100));
+        registry.add("Group", EntityContext::root_group(1, 101));
+
+        // Add ID-only (leaf entities)
+        registry.add_id_only("MergeRequest", 500);
+        registry.add_id_only("MergeRequest", 501);
+
+        // Before compaction: full contexts accessible via get()
+        assert!(registry.get("Group").is_some());
+        assert_eq!(registry.count("Group"), 2);
+        assert_eq!(registry.count("MergeRequest"), 2);
+
+        // Compact
+        registry.compact();
+
+        // After compaction: all IDs accessible via get_ids_slice()
+        let group_ids = registry.get_ids_slice("Group").unwrap();
+        assert_eq!(group_ids, &[100, 101]);
+
+        let mr_ids = registry.get_ids_slice("MergeRequest").unwrap();
+        assert_eq!(mr_ids, &[500, 501]);
+
+        // get_ids() still works after compaction
+        assert_eq!(registry.get_ids("Group"), vec![100, 101]);
+
+        // total_count is preserved
+        assert_eq!(registry.total_count(), 4);
+    }
+
+    #[test]
+    fn test_entity_registry_compact_merges_full_and_id_only() {
+        let mut registry = EntityRegistry::new(1);
+
+        // Mix: some entities added as full, some as id-only, same type
+        registry.add("Project", EntityContext::new(10, "1/100/".to_string()));
+        registry.add_id_only("Project", 20);
+
+        assert_eq!(registry.count("Project"), 2);
+
+        registry.compact();
+
+        let ids = registry.get_ids_slice("Project").unwrap();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&10));
+        assert!(ids.contains(&20));
+    }
+
+    #[test]
+    fn test_entity_registry_compact_with_aliases() {
+        let mut registry = EntityRegistry::new(1);
+
+        // Root-level Group entities
+        registry.add("Group", EntityContext::root_group(1, 100));
+        registry.add("Group", EntityContext::root_group(1, 101));
+
+        // Virtual depth-level entries
+        registry.add("Group@1", EntityContext::new(200, "1/100/200/".to_string()));
+        registry.add("Group@1", EntityContext::new(201, "1/101/201/".to_string()));
+        registry.add(
+            "Group@2",
+            EntityContext::new(300, "1/100/200/300/".to_string()),
+        );
+
+        // Non-aliased type
+        registry.add_id_only("Project", 500);
+        registry.add_id_only("Project", 501);
+
+        let aliases: HashMap<String, String> = [
+            ("Group@1".to_string(), "Group".to_string()),
+            ("Group@2".to_string(), "Group".to_string()),
+        ]
+        .into_iter()
+        .collect();
+
+        registry.compact_with_aliases(&aliases);
+
+        // All Group IDs (root + epsilon) should be merged
+        let group_ids = registry.get_ids_slice("Group").unwrap();
+        assert_eq!(group_ids.len(), 5); // 100, 101, 200, 201, 300
+        assert!(group_ids.contains(&100));
+        assert!(group_ids.contains(&201));
+        assert!(group_ids.contains(&300));
+
+        // Epsilon keys should not exist
+        assert!(registry.get_ids_slice("Group@1").is_none());
+        assert!(registry.get_ids_slice("Group@2").is_none());
+
+        // Non-aliased type is unchanged
+        let project_ids = registry.get_ids_slice("Project").unwrap();
+        assert_eq!(project_ids.len(), 2);
     }
 
     #[test]

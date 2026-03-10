@@ -1,0 +1,110 @@
+# Fake data configuration for the simulator.
+#
+# Controls string pools, boolean probabilities, integer ranges, AND the
+# classification rules that decide which generator strategy applies to each
+# ontology field. Edit this file to change generated values or add new
+# field-specific behaviour without recompilation.
+
+strings:
+  pools:
+    name_prefixes:
+      - "alpha_"
+      - "beta_"
+      - "gamma_"
+      - "delta_"
+      - "epsilon_"
+      - "zeta_"
+      - "theta_"
+      - "omega_"
+
+    email_domains:
+      - "@example.com"
+      - "@test.org"
+      - "@demo.net"
+      - "@sample.io"
+      - "@mock.dev"
+
+    description_words:
+      - "Lorem"
+      - "ipsum"
+      - "dolor"
+      - "sit"
+      - "amet"
+      - "consectetur"
+      - "adipiscing"
+      - "elit"
+      - "sed"
+      - "do"
+      - "eiusmod"
+      - "tempor"
+
+    statuses:
+      - "open"
+      - "closed"
+      - "merged"
+      - "pending"
+      - "active"
+
+    states:
+      - "pending"
+      - "running"
+      - "success"
+      - "failed"
+      - "canceled"
+
+    branch_prefixes:
+      - "feature/branch-"
+      - "fix/branch-"
+      - "hotfix/branch-"
+      - "release/branch-"
+      - "main/branch-"
+      - "develop/branch-"
+
+  # Classification rules for string fields (first match wins).
+  # Each rule checks if the lowercased field name contains any pattern.
+  # Fields that match no rule get the generic_string generator.
+  classify:
+    - contains: [name, title]
+      kind: name_or_title
+    - contains: [email]
+      kind: email
+    - contains: [url]
+      kind: url
+    - contains: [path]
+      kind: path
+    - contains: [sha, hash]
+      kind: sha_or_hash
+    - contains: [description, body]
+      kind: description_or_body
+    - contains: [status]
+      kind: status
+    - contains: [state]
+      kind: state
+    - contains: [ref, branch]
+      kind: ref_or_branch
+
+# Boolean probabilities (0.0–1.0) keyed by lowercased field name.
+# Fields not listed here use `default`.
+bools:
+  default: 0.50
+  fields:
+    archived: 0.05
+    confidential: 0.10
+    draft: 0.20
+    squash: 0.30
+    private_profile: 0.10
+    is_admin: 0.02
+    is_auditor: 0.02
+    is_external: 0.05
+    discussion_locked: 0.05
+    tag: 0.10
+
+# Integer ranges [min, max] (inclusive) keyed by lowercased field name.
+# Fields not listed here use `default`.
+ints:
+  default: [1, 99999]
+  fields:
+    iid: [1, 10000]
+    weight: [1, 19]
+    star_count: [0, 4999]
+    duration: [60, 7199]

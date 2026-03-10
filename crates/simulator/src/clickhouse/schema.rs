@@ -1,8 +1,9 @@
 //! ClickHouse schema generation from ontology and config.
 
-use crate::arrow_schema::{ToArrowSchema, edge_schema};
+use crate::arrow_schema::{ToArrowSchema, arrow_to_clickhouse_type, edge_schema};
 use crate::config::SchemaConfig;
-use arrow::datatypes::{DataType as ArrowDataType, Schema};
+use crate::constants::{TABLE_PATTERN_ALL_NODES, TABLE_PATTERN_EDGES};
+use arrow::datatypes::Schema;
 use ontology::Ontology;
 use ontology::constants::EDGE_TABLE;
 
@@ -152,12 +153,12 @@ impl<'a> SchemaGenerator<'a> {
     /// Resolve table pattern ("*" = all node tables, "edges" = edge table).
     fn resolve_table_pattern(&self, pattern: &str) -> Vec<String> {
         match pattern {
-            "*" => self
+            TABLE_PATTERN_ALL_NODES => self
                 .ontology
                 .nodes()
                 .map(|n| self.ontology.table_name(&n.name).unwrap().to_owned())
                 .collect(),
-            "edges" => vec![EDGE_TABLE.to_string()],
+            TABLE_PATTERN_EDGES => vec![EDGE_TABLE.to_string()],
             _ => vec![pattern.to_string()],
         }
     }
@@ -205,34 +206,6 @@ impl<'a> SchemaGenerator<'a> {
             primary_key_clause,
             settings.join(", ")
         )
-    }
-}
-
-/// Convert Arrow DataType to ClickHouse type string.
-fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> String {
-    let base_type = match arrow_type {
-        ArrowDataType::Boolean => "Bool",
-        ArrowDataType::Int8 => "Int8",
-        ArrowDataType::Int16 => "Int16",
-        ArrowDataType::Int32 => "Int32",
-        ArrowDataType::Int64 => "Int64",
-        ArrowDataType::UInt8 => "UInt8",
-        ArrowDataType::UInt16 => "UInt16",
-        ArrowDataType::UInt32 => "UInt32",
-        ArrowDataType::UInt64 => "UInt64",
-        ArrowDataType::Float32 => "Float32",
-        ArrowDataType::Float64 => "Float64",
-        ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => "String",
-        ArrowDataType::Date32 => "Date",
-        ArrowDataType::Date64 => "DateTime64(3)",
-        ArrowDataType::Timestamp(_, _) => "DateTime64(3)",
-        _ => "String",
-    };
-
-    if nullable {
-        format!("Nullable({})", base_type)
-    } else {
-        base_type.to_string()
     }
 }
 

@@ -5,8 +5,8 @@ use gitlab_client::GitlabClientConfiguration;
 use health_check::HealthCheckConfig;
 use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
-use indexer::dispatcher::DispatchConfig;
 use indexer::nats::NatsConfiguration;
+use indexer::scheduler::ScheduleConfig;
 use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +43,8 @@ pub struct GitlabConfig {
     pub base_url: Option<String>,
     #[serde(default)]
     pub jwt: JwtConfig,
+    #[serde(default)]
+    pub resolve_host: Option<String>,
 }
 
 impl GitlabConfig {
@@ -52,6 +54,7 @@ impl GitlabConfig {
         Some(GitlabClientConfiguration {
             base_url,
             signing_key,
+            resolve_host: self.resolve_host.clone(),
         })
     }
 }
@@ -77,7 +80,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub gitlab: GitlabConfig,
     #[serde(default)]
-    pub dispatch: DispatchConfig,
+    pub schedule: ScheduleConfig,
     #[serde(default)]
     pub health_check: HealthCheckConfig,
     #[serde(default = "default_indexer_health_bind_address")]

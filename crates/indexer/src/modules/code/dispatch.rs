@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::configuration::DispatcherConfiguration;
-use crate::dispatcher::{DispatchError, Dispatcher};
-use crate::modules::sdlc::dispatch::DispatchMetrics;
+use crate::configuration::ScheduleConfiguration;
 use crate::nats::NatsServices;
+use crate::scheduler::ScheduledTaskMetrics;
+use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::ProjectCodeIndexingRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
@@ -34,7 +34,7 @@ fn default_interval_secs() -> Option<u64> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectCodeDispatcherConfig {
     #[serde(flatten)]
-    pub dispatcher: DispatcherConfiguration,
+    pub schedule: ScheduleConfiguration,
 
     #[serde(default = "default_batch_size")]
     pub batch_size: u64,
@@ -43,7 +43,7 @@ pub struct ProjectCodeDispatcherConfig {
 impl Default for ProjectCodeDispatcherConfig {
     fn default() -> Self {
         Self {
-            dispatcher: DispatcherConfiguration {
+            schedule: ScheduleConfiguration {
                 interval_secs: default_interval_secs(),
             },
             batch_size: default_batch_size(),
@@ -54,7 +54,7 @@ impl Default for ProjectCodeDispatcherConfig {
 pub struct ProjectCodeDispatcher {
     nats: Arc<dyn NatsServices>,
     graph: ArrowClickHouseClient,
-    metrics: DispatchMetrics,
+    metrics: ScheduledTaskMetrics,
     config: ProjectCodeDispatcherConfig,
 }
 
@@ -62,7 +62,7 @@ impl ProjectCodeDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
         graph: ArrowClickHouseClient,
-        metrics: DispatchMetrics,
+        metrics: ScheduledTaskMetrics,
         config: ProjectCodeDispatcherConfig,
     ) -> Self {
         Self {
@@ -75,16 +75,16 @@ impl ProjectCodeDispatcher {
 }
 
 #[async_trait]
-impl Dispatcher for ProjectCodeDispatcher {
+impl ScheduledTask for ProjectCodeDispatcher {
     fn name(&self) -> &str {
-        "code.project"
+        "dispatch.code.project"
     }
 
-    fn dispatcher_config(&self) -> &DispatcherConfiguration {
-        &self.config.dispatcher
+    fn schedule(&self) -> &ScheduleConfiguration {
+        &self.config.schedule
     }
 
-    async fn dispatch(&self) -> Result<(), DispatchError> {
+    async fn run(&self) -> Result<(), TaskError> {
         let start = Instant::now();
 
         let result = self.dispatch_inner().await;
@@ -98,7 +98,7 @@ impl Dispatcher for ProjectCodeDispatcher {
 }
 
 impl ProjectCodeDispatcher {
-    async fn dispatch_inner(&self) -> Result<(), DispatchError> {
+    async fn dispatch_inner(&self) -> Result<(), TaskError> {
         let project_ids = self.fetch_pending_project_ids().await?;
 
         if project_ids.is_empty() {
@@ -122,7 +122,7 @@ impl ProjectCodeDispatcher {
             let topic = request.publish_topic();
             let envelope = Envelope::new(&request).map_err(|error| {
                 self.metrics.record_error(self.name(), "publish");
-                DispatchError::new(error)
+                TaskError::new(error)
             })?;
 
             match self.nats.publish(&topic, &envelope).await {
@@ -139,7 +139,7 @@ impl ProjectCodeDispatcher {
                 }
                 Err(error) => {
                     self.metrics.record_error(self.name(), "publish");
-                    return Err(DispatchError::new(error));
+                    return Err(TaskError::new(error));
                 }
             }
         }
@@ -152,7 +152,7 @@ impl ProjectCodeDispatcher {
         Ok(())
     }
 
-    async fn fetch_pending_project_ids(&self) -> Result<Vec<i64>, DispatchError> {
+    async fn fetch_pending_project_ids(&self) -> Result<Vec<i64>, TaskError> {
         let query_start = Instant::now();
         let batches = self
             .graph
@@ -162,12 +162,12 @@ impl ProjectCodeDispatcher {
             .await
             .map_err(|error| {
                 self.metrics.record_error(self.name(), "query");
-                DispatchError::new(error)
+                TaskError::new(error)
             })?;
         self.metrics
-            .record_query_duration(query_start.elapsed().as_secs_f64());
+            .record_query_duration("pending_projects", query_start.elapsed().as_secs_f64());
 
-        i64::extract_column(&batches, 0).map_err(DispatchError::new)
+        i64::extract_column(&batches, 0).map_err(TaskError::new)
     }
 }
 
@@ -180,8 +180,8 @@ mod tests {
     use crate::clickhouse::ClickHouseConfiguration;
     use crate::testkit::MockNatsServices;
 
-    fn test_metrics() -> DispatchMetrics {
-        DispatchMetrics::with_meter(&crate::testkit::test_meter())
+    fn test_metrics() -> ScheduledTaskMetrics {
+        ScheduledTaskMetrics::with_meter(&crate::testkit::test_meter())
     }
 
     fn test_client() -> ArrowClickHouseClient {
@@ -189,26 +189,23 @@ mod tests {
     }
 
     #[test]
-    fn dispatcher_name_is_code_project() {
+    fn task_name_is_code_project() {
         let nats = Arc::new(MockNatsServices::new());
-        let dispatcher = ProjectCodeDispatcher::new(
+        let task = ProjectCodeDispatcher::new(
             nats,
             test_client(),
             test_metrics(),
             ProjectCodeDispatcherConfig::default(),
         );
 
-        assert_eq!(dispatcher.name(), "code.project");
+        assert_eq!(task.name(), "dispatch.code.project");
     }
 
     #[test]
     fn defaults_to_thirty_minute_interval() {
         let config = ProjectCodeDispatcherConfig::default();
 
-        assert_eq!(
-            config.dispatcher.interval(),
-            Some(Duration::from_secs(1800))
-        );
+        assert_eq!(config.schedule.interval(), Some(Duration::from_secs(1800)));
     }
 
     #[test]

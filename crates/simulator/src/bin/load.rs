@@ -3,6 +3,7 @@
 use anyhow::Result;
 use clap::Parser;
 use ontology::Ontology;
+use ontology::constants::EDGE_TABLE;
 use simulator::Config;
 use simulator::clickhouse::{ClickHouseWriter, check_clickhouse_health};
 use simulator::parquet::ParquetReader;
@@ -129,10 +130,10 @@ async fn main() -> Result<()> {
                 let start = std::time::Instant::now();
 
                 if args.use_cli {
-                    writer.load_parquet_file("gl_edge", &edges_path)?;
+                    writer.load_parquet_file(EDGE_TABLE, &edges_path)?;
                 } else {
                     let edge_batches = reader.read_edges(*org_id)?;
-                    writer.write_batches("gl_edge", &edge_batches).await?;
+                    writer.write_batches(EDGE_TABLE, &edge_batches).await?;
                 }
 
                 println!("{:.1}s", start.elapsed().as_secs_f64());

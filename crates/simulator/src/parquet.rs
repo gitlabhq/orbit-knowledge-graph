@@ -1,6 +1,7 @@
 //! Parquet file I/O for generated data.
 
 use crate::arrow_schema::edge_schema;
+use crate::constants::DEFAULT_EDGE_FLUSH_THRESHOLD;
 use crate::generator::{EdgeRecord, OrganizationData};
 use anyhow::{Context, Result};
 use arrow::array::{Int64Array, RecordBatch, StringArray};
@@ -14,9 +15,6 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-/// Default flush threshold: 1 million edges per batch write.
-const DEFAULT_EDGE_FLUSH_THRESHOLD: usize = 1_000_000;
 
 /// Streaming edge writer that flushes to Parquet incrementally.
 /// Keeps the Parquet writer open and writes row groups as edges accumulate.
