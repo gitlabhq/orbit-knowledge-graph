@@ -41,6 +41,7 @@ async fn main() -> Result<()> {
 
     tracing::info!("Loading config from {:?}", args.config);
     let config = Config::load(&args.config)?;
+    config.evaluation.validate()?;
 
     tracing::info!(
         "Loading ontology from {:?}",
@@ -53,7 +54,10 @@ async fn main() -> Result<()> {
 
     if let Some(pattern) = &config.evaluation.filter {
         let pattern_lower = pattern.to_lowercase();
-        queries.retain(|name, _| name.to_lowercase().contains(&pattern_lower));
+        queries.retain(|key, entry| {
+            key.to_lowercase().contains(&pattern_lower)
+                || entry.desc.to_lowercase().contains(&pattern_lower)
+        });
         tracing::info!(
             "Filtered to {} queries matching '{}'",
             queries.len(),
@@ -92,23 +96,20 @@ async fn main() -> Result<()> {
         tracing::info!("Cache warmed: {} entity types", stats.len());
     }
 
+    let concurrency = config.evaluation.concurrency;
     tracing::info!(
-        "Executing {} queries ({} iteration(s))...",
+        "Executing {} queries ({} iteration(s), concurrency={})...",
         queries.len(),
-        config.evaluation.iterations
+        config.evaluation.iterations,
+        concurrency
     );
 
-    let capture_metadata = config.evaluation.metadata_dir.is_some();
-    let mut run_metadata = if capture_metadata {
-        Some(RunMetadata::new(RunConfig {
-            clickhouse_url: config.clickhouse.url.clone(),
-            iterations: config.evaluation.iterations,
-            sample_size: config.evaluation.sample_size,
-            filter: config.evaluation.filter.clone(),
-        }))
-    } else {
-        None
-    };
+    let mut run_metadata = RunMetadata::new(RunConfig {
+        clickhouse_url: config.clickhouse.url.clone(),
+        iterations: config.evaluation.iterations,
+        sample_size: config.evaluation.sample_size,
+        filter: config.evaluation.filter.clone(),
+    });
 
     let mut all_results = Vec::new();
 
@@ -121,59 +122,22 @@ async fn main() -> Result<()> {
             );
         }
 
-        if capture_metadata {
-            let results_with_metadata = executor.execute_all_with_metadata(&queries).await;
-
-            for (result, metadata) in results_with_metadata {
-                if result.success {
-                    tracing::debug!(
-                        "✓ {} - {} rows in {:.2}ms",
-                        result.query_name,
-                        result.row_count.unwrap_or(0),
-                        result.execution_time.as_secs_f64() * 1000.0
-                    );
-                } else {
-                    tracing::warn!(
-                        "✗ {} - {}",
-                        result.query_name,
-                        result.error.as_deref().unwrap_or("unknown error")
-                    );
-                }
-
-                if let Some(ref mut run) = run_metadata {
-                    run.add_query(metadata);
-                }
-                all_results.push(result);
-            }
+        let results = if concurrency > 1 {
+            executor.execute_all_concurrent(&queries, concurrency).await
         } else {
-            let results = executor.execute_all(&queries).await;
+            executor.execute_all(&queries).await
+        };
 
-            for result in &results {
-                if result.success {
-                    tracing::debug!(
-                        "✓ {} - {} rows in {:.2}ms",
-                        result.query_name,
-                        result.row_count.unwrap_or(0),
-                        result.execution_time.as_secs_f64() * 1000.0
-                    );
-                } else {
-                    tracing::warn!(
-                        "✗ {} - {}",
-                        result.query_name,
-                        result.error.as_deref().unwrap_or("unknown error")
-                    );
-                }
-            }
-
-            all_results.extend(results);
+        for (result, metadata) in results {
+            log_result(&result);
+            run_metadata.add_query(metadata);
+            all_results.push(result);
         }
     }
 
-    if let Some(ref mut run) = run_metadata {
-        run.complete();
-        if let Some(ref dir) = config.evaluation.metadata_dir {
-            run.save_to_dir(Path::new(dir))?;
-        }
+    run_metadata.complete();
+    if let Some(ref dir) = config.evaluation.metadata_dir {
+        run_metadata.save_to_dir(Path::new(dir))?;
     }
 
     let report = Report::new(all_results);
@@ -199,4 +163,21 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn log_result(result: &simulator::evaluation::ExecutionResult) {
+    if result.success {
+        tracing::debug!(
+            "✓ {} - {} rows in {:.2}ms",
+            result.query_name,
+            result.row_count.unwrap_or(0),
+            result.execution_time.as_secs_f64() * 1000.0
+        );
+    } else {
+        tracing::warn!(
+            "✗ {} - {}",
+            result.query_name,
+            result.error.as_deref().unwrap_or("unknown error")
+        );
+    }
 }

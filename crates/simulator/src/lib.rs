@@ -22,7 +22,7 @@
 //! use ontology::Ontology;
 //!
 //! let ontology = Ontology::load_from_dir("fixtures/ontology")?;
-//! let config = Config::default();
+//! let config = Config::load("simulator.yaml")?;
 //! let generator = Generator::new(ontology, config);
 //!
 //! generator.run().await?;

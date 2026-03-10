@@ -7,15 +7,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Root configuration for the simulator.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[derive(Default)]
 pub struct Config {
     /// ClickHouse connection and schema settings.
     pub clickhouse: ClickHouseConfig,
     /// Data generation settings.
     pub generation: GenerationConfig,
-    /// Evaluation settings.
+    /// Evaluation settings. Required when running the evaluator.
     #[serde(default)]
     pub evaluation: EvaluationConfig,
 }
@@ -595,8 +594,7 @@ impl AssociationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvaluationConfig {
-    /// Path to queries JSON file.
-    #[serde(default = "default_queries_path")]
+    /// Path to queries YAML file.
     pub queries_path: String,
     /// Number of IDs to sample per entity type.
     #[serde(default = "default_sample_size")]
@@ -604,6 +602,10 @@ pub struct EvaluationConfig {
     /// Number of iterations to run each query.
     #[serde(default = "default_iterations")]
     pub iterations: usize,
+    /// Number of queries to execute concurrently.
+    /// 1 = serial (default), >1 = concurrent load testing.
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
     /// Skip cache warming.
     #[serde(default)]
     pub skip_cache_warm: bool,
@@ -618,10 +620,6 @@ pub struct EvaluationConfig {
     pub metadata_dir: Option<String>,
 }
 
-fn default_queries_path() -> String {
-    "fixtures/queries/sdlc_queries.json".to_string()
-}
-
 fn default_sample_size() -> usize {
     100
 }
@@ -630,17 +628,36 @@ fn default_iterations() -> usize {
     1
 }
 
+fn default_concurrency() -> usize {
+    1
+}
+
 impl Default for EvaluationConfig {
     fn default() -> Self {
         Self {
-            queries_path: default_queries_path(),
+            queries_path: String::new(),
             sample_size: default_sample_size(),
             iterations: default_iterations(),
+            concurrency: default_concurrency(),
             skip_cache_warm: false,
             filter: None,
             output: OutputConfig::default(),
             metadata_dir: None,
         }
+    }
+}
+
+impl EvaluationConfig {
+    /// Validate that required fields are set.
+    /// `queries_path` has no serde default so YAML deserialization enforces it,
+    /// but `Default` leaves it empty for convenience. Call this before evaluation.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            !self.queries_path.is_empty(),
+            "evaluation.queries_path must be set"
+        );
+        ensure!(self.concurrency >= 1, "evaluation.concurrency must be >= 1");
+        Ok(())
     }
 }
 
