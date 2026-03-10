@@ -9,7 +9,7 @@ pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 use arrow::array::Array;
 use arrow::record_batch::RecordBatch;
 
-use super::checkpoint_store::Checkpoint;
+use crate::checkpoint::Checkpoint;
 use ast::{Expr, Op, OrderExpr, Query};
 
 /// Paginated ClickHouse extract query. Owns its cursor state and generates

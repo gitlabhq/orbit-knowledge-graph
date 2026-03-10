@@ -26,6 +26,7 @@
 //! - [`modules::sdlc`] - SDLC entities (users, projects, MRs, CI, etc.)
 //! - [`modules::code`] - Code indexing (call graphs, definitions, references)
 //!
+pub mod checkpoint;
 pub mod clickhouse;
 pub mod configuration;
 pub mod destination;

@@ -14,10 +14,10 @@ use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 
-use super::checkpoint_store::{Checkpoint, CheckpointStore};
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
 use super::plan::{PipelinePlan, SOURCE_DATA_TABLE, Transformation};
+use crate::checkpoint::{Checkpoint, CheckpointStore};
 const MAX_RETRIES: u32 = 3;
 
 pub(in crate::modules::sdlc) struct PipelineContext {
@@ -349,7 +349,7 @@ impl Pipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::sdlc::checkpoint_store::CheckpointError;
+    use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::DatalakeError;
     use crate::modules::sdlc::plan::ExtractQuery;
     use crate::modules::sdlc::plan::ast::{Expr, Op, Query, SelectExpr, TableRef};
