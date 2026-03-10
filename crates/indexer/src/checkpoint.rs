@@ -7,10 +7,10 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const CHECKPOINT_TABLE: &str = "sdlc_checkpoint";
+const CHECKPOINT_TABLE: &str = "checkpoint";
 
 #[derive(Debug, Error)]
-pub(in crate::modules::sdlc) enum CheckpointError {
+pub enum CheckpointError {
     #[error("checkpoint store operation failed: {0}")]
     Store(String),
 }
@@ -22,13 +22,13 @@ pub(in crate::modules::sdlc) enum CheckpointError {
 /// - `cursor_values: None`: completed, `watermark` becomes the next `last_watermark`
 /// - `cursor_values: Some(...)`: interrupted mid-pagination, resume from cursor
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub(in crate::modules::sdlc) struct Checkpoint {
+pub struct Checkpoint {
     pub watermark: DateTime<Utc>,
     pub cursor_values: Option<Vec<String>>,
 }
 
 #[async_trait]
-pub(in crate::modules::sdlc) trait CheckpointStore: Send + Sync {
+pub trait CheckpointStore: Send + Sync {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError>;
 
     async fn save_progress(
@@ -44,7 +44,7 @@ pub(in crate::modules::sdlc) trait CheckpointStore: Send + Sync {
     ) -> Result<(), CheckpointError>;
 }
 
-pub(in crate::modules::sdlc) struct ClickHouseCheckpointStore {
+pub struct ClickHouseCheckpointStore {
     client: Arc<ArrowClickHouseClient>,
 }
 

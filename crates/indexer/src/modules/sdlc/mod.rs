@@ -1,4 +1,3 @@
-mod checkpoint_store;
 mod datalake;
 pub mod dispatch;
 mod handler;
@@ -9,8 +8,8 @@ mod plan;
 use std::sync::Arc;
 
 use crate::IndexerConfig;
+use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::handler::{HandlerInitError, HandlerRegistry};
-use checkpoint_store::ClickHouseCheckpointStore;
 use datalake::{Datalake, DatalakeQuery};
 use handler::global::GlobalHandler;
 pub use handler::global::GlobalHandlerConfig;
@@ -36,7 +35,7 @@ pub async fn register_handlers(
         datalake_client,
         global_handler_config.datalake_batch_size,
     ));
-    let checkpoint_store: Arc<dyn checkpoint_store::CheckpointStore> =
+    let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();
 
@@ -83,9 +82,9 @@ pub(crate) mod test_fixtures {
     use async_trait::async_trait;
     use futures::stream;
 
-    use super::checkpoint_store::{Checkpoint, CheckpointError, CheckpointStore};
     use super::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
     use super::metrics::SdlcMetrics;
+    use crate::checkpoint::{Checkpoint, CheckpointError, CheckpointStore};
 
     pub(crate) fn test_metrics() -> SdlcMetrics {
         SdlcMetrics::with_meter(&crate::testkit::test_meter())

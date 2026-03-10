@@ -75,7 +75,7 @@ pub async fn processes_and_transforms_users(context: &TestContext) {
 pub async fn uses_watermark_for_incremental_processing(context: &TestContext) {
     context
         .execute(
-            "INSERT INTO sdlc_checkpoint (key, watermark, cursor_values) \
+            "INSERT INTO checkpoint (key, watermark, cursor_values) \
              VALUES ('global.User', '2024-01-19 00:00:00.000000', 'null')",
         )
         .await;
