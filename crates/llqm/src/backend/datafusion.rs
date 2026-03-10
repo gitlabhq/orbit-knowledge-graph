@@ -2,10 +2,10 @@
 //!
 //! DataFusion natively consumes Substrait plans via `datafusion-substrait`,
 //! so this backend encodes the plan into its Substrait form.
-//! All Substrait construction is delegated to `ir::substrait::encode`.
+//! All Substrait construction is delegated to `backend::substrait::encode`.
 
+use crate::backend::substrait;
 use crate::ir::plan::Plan;
-use crate::ir::substrait;
 
 pub use substrait::EncodeError;
 
