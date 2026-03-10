@@ -270,16 +270,24 @@ mise run server:start
 Or set them in a `.env.local` file (git-ignored):
 
 ```shell
+GDK_ROOT="${GDK_ROOT:-$HOME/gitlab/gdk}"
 cat > .env.local << EOF
-GDK_ROOT=~/gitlab/gdk
+GDK_ROOT=$GDK_ROOT
 GKG_DATALAKE__DATABASE=gitlab_clickhouse_development
 GKG_GRAPH__DATABASE=gkg_development
 GKG_GITLAB__BASE_URL=http://127.0.0.1:3000
-GKG_GITLAB__JWT__VERIFYING_KEY=$(cat ${GDK_ROOT:-~/gitlab/gdk}/gitlab/.gitlab_knowledge_graph_secret)
+GKG_GITLAB__JWT__VERIFYING_KEY=$(cat "$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret")
 EOF
 ```
 
 Adjust `GDK_ROOT` to your GDK installation path.
+
+> **Note:** The heredoc command above uses shell substitution (`$(cat ...)`) to bake
+> the secret value into `.env.local` at creation time. The resulting file contains
+> the literal secret — not a shell expression. This is intentional: `.env` files do
+> not evaluate `$()` syntax at load time, so a literal value is required.
+> If you regenerate `.gitlab_knowledge_graph_secret` later, re-run the command above
+> to update `.env.local`, then restart the GKG server.
 
 Then source it before starting:
 
