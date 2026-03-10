@@ -73,6 +73,16 @@ gdk psql -d gitlabhq_development -c "SHOW wal_level"
 # Expected: logical
 ```
 
+> **Warning:** `gdk reconfigure` overwrites `gitlab.conf`, removing `wal_level = logical`.
+> You must re-add it after every reconfigure. If you forget and Siphon has already created
+> a replication slot, PostgreSQL will refuse to start with:
+>
+> ```plaintext
+> FATAL: logical replication slot "siphon_slot_main_db" exists, but wal_level < logical
+> ```
+>
+> The fix is to add `wal_level = logical` back to `gitlab.conf` and restart PostgreSQL.
+
 ### 3. Enable NATS and Siphon
 
 ```shell
@@ -508,6 +518,17 @@ gdk status clickhouse
 curl "http://localhost:8123/ping"
 ```
 
+**PostgreSQL won't start after `gdk reconfigure`:**
+
+`gdk reconfigure` overwrites `gitlab.conf`, removing `wal_level = logical`. If Siphon
+replication slots already exist, PostgreSQL will refuse to start. Re-add the setting and
+restart:
+
+```shell
+echo "wal_level = logical" >> $GDK_ROOT/postgresql/data/gitlab.conf
+gdk restart postgresql
+```
+
 **No data in siphon tables:**
 
 ```shell
@@ -520,6 +541,65 @@ Verify the publication exists in PostgreSQL:
 ```shell
 gdk psql -d gitlabhq_development -c "SELECT * FROM pg_publication"
 ```
+
+**Work items (or other entities) not appearing in the graph despite data in siphon tables:**
+
+The `hierarchy_work_items` materialized view may have empty `traversal_path` values if
+Siphon streamed data before `namespace_traversal_paths` was populated (a common first-time
+setup ordering issue). Verify:
+
+```shell
+clickhouse client --port 9001 \
+  --query "SELECT traversal_path, count() FROM gitlab_clickhouse_development.hierarchy_work_items GROUP BY traversal_path LIMIT 5"
+```
+
+If `traversal_path` is empty, backfill the table and clear the indexer checkpoints:
+
+```shell
+# Backfill hierarchy_work_items with correct traversal paths
+clickhouse client --port 9001 --multiquery <<'SQL'
+INSERT INTO gitlab_clickhouse_development.hierarchy_work_items
+SELECT
+    multiIf(cte.namespace_id != 0, namespace_paths.traversal_path, '0/') AS traversal_path,
+    cte.id, cte.title, cte.author_id, cte.created_at, cte.updated_at,
+    cte.milestone_id, cte.iid, cte.updated_by_id, cte.weight, cte.confidential,
+    cte.due_date, cte.moved_to_id, cte.time_estimate, cte.relative_position,
+    cte.last_edited_at, cte.last_edited_by_id, cte.closed_at, cte.closed_by_id,
+    cte.state_id, cte.duplicated_to_id, cte.promoted_to_epic_id, cte.health_status,
+    cte.sprint_id, cte.blocking_issues_count, cte.upvotes_count, cte.work_item_type_id,
+    cte.namespace_id, cte.start_date,
+    ifNull(collected_custom_status_records.custom_status_id, 0),
+    ifNull(collected_custom_status_records.system_defined_status_id, 0),
+    cte._siphon_replicated_at, cte._siphon_deleted,
+    ifNull(collected_label_ids.label_ids, ''),
+    ifNull(collected_assignee_ids.user_ids, '')
+FROM gitlab_clickhouse_development.siphon_issues AS cte
+LEFT JOIN (
+    SELECT id, argMax(traversal_path, version) AS traversal_path, argMax(deleted, version) AS deleted
+    FROM gitlab_clickhouse_development.namespace_traversal_paths
+    WHERE id IN (SELECT DISTINCT namespace_id FROM gitlab_clickhouse_development.siphon_issues)
+    GROUP BY id HAVING deleted = false
+) AS namespace_paths ON namespace_paths.id = cte.namespace_id
+LEFT JOIN (
+    SELECT work_item_id, concat('/', arrayStringConcat(arraySort(groupArray(label_id)), '/'), '/') AS label_ids
+    FROM (SELECT work_item_id, label_id, id, argMax(deleted, version) AS deleted FROM gitlab_clickhouse_development.work_item_label_links WHERE work_item_id IN (SELECT id FROM gitlab_clickhouse_development.siphon_issues) GROUP BY work_item_id, label_id, id) WHERE deleted = false GROUP BY work_item_id
+) AS collected_label_ids ON collected_label_ids.work_item_id = cte.id
+LEFT JOIN (
+    SELECT issue_id, concat('/', arrayStringConcat(arraySort(groupArray(user_id)), '/'), '/') AS user_ids
+    FROM (SELECT issue_id, user_id, argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted FROM gitlab_clickhouse_development.siphon_issue_assignees WHERE issue_id IN (SELECT id FROM gitlab_clickhouse_development.siphon_issues) GROUP BY issue_id, user_id) WHERE _siphon_deleted = false GROUP BY issue_id
+) AS collected_assignee_ids ON collected_assignee_ids.issue_id = cte.id
+LEFT JOIN (
+    SELECT work_item_id, max(system_defined_status_id) AS system_defined_status_id, max(custom_status_id) AS custom_status_id
+    FROM (SELECT work_item_id, id, argMax(system_defined_status_id, _siphon_replicated_at) AS system_defined_status_id, argMax(custom_status_id, _siphon_replicated_at) AS custom_status_id, argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted FROM gitlab_clickhouse_development.siphon_work_item_current_statuses GROUP BY work_item_id, id) WHERE _siphon_deleted = false GROUP BY work_item_id
+) AS collected_custom_status_records ON collected_custom_status_records.work_item_id = cte.id;
+SQL
+
+# Clear indexer checkpoints so it re-processes all data
+clickhouse client --port 9001 --database gkg_development \
+  --query "TRUNCATE TABLE sdlc_checkpoint"
+```
+
+Then re-run dispatch and index as normal.
 
 **JWT authentication failures:**
 
