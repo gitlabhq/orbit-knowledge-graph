@@ -1,6 +1,6 @@
 //! Configuration for the simulator.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -310,6 +310,10 @@ pub struct GenerationConfig {
     /// If not set, uses thread-local random source.
     #[serde(default)]
     pub seed: Option<u64>,
+
+    /// Path to fake data YAML file for customizing generated values.
+    #[serde(default = "default_fake_data_path")]
+    pub fake_data_path: String,
 }
 
 fn default_output_dir() -> String {
@@ -326,6 +330,10 @@ fn default_organizations() -> u32 {
 
 fn default_namespace_entity() -> String {
     crate::constants::DEFAULT_NAMESPACE_ENTITY.to_string()
+}
+
+fn default_fake_data_path() -> String {
+    crate::constants::DEFAULT_FAKE_DATA_PATH.to_string()
 }
 
 fn default_batch_size() -> usize {
@@ -346,6 +354,7 @@ impl Default for GenerationConfig {
             batch_size: default_batch_size(),
             parallel: false,
             seed: None,
+            fake_data_path: default_fake_data_path(),
         }
     }
 }
@@ -660,6 +669,180 @@ impl Default for OutputConfig {
     }
 }
 
+/// Fake data configuration loaded from YAML.
+///
+/// Controls string pools, classification rules, boolean probabilities,
+/// and integer ranges used by `FakeValueGenerator`.
+/// All fields are mandatory in YAML — no serde defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FakeDataConfig {
+    /// String pools and classification rules.
+    pub strings: FakeDataStrings,
+    /// Boolean probabilities keyed by field name, with a default fallback.
+    pub bools: FakeDataBools,
+    /// Integer ranges keyed by field name, with a default fallback.
+    pub ints: FakeDataInts,
+}
+
+impl FakeDataConfig {
+    /// Load from a YAML file. Validates all values after deserialization.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read fake data file: {}", path.display()))?;
+        let config: Self = serde_yaml::from_str(&contents)
+            .with_context(|| format!("Failed to parse fake data file: {}", path.display()))?;
+        config
+            .validate()
+            .with_context(|| format!("Invalid fake data file: {}", path.display()))?;
+        Ok(config)
+    }
+
+    /// Validate all values are within expected bounds.
+    pub fn validate(&self) -> Result<()> {
+        self.validate_string_pools()?;
+        self.validate_bools()?;
+        self.validate_ints()?;
+        Ok(())
+    }
+
+    fn validate_string_pools(&self) -> Result<()> {
+        let pools = &self.strings.pools;
+        ensure!(
+            !pools.name_prefixes.is_empty(),
+            "strings.pools.name_prefixes must not be empty"
+        );
+        ensure!(
+            !pools.email_domains.is_empty(),
+            "strings.pools.email_domains must not be empty"
+        );
+        ensure!(
+            !pools.description_words.is_empty(),
+            "strings.pools.description_words must not be empty"
+        );
+        ensure!(
+            !pools.statuses.is_empty(),
+            "strings.pools.statuses must not be empty"
+        );
+        ensure!(
+            !pools.states.is_empty(),
+            "strings.pools.states must not be empty"
+        );
+        ensure!(
+            !pools.branch_prefixes.is_empty(),
+            "strings.pools.branch_prefixes must not be empty"
+        );
+        Ok(())
+    }
+
+    fn validate_bools(&self) -> Result<()> {
+        validate_probability(self.bools.default, "bools.default")?;
+        for (name, &p) in &self.bools.fields {
+            validate_probability(p, &format!("bools.fields.{name}"))?;
+        }
+        Ok(())
+    }
+
+    fn validate_ints(&self) -> Result<()> {
+        validate_int_range(self.ints.default, "ints.default")?;
+        for (name, &range) in &self.ints.fields {
+            validate_int_range(range, &format!("ints.fields.{name}"))?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_probability(p: f64, field: &str) -> Result<()> {
+    ensure!(
+        p.is_finite(),
+        "{field}: probability must be finite, got {p}"
+    );
+    ensure!(
+        (0.0..=1.0).contains(&p),
+        "{field}: probability must be in [0.0, 1.0], got {p}"
+    );
+    Ok(())
+}
+
+fn validate_int_range(range: [u32; 2], field: &str) -> Result<()> {
+    let [min, max] = range;
+    ensure!(min <= max, "{field}: min ({min}) must be <= max ({max})");
+    ensure!(
+        (max as u64 - min as u64 + 1) <= u32::MAX as u64,
+        "{field}: range [{min}, {max}] too large (range_size would overflow u32)"
+    );
+    Ok(())
+}
+
+/// String pools and classification rules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FakeDataStrings {
+    /// Named string pools referenced by generation strategies.
+    pub pools: FakeDataStringPools,
+    /// Classification rules for string fields (first match wins).
+    pub classify: Vec<StringClassifyRule>,
+}
+
+/// Named string pools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FakeDataStringPools {
+    pub name_prefixes: Vec<String>,
+    pub email_domains: Vec<String>,
+    pub description_words: Vec<String>,
+    pub statuses: Vec<String>,
+    pub states: Vec<String>,
+    pub branch_prefixes: Vec<String>,
+}
+
+/// A classification rule: if the lowercased field name contains any pattern, use this kind.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StringClassifyRule {
+    /// Substrings to match against the lowercased field name.
+    pub contains: Vec<String>,
+    /// The generation strategy to use.
+    pub kind: StringKind,
+}
+
+/// String generation strategy. Each variant maps to a different formatting template
+/// in the generator code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StringKind {
+    NameOrTitle,
+    Email,
+    Url,
+    Path,
+    ShaOrHash,
+    DescriptionOrBody,
+    Status,
+    State,
+    RefOrBranch,
+}
+
+/// Boolean probabilities keyed by lowercased field name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FakeDataBools {
+    /// Fallback probability for fields not in `fields`.
+    pub default: f64,
+    /// Per-field probabilities (0.0–1.0).
+    pub fields: HashMap<String, f64>,
+}
+
+/// Integer ranges keyed by lowercased field name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FakeDataInts {
+    /// Fallback range [min, max] (inclusive) for fields not in `fields`.
+    pub default: [u32; 2],
+    /// Per-field ranges.
+    pub fields: HashMap<String, [u32; 2]>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -803,5 +986,110 @@ generation:
             in_project.get("MergeRequest -> Project"),
             Some(EdgeRatio::Count(30))
         ));
+    }
+
+    #[test]
+    fn test_fake_data_config_loads_yaml() {
+        let config = FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap();
+        assert!(!config.strings.pools.name_prefixes.is_empty());
+        assert!(!config.strings.classify.is_empty());
+        assert!(!config.bools.fields.is_empty());
+        assert!(!config.ints.fields.is_empty());
+    }
+
+    #[test]
+    fn test_fake_data_config_rejects_partial_yaml() {
+        let yaml = r#"
+strings:
+  pools:
+    statuses:
+      - "custom1"
+"#;
+        let result: Result<FakeDataConfig, _> = serde_yaml::from_str(yaml);
+        assert!(
+            result.is_err(),
+            "Partial YAML should be rejected — all fields are mandatory"
+        );
+    }
+
+    /// Build a minimal valid FakeDataConfig for testing validation.
+    fn minimal_fake_data_config() -> FakeDataConfig {
+        FakeDataConfig {
+            strings: FakeDataStrings {
+                pools: FakeDataStringPools {
+                    name_prefixes: vec!["a".into()],
+                    email_domains: vec!["@x.co".into()],
+                    description_words: vec!["w".into()],
+                    statuses: vec!["open".into()],
+                    states: vec!["active".into()],
+                    branch_prefixes: vec!["fix/".into()],
+                },
+                classify: vec![],
+            },
+            bools: FakeDataBools {
+                default: 0.5,
+                fields: HashMap::new(),
+            },
+            ints: FakeDataInts {
+                default: [1, 100],
+                fields: HashMap::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn test_fake_data_validate() {
+        // Valid config passes.
+        minimal_fake_data_config().validate().unwrap();
+
+        // Empty string pool.
+        let mut cfg = minimal_fake_data_config();
+        cfg.strings.pools.name_prefixes = vec![];
+        assert!(
+            cfg.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("name_prefixes must not be empty")
+        );
+
+        // Negative probability.
+        let mut cfg = minimal_fake_data_config();
+        cfg.bools.default = -0.1;
+        assert!(
+            cfg.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("bools.default")
+        );
+
+        // Probability > 1.
+        let mut cfg = minimal_fake_data_config();
+        cfg.bools.fields.insert("bad".into(), 1.5);
+        assert!(
+            cfg.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("bools.fields.bad")
+        );
+
+        // NaN probability.
+        let mut cfg = minimal_fake_data_config();
+        cfg.bools.default = f64::NAN;
+        assert!(cfg.validate().unwrap_err().to_string().contains("finite"));
+
+        // Inverted int range.
+        let mut cfg = minimal_fake_data_config();
+        cfg.ints.default = [100, 1];
+        assert!(
+            cfg.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("min (100) must be <= max (1)")
+        );
+
+        // Overflowing int range.
+        let mut cfg = minimal_fake_data_config();
+        cfg.ints.fields.insert("huge".into(), [0, u32::MAX]);
+        assert!(cfg.validate().unwrap_err().to_string().contains("overflow"));
     }
 }

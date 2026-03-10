@@ -11,7 +11,7 @@ mod traversal;
 
 pub use batch::BatchBuilder;
 pub use dependency::{DependencyGraph, ParentEdge};
-pub use fake_data::FakeValueGenerator;
+pub use fake_data::{FakeDataPools, FakeValueGenerator};
 pub use traversal::{EntityContext, EntityRegistry, TraversalPathGenerator};
 
 use crate::arrow_schema::ToArrowSchema;
@@ -90,6 +90,8 @@ pub struct Generator {
     global_entity_counter: AtomicI64,
     /// String interner for edge records.
     interner: std::sync::Mutex<StringInterner>,
+    /// Interned fake data pools (program-lifetime, leaked).
+    pools: &'static FakeDataPools,
 }
 
 impl std::fmt::Debug for Generator {
@@ -103,8 +105,13 @@ impl std::fmt::Debug for Generator {
 
 impl Generator {
     pub fn new(ontology: Ontology, config: Config) -> Result<Self> {
+        use crate::config::FakeDataConfig;
+
         Self::validate_config(&config, &ontology)?;
         let dependency_graph = DependencyGraph::build(&config.generation, &ontology)?;
+
+        let fake_data_config = FakeDataConfig::load(&config.generation.fake_data_path)?;
+        let pools = FakeDataPools::intern(fake_data_config);
 
         Ok(Self {
             ontology,
@@ -112,6 +119,7 @@ impl Generator {
             dependency_graph,
             global_entity_counter: AtomicI64::new(1),
             interner: std::sync::Mutex::new(StringInterner::default()),
+            pools,
         })
     }
 
@@ -514,6 +522,7 @@ impl Generator {
             schema,
             self.config.generation.batch_size,
             self.config.generation.seed,
+            self.pools,
         );
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
 
@@ -553,6 +562,7 @@ impl Generator {
             schema,
             self.config.generation.batch_size,
             self.config.generation.seed,
+            self.pools,
         );
         let mut edges = Vec::new();
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
@@ -725,6 +735,7 @@ impl Generator {
             schema,
             self.config.generation.batch_size,
             self.config.generation.seed,
+            self.pools,
         );
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
 
@@ -761,6 +772,7 @@ impl Generator {
             schema,
             self.config.generation.batch_size,
             self.config.generation.seed,
+            self.pools,
         );
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
         let is_parent_type = self.dependency_graph.is_parent_type(registry_key);
