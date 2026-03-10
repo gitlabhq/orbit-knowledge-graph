@@ -1,3 +1,26 @@
+## [0.9.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.8.0...v0.9.0) (2026-03-10)
+
+### Features
+
+* **gitlab-client:** add resolve_host for PSC DNS override ([936eaa6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/936eaa6511421c54e5ef79ee142196d5676e02ae)) by Bohdan Parkhomchuk
+* **indexer:** metrics cleanup in dispatcher, sdlc and code indexing ([f35126f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f35126fe6c9fdc958201e5a5a542dcee19cab726)) by Jean-Gabriel Doyon
+* **indexer:** rewire SDLC handlers to use cursor-based keyset pagination ([586855f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/586855f37a2527ad206f5e9e1b541b120c52718b)) by Jean-Gabriel Doyon
+* **querying:** validate values used in IN operator match column type ([8f77cca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f77cca95ce743a934b802970177390741900043)) by Michael Usachenko
+* **skill:** introduce code-history skill ([f456da6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f456da6adb696f61adf1488bb8a1cbfe75df6e07)) by Michael Usachenko
+
+### Other
+
+* **deps:** update rust crate k8s-openapi to v0.27.1 ([74df1e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/74df1e6630eaf072d038d0d49f92ad2567bfb572)) by GitLab Renovate Bot
+* **deps:** update rust crate toml to v1.0.4 ([801bc2c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/801bc2caa1296ebbb1df5e00a11f09760fd39849)) by GitLab Renovate Bot
+* **deps:** update rust crate toml to v1.0.6 ([123c071](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/123c0713a8a4fb416b92b97aebed8f2fc6c148de)) by GitLab Renovate Bot
+* **deps:** update rust crate uuid to v1.22.0 ([f39a26a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f39a26ab6b29240e617d4fc260f5259378592f68)) by GitLab Renovate Bot
+* **indexer:** extract ScheduledTask abstraction from Dispatcher ([f734de9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f734de92463aaa0accdbbee575581cd54fe35304)) by Jean-Gabriel Doyon
+* **querying:** clean up hydration stage cruft + arrow code duplication ([504f3ca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/504f3ca0a4d38726c49463a13d64ecd5f7b1f3df)) by Michael Usachenko
+* **querying:** streamline & harden parameterization codepaths in graph engine ([48ff654](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/48ff65409adb7871e8767bc0374bcad862a1bfc6)) by Michael Usachenko
+* remove unsued clickhouse-client and indexer code ([5cb0d6f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5cb0d6f6e390bf5893bd0b4bbe8c35af1b4be322)) by Jean-Gabriel Doyon
+* **simulator:** fully derive simulator config from ontology & yaml specs ([e3ffa15](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e3ffa154195d175f0f5e04c8ff91da956c179b07)) by Michael Usachenko
+* **simulator:** unify graph generation with epsilon node expansion ([06c129d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/06c129d6e3fc6b51dbe7aa66286606bea8404201)) by Michael Usachenko
+
 ## [0.8.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.7.0...v0.8.0) (2026-03-06)
 
 ### Features
