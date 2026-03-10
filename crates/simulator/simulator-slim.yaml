@@ -47,6 +47,7 @@ generation:
   batch_size: 1000
 
   seed: 42
+  fake_data_path: fake_data.yaml
 
   organizations: 1
   namespace_entity: Group

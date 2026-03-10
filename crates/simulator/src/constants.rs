@@ -9,6 +9,9 @@
 /// Default entity type that defines the namespace hierarchy.
 pub const DEFAULT_NAMESPACE_ENTITY: &str = "Group";
 
+/// Default path to the fake data YAML file.
+pub const DEFAULT_FAKE_DATA_PATH: &str = "fake_data.yaml";
+
 // --- Edge directionality naming convention ---
 
 /// Edge type that is always parent-to-child (exact match).
