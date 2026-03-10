@@ -7,9 +7,9 @@ use tracing::{debug, info};
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::configuration::ScheduleConfiguration;
-use crate::dispatcher::ScheduledTaskMetrics;
-use crate::dispatcher::{ScheduledTask, TaskError};
 use crate::nats::NatsServices;
+use crate::scheduler::ScheduledTaskMetrics;
+use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::ProjectCodeIndexingRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;

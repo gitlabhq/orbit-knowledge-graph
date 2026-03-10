@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::configuration::ScheduleConfiguration;
-use crate::dispatcher::ScheduledTaskMetrics;
-use crate::dispatcher::{ScheduledTask, TaskError};
 use crate::nats::NatsServices;
+use crate::scheduler::ScheduledTaskMetrics;
+use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
 

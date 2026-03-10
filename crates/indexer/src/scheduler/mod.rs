@@ -1,6 +1,8 @@
 mod metrics;
+pub mod table_cleanup;
 
 pub use metrics::ScheduledTaskMetrics;
+pub use table_cleanup::{TableCleanup, TableCleanupConfig};
 
 use std::sync::Arc;
 
@@ -38,19 +40,17 @@ pub trait ScheduledTask: Send + Sync {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum DispatcherError {
+pub enum SchedulerError {
     #[error("NATS connection failed: {0}")]
     NatsConnection(#[from] crate::nats::NatsError),
 }
 
-pub struct DispatcherServices {
+pub struct SchedulerServices {
     pub nats: Arc<dyn NatsServices>,
     pub lock_service: Arc<dyn LockService>,
 }
 
-pub async fn connect(
-    nats_config: &NatsConfiguration,
-) -> Result<DispatcherServices, DispatcherError> {
+pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerServices, SchedulerError> {
     let broker = Arc::new(NatsBroker::connect(nats_config).await?);
     broker
         .ensure_kv_bucket_exists(
@@ -62,13 +62,13 @@ pub async fn connect(
     let nats: Arc<dyn NatsServices> = Arc::new(NatsServicesImpl::new(broker));
     let lock_service: Arc<dyn LockService> = Arc::new(NatsLockService::new(Arc::clone(&nats)));
 
-    Ok(DispatcherServices { nats, lock_service })
+    Ok(SchedulerServices { nats, lock_service })
 }
 
 pub async fn run(
     tasks: &[Box<dyn ScheduledTask>],
     lock_service: &dyn LockService,
-) -> Result<(), DispatcherError> {
+) -> Result<(), SchedulerError> {
     for task in tasks {
         let task_name = task.name();
         let interval = task.schedule().interval();
