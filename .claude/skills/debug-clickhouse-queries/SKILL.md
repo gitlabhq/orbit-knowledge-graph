@@ -1,6 +1,6 @@
 ---
 name: debug-clickhouse-queries
-description: Investigate query evaluation failures in the Knowledge Graph simulator. Use when queries fail or return unexpected results after running the evaluate binary.
+description: Investigate query evaluation failures in the Knowledge Graph synthetic data pipeline. Use when queries fail or return unexpected results after running the evaluate binary.
 ---
 
 # Investigating ClickHouse query failures
@@ -34,7 +34,7 @@ SELECT traversal_path FROM gl_<entity> LIMIT 10
 
 ## Inspect the generated SQL directly
 
-The `gkg query` command lets you see what SQL the query engine produces without running the full simulator. The query input format is defined in `crates/ontology/schema.json`.
+The `gkg query` command lets you see what SQL the query engine produces without running the full pipeline. The query input format is defined in `crates/ontology/schema.json`.
 
 First, sample some traversal paths from your data:
 
@@ -143,7 +143,7 @@ SELECT DISTINCT traversal_path FROM gl_project LIMIT 5
 
 ## Simulator configuration impact
 
-The simulator config (`simulator.yaml`) directly affects what data exists for queries to find.
+The synth config (`crates/xtask/simulator.yaml`) directly affects what data exists for queries to find.
 
 ### Edge types and directions
 
@@ -157,7 +157,7 @@ GROUP BY relationship_kind, source_kind, target_kind
 ORDER BY count(*) DESC
 ```
 
-If a query expects `MergeRequest -> Pipeline` edges but only `User -> Pipeline` exists, the query will return empty. Compare against `simulator.yaml` associations section.
+If a query expects `MergeRequest -> Pipeline` edges but only `User -> Pipeline` exists, the query will return empty. Compare against `crates/xtask/simulator.yaml` associations section.
 
 ### Association iteration direction
 
@@ -216,29 +216,29 @@ SELECT id, traversal_path FROM gl_user WHERE id = <sampled_user_id>
 
 Column name definitions:
 - `crates/query-engine/src/security.rs` - security filter column name
-- `crates/simulator/src/arrow_schema.rs` - data generation schema
+- `crates/xtask/src/synth/arrow_schema.rs` - data generation schema
 
 Enum value sources:
 - `fixtures/ontology/nodes/**/*.yaml` - ontology definitions
-- `crates/simulator/src/generator/fake_data.rs` - fake value generation logic
+- `crates/xtask/src/synth/generator/fake_data.rs` - fake value generation logic
 
 Edge configuration:
-- `crates/simulator/simulator.yaml` - relationships and associations
+- `crates/xtask/simulator.yaml` - relationships and associations
 - `fixtures/ontology/edges/*.yaml` - edge type definitions (source/target kinds)
 
 Traversal path construction:
-- `crates/simulator/src/generator/traversal.rs`
-- `crates/simulator/src/generator/mod.rs`
+- `crates/xtask/src/synth/generator/traversal.rs`
+- `crates/xtask/src/synth/generator/mod.rs`
 
 Association generation:
-- `crates/simulator/src/config.rs` - `AssociationConfig`, `IterationDirection`
-- `crates/simulator/src/generator/mod.rs` - `generate_association_edges()`
+- `crates/xtask/src/synth/config.rs` - `AssociationConfig`, `IterationDirection`
+- `crates/xtask/src/synth/generator/mod.rs` - `generate_association_edges()`
 
 ## Debugging checklist for empty results
 
 1. **Check sampling metadata** - Is it path-scoped or global fallback?
 2. **Verify edge exists in ontology** - Does `fixtures/ontology/edges/<type>.yaml` define the right direction?
-3. **Verify edge configured in simulator** - Is it in `simulator.yaml` associations?
+3. **Verify edge configured** - Is it in `crates/xtask/simulator.yaml` associations?
 4. **Check iteration direction** - Does `per: source` vs `per: target` match the cardinality?
 5. **Check edge counts** - Do enough edges of this type exist?
 6. **Check path compatibility** - Are source/target entities in the same traversal hierarchy?
@@ -247,7 +247,7 @@ Association generation:
 ## After changes, regenerate
 
 ```bash
-cargo run --bin generate -- -c simulator.yaml
-cargo run --bin load -- -c simulator.yaml
-cargo run --bin evaluate -- -c simulator.yaml
+cargo xtask synth generate
+cargo xtask synth load
+cargo xtask synth evaluate
 ```

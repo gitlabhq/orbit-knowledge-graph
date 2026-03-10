@@ -1,9 +1,9 @@
 # Simulator configuration - 100M edge scale test
 #
 # Workflow:
-#   1. Generate data:  cargo run --bin generate -- -c simulator.yaml
-#   2. Load to CH:     cargo run --bin load -- -c simulator.yaml
-#   3. Evaluate:       cargo run --bin evaluate -- -c simulator.yaml
+#   1. Generate data:  cargo xtask synth generate
+#   2. Load to CH:     cargo xtask synth load
+#   3. Evaluate:       cargo xtask synth evaluate
 
 clickhouse:
   url: http://localhost:8123
@@ -46,7 +46,7 @@ generation:
   batch_size: 100000
 
   seed: 42
-  fake_data_path: crates/simulator/fake_data.yaml
+  fake_data_path: crates/xtask/fake_data.yaml
 
   # Single org, scaled for ~100M edges with ~10M nodes
   organizations: 1

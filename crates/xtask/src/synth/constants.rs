@@ -1,15 +1,15 @@
-//! Simulator-wide constants.
+//! Synthetic data pipeline constants.
 //!
 //! Centralizes magic strings and numeric defaults used across modules.
 //! Ontology-derived constants live in `ontology::constants`; these are
-//! simulator-specific conventions and config defaults.
+//! synth-specific conventions and config defaults.
 
 // --- Config defaults (validated against the ontology at startup) ---
 
 /// Default entity type that defines the namespace hierarchy.
 pub const DEFAULT_NAMESPACE_ENTITY: &str = "Group";
 
-/// Default path to the fake data YAML file.
+/// Default path to the fake data YAML file (relative to the xtask crate root).
 pub const DEFAULT_FAKE_DATA_PATH: &str = "fake_data.yaml";
 
 // --- Edge directionality naming convention ---

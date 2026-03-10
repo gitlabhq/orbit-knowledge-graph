@@ -78,7 +78,6 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `health-check` | K8s readiness/liveness probes |
 | `treesitter-visit` | Tree-sitter language bindings wrapper |
 | `cli` | Local `gkg index` and `gkg query` commands |
-| `simulator` | Fake data generation + query correctness evaluation |
 | `datalake-generator` | Synthetic GitLab data for load testing |
 
 ## Code quality

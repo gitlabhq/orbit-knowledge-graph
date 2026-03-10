@@ -4,11 +4,17 @@ Development task runner for the GitLab Knowledge Graph.
 
 ## Features
 
-- Automates E2E environment lifecycle: provisioning a local Kubernetes cluster, deploying GitLab and GKG, running tests, and tearing it all down.
+- **Synthetic data generation**: generates fake SDLC graph data to Parquet files from ontology definitions.
+- **E2E environment lifecycle**: provisioning a local Kubernetes cluster, deploying GitLab and GKG, running tests, and tearing it all down.
 
 ## Quick start
 
 ```shell
+# Generate synthetic graph data
+cargo xtask synth generate -c crates/xtask/simulator-slim.yaml
+cargo xtask synth generate --dry-run    # preview plan only
+cargo xtask synth generate --force      # regenerate even if data exists
+
 # Full environment (Colima + GitLab + CNG setup)
 GITLAB_SRC=~/path/to/gitlab cargo xtask e2e setup
 
