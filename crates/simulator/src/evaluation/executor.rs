@@ -845,18 +845,27 @@ fn substitute_params_in_sql(
     for (name, param) in params {
         let pattern = format!("{{{name}:{}}}", param.ch_type);
 
-        let replacement = match &param.value {
-            serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "''")),
-            serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
-            serde_json::Value::Null => "NULL".to_string(),
-            other => other.to_string(),
-        };
+        let replacement = format_param_value(&param.value);
 
         result = result.replace(&pattern, &replacement);
     }
 
     result
+}
+
+/// Format a JSON value as a ClickHouse SQL literal.
+fn format_param_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "''")),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
+        serde_json::Value::Null => "NULL".to_string(),
+        serde_json::Value::Array(arr) => {
+            let elements: Vec<String> = arr.iter().map(format_param_value).collect();
+            format!("[{}]", elements.join(", "))
+        }
+        other => panic!("unsupported param value type: {other}"),
+    }
 }
 
 /// Convert `ParamValue` map to a JSON object with just the values (for serialization).

@@ -1731,11 +1731,13 @@ mod tests {
         let ontology = Ontology::load_embedded().unwrap();
 
         // Validate the actual simulator.yaml
-        let config = Config::load("simulator.yaml").unwrap();
+        let mut config = Config::load("simulator.yaml").unwrap();
+        config.generation.fake_data_path = "fake_data.yaml".to_string();
         Generator::new(ontology.clone(), config).unwrap();
 
         // Validate the actual simulator-slim.yaml
-        let config_slim = Config::load("simulator-slim.yaml").unwrap();
+        let mut config_slim = Config::load("simulator-slim.yaml").unwrap();
+        config_slim.generation.fake_data_path = "fake_data.yaml".to_string();
         Generator::new(ontology, config_slim).unwrap();
     }
 }

@@ -10,6 +10,7 @@
 clickhouse:
   url: http://localhost:8123
   database: default
+  password: password
 
   client:
     send_timeout: 30
@@ -47,7 +48,7 @@ generation:
   batch_size: 1000
 
   seed: 42
-  fake_data_path: fake_data.yaml
+  fake_data_path: crates/simulator/fake_data.yaml
 
   organizations: 1
   namespace_entity: Group
