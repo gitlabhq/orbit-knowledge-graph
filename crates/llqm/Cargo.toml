@@ -17,5 +17,9 @@ path = "test/prototype_lowering.rs"
 name = "pass_tests"
 path = "test/pass_tests.rs"
 
+[[test]]
+name = "indexer_pipeline"
+path = "test/indexer_pipeline.rs"
+
 [lints]
 workspace = true

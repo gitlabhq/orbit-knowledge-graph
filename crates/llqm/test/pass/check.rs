@@ -32,10 +32,10 @@ impl CheckPass {
 pub fn check_plan(plan: &Plan, ctx: &SecurityContext) -> Result<(), CheckError> {
     let mut aliases = Vec::new();
     plan.walk_rels(&mut |r| {
-        if let RelKind::Read { table, alias, .. } = &r.kind {
-            if should_check(table) {
-                aliases.push(alias.clone());
-            }
+        if let RelKind::Read { table, alias, .. } = &r.kind
+            && should_check(table)
+        {
+            aliases.push(alias.clone());
         }
         true
     });
@@ -46,11 +46,11 @@ pub fn check_plan(plan: &Plan, ctx: &SecurityContext) -> Result<(), CheckError> 
             if found {
                 return false;
             }
-            if let RelKind::Filter { condition } = &r.kind {
-                if expr_has_valid_starts_with(condition, alias, ctx) {
-                    found = true;
-                    return false;
-                }
+            if let RelKind::Filter { condition } = &r.kind
+                && expr_has_valid_starts_with(condition, alias, ctx)
+            {
+                found = true;
+                return false;
             }
             true
         });
@@ -78,11 +78,12 @@ fn expr_has_valid_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -
         if found {
             return false;
         }
-        if let Expr::FuncCall { name, args } = e {
-            if name == "startsWith" && is_valid_starts_with_args(args, alias, ctx) {
-                found = true;
-                return false;
-            }
+        if let Expr::FuncCall { name, args } = e
+            && name == "startsWith"
+            && is_valid_starts_with_args(args, alias, ctx)
+        {
+            found = true;
+            return false;
         }
         true
     });

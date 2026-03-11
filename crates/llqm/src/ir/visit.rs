@@ -542,10 +542,10 @@ mod tests {
 
         // Wrap root project in a new project that renames the column
         let plan = plan.transform_rels(&mut |r| {
-            if let RelKind::Project { expressions } = &r.kind {
-                if expressions.iter().any(|(_, a)| a == "id") {
-                    return r.project(&[(col("t", "id"), "node_id")]);
-                }
+            if let RelKind::Project { expressions } = &r.kind
+                && expressions.iter().any(|(_, a)| a == "id")
+            {
+                return r.project(&[(col("t", "id"), "node_id")]);
             }
             r
         });
@@ -670,10 +670,10 @@ mod tests {
     fn expr_walk_mut_can_rename_columns() {
         let mut expr = col("old", "name").and(col("old", "id").eq(int(1)));
         expr.walk_mut(&mut |e| {
-            if let Expr::Column { table, .. } = e {
-                if table == "old" {
-                    *table = "new".into();
-                }
+            if let Expr::Column { table, .. } = e
+                && table == "old"
+            {
+                *table = "new".into();
             }
             true
         });
@@ -851,11 +851,11 @@ mod tests {
             )
         });
 
-        if let RelKind::Fetch { .. } = &plan.root.kind {
-            if let RelKind::Aggregate { group_by, .. } = &plan.root.inputs[0].kind {
-                assert_eq!(group_by.len(), 2);
-                return;
-            }
+        if let RelKind::Fetch { .. } = &plan.root.kind
+            && let RelKind::Aggregate { group_by, .. } = &plan.root.inputs[0].kind
+        {
+            assert_eq!(group_by.len(), 2);
+            return;
         }
         panic!("expected Fetch(Aggregate(...))");
     }

@@ -9,7 +9,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::ir::expr::{BinaryOp, Expr, JoinType, LiteralValue, SortDir, UnaryOp};
-use crate::ir::plan::{Plan, RAW_FROM_TAG, Rel, RelKind};
+use crate::ir::plan::{Plan, Rel, RelKind, RAW_FROM_TAG};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -641,11 +641,12 @@ impl CodegenContext {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Check if an expression is a simple column ref whose name matches the alias,
-/// so we can skip the redundant `AS` clause.
+/// Check if an expression is a simple reference whose emitted form matches
+/// the alias, so we can skip the redundant `AS` clause.
 fn is_simple_column_ref(expr: &Expr, alias: &str) -> bool {
     match expr {
         Expr::Column { name, .. } => name == alias,
+        Expr::Raw(sql) => sql == alias,
         _ => false,
     }
 }
@@ -662,6 +663,46 @@ impl crate::pipeline::Backend for ClickHouseBackend {
 
     fn emit(&self, plan: &crate::ir::plan::Plan) -> Result<Self::Output, Self::Error> {
         emit_clickhouse_sql(plan)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// INSERT...SELECT emit pass
+// ---------------------------------------------------------------------------
+
+/// Emit pass that wraps a SELECT query into `INSERT INTO table (columns) SELECT ...`.
+pub struct InsertSelectPass {
+    pub table: String,
+    pub columns: Vec<String>,
+}
+
+impl InsertSelectPass {
+    pub fn new(table: &str, columns: &[&str]) -> Self {
+        Self {
+            table: table.into(),
+            columns: columns.iter().map(|c| (*c).into()).collect(),
+        }
+    }
+}
+
+impl crate::pipeline::EmitPass<ParameterizedQuery> for InsertSelectPass {
+    type Error = CodegenError;
+
+    fn transform(&self, mut pq: ParameterizedQuery) -> Result<ParameterizedQuery, CodegenError> {
+        if !pq.sql.starts_with("SELECT") {
+            return Err(CodegenError::UnsupportedRelation(
+                "INSERT...SELECT requires SQL starting with SELECT".into(),
+            ));
+        }
+
+        let prefix = if self.columns.is_empty() {
+            format!("INSERT INTO {}", self.table)
+        } else {
+            format!("INSERT INTO {} ({})", self.table, self.columns.join(", "))
+        };
+
+        pq.sql = format!("{prefix} {}", pq.sql);
+        Ok(pq)
     }
 }
 
@@ -937,5 +978,46 @@ mod tests {
         let pq = emit(&plan);
         assert!(pq.sql.contains("INNER JOIN"), "sql: {}", pq.sql);
         assert!(pq.sql.contains("LEFT JOIN"), "sql: {}", pq.sql);
+    }
+
+    #[test]
+    fn insert_select_pass() {
+        use crate::pipeline::{Backend, EmitPass};
+
+        let plan = Rel::read("gl_project", "p", &[("id", DataType::Int64)])
+            .filter(
+                func(
+                    "startsWith",
+                    vec![
+                        col("p", "traversal_path"),
+                        param("traversal_path", DataType::String),
+                    ],
+                )
+                .and(col("p", "_deleted").eq(raw("false"))),
+            )
+            .project(&[
+                (col("p", "id"), "id"),
+                (raw("true"), "_deleted"),
+                (raw("now64(6)"), "_version"),
+            ])
+            .into_plan();
+
+        let pq = ClickHouseBackend.emit(&plan).unwrap();
+        let pass = InsertSelectPass::new("gl_project", &["id", "_deleted", "_version"]);
+        let pq = pass.transform(pq).unwrap();
+
+        assert!(
+            pq.sql
+                .starts_with("INSERT INTO gl_project (id, _deleted, _version) SELECT"),
+            "sql: {}",
+            pq.sql
+        );
+        assert!(pq.sql.contains("true AS _deleted"), "sql: {}", pq.sql);
+        assert!(
+            pq.sql
+                .contains("startsWith(p.traversal_path, {traversal_path:String})"),
+            "sql: {}",
+            pq.sql
+        );
     }
 }

@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::ir::plan::Plan;
 
 // ---------------------------------------------------------------------------
@@ -32,7 +34,10 @@ pub trait Backend {
 
 pub struct Empty;
 pub struct FrontendPhase<F: Frontend>(F, F::Input);
+
+#[derive(Debug, Clone)]
 pub struct IrPhase(Plan);
+
 pub struct EmittedPhase<O>(O);
 
 // ---------------------------------------------------------------------------
@@ -62,6 +67,18 @@ pub trait EmitPass<O> {
 // ---------------------------------------------------------------------------
 
 pub struct Pipeline<Phase>(Phase);
+
+impl<Phase: Clone> Clone for Pipeline<Phase> {
+    fn clone(&self) -> Self {
+        Pipeline(self.0.clone())
+    }
+}
+
+impl<Phase: fmt::Debug> fmt::Debug for Pipeline<Phase> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Pipeline").field(&self.0).finish()
+    }
+}
 
 // --- Empty → .input(frontend, raw_input) → FrontendPhase ---
 
@@ -103,8 +120,16 @@ impl<F: Frontend> Pipeline<FrontendPhase<F>> {
 // --- IrPhase: .pass() and .emit() ---
 
 impl Pipeline<IrPhase> {
+    /// Re-enter the pipeline at the IR phase from an existing plan.
+    ///
+    /// Use when you already have a `Plan` (e.g. from an orchestrator) and
+    /// want to add IR passes or emit through a backend.
+    pub fn from_plan(plan: Plan) -> Self {
+        Pipeline(IrPhase(plan))
+    }
+
     pub fn pass<P: IrPass>(self, p: &P) -> Result<Self, P::Error> {
-        let plan = p.transform(self.0.0)?;
+        let plan = p.transform(self.0 .0)?;
         Ok(Pipeline(IrPhase(plan)))
     }
 
@@ -112,12 +137,17 @@ impl Pipeline<IrPhase> {
         self,
         backend: &B,
     ) -> Result<Pipeline<EmittedPhase<B::Output>>, B::Error> {
-        let output = backend.emit(&self.0.0)?;
+        let output = backend.emit(&self.0 .0)?;
         Ok(Pipeline(EmittedPhase(output)))
     }
 
     pub fn plan(&self) -> &Plan {
-        &self.0.0
+        &self.0 .0
+    }
+
+    /// Extract the plan, consuming the pipeline.
+    pub fn into_plan(self) -> Plan {
+        self.0 .0
     }
 }
 
@@ -125,16 +155,16 @@ impl Pipeline<IrPhase> {
 
 impl<O> Pipeline<EmittedPhase<O>> {
     pub fn pass<P: EmitPass<O>>(self, p: &P) -> Result<Self, P::Error> {
-        let output = p.transform(self.0.0)?;
+        let output = p.transform(self.0 .0)?;
         Ok(Pipeline(EmittedPhase(output)))
     }
 
     pub fn output(&self) -> &O {
-        &self.0.0
+        &self.0 .0
     }
 
     pub fn finish(self) -> O {
-        self.0.0
+        self.0 .0
     }
 }
 
