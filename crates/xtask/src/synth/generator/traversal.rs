@@ -26,7 +26,7 @@
 //! - `EntityContext`: holds an entity's ID and traversal ID
 //! - `EntityRegistry`: maintains all generated entities by type for parent lookups
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -218,7 +218,7 @@ impl TraversalPathGenerator {
     }
 
     pub fn random(&self, rng: &mut impl Rng) -> &str {
-        let idx = rng.gen_range(0..self.paths.len());
+        let idx = rng.random_range(0..self.paths.len());
         &self.paths[idx]
     }
 

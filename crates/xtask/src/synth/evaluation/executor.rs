@@ -8,6 +8,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
 use ontology::Ontology;
 use query_engine::{ParamValue, SecurityContext, compile};
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -217,14 +218,12 @@ impl QueryExecutor {
 
     /// Get a random security context for query execution.
     fn random_security_context(&self) -> Result<SecurityContext> {
-        use rand::Rng;
-
         if self.security_contexts.is_empty() {
             anyhow::bail!("No security contexts available - call warm_cache first");
         }
 
-        let mut rng = rand::thread_rng();
-        let idx = rng.gen_range(0..self.security_contexts.len());
+        let mut rng = rand::rng();
+        let idx = rng.random_range(0..self.security_contexts.len());
         let (org_id, path) = &self.security_contexts[idx];
 
         SecurityContext::new(*org_id, vec![path.clone()])

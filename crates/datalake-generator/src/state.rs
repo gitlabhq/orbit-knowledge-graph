@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +30,7 @@ impl IdRange {
         if self.count == 0 {
             return self.first_id;
         }
-        self.first_id + rng.gen_range(0..self.count as i64)
+        self.first_id + rng.random_range(0..self.count as i64)
     }
 }
 

@@ -7,6 +7,8 @@ use clickhouse::Row;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use rand::RngExt;
+use rand::seq::IndexedRandom;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -75,9 +77,8 @@ impl ParameterSampler {
         if ids.is_empty() {
             return Ok(None);
         }
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let idx = rng.gen_range(0..ids.len());
+        let mut rng = rand::rng();
+        let idx = rng.random_range(0..ids.len());
         Ok(Some(ids[idx]))
     }
 
@@ -93,11 +94,10 @@ impl ParameterSampler {
             return Ok(vec![]);
         }
 
-        use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let count = count.min(ids.len());
-        Ok(ids.choose_multiple(&mut rng, count).copied().collect())
+        Ok(ids.sample(&mut rng, count).copied().collect())
     }
 
     /// Get multiple random IDs for an entity type within a specific traversal path.

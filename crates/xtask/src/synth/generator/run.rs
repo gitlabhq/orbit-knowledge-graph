@@ -15,7 +15,7 @@ use crate::synth::constants::ASSOCIATION_TRAVERSAL_PATH;
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use ontology::{NodeEntity, Ontology};
-use rand::Rng;
+use rand::{Rng, RngExt};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -339,7 +339,7 @@ impl Generator {
     pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
         let mut data = OrganizationData::default();
         let mut registry = EntityRegistry::new(org_id);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         for node_type in self.dependency_graph.generation_order() {
             let real_type = self.dependency_graph.resolve_type(node_type);
@@ -402,7 +402,7 @@ impl Generator {
     ) -> Result<OrganizationNodes> {
         let mut data = OrganizationNodes::default();
         let mut registry = EntityRegistry::new(org_id);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         for node_type in self.dependency_graph.generation_order() {
             let real_type = self.dependency_graph.resolve_type(node_type);
@@ -617,7 +617,7 @@ impl Generator {
 
                 let count = edge_count.min(sample_len);
                 for _ in 0..count {
-                    let secondary_id = sample_from[rng.gen_range(0..sample_len)];
+                    let secondary_id = sample_from[rng.random_range(0..sample_len)];
                     let (source_id, target_id) = match direction {
                         IterationDirection::Target => (secondary_id, primary_id),
                         IterationDirection::Source => (primary_id, secondary_id),
@@ -796,7 +796,7 @@ impl Generator {
 
                 let count = edge_count.min(sample_len);
                 for _ in 0..count {
-                    let secondary_id = sample_from[rng.gen_range(0..sample_len)];
+                    let secondary_id = sample_from[rng.random_range(0..sample_len)];
                     let (source_id, target_id) = match direction {
                         IterationDirection::Target => (secondary_id, primary_id),
                         IterationDirection::Source => (primary_id, secondary_id),
