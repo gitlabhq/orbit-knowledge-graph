@@ -150,7 +150,10 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
         input.query_type,
         QueryType::Traversal | QueryType::Aggregation
     ) {
-        use crate::constants::EDGE_ALIAS_SUFFIXES;
+        use crate::constants::{
+            EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX, EDGE_SRC_TYPE_SUFFIX,
+            EDGE_TYPE_SUFFIX,
+        };
 
         for (i, rel) in input.relationships.iter().enumerate() {
             let prefix = if rel.max_hops > 1 {
@@ -160,11 +163,11 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
             };
             let path_column = (rel.max_hops > 1).then(|| format!("{prefix}path_nodes"));
             ctx.edges.push(EdgeMeta {
-                type_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[1]),
-                src_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[2]),
-                src_type_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[3]),
-                dst_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[4]),
-                dst_type_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[5]),
+                type_column: format!("{prefix}{EDGE_TYPE_SUFFIX}"),
+                src_column: format!("{prefix}{EDGE_SRC_SUFFIX}"),
+                src_type_column: format!("{prefix}{EDGE_SRC_TYPE_SUFFIX}"),
+                dst_column: format!("{prefix}{EDGE_DST_SUFFIX}"),
+                dst_type_column: format!("{prefix}{EDGE_DST_TYPE_SUFFIX}"),
                 column_prefix: prefix,
                 path_column,
                 rel_types: rel.types.clone(),
