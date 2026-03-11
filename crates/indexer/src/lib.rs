@@ -54,7 +54,7 @@ use clickhouse::ClickHouseConfiguration;
 use clickhouse::ClickHouseDestination;
 use configuration::EngineConfiguration;
 use engine::EngineBuilder;
-use gitlab_client::GitlabClientConfiguration;
+use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
 use locking::INDEXING_LOCKS_BUCKET;
@@ -152,10 +152,19 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
 
     info!(topics = registry.topics().len(), "registered handlers");
 
+    let gitlab_client = config
+        .gitlab
+        .as_ref()
+        .map(|cfg| GitlabClient::new(cfg.clone()))
+        .transpose()
+        .map_err(HandlerInitError::new)?
+        .map(Arc::new);
+
     let health_state = HealthState {
         nats_client: broker.nats_client().clone(),
         graph_client: config.graph.build_client(),
         datalake_client: config.datalake.build_client(),
+        gitlab_client,
     };
 
     let engine = Arc::new(
