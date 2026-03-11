@@ -82,14 +82,14 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_branch, skipped_watermark, skipped_lock, skipped_project_not_found, error) | Total push events processed by the code handler |
+| `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_branch, skipped_checkpoint, skipped_lock, skipped_project_not_found, error) | Total push events processed by the code handler |
 | `indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single push event |
 | `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of fetching a repository archive from Gitaly |
 | `indexer.code.repository.extract.duration` | Histogram | s | | Duration of extracting a repository archive to disk |
 | `indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
 | `indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
 | `indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
-| `indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, repository_extract, indexing, arrow_conversion, write, watermark) | Code indexing errors by pipeline stage |
+| `indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, repository_extract, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage |
 
 **KG Web Service:**
 

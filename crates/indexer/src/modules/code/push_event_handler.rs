@@ -9,6 +9,7 @@ use tracing::{debug, info, warn};
 
 use serde::{Deserialize, Serialize};
 
+use super::checkpoint_store::CodeCheckpointStore;
 use super::config::CODE_LOCK_TTL;
 use super::config::{siphon_actions, siphon_ref_types, subjects};
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
@@ -17,7 +18,6 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::project_store::{ProjectInfo, ProjectStore};
 use super::repository_service::RepositoryService;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
-use super::watermark_store::CodeWatermarkStore;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Topic};
@@ -47,7 +47,7 @@ impl Default for PushEventHandlerConfig {
 pub struct PushEventHandler {
     pipeline: Arc<CodeIndexingPipeline>,
     repository_service: Arc<dyn RepositoryService>,
-    watermark_store: Arc<dyn CodeWatermarkStore>,
+    checkpoint_store: Arc<dyn CodeCheckpointStore>,
     project_store: Arc<dyn ProjectStore>,
     metrics: CodeMetrics,
     config: PushEventHandlerConfig,
@@ -57,7 +57,7 @@ impl PushEventHandler {
     pub fn new(
         pipeline: Arc<CodeIndexingPipeline>,
         repository_service: Arc<dyn RepositoryService>,
-        watermark_store: Arc<dyn CodeWatermarkStore>,
+        checkpoint_store: Arc<dyn CodeCheckpointStore>,
         project_store: Arc<dyn ProjectStore>,
         metrics: CodeMetrics,
         config: PushEventHandlerConfig,
@@ -65,7 +65,7 @@ impl PushEventHandler {
         Self {
             pipeline,
             repository_service,
-            watermark_store,
+            checkpoint_store,
             project_store,
             metrics,
             config,
@@ -180,8 +180,11 @@ impl PushEventHandler {
             ));
         };
 
-        if self.is_already_indexed(event, project_id, &branch).await {
-            self.metrics.record_outcome("skipped_watermark");
+        if self
+            .is_already_indexed(event, &project.traversal_path, project_id, &branch)
+            .await
+        {
+            self.metrics.record_outcome("skipped_checkpoint");
             return Ok(());
         }
 
@@ -297,11 +300,15 @@ impl PushEventHandler {
     async fn is_already_indexed(
         &self,
         event: &PushEventPayload,
+        traversal_path: &str,
         project_id: i64,
         branch: &str,
     ) -> bool {
-        if let Ok(Some(wm)) = self.watermark_store.get_watermark(project_id, branch).await
-            && wm.last_event_id >= event.event_id
+        if let Ok(Some(checkpoint)) = self
+            .checkpoint_store
+            .get_checkpoint(traversal_path, project_id, branch)
+            .await
+            && checkpoint.last_event_id >= event.event_id
         {
             debug!(event_id = event.event_id, "already indexed, skipping");
             return true;
@@ -373,6 +380,9 @@ mod tests {
     use super::PushEventHandlerConfig;
     use super::*;
     use crate::handler::Handler;
+    use crate::modules::code::checkpoint_store::CodeCheckpointStore;
+    use crate::modules::code::checkpoint_store::CodeIndexingCheckpoint;
+    use crate::modules::code::checkpoint_store::test_utils::MockCodeCheckpointStore;
     use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::project_store::ProjectInfo;
     use crate::modules::code::project_store::test_utils::MockProjectStore;
@@ -380,9 +390,6 @@ mod tests {
     use crate::modules::code::repository_service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::modules::code::test_helpers::{build_replication_events, push_payload_columns};
-    use crate::modules::code::watermark_store::CodeIndexingWatermark;
-    use crate::modules::code::watermark_store::CodeWatermarkStore;
-    use crate::modules::code::watermark_store::test_utils::MockCodeWatermarkStore;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use chrono::Utc;
 
@@ -394,7 +401,7 @@ mod tests {
         handler: PushEventHandler,
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
-        mock_watermarks: Arc<MockCodeWatermarkStore>,
+        mock_checkpoints: Arc<MockCodeCheckpointStore>,
         project_store: Arc<MockProjectStore>,
     }
 
@@ -402,12 +409,12 @@ mod tests {
         fn with_repository_service(repository_service: Arc<dyn RepositoryService>) -> Self {
             let mock_nats = Arc::new(MockNatsServices::new());
             let mock_locks = Arc::new(MockLockService::new());
-            let mock_watermarks = Arc::new(MockCodeWatermarkStore::new());
+            let mock_checkpoints = Arc::new(MockCodeCheckpointStore::new());
             let project_store = Arc::new(MockProjectStore::new());
             let stale_data_cleaner = Arc::new(MockStaleDataCleaner::default());
             let metrics = test_metrics();
 
-            let watermark_store: Arc<dyn CodeWatermarkStore> = mock_watermarks.clone();
+            let checkpoint_store: Arc<dyn CodeCheckpointStore> = mock_checkpoints.clone();
 
             let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
             let table_names = Arc::new(
@@ -417,7 +424,7 @@ mod tests {
 
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 Arc::clone(&repository_service),
-                Arc::clone(&watermark_store),
+                Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
@@ -426,7 +433,7 @@ mod tests {
             let handler = PushEventHandler::new(
                 pipeline,
                 repository_service,
-                Arc::clone(&watermark_store),
+                Arc::clone(&checkpoint_store),
                 project_store.clone(),
                 metrics,
                 PushEventHandlerConfig::default(),
@@ -436,7 +443,7 @@ mod tests {
                 handler,
                 mock_nats,
                 mock_locks,
-                mock_watermarks,
+                mock_checkpoints,
                 project_store,
             }
         }
@@ -460,9 +467,10 @@ mod tests {
             );
         }
 
-        async fn set_watermark(&self, project_id: i64, branch: &str, last_event_id: i64) {
-            self.mock_watermarks
-                .set_watermark(&CodeIndexingWatermark {
+        async fn set_checkpoint(&self, project_id: i64, branch: &str, last_event_id: i64) {
+            self.mock_checkpoints
+                .set_checkpoint(&CodeIndexingCheckpoint {
+                    traversal_path: format!("/org/project-{}", project_id),
                     project_id,
                     branch: branch.to_string(),
                     last_event_id,
@@ -506,7 +514,7 @@ mod tests {
         let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
         let ctx = TestContext::with_repository_service(mock_repo);
         ctx.add_project(123);
-        ctx.set_watermark(123, "main", 100).await;
+        ctx.set_checkpoint(123, "main", 100).await;
 
         let payload = build_replication_events(vec![
             push_payload_columns(50, 123, "refs/heads/main", "abc123").build(),

@@ -175,6 +175,13 @@ The `RepositoryIndexer::load_into_database` method will then leverage the ClickH
 
 Once the process is complete, the finished database is ready for query services, MCP adapters, and AI tooling.
 
+#### Checkpoint tracking
+
+The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). It serves two purposes:
+
+- The push event handler and reconciliation handler check it to skip already-indexed events.
+- The dispatch query anti-joins against it to find projects that have never been indexed.
+
 #### Flow visual representation
 
 ```mermaid
