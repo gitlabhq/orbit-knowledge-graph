@@ -1,8 +1,0 @@
-# fixtures/ontology/edges/targets.yaml
-
-description: Target branch relationships
-
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: Branch, id: name }
-    description: "Merge request targets branch for merging."

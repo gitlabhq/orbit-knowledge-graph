@@ -16,7 +16,7 @@ flowchart LR
     F --> G[Parameterized SQL]
 ```
 
-The JSON schema (`config/schemas/graph_query.schema.json`) defines the structure, while the ontology (`fixtures/ontology/`) provides entity types, relationship types, and property definitions that are validated at runtime.
+The JSON schema (`config/schemas/graph_query.schema.json`) defines the structure, while the ontology (`config/ontology/`) provides entity types, relationship types, and property definitions that are validated at runtime.
 
 ```mermaid
 sequenceDiagram

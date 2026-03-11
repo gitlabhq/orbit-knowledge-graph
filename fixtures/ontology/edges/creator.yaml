@@ -1,8 +1,0 @@
-# fixtures/ontology/edges/creator.yaml
-
-description: User created project
-
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: Project, id: id }
-    description: "User created project."

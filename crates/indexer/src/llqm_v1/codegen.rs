@@ -129,6 +129,12 @@ fn emit_expr(sql: &mut String, expr: &Expr) {
             sql.push_str(data_type);
             sql.push(')');
         }
+        Expr::StructField { expr, field } => {
+            emit_expr(sql, expr);
+            sql.push_str("['");
+            sql.push_str(field);
+            sql.push_str("']");
+        }
     }
 }
 

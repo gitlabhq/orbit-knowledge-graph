@@ -39,7 +39,7 @@ clickhouse:
         order_by: [target_id, target_kind, relationship_kind]
 
 generation:
-  ontology_path: fixtures/ontology
+  ontology_path: config/ontology
   output_dir: gl_synthetic_data
   skip_if_present: false
   parallel: false

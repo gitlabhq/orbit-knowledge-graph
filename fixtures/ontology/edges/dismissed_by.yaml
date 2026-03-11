@@ -1,8 +1,0 @@
-# fixtures/ontology/edges/dismissed_by.yaml
-
-description: User who dismissed an entity
-
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: Vulnerability, id: id }
-    description: "User dismissed vulnerability."

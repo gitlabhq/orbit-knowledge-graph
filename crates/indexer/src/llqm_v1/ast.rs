@@ -26,6 +26,10 @@ pub enum Expr {
         expr: Box<Expr>,
         data_type: String,
     },
+    StructField {
+        expr: Box<Expr>,
+        field: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +142,13 @@ impl Expr {
         Expr::Cast {
             expr: Box::new(expr),
             data_type: data_type.into(),
+        }
+    }
+
+    pub fn struct_field(expr: Expr, field: impl Into<String>) -> Self {
+        Expr::StructField {
+            expr: Box::new(expr),
+            field: field.into(),
         }
     }
 

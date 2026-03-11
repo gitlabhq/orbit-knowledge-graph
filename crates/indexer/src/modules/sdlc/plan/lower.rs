@@ -173,6 +173,9 @@ fn lower_edge_id(id: &EdgeId) -> Expr {
             ),
             "BIGINT",
         ),
+        EdgeId::ArrayElement { column, field } => {
+            Expr::struct_field(Expr::func("unnest", vec![Expr::col("", column)]), field)
+        }
     }
 }
 
@@ -196,6 +199,11 @@ fn lower_filter(filter: &EdgeFilter) -> Expr {
         EdgeFilter::NotEmpty(column) => {
             Expr::binary(Op::Ne, Expr::col("", column), Expr::raw("''"))
         }
+        EdgeFilter::ArrayNotEmpty(column) => Expr::binary(
+            Op::Gt,
+            Expr::func("cardinality", vec![Expr::col("", column)]),
+            Expr::raw("0"),
+        ),
         EdgeFilter::TypeIn { column, types } => {
             let types_list = types
                 .iter()
@@ -498,6 +506,31 @@ mod tests {
         assert!(sql.contains("'User' AS source_kind"));
         assert!(sql.contains("id AS target_id"));
         assert!(sql.contains("'WorkItem' AS target_kind"));
+    }
+
+    #[test]
+    fn fk_edge_transform_sql_array_element_incoming() {
+        let fk_edge = FkEdgeTransform {
+            relationship_kind: "assigned".to_string(),
+            source_id: EdgeId::ArrayElement {
+                column: "assignees".to_string(),
+                field: "user_id".to_string(),
+            },
+            source_kind: EdgeKind::Literal("User".to_string()),
+            target_id: EdgeId::Column("id".to_string()),
+            target_kind: EdgeKind::Literal("MergeRequest".to_string()),
+            filters: vec![EdgeFilter::ArrayNotEmpty("assignees".to_string())],
+            namespaced: true,
+        };
+
+        let transform = lower_fk_edge_transform(&fk_edge, "gl_edge");
+        let sql = emit(&transform.query);
+
+        assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");
+        assert!(sql.contains("'User' AS source_kind"), "sql: {sql}");
+        assert!(sql.contains("id AS target_id"), "sql: {sql}");
+        assert!(sql.contains("'MergeRequest' AS target_kind"), "sql: {sql}");
+        assert!(sql.contains("cardinality(assignees) > 0"), "sql: {sql}");
     }
 
     #[test]

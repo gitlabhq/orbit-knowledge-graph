@@ -1,0 +1,110 @@
+# config/ontology/nodes/code_review/merge_request_diff_file.yaml
+
+node_type: MergeRequestDiffFile
+domain: code_review
+description: A file changed in a merge request diff
+label: new_path
+destination_table: gl_merge_request_diff_file
+default_columns: [id, new_path, old_path, new_file, deleted_file]
+
+style:
+  size: 20
+  color: "#B45309"
+
+redaction:
+  resource_type: merge_request
+  id_column: merge_request_id
+  ability: read_merge_request
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Synthetic identifier: sipHash64(merge_request_diff_id, relative_order)."
+
+  merge_request_id:
+    type: int64
+    source: merge_request_id
+    nullable: false
+    description: "ID of the parent merge request."
+
+  merge_request_diff_id:
+    type: int64
+    source: merge_request_diff_id
+    nullable: false
+    description: "ID of the merge request diff this file belongs to."
+
+  too_large:
+    type: boolean
+    source: too_large
+    nullable: false
+    description: "Whether the diff is too large to display."
+
+  new_path:
+    type: string
+    source: new_path
+    nullable: true
+    description: "Path to the file after the change."
+
+  old_path:
+    type: string
+    source: old_path
+    nullable: false
+    description: "Path to the file before the change."
+
+  new_file:
+    type: boolean
+    source: new_file
+    nullable: false
+    description: "Whether this is a newly added file."
+
+  renamed_file:
+    type: boolean
+    source: renamed_file
+    nullable: false
+    description: "Whether this file was renamed."
+
+  deleted_file:
+    type: boolean
+    source: deleted_file
+    nullable: false
+    description: "Whether this file was deleted."
+
+  binary:
+    type: boolean
+    source: binary
+    nullable: true
+    description: "Whether this is a binary file."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: query
+  scope: namespaced
+  select: >-
+    sipHash64(file.merge_request_diff_id, file.relative_order) AS id,
+    diff.merge_request_id AS merge_request_id,
+    file.merge_request_diff_id AS merge_request_diff_id,
+    file.too_large AS too_large, file.new_path AS new_path,
+    file.old_path AS old_path, file.new_file AS new_file,
+    file.renamed_file AS renamed_file, file.deleted_file AS deleted_file,
+    file.binary AS binary, diff.traversal_path AS traversal_path,
+    file.relative_order AS relative_order
+  from: >-
+    siphon_merge_request_diff_files file
+    INNER JOIN siphon_merge_request_diffs diff
+    ON file.merge_request_diff_id = diff.id
+  traversal_path_filter: "startsWith(diff.traversal_path, {traversal_path:String})"
+  watermark: file._siphon_replicated_at
+  deleted: file._siphon_deleted
+  order_by: [traversal_path, merge_request_diff_id, relative_order]
+  edges:
+    merge_request_diff_id:
+      to: MergeRequestDiff
+      as: HAS_FILE
+      direction: incoming
