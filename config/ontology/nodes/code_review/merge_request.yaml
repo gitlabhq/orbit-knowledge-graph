@@ -121,9 +121,7 @@ properties:
 etl:
   type: table
   scope: namespaced
-  source: hierarchy_merge_requests
-  watermark: version
-  deleted: deleted
+  source: merge_requests
   edges:
     target_project_id:
       to: Project
@@ -141,18 +139,18 @@ etl:
       to: Milestone
       as: IN_MILESTONE
       direction: outgoing
-    assignee_ids:
+    assignees:
       to: User
       as: ASSIGNED
       direction: incoming
-      delimiter: "/"
+      array_field: user_id
     label_ids:
       to: Label
       as: HAS_LABEL
       direction: outgoing
-      delimiter: "/"
-    approver_ids:
+      array_field: label_id
+    approvals:
       to: User
       as: REVIEWER
       direction: outgoing
-      delimiter: "/"
+      array_field: user_id

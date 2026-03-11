@@ -28,8 +28,7 @@ pub const CONFIG_YAML: &str = "config/e2e.yaml";
 /// Datalake tables polled during step 21 to confirm siphon data is flowing
 /// before dispatch-indexing.
 ///
-/// `hierarchy_merge_requests` — canary for the full MV chain (namespace
-///   traversal paths → project traversal paths → hierarchy MV).
+/// `merge_requests` — canary table; confirms Siphon replication is active.
 /// `siphon_knowledge_graph_enabled_namespaces` — the dispatcher reads this
 ///   to discover which namespaces to index.
 /// `siphon_namespace_details` — the Group entity's ETL query does a 3-way
@@ -39,11 +38,11 @@ pub const CONFIG_YAML: &str = "config/e2e.yaml";
 ///   indexer runs before it arrives. Polling it here prevents that race.
 ///
 /// We intentionally do NOT poll `hierarchy_work_items` here — it may lag
-/// behind `hierarchy_merge_requests` and is not required pre-dispatch. The
+/// behind `merge_requests` and is not required pre-dispatch. The
 /// post-indexer poll (step 22) waits for every graph table including
 /// `gl_work_item`, which is the real gate.
 pub const SIPHON_POLL_TABLES: &[&str] = &[
-    "hierarchy_merge_requests",
+    "merge_requests",
     "siphon_knowledge_graph_enabled_namespaces",
     "siphon_namespace_details",
 ];
@@ -121,9 +120,8 @@ pub const GKG_DEPLOYMENTS: &[&str] = &[
 
 /// Datalake tables dumped for diagnostics after indexing.
 pub const DATALAKE_DIAGNOSTIC_TABLES: &[&str] = &[
-    "hierarchy_merge_requests",
+    "merge_requests",
     "hierarchy_work_items",
-    "siphon_merge_requests",
     "siphon_issues",
     "siphon_namespace_details",
     "siphon_namespaces",
