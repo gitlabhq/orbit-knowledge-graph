@@ -8,9 +8,9 @@
 //! so consumers can add their own passes (security, check) and choose
 //! a backend before emitting.
 
-use super::frontend::IndexerFrontend;
-use super::raw_extract::RawExtractFrontend;
-use super::transform::{FkEdgeTransformFrontend, NodeTransformFrontend};
+use super::lower::{
+    FkEdgeTransformFrontend, IndexerFrontend, NodeTransformFrontend, RawExtractFrontend,
+};
 use super::types::*;
 use llqm::pipeline::{IrPhase, Pipeline};
 

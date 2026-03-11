@@ -5,10 +5,8 @@ use llqm::ir::expr::{self, DataType};
 use llqm::ir::plan::{Plan, Rel};
 use llqm::pipeline::{Frontend, IrPass, IrPhase, Pipeline};
 
-use super::frontend::IndexerFrontend;
+use super::lower::*;
 use super::orchestrate::*;
-use super::raw_extract::RawExtractFrontend;
-use super::transform::*;
 use super::types::*;
 
 // ---------------------------------------------------------------------------
