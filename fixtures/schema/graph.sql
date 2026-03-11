@@ -415,7 +415,7 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS deduplicate_merge_projection_mode = 'drop', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_file (
     id Int64,
@@ -431,7 +431,7 @@ CREATE TABLE IF NOT EXISTS gl_file (
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS deduplicate_merge_projection_mode = 'drop', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_definition (
     id Int64,
@@ -451,7 +451,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS deduplicate_merge_projection_mode = 'drop', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     id Int64,
@@ -472,15 +472,18 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS deduplicate_merge_projection_mode = 'drop', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
-CREATE TABLE IF NOT EXISTS project_code_indexing_watermark (
+CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
+    traversal_path String,
     project_id Int64,
     branch String,
     last_event_id Int64,
     last_commit String,
     indexed_at DateTime64(6, 'UTC'),
-    _version UInt64
+    _version UInt64,
+    PROJECTION project_lookup (SELECT * ORDER BY project_id)
 ) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (project_id, branch);
+ORDER BY (traversal_path, project_id, branch)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 

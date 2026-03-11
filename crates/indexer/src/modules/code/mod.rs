@@ -6,6 +6,7 @@
 
 mod archive;
 mod arrow_converter;
+mod checkpoint_store;
 pub mod config;
 pub mod dispatch;
 pub mod indexing_pipeline;
@@ -20,7 +21,6 @@ mod siphon_decoder;
 mod stale_data_cleaner;
 #[cfg(test)]
 mod test_helpers;
-mod watermark_store;
 
 use std::sync::Arc;
 
@@ -32,6 +32,7 @@ use metrics::CodeMetrics;
 pub use project_code_indexing_handler::ProjectCodeIndexingHandlerConfig;
 pub use push_event_handler::PushEventHandlerConfig;
 
+pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use project_code_indexing_handler::ProjectCodeIndexingHandler;
 pub use project_store::ClickHouseProjectStore;
@@ -41,7 +42,6 @@ pub use repository_service::{
     CachingRepositoryService, GitLabRepositoryService, RepositoryService,
 };
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
-pub use watermark_store::ClickHouseCodeWatermarkStore;
 
 pub fn register_handlers(
     registry: &HandlerRegistry,
@@ -65,8 +65,8 @@ pub fn register_handlers(
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(GitLabRepositoryService::create(gitlab_client));
-    let watermark_store: Arc<dyn watermark_store::CodeWatermarkStore> =
-        Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(&client)));
+    let checkpoint_store: Arc<dyn checkpoint_store::CodeCheckpointStore> =
+        Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
     let project_store: Arc<dyn project_store::ProjectStore> =
         Arc::new(ClickHouseProjectStore::new(Arc::clone(&client)));
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
@@ -79,7 +79,7 @@ pub fn register_handlers(
 
     let pipeline = Arc::new(indexing_pipeline::CodeIndexingPipeline::new(
         Arc::clone(&repository_service),
-        Arc::clone(&watermark_store),
+        Arc::clone(&checkpoint_store),
         stale_data_cleaner,
         metrics.clone(),
         table_names,
@@ -88,7 +88,7 @@ pub fn register_handlers(
     registry.register_handler(Box::new(PushEventHandler::new(
         Arc::clone(&pipeline),
         Arc::clone(&repository_service),
-        Arc::clone(&watermark_store),
+        Arc::clone(&checkpoint_store),
         Arc::clone(&project_store),
         metrics.clone(),
         push_event_config,
@@ -98,7 +98,7 @@ pub fn register_handlers(
         project_code_indexing_handler::ProjectCodeIndexingHandler::new(
             Arc::clone(&pipeline),
             Arc::clone(&repository_service),
-            Arc::clone(&watermark_store),
+            Arc::clone(&checkpoint_store),
             Arc::clone(&project_store),
             Arc::clone(&push_event_store),
             metrics.clone(),

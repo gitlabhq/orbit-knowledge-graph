@@ -17,8 +17,8 @@ use clickhouse_client::FromArrowColumn;
 const PENDING_PROJECTS_QUERY: &str = r#"
 SELECT project.id AS project_id
 FROM gl_project AS project
-LEFT ANTI JOIN (SELECT project_id FROM project_code_indexing_watermark FINAL) AS watermark
-  ON project.id = watermark.project_id
+LEFT ANTI JOIN (SELECT project_id FROM code_indexing_checkpoint FINAL) AS checkpoint
+  ON project.id = checkpoint.project_id
 WHERE project._deleted = false
 LIMIT {batch_size:UInt64}
 "#;
