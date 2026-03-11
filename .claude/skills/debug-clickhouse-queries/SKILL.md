@@ -34,7 +34,7 @@ SELECT traversal_path FROM gl_<entity> LIMIT 10
 
 ## Inspect the generated SQL directly
 
-The `gkg query` command lets you see what SQL the query engine produces without running the full pipeline. The query input format is defined in `crates/ontology/schema.json`.
+The `gkg query` command lets you see what SQL the query engine produces without running the full pipeline. The query input format is defined in `config/schemas/graph_query.schema.json`.
 
 First, sample some traversal paths from your data:
 

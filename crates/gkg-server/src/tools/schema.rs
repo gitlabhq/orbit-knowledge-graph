@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
 use toon_format::{EncodeOptions, encode};
 
-const BASE_SCHEMA: &str = include_str!("../../../ontology/schema.json");
+const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
 const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "Integer value",

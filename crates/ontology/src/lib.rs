@@ -809,7 +809,7 @@ mod tests {
     }
 
     fn base_schema() -> &'static str {
-        include_str!("../schema.json")
+        include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"))
     }
 
     #[test]
