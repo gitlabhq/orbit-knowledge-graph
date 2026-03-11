@@ -4,14 +4,12 @@
 //! hydrated properties appear on NodeRef for Dynamic plans (PathFinding,
 //! Neighbors) and on flat columns for Static plans (Traversal).
 
-mod common;
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
-    run_redaction, test_security_context,
+use crate::common::{
+    DummyClaims, GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext,
+    load_ontology, run_redaction, test_security_context,
 };
 use gkg_server::auth::Claims;
 use gkg_server::proto::ExecuteQueryMessage;

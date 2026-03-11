@@ -10,9 +10,9 @@ use crate::common::{
 pub async fn processes_merge_request_diffs_with_edges(context: &TestContext) {
     context
         .execute(
-            "INSERT INTO hierarchy_merge_requests
+            "INSERT INTO merge_requests
                 (id, iid, title, source_branch, target_branch, state_id, merge_status,
-                 draft, squash, target_project_id, traversal_path, version)
+                 draft, squash, target_project_id, traversal_path, _siphon_replicated_at)
             VALUES
                 (1, 101, 'Add feature X', 'feature-x', 'main', 1, 'can_be_merged',
                  false, true, 1000, '1/100/', '2024-01-20 12:00:00')",
@@ -67,9 +67,9 @@ pub async fn processes_merge_request_diffs_with_edges(context: &TestContext) {
 pub async fn processes_merge_request_diff_files_with_edges(context: &TestContext) {
     context
         .execute(
-            "INSERT INTO hierarchy_merge_requests
+            "INSERT INTO merge_requests
                 (id, iid, title, source_branch, target_branch, state_id, merge_status,
-                 draft, squash, target_project_id, traversal_path, version)
+                 draft, squash, target_project_id, traversal_path, _siphon_replicated_at)
             VALUES
                 (1, 101, 'Add feature X', 'feature-x', 'main', 1, 'can_be_merged',
                  false, true, 1000, '1/100/', '2024-01-20 12:00:00')",

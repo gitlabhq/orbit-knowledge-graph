@@ -23,6 +23,7 @@ members = [
   "crates/xtask",
   "crates/integration-testkit",
   "crates/utils",
+  "crates/integration-tests",
 ]
 
 [workspace.dependencies]

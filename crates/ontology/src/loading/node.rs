@@ -80,6 +80,8 @@ struct EdgeMappingYaml {
     direction: EdgeDirection,
     #[serde(default)]
     delimiter: Option<String>,
+    #[serde(default)]
+    array_field: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +197,12 @@ fn convert_edge_mappings(
                     )));
                 }
             };
+            if mapping.delimiter.is_some() && mapping.array_field.is_some() {
+                return Err(OntologyError::Validation(format!(
+                    "edge '{}': use 'delimiter' or 'array_field', not both",
+                    column
+                )));
+            }
             Ok((
                 column,
                 EdgeMapping {
@@ -202,6 +210,7 @@ fn convert_edge_mappings(
                     relationship_kind: mapping.relationship_kind,
                     direction: mapping.direction,
                     delimiter: mapping.delimiter,
+                    array_field: mapping.array_field,
                 },
             ))
         })

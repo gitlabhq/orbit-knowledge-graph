@@ -59,6 +59,7 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
 pub(in crate::modules::sdlc) enum EdgeId {
     Column(String),
     Exploded { column: String, delimiter: String },
+    ArrayElement { column: String, field: String },
 }
 
 pub(in crate::modules::sdlc) enum EdgeKind {
@@ -73,6 +74,7 @@ pub(in crate::modules::sdlc) enum EdgeKind {
 pub(in crate::modules::sdlc) enum EdgeFilter {
     IsNotNull(String),
     NotEmpty(String),
+    ArrayNotEmpty(String),
     TypeIn { column: String, types: Vec<String> },
 }
 
@@ -258,6 +260,16 @@ fn resolve_fk_edges(
                 }
                 filters.push(EdgeFilter::IsNotNull(fk_column.clone()));
                 filters.push(EdgeFilter::NotEmpty(fk_column.clone()));
+            } else if let Some(ref field) = mapping.array_field {
+                let array_id = EdgeId::ArrayElement {
+                    column: fk_column.clone(),
+                    field: field.clone(),
+                };
+                match mapping.direction {
+                    EdgeDirection::Outgoing => target_id = array_id,
+                    EdgeDirection::Incoming => source_id = array_id,
+                }
+                filters.push(EdgeFilter::ArrayNotEmpty(fk_column.clone()));
             } else {
                 filters.push(EdgeFilter::IsNotNull(fk_column.clone()));
                 if let Some(tf) = type_filter {

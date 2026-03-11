@@ -8,15 +8,15 @@ use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 
 use super::helpers::*;
 
-const SIPHON_SCHEMA_SQL: &str = include_str!("../fixtures/siphon.sql");
-const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../config/graph.sql");
-
 #[tokio::test]
 async fn indexes_repository_from_gitaly() {
     let project_id: i64 = 1;
 
-    let clickhouse =
-        integration_testkit::TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
     let (gitaly_address, _container) = start_gitaly().await;
 
     let repo_path = hashed_repo_path(project_id);
@@ -48,8 +48,11 @@ async fn indexes_repository_from_gitaly() {
 async fn soft_deletes_stale_code_data_after_reindexing() {
     let project_id: i64 = 2;
 
-    let clickhouse =
-        integration_testkit::TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
     let (gitaly_address, gitaly_container) = start_gitaly().await;
     let repo_path = hashed_repo_path(project_id);
 

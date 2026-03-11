@@ -3441,6 +3441,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration-tests"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "clickhouse-client",
+ "futures",
+ "gkg-server",
+ "integration-testkit",
+ "ontology",
+ "query-engine",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "internment"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

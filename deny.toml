@@ -89,6 +89,11 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "integration-tests"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "labkit-rs"
 expression = "MIT"
 license-files = []

@@ -107,7 +107,7 @@ Entities are written in four dependency-ordered stages:
 | Stage | Tables | Depends on |
 |-------|--------|------------|
 | Foundation | `siphon_users`, `siphon_namespaces`, `siphon_namespace_details`, `namespace_traversal_paths`, `siphon_projects`, `project_namespace_traversal_paths`, `siphon_knowledge_graph_enabled_namespaces` | nothing |
-| Primary | `hierarchy_merge_requests`, `hierarchy_work_items`, `siphon_issues`, `siphon_p_ci_pipelines`, `siphon_vulnerabilities`, `siphon_vulnerability_scanners`, `siphon_vulnerability_identifiers`, `siphon_vulnerability_occurrences`, `siphon_milestones`, `siphon_labels`, `siphon_members` | Foundation |
+| Primary | `merge_requests`, `hierarchy_work_items`, `siphon_issues`, `siphon_p_ci_pipelines`, `siphon_vulnerabilities`, `siphon_vulnerability_scanners`, `siphon_vulnerability_identifiers`, `siphon_vulnerability_occurrences`, `siphon_milestones`, `siphon_labels`, `siphon_members` | Foundation |
 | Secondary | `siphon_notes`, `siphon_merge_request_diffs`, `siphon_p_ci_stages`, `siphon_security_scans`, `siphon_vulnerability_merge_request_links`, `siphon_merge_requests_closing_issues`, `siphon_work_item_parent_links`, `siphon_issue_links`, `siphon_vulnerability_occurrence_identifiers` | Primary |
 | Leaf | `siphon_p_ci_builds`, `siphon_security_findings`, `siphon_merge_request_diff_files` | Secondary |
 
