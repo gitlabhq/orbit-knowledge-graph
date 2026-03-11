@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::checkpoint::namespace_position_key;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Topic};
@@ -88,7 +89,7 @@ impl Handler for NamespaceHandler {
 
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
-            position_key: format!("ns.{}", payload.namespace),
+            position_key: namespace_position_key(payload.namespace),
             base_conditions: BTreeMap::from([("traversal_path".to_string(), traversal_path)]),
         };
 

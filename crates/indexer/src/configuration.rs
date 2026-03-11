@@ -6,6 +6,9 @@ use std::time::Duration;
 
 use crate::modules::code::dispatch::ProjectCodeDispatcherConfig;
 use crate::modules::code::{ProjectCodeIndexingHandlerConfig, PushEventHandlerConfig};
+use crate::modules::namespace_deletion::{
+    NamespaceDeletionHandlerConfig, NamespaceDeletionSchedulerConfig,
+};
 use crate::modules::sdlc::dispatch::{GlobalDispatcherConfig, NamespaceDispatcherConfig};
 use crate::modules::sdlc::{GlobalHandlerConfig, NamespaceHandlerConfig};
 use crate::scheduler::TableCleanupConfig;
@@ -58,6 +61,8 @@ pub struct HandlersConfiguration {
     pub code_push_event: PushEventHandlerConfig,
     #[serde(default)]
     pub code_project_reconciliation: ProjectCodeIndexingHandlerConfig,
+    #[serde(default)]
+    pub namespace_deletion: NamespaceDeletionHandlerConfig,
 }
 
 /// Per-task schedule configuration (cadence interval).
@@ -89,6 +94,8 @@ pub struct ScheduledTasksConfiguration {
     pub project_code: ProjectCodeDispatcherConfig,
     #[serde(default)]
     pub table_cleanup: TableCleanupConfig,
+    #[serde(default)]
+    pub namespace_deletion: NamespaceDeletionSchedulerConfig,
 }
 
 /// ETL engine configuration.

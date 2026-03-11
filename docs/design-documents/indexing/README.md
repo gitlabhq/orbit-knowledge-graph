@@ -8,6 +8,7 @@ This document outlines the general architecture, shared patterns, and components
 
 - [Code Indexing Architecture](code_indexing.md)
 - [SDLC Indexing Architecture](sdlc_indexing.md)
+- [Namespace Deletion](namespace_deletion.md)
 
 ## Architecture Goals
 

@@ -40,6 +40,7 @@ Integration tests need Docker: `mise test:integration`.
 | Query DSL spec | `docs/design-documents/querying/` |
 | SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
+| Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |
 | Schema migration strategy | `docs/design-documents/schema_management.md` |
 | Observability / SLOs | `docs/design-documents/observability.md` |
 | Ontology node definitions | `config/ontology/nodes/` |
@@ -68,7 +69,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 |---|---|
 | `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading |
 | `query-engine` | JSON DSL -> parameterized ClickHouse SQL, security context enforcement |
-| `indexer` | NATS consumer, SDLC + code handler modules, worker pools, `testkit/` |
+| `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/` |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `code-parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
 | `code-graph` | Builds in-memory property graphs from parsed code |
