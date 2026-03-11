@@ -8,7 +8,7 @@ use gitaly_client::{GitalyClient, GitalyError, GitalyRepositoryConfig, Repositor
 use gitlab_client::{GitalyConnectionInfo, RepositoryInfo};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
-    ClickHouseCodeWatermarkStore, ClickHouseProjectStore, ClickHousePushEventStore,
+    ClickHouseCodeCheckpointStore, ClickHouseProjectStore, ClickHousePushEventStore,
     ClickHouseStaleDataCleaner, CodeIndexingPipeline, ProjectCodeIndexingHandler,
     ProjectCodeIndexingHandlerConfig, PushEventHandler, PushEventHandlerConfig, RepositoryService,
     config::CodeTableNames, metrics::CodeMetrics,
@@ -27,7 +27,7 @@ pub const GITALY_TOKEN: &str = "secret_token";
 pub struct CodeIndexingDeps {
     pub pipeline: Arc<CodeIndexingPipeline>,
     pub repository_service: Arc<dyn RepositoryService>,
-    pub watermark_store: Arc<ClickHouseCodeWatermarkStore>,
+    pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub project_store: Arc<ClickHouseProjectStore>,
     pub push_event_store: Arc<ClickHousePushEventStore>,
     pub metrics: CodeMetrics,
@@ -37,8 +37,9 @@ impl CodeIndexingDeps {
     pub fn new(gitaly_address: &str, clickhouse: &TestContext) -> Self {
         let repository_service = create_direct_gitaly_service(gitaly_address, GITALY_TOKEN);
         let graph_client = Arc::new(clickhouse.config.build_client());
-        let watermark_store =
-            Arc::new(ClickHouseCodeWatermarkStore::new(Arc::clone(&graph_client)));
+        let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
+            &graph_client,
+        )));
         let project_store = Arc::new(ClickHouseProjectStore::new(Arc::clone(&graph_client)));
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
@@ -53,7 +54,7 @@ impl CodeIndexingDeps {
 
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             Arc::clone(&repository_service),
-            Arc::clone(&watermark_store) as _,
+            Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
             table_names,
@@ -62,7 +63,7 @@ impl CodeIndexingDeps {
         Self {
             pipeline,
             repository_service,
-            watermark_store,
+            checkpoint_store,
             project_store,
             push_event_store,
             metrics,
@@ -73,7 +74,7 @@ impl CodeIndexingDeps {
         PushEventHandler::new(
             Arc::clone(&self.pipeline),
             Arc::clone(&self.repository_service),
-            Arc::clone(&self.watermark_store) as _,
+            Arc::clone(&self.checkpoint_store) as _,
             Arc::clone(&self.project_store) as _,
             self.metrics.clone(),
             PushEventHandlerConfig::default(),
@@ -84,7 +85,7 @@ impl CodeIndexingDeps {
         ProjectCodeIndexingHandler::new(
             Arc::clone(&self.pipeline),
             Arc::clone(&self.repository_service),
-            Arc::clone(&self.watermark_store) as _,
+            Arc::clone(&self.checkpoint_store) as _,
             Arc::clone(&self.project_store) as _,
             Arc::clone(&self.push_event_store) as _,
             self.metrics.clone(),
