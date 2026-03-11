@@ -1,2 +1,5 @@
 [alias]
 xtask = "run --package xtask --"
+
+[env]
+SCHEMA_DIR = { value = "config/schemas", relative = true }

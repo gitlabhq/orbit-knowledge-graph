@@ -113,7 +113,7 @@ run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat ~/
 description = "Start the GKG server (webserver mode)"
 
 [tasks."ontology:validate"]
-run = "find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile fixtures/ontology/ontology.schema.json"
+run = "find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
 
 [tasks."e2e:setup"]
