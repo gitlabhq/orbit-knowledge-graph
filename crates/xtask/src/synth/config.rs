@@ -1,7 +1,7 @@
 //! Configuration for synthetic data generation and evaluation.
 
 use anyhow::{Context, Result, ensure};
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -391,7 +391,7 @@ impl EdgeRatio {
         match self {
             EdgeRatio::Count(n) | EdgeRatio::Recursive { count: n, .. } => *n,
             EdgeRatio::Probability(p) => {
-                if rng.gen_bool(*p) {
+                if rng.random_bool(*p) {
                     1
                 } else {
                     0
@@ -407,10 +407,10 @@ impl EdgeRatio {
             EdgeRatio::Count(n) | EdgeRatio::Recursive { count: n, .. } => {
                 let min = (*n as f64 * 0.5).ceil() as usize;
                 let max = (*n as f64 * 1.5).ceil() as usize;
-                rng.gen_range(min.max(1)..=max.max(1))
+                rng.random_range(min.max(1)..=max.max(1))
             }
             EdgeRatio::Probability(p) => {
-                if rng.gen_bool(*p) {
+                if rng.random_bool(*p) {
                     1
                 } else {
                     0
@@ -897,14 +897,14 @@ generation:
     #[test]
     fn test_edge_ratio_count() {
         let ratio = EdgeRatio::Count(5);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         assert_eq!(ratio.sample(&mut rng), 5);
     }
 
     #[test]
     fn test_edge_ratio_probability() {
         let ratio = EdgeRatio::Probability(1.0);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         assert_eq!(ratio.sample(&mut rng), 1);
 
         let ratio_zero = EdgeRatio::Probability(0.0);

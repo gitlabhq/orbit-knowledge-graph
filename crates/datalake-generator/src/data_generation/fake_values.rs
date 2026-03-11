@@ -1,7 +1,7 @@
 use arrow::array::StringBuilder;
 use chrono::Utc;
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 const NULL_THRESHOLD: u64 = 26;
@@ -123,7 +123,7 @@ impl SiphonFakeValueGenerator {
     #[inline]
     fn next_random(&mut self) -> u64 {
         self.counter = self.counter.wrapping_add(1);
-        let random_bits = self.rng.r#gen::<u64>();
+        let random_bits = self.rng.random::<u64>();
         random_bits ^ self.counter.wrapping_mul(GOLDEN_RATIO_HASH)
     }
 

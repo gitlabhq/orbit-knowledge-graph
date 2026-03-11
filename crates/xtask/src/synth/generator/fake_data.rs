@@ -3,8 +3,8 @@
 use crate::synth::config::{FakeDataConfig, StringKind};
 use chrono::Utc;
 use ontology::{DataType, Field};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::rngs::Xoshiro256PlusPlus;
+use rand::{RngExt, SeedableRng};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -229,7 +229,7 @@ impl FakeDataPools {
 
 /// Generates values for ontology fields using minimal randomness.
 pub struct FakeValueGenerator {
-    rng: StdRng,
+    rng: Xoshiro256PlusPlus,
     counter: u64,
     /// Cached current timestamp to avoid repeated syscalls.
     now_millis: i64,
@@ -241,7 +241,7 @@ pub struct FakeValueGenerator {
 impl FakeValueGenerator {
     pub fn new(pools: &'static FakeDataPools) -> Self {
         Self {
-            rng: StdRng::from_entropy(),
+            rng: Xoshiro256PlusPlus::from_rng(&mut rand::rng()),
             counter: 0,
             now_millis: Utc::now().timestamp_millis(),
             buf: String::with_capacity(64),
@@ -255,7 +255,7 @@ impl FakeValueGenerator {
 
     pub fn with_seed(seed: u64, pools: &'static FakeDataPools) -> Self {
         Self {
-            rng: StdRng::seed_from_u64(seed),
+            rng: Xoshiro256PlusPlus::seed_from_u64(seed),
             counter: 0,
             now_millis: Utc::now().timestamp_millis(),
             buf: String::with_capacity(64),
@@ -388,7 +388,7 @@ impl FakeValueGenerator {
     #[inline]
     fn next_random(&mut self) -> u64 {
         self.counter = self.counter.wrapping_add(1);
-        let r = self.rng.r#gen::<u64>();
+        let r = self.rng.random::<u64>();
         r ^ self.counter.wrapping_mul(0x9e3779b97f4a7c15)
     }
 
