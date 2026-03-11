@@ -22,6 +22,7 @@ pub trait ResultFormatter: Send + Sync {
 pub(crate) fn column_value_to_json(value: &ColumnValue) -> Value {
     match value {
         ColumnValue::Int64(v) => json!(v),
+        ColumnValue::Float64(v) => json!(v),
         ColumnValue::String(v) => json!(v),
         ColumnValue::Null => Value::Null,
     }
