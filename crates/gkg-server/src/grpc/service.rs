@@ -22,8 +22,7 @@ use crate::proto::{
     execute_query_message, get_graph_schema_response,
 };
 use crate::query_pipeline::{
-    ContextEngineFormatter, QueryPipelineService, RawRowFormatter, receive_query_request,
-    send_query_error,
+    QueryPipelineService, RawRowFormatter, receive_query_request, send_query_error,
 };
 use crate::tools::{ToolRegistry, ToolService};
 
@@ -38,7 +37,7 @@ pub struct KnowledgeGraphServiceImpl {
     ontology: Arc<Ontology>,
     tool_service: ToolService,
     query_pipeline: QueryPipelineService<RawRowFormatter>,
-    llm_pipeline: QueryPipelineService<ContextEngineFormatter>,
+    llm_pipeline: QueryPipelineService<RawRowFormatter>,
     cluster_health: Arc<ClusterHealthChecker>,
 }
 
@@ -54,7 +53,7 @@ impl KnowledgeGraphServiceImpl {
         let query_pipeline =
             QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), RawRowFormatter);
         let llm_pipeline =
-            QueryPipelineService::new(Arc::clone(&ontology), client, ContextEngineFormatter);
+            QueryPipelineService::new(Arc::clone(&ontology), client, RawRowFormatter);
         Self {
             validator,
             ontology,

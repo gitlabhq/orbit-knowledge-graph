@@ -1,7 +1,7 @@
 use crate::redaction::RedactionMessage;
 
 use super::super::error::PipelineError;
-use super::super::formatter::ResultFormatter;
+use super::super::formatters::ResultFormatter;
 use super::super::metrics::PipelineObserver;
 use super::super::types::{HydrationOutput, PipelineOutput, PipelineRequest, QueryPipelineContext};
 use super::PipelineStage;
@@ -22,9 +22,9 @@ impl<F: ResultFormatter> FormattingStage<F> {
         ctx: &QueryPipelineContext,
     ) -> Result<PipelineOutput, PipelineError> {
         let row_count = input.query_result.authorized_count();
-        let formatted =
-            self.formatter
-                .format(&input.query_result, &input.result_context, &ctx.ontology);
+        let formatted = self
+            .formatter
+            .format(&input.query_result, &input.result_context, ctx);
 
         let query_type = input
             .result_context
@@ -79,7 +79,7 @@ mod tests {
     struct ConstFormatter(Value);
 
     impl ResultFormatter for ConstFormatter {
-        fn format(&self, _: &QueryResult, _: &ResultContext, _: &Ontology) -> Value {
+        fn format(&self, _: &QueryResult, _: &ResultContext, _: &QueryPipelineContext) -> Value {
             self.0.clone()
         }
     }
