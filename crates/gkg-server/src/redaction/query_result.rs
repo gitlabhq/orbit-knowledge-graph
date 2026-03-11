@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use arrow::record_batch::RecordBatch;
+use query_engine::GKG_COLUMN_PREFIX;
 use query_engine::constants::{
     EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
 };
@@ -129,6 +130,27 @@ impl QueryResultRow {
         self.authorized = false;
     }
 
+    pub fn entity_properties(
+        &self,
+        alias: &str,
+        skip_prefixes: &[&str],
+    ) -> HashMap<String, ColumnValue> {
+        let prefix = format!("{alias}_");
+        let mut props = HashMap::new();
+        for (name, value) in &self.columns {
+            if name.starts_with(GKG_COLUMN_PREFIX) {
+                continue;
+            }
+            if skip_prefixes.iter().any(|sp| name.starts_with(sp)) {
+                continue;
+            }
+            if let Some(prop_name) = name.strip_prefix(&prefix) {
+                props.insert(prop_name.to_string(), value.clone());
+            }
+        }
+        props
+    }
+
     pub fn get_column_i64(&self, column: &str) -> Option<i64> {
         self.columns.get(column)?.as_int64().copied()
     }
@@ -154,6 +176,12 @@ impl QueryResult {
         let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
         let is_neighbors = ctx.query_type == Some(QueryType::Neighbors);
 
+        let traversal_path_columns: Vec<&str> = ctx
+            .edges()
+            .iter()
+            .filter_map(|edge| edge.path_column.as_deref())
+            .collect();
+
         let mut rows = Vec::new();
         for batch in batches {
             for row_idx in 0..batch.num_rows() {
@@ -174,6 +202,12 @@ impl QueryResult {
                                 .map(|t| NodeRef::new(id, t))
                         });
                     neighbor.into_iter().collect()
+                } else if !traversal_path_columns.is_empty() {
+                    traversal_path_columns
+                        .iter()
+                        .flat_map(|column| ArrowUtils::get_i64_string_pairs(batch, column, row_idx))
+                        .map(|(id, t)| NodeRef::new(id, t))
+                        .collect()
                 } else {
                     Vec::new()
                 };

@@ -22,6 +22,7 @@ pub const EDGE_KINDS_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "edge_kinds");
 pub const NEIGHBOR_ID_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_id");
 pub const NEIGHBOR_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_type");
 pub const RELATIONSHIP_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "relationship_type");
+pub const NEIGHBOR_IS_OUTGOING_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_is_outgoing");
 
 /// Tables that should NOT have traversal path security filters applied.
 /// These are entities whose visibility is determined through relationships

@@ -76,6 +76,7 @@ tempfile = { workspace = true }
 parser-core = { workspace = true }
 internment = { workspace = true }
 smallvec = { workspace = true }
+jsonschema = { workspace = true }
 
 [lints.rust]
 # workspace uses `forbid`, downgraded to `deny` so tests can manipulate env vars
