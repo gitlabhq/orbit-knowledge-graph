@@ -48,6 +48,7 @@ Integration tests need Docker: `mise test:integration`.
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
+| Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
 | Server config structure | `crates/gkg-server/src/config.rs` |
 | Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |

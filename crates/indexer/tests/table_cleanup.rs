@@ -1,9 +1,7 @@
 use clickhouse_client::FromArrowColumn;
 use indexer::scheduler::table_cleanup::{TableCleanup, TableCleanupConfig};
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
-use integration_testkit::TestContext;
-
-const GRAPH_SCHEMA_SQL: &str = include_str!("../../../config/graph.sql");
+use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};
 
 // Verifies that OPTIMIZE TABLE ... FINAL CLEANUP is valid for every ontology table.
 // Tables need allow_experimental_replacing_merge_with_cleanup enabled for this to work.

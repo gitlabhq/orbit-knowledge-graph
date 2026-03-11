@@ -4,6 +4,9 @@ mod extract;
 pub use context::TestContext;
 pub use extract::{get_boolean_column, get_int64_column, get_string_column, get_uint64_column};
 
+pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
+pub const GRAPH_SCHEMA_SQL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph.sql"));
+
 /// Fork a database per subtest and run all subtests in parallel.
 #[macro_export]
 macro_rules! run_subtests {
