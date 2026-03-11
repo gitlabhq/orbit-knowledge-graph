@@ -22,7 +22,7 @@ use crate::proto::{
     execute_query_message, get_graph_schema_response,
 };
 use crate::query_pipeline::{
-    QueryPipelineService, RawRowFormatter, receive_query_request, send_query_error,
+    GoonFormatter, GraphFormatter, QueryPipelineService, receive_query_request, send_query_error,
 };
 use crate::tools::{ToolRegistry, ToolService};
 
@@ -36,8 +36,8 @@ pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
     tool_service: ToolService,
-    query_pipeline: QueryPipelineService<RawRowFormatter>,
-    llm_pipeline: QueryPipelineService<RawRowFormatter>,
+    query_pipeline: QueryPipelineService<GraphFormatter>,
+    llm_pipeline: QueryPipelineService<GoonFormatter>,
     cluster_health: Arc<ClusterHealthChecker>,
 }
 
@@ -51,9 +51,8 @@ impl KnowledgeGraphServiceImpl {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
         let query_pipeline =
-            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), RawRowFormatter);
-        let llm_pipeline =
-            QueryPipelineService::new(Arc::clone(&ontology), client, RawRowFormatter);
+            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), GraphFormatter);
+        let llm_pipeline = QueryPipelineService::new(Arc::clone(&ontology), client, GoonFormatter);
         Self {
             validator,
             ontology,

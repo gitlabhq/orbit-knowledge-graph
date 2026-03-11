@@ -1,3 +1,4 @@
+mod goon;
 mod graph;
 mod raw_row;
 
@@ -9,7 +10,7 @@ use query_engine::ResultContext;
 
 use super::types::QueryPipelineContext;
 
-#[allow(unused_imports)]
+pub use goon::GoonFormatter;
 pub use graph::{GraphColumn, GraphEdge, GraphFormatter, GraphNode, GraphResponse};
 pub use raw_row::{RawRowFormatter, row_to_json};
 
