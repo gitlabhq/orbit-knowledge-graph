@@ -2,7 +2,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{GRAPH_SCHEMA_SQL, IndexerTestExt, SIPHON_SCHEMA_SQL, TestContext};
+use common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, handler_context};
 use indexer::handler::Handler;
 use indexer::modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionHandler, NamespaceDeletionHandlerConfig,
@@ -118,9 +118,10 @@ async fn run_deletion_handler(context: &TestContext, ontology: &ontology::Ontolo
         traversal_path: DELETED_NAMESPACE_PATH.to_string(),
     };
     let envelope = Envelope::new(&request).unwrap();
-    let handler_context = context.create_handler_context();
-
-    handler.handle(handler_context, envelope).await.unwrap();
+    handler
+        .handle(handler_context(context), envelope)
+        .await
+        .unwrap();
 }
 
 async fn assert_graph_data_deleted(context: &TestContext) {

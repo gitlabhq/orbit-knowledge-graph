@@ -1,8 +1,15 @@
+mod assertions;
 mod context;
 mod extract;
+mod seed;
 
+pub use assertions::{
+    assert_edge_count, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
+    assert_node_count,
+};
 pub use context::TestContext;
 pub use extract::{get_boolean_column, get_int64_column, get_string_column, get_uint64_column};
+pub use seed::load_seed;
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
 pub const GRAPH_SCHEMA_SQL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph.sql"));
