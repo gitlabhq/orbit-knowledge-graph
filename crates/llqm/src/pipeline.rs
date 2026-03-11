@@ -129,7 +129,7 @@ impl Pipeline<IrPhase> {
     }
 
     pub fn pass<P: IrPass>(self, p: &P) -> Result<Self, P::Error> {
-        let plan = p.transform(self.0 .0)?;
+        let plan = p.transform(self.0.0)?;
         Ok(Pipeline(IrPhase(plan)))
     }
 
@@ -137,17 +137,17 @@ impl Pipeline<IrPhase> {
         self,
         backend: &B,
     ) -> Result<Pipeline<EmittedPhase<B::Output>>, B::Error> {
-        let output = backend.emit(&self.0 .0)?;
+        let output = backend.emit(&self.0.0)?;
         Ok(Pipeline(EmittedPhase(output)))
     }
 
     pub fn plan(&self) -> &Plan {
-        &self.0 .0
+        &self.0.0
     }
 
     /// Extract the plan, consuming the pipeline.
     pub fn into_plan(self) -> Plan {
-        self.0 .0
+        self.0.0
     }
 }
 
@@ -155,16 +155,16 @@ impl Pipeline<IrPhase> {
 
 impl<O> Pipeline<EmittedPhase<O>> {
     pub fn pass<P: EmitPass<O>>(self, p: &P) -> Result<Self, P::Error> {
-        let output = p.transform(self.0 .0)?;
+        let output = p.transform(self.0.0)?;
         Ok(Pipeline(EmittedPhase(output)))
     }
 
     pub fn output(&self) -> &O {
-        &self.0 .0
+        &self.0.0
     }
 
     pub fn finish(self) -> O {
-        self.0 .0
+        self.0.0
     }
 }
 

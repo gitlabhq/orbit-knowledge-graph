@@ -8,14 +8,15 @@
 use std::collections::HashMap;
 
 use substrait::proto::{
-    self, aggregate_rel, expression,
-    expression::{
-        field_reference, literal::LiteralType, reference_segment, FieldReference, Literal,
-        ReferenceSegment, ScalarFunction,
-    },
-    extensions as ext, fetch_rel, join_rel, plan_rel, r#type, read_rel, rel, rel_common, set_rel,
-    sort_field, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
+    self, AggregateFunction, AggregateRel, Expression, FetchRel, FilterRel, FunctionArgument,
     NamedStruct, PlanRel, ProjectRel, ReadRel, Rel, RelCommon, RelRoot, SetRel, SortRel,
+    aggregate_rel, expression,
+    expression::{
+        FieldReference, Literal, ReferenceSegment, ScalarFunction, field_reference,
+        literal::LiteralType, reference_segment,
+    },
+    extensions as ext, fetch_rel, join_rel, plan_rel, read_rel, rel, rel_common, set_rel,
+    sort_field, r#type,
 };
 
 use crate::ir::expr::{BinaryOp, DataType, Expr, JoinType, LiteralValue, UnaryOp};

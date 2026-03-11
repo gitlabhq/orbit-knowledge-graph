@@ -9,7 +9,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::ir::expr::{BinaryOp, Expr, JoinType, LiteralValue, SortDir, UnaryOp};
-use crate::ir::plan::{Plan, Rel, RelKind, RAW_FROM_TAG};
+use crate::ir::plan::{Plan, RAW_FROM_TAG, Rel, RelKind};
 
 // ---------------------------------------------------------------------------
 // Public types
