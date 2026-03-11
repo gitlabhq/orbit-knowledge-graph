@@ -112,7 +112,7 @@ enum Commands {
         #[arg(long, short, required = true, num_args = 1..)]
         traversal_paths: Vec<String>,
 
-        /// Path to ontology directory (default: fixtures/ontology)
+        /// Path to ontology directory (default: config/ontology)
         #[arg(long, short)]
         ontology: Option<PathBuf>,
 
@@ -325,7 +325,7 @@ fn run_query(
             .unwrap()
             .parent()
             .unwrap()
-            .join("fixtures/ontology")
+            .join("config/ontology")
     });
 
     let ontology = Ontology::load_from_dir(&ontology_dir)

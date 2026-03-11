@@ -1,0 +1,67 @@
+# config/ontology/nodes/source_code/file.yaml
+
+node_type: File
+domain: source_code
+description: A source code file within a repository
+label: path
+destination_table: gl_file
+default_columns: [id, path, name, language]
+sort_key: [traversal_path, project_id, branch, id]
+
+style:
+  size: 24
+  color: "#22D3EE"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Unique identifier for the file node."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "ID of the project this file belongs to."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    description: "Git branch where this file exists."
+
+  path:
+    type: string
+    source: path
+    nullable: false
+    description: "Relative path of the file within the repository."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Name of the file including extension."
+
+  extension:
+    type: string
+    source: extension
+    nullable: false
+    description: "File extension (e.g., rb, py, java)."
+
+  language:
+    type: string
+    source: language
+    nullable: false
+    description: "Programming language of the file (e.g., ruby, python, java)."

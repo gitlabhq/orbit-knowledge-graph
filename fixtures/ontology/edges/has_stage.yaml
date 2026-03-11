@@ -1,8 +1,0 @@
-# fixtures/ontology/edges/has_stage.yaml
-
-description: Pipeline contains stage relationship
-
-variants:
-  - from_node: { type: Pipeline, id: id }
-    to_node: { type: Stage, id: id }
-    description: "Pipeline contains stage."

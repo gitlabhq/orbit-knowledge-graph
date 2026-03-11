@@ -14,7 +14,7 @@ pub(crate) use node::NodeYaml;
 use schema::SchemaYaml;
 
 #[derive(Embed)]
-#[folder = "$CARGO_MANIFEST_DIR/../../fixtures/ontology/"]
+#[folder = "$CARGO_MANIFEST_DIR/../../config/ontology/"]
 struct EmbeddedOntology;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

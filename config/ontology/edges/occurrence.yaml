@@ -1,0 +1,8 @@
+# config/ontology/edges/occurrence.yaml
+
+description: Vulnerability occurrence is an occurrence of a vulnerability
+
+variants:
+  - from_node: { type: VulnerabilityOccurrence, id: id }
+    to_node: { type: Vulnerability, id: id }
+    description: "Occurrence is linked to a vulnerability."

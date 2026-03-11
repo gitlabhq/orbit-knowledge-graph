@@ -1,0 +1,99 @@
+# config/ontology/nodes/core/group.yaml
+
+node_type: Group
+domain: core
+description: A GitLab group (top-level group or subgroup)
+label: name
+destination_table: gl_group
+default_columns: [id, name, full_path, visibility_level]
+
+style:
+  size: 45
+  color: "#8B5CF6"
+
+redaction:
+  resource_type: group
+  id_column: id
+  ability: read_group
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the group."
+
+  full_path:
+    type: string
+    source: path
+    nullable: true
+    description: "Full path for the group (e.g. gitlab-org/quality)."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Display name."
+
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Group description."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the group was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Timestamp when the group was last updated."
+
+  visibility_level:
+    type: enum
+    source: visibility_level
+    nullable: false
+    description: "Visibility of the group."
+    values:
+      0: private
+      10: internal
+      20: public
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: query
+  scope: namespaced
+  select: >-
+    namespace.id AS id, namespace.name AS name,
+    namespace_details.description AS description,
+    namespace.visibility_level AS visibility_level, namespace.path AS path,
+    namespace.parent_id AS parent_id, namespace.owner_id AS owner_id,
+    namespace.created_at AS created_at, namespace.updated_at AS updated_at,
+    traversal_paths.traversal_path AS traversal_path
+  from: >-
+    siphon_namespaces namespace
+    INNER JOIN siphon_namespace_details namespace_details
+    ON namespace.id = namespace_details.namespace_id
+    INNER JOIN namespace_traversal_paths traversal_paths
+    ON namespace.id = traversal_paths.id
+  traversal_path_filter: "namespace.id IN (SELECT id FROM namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
+  watermark: namespace._siphon_replicated_at
+  deleted: namespace._siphon_deleted
+  edges:
+    owner_id:
+      to: User
+      as: OWNER
+      direction: incoming
+    parent_id:
+      to: Group
+      as: CONTAINS
+      direction: incoming

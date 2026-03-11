@@ -219,12 +219,12 @@ Column name definitions:
 - `crates/xtask/src/synth/arrow_schema.rs` - data generation schema
 
 Enum value sources:
-- `fixtures/ontology/nodes/**/*.yaml` - ontology definitions
+- `config/ontology/nodes/**/*.yaml` - ontology definitions
 - `crates/xtask/src/synth/generator/fake_data.rs` - fake value generation logic
 
 Edge configuration:
 - `crates/xtask/simulator.yaml` - relationships and associations
-- `fixtures/ontology/edges/*.yaml` - edge type definitions (source/target kinds)
+- `config/ontology/edges/*.yaml` - edge type definitions (source/target kinds)
 
 Traversal path construction:
 - `crates/xtask/src/synth/generator/traversal.rs`
@@ -237,7 +237,7 @@ Association generation:
 ## Debugging checklist for empty results
 
 1. **Check sampling metadata** - Is it path-scoped or global fallback?
-2. **Verify edge exists in ontology** - Does `fixtures/ontology/edges/<type>.yaml` define the right direction?
+2. **Verify edge exists in ontology** - Does `config/ontology/edges/<type>.yaml` define the right direction?
 3. **Verify edge configured** - Is it in `crates/xtask/simulator.yaml` associations?
 4. **Check iteration direction** - Does `per: source` vs `per: target` match the cardinality?
 5. **Check edge counts** - Do enough edges of this type exist?

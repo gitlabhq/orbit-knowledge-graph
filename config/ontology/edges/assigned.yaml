@@ -1,0 +1,12 @@
+# config/ontology/edges/assigned.yaml
+
+description: Assignment relationship between users and entities
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "User is assigned to merge request."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "User is assigned to work item."

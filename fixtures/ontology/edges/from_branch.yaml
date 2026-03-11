@@ -1,8 +1,0 @@
-# fixtures/ontology/edges/from_branch.yaml
-
-description: Source branch relationships
-
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: Branch, id: name }
-    description: "Merge request originates from source branch."

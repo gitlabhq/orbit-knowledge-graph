@@ -1,0 +1,8 @@
+# config/ontology/edges/in_pipeline.yaml
+
+description: Entity belongs to a pipeline
+
+variants:
+  - from_node: { type: SecurityScan, id: id }
+    to_node: { type: Pipeline, id: id }
+    description: "Security scan belongs to pipeline."

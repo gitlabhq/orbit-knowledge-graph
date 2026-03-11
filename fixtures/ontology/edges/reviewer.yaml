@@ -1,8 +1,0 @@
-# fixtures/ontology/edges/reviewer.yaml
-
-description: Review assignment relationship between users and merge requests
-
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: User, id: id }
-    description: "Merge request has user as reviewer."
