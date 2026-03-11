@@ -172,7 +172,7 @@ pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
     )
 }
 
-pub async fn seed_project(
+pub async fn create_project_in_graph(
     clickhouse: &TestContext,
     project_id: i64,
     traversal_path: &str,
@@ -186,7 +186,7 @@ pub async fn seed_project(
         .await;
 }
 
-pub async fn seed_push_event(
+pub async fn create_push_event(
     clickhouse: &TestContext,
     project_id: i64,
     event_id: i64,
