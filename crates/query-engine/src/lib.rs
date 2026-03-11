@@ -52,7 +52,8 @@ pub use codegen::{
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_KINDS_COLUMN, EDGE_SRC_SUFFIX,
     EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS,
-    NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
+    RELATIONSHIP_TYPE_COLUMN,
 };
 pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
@@ -377,6 +378,72 @@ mod tests {
         assert!(result.base.sql.contains("_gkg_neighbor_type"));
         assert!(result.base.sql.contains("_gkg_relationship_type"));
         assert!(result.base.sql.contains("INNER JOIN"));
+    }
+
+    #[test]
+    fn test_compile_neighbors_produces_correct_sql() {
+        let json = r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]},
+            "neighbors": {"node": "u", "direction": "both"}
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        assert!(
+            result.base.sql.contains("_gkg_neighbor_is_outgoing"),
+            "expected _gkg_neighbor_is_outgoing in SQL: {}",
+            result.base.sql
+        );
+        assert!(result.base.sql.contains("_gkg_neighbor_id"));
+        assert!(result.base.sql.contains("_gkg_neighbor_type"));
+        assert!(result.base.sql.contains("_gkg_relationship_type"));
+    }
+
+    #[test]
+    fn test_variable_length_traversal() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "min_hops": 1,
+                "max_hops": 3
+            }],
+            "limit": 25
+        }"#;
+
+        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+
+        assert!(
+            result.base.sql.contains("UNION ALL"),
+            "expected UNION ALL: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("path_nodes"),
+            "expected path_nodes in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("relationship_kind"),
+            "expected relationship_kind in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("source_id"),
+            "expected source_id in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("target_id"),
+            "expected target_id in union arms: {}",
+            result.base.sql
+        );
     }
 
     #[test]

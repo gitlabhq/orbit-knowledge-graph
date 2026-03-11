@@ -4,7 +4,8 @@
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::{
-    EDGE_ALIAS_SUFFIXES, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    EDGE_ALIAS_SUFFIXES, NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN,
+    RELATIONSHIP_TYPE_COLUMN,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{
@@ -16,21 +17,6 @@ use ontology::constants::{
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-
-/// Build `startsWith(edge.traversal_path, node.traversal_path)`.
-///
-/// The edge's path is always equal to or deeper than the node's path in the
-/// namespace hierarchy, so a prefix match is correct for both source and target
-/// sides. ClickHouse can still use the ORDER BY key prefix for this predicate.
-fn edge_path_starts_with(edge_alias: &str, node_alias: &str) -> Expr {
-    Expr::func(
-        "startsWith",
-        vec![
-            Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-            Expr::col(node_alias, TRAVERSAL_PATH_COLUMN),
-        ],
-    )
-}
 
 /// Generate SELECT expressions for all edge columns with the given table alias.
 fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
@@ -106,15 +92,29 @@ fn lower_traversal(input: &Input) -> Result<Node> {
     })))
 }
 
-/// Add edge columns to SELECT for each relationship.
+fn edge_depth_select_expr(alias: &str) -> SelectExpr {
+    SelectExpr::new(Expr::col(alias, "depth"), format!("{alias}_depth"))
+}
+
+fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
+    SelectExpr::new(
+        Expr::col(alias, "path_nodes"),
+        format!("{alias}_path_nodes"),
+    )
+}
+
 fn add_edge_columns(
     select: &mut Vec<SelectExpr>,
     rels: &[InputRelationship],
     edge_aliases: &HashMap<usize, String>,
 ) {
-    for (i, _rel) in rels.iter().enumerate() {
+    for (i, rel) in rels.iter().enumerate() {
         if let Some(alias) = edge_aliases.get(&i) {
             select.extend(edge_select_exprs(alias));
+            if rel.max_hops > 1 {
+                select.push(edge_depth_select_expr(alias));
+                select.push(edge_path_nodes_select_expr(alias));
+            }
         }
     }
 }
@@ -433,7 +433,6 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         edge_alias,
         center_entity,
         neighbors_config.direction,
-        center_node.has_traversal_path,
     );
     if let Some(tc) = edge_type_cond {
         join_cond = Expr::and(join_cond, tc);
@@ -446,16 +445,24 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         join_cond,
     );
 
+    let center_matches_source = Expr::and(
+        Expr::eq(
+            Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
+            Expr::col(edge_alias, "source_id"),
+        ),
+        Expr::eq(
+            Expr::col(edge_alias, "source_kind"),
+            Expr::string(center_entity),
+        ),
+    );
+
     let neighbor_id_expr = match neighbors_config.direction {
         Direction::Outgoing => Expr::col(edge_alias, "target_id"),
         Direction::Incoming => Expr::col(edge_alias, "source_id"),
         Direction::Both => Expr::func(
             "if",
             vec![
-                Expr::eq(
-                    Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
-                    Expr::col(edge_alias, "source_id"),
-                ),
+                center_matches_source.clone(),
                 Expr::col(edge_alias, "target_id"),
                 Expr::col(edge_alias, "source_id"),
             ],
@@ -468,10 +475,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         Direction::Both => Expr::func(
             "if",
             vec![
-                Expr::eq(
-                    Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
-                    Expr::col(edge_alias, "source_id"),
-                ),
+                center_matches_source.clone(),
                 Expr::col(edge_alias, "target_kind"),
                 Expr::col(edge_alias, "source_kind"),
             ],
@@ -484,6 +488,17 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         SelectExpr::new(
             Expr::col(edge_alias, "relationship_kind"),
             RELATIONSHIP_TYPE_COLUMN,
+        ),
+        SelectExpr::new(
+            match neighbors_config.direction {
+                Direction::Outgoing => Expr::int(1),
+                Direction::Incoming => Expr::int(0),
+                Direction::Both => Expr::func(
+                    "if",
+                    vec![center_matches_source, Expr::int(1), Expr::int(0)],
+                ),
+            },
+            NEIGHBOR_IS_OUTGOING_COLUMN,
         ),
     ];
 
@@ -522,36 +537,78 @@ fn build_hop_union_all(rel: &InputRelationship, alias: &str) -> TableRef {
     TableRef::union_all(queries, alias)
 }
 
-/// Build one arm of the union: a chain of edge joins for a specific depth.
 fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direction) -> Query {
     let (start_col, end_col) = direction.edge_columns();
+    let end_type_col = match direction {
+        Direction::Outgoing | Direction::Both => "target_kind",
+        Direction::Incoming => "source_kind",
+    };
+    let last = format!("e{depth}");
 
-    // Build chain: e1 -> e2 -> e3 -> ...
     let (mut from, first_type_cond) = edge_scan("e1", type_filter);
-
-    for i in 2..=depth {
-        let prev = format!("e{}", i - 1);
-        let curr = format!("e{i}");
-        // No traversal_path condition between consecutive edges: cross-namespace
-        // relationships (e.g. RELATED_TO, CLOSES) can link entities in different
-        // namespaces, so consecutive edges may have different paths.
-        let (edge_table, edge_type_cond) = edge_scan(&curr, type_filter);
-        let mut join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
+    for index in 2..=depth {
+        let edge = format!("e{index}");
+        let prev = format!("e{}", index - 1);
+        let (edge_table, edge_type_cond) = edge_scan(&edge, type_filter);
+        let mut join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&edge, start_col));
         if let Some(tc) = edge_type_cond {
             join_cond = Expr::and(join_cond, tc);
         }
         from = TableRef::join(JoinType::Inner, from, edge_table, join_cond);
     }
 
+    let (
+        relationship_kind_expr,
+        source_id_expr,
+        source_kind_expr,
+        target_id_expr,
+        target_kind_expr,
+    ) = match direction {
+        Direction::Outgoing | Direction::Both => (
+            Expr::col("e1", "relationship_kind"),
+            Expr::col("e1", "source_id"),
+            Expr::col("e1", "source_kind"),
+            Expr::col(&last, "target_id"),
+            Expr::col(&last, "target_kind"),
+        ),
+        Direction::Incoming => (
+            Expr::col(&last, "relationship_kind"),
+            Expr::col(&last, "source_id"),
+            Expr::col(&last, "source_kind"),
+            Expr::col("e1", "target_id"),
+            Expr::col("e1", "target_kind"),
+        ),
+    };
+
     Query {
         select: vec![
             SelectExpr::new(Expr::col("e1", start_col), "start_id"),
-            SelectExpr::new(Expr::col(format!("e{depth}"), end_col), "end_id"),
-            SelectExpr::new(Expr::int(depth as i64), "depth"),
+            SelectExpr::new(Expr::col(&last, end_col), "end_id"),
             SelectExpr::new(
-                Expr::col("e1", TRAVERSAL_PATH_COLUMN),
+                Expr::col(&last, TRAVERSAL_PATH_COLUMN),
                 TRAVERSAL_PATH_COLUMN,
             ),
+            SelectExpr::new(
+                Expr::func(
+                    "array",
+                    (1..=depth)
+                        .map(|index| {
+                            let edge = format!("e{index}");
+                            Expr::func(
+                                "tuple",
+                                vec![Expr::col(&edge, end_col), Expr::col(&edge, end_type_col)],
+                            )
+                        })
+                        .collect(),
+                ),
+                "path_nodes",
+            ),
+            SelectExpr::new(relationship_kind_expr, "relationship_kind"),
+            SelectExpr::new(source_id_expr, "source_id"),
+            SelectExpr::new(source_kind_expr, "source_kind"),
+            SelectExpr::new(target_id_expr, "target_id"),
+            SelectExpr::new(target_kind_expr, "target_kind"),
+            SelectExpr::new(Expr::int(depth as i64), "depth"),
         ],
         from,
         where_clause: first_type_cond,
@@ -605,30 +662,22 @@ fn build_joins(
         let target_table = resolve_table(target)?;
 
         if rel.max_hops > 1 {
-            // Multi-hop: UNION ALL subquery
             let alias = format!("hop_e{i}");
             edge_aliases.insert(i, alias.clone());
 
-            let from_node = find_node(nodes, &rel.from)?;
             let union = build_hop_union_all(rel, &alias);
             let (from_col, to_col) = rel.direction.union_columns();
 
-            let mut source_cond = Expr::eq(
+            let source_cond = Expr::eq(
                 Expr::col(&rel.from, DEFAULT_PRIMARY_KEY),
                 Expr::col(&alias, from_col),
             );
-            if from_node.has_traversal_path {
-                source_cond = Expr::and(edge_path_starts_with(&alias, &rel.from), source_cond);
-            }
             result = TableRef::join(JoinType::Inner, result, union, source_cond);
 
-            let mut target_cond = Expr::eq(
+            let target_cond = Expr::eq(
                 Expr::col(&alias, to_col),
                 Expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
             );
-            if target.has_traversal_path {
-                target_cond = Expr::and(edge_path_starts_with(&alias, &rel.to), target_cond);
-            }
             result = TableRef::join(
                 JoinType::Inner,
                 result,
@@ -636,18 +685,11 @@ fn build_joins(
                 target_cond,
             );
         } else {
-            // Single-hop: direct edge join
             let alias = format!("e{i}");
             edge_aliases.insert(i, alias.clone());
 
-            let from_node = find_node(nodes, &rel.from)?;
             let (edge, edge_type_cond) = edge_scan(&alias, &type_filter(&rel.types));
-            let mut join_cond = source_join_cond(
-                &rel.from,
-                &alias,
-                rel.direction,
-                from_node.has_traversal_path,
-            );
+            let mut join_cond = source_join_cond(&rel.from, &alias, rel.direction);
             if let Some(tc) = edge_type_cond {
                 join_cond = Expr::and(join_cond, tc);
             }
@@ -656,7 +698,7 @@ fn build_joins(
                 JoinType::Inner,
                 result,
                 TableRef::scan(&target_table, &rel.to),
-                target_join_cond(&alias, &rel.to, rel.direction, target.has_traversal_path),
+                target_join_cond(&alias, &rel.to, rel.direction),
             );
         }
     }
@@ -664,13 +706,8 @@ fn build_joins(
     Ok((result, edge_aliases))
 }
 
-/// Join from source node to edge table.
-/// When `with_path` is true, adds `startsWith(edge.traversal_path, node.traversal_path)`
-/// to leverage ClickHouse's ORDER BY key on the edge table. The edge's path
-/// is always equal to or deeper than either endpoint's path in the namespace
-/// hierarchy, so a prefix match is safe for all directions.
-fn source_join_cond(node: &str, edge: &str, dir: Direction, with_path: bool) -> Expr {
-    let id_cond = match dir {
+fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
+    match dir {
         Direction::Outgoing => Expr::eq(
             Expr::col(node, DEFAULT_PRIMARY_KEY),
             Expr::col(edge, "source_id"),
@@ -689,25 +726,10 @@ fn source_join_cond(node: &str, edge: &str, dir: Direction, with_path: bool) -> 
                 Expr::col(edge, "target_id"),
             ),
         ),
-    };
-    if with_path {
-        Expr::and(edge_path_starts_with(edge, node), id_cond)
-    } else {
-        id_cond
     }
 }
 
-/// Join from source node to edge table, with entity type filter.
-/// Unlike `source_join_cond`, this also filters on source_kind/target_kind
-/// to prevent ID collisions across entity types.
-/// When `with_path` is true, adds `startsWith(edge.traversal_path, node.traversal_path)`.
-fn source_join_cond_with_kind(
-    node: &str,
-    edge: &str,
-    entity: &str,
-    dir: Direction,
-    with_path: bool,
-) -> Expr {
+fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Direction) -> Expr {
     let id_and_kind = |id_col, kind_col| {
         Expr::and(
             Expr::eq(
@@ -718,26 +740,18 @@ fn source_join_cond_with_kind(
         )
     };
 
-    let id_cond = match dir {
+    match dir {
         Direction::Outgoing => id_and_kind("source_id", "source_kind"),
         Direction::Incoming => id_and_kind("target_id", "target_kind"),
         Direction::Both => Expr::or(
             id_and_kind("source_id", "source_kind"),
             id_and_kind("target_id", "target_kind"),
         ),
-    };
-    if with_path {
-        Expr::and(edge_path_starts_with(edge, node), id_cond)
-    } else {
-        id_cond
     }
 }
 
-/// Join from edge table to target node.
-///
-/// When `with_path` is true, adds `startsWith(edge.traversal_path, node.traversal_path)`.
-fn target_join_cond(edge: &str, node: &str, dir: Direction, with_path: bool) -> Expr {
-    let id_cond = match dir {
+fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
+    match dir {
         Direction::Outgoing => Expr::eq(
             Expr::col(edge, "target_id"),
             Expr::col(node, DEFAULT_PRIMARY_KEY),
@@ -756,11 +770,6 @@ fn target_join_cond(edge: &str, node: &str, dir: Direction, with_path: bool) -> 
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
             ),
         ),
-    };
-    if with_path {
-        Expr::and(edge_path_starts_with(edge, node), id_cond)
-    } else {
-        id_cond
     }
 }
 
@@ -1112,7 +1121,6 @@ mod tests {
         assert!(count_joins(&q.from) >= 4);
     }
 
-    /// Count union subqueries in a table reference tree
     fn count_unions(table_ref: &TableRef) -> usize {
         match table_ref {
             TableRef::Union { .. } => 1,
@@ -1121,7 +1129,6 @@ mod tests {
         }
     }
 
-    /// Find union with a specific alias
     fn find_union_alias(table_ref: &TableRef, alias: &str) -> bool {
         match table_ref {
             TableRef::Union { alias: a, .. } => a == alias,
@@ -1129,6 +1136,16 @@ mod tests {
                 find_union_alias(left, alias) || find_union_alias(right, alias)
             }
             TableRef::Scan { .. } | TableRef::Subquery { .. } => false,
+        }
+    }
+
+    fn find_union<'a>(table_ref: &'a TableRef, alias: &str) -> Option<&'a TableRef> {
+        match table_ref {
+            TableRef::Union { alias: a, .. } if a == alias => Some(table_ref),
+            TableRef::Join { left, right, .. } => {
+                find_union(left, alias).or_else(|| find_union(right, alias))
+            }
+            TableRef::Scan { .. } | TableRef::Union { .. } | TableRef::Subquery { .. } => None,
         }
     }
 
@@ -1155,17 +1172,52 @@ mod tests {
         let Node::Query(q) = lower(&input).unwrap() else {
             panic!("expected Query");
         };
-        println!("{:?}", q);
 
-        // Should have a union subquery for the multi-hop relationship
-        assert_eq!(
-            count_unions(&q.from),
-            1,
-            "expected one union subquery for multi-hop"
-        );
+        assert_eq!(count_unions(&q.from), 1);
+        assert!(find_union_alias(&q.from, "hop_e0"));
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(aliases.contains(&&"hop_e0_path".to_string()));
+        assert!(aliases.contains(&&"hop_e0_type".to_string()));
+        assert!(aliases.contains(&&"hop_e0_src".to_string()));
+        assert!(aliases.contains(&&"hop_e0_src_type".to_string()));
+        assert!(aliases.contains(&&"hop_e0_dst".to_string()));
+        assert!(aliases.contains(&&"hop_e0_dst_type".to_string()));
+        assert!(aliases.contains(&&"hop_e0_depth".to_string()));
+        assert!(aliases.contains(&&"hop_e0_path_nodes".to_string()));
+
+        let union = find_union(&q.from, "hop_e0").unwrap();
+        let TableRef::Union { queries, .. } = union else {
+            panic!("expected Union");
+        };
+        assert_eq!(queries.len(), 3, "expected 3 union arms for max_hops=3");
+
+        let expected_arm_aliases = [
+            "start_id",
+            "end_id",
+            "traversal_path",
+            "path_nodes",
+            "relationship_kind",
+            "source_id",
+            "source_kind",
+            "target_id",
+            "target_kind",
+            "depth",
+        ];
+        for (i, arm) in queries.iter().enumerate() {
+            let arm_aliases: Vec<_> = arm.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+            for expected in &expected_arm_aliases {
+                assert!(
+                    arm_aliases.contains(&&expected.to_string()),
+                    "arm {i} missing alias {expected}: {arm_aliases:?}"
+                );
+            }
+        }
+
+        let from_debug = format!("{:?}", q.from);
         assert!(
-            find_union_alias(&q.from, "hop_e0"),
-            "expected union with alias hop_e0"
+            !from_debug.contains("startsWith"),
+            "should not use startsWith in joins: {from_debug}"
         );
     }
 
@@ -1652,5 +1704,63 @@ mod tests {
         };
         let on = extract_join_on(&q.from).expect("expected join");
         assert!(!has_type_filter(on), "wildcard should not have type filter");
+    }
+
+    #[test]
+    fn test_single_hop_joins_do_not_assume_traversal_path_prefix() {
+        let input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 25
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let from_debug = format!("{:?}", q.from);
+        assert!(
+            !from_debug.contains("startsWith"),
+            "single-hop joins should not use startsWith: {from_debug}"
+        );
+    }
+
+    #[test]
+    fn test_lower_neighbors_both_direction() {
+        use crate::input::InputNeighbors;
+
+        let input = Input {
+            query_type: QueryType::Neighbors,
+            nodes: vec![InputNode {
+                id: "u".to_string(),
+                entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
+                node_ids: vec![123],
+                ..Default::default()
+            }],
+            neighbors: Some(InputNeighbors {
+                node: "u".to_string(),
+                direction: Direction::Both,
+                rel_types: vec![],
+            }),
+            limit: 10,
+            ..Input::default()
+        };
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(
+            aliases.contains(&&NEIGHBOR_IS_OUTGOING_COLUMN.to_string()),
+            "expected {NEIGHBOR_IS_OUTGOING_COLUMN} in select: {aliases:?}"
+        );
     }
 }
