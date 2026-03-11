@@ -1,3 +1,4 @@
+mod graph;
 mod raw_row;
 
 use serde_json::{Value, json};
@@ -8,6 +9,7 @@ use query_engine::ResultContext;
 
 use super::types::QueryPipelineContext;
 
+pub use graph::GraphFormatter;
 pub use raw_row::{RawRowFormatter, row_to_json};
 
 pub trait ResultFormatter: Send + Sync {

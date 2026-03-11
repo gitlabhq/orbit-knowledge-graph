@@ -47,6 +47,7 @@ Integration tests need Docker: `mise test:integration`.
 | Ontology edge definitions | `config/ontology/edges/` |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
+| Query response JSON schema | `crates/gkg-server/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
