@@ -81,10 +81,10 @@ impl QueryResultRow {
     }
 
     pub fn get_public_id(&self, node: &RedactionNode) -> Option<i64> {
-        match self.columns.get(&node.pk_column) {
-            Some(value) => value.as_int64().copied(),
-            None => self.get_id(node),
-        }
+        self.columns
+            .get(&node.pk_column)
+            .and_then(|v| v.as_int64().copied())
+            .or_else(|| self.get_id(node))
     }
 
     pub fn get_type(&self, node: &RedactionNode) -> Option<&str> {
