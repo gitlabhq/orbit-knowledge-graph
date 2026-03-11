@@ -1,0 +1,156 @@
+# config/ontology/nodes/code_review/merge_request.yaml
+
+node_type: MergeRequest
+domain: code_review
+description: A merge request for code review and merging changes into a target branch
+label: title
+destination_table: gl_merge_request
+default_columns: [id, iid, title, state, source_branch, target_branch]
+
+style:
+  size: 28
+  color: "#F59E0B"
+
+redaction:
+  resource_type: merge_request
+  id_column: id
+  ability: read_merge_request
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the merge request."
+
+  iid:
+    type: int64
+    source: iid
+    nullable: true
+    description: "Project-scoped merge request number."
+
+  title:
+    type: string
+    source: title
+    nullable: true
+    description: "Title of the merge request."
+
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Description body (markdown)."
+
+  source_branch:
+    type: string
+    source: source_branch
+    nullable: false
+    description: "Name of the source branch."
+
+  target_branch:
+    type: string
+    source: target_branch
+    nullable: false
+    description: "Name of the target branch."
+
+  state:
+    type: enum
+    source: state_id
+    nullable: false
+    description: "Current state of the merge request."
+    values:
+      1: opened
+      2: closed
+      3: merged
+      4: locked
+
+  merge_status:
+    type: string
+    source: merge_status
+    nullable: false
+    description: "Mergeability check status (unchecked, preparing, checking, can_be_merged, cannot_be_merged, etc.)."
+
+  draft:
+    type: boolean
+    source: draft
+    nullable: false
+    description: "Whether this is a draft/WIP merge request."
+
+  squash:
+    type: boolean
+    source: squash
+    nullable: false
+    description: "Whether to squash commits on merge."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the merge request was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Timestamp when the merge request was last updated."
+
+  merge_commit_sha:
+    type: string
+    source: merge_commit_sha
+    nullable: true
+    description: "SHA of the merge commit."
+
+  discussion_locked:
+    type: boolean
+    source: discussion_locked
+    nullable: true
+    description: "Whether discussions are locked."
+
+  prepared_at:
+    type: timestamp
+    source: prepared_at
+    nullable: true
+    description: "Timestamp when the merge request was prepared."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: table
+  scope: namespaced
+  source: merge_requests
+  edges:
+    target_project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+    author_id:
+      to: User
+      as: AUTHORED
+      direction: incoming
+    merge_user_id:
+      to: User
+      as: MERGED_BY
+      direction: incoming
+    milestone_id:
+      to: Milestone
+      as: IN_MILESTONE
+      direction: outgoing
+    assignees:
+      to: User
+      as: ASSIGNED
+      direction: incoming
+      array_field: user_id
+    label_ids:
+      to: Label
+      as: HAS_LABEL
+      direction: outgoing
+      array_field: label_id
+    approvals:
+      to: User
+      as: REVIEWER
+      direction: outgoing
+      array_field: user_id

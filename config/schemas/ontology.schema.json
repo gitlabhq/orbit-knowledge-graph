@@ -102,6 +102,10 @@
         "delimiter": {
           "type": "string",
           "description": "Delimiter for splitting multi-value columns."
+        },
+        "array_field": {
+          "type": "string",
+          "description": "When a datalake column is typed Array(Tuple(...)), names the tuple element holding the foreign key ID (e.g. 'user_id'). The indexer will ARRAY JOIN the column and extract one edge per element."
         }
       },
       "required": ["as"],

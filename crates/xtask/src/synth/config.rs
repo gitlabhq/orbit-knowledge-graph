@@ -320,7 +320,7 @@ fn default_output_dir() -> String {
 }
 
 fn default_ontology_path() -> String {
-    "fixtures/ontology".to_string()
+    "config/ontology".to_string()
 }
 
 fn default_organizations() -> u32 {

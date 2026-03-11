@@ -2,4 +2,6 @@
 xtask = "run --package xtask --"
 
 [env]
+CONFIG_DIR = { value = "config", relative = true }
+FIXTURES_DIR = { value = "fixtures", relative = true }
 SCHEMA_DIR = { value = "config/schemas", relative = true }

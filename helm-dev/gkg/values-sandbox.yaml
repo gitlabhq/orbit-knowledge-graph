@@ -101,9 +101,8 @@ siphon:
 #   1. organizations, namespaces -> namespace_traversal_paths_mv -> dictionaries
 #   2. projects -> project_namespace_traversal_paths_mv -> dictionaries
 #   3. issue_assignees, label_links, work_item_current_statuses (before issues)
-#   4. merge_request_assignees, approvals, merge_request_metrics, label_links (before merge_requests)
+#   4. merge_requests (Siphon replicates directly with embedded arrays)
 #   5. issues -> hierarchy_work_items_mv
-#   6. merge_requests -> hierarchy_merge_requests_mv
 #   7. group_audit_events -> hierarchy_audit_events_mv
 tableMappings:
   # Tier 1: Foundation (feeds namespace_traversal_paths_mv and dictionaries)
@@ -145,7 +144,7 @@ tableMappings:
     schema: public
     subject: work_item_parent_links
     target: siphon_work_item_parent_links
-  # Tier 4: MR associations (hierarchy_merge_requests_mv JOINs these)
+  # Tier 4: MR associations (embedded in merge_requests via Siphon)
   - table: merge_request_assignees
     schema: public
     subject: merge_request_assignees

@@ -9,11 +9,9 @@ use indexer::metrics::EngineMetrics;
 use indexer::testkit::{MockLockService, MockNatsServices, create_test_indexer_config};
 
 pub use integration_testkit::{
-    TestContext, get_boolean_column, get_int64_column, get_string_column, get_uint64_column,
+    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, get_boolean_column, get_int64_column,
+    get_string_column, get_uint64_column,
 };
-
-pub const SIPHON_SCHEMA_SQL: &str = include_str!("../fixtures/siphon.sql");
-pub const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../fixtures/schema/graph.sql");
 
 pub trait IndexerTestExt {
     fn create_destination(&self) -> ClickHouseDestination;

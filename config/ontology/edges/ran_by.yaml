@@ -1,0 +1,8 @@
+# config/ontology/edges/ran_by.yaml
+
+description: Security scan was executed by a CI job
+
+variants:
+  - from_node: { type: SecurityScan, id: id }
+    to_node: { type: Job, id: id }
+    description: "Security scan was run by job."

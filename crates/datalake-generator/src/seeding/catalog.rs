@@ -133,7 +133,7 @@ pub const TABLE_SPECS: &[TableSpec] = &[
         preferred_entity_table: true,
     },
     TableSpec {
-        table_name: "hierarchy_merge_requests",
+        table_name: "merge_requests",
         scope: TableScope::Project,
         stage: SeedStage::Primary,
         entity_type: Some("MergeRequest"),

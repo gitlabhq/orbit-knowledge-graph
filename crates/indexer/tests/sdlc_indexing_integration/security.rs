@@ -692,9 +692,9 @@ pub async fn processes_vulnerability_merge_request_links(context: &TestContext) 
 
     context
         .execute(
-            "INSERT INTO hierarchy_merge_requests
+            "INSERT INTO merge_requests
                 (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
-                 draft, squash, target_project_id, author_id, traversal_path, version)
+                 draft, squash, target_project_id, author_id, traversal_path, _siphon_replicated_at)
             VALUES
                 (10, 101, 'Fix SQL injection', 'Fixes the vulnerability', 'fix-sql', 'main', 3, 'merged',
                  false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),

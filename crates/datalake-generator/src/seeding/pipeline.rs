@@ -459,7 +459,7 @@ impl<'a> ProjectLinkResolver<'a> {
         Self {
             foundation,
             layout,
-            base_merge_requests: table_base_id("hierarchy_merge_requests", foundation, layout),
+            base_merge_requests: table_base_id("merge_requests", foundation, layout),
             base_work_items: table_base_id("hierarchy_work_items", foundation, layout),
             base_pipelines: table_base_id("siphon_p_ci_pipelines", foundation, layout),
             base_stages: table_base_id("siphon_p_ci_stages", foundation, layout),
@@ -973,7 +973,7 @@ fn foundation_writer_for_table(table_name: &str) -> Option<FoundationWriterFn> {
 
 fn project_row_writer_for_table(table_name: &str) -> Option<ProjectRowFieldWriterFn> {
     match table_name {
-        "hierarchy_merge_requests" => Some(write_merge_request_fields),
+        "merge_requests" => Some(write_merge_request_fields),
         "hierarchy_work_items" => Some(write_work_item_fields),
         "siphon_issues" => Some(write_work_item_fields),
         "siphon_vulnerabilities" => Some(write_vulnerability_fields),

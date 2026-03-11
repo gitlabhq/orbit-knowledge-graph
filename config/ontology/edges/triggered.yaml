@@ -1,0 +1,16 @@
+# config/ontology/edges/triggered.yaml
+
+description: Trigger relationship between entities
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Pipeline, id: id }
+    description: "User triggered pipeline."
+
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Pipeline, id: id }
+    description: "Merge request triggered pipeline."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: Job, id: id }
+    description: "User triggered job."

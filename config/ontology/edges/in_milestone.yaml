@@ -1,0 +1,12 @@
+# config/ontology/edges/in_milestone.yaml
+
+description: Entity belongs to a milestone
+
+variants:
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: Milestone, id: id }
+    description: "Work item assigned to milestone."
+
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Milestone, id: id }
+    description: "Merge request assigned to milestone."

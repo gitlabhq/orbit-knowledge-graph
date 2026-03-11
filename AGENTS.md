@@ -13,7 +13,7 @@ Integration tests need Docker: `mise test:integration`.
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). Code data via Gitaly `GetArchive` gRPC. GKG only writes to its own ClickHouse tables.
 - **Rails owns authorization.** GKG delegates all access decisions to Rails via gRPC (traversal IDs, resource permissions). See `docs/design-documents/security.md`.
 - **ClickHouse = datalake + graph.** Datalake DB holds raw Siphon rows; graph DB holds indexed property graph tables. The indexer transforms between them.
-- **Ontology-driven graph.** YAML in `fixtures/ontology/nodes/` drives ETL, query validation, and redaction. New entity types start there, not in Rust. Schema: `config/schemas/ontology.schema.json`.
+- **Ontology-driven graph.** YAML in `config/ontology/nodes/` drives ETL, query validation, and redaction. New entity types start there, not in Rust. Schema: `config/schemas/ontology.schema.json`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
@@ -42,12 +42,13 @@ Integration tests need Docker: `mise test:integration`.
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
 | Schema migration strategy | `docs/design-documents/schema_management.md` |
 | Observability / SLOs | `docs/design-documents/observability.md` |
-| Ontology node definitions | `fixtures/ontology/nodes/` |
-| Ontology edge definitions | `fixtures/ontology/edges/` |
+| Ontology node definitions | `config/ontology/nodes/` |
+| Ontology edge definitions | `config/ontology/edges/` |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
 | Query test fixtures | `fixtures/queries/` |
-| Schema fixtures | `fixtures/schema/` |
+| Graph DDL (ClickHouse) | `config/graph.sql` |
+| Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
 | Server config structure | `crates/gkg-server/src/config.rs` |
 | Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
@@ -81,6 +82,10 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `cli` | Local `gkg index` and `gkg query` commands |
 | `datalake-generator` | Synthetic GitLab data for load testing |
 | `llqm` | Substrait-based query IR with ergonomic builder and ClickHouse SQL codegen |
+| `gitlab-client` | GitLab REST/JWT client for Rails API calls |
+| `integration-testkit` | Shared ClickHouse testcontainer helpers for integration tests |
+| `integration-tests` | Integration tests for server (redaction, hydration); depends on gkg-server + integration-testkit |
+| `xtask` | Developer task runner (data generation, query evaluation, ClickHouse management) |
 
 ## Code quality
 

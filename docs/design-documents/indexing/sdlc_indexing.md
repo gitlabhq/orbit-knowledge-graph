@@ -262,7 +262,7 @@ If the worker fails unexpectedly, the unacked message will be redelivered by NAT
 
 **Ontology-driven plan building**
 
-ETL plans come from the ontology YAML in `fixtures/ontology/nodes/` and `fixtures/ontology/edges/`. Each node entity with an `etl` config becomes a `PipelinePlan` with an extraction query and one or more transforms. FK edges defined on a node are folded into the parent node's plan so they share the same extracted batch instead of querying the datalake twice. Standalone edges get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
+ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/ontology/edges/`. Each node entity with an `etl` config becomes a `PipelinePlan` with an extraction query and one or more transforms. FK edges defined on a node are folded into the parent node's plan so they share the same extracted batch instead of querying the datalake twice. Standalone edges get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
 
 **Pipeline: extract, transform, write**
 
