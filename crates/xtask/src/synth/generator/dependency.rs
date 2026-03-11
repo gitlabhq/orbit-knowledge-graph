@@ -3,8 +3,8 @@
 //! Builds a directed graph from the config's relationship definitions and
 //! performs topological sort to determine generation order.
 
-use crate::config::{EdgeRatio, GenerationConfig, RelationshipConfig};
-use crate::constants::{PARENT_TO_CHILD_EDGE, PARENT_TO_CHILD_PREFIX};
+use crate::synth::config::{EdgeRatio, GenerationConfig, RelationshipConfig};
+use crate::synth::constants::{PARENT_TO_CHILD_EDGE, PARENT_TO_CHILD_PREFIX};
 use anyhow::{Result, bail};
 use ontology::Ontology;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn test_epsilon_node_expansion() {
-        use crate::config::{GenerationConfig, RelationshipConfig};
+        use crate::synth::config::{GenerationConfig, RelationshipConfig};
 
         let ontology = ontology::Ontology::load_embedded().unwrap();
 

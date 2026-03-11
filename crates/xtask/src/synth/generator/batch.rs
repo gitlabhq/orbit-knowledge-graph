@@ -214,6 +214,10 @@ impl ColumnValues {
 mod tests {
     use super::*;
 
+    fn fake_data_path() -> String {
+        crate::synth::fixture_path(crate::synth::constants::DEFAULT_FAKE_DATA_PATH)
+    }
+
     fn test_node() -> NodeEntity {
         NodeEntity {
             name: "TestNode".to_string(),
@@ -253,12 +257,10 @@ mod tests {
 
     #[test]
     fn test_batch_builder_single_batch() {
-        use crate::arrow_schema::ToArrowSchema;
-        use crate::config::FakeDataConfig;
+        use crate::synth::arrow_schema::ToArrowSchema;
+        use crate::synth::config::FakeDataConfig;
 
-        let pools = FakeDataPools::intern(
-            FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap(),
-        );
+        let pools = FakeDataPools::intern(FakeDataConfig::load(fake_data_path()).unwrap());
         let node = test_node();
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::new(&node, schema, 100, pools);
@@ -295,12 +297,10 @@ mod tests {
 
     #[test]
     fn test_batch_builder_multiple_batches() {
-        use crate::arrow_schema::ToArrowSchema;
-        use crate::config::FakeDataConfig;
+        use crate::synth::arrow_schema::ToArrowSchema;
+        use crate::synth::config::FakeDataConfig;
 
-        let pools = FakeDataPools::intern(
-            FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap(),
-        );
+        let pools = FakeDataPools::intern(FakeDataConfig::load(fake_data_path()).unwrap());
         let node = test_node();
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::new(&node, schema, 5, pools); // Small batch size

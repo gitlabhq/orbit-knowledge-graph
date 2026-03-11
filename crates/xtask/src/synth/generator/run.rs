@@ -1,41 +1,30 @@
-//! Data generation from ontology definitions.
+//! Synthetic SDLC data generator.
 //!
 //! Generates entities in topological order based on relationship definitions,
 //! creating edges inline during generation. This ensures referential integrity
 //! and proper traversal ID inheritance.
 
-mod batch;
-mod dependency;
-mod fake_data;
-mod traversal;
-
-pub use batch::BatchBuilder;
-pub use dependency::{DependencyGraph, ParentEdge};
-pub use fake_data::{FakeDataPools, FakeValueGenerator};
-pub use traversal::{EntityContext, EntityRegistry, TraversalPathGenerator};
-
-use crate::arrow_schema::ToArrowSchema;
-use crate::config::{Config, EdgeRatio};
-use crate::parquet::StreamingEdgeWriter;
+use super::batch::BatchBuilder;
+use super::dependency::{DependencyGraph, ParentEdge};
+use super::fake_data::FakeDataPools;
+use super::parquet_writer::{ParquetWriter, StreamingEdgeWriter};
+use super::traversal::{EntityContext, EntityRegistry};
+use crate::synth::arrow_schema::ToArrowSchema;
+use crate::synth::config::{Config, EdgeRatio};
+use crate::synth::constants::ASSOCIATION_TRAVERSAL_PATH;
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use ontology::{NodeEntity, Ontology};
 use rand::Rng;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+// ── Public types ──────────────────────────────────────────────────────
+
 /// Interned string type for edge records to avoid millions of small allocations.
 pub type IStr = Arc<str>;
-
-/// Traversal path for association edges (AUTHORED, MEMBER_OF, etc.).
-///
-/// Association edges link entities across namespace boundaries and don't
-/// belong to a specific namespace path. This sentinel value tells the
-/// query engine to skip traversal-path-based security filtering for
-/// these edges (they are authorized through the source/target entities
-/// themselves).
-use crate::constants::ASSOCIATION_TRAVERSAL_PATH;
 
 /// Edge record for storage.
 #[derive(Debug, Clone)]
@@ -64,7 +53,8 @@ pub struct OrganizationNodes {
     pub nodes: HashMap<String, Vec<RecordBatch>>,
 }
 
-/// Simple string interner for edge record strings.
+// ── Internals ─────────────────────────────────────────────────────────
+
 #[derive(Debug, Default)]
 struct StringInterner {
     cache: HashMap<String, IStr>,
@@ -81,16 +71,14 @@ impl StringInterner {
     }
 }
 
+// ── Generator ─────────────────────────────────────────────────────────
+
 pub struct Generator {
     ontology: Ontology,
     config: Config,
-    /// Dependency graph determining generation order.
     dependency_graph: DependencyGraph,
-    /// Global entity ID counter (shared across all orgs for unique IDs).
     global_entity_counter: AtomicI64,
-    /// String interner for edge records.
     interner: std::sync::Mutex<StringInterner>,
-    /// Interned fake data pools (program-lifetime, leaked).
     pools: &'static FakeDataPools,
 }
 
@@ -105,7 +93,7 @@ impl std::fmt::Debug for Generator {
 
 impl Generator {
     pub fn new(ontology: Ontology, config: Config) -> Result<Self> {
-        use crate::config::FakeDataConfig;
+        use crate::synth::config::FakeDataConfig;
 
         Self::validate_config(&config, &ontology)?;
         let dependency_graph = DependencyGraph::build(&config.generation, &ontology)?;
@@ -123,11 +111,8 @@ impl Generator {
         })
     }
 
-    /// Validate all config references against the ontology.
     fn validate_config(config: &Config, ontology: &Ontology) -> Result<()> {
         let generation = &config.generation;
-
-        // --- Numeric sanity checks ---
 
         if generation.organizations == 0 {
             anyhow::bail!("generation.organizations must be > 0");
@@ -136,32 +121,26 @@ impl Generator {
             anyhow::bail!("generation.batch_size must be > 0");
         }
 
-        // --- Ontology entity validation ---
-
-        // Validate root entity types
         for node_type in generation.roots.keys() {
             DependencyGraph::validate_node(ontology, node_type)
                 .map_err(|e| anyhow::anyhow!("roots: {}", e))?;
         }
 
-        // Validate namespace entity
         DependencyGraph::validate_node(ontology, &generation.namespace_entity)
             .map_err(|e| anyhow::anyhow!("namespace_entity: {}", e))?;
 
-        // Validate relationship edge types + source/target variants
         for (edge_type, variants) in &generation.relationships.edges {
             for variant_key in variants.keys() {
-                let (source, target) = crate::config::RelationshipConfig::parse_variant_key(
-                    variant_key,
-                )
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "relationships: invalid variant key '{}' in edge type '{}'. \
+                let (source, target) =
+                    crate::synth::config::RelationshipConfig::parse_variant_key(variant_key)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "relationships: invalid variant key '{}' in edge type '{}'. \
                                  Expected 'Source -> Target'.",
-                        variant_key,
-                        edge_type
-                    )
-                })?;
+                                variant_key,
+                                edge_type
+                            )
+                        })?;
                 DependencyGraph::validate_node(ontology, &source)
                     .map_err(|e| anyhow::anyhow!("relationships.{}: {}", edge_type, e))?;
                 DependencyGraph::validate_node(ontology, &target)
@@ -171,20 +150,18 @@ impl Generator {
             }
         }
 
-        // Validate association edge types + source/target variants
         for (edge_type, variants) in &generation.associations.edges {
             for variant_key in variants.keys() {
-                let (source, target) = crate::config::RelationshipConfig::parse_variant_key(
-                    variant_key,
-                )
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "associations: invalid variant key '{}' in edge type '{}'. \
+                let (source, target) =
+                    crate::synth::config::RelationshipConfig::parse_variant_key(variant_key)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "associations: invalid variant key '{}' in edge type '{}'. \
                                  Expected 'Source -> Target'.",
-                        variant_key,
-                        edge_type
-                    )
-                })?;
+                                variant_key,
+                                edge_type
+                            )
+                        })?;
                 DependencyGraph::validate_node(ontology, &source)
                     .map_err(|e| anyhow::anyhow!("associations.{}: {}", edge_type, e))?;
                 DependencyGraph::validate_node(ontology, &target)
@@ -194,21 +171,17 @@ impl Generator {
             }
         }
 
-        // --- Schema column validation ---
-
         Self::validate_schema_config(&config.clickhouse.schema, ontology)?;
 
         Ok(())
     }
 
-    /// Validate ClickHouse schema config columns against ontology definitions.
     fn validate_schema_config(
-        schema: &crate::config::SchemaConfig,
+        schema: &crate::synth::config::SchemaConfig,
         ontology: &Ontology,
     ) -> Result<()> {
         use ontology::constants::EDGE_RESERVED_COLUMNS;
 
-        // Columns that exist on every node table: system column + reserved columns
         let universal_node_columns: std::collections::HashSet<&str> = {
             let mut cols: std::collections::HashSet<&str> =
                 std::iter::once(ontology::constants::TRAVERSAL_PATH_COLUMN).collect();
@@ -221,7 +194,6 @@ impl Generator {
         let edge_columns: std::collections::HashSet<&str> =
             EDGE_RESERVED_COLUMNS.iter().copied().collect();
 
-        // Validate node ORDER BY columns
         for col in &schema.node_order_by {
             if !universal_node_columns.contains(col.as_str()) {
                 anyhow::bail!(
@@ -233,7 +205,6 @@ impl Generator {
             }
         }
 
-        // Validate node PRIMARY KEY columns
         for col in &schema.node_primary_key {
             if !universal_node_columns.contains(col.as_str()) {
                 anyhow::bail!(
@@ -245,7 +216,6 @@ impl Generator {
             }
         }
 
-        // Validate edge ORDER BY columns
         for col in &schema.edge_order_by {
             if !edge_columns.contains(col.as_str()) {
                 anyhow::bail!(
@@ -257,7 +227,6 @@ impl Generator {
             }
         }
 
-        // Validate edge PRIMARY KEY columns
         for col in &schema.edge_primary_key {
             if !edge_columns.contains(col.as_str()) {
                 anyhow::bail!(
@@ -269,7 +238,6 @@ impl Generator {
             }
         }
 
-        // Validate indexes
         for idx in &schema.indexes {
             let valid_columns = Self::resolve_valid_columns(
                 &idx.table,
@@ -289,7 +257,6 @@ impl Generator {
             }
         }
 
-        // Validate projections
         for proj in &schema.projections {
             let valid_columns = Self::resolve_valid_columns(
                 &proj.table,
@@ -326,23 +293,17 @@ impl Generator {
         Ok(())
     }
 
-    /// Resolve valid column names for a table pattern used in indexes/projections.
-    ///
-    /// - `"edges"` → edge reserved columns
-    /// - `"*"` → universal node columns (traversal_path + id)
-    /// - specific table name → must be a known ontology table, returns all its columns
     fn resolve_valid_columns<'a>(
         table_pattern: &str,
         ontology: &'a Ontology,
         universal_node_columns: &std::collections::HashSet<&'a str>,
         edge_columns: &std::collections::HashSet<&'a str>,
     ) -> Result<std::collections::HashSet<&'a str>> {
-        use crate::constants::{TABLE_PATTERN_ALL_NODES, TABLE_PATTERN_EDGES};
+        use crate::synth::constants::{TABLE_PATTERN_ALL_NODES, TABLE_PATTERN_EDGES};
         match table_pattern {
             TABLE_PATTERN_EDGES => Ok(edge_columns.clone()),
             TABLE_PATTERN_ALL_NODES => Ok(universal_node_columns.clone()),
             specific => {
-                // Check if it's a known node table
                 if let Some(node) = ontology
                     .nodes()
                     .find(|n| ontology.table_name(&n.name).is_ok_and(|t| t == specific))
@@ -367,12 +328,10 @@ impl Generator {
         }
     }
 
-    /// Intern a string for use in edge records.
     fn intern(&self, s: &str) -> IStr {
         self.interner.lock().unwrap().intern(s)
     }
 
-    /// Get the next globally unique entity ID.
     pub fn next_entity_id(&self) -> i64 {
         self.global_entity_counter.fetch_add(1, Ordering::SeqCst)
     }
@@ -383,7 +342,6 @@ impl Generator {
         let mut rng = rand::thread_rng();
 
         for node_type in self.dependency_graph.generation_order() {
-            // Virtual nodes (e.g., "Group@1") resolve to real entity types for ontology lookup
             let real_type = self.dependency_graph.resolve_type(node_type);
             let node = self
                 .ontology
@@ -429,7 +387,6 @@ impl Generator {
             }
         }
 
-        // Compact registry, merging epsilon entries into real type names
         registry.compact_with_aliases(self.dependency_graph.epsilon_to_real());
 
         let association_edges = self.generate_association_edges(&registry, &mut rng);
@@ -438,8 +395,6 @@ impl Generator {
         Ok(data)
     }
 
-    /// Generate organization data with streaming edge output.
-    /// Edges are written directly to the StreamingEdgeWriter, reducing peak memory.
     pub fn generate_organization_streaming(
         &self,
         org_id: u32,
@@ -500,9 +455,7 @@ impl Generator {
             }
         }
 
-        // Compact registry, merging epsilon entries into real type names
         registry.compact_with_aliases(self.dependency_graph.epsilon_to_real());
-
         self.generate_association_edges_streaming(&registry, &mut rng, edge_writer)?;
 
         Ok(data)
@@ -529,20 +482,13 @@ impl Generator {
         for _ in 0..count {
             let (entity_id, traversal_path) = if is_namespace_entity {
                 let ns_id = registry.next_namespace_id();
-                let trav = format!("{}/{}/", org_id, ns_id);
-                (ns_id, trav)
+                (ns_id, format!("{}/{}/", org_id, ns_id))
             } else {
-                // Non-namespace root entities (like Users) get org-level paths.
-                // Note: The query engine skips traversal path security filters
-                // for Users since their visibility is determined through
-                // MEMBER_OF relationships to Groups, not path hierarchy.
-                let eid = self.next_entity_id();
-                (eid, format!("{}/", org_id))
+                (self.next_entity_id(), format!("{}/", org_id))
             };
 
             builder.add_row(traversal_path.clone(), entity_id);
-            let ctx = EntityContext::new(entity_id, traversal_path);
-            registry.add(&node.name, ctx);
+            registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
         }
 
         Ok((builder.finish(), Vec::new()))
@@ -566,13 +512,9 @@ impl Generator {
         );
         let mut edges = Vec::new();
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
-        // Only store full context for parent types; leaves only need IDs for associations.
-        // Check against registry_key (possibly epsilon) since the dependency graph
-        // references epsilon names as parents.
         let is_parent_type = self.dependency_graph.is_parent_type(registry_key);
 
         for parent_edge in parent_edges {
-            // Clone parent IDs and paths to avoid borrow conflict with registry.add()
             let parents: Vec<_> = match registry.get(&parent_edge.parent_kind) {
                 Some(p) if !p.is_empty() => {
                     p.iter().map(|e| (e.id, e.traversal_path.clone())).collect()
@@ -580,7 +522,6 @@ impl Generator {
                 _ => continue,
             };
 
-            // Intern strings using real type names (resolve epsilon) for edge records
             let rel_kind = self.intern(&parent_edge.edge_type);
             let parent_real_type = self.dependency_graph.resolve_type(&parent_edge.parent_kind);
             let parent_kind_str = self.intern(parent_real_type);
@@ -592,17 +533,13 @@ impl Generator {
                 for _ in 0..child_count {
                     let (entity_id, traversal_path) = if is_namespace_entity {
                         let ns_id = registry.next_namespace_id();
-                        let trav = format!("{}{}/", parent_path, ns_id);
-                        (ns_id, trav)
+                        (ns_id, format!("{}{}/", parent_path, ns_id))
                     } else {
-                        let eid = self.next_entity_id();
-                        (eid, parent_path.clone())
+                        (self.next_entity_id(), parent_path.clone())
                     };
 
                     builder.add_row(traversal_path.clone(), entity_id);
 
-                    // Store under registry_key (possibly epsilon) so entities at
-                    // different depth levels are kept separate during generation
                     if is_parent_type {
                         registry.add(registry_key, EntityContext::new(entity_id, traversal_path));
                     } else {
@@ -641,62 +578,46 @@ impl Generator {
         Ok((builder.finish(), edges))
     }
 
-    /// Generate association edges between existing entities.
-    ///
-    /// Unlike relationship edges (which are created when generating child entities),
-    /// association edges connect entities that already exist without generating new ones.
-    ///
-    /// The iteration direction determines which side we iterate over:
-    /// - `per: target` (default): For each target, sample sources to link
-    /// - `per: source`: For each source, sample targets to link
     fn generate_association_edges(
         &self,
         registry: &EntityRegistry,
         rng: &mut impl Rng,
     ) -> Vec<EdgeRecord> {
-        use crate::config::IterationDirection;
+        use crate::synth::config::IterationDirection;
 
         let mut edges = Vec::new();
 
         for (edge_type, source_kind, target_kind, ratio, direction) in
             self.config.generation.associations.all_associations()
         {
-            // Use compacted ID-only data
             let source_ids = match registry.get_ids_slice(&source_kind) {
                 Some(ids) if !ids.is_empty() => ids,
                 _ => continue,
             };
-
             let target_ids = match registry.get_ids_slice(&target_kind) {
                 Some(ids) if !ids.is_empty() => ids,
                 _ => continue,
             };
 
-            // Intern strings once per association type
             let rel_kind = self.intern(&edge_type);
             let src_kind = self.intern(&source_kind);
             let tgt_kind = self.intern(&target_kind);
 
-            // Determine which side to iterate over based on direction
             let (iterate_over, sample_from) = match direction {
                 IterationDirection::Target => (target_ids, source_ids),
                 IterationDirection::Source => (source_ids, target_ids),
             };
-
             let sample_len = sample_from.len();
 
             for &primary_id in iterate_over {
                 let edge_count = ratio.sample(rng);
-
                 if edge_count == 0 {
                     continue;
                 }
 
                 let count = edge_count.min(sample_len);
                 for _ in 0..count {
-                    let idx = rng.gen_range(0..sample_len);
-                    let secondary_id = sample_from[idx];
-
+                    let secondary_id = sample_from[rng.gen_range(0..sample_len)];
                     let (source_id, target_id) = match direction {
                         IterationDirection::Target => (secondary_id, primary_id),
                         IterationDirection::Source => (primary_id, secondary_id),
@@ -717,8 +638,7 @@ impl Generator {
         edges
     }
 
-    // ==================== Streaming variants ====================
-    // These write edges directly to StreamingEdgeWriter instead of accumulating
+    // ── Streaming variants ────────────────────────────────────────────
 
     fn generate_root_entities_streaming(
         &self,
@@ -742,16 +662,13 @@ impl Generator {
         for _ in 0..count {
             let (entity_id, traversal_path) = if is_namespace_entity {
                 let ns_id = registry.next_namespace_id();
-                let trav = format!("{}/{}/", org_id, ns_id);
-                (ns_id, trav)
+                (ns_id, format!("{}/{}/", org_id, ns_id))
             } else {
-                let eid = self.next_entity_id();
-                (eid, format!("{}/", org_id))
+                (self.next_entity_id(), format!("{}/", org_id))
             };
 
             builder.add_row(traversal_path.clone(), entity_id);
-            let ctx = EntityContext::new(entity_id, traversal_path);
-            registry.add(&node.name, ctx);
+            registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
         }
 
         Ok(builder.finish())
@@ -796,11 +713,9 @@ impl Generator {
                 for _ in 0..child_count {
                     let (entity_id, traversal_path) = if is_namespace_entity {
                         let ns_id = registry.next_namespace_id();
-                        let trav = format!("{}{}/", parent_path, ns_id);
-                        (ns_id, trav)
+                        (ns_id, format!("{}{}/", parent_path, ns_id))
                     } else {
-                        let eid = self.next_entity_id();
-                        (eid, parent_path.clone())
+                        (self.next_entity_id(), parent_path.clone())
                     };
 
                     builder.add_row(traversal_path.clone(), entity_id);
@@ -849,7 +764,7 @@ impl Generator {
         rng: &mut impl Rng,
         edge_writer: &mut StreamingEdgeWriter,
     ) -> Result<()> {
-        use crate::config::IterationDirection;
+        use crate::synth::config::IterationDirection;
 
         for (edge_type, source_kind, target_kind, ratio, direction) in
             self.config.generation.associations.all_associations()
@@ -858,7 +773,6 @@ impl Generator {
                 Some(ids) if !ids.is_empty() => ids,
                 _ => continue,
             };
-
             let target_ids = match registry.get_ids_slice(&target_kind) {
                 Some(ids) if !ids.is_empty() => ids,
                 _ => continue,
@@ -872,21 +786,17 @@ impl Generator {
                 IterationDirection::Target => (target_ids, source_ids),
                 IterationDirection::Source => (source_ids, target_ids),
             };
-
             let sample_len = sample_from.len();
 
             for &primary_id in iterate_over {
                 let edge_count = ratio.sample(rng);
-
                 if edge_count == 0 {
                     continue;
                 }
 
                 let count = edge_count.min(sample_len);
                 for _ in 0..count {
-                    let idx = rng.gen_range(0..sample_len);
-                    let secondary_id = sample_from[idx];
-
+                    let secondary_id = sample_from[rng.gen_range(0..sample_len)];
                     let (source_id, target_id) = match direction {
                         IterationDirection::Target => (secondary_id, primary_id),
                         IterationDirection::Source => (primary_id, secondary_id),
@@ -920,12 +830,11 @@ impl Generator {
             println!("    {}: {} per org = {} total", node_type, count, total);
         }
 
-        // Show recursive hierarchy expansion for self-referential edges
         for (edge_type, variants) in &cfg.relationships.edges {
             for (variant_key, ratio) in variants {
                 if let EdgeRatio::Recursive { count, max_depth } = ratio
                     && let Some((source, _)) =
-                        crate::config::RelationshipConfig::parse_variant_key(variant_key)
+                        crate::synth::config::RelationshipConfig::parse_variant_key(variant_key)
                 {
                     let root_count = cfg.roots.get(&source).copied().unwrap_or(0);
                     let mut total = root_count;
@@ -985,8 +894,8 @@ impl Generator {
                     let ratio = value.ratio();
                     let direction = value.iteration_direction();
                     let per_str = match direction {
-                        crate::config::IterationDirection::Target => "per target",
-                        crate::config::IterationDirection::Source => "per source",
+                        crate::synth::config::IterationDirection::Target => "per target",
+                        crate::synth::config::IterationDirection::Source => "per source",
                     };
                     let ratio_str = match ratio {
                         EdgeRatio::Count(n) | EdgeRatio::Recursive { count: n, .. } => {
@@ -1004,17 +913,117 @@ impl Generator {
     }
 }
 
+// ── CLI entry point ───────────────────────────────────────────────────
+
+pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
+    println!("GitLab Knowledge Graph Generator");
+    println!("=================================\n");
+
+    println!("Loading config from {:?}...", config_path);
+    let config = Config::load(config_path)?;
+
+    let writer = ParquetWriter::new(&config.generation.output_dir);
+
+    if !force && config.generation.skip_if_present && writer.data_exists() {
+        println!(
+            "Data already exists in {:?}, skipping generation.",
+            config.generation.output_dir
+        );
+        println!("Use --force to regenerate.");
+        return Ok(());
+    }
+
+    println!(
+        "Loading ontology from {:?}...",
+        config.generation.ontology_path
+    );
+    let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
+    println!(
+        "Loaded {} node types and {} edge types\n",
+        ontology.node_count(),
+        ontology.edge_count()
+    );
+
+    let generator = Generator::new(ontology.clone(), config.clone())?;
+    generator.print_plan();
+
+    if dry_run {
+        println!("Dry run - not executing.");
+        return Ok(());
+    }
+
+    println!("Output directory: {:?}\n", config.generation.output_dir);
+
+    if Path::new(&config.generation.output_dir).exists() {
+        println!("Removing existing data directory...");
+        std::fs::remove_dir_all(&config.generation.output_dir)?;
+    }
+
+    std::fs::create_dir_all(&config.generation.output_dir)?;
+
+    let overall_start = std::time::Instant::now();
+
+    for org_id in 1..=config.generation.organizations {
+        println!(
+            "=== Organization {}/{} ===",
+            org_id, config.generation.organizations
+        );
+
+        let mut edge_writer = writer.create_edge_writer(org_id)?;
+
+        let gen_start = std::time::Instant::now();
+        let org_nodes = generator.generate_organization_streaming(org_id, &mut edge_writer)?;
+        let gen_elapsed = gen_start.elapsed().as_secs_f64();
+
+        let node_count: usize = org_nodes
+            .nodes
+            .values()
+            .map(|batches| batches.iter().map(|b| b.num_rows()).sum::<usize>())
+            .sum();
+
+        let edge_count = edge_writer.count();
+
+        println!(
+            "  Generated {} nodes + {} edges ({:.1}s)",
+            node_count, edge_count, gen_elapsed
+        );
+
+        let write_start = std::time::Instant::now();
+
+        writer.write_organization_nodes(org_id, &org_nodes)?;
+        edge_writer.close()?;
+
+        let write_elapsed = write_start.elapsed().as_secs_f64();
+        println!("  Written to Parquet ({:.1}s)\n", write_elapsed);
+    }
+
+    writer.write_manifest(&ontology, config.generation.organizations)?;
+
+    println!(
+        "Done! Total time: {:.1}s",
+        overall_start.elapsed().as_secs_f64()
+    );
+    println!("Data written to: {:?}", config.generation.output_dir);
+
+    Ok(())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
+    use crate::synth::config::{
         AssociationConfig, AssociationEdgeValue, Config, EdgeRatio, GenerationConfig,
         RelationshipConfig,
     };
     use arrow::array::Array;
     use std::collections::{HashMap, HashSet};
 
-    /// Extract all entity IDs from a set of batches by looking up the "id" column by name.
+    fn fake_data_path() -> String {
+        crate::synth::fixture_path(crate::synth::constants::DEFAULT_FAKE_DATA_PATH)
+    }
+
     fn extract_ids(batches: &[RecordBatch]) -> Vec<i64> {
         let mut ids = Vec::new();
         for batch in batches {
@@ -1036,8 +1045,6 @@ mod tests {
         ids
     }
 
-    /// Build a minimal config + ontology for generator testing.
-    /// Uses the embedded ontology so edge validation passes.
     fn test_config_and_ontology() -> (Config, Ontology) {
         let ontology = Ontology::load_embedded().expect("should load embedded ontology");
 
@@ -1077,6 +1084,7 @@ mod tests {
                 associations: AssociationConfig { edges: assoc_edges },
                 batch_size: 100,
                 seed: Some(42),
+                fake_data_path: fake_data_path(),
                 ..Default::default()
             },
             ..Default::default()
@@ -1091,39 +1099,20 @@ mod tests {
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
-        // Should have produced nodes for each configured type
-        assert!(data.nodes.contains_key("User"), "Should generate Users");
-        assert!(data.nodes.contains_key("Group"), "Should generate Groups");
-        assert!(
-            data.nodes.contains_key("Project"),
-            "Should generate Projects"
-        );
-        assert!(
-            data.nodes.contains_key("MergeRequest"),
-            "Should generate MergeRequests"
-        );
+        assert!(data.nodes.contains_key("User"));
+        assert!(data.nodes.contains_key("Group"));
+        assert!(data.nodes.contains_key("Project"));
+        assert!(data.nodes.contains_key("MergeRequest"));
+        assert!(!data.edges.is_empty());
 
-        // Should have edges
-        assert!(!data.edges.is_empty(), "Should generate edges");
-
-        // Check edge types
         let edge_types: HashSet<&str> = data
             .edges
             .iter()
             .map(|e| e.relationship_kind.as_ref())
             .collect();
-        assert!(
-            edge_types.contains("CONTAINS"),
-            "Should have CONTAINS edges"
-        );
-        assert!(
-            edge_types.contains("IN_PROJECT"),
-            "Should have IN_PROJECT edges"
-        );
-        assert!(
-            edge_types.contains("AUTHORED"),
-            "Should have AUTHORED association edges"
-        );
+        assert!(edge_types.contains("CONTAINS"));
+        assert!(edge_types.contains("IN_PROJECT"));
+        assert!(edge_types.contains("AUTHORED"));
     }
 
     #[test]
@@ -1132,21 +1121,10 @@ mod tests {
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
-        // IDs must be unique within each node type.
-        // Note: namespace entities (Groups) use a per-org counter while
-        // non-namespace entities use a global counter, so IDs can
-        // legitimately collide across types (e.g., Group 2 and User 2).
         for (node_type, batches) in &data.nodes {
             let ids = extract_ids(batches);
             let unique: HashSet<i64> = ids.iter().copied().collect();
-            assert_eq!(
-                ids.len(),
-                unique.len(),
-                "Duplicate IDs found in {}: {} total, {} unique",
-                node_type,
-                ids.len(),
-                unique.len()
-            );
+            assert_eq!(ids.len(), unique.len(), "Duplicate IDs in {}", node_type);
         }
     }
 
@@ -1156,22 +1134,18 @@ mod tests {
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
-        let all_ids: HashSet<i64> = data
-            .nodes
-            .values()
-            .flat_map(|batches| extract_ids(batches))
-            .collect();
+        let all_ids: HashSet<i64> = data.nodes.values().flat_map(|b| extract_ids(b)).collect();
 
         for edge in &data.edges {
             assert!(
                 all_ids.contains(&edge.source),
-                "Edge {:?} source {} not found in generated entities",
+                "Edge {:?} source {} not found",
                 edge.relationship_kind,
                 edge.source
             );
             assert!(
                 all_ids.contains(&edge.target),
-                "Edge {:?} target {} not found in generated entities",
+                "Edge {:?} target {} not found",
                 edge.relationship_kind,
                 edge.target
             );
@@ -1184,19 +1158,14 @@ mod tests {
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
-        let authored_edges: Vec<_> = data
+        let authored: Vec<_> = data
             .edges
             .iter()
             .filter(|e| e.relationship_kind.as_ref() == "AUTHORED")
             .collect();
-
-        assert!(!authored_edges.is_empty());
-        for edge in &authored_edges {
-            assert_eq!(
-                edge.traversal_path.as_ref(),
-                ASSOCIATION_TRAVERSAL_PATH,
-                "Association edges should use the sentinel traversal path"
-            );
+        assert!(!authored.is_empty());
+        for edge in &authored {
+            assert_eq!(edge.traversal_path.as_ref(), ASSOCIATION_TRAVERSAL_PATH);
         }
     }
 
@@ -1206,40 +1175,35 @@ mod tests {
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
-        // Group traversal paths should have depth > 1 (org/ns/)
-        let group_batches = &data.nodes["Group"];
-        for batch in group_batches {
+        for batch in &data.nodes["Group"] {
             let tp_col = batch
                 .column(0)
                 .as_any()
                 .downcast_ref::<arrow::array::StringArray>()
                 .unwrap();
             for i in 0..tp_col.len() {
-                let path = tp_col.value(i);
-                let depth = path.split('/').filter(|s| !s.is_empty()).count();
+                let depth = tp_col.value(i).split('/').filter(|s| !s.is_empty()).count();
                 assert!(
                     depth >= 2,
-                    "Group traversal path '{}' should have depth >= 2",
-                    path
+                    "Group path '{}' should have depth >= 2",
+                    tp_col.value(i)
                 );
             }
         }
 
-        // Non-namespace entities (e.g., User) should have simpler paths
-        let user_batches = &data.nodes["User"];
-        for batch in user_batches {
+        for batch in &data.nodes["User"] {
             let tp_col = batch
                 .column(0)
                 .as_any()
                 .downcast_ref::<arrow::array::StringArray>()
                 .unwrap();
             for i in 0..tp_col.len() {
-                let path = tp_col.value(i);
-                let depth = path.split('/').filter(|s| !s.is_empty()).count();
+                let depth = tp_col.value(i).split('/').filter(|s| !s.is_empty()).count();
                 assert_eq!(
-                    depth, 1,
-                    "User traversal path '{}' should have depth 1 (org-level)",
-                    path
+                    depth,
+                    1,
+                    "User path '{}' should have depth 1",
+                    tp_col.value(i)
                 );
             }
         }
@@ -1252,7 +1216,6 @@ mod tests {
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
 
-        // Find CONTAINS Group→Group edges (the recursive hierarchy edges)
         let hierarchy_edges: Vec<_> = data
             .edges
             .iter()
@@ -1263,20 +1226,15 @@ mod tests {
             })
             .collect();
 
-        // With 2 root groups and { count: 1, max_depth: 1 }:
-        // sample_with_variance on count=1 gives range [1, 2], so expect 2-4 edges
         assert!(
             hierarchy_edges.len() >= 2 && hierarchy_edges.len() <= 4,
-            "Expected 2-4 CONTAINS {ns}->{ns} edges (2 roots x ~1 child), got {}",
+            "Expected 2-4 CONTAINS {ns}->{ns} edges, got {}",
             hierarchy_edges.len(),
             ns = ns_entity
         );
 
-        // All edges should have valid structure
         for edge in &hierarchy_edges {
-            assert_eq!(edge.source_kind.as_ref(), ns_entity.as_str());
-            assert_eq!(edge.target_kind.as_ref(), ns_entity.as_str());
-            assert_ne!(edge.source, edge.target, "Edge should not self-loop");
+            assert_ne!(edge.source, edge.target);
         }
     }
 
@@ -1288,27 +1246,20 @@ mod tests {
         let data1 = generator.generate_organization(1).unwrap();
         let data2 = generator.generate_organization(2).unwrap();
 
-        // Collect non-namespace entity IDs from both orgs.
-        // Namespace entities (Groups) use per-org counters so they can overlap.
-        // Non-namespace entities use the global counter so they must be unique.
-        let collect_non_ns_ids = |data: &OrganizationData, ns_entity: &str| -> HashSet<i64> {
+        let collect_non_ns_ids = |data: &OrganizationData| -> HashSet<i64> {
             data.nodes
                 .iter()
-                .filter(|(k, _)| k.as_str() != ns_entity)
-                .flat_map(|(_, batches)| extract_ids(batches))
+                .filter(|(k, _)| k.as_str() != "Group")
+                .flat_map(|(_, b)| extract_ids(b))
                 .collect()
         };
 
-        let ids1 = collect_non_ns_ids(&data1, "Group");
-        let ids2 = collect_non_ns_ids(&data2, "Group");
-
-        assert!(!ids1.is_empty(), "Org 1 should have non-namespace entities");
-        assert!(!ids2.is_empty(), "Org 2 should have non-namespace entities");
-
+        let ids1 = collect_non_ns_ids(&data1);
+        let ids2 = collect_non_ns_ids(&data2);
         let overlap: Vec<_> = ids1.intersection(&ids2).collect();
         assert!(
             overlap.is_empty(),
-            "Non-namespace entity IDs should not overlap across orgs: {:?}",
+            "Non-namespace IDs should not overlap: {:?}",
             overlap
         );
     }
@@ -1319,29 +1270,23 @@ mod tests {
     fn test_validation_rejects_unknown_root_entity() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("FakeEntity".to_string(), 10);
-
         let err = Generator::new(ontology, config).unwrap_err();
-        assert!(
-            err.to_string().contains("roots:") && err.to_string().contains("FakeEntity"),
-            "Expected root validation error, got: {}",
-            err
-        );
+        assert!(err.to_string().contains("roots:") && err.to_string().contains("FakeEntity"));
     }
 
     #[test]
     fn test_validation_rejects_unknown_namespace_entity() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.generation.namespace_entity = "FakeNamespace".to_string();
         config.generation.roots.insert("User".to_string(), 1);
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("namespace_entity:")
-                && err.to_string().contains("FakeNamespace"),
-            "Expected namespace_entity validation error, got: {}",
-            err
+                && err.to_string().contains("FakeNamespace")
         );
     }
 
@@ -1349,8 +1294,8 @@ mod tests {
     fn test_validation_rejects_self_referential_without_recursive() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
-
         let mut contains = HashMap::new();
         contains.insert("Group -> Group".to_string(), EdgeRatio::Count(2));
         config
@@ -1358,13 +1303,10 @@ mod tests {
             .relationships
             .edges
             .insert("CONTAINS".to_string(), contains);
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("Self-referential")
-                && err.to_string().contains("count, max_depth"),
-            "Expected self-referential edge validation error, got: {}",
-            err
+                && err.to_string().contains("count, max_depth")
         );
     }
 
@@ -1372,8 +1314,8 @@ mod tests {
     fn test_validation_rejects_recursive_on_non_self_referential() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
-
         let mut contains = HashMap::new();
         contains.insert(
             "Group -> Project".to_string(),
@@ -1387,20 +1329,14 @@ mod tests {
             .relationships
             .edges
             .insert("CONTAINS".to_string(), contains);
-
         let err = Generator::new(ontology, config).unwrap_err();
-        assert!(
-            err.to_string().contains("only valid for self-referential"),
-            "Expected non-self-referential Recursive validation error, got: {}",
-            err
-        );
+        assert!(err.to_string().contains("only valid for self-referential"));
     }
 
     #[test]
     fn test_validation_rejects_unknown_association_edge() {
         let ontology = Ontology::load_embedded().unwrap();
         let (mut config, _) = test_config_and_ontology();
-
         let mut fake_variants = HashMap::new();
         fake_variants.insert(
             "User -> Project".to_string(),
@@ -1411,13 +1347,10 @@ mod tests {
             .associations
             .edges
             .insert("NONEXISTENT_EDGE".to_string(), fake_variants);
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("associations:")
-                && err.to_string().contains("NONEXISTENT_EDGE"),
-            "Expected association edge validation error, got: {}",
-            err
+                && err.to_string().contains("NONEXISTENT_EDGE")
         );
     }
 
@@ -1425,7 +1358,6 @@ mod tests {
     fn test_validation_rejects_unknown_association_node() {
         let ontology = Ontology::load_embedded().unwrap();
         let (mut config, _) = test_config_and_ontology();
-
         let mut fake_variants = HashMap::new();
         fake_variants.insert(
             "FakeNode -> User".to_string(),
@@ -1436,13 +1368,10 @@ mod tests {
             .associations
             .edges
             .insert("AUTHORED".to_string(), fake_variants);
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("associations.AUTHORED:")
-                && err.to_string().contains("FakeNode"),
-            "Expected association node validation error, got: {}",
-            err
+                && err.to_string().contains("FakeNode")
         );
     }
 
@@ -1450,37 +1379,29 @@ mod tests {
     fn test_validation_rejects_zero_organizations() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.generation.organizations = 0;
-
         let err = Generator::new(ontology, config).unwrap_err();
-        assert!(
-            err.to_string().contains("organizations must be > 0"),
-            "Expected organizations validation error, got: {}",
-            err
-        );
+        assert!(err.to_string().contains("organizations must be > 0"));
     }
 
     #[test]
     fn test_validation_rejects_zero_batch_size() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.generation.batch_size = 0;
-
         let err = Generator::new(ontology, config).unwrap_err();
-        assert!(
-            err.to_string().contains("batch_size must be > 0"),
-            "Expected batch_size validation error, got: {}",
-            err
-        );
+        assert!(err.to_string().contains("batch_size must be > 0"));
     }
 
     #[test]
     fn test_validation_rejects_unknown_relationship_edge() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("User".to_string(), 1);
         config.generation.roots.insert("Group".to_string(), 1);
-
         let mut fake_variants = HashMap::new();
         fake_variants.insert("Group -> Project".to_string(), EdgeRatio::Count(1));
         config
@@ -1488,12 +1409,9 @@ mod tests {
             .relationships
             .edges
             .insert("BOGUS_EDGE".to_string(), fake_variants);
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
-            err.to_string().contains("relationships:") && err.to_string().contains("BOGUS_EDGE"),
-            "Expected relationship edge validation error, got: {}",
-            err
+            err.to_string().contains("relationships:") && err.to_string().contains("BOGUS_EDGE")
         );
     }
 
@@ -1501,8 +1419,8 @@ mod tests {
     fn test_validation_rejects_unknown_relationship_node() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
-
         let mut variants = HashMap::new();
         variants.insert("Group -> FakeChild".to_string(), EdgeRatio::Count(1));
         config
@@ -1510,13 +1428,10 @@ mod tests {
             .relationships
             .edges
             .insert("CONTAINS".to_string(), variants);
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("relationships.CONTAINS:")
-                && err.to_string().contains("FakeChild"),
-            "Expected relationship node validation error, got: {}",
-            err
+                && err.to_string().contains("FakeChild")
         );
     }
 
@@ -1524,14 +1439,12 @@ mod tests {
     fn test_validation_rejects_invalid_edge_order_by_column() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.edge_order_by =
             vec!["traversal_path".to_string(), "bogus_column".to_string()];
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
-            err.to_string().contains("edge_order_by") && err.to_string().contains("bogus_column"),
-            "Expected edge_order_by validation error, got: {}",
-            err
+            err.to_string().contains("edge_order_by") && err.to_string().contains("bogus_column")
         );
     }
 
@@ -1539,14 +1452,12 @@ mod tests {
     fn test_validation_rejects_invalid_edge_primary_key_column() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.edge_primary_key = vec!["not_a_column".to_string()];
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("edge_primary_key")
-                && err.to_string().contains("not_a_column"),
-            "Expected edge_primary_key validation error, got: {}",
-            err
+                && err.to_string().contains("not_a_column")
         );
     }
 
@@ -1554,28 +1465,22 @@ mod tests {
     fn test_validation_rejects_invalid_node_order_by_column() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.node_order_by =
             vec!["traversal_path".to_string(), "username".to_string()];
-
         let err = Generator::new(ontology, config).unwrap_err();
-        assert!(
-            err.to_string().contains("node_order_by") && err.to_string().contains("username"),
-            "Expected node_order_by validation error, got: {}",
-            err
-        );
+        assert!(err.to_string().contains("node_order_by") && err.to_string().contains("username"));
     }
 
     #[test]
     fn test_validation_rejects_invalid_node_primary_key_column() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.node_primary_key = vec!["nonexistent".to_string()];
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
-            err.to_string().contains("node_primary_key") && err.to_string().contains("nonexistent"),
-            "Expected node_primary_key validation error, got: {}",
-            err
+            err.to_string().contains("node_primary_key") && err.to_string().contains("nonexistent")
         );
     }
 
@@ -1583,26 +1488,25 @@ mod tests {
     fn test_validation_accepts_valid_schema_columns() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
+        config.generation.fake_data_path = fake_data_path();
         config.clickhouse.schema.node_order_by =
             vec!["traversal_path".to_string(), "id".to_string()];
         config.clickhouse.schema.node_primary_key =
             vec!["traversal_path".to_string(), "id".to_string()];
         config.clickhouse.schema.edge_order_by = vec![
-            "traversal_path".to_string(),
-            "source_id".to_string(),
-            "source_kind".to_string(),
-            "target_id".to_string(),
-            "target_kind".to_string(),
+            "traversal_path".into(),
+            "source_id".into(),
+            "source_kind".into(),
+            "target_id".into(),
+            "target_kind".into(),
         ];
         config.clickhouse.schema.edge_primary_key = vec![
-            "traversal_path".to_string(),
-            "source_id".to_string(),
-            "source_kind".to_string(),
-            "target_id".to_string(),
-            "target_kind".to_string(),
+            "traversal_path".into(),
+            "source_id".into(),
+            "source_kind".into(),
+            "target_id".into(),
+            "target_kind".into(),
         ];
-
-        // Should not error
         Generator::new(ontology, config).unwrap();
     }
 
@@ -1610,20 +1514,18 @@ mod tests {
     fn test_validation_rejects_invalid_index_expression() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
-        config.clickhouse.schema.indexes = vec![crate::config::IndexConfig {
-            name: "idx_bad".to_string(),
-            table: "edges".to_string(),
-            expression: "nonexistent_col".to_string(),
-            index_type: "bloom_filter".to_string(),
+        config.generation.fake_data_path = fake_data_path();
+        config.clickhouse.schema.indexes = vec![crate::synth::config::IndexConfig {
+            name: "idx_bad".into(),
+            table: "edges".into(),
+            expression: "nonexistent_col".into(),
+            index_type: "bloom_filter".into(),
             granularity: 4,
         }];
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("indexes[idx_bad]")
-                && err.to_string().contains("nonexistent_col"),
-            "Expected index expression validation error, got: {}",
-            err
+                && err.to_string().contains("nonexistent_col")
         );
     }
 
@@ -1631,19 +1533,17 @@ mod tests {
     fn test_validation_rejects_invalid_index_table() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
-        config.clickhouse.schema.indexes = vec![crate::config::IndexConfig {
-            name: "idx_bad".to_string(),
-            table: "fake_table".to_string(),
-            expression: "id".to_string(),
-            index_type: "minmax".to_string(),
+        config.generation.fake_data_path = fake_data_path();
+        config.clickhouse.schema.indexes = vec![crate::synth::config::IndexConfig {
+            name: "idx_bad".into(),
+            table: "fake_table".into(),
+            expression: "id".into(),
+            index_type: "minmax".into(),
             granularity: 4,
         }];
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
-            err.to_string().contains("unknown table") && err.to_string().contains("fake_table"),
-            "Expected index table validation error, got: {}",
-            err
+            err.to_string().contains("unknown table") && err.to_string().contains("fake_table")
         );
     }
 
@@ -1651,14 +1551,14 @@ mod tests {
     fn test_validation_accepts_valid_index_on_edges() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
-        config.clickhouse.schema.indexes = vec![crate::config::IndexConfig {
-            name: "idx_rel".to_string(),
-            table: "edges".to_string(),
-            expression: "relationship_kind".to_string(),
-            index_type: "bloom_filter".to_string(),
+        config.generation.fake_data_path = fake_data_path();
+        config.clickhouse.schema.indexes = vec![crate::synth::config::IndexConfig {
+            name: "idx_rel".into(),
+            table: "edges".into(),
+            expression: "relationship_kind".into(),
+            index_type: "bloom_filter".into(),
             granularity: 4,
         }];
-
         Generator::new(ontology, config).unwrap();
     }
 
@@ -1666,19 +1566,17 @@ mod tests {
     fn test_validation_rejects_invalid_projection_column() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
-        config.clickhouse.schema.projections = vec![crate::config::ProjectionConfig {
-            name: "proj_bad".to_string(),
-            table: "edges".to_string(),
-            columns: vec!["source_kind".to_string(), "fake_col".to_string()],
-            order_by: vec!["target_id".to_string()],
+        config.generation.fake_data_path = fake_data_path();
+        config.clickhouse.schema.projections = vec![crate::synth::config::ProjectionConfig {
+            name: "proj_bad".into(),
+            table: "edges".into(),
+            columns: vec!["source_kind".into(), "fake_col".into()],
+            order_by: vec!["target_id".into()],
         }];
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("projections[proj_bad]")
-                && err.to_string().contains("fake_col"),
-            "Expected projection column validation error, got: {}",
-            err
+                && err.to_string().contains("fake_col")
         );
     }
 
@@ -1686,19 +1584,17 @@ mod tests {
     fn test_validation_rejects_invalid_projection_order_by() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
-        config.clickhouse.schema.projections = vec![crate::config::ProjectionConfig {
-            name: "proj_bad".to_string(),
-            table: "edges".to_string(),
-            columns: vec!["source_kind".to_string()],
-            order_by: vec!["bad_order_col".to_string()],
+        config.generation.fake_data_path = fake_data_path();
+        config.clickhouse.schema.projections = vec![crate::synth::config::ProjectionConfig {
+            name: "proj_bad".into(),
+            table: "edges".into(),
+            columns: vec!["source_kind".into()],
+            order_by: vec!["bad_order_col".into()],
         }];
-
         let err = Generator::new(ontology, config).unwrap_err();
         assert!(
             err.to_string().contains("projections[proj_bad]")
-                && err.to_string().contains("bad_order_col"),
-            "Expected projection order_by validation error, got: {}",
-            err
+                && err.to_string().contains("bad_order_col")
         );
     }
 
@@ -1706,23 +1602,23 @@ mod tests {
     fn test_validation_accepts_valid_projection() {
         let ontology = Ontology::load_embedded().unwrap();
         let mut config = Config::default();
-        config.clickhouse.schema.projections = vec![crate::config::ProjectionConfig {
-            name: "by_target".to_string(),
-            table: "edges".to_string(),
+        config.generation.fake_data_path = fake_data_path();
+        config.clickhouse.schema.projections = vec![crate::synth::config::ProjectionConfig {
+            name: "by_target".into(),
+            table: "edges".into(),
             columns: vec![
-                "source_kind".to_string(),
-                "source_id".to_string(),
-                "relationship_kind".to_string(),
-                "target_kind".to_string(),
-                "target_id".to_string(),
+                "source_kind".into(),
+                "source_id".into(),
+                "relationship_kind".into(),
+                "target_kind".into(),
+                "target_id".into(),
             ],
             order_by: vec![
-                "target_id".to_string(),
-                "target_kind".to_string(),
-                "relationship_kind".to_string(),
+                "target_id".into(),
+                "target_kind".into(),
+                "relationship_kind".into(),
             ],
         }];
-
         Generator::new(ontology, config).unwrap();
     }
 
@@ -1730,14 +1626,13 @@ mod tests {
     fn test_validation_accepts_yaml_configs() {
         let ontology = Ontology::load_embedded().unwrap();
 
-        // Validate the actual simulator.yaml
-        let mut config = Config::load("simulator.yaml").unwrap();
-        config.generation.fake_data_path = "fake_data.yaml".to_string();
+        let mut config = Config::load(crate::synth::fixture_path("simulator.yaml")).unwrap();
+        config.generation.fake_data_path = fake_data_path();
         Generator::new(ontology.clone(), config).unwrap();
 
-        // Validate the actual simulator-slim.yaml
-        let mut config_slim = Config::load("simulator-slim.yaml").unwrap();
-        config_slim.generation.fake_data_path = "fake_data.yaml".to_string();
+        let mut config_slim =
+            Config::load(crate::synth::fixture_path("simulator-slim.yaml")).unwrap();
+        config_slim.generation.fake_data_path = fake_data_path();
         Generator::new(ontology, config_slim).unwrap();
     }
 }

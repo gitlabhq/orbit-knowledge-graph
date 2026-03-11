@@ -354,7 +354,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    #[ignore] // Run with: cargo test -p simulator -- --ignored --nocapture
+    #[ignore] // Run with: cargo test -p xtask -- --ignored --nocapture
     fn test_print_example_traversal_paths() {
         println!("\n=== Example traversal paths (org_id=1, count=20, max_depth=4) ===");
         let generator = TraversalPathGenerator::new(1, 20, 4);

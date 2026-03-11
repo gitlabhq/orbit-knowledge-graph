@@ -12,7 +12,8 @@ use crate::error::{QueryError, Result};
 use crate::input::{FilterOp, Input, InputFilter, QueryType};
 use ontology::{DataType, Ontology};
 
-pub(crate) const BASE_SCHEMA_JSON: &str = include_str!("../../ontology/schema.json");
+pub(crate) const BASE_SCHEMA_JSON: &str =
+    include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
 static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
 

@@ -11,11 +11,11 @@ use tracing::{debug, info, warn};
 
 use super::archive;
 use super::arrow_converter::ArrowConverter;
+use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository_service::RepositoryService;
 use super::stale_data_cleaner::StaleDataCleaner;
-use super::watermark_store::{CodeIndexingWatermark, CodeWatermarkStore};
 use crate::handler::{HandlerContext, HandlerError};
 use gitlab_client::RepositoryInfo;
 
@@ -30,7 +30,7 @@ pub struct IndexingRequest {
 
 pub struct CodeIndexingPipeline {
     repository_service: Arc<dyn RepositoryService>,
-    watermark_store: Arc<dyn CodeWatermarkStore>,
+    checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
@@ -39,14 +39,14 @@ pub struct CodeIndexingPipeline {
 impl CodeIndexingPipeline {
     pub fn new(
         repository_service: Arc<dyn RepositoryService>,
-        watermark_store: Arc<dyn CodeWatermarkStore>,
+        checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
     ) -> Self {
         Self {
             repository_service,
-            watermark_store,
+            checkpoint_store,
             stale_data_cleaner,
             metrics,
             table_names,
@@ -91,7 +91,8 @@ impl CodeIndexingPipeline {
         )
         .await?;
 
-        self.set_watermark(
+        self.set_checkpoint(
+            &request.traversal_path,
             request.project_id,
             &request.branch,
             request.event_id,
@@ -101,15 +102,17 @@ impl CodeIndexingPipeline {
         .await
     }
 
-    async fn set_watermark(
+    async fn set_checkpoint(
         &self,
+        traversal_path: &str,
         project_id: i64,
         branch: &str,
         event_id: i64,
         commit_sha: &str,
         indexed_at: DateTime<Utc>,
     ) -> Result<(), HandlerError> {
-        let watermark = CodeIndexingWatermark {
+        let checkpoint = CodeIndexingCheckpoint {
+            traversal_path: traversal_path.to_string(),
             project_id,
             branch: branch.to_string(),
             last_event_id: event_id,
@@ -117,11 +120,11 @@ impl CodeIndexingPipeline {
             indexed_at,
         };
 
-        self.watermark_store
-            .set_watermark(&watermark)
+        self.checkpoint_store
+            .set_checkpoint(&checkpoint)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to set watermark: {e}")))
-            .record_error_stage(&self.metrics, "watermark")?;
+            .map_err(|e| HandlerError::Processing(format!("failed to set checkpoint: {e}")))
+            .record_error_stage(&self.metrics, "checkpoint")?;
 
         info!(
             project_id,
