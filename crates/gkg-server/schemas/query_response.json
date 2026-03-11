@@ -69,7 +69,8 @@
         }
       },
       "additionalProperties": {
-        "description": "Entity properties and any inlined aggregation values. Property names match ontology definitions. The frontend distinguishes aggregation values from entity properties using the columns array."
+        "description": "Entity properties and any inlined aggregation values. Property names match ontology definitions. The frontend distinguishes aggregation values from entity properties using the columns array.",
+        "type": ["string", "integer", "number", "boolean", "null"]
       }
     },
     "edge": {
