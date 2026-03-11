@@ -12,6 +12,7 @@ use arrow::record_batch::RecordBatch;
 #[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
 pub enum ColumnValue {
     Int64(i64),
+    Float64(f64),
     String(String),
     Null,
 }
@@ -137,6 +138,10 @@ impl ArrowUtils {
             return ColumnValue::String(arr.value(idx).to_string());
         }
 
+        if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
+            return ColumnValue::Float64(arr.value(idx));
+        }
+
         if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
         }
@@ -154,10 +159,6 @@ impl ArrowUtils {
         }
 
         if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
-            return ColumnValue::String(arr.value(idx).to_string());
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
             return ColumnValue::String(arr.value(idx).to_string());
         }
 
