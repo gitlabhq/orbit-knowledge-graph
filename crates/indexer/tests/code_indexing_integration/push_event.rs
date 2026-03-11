@@ -31,7 +31,7 @@ async fn indexes_repository_from_gitaly() {
     )
     .await;
 
-    seed_project(&clickhouse, project_id, "/test", "test/repo").await;
+    create_project_in_graph(&clickhouse, project_id, "/test", "test/repo").await;
 
     let deps = CodeIndexingDeps::new(&gitaly_address, &clickhouse);
     let handler = deps.push_event_handler();
@@ -56,7 +56,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
     let (gitaly_address, gitaly_container) = start_gitaly().await;
     let repo_path = hashed_repo_path(project_id);
 
-    seed_project(&clickhouse, project_id, "/stale-test", "stale/test").await;
+    create_project_in_graph(&clickhouse, project_id, "/stale-test", "stale/test").await;
     let deps = CodeIndexingDeps::new(&gitaly_address, &clickhouse);
     let handler = deps.push_event_handler();
 

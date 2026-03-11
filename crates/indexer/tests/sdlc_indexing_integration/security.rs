@@ -1,76 +1,42 @@
-//! Integration subtests for security entity processing.
-
 use arrow::array::Array;
-use indexer::testkit::TestEnvelopeFactory;
 
 use crate::common::{
-    IndexerTestExt, TestContext, create_namespace_payload, default_test_watermark,
-    get_boolean_column, get_string_column,
+    TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
+    create_project, get_boolean_column, get_string_column, handler_context, namespace_envelope,
+    namespace_handler,
 };
 
-pub async fn processes_vulnerabilities(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_vulnerabilities(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerabilities
+            (id, title, description, project_id, author_id, state, severity, report_type,
+             resolved_on_default_branch, present_on_default_branch, uuid,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 'SQL Injection in login', 'Critical SQL injection vulnerability', 1000, 1, 4, 7, 0,
+             false, true, 'uuid-001',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 'XSS in comments', 'Cross-site scripting vulnerability', 1000, 2, 1, 4, 3,
+             false, true, 'uuid-002',
+             '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerabilities
-                (id, title, description, project_id, author_id, state, severity, report_type,
-                 resolved_on_default_branch, present_on_default_branch, uuid,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 'SQL Injection in login', 'Critical SQL injection vulnerability', 1000, 1, 4, 7, 0,
-                 false, true, 'uuid-001',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'XSS in comments', 'Cross-site scripting vulnerability', 1000, 2, 1, 4, 3,
-                 false, true, 'uuid-002',
-                 '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
 
-    let result = context
-        .query("SELECT id, title, state, severity, report_type FROM gl_vulnerability FINAL ORDER BY id")
+    assert_node_count(ctx, "gl_vulnerability", 2).await;
+
+    let result = ctx
+        .query("SELECT title, state, severity FROM gl_vulnerability FINAL ORDER BY id")
         .await;
-    assert!(!result.is_empty(), "vulnerabilities should exist");
-
     let batch = &result[0];
-    assert_eq!(batch.num_rows(), 2);
 
     let titles = get_string_column(batch, "title");
     assert_eq!(titles.value(0), "SQL Injection in login");
@@ -84,74 +50,36 @@ pub async fn processes_vulnerabilities(context: &TestContext) {
     assert_eq!(severities.value(0), "critical");
     assert_eq!(severities.value(1), "medium");
 
-    context
-        .assert_edges_have_traversal_path("IN_PROJECT", "Vulnerability", "Project", "1/100/", 2)
+    assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Vulnerability", "Project", "1/100/", 2)
         .await;
-    context
-        .assert_edges_have_traversal_path("AUTHORED", "User", "Vulnerability", "1/100/", 2)
-        .await;
+    assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Vulnerability", "1/100/", 2).await;
 }
 
-pub async fn processes_scanners(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_scanners(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_scanners
+            (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 'bandit', 'Bandit', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_scanners
-                (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'bandit', 'Bandit', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
 
-    let result = context
-        .query(
-            "SELECT id, external_id, name, vendor FROM gl_vulnerability_scanner FINAL ORDER BY id",
-        )
+    assert_node_count(ctx, "gl_vulnerability_scanner", 2).await;
+
+    let result = ctx
+        .query("SELECT name, external_id FROM gl_vulnerability_scanner FINAL ORDER BY id")
         .await;
-    assert!(!result.is_empty(), "scanners should exist");
-
     let batch = &result[0];
-    assert_eq!(batch.num_rows(), 2);
-
     let names = get_string_column(batch, "name");
     assert_eq!(names.value(0), "Gemnasium");
     assert_eq!(names.value(1), "Bandit");
@@ -160,68 +88,35 @@ pub async fn processes_scanners(context: &TestContext) {
     assert_eq!(external_ids.value(0), "gemnasium");
     assert_eq!(external_ids.value(1), "bandit");
 
-    context
-        .assert_edges_have_traversal_path("SCANS", "VulnerabilityScanner", "Project", "1/100/", 2)
+    assert_edges_have_traversal_path(ctx, "SCANS", "VulnerabilityScanner", "Project", "1/100/", 2)
         .await;
 }
 
-pub async fn processes_vulnerability_identifiers(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_vulnerability_identifiers(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_identifiers
+            (id, external_type, external_id, name, url, fingerprint, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 'cve', 'CVE-2021-44228', 'Log4Shell', 'https://nvd.nist.gov/vuln/detail/CVE-2021-44228', 'fp1', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 'cwe', 'CWE-89', 'SQL Injection', 'https://cwe.mitre.org/data/definitions/89.html', 'fp2', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_identifiers
-                (id, external_type, external_id, name, url, fingerprint, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 'cve', 'CVE-2021-44228', 'Log4Shell', 'https://nvd.nist.gov/vuln/detail/CVE-2021-44228', 'fp1', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'cwe', 'CWE-89', 'SQL Injection', 'https://cwe.mitre.org/data/definitions/89.html', 'fp2', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
 
-    let result = context
-        .query("SELECT id, external_type, external_id, name, url FROM gl_vulnerability_identifier FINAL ORDER BY id")
+    assert_node_count(ctx, "gl_vulnerability_identifier", 2).await;
+
+    let result = ctx
+        .query("SELECT name, external_type, external_id FROM gl_vulnerability_identifier FINAL ORDER BY id")
         .await;
-    assert!(!result.is_empty(), "vulnerability identifiers should exist");
-
     let batch = &result[0];
-    assert_eq!(batch.num_rows(), 2);
 
     let names = get_string_column(batch, "name");
     assert_eq!(names.value(0), "Log4Shell");
@@ -235,82 +130,49 @@ pub async fn processes_vulnerability_identifiers(context: &TestContext) {
     assert_eq!(external_ids.value(0), "CVE-2021-44228");
     assert_eq!(external_ids.value(1), "CWE-89");
 
-    context
-        .assert_edges_have_traversal_path(
-            "IN_PROJECT",
-            "VulnerabilityIdentifier",
-            "Project",
-            "1/100/",
-            2,
-        )
-        .await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "IN_PROJECT",
+        "VulnerabilityIdentifier",
+        "Project",
+        "1/100/",
+        2,
+    )
+    .await;
 }
 
-pub async fn processes_findings(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_findings(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_scanners
+            (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_security_findings
+            (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"SQL Injection\", \"description\": \"A SQL injection vulnerability\", \"solution\": \"Use parameterized queries\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
+            (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_scanners
-                (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_security_findings
-                (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
-            VALUES
-                (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"SQL Injection\", \"description\": \"A SQL injection vulnerability\", \"solution\": \"Use parameterized queries\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
-                (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
 
-    let result = context
-        .query("SELECT id, uuid, name, description, solution, severity, deduplicated FROM gl_finding FINAL ORDER BY id")
+    assert_node_count(ctx, "gl_finding", 2).await;
+
+    let result = ctx
+        .query("SELECT uuid, name, description, solution, severity, deduplicated FROM gl_finding FINAL ORDER BY id")
         .await;
-    assert!(!result.is_empty(), "findings should exist");
-
     let batch = &result[0];
-    assert_eq!(batch.num_rows(), 2);
 
     let uuids = get_string_column(batch, "uuid");
     assert_eq!(uuids.value(0), "00000000-0000-0000-0000-000000000f01");
@@ -336,255 +198,145 @@ pub async fn processes_findings(context: &TestContext) {
     assert!(deduplicated.value(0));
     assert!(!deduplicated.value(1));
 
-    context
-        .assert_edges_have_traversal_path("IN_PROJECT", "Finding", "Project", "1/100/", 2)
+    assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Finding", "Project", "1/100/", 2).await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "DETECTED_BY",
+        "Finding",
+        "VulnerabilityScanner",
+        "1/100/",
+        2,
+    )
+    .await;
+}
+
+pub async fn processes_vulnerability_with_user_edges(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
+
+    ctx.execute(
+        "INSERT INTO siphon_vulnerabilities
+            (id, title, project_id, author_id, state, severity, report_type,
+             confirmed_by_id, resolved_by_id, dismissed_by_id, uuid,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 'Confirmed vulnerability', 1000, 1, 4, 6, 0,
+             2, NULL, NULL, 'uuid-003',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 'Resolved vulnerability', 1000, 1, 3, 4, 1,
+             NULL, 3, NULL, 'uuid-004',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (3, 'Dismissed vulnerability', 1000, 1, 2, 3, 2,
+             NULL, NULL, 4, 'uuid-005',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_node_count(ctx, "gl_vulnerability", 3).await;
+
+    assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Vulnerability", "1/100/", 3).await;
+    assert_edges_have_traversal_path(ctx, "CONFIRMED_BY", "User", "Vulnerability", "1/100/", 1)
         .await;
-    context
-        .assert_edges_have_traversal_path(
-            "DETECTED_BY",
-            "Finding",
-            "VulnerabilityScanner",
-            "1/100/",
-            2,
-        )
+    assert_edges_have_traversal_path(ctx, "RESOLVED_BY", "User", "Vulnerability", "1/100/", 1)
+        .await;
+    assert_edges_have_traversal_path(ctx, "DISMISSED_BY", "User", "Vulnerability", "1/100/", 1)
         .await;
 }
 
-pub async fn processes_vulnerability_with_user_edges(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_vulnerability_finding_edge(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_security_findings
+            (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
+        VALUES (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"Test Finding\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerabilities
+            (id, title, project_id, author_id, state, severity, report_type, finding_id, uuid,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 'Vulnerability with finding', 1000, 1, 1, 7, 0, 1, 'uuid-006',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerabilities
-                (id, title, project_id, author_id, state, severity, report_type,
-                 confirmed_by_id, resolved_by_id, dismissed_by_id, uuid,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 'Confirmed vulnerability', 1000, 1, 4, 6, 0,
-                 2, NULL, NULL, 'uuid-003',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'Resolved vulnerability', 1000, 1, 3, 4, 1,
-                 NULL, 3, NULL, 'uuid-004',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (3, 'Dismissed vulnerability', 1000, 1, 2, 3, 2,
-                 NULL, NULL, 4, 'uuid-005',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
 
-    let result = context
-        .query("SELECT id, title, state FROM gl_vulnerability FINAL ORDER BY id")
-        .await;
-    assert!(!result.is_empty(), "vulnerabilities should exist");
-    assert_eq!(result[0].num_rows(), 3);
-
-    context
-        .assert_edges_have_traversal_path("AUTHORED", "User", "Vulnerability", "1/100/", 3)
-        .await;
-    context
-        .assert_edges_have_traversal_path("CONFIRMED_BY", "User", "Vulnerability", "1/100/", 1)
-        .await;
-    context
-        .assert_edges_have_traversal_path("RESOLVED_BY", "User", "Vulnerability", "1/100/", 1)
-        .await;
-    context
-        .assert_edges_have_traversal_path("DISMISSED_BY", "User", "Vulnerability", "1/100/", 1)
+    assert_edges_have_traversal_path(ctx, "HAS_FINDING", "Vulnerability", "Finding", "1/100/", 1)
         .await;
 }
 
-pub async fn processes_vulnerability_finding_edge(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_vulnerability_occurrences(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_scanners
+            (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_identifiers
+            (id, external_type, external_id, name, url, fingerprint, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES (1, 'cve', 'CVE-2021-44228', 'Log4Shell', 'https://nvd.nist.gov/vuln/detail/CVE-2021-44228', 'fp1', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerabilities
+            (id, title, project_id, author_id, state, severity, report_type, uuid,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES (1, 'Log4Shell Vulnerability', 1000, 1, 1, 7, 0, '00000000-0000-0000-0000-000000000b01',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_security_findings
-                (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
-            VALUES (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"Test Finding\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_occurrences
+            (id, uuid, name, description, solution, cve, location, location_fingerprint,
+             severity, report_type, detection_method, project_id, scanner_id,
+             primary_identifier_id, vulnerability_id, metadata_version,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, '00000000-0000-0000-0000-0000000000a1', 'SQL Injection', 'A SQL injection vulnerability', 'Use parameterized queries',
+             'CVE-2021-44228', 'src/main.rs:42', 'fp-location-1',
+             7, 0, 0, 1000, 1, 1, 1, '1.0',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, '00000000-0000-0000-0000-0000000000a2', 'XSS Vulnerability', NULL, NULL,
+             NULL, 'src/web.rs:100', 'fp-location-2',
+             5, 3, 1, 1000, 1, 1, NULL, '1.0',
+             '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerabilities
-                (id, title, project_id, author_id, state, severity, report_type, finding_id, uuid,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 'Vulnerability with finding', 1000, 1, 1, 7, 0, 1, 'uuid-006',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
-
-    context
-        .assert_edges_have_traversal_path("HAS_FINDING", "Vulnerability", "Finding", "1/100/", 1)
-        .await;
-}
-
-pub async fn processes_vulnerability_occurrences(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_scanners
-                (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_identifiers
-                (id, external_type, external_id, name, url, fingerprint, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (1, 'cve', 'CVE-2021-44228', 'Log4Shell', 'https://nvd.nist.gov/vuln/detail/CVE-2021-44228', 'fp1', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerabilities
-                (id, title, project_id, author_id, state, severity, report_type, uuid,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (1, 'Log4Shell Vulnerability', 1000, 1, 1, 7, 0, '00000000-0000-0000-0000-000000000b01',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_occurrences
-                (id, uuid, name, description, solution, cve, location, location_fingerprint,
-                 severity, report_type, detection_method, project_id, scanner_id,
-                 primary_identifier_id, vulnerability_id, metadata_version,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, '00000000-0000-0000-0000-0000000000a1', 'SQL Injection', 'A SQL injection vulnerability', 'Use parameterized queries',
-                 'CVE-2021-44228', 'src/main.rs:42', 'fp-location-1',
-                 7, 0, 0, 1000, 1, 1, 1, '1.0',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, '00000000-0000-0000-0000-0000000000a2', 'XSS Vulnerability', NULL, NULL,
-                 NULL, 'src/web.rs:100', 'fp-location-2',
-                 5, 3, 1, 1000, 1, 1, NULL, '1.0',
-                 '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
         .await
-        .expect("handler should succeed");
+        .unwrap();
 
-    let result = context
-        .query("SELECT id, uuid, name, description, solution, cve, severity, report_type, detection_method FROM gl_vulnerability_occurrence FINAL ORDER BY id")
+    assert_node_count(ctx, "gl_vulnerability_occurrence", 2).await;
+
+    let result = ctx
+        .query("SELECT uuid, name, description, severity, report_type, detection_method FROM gl_vulnerability_occurrence FINAL ORDER BY id")
         .await;
-    assert!(!result.is_empty(), "vulnerability occurrences should exist");
-
     let batch = &result[0];
-    assert_eq!(batch.num_rows(), 2);
 
     let uuids = get_string_column(batch, "uuid");
     assert_eq!(uuids.value(0), "00000000-0000-0000-0000-0000000000a1");
@@ -610,296 +362,194 @@ pub async fn processes_vulnerability_occurrences(context: &TestContext) {
     assert_eq!(detection_methods.value(0), "gitlab_security_report");
     assert_eq!(detection_methods.value(1), "external_security_report");
 
-    context
-        .assert_edges_have_traversal_path(
-            "IN_PROJECT",
-            "VulnerabilityOccurrence",
-            "Project",
-            "1/100/",
-            2,
-        )
-        .await;
-    context
-        .assert_edges_have_traversal_path(
-            "DETECTED_BY",
-            "VulnerabilityOccurrence",
-            "VulnerabilityScanner",
-            "1/100/",
-            2,
-        )
-        .await;
-    context
-        .assert_edges_have_traversal_path(
-            "HAS_IDENTIFIER",
-            "VulnerabilityOccurrence",
-            "VulnerabilityIdentifier",
-            "1/100/",
-            2,
-        )
-        .await;
-    context
-        .assert_edges_have_traversal_path(
-            "OCCURRENCE_OF",
-            "VulnerabilityOccurrence",
-            "Vulnerability",
-            "1/100/",
-            1,
-        )
+    assert_edges_have_traversal_path(
+        ctx,
+        "IN_PROJECT",
+        "VulnerabilityOccurrence",
+        "Project",
+        "1/100/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "DETECTED_BY",
+        "VulnerabilityOccurrence",
+        "VulnerabilityScanner",
+        "1/100/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "HAS_IDENTIFIER",
+        "VulnerabilityOccurrence",
+        "VulnerabilityIdentifier",
+        "1/100/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "OCCURRENCE_OF",
+        "VulnerabilityOccurrence",
+        "Vulnerability",
+        "1/100/",
+        1,
+    )
+    .await;
+}
+
+pub async fn processes_vulnerability_merge_request_links(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
+
+    ctx.execute(
+        "INSERT INTO siphon_vulnerabilities
+            (id, title, project_id, author_id, state, severity, report_type, uuid,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 'SQL Injection', 1000, 1, 1, 7, 0, '00000000-0000-0000-0000-000000000b01',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 'XSS Vulnerability', 1000, 1, 1, 6, 0, '00000000-0000-0000-0000-000000000b02',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO merge_requests
+            (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+             draft, squash, target_project_id, author_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (10, 101, 'Fix SQL injection', 'Fixes the vulnerability', 'fix-sql', 'main', 3, 'merged',
+             false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),
+            (20, 102, 'Fix XSS', 'Fixes XSS issue', 'fix-xss', 'main', 3, 'merged',
+             false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_merge_request_links
+            (id, vulnerability_id, merge_request_id, project_id, traversal_path,
+             created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 1, 10, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 2, 20, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_edges_have_traversal_path(ctx, "FIXES", "MergeRequest", "Vulnerability", "1/100/", 2)
         .await;
 }
 
-pub async fn processes_vulnerability_merge_request_links(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_vulnerability_occurrence_identifiers(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_scanners
+            (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_identifiers
+            (id, external_type, external_id, name, url, fingerprint, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 'cve', 'CVE-2021-44228', 'Log4Shell', 'https://nvd.nist.gov/vuln/detail/CVE-2021-44228', 'fp1', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 'cwe', 'CWE-89', 'SQL Injection', 'https://cwe.mitre.org/data/definitions/89.html', 'fp2', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (3, 'cve', 'CVE-2022-12345', 'Another CVE', 'https://nvd.nist.gov/vuln/detail/CVE-2022-12345', 'fp3', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_occurrences
+            (id, uuid, name, severity, report_type, detection_method, project_id, scanner_id,
+             primary_identifier_id, metadata_version, location, location_fingerprint,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, '00000000-0000-0000-0000-0000000000a1', 'SQL Injection', 7, 0, 0, 1000, 1, 1, '1.0', 'src/main.rs:42', 'fp-loc-1',
+             '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, '00000000-0000-0000-0000-0000000000a2', 'XSS Vulnerability', 5, 0, 0, 1000, 1, 3, '1.0', 'src/web.rs:100', 'fp-loc-2',
+             '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerabilities
-                (id, title, project_id, author_id, state, severity, report_type, uuid,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 'SQL Injection', 1000, 1, 1, 7, 0, '00000000-0000-0000-0000-000000000b01',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'XSS Vulnerability', 1000, 1, 1, 6, 0, '00000000-0000-0000-0000-000000000b02',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_occurrence_identifiers
+            (id, occurrence_id, identifier_id, project_id, traversal_path,
+             created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 1, 1, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 1, 2, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (3, 2, 3, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO merge_requests
-                (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
-                 draft, squash, target_project_id, author_id, traversal_path, _siphon_replicated_at)
-            VALUES
-                (10, 101, 'Fix SQL injection', 'Fixes the vulnerability', 'fix-sql', 'main', 3, 'merged',
-                 false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),
-                (20, 102, 'Fix XSS', 'Fixes XSS issue', 'fix-xss', 'main', 3, 'merged',
-                 false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_merge_request_links
-                (id, vulnerability_id, merge_request_id, project_id, traversal_path,
-                 created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 1, 10, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 2, 20, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
 
-    context
-        .assert_edges_have_traversal_path("FIXES", "MergeRequest", "Vulnerability", "1/100/", 2)
-        .await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "HAS_IDENTIFIER",
+        "VulnerabilityOccurrence",
+        "VulnerabilityIdentifier",
+        "1/100/",
+        3,
+    )
+    .await;
 }
 
-pub async fn processes_vulnerability_occurrence_identifiers(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_security_scans(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_p_ci_pipelines
+            (id, project_id, status, source, tag, traversal_path, _siphon_replicated_at)
+        VALUES (500, 1000, 'success', 1, false, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_p_ci_builds
+            (id, name, status, project_id, stage_id, allow_failure, traversal_path, _siphon_replicated_at)
+        VALUES (600, 'sast-job', 'success', 1000, 1, false, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_security_scans
+            (id, build_id, scan_type, status, latest, project_id, pipeline_id,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+            (1, 600, 1, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (2, 600, 2, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_scanners
-                (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_identifiers
-                (id, external_type, external_id, name, url, fingerprint, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 'cve', 'CVE-2021-44228', 'Log4Shell', 'https://nvd.nist.gov/vuln/detail/CVE-2021-44228', 'fp1', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 'cwe', 'CWE-89', 'SQL Injection', 'https://cwe.mitre.org/data/definitions/89.html', 'fp2', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (3, 'cve', 'CVE-2022-12345', 'Another CVE', 'https://nvd.nist.gov/vuln/detail/CVE-2022-12345', 'fp3', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_occurrences
-                (id, uuid, name, severity, report_type, detection_method, project_id, scanner_id,
-                 primary_identifier_id, metadata_version, location, location_fingerprint,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, '00000000-0000-0000-0000-0000000000a1', 'SQL Injection', 7, 0, 0, 1000, 1, 1, '1.0', 'src/main.rs:42', 'fp-loc-1',
-                 '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, '00000000-0000-0000-0000-0000000000a2', 'XSS Vulnerability', 5, 0, 0, 1000, 1, 3, '1.0', 'src/web.rs:100', 'fp-loc-2',
-                 '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_occurrence_identifiers
-                (id, occurrence_id, identifier_id, project_id, traversal_path,
-                 created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 1, 1, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 1, 2, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (3, 2, 3, 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
-
-    context
-        .assert_edges_have_traversal_path(
-            "HAS_IDENTIFIER",
-            "VulnerabilityOccurrence",
-            "VulnerabilityIdentifier",
-            "1/100/",
-            3,
-        )
-        .await;
-}
-
-pub async fn processes_security_scans(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_p_ci_pipelines
-                (id, project_id, status, source, tag, traversal_path, _siphon_replicated_at)
-            VALUES (500, 1000, 'success', 1, false, '1/100/', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_p_ci_builds
-                (id, name, status, project_id, stage_id, allow_failure, traversal_path, _siphon_replicated_at)
-            VALUES (600, 'sast-job', 'success', 1000, 1, false, '1/100/', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_security_scans
-                (id, build_id, scan_type, status, latest, project_id, pipeline_id,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES
-                (1, 600, 1, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-                (2, 600, 2, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
         .await
-        .expect("handler should succeed");
+        .unwrap();
 
-    let result = context
-        .query("SELECT id, scan_type, status, latest FROM gl_security_scan FINAL ORDER BY id")
+    assert_node_count(ctx, "gl_security_scan", 2).await;
+
+    let result = ctx
+        .query("SELECT scan_type, status, latest FROM gl_security_scan FINAL ORDER BY id")
         .await;
-    assert!(!result.is_empty(), "security scans should exist");
-
     let batch = &result[0];
-    assert_eq!(batch.num_rows(), 2);
 
     let scan_types = get_string_column(batch, "scan_type");
     assert_eq!(scan_types.value(0), "sast");
@@ -913,85 +563,47 @@ pub async fn processes_security_scans(context: &TestContext) {
     assert!(latest_values.value(0));
     assert!(latest_values.value(1));
 
-    context
-        .assert_edges_have_traversal_path("IN_PROJECT", "SecurityScan", "Project", "1/100/", 2)
+    assert_edges_have_traversal_path(ctx, "IN_PROJECT", "SecurityScan", "Project", "1/100/", 2)
         .await;
-    context
-        .assert_edges_have_traversal_path("IN_PIPELINE", "SecurityScan", "Pipeline", "1/100/", 2)
+    assert_edges_have_traversal_path(ctx, "IN_PIPELINE", "SecurityScan", "Pipeline", "1/100/", 2)
         .await;
-    context
-        .assert_edges_have_traversal_path("RAN_BY", "SecurityScan", "Job", "1/100/", 2)
-        .await;
+    assert_edges_have_traversal_path(ctx, "RAN_BY", "SecurityScan", "Job", "1/100/", 2).await;
 }
 
-pub async fn processes_security_scan_finding_edges(context: &TestContext) {
-    context
-        .execute(
-            "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
-        )
-        .await;
+pub async fn processes_security_scan_finding_edges(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
-    context
-        .execute(
-            "INSERT INTO namespace_traversal_paths (id, traversal_path)
-            VALUES (100, '1/100/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_vulnerability_scanners
+            (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_projects (id, name, namespace_id, _siphon_replicated_at)
-            VALUES (1000, 'project-alpha', 100, '2024-01-20 12:00:00')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_security_scans
+            (id, build_id, scan_type, status, latest, project_id, pipeline_id,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES (100, 600, 1, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO project_namespace_traversal_paths (id, traversal_path)
-            VALUES (1000, '1/100/1000/')",
-        )
-        .await;
+    ctx.execute(
+        "INSERT INTO siphon_security_findings
+            (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"SQL Injection\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
+            (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
 
-    context
-        .execute(
-            "INSERT INTO siphon_vulnerability_scanners
-                (id, external_id, name, vendor, project_id, traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (1, 'gemnasium', 'Gemnasium', 'GitLab', 1000, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_security_scans
-                (id, build_id, scan_type, status, latest, project_id, pipeline_id,
-                 traversal_path, created_at, updated_at, _siphon_replicated_at)
-            VALUES (100, 600, 1, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    context
-        .execute(
-            "INSERT INTO siphon_security_findings
-                (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
-            VALUES
-                (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"SQL Injection\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
-                (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
-        )
-        .await;
-
-    let namespace_handler = context.get_namespace_handler().await;
-    let watermark = default_test_watermark();
-
-    let envelope = TestEnvelopeFactory::simple(&create_namespace_payload(1, 100, watermark));
-    let handler_context = context.create_handler_context();
-
-    namespace_handler
-        .handle(handler_context, envelope)
+    namespace_handler(ctx)
         .await
-        .expect("handler should succeed");
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
 
-    context
-        .assert_edges_have_traversal_path("HAS_FINDING", "SecurityScan", "Finding", "1/100/", 2)
+    assert_edges_have_traversal_path(ctx, "HAS_FINDING", "SecurityScan", "Finding", "1/100/", 2)
         .await;
 }

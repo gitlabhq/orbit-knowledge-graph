@@ -27,8 +27,8 @@ async fn indexes_project_from_datalake_push_event() {
     )
     .await;
 
-    seed_project(&clickhouse, project_id, "/reconcile", "reconcile/repo").await;
-    seed_push_event(&clickhouse, project_id, 42, "main", &commit_sha).await;
+    create_project_in_graph(&clickhouse, project_id, "/reconcile", "reconcile/repo").await;
+    create_push_event(&clickhouse, project_id, 42, "main", &commit_sha).await;
 
     let deps = CodeIndexingDeps::new(&gitaly_address, &clickhouse);
     let handler = deps.reconciliation_handler();
