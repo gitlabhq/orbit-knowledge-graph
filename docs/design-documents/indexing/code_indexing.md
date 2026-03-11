@@ -2,19 +2,19 @@
 
 ## Code Indexing ETL
 
-This document outlines the approach of building the ETL pipeline for the Code Indexing in the `gkg-indexer`. The difference between code and SDLC entities is that we have to take into account that code versions can exist in parallel to each other via different branches.
+This document describes how the code indexing ETL pipeline works. Unlike SDLC entities, code versions can exist in parallel across branches, so the same file can look different on `main` vs. a feature branch.
 
-If we want the Knowledge Graph to be able to ask questions about code, it needs to be able to understand the relationships at any given branch and at different commits.
+If we want the Knowledge Graph to answer questions about code, it needs to understand relationships at any given branch and commit.
 
-The ETL pipeline will be responsible for:
+The ETL pipeline:
 
-- Reading the code from the GitLab repositories using Gitaly RPC calls
-- Transforming the code into the desired format, including the call graph and the filesystem hierarchy
-- Writing the entities and relationships to the Knowledge Graph ClickHouse database
+- Reads code from GitLab repositories through Gitaly RPC calls
+- Transforms it into a call graph and file system hierarchy
+- Writes entities and relationships to ClickHouse
 
 ### What is a call graph?
 
-Here is a simple example of a call graph between two files:
+Here is an example of a call graph between two files:
 
 ```typescript
 // fileA.ts
@@ -83,20 +83,40 @@ graph LR
 
 ```
 
-### Core components
+### Architecture overview
 
-- `gkg-indexer`: The ETL pipeline for GitLab code.
-- `gkg-webserver`: The gRPC and HTTP interface to query the Knowledge Graph.
-- `NATS JetStream`: The message broker for the Knowledge Graph.
-- `NATS KV`: The key-value store for the Knowledge Graph.
-- `ClickHouse`: The OLAP database for the Knowledge Graph.
-- `Gitaly`: Handles all Git repository RPC file access for GitLab
+```mermaid
+graph LR
+    Siphon["Siphon CDC"] --> NATS["NATS JetStream"]
+    NATS --> GKG["gkg-server<br/>(Indexer mode)"]
+    GKG --> Gitaly["Gitaly<br/>GetArchive RPC"]
+    Gitaly --> CodeGraph["code-graph<br/>(parse + analyze)"]
+    CodeGraph --> Arrow["ArrowConverter"]
+    Arrow --> ClickHouse["ClickHouse"]
+```
+
+### Components
+
+| Component | Description |
+|---|---|
+| `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
+| `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
+| `indexer` crate | NATS consumer, ETL engine, push event handler, Arrow conversion, ClickHouse writes |
+| `gitaly-client` crate | Gitaly gRPC client for `GetArchive` RPC |
+| `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
+| NATS JetStream | Message broker with durable delivery between Siphon and GKG |
+| NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
+| ClickHouse | Columnar OLAP database storing the datalake and the property graph |
+| Gitaly | GitLab Git storage service; code indexer uses `GetArchive` RPC |
+
+For background on Siphon CDC, NATS, and ClickHouse architecture, see the
+[SDLC indexing design document](sdlc_indexing.md).
 
 ### Data storage
 
-The Knowledge Graph code data is going to be stored in separate ClickHouse database.
+The Knowledge Graph code data is stored in a separate ClickHouse database.
 
-- For `.com` this will probably be in a separate instance.
+- For `.com` this is expected to run in a separate instance.
 - For small dedicated environments and self-hosted instances, this can be done in the same instance as the main ClickHouse database. This choice ultimately depends on what the operators think is best for their environment.
 
 ### Some numbers
@@ -109,37 +129,37 @@ For simplicity's sake, let's say we want to keep an active code index for branch
 
 ### Use cases
 
-To come up with a solution for the scale issue it's probably best to outline some use cases where the Knowledge Graph can be used to answer questions about code.
+The scale problem depends on what we actually need from the graph. The target use cases:
 
-- Does this merge request change the behavior of the existing code in unexpected ways?
-- What is the impact of this merge request on the existing code?
-- Perform code exploration to help understand the codebase and reveal architectural patterns.
-- Provide guidance when a user wants to refactor the code or add a new feature.
-- Identify the potential risks of a vulnerability in the codebase.
-- Create queryable APIs for code exploration and analysis.
-- Documentation generation for the codebase.
+- Detect whether a merge request changes existing behavior in unexpected ways
+- Assess the blast radius of a merge request on the rest of the codebase
+- Help developers explore unfamiliar code and understand architectural patterns
+- Guide refactoring and feature work by surfacing dependencies
+- Trace how a vulnerability propagates through the call graph
+- Expose queryable APIs for code exploration and analysis
+- Generate documentation from the indexed codebase
 
-Of course, there are many more use cases that can be thought of, but these seem to be the most common ones. This raises the question: do we need to index all the code for **every active branch** for every repository? The answer is **probably not**.
+None of these require indexing **every active branch** for every repository.
 
 ### Indexing the main branch
 
-Let's first focus on indexing the main branch for every repository. This should cover most of the use cases for the Knowledge Graph and then let's think of a strategy to index the active branches if the need arises.
+The first milestone is indexing the main branch for every repository. This covers the majority of the use cases listed above. A strategy for active branches is described in a [later section](#indexing-the-active-branches).
 
 #### Extract
 
-The extract phase involves listening to events from NATS and leveraging ClickHouse as both the data store and the mechanism for deriving project hierarchies and full paths.
+The extract phase listens to push events from NATS and uses ClickHouse to derive project hierarchies and full paths.
 
 Push events from the GitLab PostgreSQL database are published to NATS JetStream subjects like:
 
 - `gkg_siphon_stream.events`
 - `gkg_siphon_stream.push_event_payloads`
 
-The indexing service subscribes to these NATS subjects and correlates events across tables:
+The indexing service subscribes to these subjects and correlates events across tables:
 
-- Events table: Contains `event_id`, `project_id`, `author_id`, and push action.
-- Push payloads table: Contains `event_id`, `ref` (branch name), `commit_to` (SHA) and ref type.
+- Events table: contains `event_id`, `project_id`, `author_id`, and push action.
+- Push payloads table: contains `event_id`, `ref` (branch name), `commit_to` (SHA) and ref type.
 
-The indexer receives the events and confirms it's a push to the `main` branch before proceeding with the indexing process. Then, the service acquires a lock on the project + branch + ref combination. This is to prevent other workers or pods from indexing the same branch at the same time.
+The indexer confirms it's a push to the `main` branch before proceeding. Then it acquires a lock on the project + branch + ref combination to prevent other workers from indexing the same branch concurrently.
 
 Example NATS KV:
 
@@ -147,33 +167,89 @@ Example NATS KV:
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 1 hour (estimated based on the amount of resources)
 
-Once the service acquires the lock, it will make a direct RPC call to Gitaly to download the files temporarily to disk. The service will query ClickHouse as needed to build the namespace hierarchy and gather additional metadata to enrich both the project's code graph and NATS locking.
+After acquiring the lock, the service makes an RPC call to Gitaly to download the repository archive to a temp directory. It also queries ClickHouse to build the namespace hierarchy and gather metadata for the project's code graph.
 
-#### Transform (Call Graph Construction)
+#### Transform (call graph construction)
 
-The next phase is documented at https://gitlab.com/gitlab-org/rust/knowledge-graph, however, here's a brief overview of the process:
+##### Parser architecture
 
-- `FileProcessor` chooses a language parser by extension and feeds the content through the analyzers to the [GitLab Code Parser](https://gitlab.com/gitlab-org/rust/gitlab-code-parser). Supported languages include:
-  - Ruby
-  - Python
-  - Kotlin
-  - Java
-  - C#
-  - TypeScript/JavaScript
-  - Rust
-- The parser output is normalized into `FileProcessingResult` objects that contain definitions, imports, and references with precise byte offsets.
-- For each file, the `AnalysisService` turns those results into a graph:
-  - `FileSystemAnalyzer` builds directory and file nodes plus containment edges.
-  - Language-specific analyzers emit definition and import nodes using consistent structs.
-  - References are stitched into call-graph edges (definition → definition) and dependency edges (definition → imported symbol, imported symbol → definition/file).
+The code parser supports seven languages using three parser backends:
+
+- **Ruby** uses native Prism bindings for high-fidelity AST parsing.
+- **TypeScript and JavaScript** use the SWC parser. Minified files are skipped.
+- **Python, Kotlin, Java, C#, and Rust** use tree-sitter grammars.
+
+Language detection is extension-based (12 extensions across the seven languages). Ruby, TypeScript/JavaScript, Python, Kotlin, and Java support full reference extraction. C# and Rust currently support definitions and imports only.
+
+For each file, the parser extracts three categories of information:
+
+- **Definitions** such as classes, modules, methods, functions, constants, and interfaces. Each carries a fully qualified name (FQN), source range, and language-specific type.
+- **Imported symbols** with their import path, identifier, optional alias, and scope.
+- **References** including call sites and property accesses. A reference can be resolved to a single target, ambiguous across multiple candidates, or unresolved.
+
+##### Streaming indexing pipeline
+
+The indexing pipeline is fully streaming: files are processed as they are discovered, with no upfront collection step. The stages are:
+
+1. **Directory walking** discovers files, respecting `.gitignore` rules and skipping `.git` directories and nested repositories.
+2. **Extension filtering** keeps only files with supported language extensions.
+3. **Async file reads** load file contents with bounded IO concurrency.
+4. **CPU-bound parsing** runs on a thread pool with a semaphore to cap parallelism based on available cores.
+5. **Analysis** groups parsed results by language and builds the graph.
+
+IO reads and CPU-bound parsing are bounded independently: file reads use a concurrency limit proportional to the worker thread count, while parsing uses a semaphore sized to the number of available CPU cores. This separation prevents IO-heavy repositories from starving the parser and vice versa. The pipeline outputs a graph structure consumed by the load phase. The defaults scale with the number of available cores.
+
+##### Graph data model
+
+After parsing, the analysis phase groups results by language and builds a graph containing:
+
+| Node type | Description |
+|---|---|
+| Directory | Directory in the repository tree |
+| File | Source file with path, language, extension |
+| Definition | Code definition with FQN, type, source range, file path |
+| Imported symbol | Import statement with path, type, identifier, source range |
+
+##### Relationship types
+
+The graph captures fine-grained relationships across several categories:
+
+- **Containment** tracks which directories contain other directories or files.
+- **Definitions** link files to the code entities they define, and capture the nesting hierarchy (e.g., a class containing methods, a module containing classes).
+- **Imports** connect files and symbols to the definitions or files they import.
+- **References** represent call sites, property accesses, and ambiguous calls where the target cannot be resolved to a single definition.
+
+Internally the graph uses roughly 50 fine-grained relationship types spread across these categories, for example distinguishing a method call from a property access, or a re-export from a direct import. During the load phase, these fine-grained types are collapsed into four high-level ontology labels: **CONTAINS**, **DEFINES**, **IMPORTS**, and **CALLS**. This simplification keeps the query layer consistent while the internal graph retains full detail for analysis.
 
 #### Load
 
-Once the graph is constructed, the `WriterService` converts nodes and edges into Arrow batches and writes Parquet files (`directory.parquet`, `file.parquet`, `definition.parquet`, `imported_symbol.parquet`, plus one Parquet file per relationship table defined in `RELATIONSHIP_TABLES`).
+##### ETL engine and module system
 
-The `RepositoryIndexer::load_into_database` method will then leverage the ClickHouse client to stream the parquet data into the appropriate node and edge tables. Loading the data should be done using upsert operations to prevent duplicate data. The nodes and edges that have been deleted should be soft-deleted so a subsequent cleaning job can remove them.
+The indexer provides a general-purpose ETL engine shared by both code and SDLC indexing. Each indexing pipeline is a module plugged into this engine.
 
-Once the process is complete, the finished database is ready for query services, MCP adapters, and AI tooling.
+The engine subscribes to NATS topics, routes messages to the appropriate module's handler, and manages acknowledgments. A global worker pool with optional per-module concurrency limits prevents any single module from starving others.
+
+##### Pluggable storage
+
+Handlers don't write to ClickHouse directly. They receive a trait-based storage abstraction and create table-specific writers on demand. The abstraction has two implementations: a production writer that serializes Arrow record batches and streams them to ClickHouse, and a mock that captures writes in memory for test assertions. Because handlers only depend on the trait, they are database-independent and can be tested without any external infrastructure.
+
+##### Push event flow
+
+The code indexing handler subscribes to push event payloads from NATS. On each event the handler:
+
+1. Validates the event is a push to the default branch and hasn't already been processed (watermark check)
+2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
+3. Fetches the repository archive from Gitaly and extracts it to a temp directory
+4. Runs the streaming indexing pipeline to produce the graph
+5. Converts the graph to Arrow record batches and writes them to ClickHouse
+6. Cleans up stale data from the previous indexing run
+7. Updates the watermark and releases the lock
+
+##### Storage in ClickHouse
+
+The graph is converted to Apache Arrow record batches and written to five ClickHouse tables: one each for directories, files, definitions, imported symbols, and edges (shared with SDLC data). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
+
+Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
 #### Checkpoint tracking
 
@@ -184,112 +260,65 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
 
 #### Flow visual representation
 
-```mermaid
-graph TB
-    subgraph "Data Sources"
-        GL[GitLab PostgreSQL]
-    end
-
-    subgraph "Event Streaming Layer"
-        NATS[NATS JetStream]
-        E1[gkg_siphon_stream.events]
-        E2[gkg_siphon_stream.push_event_payloads]
-        GL --> NATS
-        NATS --> E1
-        NATS --> E2
-    end
-
-    subgraph "Extract Phase"
-        IS[Indexing Service]
-        E1 --> IS
-        E2 --> IS
-
-        LOCK{Acquire Lock?}
-        IS --> LOCK
-
-        KV[(NATS KV Store<br/>TTL: 1 hour)]
-        LOCK -->|Lock Key| KV
-
-        GITALY[Gitaly RPC<br/>Download Files]
-        LOCK -->|Success| GITALY
-    end
-
-    subgraph "Transform Phase - Call Graph Construction"
-        FP[FileProcessor<br/>Choose Parser by Extension]
-        GITALY --> FP
-
-        GCP[GitLab Code Parser]
-        FP --> GCP
-
-        LANGS[Supported Languages:<br/>Ruby, Python, Kotlin<br/>Java, C#, TS/JS, Rust]
-        GCP -.-> LANGS
-
-        FPR[FileProcessingResult<br/>definitions, imports, references]
-        GCP --> FPR
-
-        AS[AnalysisService]
-        FPR --> AS
-
-        FSA[FileSystemAnalyzer<br/>directories, files, containment]
-        AS --> FSA
-
-        LA[Language Analyzers<br/>definitions, imports]
-        AS --> LA
-
-        CG[Call Graph Construction<br/>def→def edges<br/>def→import edges<br/>import→def/file edges]
-        FSA --> CG
-        LA --> CG
-    end
-
-    subgraph "Load Phase"
-        WS[WriterService]
-        CG --> WS
-
-        ARROW[Convert to Arrow Batches]
-        WS --> ARROW
-
-        PQ[Write Parquet Files:<br/>directory.parquet<br/>file.parquet<br/>definition.parquet<br/>imported_symbol.parquet<br/>+ relationship tables]
-        ARROW --> PQ
-
-        UPSERT[Stream to ClickHouse<br/>Upsert Operations<br/>Soft Delete Removed Nodes]
-        PQ --> UPSERT
-
-        CHDB[(ClickHouse Database<br/>Node & Edge Tables)]
-        UPSERT --> CHDB
-    end
-
-    subgraph "Consumers"
-        QS[Query Services]
-        MCP[MCP Adapters]
-        AI[AI Tooling]
-
-        CHDB --> QS
-        CHDB --> MCP
-        CHDB --> AI
-    end
-
-    style IS fill:#e1f5ff
-    style FP fill:#fff4e1
-    style AS fill:#fff4e1
-    style WS fill:#e8f5e9
-    style CHDB fill:#f3e5f5
+```plaintext
+Siphon CDC (push events)
+        |
+        v
+  NATS JetStream
+        |
+        v
+  gkg-server (Indexer mode)
+        |
+        v
+  Push event handler
+        |
+        |- 1. Validate event (default branch only, not already indexed)
+        |- 2. Acquire distributed lock via NATS KV
+        |- 3. Fetch repository archive from Gitaly
+        |- 4. Extract to temp directory
+        |- 5. Run indexing pipeline
+        |       |- File discovery (respects .gitignore)
+        |       |- Async file reads
+        |       |- CPU-bound parsing (bounded parallelism)
+        |       \- Analysis phase -> graph
+        |- 6. Convert graph to Arrow record batches
+        |- 7. Write to ClickHouse (5 tables)
+        |- 8. Clean up stale data
+        \- 9. Update watermark, release lock
 ```
+
+### Differences from the original local tool
+
+The original Knowledge Graph (at `gitlab-org/rust/knowledge-graph`) was a local desktop
+tool. Here are the main architectural differences in the current service:
+
+| Aspect | Original (local) | Current (service) |
+|---|---|---|
+| Graph database | lbug (embedded) | ClickHouse |
+| Code access | Local filesystem | Gitaly `GetArchive` RPC |
+| Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC push events via NATS |
+| Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
+| Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
+| Authorization | None (local tool) | Rails gRPC delegation |
+| Parser crate | External `parser-core` dependency | In-tree `code-parser` (forked and evolved) |
+| Graph builder | External `indexer` crate | In-tree `code-graph` |
+| Concurrency | Streaming model (Rayon + semaphore) | Same streaming model (preserved) |
 
 ### Indexing the active branches
 
 #### The problem
 
-As discussed in the previous section, the main branch is the most common branch to index. However, it still feels relevant to document a strategy to index the active branches if the need arises. Let's also not forget that the Knowledge Graph includes a local version that customers can use to query code against their local repository at any version.
+The main branch is the most common branch to index, but a strategy for active branches is worth documenting. The Knowledge Graph also includes a local version that customers can use to query code against their local repository at any version.
 
-To reiterate, the issue with indexing active branches is the sheer volume of data that would need to be indexed. We're talking about billions of definitions and relationships for each GitLab-like repositories. This is a complex problem that takes effort away from releasing a first version of the Knowledge Graph service without providing clear value.
+The core issue with indexing active branches is volume: billions of definitions and relationships for repositories the size of the GitLab monolith. The initial release focuses on main-branch indexing; branch-level and commit-level support are planned as follow-on work.
 
 #### A future strategy
 
-Once we deploy the initial version, if our metrics and customer feedback show that the ability to explore codebases at any version is valuable, we can then explore our options.
+After the initial deployment, metrics and customer feedback will determine whether branch-level indexing is worth the storage and compute cost. The approach below outlines one viable path.
 
 As stated above GitLab has the concept of a branch being "active" or "stale". An active branch is one that has been committed to within the last 3 months. A stale branch is one that has not been committed to in the last 3 months.
 
-For the amount of data and un-even query distribution (some branches are never going to be queried), it's best we don't keep the data against the main branches in the same database since that would result in a lot of wasted storage and compute resources.
+For the amount of data and uneven query distribution (some branches are never going to be queried), it's best we don't keep the data against the main branches in the same database since that would result in a lot of wasted storage and compute resources.
 
 Ideally, we would re-use the same indexing strategy as the main branch where we can index the active branches by listening to push events from NATS, but instead of loading the data into ClickHouse, we would store the data in cold storage (like S3 or GCS).
 
@@ -336,22 +365,20 @@ Stale branches are in most cases branches that have been abandoned by the origin
 
 Code Indexing is going to follow the same schema migration strategy as the main branch as described in [Zero-Downtime Schema Changes](./sdlc_indexing.md#zero-downtime-schema-changes).
 
-### How Code Querying Works Today
+### How code querying works today
 
-- **Purpose-built MCP tools**
-  - The Knowledge Graph team originally built dedicated MCP tools, which include code-specific tools implemented under `crates/mcp/tools`. Each tool wraps a focused workflow on top of the indexed call graph. Reference documentation lives at [`docs/mcp/tools`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/mcp/tools/).
-- **What the tools currently do**
-  - [`list_projects`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/mcp/tools/#list_projects) enumerates indexed repositories for agent discovery.
-  - [`search_codebase_definitions`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/mcp/tools/#search_codebase_definitions) searches Definition nodes by name, FQN, or partial match and streams back signatures plus context.
-  - [`get_definition`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/mcp/tools/#get_definition) resolves a usage line to its Definition or ImportedSymbol node by leveraging call graph edges such as `CALLS` and `AMBIGUOUSLY_CALLS`.
-  - [`get_references`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/mcp/tools/#get_references) pivots the other way through relationships like `DEFINES_IMPORTED_SYMBOL` and `FILE_IMPORTS` to list every referencing definition with contextual snippets.
-  - [`read_definitions`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/mcp/tools/#read_definitions) batches definition bodies so agents can retrieve implementations efficiently.
-  - [`repo_map`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/mcp/tools/#repo_map) walks the directory nodes and summarizes contained definitions, using the graph to stay `.gitignore`-aware.
-  - [`index_project`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/mcp/tools/#index_project) invokes the repository indexer inside the MCP process, wiring the reindexing flow described earlier into an on-demand tool call.
-- **How they execute queries**
-  - Tools rely on `database::querying::QueryLibrary` (for example, `search_codebase_definitions` delegates to `QueryingService` via the shared query library) and on the same database connections managed by `crates/database`. This keeps query plans consistent with the schema imported during indexing.
-  - Many tools supplement database hits with filesystem reads (see `file_reader_utils`) so responses include code snippets, respecting byte offsets captured in the graph.
-- **Other consumers**
-  - The HTTP/GQL surfaces continue to use the shared schema metadata published at [`docs/reference/schema`](https://gitlab-org.gitlab.io/rust/knowledge-graph/docs/reference/schema/); the MCP tools simply package the most common graph traversals for AI agents and IDE features while reusing the same underlying query service.
+The Knowledge Graph team originally built dedicated MCP tools for code querying. Each tool wraps a focused workflow on top of the indexed call graph. Reference documentation lives at [Knowledge Graph: tools](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/).
+
+The available tools:
+
+- [`list_projects`](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/#list_projects) enumerates indexed repositories for agent discovery.
+- [`search_codebase_definitions`](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/#search_codebase_definitions) searches definition nodes by name, FQN, or partial match and returns signatures plus context.
+- [`get_definition`](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/#get_definition) resolves a usage line to its definition or import by following call graph edges.
+- [`get_references`](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/#get_references) walks the graph in the other direction to list every reference to a definition, with contextual snippets.
+- [`read_definitions`](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/#read_definitions) batches definition bodies so agents can retrieve implementations efficiently.
+- [`repo_map`](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/#repo_map) walks the directory nodes and summarizes contained definitions, using the graph to stay `.gitignore`-aware.
+- [`index_project`](https://gitlab-org.gitlab.io/rust/knowledge-graph/mcp/tools/#index_project) triggers the repository indexer inside the MCP process for on-demand reindexing.
+
+These tools use a shared query library and the same database connections used during indexing. Many also supplement database hits with filesystem reads to include code snippets based on byte offsets from the graph.
 
 > **Important Note:** We intend to replace the above tools, where it makes sense, with our Graph Query Engine technology to enable agents and analytics to traverse the graph using tools that will be shared with SDLC querying. Agents will never write or execute raw queries themselves. They can only interact with the graph through these exposed, parameterized tools, which enforce security and access controls.
