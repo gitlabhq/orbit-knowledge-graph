@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use xshell::Shell;
 
 mod e2e;
+mod synth;
 
 /// GKG development task runner.
 ///
@@ -21,6 +22,65 @@ enum Command {
     E2e {
         #[command(subcommand)]
         command: E2eCommand,
+    },
+    /// Synthetic graph data pipeline (generate, load, evaluate).
+    Synth {
+        #[command(subcommand)]
+        command: SynthCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum SynthCommand {
+    /// Generate synthetic SDLC data to Parquet files.
+    Generate {
+        /// Path to YAML configuration file.
+        #[arg(short, long, default_value = "crates/xtask/simulator.yaml")]
+        config: std::path::PathBuf,
+
+        /// Print the generation plan without executing.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Force regeneration even if data exists.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Load generated Parquet data into ClickHouse.
+    Load {
+        /// Path to YAML configuration file.
+        #[arg(short, long, default_value = "crates/xtask/simulator.yaml")]
+        config: std::path::PathBuf,
+
+        /// Skip creating/dropping tables (useful for reloading).
+        #[arg(long)]
+        no_schema: bool,
+
+        /// Skip loading data (useful for just adding indexes/projections).
+        #[arg(long)]
+        no_data: bool,
+
+        /// Skip adding indexes.
+        #[arg(long)]
+        no_indexes: bool,
+
+        /// Skip adding projections.
+        #[arg(long)]
+        no_projections: bool,
+
+        /// Use clickhouse-client CLI for loading (faster, more reliable).
+        #[arg(long)]
+        use_cli: bool,
+    },
+    /// Execute SDLC queries and collect statistics.
+    Evaluate {
+        /// Path to YAML configuration file.
+        #[arg(short, long, default_value = "crates/xtask/simulator.yaml")]
+        config: std::path::PathBuf,
+
+        /// Verbose output.
+        #[arg(short, long)]
+        verbose: bool,
     },
 }
 
@@ -111,6 +171,34 @@ async fn main() -> Result<()> {
     let sh = Shell::new()?;
 
     match cli.command {
+        Command::Synth { command } => match command {
+            SynthCommand::Generate {
+                config,
+                dry_run,
+                force,
+            } => synth::generator::run::run(&config, dry_run, force),
+            SynthCommand::Load {
+                config,
+                no_schema,
+                no_data,
+                no_indexes,
+                no_projections,
+                use_cli,
+            } => {
+                synth::load::run::run(
+                    &config,
+                    no_schema,
+                    no_data,
+                    no_indexes,
+                    no_projections,
+                    use_cli,
+                )
+                .await
+            }
+            SynthCommand::Evaluate { config, verbose } => {
+                synth::evaluation::run::run(&config, verbose).await
+            }
+        },
         Command::E2e { command } => {
             for tool in e2e::constants::REQUIRED_TOOLS {
                 if !e2e::cmd::exists(&sh, tool) {

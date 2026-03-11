@@ -6,6 +6,7 @@ use tracing::{debug, info, warn};
 
 use serde::{Deserialize, Serialize};
 
+use super::checkpoint_store::CodeCheckpointStore;
 use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::locking::project_lock_key;
@@ -13,7 +14,6 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::project_store::ProjectStore;
 use super::push_event_store::PushEventStore;
 use super::repository_service::RepositoryService;
-use super::watermark_store::CodeWatermarkStore;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::ProjectCodeIndexingRequest;
@@ -28,7 +28,7 @@ pub struct ProjectCodeIndexingHandlerConfig {
 pub struct ProjectCodeIndexingHandler {
     pipeline: Arc<CodeIndexingPipeline>,
     repository_service: Arc<dyn RepositoryService>,
-    watermark_store: Arc<dyn CodeWatermarkStore>,
+    checkpoint_store: Arc<dyn CodeCheckpointStore>,
     project_store: Arc<dyn ProjectStore>,
     push_event_store: Arc<dyn PushEventStore>,
     metrics: CodeMetrics,
@@ -39,7 +39,7 @@ impl ProjectCodeIndexingHandler {
     pub fn new(
         pipeline: Arc<CodeIndexingPipeline>,
         repository_service: Arc<dyn RepositoryService>,
-        watermark_store: Arc<dyn CodeWatermarkStore>,
+        checkpoint_store: Arc<dyn CodeCheckpointStore>,
         project_store: Arc<dyn ProjectStore>,
         push_event_store: Arc<dyn PushEventStore>,
         metrics: CodeMetrics,
@@ -48,7 +48,7 @@ impl ProjectCodeIndexingHandler {
         Self {
             pipeline,
             repository_service,
-            watermark_store,
+            checkpoint_store,
             project_store,
             push_event_store,
             metrics,
@@ -127,14 +127,14 @@ impl ProjectCodeIndexingHandler {
             return Ok(());
         };
 
-        if let Ok(Some(watermark)) = self
-            .watermark_store
-            .get_watermark(project_id, default_branch)
+        if let Ok(Some(checkpoint)) = self
+            .checkpoint_store
+            .get_checkpoint(&project.traversal_path, project_id, default_branch)
             .await
-            && watermark.last_event_id >= push_event.event_id
+            && checkpoint.last_event_id >= push_event.event_id
         {
             debug!(project_id, "already indexed, skipping reconciliation");
-            metrics.record_outcome("skipped_watermark");
+            metrics.record_outcome("skipped_checkpoint");
             return Ok(());
         }
 
@@ -198,6 +198,9 @@ impl ProjectCodeIndexingHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modules::code::checkpoint_store::CodeCheckpointStore;
+    use crate::modules::code::checkpoint_store::CodeIndexingCheckpoint;
+    use crate::modules::code::checkpoint_store::test_utils::MockCodeCheckpointStore;
     use crate::modules::code::indexing_pipeline::CodeIndexingPipeline;
     use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::project_store::ProjectInfo;
@@ -205,9 +208,6 @@ mod tests {
     use crate::modules::code::push_event_store::test_utils::MockPushEventStore;
     use crate::modules::code::repository_service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
-    use crate::modules::code::watermark_store::CodeIndexingWatermark;
-    use crate::modules::code::watermark_store::CodeWatermarkStore;
-    use crate::modules::code::watermark_store::test_utils::MockCodeWatermarkStore;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices};
     use chrono::Utc;
 
@@ -219,7 +219,7 @@ mod tests {
         handler: ProjectCodeIndexingHandler,
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
-        mock_watermarks: Arc<MockCodeWatermarkStore>,
+        mock_checkpoints: Arc<MockCodeCheckpointStore>,
         project_store: Arc<MockProjectStore>,
         push_event_store: Arc<MockPushEventStore>,
     }
@@ -235,13 +235,13 @@ mod tests {
         ) -> Self {
             let mock_nats = Arc::new(MockNatsServices::new());
             let mock_locks = Arc::new(MockLockService::new());
-            let mock_watermarks = Arc::new(MockCodeWatermarkStore::new());
+            let mock_checkpoints = Arc::new(MockCodeCheckpointStore::new());
             let project_store = Arc::new(MockProjectStore::new());
             let push_event_store = Arc::new(MockPushEventStore::new());
             let stale_data_cleaner = Arc::new(MockStaleDataCleaner::default());
             let metrics = test_metrics();
 
-            let watermark_store: Arc<dyn CodeWatermarkStore> = mock_watermarks.clone();
+            let checkpoint_store: Arc<dyn CodeCheckpointStore> = mock_checkpoints.clone();
 
             let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
             let table_names = Arc::new(
@@ -251,7 +251,7 @@ mod tests {
 
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 Arc::clone(&repository_service),
-                Arc::clone(&watermark_store),
+                Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
@@ -260,7 +260,7 @@ mod tests {
             let handler = ProjectCodeIndexingHandler::new(
                 pipeline,
                 repository_service,
-                Arc::clone(&watermark_store),
+                Arc::clone(&checkpoint_store),
                 project_store.clone(),
                 push_event_store.clone(),
                 metrics,
@@ -271,7 +271,7 @@ mod tests {
                 handler,
                 mock_nats,
                 mock_locks,
-                mock_watermarks,
+                mock_checkpoints,
                 project_store,
                 push_event_store,
             }
@@ -329,8 +329,9 @@ mod tests {
         ctx.push_event_store
             .add_push_event(123, "main", 50, "abc123");
 
-        ctx.mock_watermarks
-            .set_watermark(&CodeIndexingWatermark {
+        ctx.mock_checkpoints
+            .set_checkpoint(&CodeIndexingCheckpoint {
+                traversal_path: "/org/project-123".to_string(),
                 project_id: 123,
                 branch: "main".to_string(),
                 last_event_id: 100,

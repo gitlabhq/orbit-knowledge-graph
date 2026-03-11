@@ -1,52 +1,26 @@
-//! CLI for loading Parquet data into ClickHouse.
+//! Load generated Parquet data into ClickHouse.
 
+use super::ParquetReader;
+use crate::synth::clickhouse::{ClickHouseWriter, check_clickhouse_health};
+use crate::synth::config::Config;
 use anyhow::Result;
-use clap::Parser;
 use ontology::Ontology;
 use ontology::constants::EDGE_TABLE;
-use simulator::Config;
-use simulator::clickhouse::{ClickHouseWriter, check_clickhouse_health};
-use simulator::parquet::ParquetReader;
-use std::path::PathBuf;
+use std::path::Path;
 
-#[derive(Parser)]
-#[command(name = "load")]
-#[command(about = "Load generated Parquet data into ClickHouse")]
-struct Args {
-    /// Path to YAML configuration file
-    #[arg(short, long, default_value = "simulator.yaml")]
-    config: PathBuf,
-
-    /// Skip creating/dropping tables (useful for reloading)
-    #[arg(long)]
+pub async fn run(
+    config_path: &Path,
     no_schema: bool,
-
-    /// Skip loading data (useful for just adding indexes/projections)
-    #[arg(long)]
     no_data: bool,
-
-    /// Skip adding indexes
-    #[arg(long)]
     no_indexes: bool,
-
-    /// Skip adding projections
-    #[arg(long)]
     no_projections: bool,
-
-    /// Use clickhouse-client CLI for loading (faster, more reliable)
-    #[arg(long)]
     use_cli: bool,
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
+) -> Result<()> {
     println!("GitLab Knowledge Graph Loader");
     println!("=============================\n");
 
-    println!("Loading config from {:?}...", args.config);
-    let config = Config::load(&args.config)?;
+    println!("Loading config from {:?}...", config_path);
+    let config = Config::load(config_path)?;
 
     println!(
         "Loading ontology from {:?}...",
@@ -64,13 +38,13 @@ async fn main() -> Result<()> {
     println!("ClickHouse is healthy");
 
     // Create schemas
-    if !args.no_schema {
+    if !no_schema {
         println!("\n=== Schema Setup ===");
         writer.create_schemas(&ontology, &config.clickhouse).await?;
     }
 
     // Load data
-    if !args.no_data {
+    if !no_data {
         println!("\n=== Loading Data ===");
 
         let reader = ParquetReader::new(&config.generation.output_dir);
@@ -90,7 +64,7 @@ async fn main() -> Result<()> {
 
         let overall_start = std::time::Instant::now();
 
-        if args.use_cli {
+        if use_cli {
             ClickHouseWriter::check_cli_available()?;
             println!("Using clickhouse client for loading (faster)");
         }
@@ -111,7 +85,7 @@ async fn main() -> Result<()> {
 
                 let start = std::time::Instant::now();
 
-                if args.use_cli {
+                if use_cli {
                     writer.load_parquet_file(tbl_name, &file_path)?;
                 } else {
                     let batches = reader.read_batches(*org_id, &node.name)?;
@@ -129,7 +103,7 @@ async fn main() -> Result<()> {
 
                 let start = std::time::Instant::now();
 
-                if args.use_cli {
+                if use_cli {
                     writer.load_parquet_file(EDGE_TABLE, &edges_path)?;
                 } else {
                     let edge_batches = reader.read_edges(*org_id)?;
@@ -147,13 +121,13 @@ async fn main() -> Result<()> {
     }
 
     // Add indexes (after data load for efficiency)
-    if !args.no_indexes && !config.clickhouse.schema.indexes.is_empty() {
+    if !no_indexes && !config.clickhouse.schema.indexes.is_empty() {
         println!("\n=== Indexes ===");
         writer.add_indexes(&ontology, &config.clickhouse).await?;
     }
 
     // Add projections (after data load for efficiency)
-    if !args.no_projections && !config.clickhouse.schema.projections.is_empty() {
+    if !no_projections && !config.clickhouse.schema.projections.is_empty() {
         println!("\n=== Projections ===");
         writer
             .add_projections(&ontology, &config.clickhouse)

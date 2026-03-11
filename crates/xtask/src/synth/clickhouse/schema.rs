@@ -1,8 +1,8 @@
 //! ClickHouse schema generation from ontology and config.
 
-use crate::arrow_schema::{ToArrowSchema, arrow_to_clickhouse_type, edge_schema};
-use crate::config::SchemaConfig;
-use crate::constants::{TABLE_PATTERN_ALL_NODES, TABLE_PATTERN_EDGES};
+use crate::synth::arrow_schema::{ToArrowSchema, arrow_to_clickhouse_type, edge_schema};
+use crate::synth::config::SchemaConfig;
+use crate::synth::constants::{TABLE_PATTERN_ALL_NODES, TABLE_PATTERN_EDGES};
 use arrow::datatypes::Schema;
 use ontology::Ontology;
 use ontology::constants::EDGE_TABLE;
@@ -212,7 +212,7 @@ impl<'a> SchemaGenerator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::IndexConfig;
+    use crate::synth::config::IndexConfig;
     use ontology::DataType;
 
     fn test_config() -> SchemaConfig {

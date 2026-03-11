@@ -1,4 +1,4 @@
-//! Configuration for the simulator.
+//! Configuration for synthetic data generation and evaluation.
 
 use anyhow::{Context, Result, ensure};
 use rand::Rng;
@@ -328,11 +328,11 @@ fn default_organizations() -> u32 {
 }
 
 fn default_namespace_entity() -> String {
-    crate::constants::DEFAULT_NAMESPACE_ENTITY.to_string()
+    super::constants::DEFAULT_NAMESPACE_ENTITY.to_string()
 }
 
 fn default_fake_data_path() -> String {
-    crate::constants::DEFAULT_FAKE_DATA_PATH.to_string()
+    super::constants::DEFAULT_FAKE_DATA_PATH.to_string()
 }
 
 fn default_batch_size() -> usize {
@@ -1007,7 +1007,7 @@ generation:
 
     #[test]
     fn test_fake_data_config_loads_yaml() {
-        let config = FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap();
+        let config = FakeDataConfig::load(crate::synth::constants::DEFAULT_FAKE_DATA_PATH).unwrap();
         assert!(!config.strings.pools.name_prefixes.is_empty());
         assert!(!config.strings.classify.is_empty());
         assert!(!config.bools.fields.is_empty());

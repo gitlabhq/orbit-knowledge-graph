@@ -1,6 +1,6 @@
 //! Fast data generators for ontology data types.
 
-use crate::config::{FakeDataConfig, StringKind};
+use crate::synth::config::{FakeDataConfig, StringKind};
 use chrono::Utc;
 use ontology::{DataType, Field};
 use rand::rngs::StdRng;
@@ -13,6 +13,7 @@ const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 /// Fast hex formatting into a String buffer.
 #[inline]
+#[allow(unsafe_code)]
 fn push_hex_u64(buf: &mut String, mut val: u64) {
     if val == 0 {
         buf.push('0');
@@ -30,6 +31,8 @@ fn push_hex_u64(buf: &mut String, mut val: u64) {
     for _ in 0..nibbles {
         buf.push('0'); // placeholder
     }
+    // SAFETY: we only write ASCII hex digits (0-9, a-f) into positions
+    // that already contain ASCII '0', so the buffer remains valid UTF-8.
     let bytes = unsafe { buf.as_bytes_mut() };
     for i in (0..nibbles).rev() {
         bytes[start + i] = HEX_DIGITS[(val & 0xf) as usize];
@@ -490,10 +493,12 @@ mod tests {
     use ontology::DataType;
     use std::collections::BTreeMap;
 
+    fn fake_data_path() -> String {
+        crate::synth::fixture_path(crate::synth::constants::DEFAULT_FAKE_DATA_PATH)
+    }
+
     fn test_pools() -> &'static FakeDataPools {
-        FakeDataPools::intern(
-            FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap(),
-        )
+        FakeDataPools::intern(FakeDataConfig::load(fake_data_path()).unwrap())
     }
 
     #[test]
@@ -664,7 +669,7 @@ mod tests {
 
     #[test]
     fn test_yaml_loads_and_interns() {
-        let config = FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap();
+        let config = FakeDataConfig::load(fake_data_path()).unwrap();
         let pools = FakeDataPools::intern(config);
 
         assert!(!pools.name_prefixes.is_empty());
@@ -680,7 +685,7 @@ mod tests {
 
     #[test]
     fn test_custom_pools_affect_output() {
-        let mut config = FakeDataConfig::load(crate::constants::DEFAULT_FAKE_DATA_PATH).unwrap();
+        let mut config = FakeDataConfig::load(fake_data_path()).unwrap();
         config.strings.pools.statuses = vec!["custom_status".to_string()];
         let pools = FakeDataPools::intern(config);
 
