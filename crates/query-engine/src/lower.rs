@@ -3,7 +3,9 @@
 //! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
-use crate::constants::{NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN};
+use crate::constants::{
+    EDGE_ALIAS_SUFFIXES, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+};
 use crate::error::{QueryError, Result};
 use crate::input::{
     ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
@@ -14,10 +16,6 @@ use ontology::constants::{
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-
-/// Maps edge column names to output alias suffixes.
-/// Uses EDGE_RESERVED_COLUMNS order: traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind
-const EDGE_ALIAS_SUFFIXES: &[&str] = &["path", "type", "src", "src_type", "dst", "dst_type"];
 
 /// Build `startsWith(edge.traversal_path, node.traversal_path)`.
 ///

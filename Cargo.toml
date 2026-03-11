@@ -92,7 +92,7 @@ jsonschema = "0.44.0"
 const_format = "0.2.35"
 
 # Simulator dependencies
-rand = { version = "0.8", features = ["small_rng"] }
+rand = "0.10"
 sqlformat = "0.5"
 tabled = "0.20"
 indicatif = "0.18"

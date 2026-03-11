@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -375,7 +375,7 @@ fn pick_random_project(
         return None;
     }
 
-    let index = project_indices[rng.gen_range(0..project_indices.len())];
+    let index = project_indices[rng.random_range(0..project_indices.len())];
     let entry = &state.path_entries[index];
     Some(ProjectRef {
         project_id: entry.id,
@@ -409,6 +409,6 @@ fn random_organization_id(state: &HierarchyState, rng: &mut SmallRng) -> i64 {
     if state.metadata.enabled_namespaces.is_empty() {
         return 1;
     }
-    let index = rng.gen_range(0..state.metadata.enabled_namespaces.len());
+    let index = rng.random_range(0..state.metadata.enabled_namespaces.len());
     state.metadata.enabled_namespaces[index].organization_id
 }

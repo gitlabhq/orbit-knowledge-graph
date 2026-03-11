@@ -16,6 +16,14 @@ View the [Graph Query Engine](graph_engine.md) design document for more details 
 
 View the [Intermediate Query Language](./intermediary_llm_query_language.md) design document for more details on the intermediate LLM query language.
 
+### Unified Response Schema
+
+All five query types (search, traversal, aggregation, path_finding, neighbors) will return a unified JSON response in the shape `{ columns, nodes, edges }`. This replaces the current flat tabular rows with deduplicated entity objects and instance-level edges, giving callers a single contract for rendering graphs, tables, or analytics views.
+
+- **ADR**: [ADR 004 — Unified Response Schema](../decisions/004_unified_response_schema.md)
+
+A `GraphFormatter` in the Rust query pipeline will handle the transformation from raw `QueryResult` rows into the unified payload. A JSON Schema defines the response contract shared between server and frontend.
+
 ## Web Server Architecture
 
 The web server will expose endpoints for GitLab Rails to consume. This will power the following features:
@@ -58,4 +66,4 @@ flowchart LR
 
 - All query paths reuse the shared schema and query helpers in `crates/database`, so code and namespace graphs adhere to the same table/relationship definitions.
 - SQL generation is guard-railed: hop limits (max three for namespace traversals), explicit relationship lists, and schema-driven validation prevent runaway queries.
-- The response format will be explicitly defined: rows of JSON objects plus the SQL string if needed. That allows callers to audit what executed, retry manually, or feed the statement into alternative tools.
+- The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Once !479 lands, every query will return a unified `{ columns, nodes, edges }` payload with deduplicated entity objects and instance-level edges. Proto-level metadata (query type, row count, generated SQL) will travel alongside the JSON payload.

@@ -53,6 +53,10 @@ These choices preserve factorization: each hop operates on a compact frontier an
 3. Planner compiles to ClickHouse SQL (CTEs, recursive CTEs, unions, joins) with bound parameters.
 4. ClickHouse executes; the server returns rows plus the generated SQL for audit.
 
+### Unified Response Format
+
+After ClickHouse returns rows, the formatting stage transforms the raw `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ query_type, nodes, edges }` shape for all five query types (search, traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
+
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 
 ## Authorization and Safety

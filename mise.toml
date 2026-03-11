@@ -1,11 +1,14 @@
 [env]
+# GDK root directory. Override with an absolute path, e.g: export GDK_ROOT=$HOME/workspace/gdk
+# Do not use ~ (tilde is not expanded in variable values).
+GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}"
+
 # Path to Gitaly repository for proto compilation (gitaly-client crate)
-# Adjust if your GDK is in a different location
-GITALY_PROTO_ROOT = "~/gitlab/gdk/gitaly"
+GITALY_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/gitaly"
 
 # Path to Siphon repository for proto compilation (siphon-proto crate)
 # Clone from: https://gitlab.com/gitlab-org/analytics-section/siphon
-SIPHON_PROTO_ROOT = "~/gitlab/gdk/siphon"
+SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/siphon"
 
 [tools]
 "rust" = { version = "1.93.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu" }
@@ -109,7 +112,7 @@ run = 'gem push _build/gitlab-gkg-proto-*.gem'
 description = "Publish gitlab-gkg-proto gem to RubyGems.org"
 
 [tasks."server:start"]
-run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat ~/gitlab/gdk/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
+run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_knowledge_graph_secret 2>/dev/null || cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
 description = "Start the GKG server (webserver mode)"
 
 [tasks."ontology:validate"]

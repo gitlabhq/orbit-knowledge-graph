@@ -10,11 +10,13 @@ use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use indexer::IndexerConfig;
+use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::modules::code::dispatch::ProjectCodeDispatcher;
+use indexer::modules::namespace_deletion::{
+    ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
+};
 use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
-use indexer::scheduler::ScheduledTask;
-use indexer::scheduler::ScheduledTaskMetrics;
-use indexer::scheduler::TableCleanup;
+use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -44,6 +46,18 @@ async fn main() -> anyhow::Result<()> {
             let datalake = config.datalake.build_client();
             let metrics = ScheduledTaskMetrics::new();
             let lock_service = services.lock_service.clone();
+
+            let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+            let deletion_graph = Arc::new(config.graph.build_client());
+            let deletion_datalake = Arc::new(config.datalake.build_client());
+            let deletion_store: Arc<dyn NamespaceDeletionStore> =
+                Arc::new(ClickHouseNamespaceDeletionStore::new(
+                    deletion_datalake,
+                    Arc::clone(&deletion_graph),
+                    &ontology,
+                ));
+            let checkpoint_store = Arc::new(ClickHouseCheckpointStore::new(deletion_graph));
+
             let tasks: Vec<Box<dyn ScheduledTask>> = vec![
                 Box::new(GlobalDispatcher::new(
                     services.nats.clone(),
@@ -52,20 +66,27 @@ async fn main() -> anyhow::Result<()> {
                 )),
                 Box::new(NamespaceDispatcher::new(
                     services.nats.clone(),
-                    datalake.clone(),
+                    datalake,
                     metrics.clone(),
                     config.schedule.tasks.namespace.clone(),
                 )),
                 Box::new(ProjectCodeDispatcher::new(
-                    services.nats,
+                    services.nats.clone(),
                     graph.clone(),
                     metrics.clone(),
                     config.schedule.tasks.project_code.clone(),
                 )),
                 Box::new(TableCleanup::new(
                     graph,
-                    metrics,
+                    metrics.clone(),
                     config.schedule.tasks.table_cleanup.clone(),
+                )),
+                Box::new(NamespaceDeletionScheduler::new(
+                    deletion_store,
+                    checkpoint_store,
+                    services.nats.clone(),
+                    metrics,
+                    config.schedule.tasks.namespace_deletion.clone(),
                 )),
             ];
             indexer::scheduler::run(&tasks, &*lock_service)

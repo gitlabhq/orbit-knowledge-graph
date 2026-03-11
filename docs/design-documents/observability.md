@@ -36,7 +36,7 @@ Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrum
 
 **KG Indexer Service:**
 
-The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the core engine, `scheduler` for the scheduled task loop, `indexer_sdlc` for the SDLC module, and `indexer_code` for the code indexing module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
+The indexer emits metrics under five OpenTelemetry meters: `etl_engine` for the core engine, `scheduler` for the scheduled task loop, `indexer_sdlc` for the SDLC module, `indexer_code` for the code indexing module, and `indexer_namespace_deletion` for the namespace deletion module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
 
 *Engine metrics (`etl_engine`):*
 
@@ -90,6 +90,13 @@ The indexer emits metrics under four OpenTelemetry meters: `etl_engine` for the 
 | `indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
 | `indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
 | `indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, repository_extract, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage |
+
+*Namespace deletion module metrics (`indexer_namespace_deletion`):*
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `indexer.namespace_deletion.table.duration` | Histogram | s | `table` | Duration of a single table's soft-delete INSERT-SELECT |
+| `indexer.namespace_deletion.table.errors` | Counter | count | `table` | Total per-table deletion failures |
 
 **KG Web Service:**
 

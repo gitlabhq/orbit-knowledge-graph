@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use async_trait::async_trait;
+use clickhouse_client::FromArrowColumn;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -32,7 +33,6 @@ pub struct TableCleanup {
     graph: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     config: TableCleanupConfig,
-    tables: Vec<String>,
 }
 
 impl TableCleanup {
@@ -41,20 +41,10 @@ impl TableCleanup {
         metrics: ScheduledTaskMetrics,
         config: TableCleanupConfig,
     ) -> Self {
-        let ontology =
-            ontology::Ontology::load_embedded().expect("embedded ontology must be valid");
-
-        let mut tables: Vec<String> = ontology
-            .nodes()
-            .map(|node| node.destination_table.clone())
-            .collect();
-        tables.push(ontology.edge_table().to_owned());
-
         Self {
             graph,
             metrics,
             config,
-            tables,
         }
     }
 }
@@ -83,11 +73,27 @@ impl ScheduledTask for TableCleanup {
 }
 
 impl TableCleanup {
+    async fn discover_tables(&self) -> Result<Vec<String>, TaskError> {
+        let batches = self
+            .graph
+            .query_arrow(
+                "SELECT table_name FROM information_schema.tables \
+                 WHERE table_catalog = currentDatabase() \
+                   AND table_type = 'BASE TABLE'",
+            )
+            .await
+            .map_err(|error| TaskError::new(format!("failed to discover tables: {error}")))?;
+
+        String::extract_column(&batches, 0)
+            .map_err(|error| TaskError::new(format!("failed to extract table names: {error}")))
+    }
+
     async fn cleanup_all_tables(&self) -> Result<(), TaskError> {
+        let tables = self.discover_tables().await?;
         let mut cleaned = 0u64;
         let mut failed = 0u64;
 
-        for table in &self.tables {
+        for table in &tables {
             let statement = format!("OPTIMIZE TABLE {table} FINAL CLEANUP");
 
             match self.graph.execute(&statement).await {
