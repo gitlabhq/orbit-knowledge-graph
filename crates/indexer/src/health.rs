@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use clickhouse_client::ArrowClickHouseClient;
+use gitlab_client::GitlabClient;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
@@ -15,6 +17,7 @@ pub struct HealthState {
     pub nats_client: async_nats::Client,
     pub graph_client: ArrowClickHouseClient,
     pub datalake_client: ArrowClickHouseClient,
+    pub gitlab_client: Option<Arc<GitlabClient>>,
 }
 
 #[derive(Serialize)]
@@ -54,6 +57,18 @@ async fn ready(State(state): State<HealthState>) -> impl IntoResponse {
     .await
     .is_ok_and(|r| r.is_ok());
 
+    let gitlab_healthy = match &state.gitlab_client {
+        Some(client) => timeout(HEALTH_CHECK_TIMEOUT, client.repository_info(1))
+            .await
+            .is_ok_and(|r| {
+                matches!(
+                    r,
+                    Ok(_) | Err(gitlab_client::GitlabClientError::NotFound(_))
+                )
+            }),
+        None => true,
+    };
+
     let mut unhealthy_components = Vec::new();
     if !nats_healthy {
         unhealthy_components.push("nats");
@@ -63,6 +78,9 @@ async fn ready(State(state): State<HealthState>) -> impl IntoResponse {
     }
     if !datalake_healthy {
         unhealthy_components.push("clickhouse_datalake");
+    }
+    if !gitlab_healthy {
+        unhealthy_components.push("gitlab");
     }
 
     let healthy = unhealthy_components.is_empty();
@@ -85,14 +103,18 @@ async fn ready(State(state): State<HealthState>) -> impl IntoResponse {
     )
 }
 
+pub fn create_health_router(state: HealthState) -> Router {
+    Router::new()
+        .route("/live", get(live))
+        .route("/ready", get(ready))
+        .with_state(state)
+}
+
 pub async fn run_health_server(
     bind_address: SocketAddr,
     state: HealthState,
 ) -> Result<(), std::io::Error> {
-    let app = Router::new()
-        .route("/live", get(live))
-        .route("/ready", get(ready))
-        .with_state(state);
+    let app = create_health_router(state);
 
     let listener = TcpListener::bind(bind_address).await?;
 
