@@ -4,11 +4,9 @@
 //! subtests sequentially, truncating tables between them to avoid cross-test
 //! contamination while eliminating per-test container startup overhead.
 
-mod common;
-
 use std::collections::HashSet;
 
-use common::{
+use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, compile_and_execute,
     load_ontology, run_redaction, test_security_context,
 };
