@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/crates/gkg-server/schemas/query_response.json",
+  "title": "GKG unified query response",
+  "description": "The JSON payload of the query pipeline. One shape for all five query types (search, traversal, aggregation, path_finding, neighbors).",
+  "type": "object",
+  "required": ["query_type", "row_count", "columns", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "query_type": {
+      "type": "string",
+      "description": "The query type that produced this result.",
+      "enum": ["search", "traversal", "aggregation", "path_finding", "neighbors"]
+    },
+    "row_count": {
+      "type": "integer",
+      "description": "Number of rows returned after redaction. Not the same as nodes.length — a page of 20 rows might produce 4 unique nodes if the same entities appear in many relationships.",
+      "minimum": 0
+    },
+    "columns": {
+      "description": "Computed value descriptors. Empty for most query types. Non-empty only when the query produces aggregation results (COUNT, AVG, etc.) that are inlined on nodes.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/column" }
+    },
+    "nodes": {
+      "description": "Deduplicated entity objects. Each entity appears once even if it participates in many edges. The frontend groups nodes by type for stacked table display and passes them directly to Three.js for graph display.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "description": "Instance-level relationships between nodes. Each edge connects two specific nodes by their type and ID. Empty for search and aggregation queries.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    }
+  },
+  "$defs": {
+    "column": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The property name as it appears on nodes (e.g. \"mr_count\")."
+        },
+        "type": {
+          "type": "string",
+          "description": "Data type of the computed value.",
+          "enum": ["Int64", "Float64", "String"]
+        },
+        "aggregation": {
+          "type": "string",
+          "description": "The aggregation function that produced this value. Present only for query-derived columns, never for real entity properties.",
+          "enum": ["count", "sum", "avg", "min", "max", "collect"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Entity type name matching the ontology (e.g. \"User\", \"MergeRequest\", \"Project\"). The frontend looks this up in the cached ontology for label_field, domain, and style."
+        },
+        "id": {
+          "type": "integer",
+          "description": "Entity ID. Together with type, forms the composite identity (\"User:42\"). Always included even if the user didn't select it."
+        }
+      },
+      "additionalProperties": {
+        "description": "Entity properties and any inlined aggregation values. Property names match ontology definitions. The frontend distinguishes aggregation values from entity properties using the columns array."
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "from_id", "to", "to_id", "type"],
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "Source node entity type."
+        },
+        "from_id": {
+          "type": "integer",
+          "description": "Source node entity ID."
+        },
+        "to": {
+          "type": "string",
+          "description": "Target node entity type."
+        },
+        "to_id": {
+          "type": "integer",
+          "description": "Target node entity ID."
+        },
+        "type": {
+          "type": "string",
+          "description": "Relationship type from the ontology (e.g. \"AUTHORED\", \"MEMBER_OF\", \"CONTAINS\")."
+        },
+        "depth": {
+          "type": "integer",
+          "description": "For variable-length traversals (max_hops > 1), the number of hops this edge represents. Absent on single-hop edges.",
+          "minimum": 1
+        },
+        "path_id": {
+          "type": "integer",
+          "description": "For path finding, identifies which path this edge belongs to. Absent for non-path queries.",
+          "minimum": 0
+        },
+        "step": {
+          "type": "integer",
+          "description": "For path finding, the position of this edge within its path (0-indexed). Absent for non-path queries.",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
