@@ -1,0 +1,20 @@
+# config/ontology/edges/on_branch.yaml
+
+description: Code entities belong to a specific branch
+
+variants:
+  - from_node: { type: Directory, id: id }
+    to_node: { type: Branch, id: name }
+    description: "Directory exists on branch."
+
+  - from_node: { type: File, id: id }
+    to_node: { type: Branch, id: name }
+    description: "File exists on branch."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Branch, id: name }
+    description: "Definition exists on branch."
+
+  - from_node: { type: ImportedSymbol, id: id }
+    to_node: { type: Branch, id: name }
+    description: "Imported symbol exists on branch."

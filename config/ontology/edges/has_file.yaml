@@ -1,0 +1,8 @@
+# config/ontology/edges/has_file.yaml
+
+description: Files changed in a merge request diff
+
+variants:
+  - from_node: { type: MergeRequestDiff, id: id }
+    to_node: { type: MergeRequestDiffFile, id: id }
+    description: "Merge request diff contains changed file."

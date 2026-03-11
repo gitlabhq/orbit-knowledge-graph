@@ -1,0 +1,156 @@
+# config/ontology/nodes/core/user.yaml
+
+node_type: User
+domain: core
+description: A GitLab user account
+label: username
+destination_table: gl_user
+default_columns: [id, username, name, state]
+sort_key: [id]
+
+style:
+  size: 32
+  color: "#10B981"
+
+redaction:
+  resource_type: user
+  id_column: id
+  ability: read_user
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the user."
+
+  username:
+    type: string
+    source: username
+    nullable: true
+    description: "The user's handle (unique in GitLab)."
+
+  email:
+    type: string
+    source: email
+    nullable: false
+    description: "Primary email address."
+
+  name:
+    type: string
+    source: name
+    nullable: true
+    description: "Display name."
+
+  first_name:
+    type: string
+    source: first_name
+    nullable: true
+    description: "First name, if provided."
+
+  last_name:
+    type: string
+    source: last_name
+    nullable: true
+    description: "Last name, if provided."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the user was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Timestamp when the user record was last updated."
+
+  state:
+    type: enum
+    source: state
+    nullable: true
+    description: "Account state."
+    enum_type: string
+    values:
+      0: active
+      1: blocked
+      2: ldap_blocked
+      3: blocked_pending_approval
+      4: banned
+      5: deactivated
+
+  avatar_url:
+    type: string
+    source: avatar
+    nullable: true
+    description: "URL to the user's avatar image."
+
+  public_email:
+    type: string
+    source: public_email
+    nullable: true
+    description: "Publicly visible email, if set."
+
+  preferred_language:
+    type: string
+    source: preferred_language
+    nullable: true
+    description: "User's preferred UI language."
+
+  last_activity_on:
+    type: date
+    source: last_activity_on
+    nullable: true
+    description: "Most recent recorded activity date."
+
+  private_profile:
+    type: boolean
+    source: private_profile
+    nullable: false
+    description: "Whether the user profile is private."
+
+  is_admin:
+    type: boolean
+    source: admin
+    nullable: false
+    description: "Whether the user is an instance administrator."
+
+  is_auditor:
+    type: boolean
+    source: auditor
+    nullable: false
+    description: "Whether the user has auditor role."
+
+  is_external:
+    type: boolean
+    source: external
+    nullable: false
+    description: "Whether the user is marked as external."
+
+  user_type:
+    type: enum
+    source: user_type
+    nullable: false
+    description: "Type of user account."
+    values:
+      0: human
+      1: support_bot
+      2: alert_bot
+      3: visual_review_bot
+      4: service_user
+      5: ghost
+      6: project_bot
+      7: security_bot
+      8: automation_bot
+      9: security_policy_bot
+      10: admin_bot
+      11: service_account
+      12: placeholder
+      13: duo_code_review_bot
+      14: import_user
+
+etl:
+  type: table
+  scope: global
+  source: siphon_users

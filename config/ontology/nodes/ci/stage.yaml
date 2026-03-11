@@ -1,0 +1,90 @@
+# config/ontology/nodes/ci/stage.yaml
+
+node_type: Stage
+domain: ci
+description: A stage within a CI/CD pipeline that groups related jobs (e.g., build, test, deploy)
+label: name
+destination_table: gl_stage
+default_columns: [id, name, status]
+
+style:
+  size: 26
+  color: "#818CF8"
+
+redaction:
+  resource_type: ci_stage
+  id_column: id
+  ability: read_build
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the stage."
+
+  name:
+    type: string
+    source: name
+    nullable: true
+    description: "Name of the stage (e.g., build, test, deploy)."
+
+  status:
+    type: enum
+    source: status
+    nullable: false
+    description: "Current execution status of the stage."
+    values:
+      0: created
+      1: pending
+      2: running
+      3: success
+      4: failed
+      5: canceled
+      6: skipped
+      7: manual
+      8: scheduled
+      9: preparing
+      10: waiting_for_resource
+      11: waiting_for_callback
+      12: canceling
+
+  position:
+    type: int64
+    source: position
+    nullable: true
+    description: "Order of the stage within the pipeline (0-indexed)."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the stage was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Timestamp when the stage was last updated."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_p_ci_stages
+  order_by: [traversal_path, id, partition_id]
+  edges:
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+    pipeline_id:
+      to: Pipeline
+      as: HAS_STAGE
+      direction: incoming
+

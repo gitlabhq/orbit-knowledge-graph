@@ -12,7 +12,7 @@
 //! let ontology = Ontology::load_embedded()?;
 //!
 //! // Or load from a directory on disk
-//! let ontology = Ontology::load_from_dir("fixtures/ontology")?;
+//! let ontology = Ontology::load_from_dir("config/ontology")?;
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
@@ -254,7 +254,7 @@ impl Ontology {
 
     /// Load ontology from embedded files compiled into the binary.
     ///
-    /// This uses the ontology files from `fixtures/ontology/` that were
+    /// This uses the ontology files from `config/ontology/` that were
     /// embedded at compile time.
     ///
     /// # Errors
@@ -589,7 +589,7 @@ mod tests {
             .expect("crates directory should exist")
             .parent()
             .expect("workspace root should exist")
-            .join("fixtures/ontology")
+            .join("config/ontology")
     }
 
     #[test]

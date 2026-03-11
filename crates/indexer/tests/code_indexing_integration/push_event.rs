@@ -9,7 +9,7 @@ use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 use super::helpers::*;
 
 const SIPHON_SCHEMA_SQL: &str = include_str!("../fixtures/siphon.sql");
-const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../fixtures/schema/graph.sql");
+const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../config/graph.sql");
 
 #[tokio::test]
 async fn indexes_repository_from_gitaly() {

@@ -1,0 +1,8 @@
+# config/ontology/edges/owner.yaml
+
+description: Ownership relationship between users and groups/projects
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Group, id: id }
+    description: "User owns group."

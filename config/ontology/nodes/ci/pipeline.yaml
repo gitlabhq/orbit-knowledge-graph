@@ -1,0 +1,163 @@
+# config/ontology/nodes/ci/pipeline.yaml
+
+node_type: Pipeline
+domain: ci
+description: A CI/CD pipeline that runs a series of stages and jobs to build, test, and deploy code
+label: id
+destination_table: gl_pipeline
+default_columns: [id, iid, status, ref, source]
+
+style:
+  size: 30
+  color: "#6366F1"
+
+redaction:
+  resource_type: ci_pipeline
+  id_column: id
+  ability: read_pipeline
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the pipeline."
+
+  iid:
+    type: int64
+    source: iid
+    nullable: true
+    description: "Project-scoped pipeline number."
+
+  sha:
+    type: string
+    source: sha
+    nullable: true
+    description: "Git commit SHA that the pipeline runs against."
+
+  ref:
+    type: string
+    source: ref
+    nullable: true
+    description: "Branch or tag name the pipeline runs for."
+
+  status:
+    type: enum
+    source: status
+    nullable: false
+    description: "Current execution status of the pipeline."
+    enum_type: string
+    values:
+      0: created
+      1: pending
+      2: running
+      3: success
+      4: failed
+      5: canceled
+      6: skipped
+      7: manual
+      8: scheduled
+      9: preparing
+      10: waiting_for_resource
+      11: waiting_for_callback
+      12: canceling
+
+  source:
+    type: enum
+    source: source
+    nullable: false
+    description: "What triggered the pipeline (push, merge request, schedule, etc.)."
+    values:
+      0: unknown
+      1: push
+      2: web
+      3: trigger
+      4: schedule
+      5: api
+      6: external
+      7: pipeline
+      8: chat
+      9: webide
+      10: merge_request_event
+      11: external_pull_request_event
+      12: parent_pipeline
+      13: ondemand_dast_scan
+      14: ondemand_dast_validation
+      15: security_orchestration_policy
+      16: container_registry_push
+      17: duo_workflow
+      18: pipeline_execution_policy_schedule
+
+  tag:
+    type: boolean
+    source: tag
+    nullable: false
+    description: "Whether this pipeline runs on a git tag."
+
+  duration:
+    type: int64
+    source: duration
+    nullable: true
+    description: "Total duration of the pipeline in seconds."
+
+  failure_reason:
+    type: enum
+    source: failure_reason
+    nullable: true
+    description: "Reason the pipeline failed, if applicable."
+    values:
+      0: unknown_failure
+      1: config_error
+      2: external_validation_failure
+      3: user_not_verified
+      21: size_limit_exceeded
+      22: job_activity_limit_exceeded
+      23: deployments_limit_exceeded
+      25: project_deleted
+      26: filtered_by_rules
+      27: filtered_by_workflow_rules
+      28: composite_identity_forbidden
+      29: pipeline_ref_creation_failure
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the pipeline was created."
+
+  started_at:
+    type: timestamp
+    source: started_at
+    nullable: true
+    description: "Timestamp when the pipeline started executing."
+
+  finished_at:
+    type: timestamp
+    source: finished_at
+    nullable: true
+    description: "Timestamp when the pipeline finished executing."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_p_ci_pipelines
+  order_by: [traversal_path, id, partition_id]
+  edges:
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+    user_id:
+      to: User
+      as: TRIGGERED
+      direction: incoming
+    merge_request_id:
+      to: MergeRequest
+      as: TRIGGERED
+      direction: incoming

@@ -13,7 +13,7 @@ pub use integration_testkit::{
 };
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!("../fixtures/siphon.sql");
-pub const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../fixtures/schema/graph.sql");
+pub const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../config/graph.sql");
 
 pub trait IndexerTestExt {
     fn create_destination(&self) -> ClickHouseDestination;

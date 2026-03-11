@@ -1,0 +1,69 @@
+# config/ontology/nodes/core/user.yaml
+
+node_type: User
+domain: core
+description: A GitLab user account
+destination_table: users
+
+# Source definition for ETL
+# source:
+#   table: siphon_users
+#   watermark_column: _siphon_replicated_at
+#   deleted_column: _siphon_deleted
+#   primary_key: id
+
+# Output destination
+# destination:
+#   table: users
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+
+  username:
+    type: string
+    source: username
+    nullable: false
+
+  email:
+    type: string
+    source: email
+    nullable: false
+
+  is_admin:
+    type: boolean
+    source: admin  # rename: admin → is_admin
+    nullable: false
+
+  user_type:
+    type: enum
+    source: user_type
+    nullable: false
+    values: 
+      0: human
+      1: support_bot
+      2: alert_bot
+      8: automation_bot
+
+edges:
+  - type: OWNER
+    source_id: owner_id
+    target_kind: User
+
+  - type: CONTAINS
+    source: parent_id
+    target_kind: Group
+
+# using this overrides automatic query gen via the properties fields above
+etl:
+  # codepath: siphon
+  # codepath: internal_code_indexing
+  query: |
+    SELECT * FROM notes where noteable_type = 'MergeRequest'
+
+# below scenario is where you want to split 1 siphon table into multiple tables 
+# etl:
+#   query: |
+#     SELECT * FROM notes where noteable_type = 'Issue'

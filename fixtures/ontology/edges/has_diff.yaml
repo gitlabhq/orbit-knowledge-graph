@@ -1,8 +1,0 @@
-# fixtures/ontology/edges/has_diff.yaml
-
-description: Diff snapshots of a merge request
-
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: MergeRequestDiff, id: id }
-    description: "Merge request has a diff snapshot."

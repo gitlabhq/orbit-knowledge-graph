@@ -1,0 +1,21 @@
+# config/ontology/edges/authored.yaml
+
+description: Authorship relationship between users and entities
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Note, id: id }
+    description: "User authored note."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "User authored merge request."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: Vulnerability, id: id }
+    description: "User reported vulnerability."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "User authored work item."
+
