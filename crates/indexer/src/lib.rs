@@ -147,6 +147,9 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     info!("initializing Code handlers");
     modules::code::register_handlers(&registry, config, &ontology)?;
 
+    info!("initializing Namespace Deletion handler");
+    modules::namespace_deletion::register_handlers(&registry, config, &ontology)?;
+
     info!(topics = registry.topics().len(), "registered handlers");
 
     let health_state = HealthState {

@@ -4,8 +4,11 @@ CREATE TABLE IF NOT EXISTS checkpoint (
     key String,
     watermark DateTime64(6, 'UTC'),
     cursor_values String DEFAULT '',
-    _version DateTime64(6, 'UTC') DEFAULT now64(6)
-) ENGINE = ReplacingMergeTree(_version) ORDER BY (key);
+    _version DateTime64(6, 'UTC') DEFAULT now64(6),
+    _deleted Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (key)
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- Namespace deletion schedule
 
@@ -482,8 +485,9 @@ CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
     last_commit String,
     indexed_at DateTime64(6, 'UTC'),
     _version UInt64,
+    _deleted Bool DEFAULT false,
     PROJECTION project_lookup (SELECT * ORDER BY project_id)
-) ENGINE = ReplacingMergeTree(_version)
+) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch)
-SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 

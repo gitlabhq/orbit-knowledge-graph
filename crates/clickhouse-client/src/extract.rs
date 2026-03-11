@@ -1,4 +1,4 @@
-use arrow::array::{Array, Int64Array, StringArray};
+use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 
 #[derive(Debug, thiserror::Error)]
@@ -12,6 +12,33 @@ pub trait FromArrowColumn: Sized {
         batches: &[RecordBatch],
         column_index: usize,
     ) -> Result<Vec<Self>, ExtractError>;
+}
+
+impl FromArrowColumn for bool {
+    fn extract_column(
+        batches: &[RecordBatch],
+        column_index: usize,
+    ) -> Result<Vec<Self>, ExtractError> {
+        let mut values = Vec::new();
+
+        for batch in batches {
+            let column = batch
+                .column(column_index)
+                .as_any()
+                .downcast_ref::<BooleanArray>()
+                .ok_or(ExtractError {
+                    expected: "BooleanArray",
+                })?;
+
+            for i in 0..column.len() {
+                if !column.is_null(i) {
+                    values.push(column.value(i));
+                }
+            }
+        }
+
+        Ok(values)
+    }
 }
 
 impl FromArrowColumn for String {

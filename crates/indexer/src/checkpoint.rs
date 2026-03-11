@@ -9,6 +9,14 @@ use thiserror::Error;
 
 const CHECKPOINT_TABLE: &str = "checkpoint";
 
+/// The checkpoint key prefix for a given namespace, e.g. `ns.100`.
+///
+/// The pipeline appends `.{plan_name}` to form the full key, so all
+/// checkpoints for a namespace share this prefix followed by a dot.
+pub fn namespace_position_key(namespace_id: i64) -> String {
+    format!("ns.{namespace_id}")
+}
+
 #[derive(Debug, Error)]
 pub enum CheckpointError {
     #[error("checkpoint store operation failed: {0}")]
