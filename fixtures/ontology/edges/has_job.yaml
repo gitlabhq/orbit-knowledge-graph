@@ -1,8 +1,0 @@
-# fixtures/ontology/edges/has_job.yaml
-
-description: Stage contains job relationship
-
-variants:
-  - from_node: { type: Stage, id: id }
-    to_node: { type: Job, id: id }
-    description: "Stage contains job."

@@ -41,7 +41,7 @@ flowchart LR
 |---|---|
 | Design documents | [`docs/design-documents/`](docs/design-documents/) |
 | Crate source | [`crates/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/crates) |
-| Ontology definitions | [`fixtures/ontology/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/fixtures/ontology) |
+| Ontology definitions | [`config/ontology/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/config/ontology) |
 | Dev documentation | [`docs/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs) |
 
 > Note: [gitlab-org/rust/knowledge-graph](https://gitlab.com/gitlab-org/rust/knowledge-graph) is the old repository for the local client-side knowledge graph, which will be archived. The code graph was taken from that repo and moved into `orbit/knowledge-graph`.

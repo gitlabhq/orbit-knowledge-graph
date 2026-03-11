@@ -1,0 +1,76 @@
+# config/ontology/nodes/security/identifier.yaml
+
+node_type: VulnerabilityIdentifier
+domain: security
+description: A vulnerability identifier such as a CVE, CWE, or other external reference
+label: name
+destination_table: gl_vulnerability_identifier
+default_columns: [id, name, external_type, external_id]
+
+style:
+  size: 22
+  color: "#7F1D1D"
+
+redaction:
+  resource_type: vulnerability_identifier
+  id_column: id
+  ability: read_vulnerability
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the vulnerability identifier."
+
+  external_type:
+    type: string
+    source: external_type
+    nullable: false
+    description: "Type of external identifier (e.g., cve, cwe, gemnasium)."
+
+  external_id:
+    type: string
+    source: external_id
+    nullable: false
+    description: "External identifier value (e.g., CVE-2021-44228)."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Human-readable name of the identifier."
+
+  url:
+    type: string
+    source: url
+    nullable: true
+    description: "URL with more information about the identifier."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    description: "Timestamp when the identifier was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Timestamp when the identifier was last updated."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_vulnerability_identifiers
+  edges:
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing

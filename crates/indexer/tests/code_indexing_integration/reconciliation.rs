@@ -6,7 +6,7 @@ use indexer::topic::ProjectCodeIndexingRequest;
 use super::helpers::*;
 
 const SIPHON_SCHEMA_SQL: &str = include_str!("../fixtures/siphon.sql");
-const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../fixtures/schema/graph.sql");
+const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../config/graph.sql");
 
 #[tokio::test]
 async fn indexes_project_from_datalake_push_event() {

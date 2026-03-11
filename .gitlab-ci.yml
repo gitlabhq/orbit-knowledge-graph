@@ -98,7 +98,7 @@ ontology-schema-validate:
     - .mr-and-main-rules
   needs: []
   script:
-    - find fixtures/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
+    - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
 
 check-docs:
   stage: lint
