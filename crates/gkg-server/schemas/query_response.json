@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/crates/gkg-server/schemas/query_response.json",
+  "title": "GKG unified query response",
+  "description": "The JSON payload of the query pipeline. One shape for all five query types (search, traversal, aggregation, path_finding, neighbors).",
+  "type": "object",
+  "required": ["query_type", "row_count", "columns", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "query_type": {
+      "type": "string",
+      "description": "The query type that produced this result.",
+      "enum": ["search", "traversal", "aggregation", "path_finding", "neighbors"]
+    },
+    "row_count": {
+      "type": "integer",
+      "description": "Number of rows returned after redaction.",
+      "minimum": 0
+    },
+    "columns": {
+      "description": "Computed value descriptors. Empty for most query types. Non-empty only when the query produces aggregation results.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/column" }
+    },
+    "nodes": {
+      "description": "Deduplicated entity objects. Each entity appears once even if it participates in many edges.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "description": "Instance-level relationships between nodes. Empty for search and aggregation queries.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    }
+  },
+  "$defs": {
+    "column": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["Int64", "Float64", "String"] },
+        "aggregation": { "type": "string", "enum": ["count", "sum", "avg", "min", "max", "collect"] }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string" },
+        "id": { "type": "integer" }
+      },
+      "additionalProperties": {
+        "description": "Entity properties and inlined aggregation values.",
+        "type": ["string", "integer", "number", "boolean", "null"]
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "from_id", "to", "to_id", "type"],
+      "properties": {
+        "from": { "type": "string" },
+        "from_id": { "type": "integer" },
+        "to": { "type": "string" },
+        "to_id": { "type": "integer" },
+        "type": { "type": "string" },
+        "depth": { "type": "integer", "minimum": 1 },
+        "path_id": { "type": "integer", "minimum": 0 },
+        "step": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

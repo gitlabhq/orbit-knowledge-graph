@@ -154,26 +154,35 @@ impl QueryResult {
         let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
         let is_neighbors = ctx.query_type == Some(QueryType::Neighbors);
 
+        let traversal_path_columns: Vec<&str> = ctx
+            .edges()
+            .iter()
+            .filter_map(|edge| edge.path_column.as_deref())
+            .collect();
+
         let mut rows = Vec::new();
         for batch in batches {
             for row_idx in 0..batch.num_rows() {
                 let columns = ArrowUtils::extract_row(batch, row_idx);
 
                 let dynamic_nodes = if is_path_finding {
-                    // Extract nodes from the _gkg_path column in path finding queries.
-                    // The column is Array(Tuple(Int64, String)) where each tuple is (node_id, entity_type).
                     ArrowUtils::get_i64_string_pairs(batch, PATH_COLUMN, row_idx)
                         .into_iter()
                         .map(|(id, t)| NodeRef::new(id, t))
                         .collect()
                 } else if is_neighbors {
-                    // Neighbor node from _gkg_neighbor_id / _gkg_neighbor_type columns
                     let neighbor = ArrowUtils::get_column_i64(batch, NEIGHBOR_ID_COLUMN, row_idx)
                         .and_then(|id| {
                             ArrowUtils::get_column_string(batch, NEIGHBOR_TYPE_COLUMN, row_idx)
                                 .map(|t| NodeRef::new(id, t))
                         });
                     neighbor.into_iter().collect()
+                } else if !traversal_path_columns.is_empty() {
+                    traversal_path_columns
+                        .iter()
+                        .flat_map(|column| ArrowUtils::get_i64_string_pairs(batch, column, row_idx))
+                        .map(|(id, t)| NodeRef::new(id, t))
+                        .collect()
                 } else {
                     Vec::new()
                 };

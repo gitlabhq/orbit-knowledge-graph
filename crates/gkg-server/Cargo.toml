@@ -71,6 +71,7 @@ integration-testkit = { path = "../integration-testkit" }
 indexer = { path = "../indexer", features = ["testkit"] }
 clickhouse-client = { path = "../clickhouse-client", features = ["testkit"] }
 query-engine = { path = "../query-engine" }
+jsonschema = { workspace = true }
 regex = { workspace = true }
 tempfile = { workspace = true }
 parser-core = { workspace = true }

@@ -1,3 +1,4 @@
+mod graph;
 mod raw_row;
 
 use serde_json::{Value, json};
@@ -8,6 +9,8 @@ use query_engine::ResultContext;
 
 use super::types::QueryPipelineContext;
 
+#[allow(unused_imports)]
+pub use graph::{GraphColumn, GraphEdge, GraphFormatter, GraphNode, GraphResponse};
 pub use raw_row::{RawRowFormatter, row_to_json};
 
 pub trait ResultFormatter: Send + Sync {
@@ -26,5 +29,14 @@ pub(crate) fn column_value_to_json(value: &ColumnValue) -> Value {
         ColumnValue::Float64(_) => Value::Null,
         ColumnValue::String(v) => json!(v),
         ColumnValue::Null => Value::Null,
+    }
+}
+
+pub(crate) fn column_value_schema_type(value: &ColumnValue) -> Option<&'static str> {
+    match value {
+        ColumnValue::Int64(_) => Some("Int64"),
+        ColumnValue::Float64(_) => Some("Float64"),
+        ColumnValue::String(_) => Some("String"),
+        ColumnValue::Null => None,
     }
 }
