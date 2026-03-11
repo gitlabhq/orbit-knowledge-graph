@@ -1,19 +1,18 @@
 //! Lower: Input → Plan
 //!
-//! Transforms indexer inputs into `Rel` trees. Four frontends, each
-//! implementing `Frontend<Input = ..., Error = LowerError>`:
+//! Transforms indexer inputs into `Rel` trees. Called by the thin
+//! `Frontend` wrappers in `frontend.rs`.
 //!
-//! | Frontend                | SQL target  | Query shape |
-//! |-------------------------|-------------|-------------|
-//! | `IndexerFrontend`       | ClickHouse  | Read [→ Join] → Filter(watermark [+ cursor]) → Project → Sort → Fetch |
-//! | `RawExtractFrontend`    | ClickHouse  | Read_raw → Filter(watermark [+ ns + extra + cursor]) → Project → Sort → Fetch |
-//! | `NodeTransformFrontend` | DataFusion  | Read(source_data) → Project |
-//! | `FkEdgeTransformFrontend` | DataFusion | Read(source_data) [→ Filter] → Project |
+//! | Entry point       | SQL target  | Query shape |
+//! |-------------------|-------------|-------------|
+//! | `extract`         | ClickHouse  | Read [→ Join] → Filter(watermark [+ cursor]) → Project → Sort → Fetch |
+//! | `raw_extract`     | ClickHouse  | Read_raw → Filter(watermark [+ ns + extra + cursor]) → Project → Sort → Fetch |
+//! | `node_transform`  | DataFusion  | Read(source_data) → Project |
+//! | `fk_edge_transform` | DataFusion | Read(source_data) [→ Filter] → Project |
 
 use super::types::*;
 use llqm::ir::expr::{self, DataType, Expr};
 use llqm::ir::plan::{Plan, Rel};
-use llqm::pipeline::Frontend;
 
 const VERSION_ALIAS: &str = "_version";
 const DELETED_ALIAS: &str = "_deleted";
@@ -29,36 +28,29 @@ pub enum LowerError {
 // Table-based Extract
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub struct IndexerFrontend;
-
-impl Frontend for IndexerFrontend {
-    type Input = ExtractInput;
-    type Error = LowerError;
-
-    fn lower(&self, input: Self::Input) -> Result<Plan, Self::Error> {
-        let entity = &input.entity;
-        if entity.columns.is_empty() && entity.join.as_ref().is_none_or(|j| j.columns.is_empty()) {
-            return Err(LowerError::NoColumns("entity"));
-        }
-
-        let mut rel = extract_read(entity);
-
-        if let Some(join) = &entity.join {
-            rel = extract_join(rel, entity, join);
-        }
-
-        rel = extract_watermark(rel, entity);
-
-        if !input.cursor_values.is_empty() {
-            rel = build_cursor_filter(rel, &input.cursor_values);
-        }
-
-        rel = extract_projection(rel, entity);
-        rel = extract_sort(rel, entity);
-        rel = rel.fetch(input.batch_size, None);
-
-        Ok(rel.into_plan())
+pub fn extract(input: ExtractInput) -> Result<Plan, LowerError> {
+    let entity = &input.entity;
+    if entity.columns.is_empty() && entity.join.as_ref().is_none_or(|j| j.columns.is_empty()) {
+        return Err(LowerError::NoColumns("entity"));
     }
+
+    let mut rel = extract_read(entity);
+
+    if let Some(join) = &entity.join {
+        rel = extract_join(rel, entity, join);
+    }
+
+    rel = extract_watermark(rel, entity);
+
+    if !input.cursor_values.is_empty() {
+        rel = build_cursor_filter(rel, &input.cursor_values);
+    }
+
+    rel = extract_projection(rel, entity);
+    rel = extract_sort(rel, entity);
+    rel = rel.fetch(input.batch_size, None);
+
+    Ok(rel.into_plan())
 }
 
 fn extract_read(entity: &EntityDef) -> Rel {
@@ -151,46 +143,39 @@ fn resolve_sort_column(entity: &EntityDef, key: &str) -> Expr {
 // Query-based Extract
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub struct RawExtractFrontend;
-
-impl Frontend for RawExtractFrontend {
-    type Input = RawExtractInput;
-    type Error = LowerError;
-
-    fn lower(&self, input: Self::Input) -> Result<Plan, Self::Error> {
-        if input.columns.is_empty() {
-            return Err(LowerError::NoColumns("extract"));
-        }
-
-        let output_cols = derive_output_columns(&input.columns);
-        let mut rel = Rel::read_raw(&input.from, &output_cols);
-
-        rel = raw_watermark(rel, &input.watermark);
-
-        if input.namespaced {
-            rel = raw_namespace_filter(rel, input.traversal_path_filter.as_deref());
-        }
-
-        if let Some(extra) = &input.additional_where {
-            rel = rel.filter(expr::raw(extra));
-        }
-
-        if !input.cursor_values.is_empty() {
-            rel = build_cursor_filter(rel, &input.cursor_values);
-        }
-
-        rel = raw_projection(rel, &input.columns, &input.watermark, &input.deleted);
-
-        let sort_keys: Vec<(Expr, expr::SortDir)> = input
-            .order_by
-            .iter()
-            .map(|k| (expr::raw(k), expr::SortDir::Asc))
-            .collect();
-        rel = rel.sort(&sort_keys);
-        rel = rel.fetch(input.batch_size, None);
-
-        Ok(rel.into_plan())
+pub fn raw_extract(input: RawExtractInput) -> Result<Plan, LowerError> {
+    if input.columns.is_empty() {
+        return Err(LowerError::NoColumns("extract"));
     }
+
+    let output_cols = derive_output_columns(&input.columns);
+    let mut rel = Rel::read_raw(&input.from, &output_cols);
+
+    rel = raw_watermark(rel, &input.watermark);
+
+    if input.namespaced {
+        rel = raw_namespace_filter(rel, input.traversal_path_filter.as_deref());
+    }
+
+    if let Some(extra) = &input.additional_where {
+        rel = rel.filter(expr::raw(extra));
+    }
+
+    if !input.cursor_values.is_empty() {
+        rel = build_cursor_filter(rel, &input.cursor_values);
+    }
+
+    rel = raw_projection(rel, &input.columns, &input.watermark, &input.deleted);
+
+    let sort_keys: Vec<(Expr, expr::SortDir)> = input
+        .order_by
+        .iter()
+        .map(|k| (expr::raw(k), expr::SortDir::Asc))
+        .collect();
+    rel = rel.sort(&sort_keys);
+    rel = rel.fetch(input.batch_size, None);
+
+    Ok(rel.into_plan())
 }
 
 fn derive_output_columns(columns: &[RawExtractColumn]) -> Vec<(&str, DataType)> {
@@ -222,7 +207,6 @@ fn raw_watermark(rel: Rel, watermark: &str) -> Rel {
     let upper = expr::raw(watermark).le(expr::param("watermark", DataType::String));
     rel.filter(lower.and(upper))
 }
-
 
 fn raw_namespace_filter(rel: Rel, custom_filter: Option<&str>) -> Rel {
     match custom_filter {
@@ -256,21 +240,14 @@ fn raw_projection(rel: Rel, columns: &[RawExtractColumn], watermark: &str, delet
 // Node Transform
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub struct NodeTransformFrontend;
-
-impl Frontend for NodeTransformFrontend {
-    type Input = NodeTransformInput;
-    type Error = LowerError;
-
-    fn lower(&self, input: Self::Input) -> Result<Plan, Self::Error> {
-        if input.columns.is_empty() {
-            return Err(LowerError::NoColumns("node transform"));
-        }
-
-        let source = source_data_read(&input.columns);
-        let rel = node_projection(source, &input.columns);
-        Ok(rel.into_plan())
+pub fn node_transform(input: NodeTransformInput) -> Result<Plan, LowerError> {
+    if input.columns.is_empty() {
+        return Err(LowerError::NoColumns("node transform"));
     }
+
+    let source = source_data_read(&input.columns);
+    let rel = node_projection(source, &input.columns);
+    Ok(rel.into_plan())
 }
 
 fn source_data_read(columns: &[NodeColumn]) -> Rel {
@@ -325,17 +302,10 @@ fn lower_node_column(column: &NodeColumn) -> (Expr, &str) {
 // FK Edge Transform
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub struct FkEdgeTransformFrontend;
-
-impl Frontend for FkEdgeTransformFrontend {
-    type Input = FkEdgeTransformInput;
-    type Error = LowerError;
-
-    fn lower(&self, input: Self::Input) -> Result<Plan, Self::Error> {
-        let source = edge_source_data_read();
-        let rel = build_edge_query(source, &input);
-        Ok(rel.into_plan())
-    }
+pub fn fk_edge_transform(input: FkEdgeTransformInput) -> Result<Plan, LowerError> {
+    let source = edge_source_data_read();
+    let rel = build_edge_query(source, &input);
+    Ok(rel.into_plan())
 }
 
 fn edge_source_data_read() -> Rel {

@@ -5,7 +5,7 @@ use llqm::ir::expr::{self, DataType};
 use llqm::ir::plan::{Plan, Rel};
 use llqm::pipeline::{Frontend, IrPass, IrPhase, Pipeline};
 
-use super::lower::*;
+use super::frontend::*;
 use super::orchestrate::*;
 use super::types::*;
 

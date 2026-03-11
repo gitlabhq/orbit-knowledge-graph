@@ -8,7 +8,7 @@
 //! so consumers can add their own passes (security, check) and choose
 //! a backend before emitting.
 
-use super::lower::{
+use super::frontend::{
     FkEdgeTransformFrontend, IndexerFrontend, NodeTransformFrontend, RawExtractFrontend,
 };
 use super::types::*;
