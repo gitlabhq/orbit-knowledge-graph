@@ -29,6 +29,32 @@ pub struct RedactionNode {
     pub type_column: String,
 }
 
+/// Metadata for an edge relationship in the query, used by formatters to extract
+/// edge columns without scanning column names.
+#[derive(Debug, Clone)]
+pub struct EdgeMeta {
+    /// Column prefix for this edge (e.g. "e0_", "hop_e1_").
+    pub column_prefix: String,
+    /// Optional internal path column for multi-hop relationships.
+    pub path_column: Option<String>,
+    /// Relationship types from the input (e.g. ["AUTHORED"]).
+    pub rel_types: Vec<String>,
+    /// Source node alias (e.g. "u").
+    pub from_alias: String,
+    /// Target node alias (e.g. "p").
+    pub to_alias: String,
+    /// Pre-computed column name for edge type (e.g. "e0_type").
+    pub type_column: String,
+    /// Pre-computed column name for source ID (e.g. "e0_src").
+    pub src_column: String,
+    /// Pre-computed column name for source type (e.g. "e0_src_type").
+    pub src_type_column: String,
+    /// Pre-computed column name for destination ID (e.g. "e0_dst").
+    pub dst_column: String,
+    /// Pre-computed column name for destination type (e.g. "e0_dst_type").
+    pub dst_type_column: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
@@ -37,6 +63,7 @@ pub struct ResultContext {
     /// Covers all entities in the ontology, not just those in the current query,
     /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
     entity_auth: HashMap<String, EntityAuthConfig>,
+    edges: Vec<EdgeMeta>,
 }
 
 impl ResultContext {
@@ -89,6 +116,14 @@ impl ResultContext {
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
+
+    pub fn add_edge(&mut self, edge: EdgeMeta) {
+        self.edges.push(edge);
+    }
+
+    pub fn edges(&self) -> &[EdgeMeta] {
+        &self.edges
+    }
 }
 
 pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
@@ -109,6 +144,34 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
 
     match node {
         Node::Query(q) => enforce_return_columns(q, input, &selectable_nodes, &mut ctx)?,
+    }
+
+    if matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        use crate::constants::EDGE_ALIAS_SUFFIXES;
+
+        for (i, rel) in input.relationships.iter().enumerate() {
+            let prefix = if rel.max_hops > 1 {
+                format!("hop_e{i}_")
+            } else {
+                format!("e{i}_")
+            };
+            let path_column = (rel.max_hops > 1).then(|| format!("{prefix}path_nodes"));
+            ctx.edges.push(EdgeMeta {
+                type_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[1]),
+                src_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[2]),
+                src_type_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[3]),
+                dst_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[4]),
+                dst_type_column: format!("{prefix}{}", EDGE_ALIAS_SUFFIXES[5]),
+                column_prefix: prefix,
+                path_column,
+                rel_types: rel.types.clone(),
+                from_alias: rel.from.clone(),
+                to_alias: rel.to.clone(),
+            });
+        }
     }
 
     Ok(ctx)

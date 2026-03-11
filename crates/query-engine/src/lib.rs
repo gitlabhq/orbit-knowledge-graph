@@ -50,10 +50,10 @@ pub use codegen::{
     CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
 };
 pub use constants::{
-    EDGE_KINDS_COLUMN, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, NEIGHBOR_ID_COLUMN,
-    NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    EDGE_ALIAS_SUFFIXES, EDGE_KINDS_COLUMN, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS,
+    NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
 };
-pub use enforce::{RedactionNode, ResultContext, enforce_return};
+pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
 pub use input::{DynamicColumnMode, EntityAuthConfig};
 pub use input::{Input, QueryType, parse_input};

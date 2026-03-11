@@ -49,3 +49,8 @@ pub const HYDRATION_NODE_ALIAS: &str = "hydrate";
 
 /// Upper bound on rows fetched per entity type during dynamic hydration.
 pub const MAX_DYNAMIC_HYDRATION_RESULTS: usize = 1000;
+
+/// Output alias suffixes for edge columns in traversal queries.
+/// Matches `EDGE_RESERVED_COLUMNS` order from the ontology:
+/// traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind.
+pub const EDGE_ALIAS_SUFFIXES: &[&str] = &["path", "type", "src", "src_type", "dst", "dst_type"];
