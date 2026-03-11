@@ -852,6 +852,67 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
     assert_eq!(g100["name"].as_str().unwrap(), "Public Group");
 }
 
+async fn traversal_shared_target_node(ctx: &TestContext) {
+    seed(ctx).await;
+
+    ctx.execute(
+        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 3000, 'Note'),
+         ('1/100/1000/', 1000, 'Project', 'CONTAINS', 3000, 'Note')",
+    )
+    .await;
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "n", "entity": "Note", "columns": ["note"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "n"},
+                {"type": "CONTAINS", "from": "p", "to": "n"}
+            ],
+            "limit": 50
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert_eq!(value["query_type"], "traversal");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let users = node_ids(nodes, "User");
+    let notes = node_ids(nodes, "Note");
+    let projects = node_ids(nodes, "Project");
+    assert!(users.contains(&1), "alice should be present");
+    assert!(notes.contains(&3000), "note 3000 should be present");
+    assert!(projects.contains(&1000), "project 1000 should be present");
+
+    let alice = find_node(nodes, "User", 1);
+    assert_eq!(alice["username"].as_str().unwrap(), "alice");
+    let note = find_node(nodes, "Note", 3000);
+    assert_eq!(note["note"].as_str().unwrap(), "Normal note");
+    let project = find_node(nodes, "Project", 1000);
+    assert_eq!(project["name"].as_str().unwrap(), "Public Project");
+
+    let edges = value["edges"].as_array().unwrap();
+    assert!(
+        edges
+            .iter()
+            .any(|e| e["from"] == "User" && e["to"] == "Note" && e["type"] == "AUTHORED"),
+        "User→Note AUTHORED edge"
+    );
+    assert!(
+        edges
+            .iter()
+            .any(|e| e["from"] == "Project" && e["to"] == "Note" && e["type"] == "CONTAINS"),
+        "Project→Note CONTAINS edge"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Aggregation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2363,6 +2424,7 @@ async fn graph_formatter_e2e() {
         traversal_variable_length_reaches_depth_2,
         traversal_variable_length_min_hops_skips_shallow,
         traversal_variable_length_with_redaction_at_depth,
+        traversal_shared_target_node,
         // Aggregation — all functions
         aggregation_count_exact,
         aggregation_sum,
