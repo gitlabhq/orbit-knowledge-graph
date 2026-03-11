@@ -107,6 +107,15 @@ pub enum NodeColumn {
     },
 }
 
+impl NodeColumn {
+    pub fn source_name(&self) -> &str {
+        match self {
+            Self::Identity(n) => n,
+            Self::Rename { source, .. } | Self::IntEnum { source, .. } => source,
+        }
+    }
+}
+
 /// Input for a node transform query (`SELECT ... FROM source_data`).
 #[derive(Debug, Clone)]
 pub struct NodeTransformInput {
