@@ -102,6 +102,10 @@
         "delimiter": {
           "type": "string",
           "description": "Delimiter for splitting multi-value columns."
+        },
+        "array_field": {
+          "type": "string",
+          "description": "Struct field name for extracting IDs from Array(Tuple(...)) columns."
         }
       },
       "required": ["as"],
