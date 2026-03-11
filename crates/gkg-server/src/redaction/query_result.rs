@@ -76,6 +76,17 @@ impl QueryResultRow {
         self.columns.get(&node.id_column)?.as_int64().copied()
     }
 
+    pub fn get_pk(&self, node: &RedactionNode) -> Option<i64> {
+        self.columns.get(&node.pk_column)?.as_int64().copied()
+    }
+
+    pub fn get_public_id(&self, node: &RedactionNode) -> Option<i64> {
+        match self.columns.get(&node.pk_column) {
+            Some(value) => value.as_int64().copied(),
+            None => self.get_id(node),
+        }
+    }
+
     pub fn get_type(&self, node: &RedactionNode) -> Option<&str> {
         self.columns
             .get(&node.type_column)?
@@ -142,6 +153,11 @@ impl QueryResult {
     pub fn from_batches(batches: &[RecordBatch], ctx: &ResultContext) -> Self {
         let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
         let is_neighbors = ctx.query_type == Some(QueryType::Neighbors);
+        let traversal_path_columns: Vec<&str> = ctx
+            .edges()
+            .iter()
+            .filter_map(|edge| edge.path_column.as_deref())
+            .collect();
 
         let mut rows = Vec::new();
         for batch in batches {
@@ -163,6 +179,12 @@ impl QueryResult {
                                 .map(|t| NodeRef::new(id, t))
                         });
                     neighbor.into_iter().collect()
+                } else if !traversal_path_columns.is_empty() {
+                    traversal_path_columns
+                        .iter()
+                        .flat_map(|column| ArrowUtils::get_i64_string_pairs(batch, column, row_idx))
+                        .map(|(id, t)| NodeRef::new(id, t))
+                        .collect()
                 } else {
                     Vec::new()
                 };
@@ -526,7 +548,7 @@ mod tests {
         }
 
         #[test]
-        fn get_id_extracts_node_id() {
+        fn get_id_extracts_redaction_auth_id() {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
@@ -534,6 +556,43 @@ mod tests {
 
             assert_eq!(row.get_id(u), Some(1));
             assert_eq!(row.get_id(p), Some(100));
+        }
+
+        #[test]
+        fn get_public_id_falls_back_to_redaction_id_when_pk_is_absent() {
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let row = &result.rows()[0];
+            let u = result.ctx().get("u").unwrap();
+
+            assert_eq!(row.get_pk(u), None);
+            assert_eq!(row.get_public_id(u), Some(1));
+        }
+
+        #[test]
+        fn get_public_id_prefers_pk_for_indirect_auth_entities() {
+            let batch = make_batch(vec![
+                ("_gkg_d_id", Arc::new(Int64Array::from(vec![1000]))),
+                ("_gkg_d_pk", Arc::new(Int64Array::from(vec![5000]))),
+                (
+                    "_gkg_d_type",
+                    Arc::new(StringArray::from(vec!["Definition"])),
+                ),
+            ]);
+
+            let mut ctx = ResultContext::new();
+            ctx.add_node("d", "Definition");
+
+            let result = QueryResult::from_batches(&[batch], &ctx);
+            let row = &result.rows()[0];
+            let d = result.ctx().get("d").unwrap();
+
+            assert_eq!(row.get_id(d), Some(1000));
+            assert_eq!(row.get_pk(d), Some(5000));
+            assert_eq!(row.get_public_id(d), Some(5000));
+
+            let node_ref = row.node_ref(d).unwrap();
+            assert_eq!(node_ref.id, 1000);
+            assert_eq!(node_ref.entity_type, "Definition");
         }
 
         #[test]

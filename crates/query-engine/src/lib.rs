@@ -50,10 +50,11 @@ pub use codegen::{
     CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
 };
 pub use constants::{
-    EDGE_KINDS_COLUMN, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, NEIGHBOR_ID_COLUMN,
-    NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    EDGE_ALIAS_SUFFIXES, EDGE_KINDS_COLUMN, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS,
+    NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
+    RELATIONSHIP_TYPE_COLUMN,
 };
-pub use enforce::{RedactionNode, ResultContext, enforce_return};
+pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
 pub use input::{DynamicColumnMode, EntityAuthConfig};
 pub use input::{Input, QueryType, parse_input};
@@ -375,6 +376,7 @@ mod tests {
         assert!(result.base.sql.contains("_gkg_neighbor_id"));
         assert!(result.base.sql.contains("_gkg_neighbor_type"));
         assert!(result.base.sql.contains("_gkg_relationship_type"));
+        assert!(result.base.sql.contains("_gkg_neighbor_is_outgoing"));
         assert!(result.base.sql.contains("INNER JOIN"));
     }
 
@@ -866,6 +868,46 @@ mod ontology_integration_tests {
         assert!(
             result.base.sql.contains("AS depth"),
             "expected depth column: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("hop_e0.depth AS hop_e0_depth"),
+            "expected projected edge depth column: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("AS start_id"),
+            "expected start_id in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("AS end_id"),
+            "expected end_id in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("AS relationship_kind"),
+            "expected relationship_kind in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("AS source_id"),
+            "expected source_id in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("AS source_kind"),
+            "expected source_kind in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("AS target_id"),
+            "expected target_id in union arms: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("AS target_kind"),
+            "expected target_kind in union arms: {}",
             result.base.sql
         );
     }

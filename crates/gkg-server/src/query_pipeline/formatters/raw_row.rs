@@ -1,44 +1,29 @@
-use ontology::Ontology;
 use query_engine::{
     GKG_COLUMN_PREFIX, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, QueryType,
     RELATIONSHIP_TYPE_COLUMN, ResultContext,
 };
 use serde_json::{Value, json};
 
+use crate::query_pipeline::QueryPipelineContext;
 use crate::redaction::{NodeRef, QueryResult, QueryResultRow};
-use gkg_utils::arrow::ColumnValue;
 
-pub trait ResultFormatter: Send + Sync {
-    fn format(
-        &self,
-        result: &QueryResult,
-        result_context: &ResultContext,
-        ontology: &Ontology,
-    ) -> Value;
-}
+use super::{ResultFormatter, column_value_to_json};
 
 #[derive(Clone, Copy)]
 pub struct RawRowFormatter;
 
 impl ResultFormatter for RawRowFormatter {
-    fn format(&self, result: &QueryResult, ctx: &ResultContext, _: &Ontology) -> Value {
+    fn format(
+        &self,
+        result: &QueryResult,
+        result_context: &ResultContext,
+        _pipeline_ctx: &QueryPipelineContext,
+    ) -> Value {
         let rows: Vec<Value> = result
             .authorized_rows()
-            .map(|row| row_to_json(row, ctx))
+            .map(|row| row_to_json(row, result_context))
             .collect();
         Value::Array(rows)
-    }
-}
-
-/// Formats query results for the context engine using GOON format.
-/// TODO: Implement GOON format per https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205
-#[derive(Clone, Copy)]
-pub struct ContextEngineFormatter;
-
-impl ResultFormatter for ContextEngineFormatter {
-    fn format(&self, result: &QueryResult, ctx: &ResultContext, ontology: &Ontology) -> Value {
-        // Placeholder: delegates to raw format until GOON is implemented
-        RawRowFormatter.format(result, ctx, ontology)
     }
 }
 
@@ -57,7 +42,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
     }
 
     for node in ctx.nodes() {
-        if let Some(id) = row.get_id(node) {
+        if let Some(id) = row.get_public_id(node) {
             obj.insert(format!("{}_id", node.alias), json!(id));
         }
         if let Some(entity_type) = row.get_type(node) {
@@ -102,14 +87,6 @@ fn node_ref_to_json(node: &NodeRef) -> Value {
     Value::Object(obj)
 }
 
-fn column_value_to_json(value: &ColumnValue) -> Value {
-    match value {
-        ColumnValue::Int64(v) => json!(v),
-        ColumnValue::String(v) => json!(v),
-        ColumnValue::Null => Value::Null,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +94,7 @@ mod tests {
     use arrow::buffer::OffsetBuffer;
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
+    use gkg_utils::arrow::ColumnValue;
     use std::sync::Arc;
 
     fn make_test_result() -> (QueryResult, ResultContext) {
@@ -228,6 +206,36 @@ mod tests {
         let obj = json.as_object().unwrap();
 
         assert_eq!(obj.get("p_id").unwrap().as_i64().unwrap(), 101);
+    }
+
+    #[test]
+    fn row_to_json_uses_public_id_when_pk_is_present() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("_gkg_d_id", DataType::Int64, false),
+            Field::new("_gkg_d_pk", DataType::Int64, false),
+            Field::new("_gkg_d_type", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(vec![9001])),
+                Arc::new(Int64Array::from(vec![42])),
+                Arc::new(StringArray::from(vec!["Definition"])),
+            ],
+        )
+        .unwrap();
+
+        let mut ctx = ResultContext::new();
+        ctx.add_node("d", "Definition");
+
+        let result = QueryResult::from_batches(&[batch], &ctx);
+        let row = &result.rows()[0];
+
+        let json = row_to_json(row, &ctx);
+        let obj = json.as_object().unwrap();
+
+        assert_eq!(obj.get("d_id").unwrap().as_i64().unwrap(), 42);
+        assert_eq!(obj.get("d_type").unwrap().as_str().unwrap(), "Definition");
     }
 
     #[test]

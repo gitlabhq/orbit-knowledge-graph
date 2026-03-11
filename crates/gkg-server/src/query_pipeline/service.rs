@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use super::error::PipelineError;
-use super::formatter::ResultFormatter;
+use super::formatters::ResultFormatter;
 use super::metrics::PipelineObserver;
 use super::stages::{
     AuthorizationStage, CompilationStage, ExecutionStage, ExtractionStage, FormattingStage,

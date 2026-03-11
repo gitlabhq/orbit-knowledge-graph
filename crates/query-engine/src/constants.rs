@@ -22,6 +22,7 @@ pub const EDGE_KINDS_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "edge_kinds");
 pub const NEIGHBOR_ID_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_id");
 pub const NEIGHBOR_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_type");
 pub const RELATIONSHIP_TYPE_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "relationship_type");
+pub const NEIGHBOR_IS_OUTGOING_COLUMN: &str = concatcp!(GKG_COLUMN_PREFIX, "neighbor_is_outgoing");
 
 /// Tables that should NOT have traversal path security filters applied.
 /// These are entities whose visibility is determined through relationships
@@ -49,3 +50,8 @@ pub const HYDRATION_NODE_ALIAS: &str = "hydrate";
 
 /// Upper bound on rows fetched per entity type during dynamic hydration.
 pub const MAX_DYNAMIC_HYDRATION_RESULTS: usize = 1000;
+
+/// Output alias suffixes for edge columns in traversal queries.
+/// Matches `EDGE_RESERVED_COLUMNS` order from the ontology:
+/// traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind.
+pub const EDGE_ALIAS_SUFFIXES: &[&str] = &["path", "type", "src", "src_type", "dst", "dst_type"];

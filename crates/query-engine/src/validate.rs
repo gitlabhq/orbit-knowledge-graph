@@ -9,7 +9,7 @@
 use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
-use crate::input::{FilterOp, Input, InputFilter, QueryType};
+use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
 use ontology::{DataType, Ontology};
 
 pub(crate) const BASE_SCHEMA_JSON: &str = include_str!("../../ontology/schema.json");
@@ -330,6 +330,12 @@ impl<'a> Validator<'a> {
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
         for (i, agg) in input.aggregations.iter().enumerate() {
+            if agg.function == AggFunction::Collect {
+                return Err(QueryError::Validation(format!(
+                    "aggregation[{i}] function \"collect\" is not supported"
+                )));
+            }
+
             if let Some(target) = &agg.target
                 && !node_ids.contains(&target.as_str())
             {
@@ -361,6 +367,25 @@ impl<'a> Validator<'a> {
                         i, e
                     ))
                 })?;
+
+                if matches!(agg.function, AggFunction::Sum | AggFunction::Avg) {
+                    let data_type =
+                        self.ontology.get_field_type(entity, prop).ok_or_else(|| {
+                            QueryError::AllowlistRejected(format!(
+                                "invalid property in aggregation[{}]: {}.{}",
+                                i, entity, prop
+                            ))
+                        })?;
+
+                    if !matches!(data_type, DataType::Int | DataType::Float) {
+                        return Err(QueryError::Validation(format!(
+                            "aggregation[{i}] function \"{}\" requires a numeric property, got {}.{} ({data_type})",
+                            agg.function.as_sql(),
+                            entity,
+                            prop
+                        )));
+                    }
+                }
             }
         }
 
@@ -792,6 +817,73 @@ mod tests {
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project"}],
                 "aggregations": [{"function": "count", "target": "p", "alias": "total"}]
+            }"#,
+        );
+    }
+
+    #[test]
+    fn rejects_collect_aggregation() {
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "aggregations": [{
+                    "function": "collect",
+                    "target": "u",
+                    "property": "username",
+                    "alias": "usernames"
+                }]
+            }"#,
+            "function \"collect\" is not supported",
+        );
+    }
+
+    #[test]
+    fn rejects_sum_on_string_property() {
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "aggregations": [{
+                    "function": "sum",
+                    "target": "u",
+                    "property": "username",
+                    "alias": "username_sum"
+                }]
+            }"#,
+            "requires a numeric property",
+        );
+    }
+
+    #[test]
+    fn rejects_avg_on_string_property() {
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "aggregations": [{
+                    "function": "avg",
+                    "target": "u",
+                    "property": "username",
+                    "alias": "username_avg"
+                }]
+            }"#,
+            "requires a numeric property",
+        );
+    }
+
+    #[test]
+    fn accepts_min_on_string_property() {
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "aggregations": [{
+                    "function": "min",
+                    "target": "u",
+                    "property": "username",
+                    "alias": "first_username"
+                }]
             }"#,
         );
     }
