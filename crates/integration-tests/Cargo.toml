@@ -1,0 +1,18 @@
+[package]
+name = "integration-tests"
+version.workspace = true
+edition = "2024"
+publish = false
+
+# No src/lib.rs — this crate only contains integration tests.
+
+[dev-dependencies]
+clickhouse-client = { path = "../clickhouse-client" }
+gkg-server = { path = "../gkg-server" }
+integration-testkit = { path = "../integration-testkit" }
+ontology = { path = "../ontology" }
+query-engine = { path = "../query-engine" }
+arrow = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
