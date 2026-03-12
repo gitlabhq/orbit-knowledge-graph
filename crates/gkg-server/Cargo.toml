@@ -63,19 +63,10 @@ tonic-prost-build = { workspace = true }
 prost-build = { workspace = true }
 
 [dev-dependencies]
-async-nats = { workspace = true }
-tokio = { workspace = true }
-testcontainers = { workspace = true }
-testcontainers-modules = { workspace = true }
-integration-testkit = { path = "../integration-testkit" }
-indexer = { path = "../indexer", features = ["testkit"] }
-clickhouse-client = { path = "../clickhouse-client", features = ["testkit"] }
+jsonschema = { workspace = true }
 query-engine = { path = "../query-engine" }
-regex = { workspace = true }
 tempfile = { workspace = true }
-parser-core = { workspace = true }
-internment = { workspace = true }
-smallvec = { workspace = true }
+tokio = { workspace = true }
 
 [lints.rust]
 # workspace uses `forbid`, downgraded to `deny` so tests can manipulate env vars

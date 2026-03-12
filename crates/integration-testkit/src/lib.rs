@@ -1,6 +1,7 @@
 mod assertions;
 mod context;
 mod extract;
+pub mod mock_redaction;
 mod seed;
 
 pub use assertions::{
