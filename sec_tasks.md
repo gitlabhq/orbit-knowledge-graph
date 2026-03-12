@@ -1217,3 +1217,184 @@ if matches!(op, FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith) 
 | Restriction analysis | **FAIL** | No minimum pattern length. No per-column operator restriction. No sensitivity metadata in ontology. |
 | Rate limiting against probing | **FAIL** | Not implemented. Metric defined but unincremented. No concurrency gate. |
 | Ontology metadata for LIKE restriction | **IMPROVEMENT** | Schema extension path identified. `like_allowed: bool` on `propertyDefinition` + validation check. |
+
+---
+
+# TQ10: Hydration AuthZ Boundary — Security Task Results
+
+## Task 1: Verify hydration queries include traversal_path filters
+
+**Status:** PASS — hydration queries go through full `compile()` including `apply_security_context`
+
+Both dynamic and static hydration queries are compiled via `compile_and_fetch()` (`hydration.rs:82-100`), which calls the full `compile()` pipeline (`lib.rs:91-113`):
+
+```
+validated_input() → lower() → enforce_return() → apply_security_context() → check_ast() → codegen()
+```
+
+At `hydration.rs:87-88`:
+
+```rust
+let compiled = compile(&query_json, &ctx.ontology, ctx.security_context()?)
+    .map_err(|e| PipelineError::Compile(e.to_string()))?;
+```
+
+The `SecurityContext` is the same one established for the original request, passed through `ctx.security_context()`. This means:
+
+1. `apply_security_context()` (`security.rs:73-82`) injects `startsWith(traversal_path, ...)` filters into the hydration query AST
+2. `check_ast()` (`check.rs:19-28`) verifies post-compilation that every non-skipped `gl_*` alias has a valid security predicate
+3. The hydration query is a `search` type (`hydration.rs:194`) targeting a single `gl_*` table, so exactly one alias gets the traversal_path filter
+
+**Exception:** `gl_user` is in `SKIP_SECURITY_FILTER_TABLES` (`constants.rs:30`), so User hydration queries skip traversal_path filters. This is by design — User visibility is determined via Layer 3 redaction (Rails `read_user` ability), not path hierarchy.
+
+### References
+
+- `compile_and_fetch()` calls full `compile()`: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:87-88`
+- `compile()` pipeline with `apply_security_context`: `crates/query-engine/src/lib.rs:91-113`
+- `apply_security_context()`: `crates/query-engine/src/security.rs:73-82`
+- `check_ast()` defense-in-depth: `crates/query-engine/src/check.rs:19-28`
+- Same security context used: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:87`
+- User skip list: `crates/query-engine/src/constants.rs:27-30`
+
+---
+
+## Task 2: Unknown entity types in _gkg_neighbor_type — graceful failure
+
+**Status:** PASS — fail-closed at two layers
+
+When `build_dynamic_search_query()` encounters an entity type string from the `_gkg_neighbor_type` column, it performs an ontology lookup at `hydration.rs:175-179`:
+
+```rust
+let node = ctx.ontology.get_node(entity_type).ok_or_else(|| {
+    PipelineError::Execution(format!(
+        "entity type not found in ontology during dynamic hydration: {entity_type}"
+    ))
+})?;
+```
+
+**Layer 1 — ontology lookup failure:** If the entity type is not in the ontology, `build_dynamic_search_query` returns `PipelineError::Execution`. This propagates via `?` through `hydrate_dynamic()` (`hydration.rs:71`) via the `collect::<Result<Vec<_>, PipelineError>>()?`, failing the entire hydration stage.
+
+**Layer 2 — compile() validation:** Even if the ontology lookup somehow passed, the generated JSON goes through `compile()` which runs `validated_input()` (`lib.rs:96`). The ontology-derived JSON schema validates entity names against an enum of allowed values. An unknown entity would be rejected by `check_json()` or `check_ontology()`.
+
+**Layer 3 — redaction fail-closed:** At the redaction level (`query_result.rs:374-388`), if `get_entity_auth()` returns `None` for an unknown entity type, `is_authorized()` returns `false` — the row is denied. This is correct fail-closed behavior.
+
+**Finding:** The error at Layer 1 exposes the unknown entity type string in the error message sent to the client (`PipelineError::Execution` propagates verbatim — same issue as TQ6). This is a minor information leakage concern but not a security bypass.
+
+### References
+
+- Ontology lookup with fail-closed: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:175-179`
+- Error propagation through `hydrate_dynamic()`: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:68-71`
+- `compile()` validation layer: `crates/query-engine/src/lib.rs:96`
+- `is_authorized()` returns false for unknown entity: `crates/gkg-server/src/redaction/query_result.rs:374-381`
+
+---
+
+## Task 3: MAX_DYNAMIC_HYDRATION_RESULTS enforcement
+
+**Status:** PASS with caveat — enforced server-side, but tension with MAX_NODE_IDS
+
+`MAX_DYNAMIC_HYDRATION_RESULTS` is defined as `1000` at `constants.rs:52` and applied at `hydration.rs:201`:
+
+```rust
+"limit": ids.len().min(MAX_DYNAMIC_HYDRATION_RESULTS)
+```
+
+This is baked into the hydration query JSON **before** compilation and ClickHouse execution. The user has no control over this value. The limit is per entity type — if dynamic hydration discovers N entity types, up to N × 1000 rows total could be fetched. N is bounded by the ontology (~25 entity types).
+
+**Caveat — MAX_NODE_IDS tension:** The hydration query sets `"node_ids": ids` where `ids` are deduped IDs from base query results. The `node_ids` array goes through `compile()` → `validated_input()` → `check_depth()` which enforces `MAX_NODE_IDS = 500` (`validate.rs:159,191-197`). This means:
+
+- If deduped IDs for one entity type exceed 500, the hydration `compile()` call **fails** with `LimitExceeded`
+- `MAX_DYNAMIC_HYDRATION_RESULTS = 1000` can never actually be reached because `MAX_NODE_IDS = 500` is hit first
+- This is a fail-hard, not fail-graceful scenario — the entire pipeline errors instead of returning partial results
+
+The effective cap is min(500, 1000) = 500 per entity type. The 1000 cap is dead in practice.
+
+### References
+
+- `MAX_DYNAMIC_HYDRATION_RESULTS = 1000`: `crates/query-engine/src/constants.rs:52`
+- Limit applied in query JSON: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:201`
+- `MAX_NODE_IDS = 500`: `crates/query-engine/src/validate.rs:159`
+- `node_ids` length check: `crates/query-engine/src/validate.rs:191-197`
+- IDs deduped before query build: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:146-149`
+
+---
+
+## Task 4: HydrationPlan::Static templates cannot be manipulated by query input
+
+**Status:** PASS — static hydration is currently dead code; if enabled, templates go through full compile()
+
+`build_hydration_plan()` (`lib.rs:122-132`) returns `HydrationPlan::None` for Traversal and Search (the only query types that would use static hydration). The TODO at lines 126-129 explains that static hydration requires a "slim SELECT" refactor in `lower.rs` that hasn't landed yet.
+
+**If static hydration were enabled**, the security boundary is:
+
+1. `HydrationTemplate` (`codegen.rs:46-55`) contains `entity_type`, `node_alias`, and `query_json` — all derived from validated `InputNode` definitions at compile time
+2. `template.with_ids(&ids)` (`codegen.rs:59-64`) injects `node_ids` into the pre-built JSON template
+3. The IDs come from `collect_static_ids()` (`hydration.rs:103-112`) which reads `_gkg_{alias}_id` columns from **`result.authorized_rows()` only** (line 106) — redacted row IDs are never included
+4. The final JSON goes through full `compile()` (`hydration.rs:87`) including schema validation, ontology validation, and security context injection
+5. Entity types are validated against the ontology; column names are validated against ontology fields; node_ids are `Vec<i64>` extracted from Arrow columns (cannot contain arbitrary strings)
+
+No user input can influence the static template SQL beyond the entity types and columns already validated in the original query compilation.
+
+### References
+
+- `build_hydration_plan()` returns None for Traversal/Search: `crates/query-engine/src/lib.rs:126-130`
+- `HydrationTemplate` struct: `crates/query-engine/src/codegen.rs:46-55`
+- `with_ids()` injects node_ids: `crates/query-engine/src/codegen.rs:59-64`
+- `collect_static_ids()` uses `authorized_rows()`: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:103-112`
+- `hydrate_static()` calls `compile_and_fetch()`: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:30-57`
+- `compile_and_fetch()` calls full `compile()`: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:87-88`
+
+---
+
+## Task 5: Hydration of redacted rows is impossible
+
+**Status:** PASS — redaction occurs before hydration; all hydration paths filter to authorized_rows() only
+
+The pipeline execution order is defined at `service.rs:58-75`:
+
+```
+SecurityStage → CompilationStage → ExecutionStage → ExtractionStage →
+AuthorizationStage → RedactionStage → HydrationStage → FormattingStage
+```
+
+**RedactionStage** (line 69) runs **before** HydrationStage (line 71). `apply_authorizations()` (`query_result.rs:318-359`) sets `row.authorized = false` on denied rows.
+
+**Every hydration code path filters on `authorized_rows()`:**
+
+| Code path | Filter method | Location |
+|-----------|---------------|----------|
+| Static: collect IDs | `result.authorized_rows()` | `hydration.rs:106` |
+| Static: merge properties | `result.authorized_rows_mut()` | `hydration.rs:120` |
+| Dynamic: extract refs | `result.authorized_rows()` | `hydration.rs:138` |
+| Dynamic: merge properties | `result.authorized_rows_mut()` | `hydration.rs:156` |
+
+`authorized_rows()` is defined at `query_result.rs:361-362` as `self.rows.iter().filter(|r| r.authorized)`. `authorized_rows_mut()` at `query_result.rs:365-366` is the mutable equivalent.
+
+**Result:** Redacted row IDs are never sent for hydration fetch. Redacted rows never have properties merged. The formatter (`formatting.rs`) also iterates only `authorized_rows()`. There is no code path where hydrated data for a redacted row can reach the client.
+
+**Defense-in-depth:** Even if a redacted row's ID somehow entered a hydration query, the hydration query goes through `compile()` with the same `SecurityContext`, so traversal_path filters would scope results to the caller's namespace. And the hydration results are merged by ID lookup into `authorized_rows_mut()` — a redacted row wouldn't be in that iterator to receive the merge.
+
+### References
+
+- Pipeline order (redaction before hydration): `crates/gkg-server/src/query_pipeline/service.rs:58-75`
+- `apply_authorizations()` sets `row.authorized = false`: `crates/gkg-server/src/redaction/query_result.rs:318-359`
+- `authorized_rows()` filter: `crates/gkg-server/src/redaction/query_result.rs:361-362`
+- `authorized_rows_mut()` filter: `crates/gkg-server/src/redaction/query_result.rs:365-366`
+- Static ID collection from authorized only: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:106`
+- Static merge into authorized only: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:120`
+- Dynamic ref extraction from authorized only: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:138`
+- Dynamic merge into authorized only: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:156`
+
+---
+
+## Summary
+
+### TQ10: Hydration AuthZ Boundary
+
+| Task | Verdict | Open Items |
+|------|---------|------------|
+| Hydration queries include traversal_path filters | **PASS** | Full `compile()` path including `apply_security_context` and `check_ast`. `gl_user` excluded by design. |
+| Unknown entity types in _gkg_neighbor_type | **PASS** | Fail-closed at ontology lookup + compile validation + redaction. Error message leaks entity string (minor, same class as TQ6). |
+| MAX_DYNAMIC_HYDRATION_RESULTS enforcement | **PASS** | Enforced server-side before execution. Effective cap is 500 (not 1000) due to `MAX_NODE_IDS` validation in `compile()`. >500 IDs fails hard, not graceful. |
+| Static templates cannot be manipulated | **PASS** | Dead code currently. If enabled: templates from validated input, IDs from authorized rows only, full `compile()` on hydration queries. |
+| Hydration of redacted rows impossible | **PASS** | Redaction before hydration. All 4 hydration code paths (static collect/merge, dynamic extract/merge) filter on `authorized_rows()`. |
