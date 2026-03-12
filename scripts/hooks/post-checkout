@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# Fix lefthook in git worktrees.
+#
+# In a worktree, .git is a file (not a directory), which causes
+# `git rev-parse --path-format=absolute --git-path hooks` to fail.
+# Setting core.hooksPath to the shared hooks directory resolves this.
+
+git_dir=$(git rev-parse --git-dir 2>/dev/null)
+common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+
+if [ -n "$git_dir" ] && [ -n "$common_dir" ] && [ "$git_dir" != "$common_dir" ]; then
+  git config core.hooksPath "$common_dir/hooks"
+fi
