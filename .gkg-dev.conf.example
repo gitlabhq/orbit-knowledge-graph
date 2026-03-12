@@ -1,0 +1,55 @@
+# ============================================================================
+# .gkg-dev.conf — User-specific settings for scripts/gkg-dev.sh
+# ============================================================================
+#
+# Copy this file to .gkg-dev.conf and uncomment/edit values as needed.
+# This file is gitignored — your settings won't be committed.
+#
+# This file is sourced as bash, so use KEY=value syntax (no spaces around =).
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# GDK_ROOT — Path to your GitLab Development Kit checkout
+# ---------------------------------------------------------------------------
+# GDK provides the upstream services GKG depends on: PostgreSQL, NATS,
+# ClickHouse, Gitaly, and Rails. It must be configured with:
+#   gdk config set nats.enabled true
+#   gdk config set siphon.enabled true
+#   gdk config set clickhouse.enabled true
+#   gdk reconfigure
+# See docs/dev/local-development.md for full setup instructions.
+#
+# GDK_ROOT="$HOME/gdk"
+
+# ---------------------------------------------------------------------------
+# K8S_RUNTIME — Kubernetes runtime to use
+# ---------------------------------------------------------------------------
+# Options: "colima", "minikube", "docker-desktop", "none", or "auto"
+#   auto           — colima on macOS, minikube on Linux (default)
+#   colima         — Colima with K8s (recommended for macOS)
+#   minikube       — minikube (recommended for Linux)
+#   docker-desktop — Docker Desktop with K8s enabled
+#   none           — you manage the K8s cluster yourself
+#
+# K8S_RUNTIME="auto"
+
+# ---------------------------------------------------------------------------
+# Colima resources (only used when K8S_RUNTIME is colima)
+# ---------------------------------------------------------------------------
+# COLIMA_CPUS="4"
+# COLIMA_MEMORY="12"
+
+# ---------------------------------------------------------------------------
+# minikube resources (only used when K8S_RUNTIME is minikube)
+# ---------------------------------------------------------------------------
+# MINIKUBE_CPUS="4"
+# MINIKUBE_MEMORY="12288"
+
+# ---------------------------------------------------------------------------
+# TILT_STREAM — Whether tilt streams logs to the terminal
+# ---------------------------------------------------------------------------
+# When true (default), `gkg-dev.sh start` will stream Tilt logs to stdout.
+# The Tilt UI is always available at http://localhost:10350 regardless.
+# Set to false to run Tilt in the background.
+#
+# TILT_STREAM="true"
