@@ -150,17 +150,17 @@ impl PushEventHandler {
 
         let project_id = event.project_id;
 
-        let repository = self
+        let project_info = self
             .repository_service
-            .repository_info(project_id)
+            .project_info(project_id)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to fetch repository info: {e}")))
+            .map_err(|e| HandlerError::Processing(format!("failed to fetch project info: {e}")))
             .record_error_stage(&self.metrics, "repository_fetch")?;
 
-        let default_branch = repository
+        let default_branch = project_info
             .default_branch
             .strip_prefix("refs/heads/")
-            .unwrap_or(&repository.default_branch);
+            .unwrap_or(&project_info.default_branch);
 
         if branch != default_branch {
             debug!(
@@ -196,7 +196,7 @@ impl PushEventHandler {
         );
 
         let result = self
-            .index_with_lock(context, event, project_id, &branch, &project, &repository)
+            .index_with_lock(context, event, project_id, &branch, &project)
             .await;
 
         let outcome = if result.is_ok() { "indexed" } else { "error" };
@@ -215,7 +215,6 @@ impl PushEventHandler {
         project_id: i64,
         branch: &str,
         project: &ProjectInfo,
-        repository: &gitlab_client::RepositoryInfo,
     ) -> Result<(), HandlerError> {
         if !self.try_acquire_lock(context, project_id, branch).await? {
             debug!(
@@ -238,7 +237,6 @@ impl PushEventHandler {
                     traversal_path: project.traversal_path.clone(),
                     event_id: event.event_id,
                     commit_sha: event.revision_after.clone(),
-                    repository: repository.clone(),
                 },
             )
             .await;

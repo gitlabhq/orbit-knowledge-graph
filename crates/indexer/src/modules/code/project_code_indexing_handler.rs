@@ -107,14 +107,14 @@ impl ProjectCodeIndexingHandler {
             return Ok(());
         };
 
-        let repository = self
+        let project_info = self
             .repository_service
-            .repository_info(project_id)
+            .project_info(project_id)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to fetch repository info: {e}")))
+            .map_err(|e| HandlerError::Processing(format!("failed to fetch project info: {e}")))
             .record_error_stage(metrics, "repository_fetch")?;
 
-        let default_branch = &repository.default_branch;
+        let default_branch = &project_info.default_branch;
 
         let Some(push_event) = self
             .push_event_store
@@ -168,7 +168,6 @@ impl ProjectCodeIndexingHandler {
                     traversal_path: project.traversal_path.clone(),
                     event_id: push_event.event_id,
                     commit_sha: push_event.commit_sha.clone(),
-                    repository,
                 },
             )
             .await;

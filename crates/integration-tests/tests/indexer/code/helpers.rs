@@ -1,17 +1,19 @@
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
+use std::io::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use gitaly_client::{GitalyClient, GitalyError, GitalyRepositoryConfig, RepositorySource};
-use gitlab_client::{GitalyConnectionInfo, RepositoryInfo};
+use flate2::Compression;
+use flate2::write::GzEncoder;
+use gitaly_client::{GitalyClient, GitalyRepositoryConfig, RepositorySource};
+use gitlab_client::ProjectInfo;
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseProjectStore, ClickHousePushEventStore,
     ClickHouseStaleDataCleaner, CodeIndexingPipeline, ProjectCodeIndexingHandler,
     ProjectCodeIndexingHandlerConfig, PushEventHandler, PushEventHandlerConfig, RepositoryService,
-    config::CodeTableNames, metrics::CodeMetrics,
+    RepositoryServiceError, config::CodeTableNames, metrics::CodeMetrics,
 };
 use indexer::testkit::{MockLockService, MockNatsServices};
 use integration_testkit::TestContext;
@@ -102,48 +104,68 @@ struct DirectGitalyRepositoryService {
 
 #[async_trait]
 impl RepositoryService for DirectGitalyRepositoryService {
-    async fn repository_info(&self, project_id: i64) -> Result<RepositoryInfo, GitalyError> {
+    async fn project_info(&self, project_id: i64) -> Result<ProjectInfo, RepositoryServiceError> {
         let config = GitalyRepositoryConfig {
             address: self.address.clone(),
             storage: self.storage.clone(),
             relative_path: hashed_repo_path(project_id),
             token: self.token.clone(),
         };
-        let client = GitalyClient::connect(config).await?;
-        let raw_branch = client.find_default_branch_name().await?.ok_or_else(|| {
-            GitalyError::Config(format!("no default branch for project {project_id}"))
-        })?;
+        let client = GitalyClient::connect(config)
+            .await
+            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
+        let raw_branch = client
+            .find_default_branch_name()
+            .await
+            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))?
+            .ok_or_else(|| {
+                RepositoryServiceError::Archive(format!(
+                    "no default branch for project {project_id}"
+                ))
+            })?;
         let default_branch = raw_branch
             .strip_prefix("refs/heads/")
             .unwrap_or(&raw_branch)
             .to_string();
 
-        Ok(RepositoryInfo {
+        Ok(ProjectInfo {
             project_id,
             default_branch,
-            gitaly_connection_info: GitalyConnectionInfo {
-                address: self.address.clone(),
-                token: self.token.clone(),
-                storage: self.storage.clone(),
-                path: hashed_repo_path(project_id),
-            },
         })
     }
 
-    async fn fetch_archive(
+    async fn download_archive(
         &self,
-        repository: &RepositoryInfo,
-        target_dir: &Path,
-        commit_id: &str,
-    ) -> Result<PathBuf, GitalyError> {
+        project_id: i64,
+        ref_name: &str,
+    ) -> Result<Vec<u8>, RepositoryServiceError> {
+        let temp_dir =
+            tempfile::tempdir().map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
         let config = GitalyRepositoryConfig {
-            address: repository.gitaly_connection_info.address.clone(),
-            storage: repository.gitaly_connection_info.storage.clone(),
-            relative_path: repository.gitaly_connection_info.path.clone(),
-            token: repository.gitaly_connection_info.token.clone(),
+            address: self.address.clone(),
+            storage: self.storage.clone(),
+            relative_path: hashed_repo_path(project_id),
+            token: self.token.clone(),
         };
-        let client = GitalyClient::connect(config).await?;
-        client.fetch_archive(target_dir, Some(commit_id)).await
+        let client =
+            GitalyClient::connect(config)
+                .await
+                .map_err(|e: gitaly_client::GitalyError| {
+                    RepositoryServiceError::Archive(e.to_string())
+                })?;
+        let tar_path = client
+            .fetch_archive(temp_dir.path(), Some(ref_name))
+            .await
+            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
+        let tar_bytes =
+            std::fs::read(&tar_path).map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder
+            .write_all(&tar_bytes)
+            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
+        encoder
+            .finish()
+            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))
     }
 }
 

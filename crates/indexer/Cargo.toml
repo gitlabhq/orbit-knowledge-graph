@@ -19,8 +19,8 @@ clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
 datafusion = { workspace = true }
+flate2 = { workspace = true }
 futures = { workspace = true }
-gitaly-client = { path = "../gitaly-client" }
 gitlab-client = { workspace = true }
 moka = { workspace = true }
 ontology = { path = "../ontology" }
@@ -43,6 +43,7 @@ axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
+gitaly-client = { path = "../gitaly-client" }
 sha2 = { workspace = true }
 internment = { workspace = true }
 parser-core = { workspace = true }

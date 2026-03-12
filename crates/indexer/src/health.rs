@@ -58,7 +58,7 @@ async fn ready(State(state): State<HealthState>) -> impl IntoResponse {
     .is_ok_and(|r| r.is_ok());
 
     let gitlab_healthy = match &state.gitlab_client {
-        Some(client) => timeout(HEALTH_CHECK_TIMEOUT, client.repository_info(1))
+        Some(client) => timeout(HEALTH_CHECK_TIMEOUT, client.project_info(1))
             .await
             .is_ok_and(|r| {
                 matches!(

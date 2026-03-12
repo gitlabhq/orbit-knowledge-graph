@@ -99,7 +99,7 @@ fn build_gitlab_client(base_url: &str) -> GitlabClient {
 
 async fn start_mock_gitlab(status: StatusCode) -> SocketAddr {
     let app = Router::new().route(
-        "/api/v4/internal/knowledge_graph/{id}/repository_info",
+        "/api/v4/internal/orbit/project/{id}/info",
         get(move || async move { status }),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

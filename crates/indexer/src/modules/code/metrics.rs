@@ -40,7 +40,7 @@ impl CodeMetrics {
         let repository_fetch_duration = meter
             .f64_histogram("indexer.code.repository.fetch.duration")
             .with_unit("s")
-            .with_description("Duration of fetching a repository archive from Gitaly")
+            .with_description("Duration of downloading a repository archive")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
