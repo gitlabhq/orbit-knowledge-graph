@@ -1662,3 +1662,210 @@ Each request is spawned via `tokio::spawn` (`grpc/service.rs:119`), providing ta
 | result_id mismatch handling | **PASS** | UUID v4 per request. Strict equality check. Mismatch → query abort. No integration test for live mismatch. |
 | mTLS on authorization gRPC channel | **FAIL** | No TLS at application layer. `TonicServer::builder()` with no `ServerTlsConfig`. Relies on infrastructure-level encryption. |
 | Concurrent requests don't share state | **PASS** | Per-request stream, channel, context, pipeline. Stateless `RedactionService`. `tokio::spawn` isolation. |
+
+---
+
+# TQ12: Pipeline Stage Bypass — Security Task Results
+
+## Task 1: ctx.security_context() returns Err if called before SecurityStage
+
+**Status:** PASS — runtime guard via Option::None
+
+`QueryPipelineContext` is initialized with `security_context: None` at `service.rs:48`. The accessor at `types.rs:39-43`:
+
+```rust
+pub fn security_context(&self) -> Result<&SecurityContext, PipelineError> {
+    self.security_context.as_ref().ok_or_else(|| {
+        PipelineError::Security(SecurityError("security context not yet available".into()))
+    })
+}
+```
+
+If `SecurityStage` has not run, `security_context` remains `None` and any caller gets `Err(PipelineError::Security(...))`. `CompilationStage` calls `ctx.security_context()?` at `compilation.rs:29` — it will fail if SecurityStage was skipped.
+
+`SecurityStage` sets the field at `security.rs:43`: `ctx.security_context = Some(security_context)`.
+
+**Note:** The `security_context` field is `pub` on the struct (`types.rs:29`), so any code with `&mut QueryPipelineContext` could set it directly, bypassing `SecurityStage`. However, grep confirms only `SecurityStage` writes to this field — no other code sets `ctx.security_context =`.
+
+### References
+
+- Context initialized with None: `crates/gkg-server/src/query_pipeline/service.rs:44-49`
+- `security_context()` accessor returns Err on None: `crates/gkg-server/src/query_pipeline/types.rs:39-43`
+- SecurityStage sets the field: `crates/gkg-server/src/query_pipeline/stages/security.rs:43`
+- CompilationStage calls `security_context()?`: `crates/gkg-server/src/query_pipeline/stages/compilation.rs:29`
+- Field is `pub`: `crates/gkg-server/src/query_pipeline/types.rs:29`
+
+---
+
+## Task 2: ctx.compiled() returns Err if called before CompilationStage
+
+**Status:** PASS — runtime guard via Option::None
+
+`QueryPipelineContext` is initialized with `compiled: None` at `service.rs:45`. The accessor at `types.rs:33-37`:
+
+```rust
+pub fn compiled(&self) -> Result<&Arc<CompiledQueryContext>, PipelineError> {
+    self.compiled.as_ref().ok_or_else(|| {
+        PipelineError::Compile("compiled query context not yet available".into())
+    })
+}
+```
+
+Consumers that call `ctx.compiled()?`:
+- `ExecutionStage` at `execution.rs:27` — reads `compiled.base.sql` and `compiled.base.params`
+- `HydrationStage` at `hydration.rs:174,257` — reads `compiled.input` and `compiled.hydration`
+- `FormattingStage` at `formatting.rs:38` — reads `compiled.base.sql` for `raw_query_strings`
+
+All will fail with `PipelineError::Compile` if CompilationStage has not run.
+
+`CompilationStage` sets the field at `compilation.rs:40`: `ctx.compiled = Some(Arc::new(compiled))`.
+
+**Same `pub` note as Task 1:** The `compiled` field is `pub` (`types.rs:26`), but only `CompilationStage` writes to it.
+
+### References
+
+- Context initialized with None: `crates/gkg-server/src/query_pipeline/service.rs:45`
+- `compiled()` accessor returns Err on None: `crates/gkg-server/src/query_pipeline/types.rs:33-37`
+- CompilationStage sets the field: `crates/gkg-server/src/query_pipeline/stages/compilation.rs:40`
+- ExecutionStage calls `compiled()?`: `crates/gkg-server/src/query_pipeline/stages/execution.rs:27`
+- HydrationStage calls `compiled()?`: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:174,257`
+- FormattingStage calls `compiled()?`: `crates/gkg-server/src/query_pipeline/stages/formatting.rs:38`
+- Fields are `pub`: `crates/gkg-server/src/query_pipeline/types.rs:26,29`
+
+---
+
+## Task 3: All pipeline invocations use the full 8-stage chain
+
+**Status:** PASS — single invocation site, type-enforced from Extraction onward
+
+There is exactly **one** pipeline invocation in the entire codebase: `run_query()` at `service.rs:58-75`:
+
+```rust
+PipelineRunner::start(&mut ctx, req, &mut obs)
+    .then(&SecurityStage).await?
+    .then(&CompilationStage).await?
+    .then(&ExecutionStage).await?
+    .then(&ExtractionStage).await?
+    .then(&AuthorizationStage).await?
+    .then(&RedactionStage).await?
+    .then(&HydrationStage).await?
+    .then(&self.formatter).await?
+    .finish()
+```
+
+This is called from two places in `grpc/service.rs`: line 131 (`raw_pipeline.run_query`) and line 135 (`llm_pipeline.run_query`). Both use the same `run_query` method with the full chain.
+
+**Type chain analysis:**
+
+The `PipelineRunner::then()` method at `mod.rs:56-58` enforces `S: PipelineStage<M, Input = T>` — each stage's `Input` must match the previous stage's `Output`. The full chain:
+
+| Stage | Input | Output |
+|-------|-------|--------|
+| SecurityStage | `()` | `()` |
+| CompilationStage | `()` | `()` |
+| ExecutionStage | `()` | `ExecutionOutput` |
+| ExtractionStage | `ExecutionOutput` | `ExtractionOutput` |
+| AuthorizationStage | `ExtractionOutput` | `AuthorizationOutput` |
+| RedactionStage | `AuthorizationOutput` | `RedactionOutput` |
+| HydrationStage | `RedactionOutput` | `HydrationOutput` |
+| FormattingStage | `HydrationOutput` | `PipelineOutput` |
+
+**From ExtractionStage onward, the type system enforces ordering at compile time.** You cannot call AuthorizationStage before ExtractionStage because the types don't match.
+
+**Limitation:** The first three stages (Security, Compilation, Execution) all accept `()` as input, so Rust's type system alone doesn't prevent reordering them. The ordering of these three is enforced only by **runtime guards**: CompilationStage calls `ctx.security_context()?` (fails if Security hasn't run), ExecutionStage calls `ctx.compiled()?` (fails if Compilation hasn't run).
+
+**No other pipeline invocations exist.** Grep for `PipelineRunner::start`, `run_query`, and `.then(&` confirms only `service.rs:58` constructs a pipeline. Hydration sub-queries call `compile()` directly (not via the pipeline) — this is correct since they only need compilation, not the full authorization/redaction flow.
+
+### References
+
+- Single pipeline invocation: `crates/gkg-server/src/query_pipeline/service.rs:58-75`
+- Two callers of `run_query`: `crates/gkg-server/src/grpc/service.rs:131,135`
+- `then()` type constraint `S::Input = T`: `crates/gkg-server/src/query_pipeline/stages/mod.rs:56-58`
+- Security→Compilation runtime guard: `crates/gkg-server/src/query_pipeline/stages/compilation.rs:29`
+- Compilation→Execution runtime guard: `crates/gkg-server/src/query_pipeline/stages/execution.rs:27`
+- Hydration uses `compile()` directly (not pipeline): `crates/gkg-server/src/query_pipeline/stages/hydration.rs:87`
+
+---
+
+## Task 4: Concurrent queries do not share QueryPipelineContext
+
+**Status:** PASS — fresh context per request
+
+Each `execute_query` gRPC call at `grpc/service.rs:119` spawns a `tokio::spawn`. Inside, `run_query()` creates a fresh `QueryPipelineContext` at `service.rs:44-49`:
+
+```rust
+let mut ctx = QueryPipelineContext {
+    compiled: None,
+    ontology: Arc::clone(&self.ontology),
+    client: Arc::clone(&self.client),
+    security_context: None,
+};
+```
+
+- `compiled: None` — fresh, per-request
+- `security_context: None` — fresh, per-request
+- `ontology: Arc::clone(...)` — shared reference to immutable `Ontology`
+- `client: Arc::clone(...)` — shared reference to connection-pooled `ArrowClickHouseClient`
+
+The context is passed as `&mut ctx` to the pipeline, so it is exclusively owned by the current task. No other task can access it. The `PipelineRunner` holds `&'a mut QueryPipelineContext` (`mod.rs:35`), which Rust's borrow checker ensures is exclusive.
+
+Shared resources (`ontology`, `client`) are immutable or connection-pooled with no per-request state.
+
+### References
+
+- Per-request context creation: `crates/gkg-server/src/query_pipeline/service.rs:44-49`
+- `tokio::spawn` per request: `crates/gkg-server/src/grpc/service.rs:119`
+- `PipelineRunner` holds `&mut`: `crates/gkg-server/src/query_pipeline/stages/mod.rs:33-38`
+- `QueryPipelineService` shared fields are `Arc`: `crates/gkg-server/src/query_pipeline/service.rs:20-24`
+
+---
+
+## Task 5: PipelineStage trait implementations — no shared mutable state
+
+**Status:** PASS — all stages are stateless unit structs or contain only immutable config
+
+Every stage struct:
+
+| Stage | Fields | Mutability |
+|-------|--------|------------|
+| `SecurityStage` | none (unit struct) | stateless |
+| `CompilationStage` | none (unit struct) | stateless |
+| `ExecutionStage` | none (unit struct) | stateless |
+| `ExtractionStage` | none (unit struct) | stateless |
+| `AuthorizationStage` | none (unit struct) | stateless |
+| `RedactionStage` | none (unit struct) | stateless |
+| `HydrationStage` | none (unit struct) | stateless |
+| `FormattingStage<F>` | `formatter: F` (impl `ResultFormatter`) | immutable config, cloned per service |
+
+No stage contains `Mutex`, `RwLock`, `AtomicU*`, `Cell`, `RefCell`, `static`, `lazy_static`, `once_cell`, or `thread_local`. Grep across all stage files confirms zero hits for any shared mutable state primitives.
+
+All state mutation happens through `&mut QueryPipelineContext` (per-request, exclusively owned) or through the stage's `Input` value (moved, not shared).
+
+The `PipelineStage::execute` signature at `mod.rs:22-28` takes `&self` (shared reference to stage) and `&mut QueryPipelineContext` (exclusive reference to per-request context). This design means stages cannot mutate their own fields — they can only mutate the per-request context.
+
+### References
+
+- `PipelineStage::execute` signature (`&self`): `crates/gkg-server/src/query_pipeline/stages/mod.rs:22-28`
+- SecurityStage unit struct: `crates/gkg-server/src/query_pipeline/stages/security.rs:13`
+- CompilationStage unit struct: `crates/gkg-server/src/query_pipeline/stages/compilation.rs:14`
+- ExecutionStage unit struct: `crates/gkg-server/src/query_pipeline/stages/execution.rs:13`
+- ExtractionStage unit struct: `crates/gkg-server/src/query_pipeline/stages/extraction.rs:11`
+- AuthorizationStage unit struct: `crates/gkg-server/src/query_pipeline/stages/authorization.rs:15`
+- RedactionStage unit struct: `crates/gkg-server/src/query_pipeline/stages/redaction.rs:11`
+- HydrationStage unit struct: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:26`
+- FormattingStage has only `formatter: F`: `crates/gkg-server/src/query_pipeline/stages/formatting.rs:10-12`
+- No shared mutable state primitives in stages: `crates/gkg-server/src/query_pipeline/stages/` (zero grep hits)
+
+---
+
+## Summary
+
+### TQ12: Pipeline Stage Bypass
+
+| Task | Verdict | Open Items |
+|------|---------|------------|
+| `security_context()` Err before SecurityStage | **PASS** | Option::None → Err. Only SecurityStage writes the field. Field is `pub` — no compile-time write restriction, but no other code writes it. |
+| `compiled()` Err before CompilationStage | **PASS** | Option::None → Err. Only CompilationStage writes the field. Same `pub` note. |
+| All invocations use full 8-stage chain | **PASS** | Single `run_query()` site. Type system enforces order from Extraction onward. First 3 stages (`()→()`) order enforced by runtime guards only. |
+| Concurrent queries don't share context | **PASS** | Fresh `QueryPipelineContext` per request. `&mut` exclusive borrow. Shared `Arc` resources are immutable/pooled. |
+| No shared mutable state in stages | **PASS** | All stages are stateless unit structs or hold immutable config. `&self` on `execute()`. No Mutex/RwLock/Atomic/static. |
