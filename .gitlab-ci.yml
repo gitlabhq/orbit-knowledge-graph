@@ -257,8 +257,16 @@ gitaly-integration-test:
 
 tilt-ci:
   stage: test
-  extends:
-    - .mr-only-rules
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - Tiltfile
+        - .tiltignore
+        - .tilt-secrets.example
+        - Dockerfile
+        - scripts/build-dev.sh
+        - helm-dev/**/*
+        - .gitlab-ci.yml
   image: docker:29
   tags:
     - saas-linux-large-amd64
