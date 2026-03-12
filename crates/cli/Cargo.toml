@@ -1,10 +1,10 @@
 [package]
-name = "gkg"
+name = "orbit"
 version.workspace = true
 edition = "2024"
 
 [[bin]]
-name = "gkg"
+name = "orbit"
 path = "src/main.rs"
 
 [lints]

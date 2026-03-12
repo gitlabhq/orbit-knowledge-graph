@@ -34,7 +34,7 @@ SELECT traversal_path FROM gl_<entity> LIMIT 10
 
 ## Inspect the generated SQL directly
 
-The `gkg query` command lets you see what SQL the query engine produces without running the full pipeline. The query input format is defined in `config/schemas/graph_query.schema.json`.
+The `orbit query` command lets you see what SQL the query engine produces without running the full pipeline. The query input format is defined in `config/schemas/graph_query.schema.json`.
 
 First, sample some traversal paths from your data:
 
@@ -46,16 +46,16 @@ Then pass them to the query command (org ID is parsed from the first segment):
 
 ```bash
 # From the SDLC queries file
-cargo run -p gkg -- query -t "1/2/3/" fixtures/queries/sdlc_queries.json
+cargo run -p orbit -- query -t "1/2/3/" fixtures/queries/sdlc_queries.json
 
 # Multiple traversal paths
-cargo run -p gkg -- query -t "1/2/" -t "1/3/" fixtures/queries/sdlc_queries.json
+cargo run -p orbit -- query -t "1/2/" -t "1/3/" fixtures/queries/sdlc_queries.json
 
 # Single query inline
-cargo run -p gkg -- query -t "1/" --json '{"test": {"nodes": [{"type": "Pipeline"}]}}'
+cargo run -p orbit -- query -t "1/" --json '{"test": {"nodes": [{"type": "Pipeline"}]}}'
 
 # JSON output for scripting
-cargo run -p gkg -- query -t "1/" --format json fixtures/queries/sdlc_queries.json
+cargo run -p orbit -- query -t "1/" --format json fixtures/queries/sdlc_queries.json
 ```
 
 This shows each query's input JSON, generated SQL, and parameters. You can then run the SQL directly in ClickHouse to see what's happening and use it to guide your investigations.

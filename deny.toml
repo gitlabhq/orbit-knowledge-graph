@@ -74,7 +74,7 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "gkg"
+name = "orbit"
 expression = "LicenseRef-EE"
 license-files = []
 

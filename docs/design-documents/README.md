@@ -26,7 +26,7 @@ With this service, we strive to transform how teams understand, navigate, and au
 
 Today, we offer a local code-indexing CLI tool that agents can connect to via MCP. We currently include the following:
 
-- The `gkg` CLI provides local indexing for workspaces, supports parallel parsing across multiple repositories, emits statistics, and comes with server controls plus developer tools for direct graph queries via `gkg server`, `gkg index`, and related commands; see [Usage guide](https://gitlab-org.gitlab.io/rust/knowledge-graph/getting-started/usage/) and [Server reference](https://gitlab-org.gitlab.io/rust/knowledge-graph/cli/server/).
+- The `orbit` CLI provides local code indexing, supports parallel parsing across multiple repositories, and emits statistics via `orbit index`.
 - [`Kuzu`](https://kuzudb.com/docs/) ships statically linked inside the CLI so the graph runtime travels as a single binary for local MCP servers, while contributors can switch to dynamic linking for faster builds; see the [Build guide](https://gitlab-org.gitlab.io/rust/knowledge-graph/contribute/build/).
 - The bundled Vue/Vite UI is embedded in the desktop HTTP server, letting users launch `gkg server start` and browse indexed projects through the local web experience; see the [Usage guide](https://gitlab-org.gitlab.io/rust/knowledge-graph/getting-started/usage/).
 - We have a *full delivery pipeline* for all major OSs for the CLI, including Windows. See this [epic](https://gitlab.com/groups/gitlab-org/rust/-/epics/3) and the [release page](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/releases) for more details.

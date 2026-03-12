@@ -67,8 +67,8 @@ struct ErroredFile {
 }
 
 #[derive(Parser)]
-#[command(name = "gkg")]
-#[command(about = "Knowledge Graph Indexer - indexes code repositories into graph structures")]
+#[command(name = "orbit")]
+#[command(about = "Orbit - local code indexing and query CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

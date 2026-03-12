@@ -81,7 +81,7 @@ run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,
 description = "Fix newlines formatting in the codebase"
 
 [tasks."local:index:repo"]
-run = 'cargo run --release --bin gkg -- index ${usage_repo_path?} --stats'
+run = 'cargo run --release --bin orbit -- index ${usage_repo_path?} --stats'
 description = "Index a local repository"
 usage = 'arg "<repo_path>"'
 

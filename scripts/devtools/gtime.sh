@@ -13,7 +13,7 @@ if [ -z "$1" ]; then
 fi
 
 # Run gtime and capture output
-GTIME_OUTPUT=$(gtime --verbose cargo run --release --bin gkg index "$1" 2>&1 > /dev/null)
+GTIME_OUTPUT=$(gtime --verbose cargo run --release --bin orbit index "$1" 2>&1 > /dev/null)
 
 # Parse the gtime output
 COMMAND=$(echo "$GTIME_OUTPUT" | grep "Command being timed:" | sed 's/.*Command being timed: "\(.*\)"/\1/')
