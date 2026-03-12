@@ -1,0 +1,11 @@
+[project]
+name = "gkg"
+
+[[scenarios.hyperfine]]
+id = "gkg_index_gdk_release_4_threads"
+command = "./target/release/orbit index output/gdk --threads 4 --stats"
+setup = "cargo xtask benchmark download-repos"
+description = "Indexes all of GDK (gdk, gitlab, gitlab-shell) with 4 threads"
+warmup = 1
+min_runs = 3
+max_runs = 3

@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use xshell::Shell;
 
+mod benchmark;
 mod e2e;
 mod synth;
 
@@ -18,6 +19,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Code indexing benchmark utilities.
+    Benchmark {
+        #[command(subcommand)]
+        command: benchmark::BenchmarkCommand,
+    },
     /// E2E environment management.
     E2e {
         #[command(subcommand)]
@@ -171,6 +177,7 @@ async fn main() -> Result<()> {
     let sh = Shell::new()?;
 
     match cli.command {
+        Command::Benchmark { command } => return benchmark::run(command).await,
         Command::Synth { command } => match command {
             SynthCommand::Generate {
                 config,

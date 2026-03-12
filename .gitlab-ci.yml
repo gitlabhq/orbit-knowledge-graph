@@ -15,6 +15,7 @@ stages:
   - lint
   - security
   - test
+  - benchmark
   - ai
   - build
   - publish
@@ -309,6 +310,90 @@ tilt-ci:
       GKG_GITLAB__JWT__VERIFYING_KEY=ci_test_jwt_secret_at_least_32_bytes_long
       EOF
     - tilt ci
+
+# Benchmark Stage
+#
+# Runs code indexing benchmarks on every MR and posts results as a comment.
+# gitlab-xtasks is pre-installed in the build-images Docker image.
+#
+# Required CI/CD variable:
+#   BENCHMARK_GITLAB_TOKEN — Project access token (Reporter role, api scope)
+#                            used by gitlab-xtasks to post MR comments.
+
+.code-indexing-benchmark-template:
+  stage: benchmark
+  needs: []
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+  interruptible: true
+  script:
+    - cargo build --bin orbit --release
+    - |
+      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${SCENARIO}.json"
+      gitlab-xtasks benchmark hyperfine \
+        --config gkg-benchmark-config.toml \
+        --architecture "$ARCH" \
+        --scenario "$SCENARIO" \
+        --output-file "$OUTPUT_FILE"
+  artifacts:
+    paths:
+      - gkg-benchmark-*.json
+    expire_in: 3 weeks
+
+code-indexing-benchmark-linux:
+  extends:
+    - .job-template
+    - .code-indexing-benchmark-template
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: "linux-x86_64"
+  parallel:
+    matrix:
+      - SCENARIO: [gkg_index_gdk_release_4_threads]
+
+code-indexing-benchmark-analyze:
+  stage: benchmark
+  needs:
+    - code-indexing-benchmark-linux
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+  interruptible: true
+  extends:
+    - .job-template
+  script:
+    - |
+      gitlab-xtasks benchmark analyze \
+        --pattern "gkg-benchmark-*.json" \
+        --output-format markdown \
+        --pipeline-url "$CI_PIPELINE_URL" \
+        --job-url "$CI_JOB_URL" \
+        --branch "$CI_COMMIT_REF_NAME" \
+        --output-file gkg-benchmark-results.md
+
+      gitlab-xtasks benchmark analyze \
+        --pattern "gkg-benchmark-*.json" \
+        --output-format json \
+        --pipeline-url "$CI_PIPELINE_URL" \
+        --job-url "$CI_JOB_URL" \
+        --branch "$CI_COMMIT_REF_NAME" \
+        --output-file gkg-benchmark-results.json
+
+      if [[ -n "$CI_MERGE_REQUEST_IID" ]]; then
+        gitlab-xtasks comment post \
+          --type add-or-edit \
+          --unique-id "code-indexing-benchmark-comment" \
+          --token "$BENCHMARK_GITLAB_TOKEN" \
+          --file-path gkg-benchmark-results.md
+      fi
+  artifacts:
+    paths:
+      - gkg-benchmark-results.md
+      - gkg-benchmark-results.json
+      - gkg-benchmark-*.json
+    expire_in: 1 week
 
 # Build Stage
 

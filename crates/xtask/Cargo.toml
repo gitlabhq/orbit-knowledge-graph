@@ -48,3 +48,5 @@ clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 gkg-utils = { path = "../utils" }
 query-engine = { path = "../query-engine" }
+reqwest = { workspace = true, features = ["default-tls"] }
+zip = "2"
