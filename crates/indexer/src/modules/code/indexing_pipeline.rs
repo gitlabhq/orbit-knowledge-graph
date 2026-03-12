@@ -147,7 +147,12 @@ impl CodeIndexingPipeline {
         repo_dir: &Path,
     ) -> Result<(), HandlerError> {
         let repo_path = repo_dir.to_string_lossy().to_string();
-        let indexer = RepositoryIndexer::new(format!("project-{project_id}"), repo_path.clone());
+        let indexer = RepositoryIndexer::with_graph_identity(
+            format!("project-{project_id}"),
+            repo_path.clone(),
+            project_id,
+            branch.to_string(),
+        );
         let file_source = DirectoryFileSource::new(repo_path);
 
         let indexing_start = Instant::now();
@@ -174,13 +179,10 @@ impl CodeIndexingPipeline {
             );
         }
 
-        let Some(mut graph_data) = result.graph_data else {
+        let Some(graph_data) = result.graph_data else {
             debug!(project_id, branch = %branch, "indexing produced no graph data, skipping write");
             return Ok(());
         };
-
-        // TODO: This should be done on construction of the GraphData struct.
-        graph_data.assign_node_ids(project_id, branch);
 
         self.metrics
             .record_files_processed(graph_data.file_nodes.len() as u64, "parsed");
