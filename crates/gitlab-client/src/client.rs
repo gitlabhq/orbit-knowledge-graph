@@ -9,7 +9,7 @@ use tracing::debug;
 
 use crate::config::GitlabClientConfiguration;
 use crate::error::GitlabClientError;
-use crate::types::RepositoryInfo;
+use crate::types::ProjectInfo;
 
 /// JWT issuer — Rails expects this value when validating incoming tokens.
 pub const JWT_ISSUER: &str = "gitlab";
@@ -23,7 +23,7 @@ pub const JWT_SUBJECT: &str = "gkg-indexer:code";
 
 /// Custom authentication header used by the Knowledge Graph internal API.
 /// The raw JWT token is sent directly as the header value (no `Bearer` prefix).
-const AUTH_HEADER: &str = "Gitlab-Kg-Api-Request";
+const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 
 const JWT_EXPIRY_SECONDS: i64 = 300;
 
@@ -92,39 +92,67 @@ impl GitlabClient {
             .map_err(|e| GitlabClientError::Unexpected(format!("failed to build HTTP client: {e}")))
     }
 
-    pub async fn repository_info(
-        &self,
-        project_id: i64,
-    ) -> Result<RepositoryInfo, GitlabClientError> {
-        let token = self.sign_jwt()?;
+    pub async fn project_info(&self, project_id: i64) -> Result<ProjectInfo, GitlabClientError> {
         let url = format!(
-            "{}/api/v4/internal/knowledge_graph/{}/repository_info",
+            "{}/api/v4/internal/orbit/project/{}/info",
             self.base_url, project_id
         );
 
-        debug!(project_id, url = %url, "fetching repository info from GitLab");
+        debug!(project_id, url = %url, "fetching project info from GitLab");
 
-        let response = self
+        let response = self.authenticated_get(&url).await?;
+        Self::check_status(&response, project_id)?;
+
+        let info: ProjectInfo = response.json().await?;
+        Ok(info)
+    }
+
+    pub async fn download_archive(
+        &self,
+        project_id: i64,
+        ref_name: &str,
+    ) -> Result<Vec<u8>, GitlabClientError> {
+        let base = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/archive",
+            self.base_url, project_id
+        );
+        let url = reqwest::Url::parse_with_params(&base, &[("ref", ref_name)])
+            .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
+
+        debug!(project_id, ref_name, url = %url, "downloading archive from GitLab");
+
+        let response = self.authenticated_get(url).await?;
+        Self::check_status(&response, project_id)?;
+
+        let bytes = response.bytes().await?;
+        Ok(bytes.to_vec())
+    }
+
+    async fn authenticated_get(
+        &self,
+        url: impl reqwest::IntoUrl,
+    ) -> Result<reqwest::Response, GitlabClientError> {
+        let token = self.sign_jwt()?;
+        Ok(self
             .http
-            .get(&url)
+            .get(url)
             .header(AUTH_HEADER, &token)
             .send()
-            .await?;
+            .await?)
+    }
 
+    fn check_status(
+        response: &reqwest::Response,
+        project_id: i64,
+    ) -> Result<(), GitlabClientError> {
         match response.status() {
-            StatusCode::OK => {}
-            StatusCode::UNAUTHORIZED => return Err(GitlabClientError::Unauthorized),
-            StatusCode::NOT_FOUND => return Err(GitlabClientError::NotFound(project_id)),
-            status => {
-                let body = response.text().await.unwrap_or_default();
-                return Err(GitlabClientError::Unexpected(format!(
-                    "status {status}: {body}"
-                )));
-            }
+            StatusCode::OK => Ok(()),
+            StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
+            StatusCode::NOT_FOUND => Err(GitlabClientError::NotFound(project_id)),
+            status => Err(GitlabClientError::Unexpected(format!(
+                "unexpected status {status}"
+            ))),
         }
-
-        let info: RepositoryInfo = response.json().await?;
-        Ok(info)
     }
 
     fn sign_jwt(&self) -> Result<String, GitlabClientError> {

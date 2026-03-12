@@ -39,7 +39,7 @@ pub use project_store::ClickHouseProjectStore;
 pub use push_event_handler::PushEventHandler;
 pub use push_event_store::ClickHousePushEventStore;
 pub use repository_service::{
-    CachingRepositoryService, GitLabRepositoryService, RepositoryService,
+    CachingRepositoryService, RailsRepositoryService, RepositoryService, RepositoryServiceError,
 };
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 
@@ -64,7 +64,7 @@ pub fn register_handlers(
     let client = Arc::new(config.graph.build_client());
 
     let repository_service: Arc<dyn RepositoryService> =
-        CachingRepositoryService::create(GitLabRepositoryService::create(gitlab_client));
+        CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
     let checkpoint_store: Arc<dyn checkpoint_store::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
     let project_store: Arc<dyn project_store::ProjectStore> =

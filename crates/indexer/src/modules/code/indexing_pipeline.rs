@@ -17,7 +17,6 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository_service::RepositoryService;
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
-use gitlab_client::RepositoryInfo;
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -25,7 +24,6 @@ pub struct IndexingRequest {
     pub traversal_path: String,
     pub event_id: i64,
     pub commit_sha: String,
-    pub repository: RepositoryInfo,
 }
 
 pub struct CodeIndexingPipeline {
@@ -62,19 +60,19 @@ impl CodeIndexingPipeline {
             .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
 
         let fetch_start = Instant::now();
-        let archive_path = self
+        let archive_bytes = self
             .repository_service
-            .fetch_archive(&request.repository, temp_dir.path(), &request.commit_sha)
+            .download_archive(request.project_id, &request.commit_sha)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to fetch repository: {e}")))
+            .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))
             .record_error_stage(&self.metrics, "repository_fetch")?;
         self.metrics
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
 
         let extract_start = Instant::now();
-        archive::unpack_archive(&archive_path, temp_dir.path())
-            .map_err(|e| HandlerError::Processing(format!("failed to extract repository: {e}")))
+        archive::extract_tar_gz(&archive_bytes, temp_dir.path())
+            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
             .record_error_stage(&self.metrics, "repository_extract")?;
         self.metrics
             .repository_extract_duration
