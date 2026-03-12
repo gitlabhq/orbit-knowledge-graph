@@ -26,6 +26,8 @@ stages:
   tags:
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
+  variables:
+    MISE_DISABLE_TOOLS: lefthook
   before_script:
     - mise install
 
