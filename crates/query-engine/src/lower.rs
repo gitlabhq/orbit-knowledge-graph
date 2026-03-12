@@ -599,13 +599,16 @@ fn build_joins(
     let start_table = resolve_table(start)?;
     let mut result = TableRef::scan(&start_table, &start.id);
     let mut edge_aliases = HashMap::new();
+    let mut joined = HashSet::new();
+    joined.insert(start.id.clone());
 
     for (i, rel) in rels.iter().enumerate() {
         let target = find_node(nodes, &rel.to)?;
         let target_table = resolve_table(target)?;
+        let source_joined = joined.contains(&rel.from);
+        let target_joined = joined.contains(&rel.to);
 
         if rel.max_hops > 1 {
-            // Multi-hop: UNION ALL subquery
             let alias = format!("hop_e{i}");
             edge_aliases.insert(i, alias.clone());
 
@@ -620,7 +623,6 @@ fn build_joins(
             if from_node.has_traversal_path {
                 source_cond = Expr::and(edge_path_starts_with(&alias, &rel.from), source_cond);
             }
-            result = TableRef::join(JoinType::Inner, result, union, source_cond);
 
             let mut target_cond = Expr::eq(
                 Expr::col(&alias, to_col),
@@ -629,35 +631,91 @@ fn build_joins(
             if target.has_traversal_path {
                 target_cond = Expr::and(edge_path_starts_with(&alias, &rel.to), target_cond);
             }
-            result = TableRef::join(
-                JoinType::Inner,
-                result,
-                TableRef::scan(&target_table, &rel.to),
-                target_cond,
-            );
+
+            let union_join_cond = match (source_joined, target_joined) {
+                (true, true) => Expr::and(source_cond.clone(), target_cond.clone()),
+                (true, false) => source_cond.clone(),
+                (false, true) => target_cond.clone(),
+                (false, false) => {
+                    return Err(QueryError::Lowering(format!(
+                        "disconnected relationship: neither '{}' nor '{}' are reachable",
+                        rel.from, rel.to
+                    )));
+                }
+            };
+
+            result = TableRef::join(JoinType::Inner, result, union, union_join_cond);
+
+            if !source_joined {
+                let source_table = resolve_table(from_node)?;
+                result = TableRef::join(
+                    JoinType::Inner,
+                    result,
+                    TableRef::scan(&source_table, &rel.from),
+                    source_cond,
+                );
+                joined.insert(rel.from.clone());
+            }
+            if !target_joined {
+                result = TableRef::join(
+                    JoinType::Inner,
+                    result,
+                    TableRef::scan(&target_table, &rel.to),
+                    target_cond,
+                );
+                joined.insert(rel.to.clone());
+            }
         } else {
-            // Single-hop: direct edge join
             let alias = format!("e{i}");
             edge_aliases.insert(i, alias.clone());
 
             let from_node = find_node(nodes, &rel.from)?;
             let (edge, edge_type_cond) = edge_scan(&alias, &type_filter(&rel.types));
-            let mut join_cond = source_join_cond(
+            let source_cond = source_join_cond(
                 &rel.from,
                 &alias,
                 rel.direction,
                 from_node.has_traversal_path,
             );
+            let target_cond =
+                target_join_cond(&alias, &rel.to, rel.direction, target.has_traversal_path);
+
+            let mut edge_join_cond = match (source_joined, target_joined) {
+                (true, true) => Expr::and(source_cond.clone(), target_cond.clone()),
+                (true, false) => source_cond.clone(),
+                (false, true) => target_cond.clone(),
+                (false, false) => {
+                    return Err(QueryError::Lowering(format!(
+                        "disconnected relationship: neither '{}' nor '{}' are reachable",
+                        rel.from, rel.to
+                    )));
+                }
+            };
             if let Some(tc) = edge_type_cond {
-                join_cond = Expr::and(join_cond, tc);
+                edge_join_cond = Expr::and(edge_join_cond, tc);
             }
-            result = TableRef::join(JoinType::Inner, result, edge, join_cond);
-            result = TableRef::join(
-                JoinType::Inner,
-                result,
-                TableRef::scan(&target_table, &rel.to),
-                target_join_cond(&alias, &rel.to, rel.direction, target.has_traversal_path),
-            );
+
+            result = TableRef::join(JoinType::Inner, result, edge, edge_join_cond);
+
+            if !source_joined {
+                let source_table = resolve_table(from_node)?;
+                result = TableRef::join(
+                    JoinType::Inner,
+                    result,
+                    TableRef::scan(&source_table, &rel.from),
+                    source_cond,
+                );
+                joined.insert(rel.from.clone());
+            }
+            if !target_joined {
+                result = TableRef::join(
+                    JoinType::Inner,
+                    result,
+                    TableRef::scan(&target_table, &rel.to),
+                    target_cond,
+                );
+                joined.insert(rel.to.clone());
+            }
         }
     }
 

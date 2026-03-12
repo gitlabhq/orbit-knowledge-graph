@@ -1344,6 +1344,59 @@ async fn traversal_both_direction(ctx: &TestContext) {
     }
 }
 
+async fn traversal_shared_target_node(ctx: &TestContext) {
+    seed(ctx).await;
+
+    ctx.execute(
+        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 3000, 'Note'),
+         ('1/100/1000/', 1000, 'Project', 'CONTAINS', 3000, 'Note')",
+    )
+    .await;
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "n", "entity": "Note", "columns": ["note"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "n"},
+                {"type": "CONTAINS", "from": "p", "to": "n"}
+            ],
+            "limit": 50
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert_eq!(value["query_type"], "traversal");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let user_ids = node_ids(nodes, "User");
+    let note_ids = node_ids(nodes, "Note");
+    let project_ids = node_ids(nodes, "Project");
+    assert!(user_ids.contains(&1), "User 1 should be present");
+    assert!(note_ids.contains(&3000), "Note 3000 should be present");
+    assert!(
+        project_ids.contains(&1000),
+        "Project 1000 should be present"
+    );
+
+    let edges = value["edges"].as_array().unwrap();
+    assert!(
+        edges.iter().any(|e| e["type"] == "AUTHORED"),
+        "AUTHORED edge should exist"
+    );
+    assert!(
+        edges.iter().any(|e| e["type"] == "CONTAINS"),
+        "CONTAINS edge should exist"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Column types — Bool, DateTime, Nullable
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1914,6 +1967,8 @@ async fn graph_formatter_e2e() {
         // Traversal — direction
         traversal_incoming_direction,
         traversal_both_direction,
+        // Traversal — fan-in
+        traversal_shared_target_node,
         // Aggregation — all functions
         aggregation_count_exact,
         aggregation_sum,
