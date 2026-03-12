@@ -148,6 +148,8 @@ pub struct LogicalReplicationEvents {
     pub events: ::prost::alloc::vec::Vec<ReplicationEvent>,
     #[prost(string, repeated, tag = "6")]
     pub columns: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(uint64, tag = "7")]
+    pub version_hash: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

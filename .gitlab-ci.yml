@@ -114,7 +114,7 @@ check-docs:
   script:
     - markdownlint-cli2 '**/*.md'
     - vale --minAlertLevel error .
-    - lychee --offline --include-fragments '**/*.md'
+    - lychee --offline --include-fragments --exclude-path output '**/*.md'
 
 fmt-check:
   stage: lint

@@ -105,6 +105,7 @@ mod tests {
             application_identifier: "test".to_string(),
             events: vec![event],
             columns: columns.into_iter().map(String::from).collect(),
+            version_hash: 0,
         }
     }
 

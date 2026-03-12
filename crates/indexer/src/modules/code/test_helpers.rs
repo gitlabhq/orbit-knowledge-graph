@@ -85,6 +85,7 @@ pub fn build_replication_events(events: Vec<(Vec<String>, ReplicationEvent)>) ->
         application_identifier: "test".to_string(),
         events,
         columns: column_names,
+        version_hash: 0,
     };
 
     let encoded = payload.encode_to_vec();
