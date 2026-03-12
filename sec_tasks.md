@@ -2588,3 +2588,286 @@ One snapshot per query type (search, traversal, aggregation, path_finding, neigh
 | CI automation for simulator evaluation | **NOT IMPLEMENTED** | Framework exists (29 queries, reporting). Not in CI or mise. Needs ClickHouse with data. |
 | Golden file / snapshot tests | **NOT IMPLEMENTED** | No `insta`/`expect_test`/`goldenfile`. 8 exact SQL assertions (codegen.rs) + 23 fragment checks (lib.rs) serve as partial substitute. No full-pipeline SQL snapshot. |
 | Staging deployment and validation | **PARTIAL** | Sandbox on GKE exists with Helm values. Deployment is manual. No CD pipeline. `deploy-sandbox` job planned but not implemented. |
+
+---
+
+# Observability — Security Task Results
+
+## Task 1: Instrument query resource usage into Prometheus
+
+**Status:** PARTIAL — comprehensive pipeline metrics exist; ClickHouse resource consumption not tracked; Grafana dashboard has no query-specific panels
+
+**What exists (21 instruments total):**
+
+**Pipeline metrics (`qp.*`) — 13 instruments** at `query_pipeline/metrics.rs:29-88`:
+- `qp.queries_total` (counter, `query_type` + `status` labels)
+- `qp.compile_duration_ms`, `qp.execute_duration_ms`, `qp.authorization_duration_ms`, `qp.hydration_duration_ms`, `qp.pipeline_duration_ms` (f64 histograms)
+- `qp.result_set_size`, `qp.node_count`, `qp.redacted_count` (u64 histograms)
+- `qp.error.security_rejected`, `qp.error.execution_failed`, `qp.error.authorization_failed`, `qp.error.streaming_failed` (counters)
+
+`PipelineObserver` (lines 105-198) collects per-stage timings and emits all metrics on `finish()`. Error metrics are emitted on every `check()` failure via `record_error()`.
+
+**Threat counters (`qe.threat.*`) — 8 instruments** at `query-engine/src/metrics.rs:40-101`:
+- `qe.threat.validation_failed`, `qe.threat.allowlist_rejected`, `qe.threat.auth_filter_missing`, `qe.threat.timeout`, `qe.threat.rate_limited`, `qe.threat.depth_exceeded`, `qe.threat.limit_exceeded` (7 counters)
+- `qe.internal.pipeline_invariant_violated` (1 counter)
+
+Auto-incremented via `CountErr` trait (`metrics.rs:130-142`) — every `QueryError` variant maps to exactly one counter with a `reason` label.
+
+**What's missing:**
+
+1. **ClickHouse resource metrics.** ClickHouse returns `read_rows`, `read_bytes`, `memory_usage` in response headers (`X-ClickHouse-Summary`). These are never parsed or recorded. No instrument exists to track per-query resource consumption at the database level. This is the highest-value gap — without it, resource exhaustion attacks (TQ5) are invisible to alerting.
+
+2. **Grafana dashboard gaps.** The overview dashboard at `helm-dev/observability/dashboards/gkg-overview.json` contains only HTTP-level panels (request rate, latency, error rate from `labkit-rs` histograms). Zero panels for `qp.*` or `qe.threat.*` metrics. The `qe.threat.*` counters are fire-and-forget with no dashboard or alert rule consuming them.
+
+3. **Alert rules gap.** `helm-dev/observability/templates/gkg-alert-rules.yaml` defines 10 PrometheusRule alerts — all HTTP/pod-level (high error rate, high latency, pod restarts). No alert on `qe.threat.*` spikes, no alert on query duration outliers, no alert on ClickHouse resource consumption.
+
+**Recommended additions:**
+- Parse `X-ClickHouse-Summary` headers in `clickhouse-client` and record `qp.ch_read_rows`, `qp.ch_read_bytes`, `qp.ch_memory_usage` histograms
+- Add Grafana panels for `qp.pipeline_duration_ms` (p50/p95/p99), `qp.result_set_size`, and `qe.threat.*` counters
+- Add PrometheusRule alert on `rate(qe.threat.auth_filter_missing[5m]) > 0` and `qp.pipeline_duration_ms{quantile="0.99"} > 10000`
+
+### References
+
+- Pipeline metrics (13 instruments): `crates/gkg-server/src/query_pipeline/metrics.rs:29-88`
+- PipelineObserver: `crates/gkg-server/src/query_pipeline/metrics.rs:105-198`
+- Threat counters (8 instruments): `crates/query-engine/src/metrics.rs:40-101`
+- CountErr auto-increment: `crates/query-engine/src/metrics.rs:130-142`
+- Grafana dashboard (HTTP only): `helm-dev/observability/dashboards/gkg-overview.json`
+- Alert rules (HTTP/pod only): `helm-dev/observability/templates/gkg-alert-rules.yaml`
+- ClickHouse client (no header parsing): `crates/clickhouse-client/src/`
+
+---
+
+## Summary
+
+### Observability
+
+| Task | Verdict | Open Items |
+|------|---------|------------|
+| Instrument query resource usage | **PARTIAL** | 21 instruments exist (13 pipeline + 8 threat). ClickHouse `read_rows`/`read_bytes`/`memory_usage` not tracked. Grafana has zero `qp.*`/`qe.*` panels. No threat-based alerts. |
+
+---
+
+# Property-Based Testing — Security Task Results
+
+## Task 1: proptest traversal_path predicate in all SQL
+
+**Status:** NOT IMPLEMENTED — no property-based testing infrastructure exists
+
+**Evidence of absence:**
+- Zero hits for `proptest`, `quickcheck`, `Arbitrary`, or `fuzz` in any `Cargo.toml` across the workspace
+- No `*.proptest-regressions` files in the repository
+- No `fuzz/` directory or `cargo-fuzz` configuration
+- No `Strategy` or `Arbitrary` implementations for query JSON, `Input`, `FilterOp`, `AggFunction`, or any query-engine type
+
+**What would be tested:**
+
+The property: "For any valid query JSON and any SecurityContext, `compile()` produces SQL where every `gl_*` table scan has a `startsWith(traversal_path, ...)` predicate matching one of the context's allowed paths."
+
+This property is currently enforced by:
+1. `apply_security_context()` (`security.rs:73-82`) — injects filters
+2. `check_ast()` (`check.rs:19-28`) — verifies filters post-compilation
+
+`check_ast()` has 16 hand-crafted adversarial tests (`check.rs:121-525`) covering: missing filters, wrong path literals, subqueries without filters, CTE missing filters, UNION ALL arms missing filters, TableRef::Union arms missing filters, aggregate subqueries without filters, non-sensitive table skip. These are comprehensive but do not explore the combinatorial space of query structures × security contexts.
+
+**What would be needed:**
+1. Add `proptest` dev-dependency to `query-engine`
+2. Implement `Arbitrary` for a subset of valid query JSON (entity types from ontology, valid filter operators, varying depths)
+3. Implement `Arbitrary` for `SecurityContext` (random org_ids, varying numbers of traversal paths, nested vs flat)
+4. Property: `compile(json, ontology, ctx).is_ok()` implies `check_ast(ast, ctx).is_ok()` — this is already enforced but proptest would explore edge cases
+5. Stronger property: parse compiled SQL and verify all `gl_*` table references have `startsWith` WHERE clauses
+
+### References
+
+- No proptest in any Cargo.toml: workspace-wide search, zero hits
+- `check_ast` verifier: `crates/query-engine/src/check.rs:19-28`
+- 16 adversarial tests: `crates/query-engine/src/check.rs:121-525`
+- `apply_security_context`: `crates/query-engine/src/security.rs:73-82`
+- Input types that would need Arbitrary: `crates/query-engine/src/input.rs`
+
+---
+
+## Task 2: proptest organization_id predicate in all SQL
+
+**Status:** NOT APPLICABLE — org_id does not appear in compiled SQL by design
+
+**Architectural finding:** `org_id` is never emitted into compiled SQL. It is used exclusively at `SecurityContext::new()` time (`security.rs:26-44`) to validate that all provided `traversal_path` values begin with the organization's root prefix. After validation, only the `traversal_path` prefixes are injected into SQL via `build_path_filter()`.
+
+The correct property test for organization isolation is the same as PBT1: verify that `traversal_path` predicates are present and constrained to the context's allowed paths. This inherently enforces org isolation because traversal paths are org-scoped (e.g., `"42/"` prefix for org 42).
+
+A separate `org_id` property test would need to verify: "Given `SecurityContext::new(org_id, paths)`, all paths must start with `{org_id}/`." This is already enforced by `SecurityContext::new()` at `security.rs:34-38` and tested at `security.rs:224-260`.
+
+### References
+
+- `SecurityContext::new` org_id validation: `crates/query-engine/src/security.rs:26-44`
+- org_id prefix check: `crates/query-engine/src/security.rs:34-38`
+- Unit tests for path validation: `crates/query-engine/src/security.rs:224-260`
+- `build_path_filter` (only paths, no org_id): `crates/query-engine/src/security.rs:55-71`
+
+---
+
+## Task 3: proptest query execution time bounds
+
+**Status:** NOT IMPLEMENTED — no property-based testing exists; no timeout enforcement exists
+
+This task combines two independent gaps:
+1. **No property-based testing** (same as PBT1)
+2. **No query timeout enforcement** (same finding as TQ5)
+
+Without timeout enforcement, no property about execution time bounds can be meaningfully tested. The property "all queries complete within N seconds" requires both a timeout mechanism and a test framework that explores the input space.
+
+Even with timeouts, property-based execution time testing has limited value — execution time depends on data volume, ClickHouse cluster state, and query plan, not just query structure. The higher-value approach is:
+1. Implement `max_execution_time` ClickHouse setting (TQ5 recommendation)
+2. Add `tokio::time::timeout` around the execution stage (TQ5 recommendation)
+3. Add ClickHouse resource metrics (OBS1 recommendation)
+4. Alert on p99 latency exceeding SLO threshold
+
+### References
+
+- No proptest: all `Cargo.toml` files, zero hits
+- No execution timeout: `crates/gkg-server/src/query_pipeline/stages/execution.rs` (no `tokio::time::timeout`)
+- No `max_execution_time`: `crates/clickhouse-client/src/` (no ClickHouse settings sent)
+- TQ5 findings: see TQ5 section above
+
+---
+
+## Summary
+
+### Property-Based Testing
+
+| Task | Verdict | Open Items |
+|------|---------|------------|
+| proptest traversal_path in all SQL | **NOT IMPLEMENTED** | No proptest/quickcheck/fuzz infrastructure. 16 hand-crafted adversarial tests in `check.rs` provide strong coverage but don't explore combinatorial space. |
+| proptest organization_id in all SQL | **NOT APPLICABLE** | org_id never appears in SQL. Correct property is traversal_path predicate (PBT1). org_id→path validation already enforced + tested in `SecurityContext::new()`. |
+| proptest query execution time bounds | **NOT IMPLEMENTED** | No property-based testing. No timeout enforcement (TQ5). Property cannot be meaningfully tested without both. |
+
+---
+
+# Penetration Testing — Security Task Results
+
+## Task 1: Predicate stripping via crafted inputs
+
+**Status:** COVERED (structurally) — 16 adversarial unit tests; no fuzz/property testing explores combinatorial space
+
+**What exists:**
+
+`check_ast()` at `check.rs:19-28` is a post-compilation verifier that walks the entire AST and rejects any query where a `gl_*` table scan lacks a valid `startsWith(traversal_path, ...)` predicate matching the `SecurityContext`. This is the defense-in-depth layer — even if `apply_security_context()` were somehow bypassed, `check_ast()` would catch it.
+
+**16 adversarial tests** at `check.rs:121-525`:
+
+| Test | What it verifies |
+|------|-----------------|
+| `passes_after_security_injection` (L122) | Happy path: security injection + check passes |
+| `fails_without_any_filter` (L129) | No WHERE clause → rejected |
+| `fails_with_wrong_path_literal` (L140) | Wrong path value → rejected |
+| `accepts_lowest_common_prefix` (L156) | Multi-path context uses common prefix |
+| `skips_non_gl_tables` (L164) | CTE/non-gl tables not required to have filter |
+| `rejects_subquery_without_inner_security_filter` (L203) | Subquery wrapping gl_* without filter → rejected |
+| `accepts_subquery_with_inner_security_filter` (L214) | Subquery with filter → passes |
+| `rejects_aggregate_subquery_without_inner_security_filter` (L233) | Aggregate subquery without filter → rejected |
+| `accepts_aggregate_subquery_with_inner_security_filter` (L258) | Aggregate subquery with filter → passes |
+| `accepts_subquery_wrapping_non_sensitive_table` (L287) | Non-gl subquery → passes |
+| `rejects_union_all_arm_without_security_filter` (L305) | UNION ALL arm missing filter → rejected |
+| `accepts_union_all_arms_with_security_filters` (L337) | All UNION ALL arms filtered → passes |
+| `rejects_cte_with_sensitive_table_missing_filter` (L364) | CTE body scanning gl_* without filter → rejected |
+| `accepts_cte_with_security_filter` (L399) | CTE body with filter → passes |
+| `rejects_union_arm_missing_security_filter` (L437) | TableRef::Union arm missing filter → rejected |
+| `accepts_union_arm_with_security_filter` (L479) | TableRef::Union arm with filter → passes |
+
+**What's not covered:**
+
+All tests are hand-crafted ASTs. No testing explores:
+- Combinatorial interaction between CTEs + UNION ALL + subqueries + aggregation in a single query
+- Edge cases in the AST walker's recursion (deeply nested structures that might skip a branch)
+- Race conditions between `apply_security_context` and `check_ast` (none possible — same thread, synchronous)
+- Malformed AST nodes that the walker might not visit (all reachable — `check_ast` is exhaustive over `Node`, `Query`, `TableRef` variants)
+
+The structural defense is strong: `check_ast` is a recursive walker with explicit handling for every `TableRef` variant (Scan, Subquery, Join, Union) and every `Node` variant (Query, Cte). Adding a new `TableRef` variant would require matching it in `check_ast` or hitting a compile error (Rust exhaustive match).
+
+### References
+
+- `check_ast` verifier: `crates/query-engine/src/check.rs:19-28`
+- 16 adversarial tests: `crates/query-engine/src/check.rs:121-525`
+- `apply_security_context`: `crates/query-engine/src/security.rs:73-82`
+- Exhaustive TableRef match: `crates/query-engine/src/check.rs:40-80`
+
+---
+
+## Task 2: Cross-tenant access outside JWT scope
+
+**Status:** NOT TESTED — all integration tests use single org; no cross-tenant isolation test exists
+
+**Evidence:**
+
+All integration tests use a single shared security context:
+- `common.rs:17-18`: `test_security_context()` returns `SecurityContext::new(1, vec!["1/".into()])` — org_id=1, single root path "1/"
+- `common.rs:37-53`: `DummyClaims::dummy()` uses `organization_id: Some(1)`, `group_traversal_ids: vec!["1/".into()]`
+- All 169 integration test functions use these shared fixtures
+
+**Only exception:** `dispatcher.rs:181` creates a Siphon event with `organization_id: 2` to test the indexer's dispatch routing — but this is an indexer test, not a query authorization test.
+
+**What a cross-tenant test would verify:**
+1. Insert data for org 1 (traversal_path "1/10/") and org 2 (traversal_path "2/20/")
+2. Query with `SecurityContext::new(1, vec!["1/10/".into()])` — should return only org 1 data
+3. Query with `SecurityContext::new(2, vec!["2/20/".into()])` — should return only org 2 data
+4. Query with org 1 context should return zero rows from org 2 tables
+
+**Why this matters:** The security invariant (`startsWith(traversal_path, ...)`) is org-scoped by convention (paths start with org_id), but no integration test verifies actual data isolation between organizations. The unit tests in `security.rs` validate path format, and `check.rs` validates predicate presence, but neither proves that ClickHouse actually returns no cross-org rows when queried.
+
+### References
+
+- Single-org security context: `crates/integration-tests/tests/common.rs:17-18`
+- Single-org claims: `crates/integration-tests/tests/common.rs:37-53`
+- Only multi-org usage (indexer, not query): `crates/integration-tests/tests/indexer/dispatcher.rs:181`
+- SecurityContext path validation: `crates/query-engine/src/security.rs:26-44`
+
+---
+
+## Task 3: Sparse permissions + namespace edge cases
+
+**Status:** PARTIALLY COVERED — extensive partial authorization tests; gaps in nested hierarchy and multi-org scenarios
+
+**What exists:**
+
+**Redaction integration tests (`redaction.rs`)** — ~71 test functions covering:
+- Partial authorization (some rows authorized, some not) across all query types
+- `fail_closed_on_authorization_failure` (L53) — authorization service error → zero rows returned
+- `fail_closed_on_unavailable_redaction` (L69) — service unavailable → zero rows returned
+- Multi-node queries where some nodes are authorized and others are not
+- Path finding with intermediate nodes denied (`path_finding_denying_intermediate_node_filters_path`, L1020)
+- Shared intermediate authorization (`path_finding_shared_intermediate_node_authorization`, L1273)
+- Column selection with aggregation + redaction (`column_selection_aggregation_only_group_by_node_has_mandatory_columns`, L2479)
+
+**MockRedactionService** (`mock_redaction.rs`) allows fine-grained per-resource authorization control. Tests configure which resources are authorized and verify that unauthorized resources are filtered from results.
+
+**What's not covered:**
+
+1. **Nested group hierarchy with varied permissions.** No test creates a deep group hierarchy (org → root group → child group → grandchild group) where the user has access to the child but not the grandchild, and verifies that traversal_path filtering correctly scopes results. The integration test data at `graph_formatter.rs:65` mentions `Group 100 →MEMBER_OF→ Group 200` but this is used for multi-hop traversal testing, not permission boundary testing.
+
+2. **Multi-org test.** No test with data in multiple organizations verifying that a user scoped to org 1 cannot see org 2 data (same finding as PEN2).
+
+3. **Root-level admin access.** No test verifies behavior when a user has admin-level access (root traversal path like `"1/"`) — specifically, whether they can see all data within the org but nothing outside it. `DummyClaims::dummy()` uses `admin: true` and `"1/"` root path, but all test data is within this scope, so the admin flag's effect is never isolated.
+
+4. **Empty traversal_path list.** `SecurityContext::new()` at `security.rs:30-32` rejects empty paths, but no integration test verifies that a JWT with empty `group_traversal_ids` results in query rejection through the full pipeline.
+
+### References
+
+- Redaction tests (~71 functions): `crates/integration-tests/tests/server/redaction.rs`
+- fail_closed tests: `crates/integration-tests/tests/server/redaction.rs:53,69`
+- Intermediate node denial: `crates/integration-tests/tests/server/redaction.rs:1020,1273`
+- MockRedactionService: `crates/integration-testkit/src/mock_redaction.rs`
+- Group hierarchy test data: `crates/integration-tests/tests/server/graph_formatter.rs:65`
+- Empty path rejection: `crates/query-engine/src/security.rs:30-32`
+- Admin claims: `crates/integration-tests/tests/common.rs:48`
+
+---
+
+## Summary
+
+### Penetration Testing
+
+| Task | Verdict | Open Items |
+|------|---------|------------|
+| Predicate stripping via crafted inputs | **COVERED (structurally)** | 16 adversarial `check_ast` tests. Exhaustive Rust match enforces completeness. No fuzz/proptest explores combinatorial space. |
+| Cross-tenant access outside JWT scope | **NOT TESTED** | All 169 integration tests use single org_id=1. No cross-org data isolation test. Security enforced structurally but never verified with real data. |
+| Sparse permissions + namespace edge cases | **PARTIALLY COVERED** | ~71 redaction tests with partial auth. Gaps: no nested hierarchy permissions test, no multi-org test, no empty traversal_path pipeline test. |
