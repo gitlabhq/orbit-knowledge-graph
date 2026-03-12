@@ -9,17 +9,24 @@
 //! ```ignore
 //! use integration_testkit::visitor::{ResponseView, NodeExt};
 //!
-//! let resp = ResponseView::new(pipeline_response);
-//! resp.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
-//! resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+//! // With assertion enforcement — parses the query and requires matching assertions:
+//! let resp = ResponseView::for_query(query_json, pipeline_response);
+//! resp.assert_node_order("User", &[1, 2, 3]); // required because query has order_by
+//! // Drop panics if required assertions were not called.
 //!
-//! let user_ids = resp.node_ids("User");
-//! let edges = resp.edges_from("User", 1);
+//! // Without enforcement — for unit tests or exploratory checks:
+//! let resp = ResponseView::new(pipeline_response);
 //! ```
+
+mod enforcement;
+
+use enforcement::AssertionTracker;
+pub use enforcement::{QueryRequirements, Requirement};
 
 use std::collections::HashSet;
 
 use gkg_server::query_pipeline::{GraphEdge, GraphNode, GraphResponse};
+use query_engine::input::{Input, QueryType};
 use serde_json::Value;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,13 +37,61 @@ use serde_json::Value;
 ///
 /// Wraps [`GraphResponse`] and provides ergonomic lookup, iteration, and
 /// assertion helpers for integration tests.
+///
+/// When created via [`for_query`](Self::for_query), the query JSON is parsed
+/// to derive assertion requirements. If the test drops the view without
+/// satisfying all requirements, the drop impl panics with a list of what
+/// was missed.
 pub struct ResponseView {
     pub response: GraphResponse,
+    tracker: AssertionTracker,
 }
 
 impl ResponseView {
-    pub fn new(response: GraphResponse) -> Self {
-        Self { response }
+    /// Create a view without assertion enforcement.
+    ///
+    /// Only available in `integration-testkit`'s own unit tests.
+    /// External crates must use [`for_query`](Self::for_query).
+    #[cfg(test)]
+    pub(crate) fn new(response: GraphResponse) -> Self {
+        Self {
+            response,
+            tracker: AssertionTracker::empty(),
+        }
+    }
+
+    /// Create a view with assertion enforcement derived from the compiled [`Input`].
+    ///
+    /// Validates structural invariants on construction:
+    /// - `response.query_type` matches the input
+    /// - Search and aggregation responses have zero edges (the formatter never
+    ///   produces edges for these query types)
+    pub fn for_query(input: &Input, response: GraphResponse) -> Self {
+        let expected_type: &str = input.query_type.into();
+        assert_eq!(
+            response.query_type, expected_type,
+            "response query_type '{}' does not match input '{expected_type}'",
+            response.query_type,
+        );
+
+        if matches!(input.query_type, QueryType::Search | QueryType::Aggregation) {
+            assert!(
+                response.edges.is_empty(),
+                "{} response must have zero edges, got {}",
+                input.query_type,
+                response.edges.len(),
+            );
+        }
+
+        Self {
+            response,
+            tracker: AssertionTracker::new(input.requirements()),
+        }
+    }
+
+    /// Explicitly skip a requirement that doesn't apply to this test case.
+    pub fn skip_requirement(&self, req: Requirement) {
+        self.tracker.skip(req);
     }
 
     pub fn query_type(&self) -> &str {
@@ -53,6 +108,18 @@ impl ResponseView {
 
     pub fn node_count(&self) -> usize {
         self.response.nodes.len()
+    }
+
+    /// Assert exact node count. Satisfies [`Requirement::NodeIds`] and [`Requirement::Range`].
+    pub fn assert_node_count(&self, expected: usize) {
+        self.tracker.satisfy(Requirement::NodeIds);
+        self.tracker.satisfy(Requirement::Range);
+        assert_eq!(
+            self.response.nodes.len(),
+            expected,
+            "expected {expected} nodes, got {}",
+            self.response.nodes.len()
+        );
     }
 
     pub fn edge_count(&self) -> usize {
@@ -76,7 +143,9 @@ impl ResponseView {
             .collect()
     }
 
+    /// Satisfies [`Requirement::NodeIds`].
     pub fn node_ids(&self, entity_type: &str) -> HashSet<i64> {
+        self.tracker.satisfy(Requirement::NodeIds);
         self.response
             .nodes
             .iter()
@@ -138,7 +207,12 @@ impl ResponseView {
             .collect()
     }
 
+    /// Satisfies [`Requirement::Relationship`] for the given edge type, and [`Requirement::Neighbors`].
     pub fn edges_of_type(&self, edge_type: &str) -> Vec<&GraphEdge> {
+        self.tracker.satisfy(Requirement::Relationship {
+            edge_type: edge_type.to_string(),
+        });
+        self.tracker.satisfy(Requirement::Neighbors);
         self.response
             .edges
             .iter()
@@ -166,7 +240,9 @@ impl ResponseView {
     ///
     /// Tests should use this to discover which paths exist, then call
     /// [`path`] for each one explicitly.
+    /// Satisfies [`Requirement::PathFinding`].
     pub fn path_ids(&self) -> HashSet<usize> {
+        self.tracker.satisfy(Requirement::PathFinding);
         self.response
             .edges
             .iter()
@@ -222,7 +298,9 @@ impl ResponseView {
     }
 
     /// Assert a node exists and satisfies a predicate.
+    /// Satisfies [`Requirement::Aggregation`] (property value was checked).
     pub fn assert_node(&self, entity_type: &str, id: i64, predicate: impl Fn(&GraphNode) -> bool) {
+        self.tracker.satisfy(Requirement::Aggregation);
         let node = self
             .find_node(entity_type, id)
             .unwrap_or_else(|| panic!("node {entity_type}:{id} not found"));
@@ -232,6 +310,7 @@ impl ResponseView {
         );
     }
 
+    /// Satisfies [`Requirement::Relationship`] for the given edge type, and [`Requirement::Neighbors`].
     pub fn assert_edge_exists(
         &self,
         from: &str,
@@ -240,6 +319,10 @@ impl ResponseView {
         to_id: i64,
         edge_type: &str,
     ) {
+        self.tracker.satisfy(Requirement::Relationship {
+            edge_type: edge_type.to_string(),
+        });
+        self.tracker.satisfy(Requirement::Neighbors);
         assert!(
             self.find_edge(from, from_id, to, to_id, edge_type)
                 .is_some(),
@@ -248,6 +331,7 @@ impl ResponseView {
         );
     }
 
+    /// Satisfies [`Requirement::Relationship`] for the given edge type, and [`Requirement::Neighbors`].
     pub fn assert_edge_absent(
         &self,
         from: &str,
@@ -256,6 +340,10 @@ impl ResponseView {
         to_id: i64,
         edge_type: &str,
     ) {
+        self.tracker.satisfy(Requirement::Relationship {
+            edge_type: edge_type.to_string(),
+        });
+        self.tracker.satisfy(Requirement::Neighbors);
         assert!(
             self.find_edge(from, from_id, to, to_id, edge_type)
                 .is_none(),
@@ -263,7 +351,9 @@ impl ResponseView {
         );
     }
 
-    /// Assert that all nodes satisfy a predicate.
+    /// Assert that all nodes satisfy a predicate (structural check, no enforcement).
+    ///
+    /// For filter enforcement use [`assert_filter`](Self::assert_filter) instead.
     pub fn assert_all_nodes(&self, predicate: impl Fn(&GraphNode) -> bool, msg: &str) {
         for (i, node) in self.response.nodes.iter().enumerate() {
             assert!(
@@ -275,8 +365,41 @@ impl ResponseView {
         }
     }
 
+    /// Assert that a filter on `field` produced correct results for nodes of
+    /// `entity_type`. Checks that every node of the given type satisfies the predicate.
+    ///
+    /// Satisfies [`Requirement::Filter`] for the specific `field`.
+    pub fn assert_filter(
+        &self,
+        entity_type: &str,
+        field: &str,
+        predicate: impl Fn(&GraphNode) -> bool,
+    ) {
+        self.tracker.satisfy(Requirement::Filter {
+            field: field.to_string(),
+        });
+        for node in self
+            .response
+            .nodes
+            .iter()
+            .filter(|n| n.entity_type == entity_type)
+        {
+            assert!(
+                predicate(node),
+                "{}:{} failed filter assertion on '{field}'",
+                node.entity_type,
+                node.id,
+            );
+        }
+    }
+
     /// Assert that nodes of the given type appear in exactly this ID order.
+    /// Satisfies [`Requirement::OrderBy`], [`Requirement::NodeIds`], and
+    /// [`Requirement::AggregationSort`].
     pub fn assert_node_order(&self, entity_type: &str, expected_ids: &[i64]) {
+        self.tracker.satisfy(Requirement::OrderBy);
+        self.tracker.satisfy(Requirement::NodeIds);
+        self.tracker.satisfy(Requirement::AggregationSort);
         let actual = self.node_ids_ordered(entity_type);
         assert_eq!(actual, expected_ids, "{entity_type} nodes in wrong order");
     }
@@ -407,11 +530,11 @@ pub fn walk_response(response: &ResponseView, visitor: &mut impl ResponseVisitor
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use serde_json::json;
 
-    fn make_node(entity_type: &str, id: i64, props: &[(&str, Value)]) -> GraphNode {
+    pub(crate) fn make_node(entity_type: &str, id: i64, props: &[(&str, Value)]) -> GraphNode {
         let mut properties = serde_json::Map::new();
         for (k, v) in props {
             properties.insert(k.to_string(), v.clone());
@@ -423,7 +546,13 @@ mod tests {
         }
     }
 
-    fn make_edge(from: &str, from_id: i64, to: &str, to_id: i64, edge_type: &str) -> GraphEdge {
+    pub(crate) fn make_edge(
+        from: &str,
+        from_id: i64,
+        to: &str,
+        to_id: i64,
+        edge_type: &str,
+    ) -> GraphEdge {
         GraphEdge {
             from: from.to_string(),
             from_id,
@@ -436,7 +565,7 @@ mod tests {
         }
     }
 
-    fn make_path_edge(
+    pub(crate) fn make_path_edge(
         from: &str,
         from_id: i64,
         to: &str,
@@ -452,7 +581,7 @@ mod tests {
         }
     }
 
-    fn sample_response() -> GraphResponse {
+    pub(crate) fn sample_response() -> GraphResponse {
         GraphResponse {
             query_type: "traversal".to_string(),
             nodes: vec![
@@ -465,6 +594,43 @@ mod tests {
                 make_edge("User", 1, "Group", 100, "MEMBER_OF"),
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
                 make_edge("User", 2, "Group", 100, "MEMBER_OF"),
+            ],
+        }
+    }
+
+    pub(crate) fn sample_search_response() -> GraphResponse {
+        GraphResponse {
+            query_type: "search".to_string(),
+            nodes: vec![
+                make_node("User", 1, &[("username", json!("alice"))]),
+                make_node("User", 2, &[("username", json!("bob"))]),
+            ],
+            edges: vec![],
+        }
+    }
+
+    pub(crate) fn sample_aggregation_response() -> GraphResponse {
+        GraphResponse {
+            query_type: "aggregation".to_string(),
+            nodes: vec![
+                make_node("User", 1, &[("username", json!("alice"))]),
+                make_node("User", 2, &[("username", json!("bob"))]),
+            ],
+            edges: vec![],
+        }
+    }
+
+    pub(crate) fn sample_neighbors_response() -> GraphResponse {
+        GraphResponse {
+            query_type: "neighbors".to_string(),
+            nodes: vec![
+                make_node("User", 1, &[("username", json!("alice"))]),
+                make_node("Group", 100, &[("name", json!("Public"))]),
+                make_node("Group", 101, &[("name", json!("Private"))]),
+            ],
+            edges: vec![
+                make_edge("User", 1, "Group", 100, "MEMBER_OF"),
+                make_edge("User", 1, "Group", 101, "MEMBER_OF"),
             ],
         }
     }
