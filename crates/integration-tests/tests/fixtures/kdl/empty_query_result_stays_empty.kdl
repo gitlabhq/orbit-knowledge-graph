@@ -12,4 +12,4 @@ query """
 redact allow "user" 1 2 3 4 5
 redact run
 
-count authorized=0 redacted=0
+assert-count authorized=0 redacted=0

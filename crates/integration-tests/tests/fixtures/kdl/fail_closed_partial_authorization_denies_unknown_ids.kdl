@@ -8,11 +8,11 @@ query """
   }
 """
 
-count raw=5
+assert-count raw=5
 
 redact allow "user" 1 2
 redact run
 
-count authorized=2 redacted=3
+assert-count authorized=2 redacted=3
 assert-ids authorized "u" 1 2
 assert-ids denied "u" 3 4 5

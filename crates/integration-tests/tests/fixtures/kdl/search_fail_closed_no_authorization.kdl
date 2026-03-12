@@ -8,9 +8,9 @@ query """
   }
 """
 
-count raw=3
+assert-count raw=3
 
 // No authorizations — fail closed.
 redact run
 
-count authorized=0 redacted=3
+assert-count authorized=0 redacted=3

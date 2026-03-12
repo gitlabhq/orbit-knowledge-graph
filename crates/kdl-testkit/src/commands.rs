@@ -16,10 +16,10 @@ use integration_testkit::mock_redaction::MockRedactionService;
 register_command!("query", cmd_query);
 register_command!("extra-sql", cmd_extra_sql);
 register_command!("redact", cmd_redact);
-register_command!("count", cmd_count);
+register_command!("assert-count", cmd_count);
 register_command!("assert-ids", cmd_assert_ids);
-register_command!("sql-contains", cmd_sql_contains);
-register_command!("sql-not-contains", cmd_sql_not_contains);
+register_command!("assert-sql-contains", cmd_sql_contains);
+register_command!("assert-sql-not-contains", cmd_sql_not_contains);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Action commands
@@ -107,20 +107,20 @@ async fn cmd_redact(state: &mut TestState, node: &kdl::KdlNode) -> Result {
 
 async fn cmd_count(state: &mut TestState, node: &kdl::KdlNode) -> Result {
     if let Some(expected) = node.get("raw").and_then(|v| v.as_integer()) {
-        assert_eq_result(state.result()?.len(), expected as usize, "count raw")?;
+        assert_eq_result(state.result()?.len(), expected as usize, "assert-count raw")?;
     }
     if let Some(expected) = node.get("authorized").and_then(|v| v.as_integer()) {
         assert_eq_result(
             state.result()?.authorized_count(),
             expected as usize,
-            "count authorized",
+            "assert-count authorized",
         )?;
     }
     if let Some(expected) = node.get("redacted").and_then(|v| v.as_integer()) {
         let actual = state.last_redacted_count.ok_or_else(|| {
             RunnerError::StateError("`redact` must run before checking redacted count".into())
         })?;
-        assert_eq_result(actual, expected as usize, "count redacted")?;
+        assert_eq_result(actual, expected as usize, "assert-count redacted")?;
     }
     Ok(())
 }
