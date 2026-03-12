@@ -1869,3 +1869,311 @@ The `PipelineStage::execute` signature at `mod.rs:22-28` takes `&self` (shared r
 | All invocations use full 8-stage chain | **PASS** | Single `run_query()` site. Type system enforces order from Extraction onward. First 3 stages (`()→()`) order enforced by runtime guards only. |
 | Concurrent queries don't share context | **PASS** | Fresh `QueryPipelineContext` per request. `&mut` exclusive borrow. Shared `Arc` resources are immutable/pooled. |
 | No shared mutable state in stages | **PASS** | All stages are stateless unit structs or hold immutable config. `&self` on `execute()`. No Mutex/RwLock/Atomic/static. |
+
+---
+
+# Hardening — Security Task Results
+
+## Task 1: Remove hardcoded SKIP_SECURITY_FILTER_TABLES (derive from ontology)
+
+**Status:** NOT IMPLEMENTED — refactor path fully documented in TQ8 Task 2
+
+The hardcoded constant at `constants.rs:30` (`SKIP_SECURITY_FILTER_TABLES = &["gl_user"]`) should be replaced by a runtime check against `NodeEntity.has_traversal_path` from the ontology. The field already exists (`entities.rs:97-99`), is auto-derived during YAML loading (`loading/node.rs:157-159`), and is consumed by the indexer (`namespace_deletion/lower.rs:26-27`). The query engine does not use it.
+
+**Refactor:** `should_apply_security_filter()` (`security.rs:192-203`) takes `&Ontology`, looks up the entity by destination table, checks `node.has_traversal_path`. This eliminates the hardcoded skip list. The ontology is already available in `compile()` (`lib.rs:91`).
+
+**Cross-reference:** TQ8 Task 2 documents the full refactor path with all file:line references.
+
+### References
+
+- Hardcoded constant: `crates/query-engine/src/constants.rs:27-30`
+- `has_traversal_path` on NodeEntity: `crates/ontology/src/entities.rs:97-99`
+- Auto-derived during loading: `crates/ontology/src/loading/node.rs:157-159`
+- Already consumed by indexer: `crates/indexer/src/modules/namespace_deletion/lower.rs:26-27`
+- `should_apply_security_filter()`: `crates/query-engine/src/security.rs:192-203`
+- `compile()` receives `&Ontology`: `crates/query-engine/src/lib.rs:91-93`
+
+---
+
+## Task 2: Fuzz testing — JSON schema fuzzing (cargo-fuzz)
+
+**Status:** NOT IMPLEMENTED — no fuzz infrastructure exists
+
+No `fuzz/` directory, no `cargo-fuzz` targets, no `fuzz_compile_raw` binary exist anywhere in the repository. Glob for `**/fuzz*` returned zero results. Grep for `fuzz` in query-engine Rust files returned zero results.
+
+The TQ1 Task 1 audit performed manual trace of all input→SQL paths and confirmed parameterization. However, automated fuzz testing would provide continuous coverage against regressions.
+
+**Recommended implementation:**
+
+1. Create `crates/query-engine/fuzz/` with `cargo-fuzz` scaffold
+2. Add `fuzz_compile_raw` target that feeds arbitrary bytes through `compile()`:
+
+```rust
+#![no_main]
+use libfuzzer_sys::fuzz_target;
+use query_engine::{compile, SecurityContext};
+use ontology::Ontology;
+
+fuzz_target!(|data: &[u8]| {
+    let Ok(json) = std::str::from_utf8(data) else { return };
+    let ontology = Ontology::load_embedded().unwrap();
+    let ctx = SecurityContext::new(1, vec!["1/".to_string()]).unwrap();
+    let _ = compile(json, &ontology, &ctx);
+});
+```
+
+3. Add CI job: `cargo +nightly fuzz run fuzz_compile_raw -- -max_total_time=300`
+
+### References
+
+- No fuzz directory: repo root (zero glob hits for `**/fuzz*`)
+- `compile()` entry point for fuzzing: `crates/query-engine/src/lib.rs:91-113`
+- `Ontology::load_embedded()`: `crates/ontology/src/lib.rs`
+- JSON Schema validation (first defense layer): `crates/query-engine/src/validate.rs:112-115`
+
+---
+
+## Task 3: Fuzz testing — add SQL injection dictionary (sql.dict)
+
+**Status:** NOT IMPLEMENTED — depends on Task 2 (no fuzz infrastructure)
+
+No fuzz targets exist to add a dictionary to. Once Task 2 creates the `cargo-fuzz` scaffold, a `sql.dict` should be placed at `crates/query-engine/fuzz/sql.dict` containing SQL injection payloads:
+
+```
+# SQL injection payloads for libFuzzer dictionary
+"' OR 1=1 --"
+"'; DROP TABLE gl_user; --"
+"1 UNION SELECT * FROM gl_user"
+"${1+1}"
+"' AND SLEEP(5) --"
+"\x00"
+"' OR ''='"
+"1; SET max_execution_time=0"
+"') OR ('1'='1"
+"admin'--"
+```
+
+Invoke with: `cargo +nightly fuzz run fuzz_compile_raw -- -dict=fuzz/sql.dict`
+
+### References
+
+- No fuzz directory exists (prerequisite Task 2)
+- libFuzzer dictionary format: external cargo-fuzz docs
+- SQL injection payloads relevant to ClickHouse parameterization
+
+---
+
+## Task 4: String concatenation audit
+
+**Status:** COVERED — TQ1 Task 2
+
+Exhaustive audit of every `format!`/`write!` in `codegen.rs` (30+ interpolation sites). All safe except one dormant path:
+
+- `codegen.rs:124`: `format!("SET {key} = {value};")` — `set_statements` is always `vec![]` (`ast.rs:209`). Dead code, never populated by any lowerer.
+- LIKE metacharacter escape gap at `lower.rs:931-934`: user values in `contains`/`starts_with`/`ends_with` are parameterized (no injection) but `%` and `_` chars are not escaped, allowing semantic broadening.
+
+**Cross-reference:** TQ1 Task 2 has full details and all 30+ line references.
+
+### References
+
+- Dormant SET injection: `crates/query-engine/src/codegen.rs:123-124`
+- `set_statements` always empty: `crates/query-engine/src/ast.rs:190,209`
+- LIKE metachar escape gap: `crates/query-engine/src/lower.rs:931-934`
+- Full interpolation site list: see TQ1 Task 2
+
+---
+
+## Task 5: Allow-list completeness audit
+
+**Status:** COVERED — TQ3 Task 3
+
+Ontology-derived JSON schema at `json_schema.rs` generates strict enums for entity names, column names, and relationship types via `derive_json_schema()`. `check_json()` validates incoming queries against this schema before any Rust deserialization. `check_ontology()` provides a second validation layer.
+
+**Gap noted:** No automated CI job cross-validates that the ontology YAML enum values match the actual ClickHouse DDL column names in `config/graph.sql`. A column renamed in DDL but not in YAML (or vice versa) would cause silent runtime failures rather than CI failures.
+
+**Cross-reference:** TQ3 Task 3 has full details.
+
+### References
+
+- `derive_json_schema()`: `crates/ontology/src/json_schema.rs`
+- `check_json()`: `crates/query-engine/src/validate.rs:112-115`
+- `check_ontology()`: `crates/query-engine/src/validate.rs:119-132`
+- ClickHouse DDL: `config/graph.sql`
+
+---
+
+## Task 6: Case/Unicode bypass tests
+
+**Status:** COVERED — TQ3 Tasks 1 and 2
+
+**Case variation:** JSON Schema Identifier regex `^[a-zA-Z_][a-zA-Z0-9_]{0,63}$` (`graph_query.schema.json:175-181`) is case-sensitive. `GL_ISSUE` passes the regex but fails ontology enum validation (only lowercase `gl_issue` is a valid entity). Two-layer defense.
+
+**Unicode homoglyphs:** The regex `[a-zA-Z0-9_]` uses ASCII character classes. Unicode homoglyphs (Cyrillic а, Greek ο, etc.) fall outside `[a-zA-Z]` and are rejected. Defense relies on regex engine ASCII semantics — no explicit ASCII-only assertion exists, but `jsonschema` crate uses standard Rust regex which defaults to Unicode-unaware for `[a-z]` class.
+
+**Cross-reference:** TQ3 Tasks 1 and 2 have full details.
+
+### References
+
+- Identifier regex: `config/schemas/graph_query.schema.json:175-181`
+- Ontology enum validation: `crates/ontology/src/json_schema.rs`
+- See TQ3 Tasks 1 and 2 for exhaustive analysis
+
+---
+
+## Task 7: LIKE pattern analysis
+
+**Status:** COVERED — TQ9 (all 4 tasks)
+
+Extensive analysis found:
+- All 112 `type: string` columns across 24 entities accept LIKE operators (Contains, StartsWith, EndsWith)
+- No minimum pattern length enforcement (`like_pattern()` at `lower.rs:931-934` accepts empty strings)
+- LIKE + COUNT aggregation is fully composable — enables character-by-character probing
+- 15+ columns at HIGH/CRITICAL sensitivity (vulnerability titles, user emails, note text)
+- No per-column operator restrictions in validation or ontology schema
+- No rate limiting to throttle probing
+
+**Cross-reference:** TQ9 Tasks 1-4 have full column inventory, attack scenarios, and mitigation paths.
+
+### References
+
+- `like_pattern()`: `crates/query-engine/src/lower.rs:931-934`
+- `check_one_filter()` no op restriction: `crates/query-engine/src/validate.rs:241-284`
+- See TQ9 for complete analysis
+
+---
+
+## Task 8: Validate ontology field names do not start with _gkg_ prefix
+
+**Status:** NOT COVERED — no validation exists, no current collision
+
+Grep for `_gkg_` across all ontology YAML files (`config/ontology/nodes/`, `config/ontology/edges/`) returned **zero matches**. No ontology field currently uses the `_gkg_` prefix.
+
+However, no validation prevents a future YAML addition from using `_gkg_`-prefixed field names. The ontology JSON schema (`ontology.schema.json`) does not constrain property names beyond basic string type. The query engine's `enforce_return()` adds `_gkg_{alias}_id`, `_gkg_{alias}_type`, `_gkg_{alias}_pk` columns to the SELECT for redaction — a collision with a user-defined ontology field of the same name could cause incorrect redaction lookups.
+
+**Recommended mitigation:** Add a validation check in ontology loading (`loading/node.rs`) or in `validate_ontology_constants()`:
+
+```rust
+for field_name in node.fields.keys() {
+    assert!(!field_name.starts_with("_gkg_"),
+        "ontology field '{field_name}' on {node_type} must not start with '_gkg_' (reserved)");
+}
+```
+
+### References
+
+- No `_gkg_` fields in ontology: `config/ontology/nodes/` (zero grep hits)
+- `GKG_COLUMN_PREFIX = "_gkg_"`: `crates/query-engine/src/constants.rs:8`
+- `_gkg_` columns added by `enforce_return()`: `crates/query-engine/src/enforce.rs`
+- Ontology property schema (no name constraint): `config/schemas/ontology.schema.json:51-80`
+- `validate_ontology_constants()`: `crates/ontology/src/constants.rs:43-61`
+
+---
+
+## Task 9: Authorization stream chaos testing
+
+**Status:** COVERED (audit) — TQ11 Task 4, code changes NOT implemented
+
+TQ11 Task 4 verified all 4 stream error paths are fail-closed:
+- `StreamClosed` → `Status::cancelled` (Rails disconnects)
+- `ReceiveFailed(status)` → original gRPC Status (transport error)
+- `ClientError` → `Status::aborted` (Rails sends error message)
+- `InvalidMessage` → `Status::invalid_argument` (wrong message type)
+
+**Gaps identified:**
+1. No `tokio::time::timeout` on `stream.next().await` (`stream.rs:112`) — hangs indefinitely if Rails stalls without disconnecting
+2. No integration tests exercise the streaming exchange — `MockRedactionService` bypasses gRPC entirely (`common.rs:55-58`)
+3. No chaos/fault injection tests for network partition scenarios
+
+**Cross-reference:** TQ11 Task 4 has full error path analysis.
+
+### References
+
+- Stream error handling: `crates/gkg-server/src/redaction/stream.rs:112-122`
+- No timeout: `crates/gkg-server/src/redaction/stream.rs:112`
+- Mock bypasses streaming: `crates/integration-tests/tests/common.rs:55-58`
+- See TQ11 Task 4 for all error paths
+
+---
+
+## Task 10: Audit all PipelineRunner invocations
+
+**Status:** COVERED — TQ12 Task 3
+
+Single pipeline invocation at `service.rs:58-75`. Two callers: `grpc/service.rs:131` (raw) and `grpc/service.rs:135` (LLM). Both use the same `run_query()` with full 8-stage chain.
+
+Type system enforces stage ordering from ExtractionStage onward (unique Input/Output types). First 3 stages (Security, Compilation, Execution) all accept `()` — ordering enforced by runtime `Option::None` guards only.
+
+No code path bypasses SecurityStage or RedactionStage.
+
+**Cross-reference:** TQ12 Task 3 has full type chain analysis.
+
+### References
+
+- Single invocation: `crates/gkg-server/src/query_pipeline/service.rs:58-75`
+- Two callers: `crates/gkg-server/src/grpc/service.rs:131,135`
+- Type chain enforcement: `crates/gkg-server/src/query_pipeline/stages/mod.rs:56-58`
+- See TQ12 Task 3 for complete analysis
+
+---
+
+## Task 11: check_ast coverage for Neighbors/Search query types
+
+**Status:** COVERED — TQ2, verified query-type agnostic
+
+`check_ast()` (`check.rs:19-28`) operates on the `Node` AST type, not on query type enums. It walks all `Query` nodes, collecting `gl_*` table aliases via `collect_node_aliases()` and verifying each has a valid `startsWith(traversal_path, path)` predicate via `has_valid_path_filter()`.
+
+All query types (Traversal, Search, PathFinding, Neighbors, Aggregation) produce a `Node::Query(q)` via `lower()` before reaching `check_ast()`. The check is structurally comprehensive:
+
+- Main query WHERE clause checked (`check_query()` at line 30-37)
+- UNION ALL arms recursed (`check_query()` at line 42-44)
+- CTEs recursed (`check_ast()` at line 22-24)
+- Derived tables/subqueries recursed (`check_derived_tables_in_from()` at line 46)
+
+No query type can bypass `check_ast` because `compile()` (`lib.rs:101`) calls it unconditionally after `apply_security_context()`.
+
+### References
+
+- `check_ast()` query-type agnostic: `crates/query-engine/src/check.rs:19-28`
+- `check_query()` walks aliases: `crates/query-engine/src/check.rs:30-47`
+- `check_derived_tables_in_from()` recurses subqueries: `crates/query-engine/src/check.rs:49-66`
+- `compile()` calls `check_ast` unconditionally: `crates/query-engine/src/lib.rs:101`
+- Test coverage (17 tests): `crates/query-engine/src/check.rs:126-523`
+
+---
+
+## Task 12: Hydration query security review — same SecurityContext
+
+**Status:** COVERED — TQ10 Task 1
+
+`compile_and_fetch()` at `hydration.rs:87` calls `compile(&query_json, &ctx.ontology, ctx.security_context()?)`. The `ctx` is the same `QueryPipelineContext` established for the original request. `security_context()` returns the same `SecurityContext` set by `SecurityStage` at request start.
+
+The full `compile()` pipeline runs on hydration queries: `validated_input()` → `lower()` → `enforce_return()` → `apply_security_context()` → `check_ast()` → `codegen()`. Traversal_path filters are injected and verified.
+
+**Cross-reference:** TQ10 Task 1 has the complete trace.
+
+### References
+
+- `compile_and_fetch()` uses same context: `crates/gkg-server/src/query_pipeline/stages/hydration.rs:87`
+- `compile()` full pipeline: `crates/query-engine/src/lib.rs:91-113`
+- See TQ10 Task 1 for complete analysis
+
+---
+
+## Summary
+
+### Hardening Tasks
+
+| Task | Verdict | Status |
+|------|---------|--------|
+| Remove hardcoded SKIP_SECURITY_FILTER_TABLES | **NOT IMPLEMENTED** | Refactor path documented (TQ8 Task 2). Code change needed. |
+| Fuzz testing: JSON schema fuzzing | **NOT IMPLEMENTED** | No fuzz infrastructure exists. Manual audit done (TQ1 Task 1). |
+| Fuzz testing: add sql.dict | **NOT IMPLEMENTED** | Depends on fuzz infrastructure (Task 2). |
+| String concatenation audit | **COVERED** | TQ1 Task 2. Dormant SET code + LIKE escape gap noted. |
+| Allow-list completeness audit | **COVERED** | TQ3 Task 3. Gap: no ontology-vs-DDL CI cross-validation. |
+| Case/Unicode bypass tests | **COVERED** | TQ3 Tasks 1-2. Two-layer defense confirmed. |
+| LIKE pattern analysis | **COVERED** | TQ9 all tasks. 112 string columns, 15+ HIGH/CRITICAL. |
+| Validate _gkg_ prefix collision | **NOT COVERED** | No current collision. No validation guard exists. |
+| Authorization stream chaos testing | **COVERED** (audit) | TQ11 Task 4. Fail-closed verified. No timeout, no integration tests. |
+| Audit PipelineRunner invocations | **COVERED** | TQ12 Task 3. Single site, type-enforced. |
+| check_ast coverage for new query types | **COVERED** | Query-type agnostic by design. All types go through `check_ast`. |
+| Hydration query SecurityContext | **COVERED** | TQ10 Task 1. Same context, full `compile()` path. |
