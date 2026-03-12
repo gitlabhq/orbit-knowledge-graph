@@ -2783,6 +2783,7 @@ dependencies = [
  "gkg-utils",
  "health-check",
  "indexer",
+ "indexmap 2.13.0",
  "jsonschema",
  "jsonwebtoken",
  "labkit-rs",

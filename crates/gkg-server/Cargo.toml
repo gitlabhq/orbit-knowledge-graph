@@ -25,6 +25,7 @@ config = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 gkg-utils = { path = "../utils" }
 health-check = { path = "../health-check" }
+indexmap = { workspace = true }
 indexer = { path = "../indexer" }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
