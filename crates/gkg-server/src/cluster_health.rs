@@ -214,6 +214,75 @@ impl Default for ClusterHealthChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{Json, Router, routing::get};
+    use health_check::{ComponentHealth as HcComponentHealth, HealthStatus, ServiceHealth, Status};
+    use tokio::net::TcpListener;
+
+    fn install_crypto_provider() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    async fn start_mock_sidecar(health: HealthStatus) -> String {
+        install_crypto_provider();
+        let app = Router::new().route(
+            "/health",
+            get(move || {
+                let h = health.clone();
+                async move { Json(h) }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}")
+    }
+
+    fn healthy_sidecar_response() -> HealthStatus {
+        HealthStatus {
+            status: Status::Healthy,
+            services: vec![
+                ServiceHealth {
+                    name: "webserver".to_string(),
+                    status: Status::Healthy,
+                    ready_replicas: 2,
+                    desired_replicas: 2,
+                },
+                ServiceHealth {
+                    name: "indexer".to_string(),
+                    status: Status::Healthy,
+                    ready_replicas: 1,
+                    desired_replicas: 1,
+                },
+            ],
+            clickhouse: HcComponentHealth {
+                status: Status::Healthy,
+                error: None,
+            },
+        }
+    }
+
+    fn degraded_sidecar_response() -> HealthStatus {
+        HealthStatus {
+            status: Status::Unhealthy,
+            services: vec![ServiceHealth {
+                name: "indexer".to_string(),
+                status: Status::Unhealthy,
+                ready_replicas: 0,
+                desired_replicas: 2,
+            }],
+            clickhouse: HcComponentHealth {
+                status: Status::Healthy,
+                error: None,
+            },
+        }
+    }
+
+    fn extract_structured(response: GetClusterHealthResponse) -> StructuredClusterHealth {
+        match response.content {
+            Some(get_cluster_health_response::Content::Structured(s)) => s,
+            _ => panic!("Expected structured response"),
+        }
+    }
 
     #[tokio::test]
     async fn test_stubbed_health_returns_healthy_structured() {
@@ -338,5 +407,61 @@ mod tests {
     fn test_default_has_no_health_client() {
         let checker = ClusterHealthChecker::default();
         assert!(checker.health_client.is_none());
+    }
+
+    #[tokio::test]
+    async fn real_mode_healthy_sidecar() {
+        let url = start_mock_sidecar(healthy_sidecar_response()).await;
+        let checker = ClusterHealthChecker::new(Some(url));
+
+        let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
+
+        assert_eq!(s.status, ClusterStatus::Healthy as i32);
+        let names: Vec<&str> = s.components.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"webserver"));
+        assert!(names.contains(&"indexer"));
+        assert!(names.contains(&"clickhouse"));
+
+        let webserver = s.components.iter().find(|c| c.name == "webserver").unwrap();
+        let replicas = webserver.replicas.as_ref().unwrap();
+        assert_eq!(replicas.ready, 2);
+        assert_eq!(replicas.desired, 2);
+    }
+
+    #[tokio::test]
+    async fn real_mode_unhealthy_component_propagates() {
+        let url = start_mock_sidecar(degraded_sidecar_response()).await;
+        let checker = ClusterHealthChecker::new(Some(url));
+
+        let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
+
+        assert_eq!(s.status, ClusterStatus::Unhealthy as i32);
+        let indexer = s.components.iter().find(|c| c.name == "indexer").unwrap();
+        assert_eq!(indexer.status, ClusterStatus::Unhealthy as i32);
+        let replicas = indexer.replicas.as_ref().unwrap();
+        assert_eq!(replicas.ready, 0);
+        assert_eq!(replicas.desired, 2);
+    }
+
+    #[tokio::test]
+    async fn real_mode_unreachable_sidecar_returns_unhealthy() {
+        install_crypto_provider();
+        let checker = ClusterHealthChecker::new(Some("http://127.0.0.1:1".to_string()));
+
+        let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
+
+        assert_eq!(s.status, ClusterStatus::Unhealthy as i32);
+        let clickhouse = s
+            .components
+            .iter()
+            .find(|c| c.name == "clickhouse")
+            .unwrap();
+        assert!(
+            clickhouse
+                .metrics
+                .get("error")
+                .unwrap()
+                .contains("unreachable")
+        );
     }
 }

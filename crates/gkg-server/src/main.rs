@@ -124,19 +124,15 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
-    let http_server = HttpServer::bind(
-        config.bind_address,
-        (*validator).clone(),
-        Arc::clone(&cluster_health),
-    )
-    .await?;
+    let graph_client = config.graph.build_client();
+    let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
         &config.graph,
-        Arc::clone(&cluster_health),
+        cluster_health,
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
