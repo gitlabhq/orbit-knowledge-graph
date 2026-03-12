@@ -1,0 +1,56 @@
+glob_matcher: doublestar
+
+output:
+  - summary
+  - failure
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: mise exec -- npx --yes -p @commitlint/config-conventional -p @commitlint/cli commitlint --edit {1}
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: fmt
+      run: mise run lint:fmt
+      glob: "**/*.rs"
+    - name: agent-file-sync
+      run: diff AGENTS.md CLAUDE.md
+      glob:
+        - "AGENTS.md"
+        - "CLAUDE.md"
+    - name: ontology-schema
+      run: mise run ontology:validate
+      glob: "fixtures/ontology/**/*.yaml"
+    - name: docs
+      glob: "**/*.md"
+      group:
+        parallel: true
+        jobs:
+          - name: markdownlint
+            run: mise run lint:markdown
+          - name: vale
+            run: mise run lint:vale
+          - name: lychee
+            run: mise run lint:links
+    - name: helm-lint
+      glob: "helm-dev/**"
+      group:
+        parallel: true
+        jobs:
+          - name: helm-lint-gkg
+            run: helm lint helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
+          - name: helm-lint-observability
+            run: helm lint helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
+          - name: helm-template-gkg
+            run: helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
+          - name: helm-template-observability
+            run: helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: clippy
+      run: mise run lint:code
+      glob: "**/*.rs"
