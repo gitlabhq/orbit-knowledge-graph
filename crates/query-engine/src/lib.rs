@@ -377,6 +377,11 @@ mod tests {
         assert!(result.base.sql.contains("_gkg_neighbor_id"));
         assert!(result.base.sql.contains("_gkg_neighbor_type"));
         assert!(result.base.sql.contains("_gkg_relationship_type"));
+        assert!(
+            result.base.sql.contains("_gkg_neighbor_is_outgoing"),
+            "bidirectional neighbor query should include direction column: {}",
+            result.base.sql
+        );
         assert!(result.base.sql.contains("INNER JOIN"));
     }
 

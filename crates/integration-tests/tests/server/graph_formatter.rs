@@ -911,20 +911,22 @@ async fn neighbors_both_exact(ctx: &TestContext) {
         "should have CONTAINS edges"
     );
 
+    // MEMBER_OF edges: User→Group (incoming to center), so from=User, to=Group
     assert!(edges.iter().any(|e| {
-        e["from"] == "Group"
-            && e["from_id"] == 100
-            && e["to"] == "User"
-            && e["to_id"] == 1
+        e["from"] == "User"
+            && e["from_id"] == 1
+            && e["to"] == "Group"
+            && e["to_id"] == 100
             && e["type"] == "MEMBER_OF"
     }));
     assert!(edges.iter().any(|e| {
-        e["from"] == "Group"
-            && e["from_id"] == 100
-            && e["to"] == "User"
-            && e["to_id"] == 5
+        e["from"] == "User"
+            && e["from_id"] == 5
+            && e["to"] == "Group"
+            && e["to_id"] == 100
             && e["type"] == "MEMBER_OF"
     }));
+    // CONTAINS edge: Group→Project (outgoing from center), so from=Group, to=Project
     assert!(edges.iter().any(|e| {
         e["from"] == "Group"
             && e["from_id"] == 100
@@ -934,10 +936,87 @@ async fn neighbors_both_exact(ctx: &TestContext) {
     }));
 
     for edge in edges {
-        assert_eq!(edge["from_id"], 100, "center node should be from_id");
+        assert!(edge["from_id"].is_i64());
         assert!(edge["to_id"].is_i64());
         assert!(edge.get("path_id").is_none());
     }
+}
+
+async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
+    seed(ctx).await;
+
+    // User 1 is MEMBER_OF Group 100 (User→Group edge in gl_edge)
+    // Query neighbors of User 1 in both directions
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u", "direction": "both"}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let edges = value["edges"].as_array().unwrap();
+    assert!(!edges.is_empty(), "should have neighbor edges");
+
+    // User 1 is the source of MEMBER_OF edges (outgoing from center)
+    // so from=User, to=Group
+    for edge in edges {
+        if edge["type"] == "MEMBER_OF" {
+            assert_eq!(edge["from"], "User", "MEMBER_OF is outgoing from User");
+            assert_eq!(edge["from_id"], 1);
+        }
+    }
+}
+
+async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
+    seed(ctx).await;
+
+    // MR 2000 has incoming AUTHORED from User 1 and outgoing HAS_NOTE to Notes 3000, 3002, 3003
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+            "neighbors": {"node": "mr", "direction": "both"}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let edges = value["edges"].as_array().unwrap();
+    assert!(!edges.is_empty(), "should have neighbor edges");
+
+    // AUTHORED: User→MergeRequest (incoming to center), so from=User, to=MergeRequest
+    assert!(
+        edges.iter().any(|e| {
+            e["from"] == "User"
+                && e["from_id"] == 1
+                && e["to"] == "MergeRequest"
+                && e["to_id"] == 2000
+                && e["type"] == "AUTHORED"
+        }),
+        "AUTHORED edge should show User as source"
+    );
+
+    // HAS_NOTE: MergeRequest→Note (outgoing from center), so from=MergeRequest, to=Note
+    let has_note_edges: Vec<_> = edges.iter().filter(|e| e["type"] == "HAS_NOTE").collect();
+    assert!(!has_note_edges.is_empty(), "should have HAS_NOTE edges");
+    for edge in &has_note_edges {
+        assert_eq!(edge["from"], "MergeRequest", "HAS_NOTE is outgoing from MR");
+        assert_eq!(edge["from_id"], 2000);
+        assert_eq!(edge["to"], "Note");
+    }
+
+    let note_ids: HashSet<i64> = has_note_edges
+        .iter()
+        .filter_map(|e| e["to_id"].as_i64())
+        .collect();
+    assert!(note_ids.contains(&3000));
+    assert!(note_ids.contains(&3002));
+    assert!(note_ids.contains(&3003));
 }
 
 async fn neighbors_redaction(ctx: &TestContext) {
@@ -1988,6 +2067,8 @@ async fn graph_formatter_e2e() {
         neighbors_outgoing_exact,
         neighbors_incoming_exact,
         neighbors_both_exact,
+        neighbors_both_direction_edges_correct,
+        neighbors_both_direction_mixed_entity,
         neighbors_with_rel_types_filter,
         neighbors_dynamic_columns_all,
         neighbors_redaction,
