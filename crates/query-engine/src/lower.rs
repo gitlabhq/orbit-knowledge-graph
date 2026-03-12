@@ -4,7 +4,8 @@
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::{
-    EDGE_ALIAS_SUFFIXES, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    EDGE_ALIAS_SUFFIXES, NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN,
+    RELATIONSHIP_TYPE_COLUMN,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{
@@ -446,16 +447,24 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         join_cond,
     );
 
+    let center_matches_source = Expr::and(
+        Expr::eq(
+            Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
+            Expr::col(edge_alias, "source_id"),
+        ),
+        Expr::eq(
+            Expr::col(edge_alias, "source_kind"),
+            Expr::string(center_entity),
+        ),
+    );
+
     let neighbor_id_expr = match neighbors_config.direction {
         Direction::Outgoing => Expr::col(edge_alias, "target_id"),
         Direction::Incoming => Expr::col(edge_alias, "source_id"),
         Direction::Both => Expr::func(
             "if",
             vec![
-                Expr::eq(
-                    Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
-                    Expr::col(edge_alias, "source_id"),
-                ),
+                center_matches_source.clone(),
                 Expr::col(edge_alias, "target_id"),
                 Expr::col(edge_alias, "source_id"),
             ],
@@ -468,10 +477,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         Direction::Both => Expr::func(
             "if",
             vec![
-                Expr::eq(
-                    Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
-                    Expr::col(edge_alias, "source_id"),
-                ),
+                center_matches_source.clone(),
                 Expr::col(edge_alias, "target_kind"),
                 Expr::col(edge_alias, "source_kind"),
             ],
@@ -484,6 +490,17 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         SelectExpr::new(
             Expr::col(edge_alias, "relationship_kind"),
             RELATIONSHIP_TYPE_COLUMN,
+        ),
+        SelectExpr::new(
+            match neighbors_config.direction {
+                Direction::Outgoing => Expr::int(1),
+                Direction::Incoming => Expr::int(0),
+                Direction::Both => Expr::func(
+                    "if",
+                    vec![center_matches_source, Expr::int(1), Expr::int(0)],
+                ),
+            },
+            NEIGHBOR_IS_OUTGOING_COLUMN,
         ),
     ];
 
@@ -1556,11 +1573,46 @@ mod tests {
         assert!(aliases.contains(&&"_gkg_neighbor_id".to_string()));
         assert!(aliases.contains(&&"_gkg_neighbor_type".to_string()));
         assert!(aliases.contains(&&"_gkg_relationship_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_neighbor_is_outgoing".to_string()));
 
         // Should NOT have raw edge columns (indirect auth uses static/dynamic nodes instead)
         assert!(!aliases.contains(&&"e_path".to_string()));
         assert!(!aliases.contains(&&"e_src".to_string()));
         assert!(!aliases.contains(&&"e_dst".to_string()));
+    }
+
+    #[test]
+    fn test_lower_neighbors_both_direction() {
+        use crate::input::{Direction, InputNeighbors};
+
+        let input = Input {
+            query_type: QueryType::Neighbors,
+            nodes: vec![InputNode {
+                id: "g".to_string(),
+                entity: Some("Group".to_string()),
+                table: Some("gl_group".to_string()),
+                node_ids: vec![100],
+                ..Default::default()
+            }],
+            neighbors: Some(InputNeighbors {
+                node: "g".to_string(),
+                direction: Direction::Both,
+                rel_types: vec![],
+            }),
+            limit: 10,
+            ..Input::default()
+        };
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+
+        assert!(aliases.contains(&&"_gkg_neighbor_is_outgoing".to_string()));
+        assert!(aliases.contains(&&"_gkg_neighbor_id".to_string()));
+        assert!(aliases.contains(&&"_gkg_neighbor_type".to_string()));
+        assert!(aliases.contains(&&"_gkg_relationship_type".to_string()));
     }
 
     #[test]
