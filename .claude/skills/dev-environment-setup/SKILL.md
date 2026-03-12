@@ -82,7 +82,8 @@ If missing, offer to install:
 ```bash
 sudo apt-get update && sudo apt-get install -y \
     build-essential bison flex libreadline-dev zlib1g-dev \
-    libssl-dev libpq-dev pkg-config cmake libicu-dev libre2-dev
+    libssl-dev libpq-dev pkg-config cmake libicu-dev libre2-dev \
+    libclang-dev clang
 ```
 
 On macOS, Xcode Command Line Tools (`xcode-select --install`) covers most of these.
