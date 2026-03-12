@@ -2018,6 +2018,137 @@ async fn empty_result_all_fields_present(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Traversal — variable-length (multi-hop)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
+    seed(ctx).await;
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "g",
+                "min_hops": 1,
+                "max_hops": 2
+            }],
+            "limit": 50
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert_eq!(value["query_type"], "traversal");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let group_ids = node_ids(nodes, "Group");
+    assert!(
+        group_ids.contains(&200),
+        "depth-2 group (200) must be reachable via User→Group100→Group200"
+    );
+    assert!(group_ids.contains(&100), "depth-1 groups must still appear");
+
+    let edges = value["edges"].as_array().unwrap();
+    assert!(
+        !edges.is_empty(),
+        "multi-hop traversal should produce edges"
+    );
+    for edge in edges {
+        assert!(edge["from_id"].is_i64());
+        assert!(edge["to_id"].is_i64());
+    }
+}
+
+async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
+    seed(ctx).await;
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "g",
+                "min_hops": 2,
+                "max_hops": 3
+            }],
+            "limit": 50
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert_eq!(value["query_type"], "traversal");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let group_ids = node_ids(nodes, "Group");
+    assert!(
+        !group_ids.contains(&100) && !group_ids.contains(&101) && !group_ids.contains(&102),
+        "depth-1 groups (100, 101, 102) must be excluded by min_hops=2"
+    );
+    assert!(
+        group_ids.contains(&200),
+        "depth-2 group (200) should be reachable"
+    );
+}
+
+async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
+    seed(ctx).await;
+
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1, 2, 3, 4, 5]);
+    svc.allow("group", &[100, 101, 102]);
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "g",
+                "min_hops": 1,
+                "max_hops": 3
+            }],
+            "limit": 50
+        }"#,
+        &svc,
+    )
+    .await;
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let group_ids = node_ids(nodes, "Group");
+    assert!(
+        !group_ids.contains(&200),
+        "group 200 should be redacted (not in allow list)"
+    );
+    assert!(
+        !group_ids.contains(&300),
+        "group 300 should be redacted (not in allow list)"
+    );
+    assert!(
+        group_ids.contains(&100),
+        "group 100 should survive redaction"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Test runner
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2043,6 +2174,10 @@ async fn graph_formatter_e2e() {
         traversal_with_filter,
         traversal_deduplicates_shared_nodes,
         traversal_redaction_removes_unauthorized_paths,
+        // Traversal — variable-length (multi-hop)
+        traversal_variable_length_reaches_depth_2,
+        traversal_variable_length_min_hops_skips_shallow,
+        traversal_variable_length_with_redaction_at_depth,
         // Traversal — direction
         traversal_incoming_direction,
         traversal_both_direction,
