@@ -8,7 +8,8 @@ publish = false
 
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
-gkg-server = { path = "../gkg-server" }
+gkg-server = { path = "../gkg-server", features = ["testkit"] }
+jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
 ontology = { path = "../ontology" }

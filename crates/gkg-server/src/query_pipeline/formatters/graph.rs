@@ -499,20 +499,6 @@ mod tests {
     }
 
     #[test]
-    fn response_validates_against_json_schema() {
-        let schema_str = include_str!("../../../schemas/query_response.json");
-        let schema_value: serde_json::Value = serde_json::from_str(schema_str).unwrap();
-        let validator = jsonschema::validator_for(&schema_value).unwrap();
-
-        let (qr, result_ctx, ctx) = make_search_ctx();
-        let formatter = GraphFormatter;
-        let value = formatter.format(&qr, &result_ctx, &ctx);
-
-        let result = validator.validate(&value);
-        assert!(result.is_ok(), "schema validation failed: {result:?}");
-    }
-
-    #[test]
     fn deduplicates_nodes_by_type_and_id() {
         let schema = Arc::new(Schema::new(vec![
             Field::new("_gkg_p_id", DataType::Int64, false),
