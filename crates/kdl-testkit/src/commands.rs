@@ -4,42 +4,31 @@ use query_engine::compile;
 
 use crate::error::{Result, RunnerError, assert_eq_result};
 use crate::register_command;
-use integration_testkit::mock_redaction::MockRedactionService;
 use crate::runner::{
-    TestState, collect_trailing_ids, execute_sql_statements, require_int_arg, require_string_arg,
-    resolve_alias,
+    TestState, collect_trailing_ids, execute_sql_statements, require_string_arg, resolve_alias,
 };
+use integration_testkit::mock_redaction::MockRedactionService;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry
 // ─────────────────────────────────────────────────────────────────────────────
 
+register_command!("query", cmd_query);
 register_command!("extra-sql", cmd_extra_sql);
-register_command!("compile", cmd_compile);
-register_command!("execute", cmd_execute);
 register_command!("allow", cmd_allow);
 register_command!("deny", cmd_deny);
 register_command!("redact", cmd_redact);
 register_command!("reset-redaction", cmd_reset_redaction);
-register_command!("authorized-ids", cmd_authorized_ids);
-register_command!("raw-ids", cmd_raw_ids);
-register_command!("denied-ids", cmd_denied_ids);
-register_command!("authorized-count", cmd_authorized_count);
-register_command!("raw-count", cmd_raw_count);
+register_command!("count", cmd_count);
+register_command!("assert-ids", cmd_assert_ids);
 register_command!("sql-contains", cmd_sql_contains);
 register_command!("sql-not-contains", cmd_sql_not_contains);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Commands
+// Action commands
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn cmd_extra_sql(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    let sql = require_string_arg(node, 0)?;
-    execute_sql_statements(&state.ctx, sql).await;
-    Ok(())
-}
-
-async fn cmd_compile(state: &mut TestState, node: &kdl::KdlNode) -> Result {
+async fn cmd_query(state: &mut TestState, node: &kdl::KdlNode) -> Result {
     let json = require_string_arg(node, 0)?;
 
     let expect_error = node
@@ -56,21 +45,19 @@ async fn cmd_compile(state: &mut TestState, node: &kdl::KdlNode) -> Result {
         };
     }
 
-    state.compiled = Some(result.map_err(|e| RunnerError::CompileError(e.to_string()))?);
+    let compiled = result.map_err(|e| RunnerError::CompileError(e.to_string()))?;
+    let batches = state.ctx.query_parameterized(&compiled.base).await;
+    let query_result =
+        gkg_server::redaction::QueryResult::from_batches(&batches, &compiled.base.result_context);
+
+    state.compiled = Some(compiled);
+    state.result = Some(query_result);
     Ok(())
 }
 
-async fn cmd_execute(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    let compiled = state.compiled()?;
-    let batches = state.ctx.query_parameterized(&compiled.base).await;
-    let result =
-        gkg_server::redaction::QueryResult::from_batches(&batches, &compiled.base.result_context);
-
-    if let Some(expected) = node.get("expect").and_then(|v| v.as_integer()) {
-        assert_eq_result(result.len(), expected as usize, "execute row count")?;
-    }
-
-    state.result = Some(result);
+async fn cmd_extra_sql(state: &mut TestState, node: &kdl::KdlNode) -> Result {
+    let sql = require_string_arg(node, 0)?;
+    execute_sql_statements(&state.ctx, sql).await;
     Ok(())
 }
 
@@ -86,19 +73,16 @@ async fn cmd_deny(state: &mut TestState, node: &kdl::KdlNode) -> Result {
     Ok(())
 }
 
-async fn cmd_redact(state: &mut TestState, node: &kdl::KdlNode) -> Result {
+async fn cmd_redact(state: &mut TestState, _node: &kdl::KdlNode) -> Result {
     let result = state
         .result
         .as_mut()
-        .ok_or_else(|| RunnerError::StateError("`execute` must run first".into()))?;
+        .ok_or_else(|| RunnerError::StateError("`query` must run first".into()))?;
 
     let checks = result.resource_checks();
     let authorizations = state.mock_service.check(&checks);
     let redacted = result.apply_authorizations(&authorizations);
-
-    if let Some(expected) = node.get("expect").and_then(|v| v.as_integer()) {
-        assert_eq_result(redacted, expected as usize, "redacted count")?;
-    }
+    state.last_redacted_count = Some(redacted);
     Ok(())
 }
 
@@ -111,47 +95,74 @@ async fn cmd_reset_redaction(state: &mut TestState, _node: &kdl::KdlNode) -> Res
 // Assertion commands
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn cmd_authorized_ids(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    assert_ids(state, node, true)
-}
-
-async fn cmd_raw_ids(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    assert_ids(state, node, false)
-}
-
-async fn cmd_denied_ids(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    let cmd = node.name().value();
-    let (alias, denied_ids) = parse_alias_ids(node)?;
-    let result = state.result()?;
-    let node_ref = resolve_alias(result, &alias)?;
-
-    let actual: HashSet<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&node_ref))
-        .collect();
-
-    for id in denied_ids {
-        if actual.contains(&id) {
-            return Err(RunnerError::AssertionFailed(format!(
-                "{cmd} `{alias}`: id {id} should NOT be in authorized rows"
-            )));
-        }
+async fn cmd_count(state: &mut TestState, node: &kdl::KdlNode) -> Result {
+    if let Some(expected) = node.get("raw").and_then(|v| v.as_integer()) {
+        assert_eq_result(state.result()?.len(), expected as usize, "count raw")?;
+    }
+    if let Some(expected) = node.get("authorized").and_then(|v| v.as_integer()) {
+        assert_eq_result(
+            state.result()?.authorized_count(),
+            expected as usize,
+            "count authorized",
+        )?;
+    }
+    if let Some(expected) = node.get("redacted").and_then(|v| v.as_integer()) {
+        let actual = state.last_redacted_count.ok_or_else(|| {
+            RunnerError::StateError("`redact` must run before checking redacted count".into())
+        })?;
+        assert_eq_result(actual, expected as usize, "count redacted")?;
     }
     Ok(())
 }
 
-async fn cmd_authorized_count(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    let expected = require_int_arg(node, 0)?;
-    assert_eq_result(
-        state.result()?.authorized_count(),
-        expected as usize,
-        "authorized-count",
-    )
-}
+async fn cmd_assert_ids(state: &mut TestState, node: &kdl::KdlNode) -> Result {
+    let mode = require_string_arg(node, 0)?;
+    let alias = require_string_arg(node, 1)?.to_string();
+    let expected_ids: HashSet<i64> = collect_trailing_ids(node, 2).into_iter().collect();
+    let result = state.result()?;
+    let node_ref = resolve_alias(result, &alias)?;
 
-async fn cmd_raw_count(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    let expected = require_int_arg(node, 0)?;
-    assert_eq_result(state.result()?.len(), expected as usize, "raw-count")
+    match mode {
+        "raw" => {
+            let actual: HashSet<i64> =
+                result.iter().filter_map(|r| r.get_id(&node_ref)).collect();
+            if actual != expected_ids {
+                return Err(RunnerError::AssertionFailed(format!(
+                    "assert-ids raw `{alias}`: expected {expected_ids:?}, got {actual:?}"
+                )));
+            }
+        }
+        "authorized" => {
+            let actual: HashSet<i64> = result
+                .authorized_rows()
+                .filter_map(|r| r.get_id(&node_ref))
+                .collect();
+            if actual != expected_ids {
+                return Err(RunnerError::AssertionFailed(format!(
+                    "assert-ids authorized `{alias}`: expected {expected_ids:?}, got {actual:?}"
+                )));
+            }
+        }
+        "denied" => {
+            let authorized: HashSet<i64> = result
+                .authorized_rows()
+                .filter_map(|r| r.get_id(&node_ref))
+                .collect();
+            for id in &expected_ids {
+                if authorized.contains(id) {
+                    return Err(RunnerError::AssertionFailed(format!(
+                        "assert-ids denied `{alias}`: id {id} should NOT be in authorized rows"
+                    )));
+                }
+            }
+        }
+        other => {
+            return Err(RunnerError::MissingArg(format!(
+                "`assert-ids` mode must be `raw`, `authorized`, or `denied`, got `{other}`"
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn cmd_sql_contains(state: &mut TestState, node: &kdl::KdlNode) -> Result {
@@ -163,32 +174,8 @@ async fn cmd_sql_not_contains(state: &mut TestState, node: &kdl::KdlNode) -> Res
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared assertion logic
+// Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-fn assert_ids(state: &TestState, node: &kdl::KdlNode, authorized_only: bool) -> Result {
-    let cmd = node.name().value();
-    let (alias, expected_ids) = parse_alias_ids(node)?;
-    let result = state.result()?;
-    let node_ref = resolve_alias(result, &alias)?;
-
-    let actual: HashSet<i64> = if authorized_only {
-        result
-            .authorized_rows()
-            .filter_map(|r| r.get_id(&node_ref))
-            .collect()
-    } else {
-        result.iter().filter_map(|r| r.get_id(&node_ref)).collect()
-    };
-    let expected: HashSet<i64> = expected_ids.into_iter().collect();
-
-    if actual != expected {
-        return Err(RunnerError::AssertionFailed(format!(
-            "{cmd} `{alias}`: expected {expected:?}, got {actual:?}"
-        )));
-    }
-    Ok(())
-}
 
 fn assert_sql(state: &TestState, node: &kdl::KdlNode, expect_present: bool) -> Result {
     let cmd = node.name().value();
@@ -209,10 +196,6 @@ fn assert_sql(state: &TestState, node: &kdl::KdlNode, expect_present: bool) -> R
     Ok(())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Parsing helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn parse_entity_ids(node: &kdl::KdlNode) -> Result<(String, Vec<i64>)> {
     let cmd = node.name().value();
     let entity = require_string_arg(node, 0)?.to_string();
@@ -225,9 +208,4 @@ fn parse_entity_ids(node: &kdl::KdlNode) -> Result<(String, Vec<i64>)> {
     }
 
     Ok((entity, ids))
-}
-
-fn parse_alias_ids(node: &kdl::KdlNode) -> Result<(String, Vec<i64>)> {
-    let alias = require_string_arg(node, 0)?.to_string();
-    Ok((alias, collect_trailing_ids(node, 1)))
 }

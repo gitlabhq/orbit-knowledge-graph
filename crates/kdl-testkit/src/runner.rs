@@ -24,6 +24,7 @@ pub struct TestState {
     pub compiled: Option<CompiledQueryContext>,
     pub result: Option<QueryResult>,
     pub mock_service: MockRedactionService,
+    pub last_redacted_count: Option<usize>,
 }
 
 impl TestState {
@@ -36,19 +37,20 @@ impl TestState {
             compiled: None,
             result: None,
             mock_service: MockRedactionService::new(),
+            last_redacted_count: None,
         }
     }
 
     pub fn compiled(&self) -> Result<&CompiledQueryContext> {
         self.compiled
             .as_ref()
-            .ok_or_else(|| RunnerError::StateError("`compile` must run first".into()))
+            .ok_or_else(|| RunnerError::StateError("`query` must run first".into()))
     }
 
     pub fn result(&self) -> Result<&QueryResult> {
         self.result
             .as_ref()
-            .ok_or_else(|| RunnerError::StateError("`execute` must run first".into()))
+            .ok_or_else(|| RunnerError::StateError("`query` must run first".into()))
     }
 }
 
@@ -218,13 +220,6 @@ pub fn require_string_arg(node: &kdl::KdlNode, index: usize) -> Result<&str> {
     let cmd = node.name().value();
     node.get(index).and_then(|v| v.as_string()).ok_or_else(|| {
         RunnerError::MissingArg(format!("`{cmd}` requires a string at position {index}"))
-    })
-}
-
-pub fn require_int_arg(node: &kdl::KdlNode, index: usize) -> Result<i128> {
-    let cmd = node.name().value();
-    node.get(index).and_then(|v| v.as_integer()).ok_or_else(|| {
-        RunnerError::MissingArg(format!("`{cmd}` requires an integer at position {index}"))
     })
 }
 

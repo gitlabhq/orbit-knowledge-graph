@@ -1,6 +1,6 @@
 test "fail_closed_no_authorization_returns_nothing" seed="default"
 
-compile """
+query """
   {
       "query_type": "search",
       "node": {"id": "u", "entity": "User"},
@@ -8,12 +8,10 @@ compile """
   }
 """
 
-execute
-
 // Before redaction: all 5 users present.
-raw-ids "u" 1 2 3 4 5
+assert-ids raw "u" 1 2 3 4 5
 
 // No allow/deny rules — fail closed.
-redact expect=5
+redact
 
-authorized-count 0
+count authorized=0 redacted=5

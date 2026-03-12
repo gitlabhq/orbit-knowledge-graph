@@ -1,6 +1,6 @@
 test "fail_closed_partial_authorization_denies_unknown_ids" seed="default"
 
-compile """
+query """
   {
       "query_type": "search",
       "node": {"id": "u", "entity": "User"},
@@ -8,12 +8,12 @@ compile """
   }
 """
 
-execute expect=5
+count raw=5
 
 allow "user" 1 2
 
-redact expect=3
+redact
 
-authorized-count 2
-authorized-ids "u" 1 2
-denied-ids "u" 3 4 5
+count authorized=2 redacted=3
+assert-ids authorized "u" 1 2
+assert-ids denied "u" 3 4 5

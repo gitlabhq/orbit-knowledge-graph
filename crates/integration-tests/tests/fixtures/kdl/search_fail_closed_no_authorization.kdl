@@ -1,6 +1,6 @@
 test "search_fail_closed_no_authorization" seed="default"
 
-compile """
+query """
   {
       "query_type": "search",
       "node": {"id": "g", "entity": "Group"},
@@ -8,9 +8,9 @@ compile """
   }
 """
 
-execute expect=3
+count raw=3
 
 // No authorizations — fail closed.
-redact expect=3
+redact
 
-authorized-count 0
+count authorized=0 redacted=3

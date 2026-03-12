@@ -1,6 +1,6 @@
 test "empty_query_result_stays_empty" seed="default"
 
-compile """
+query """
   {
       "query_type": "search",
       "node": {"id": "u", "entity": "User", "filters": {"username": "nonexistent"}},
@@ -8,11 +8,9 @@ compile """
   }
 """
 
-execute expect=0
-
 // Allow all users — but there are no rows to authorize.
 allow "user" 1 2 3 4 5
 
-redact expect=0
+redact
 
-authorized-count 0
+count authorized=0 redacted=0
