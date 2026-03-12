@@ -27,7 +27,7 @@ impl ToolRegistry {
 
         let description = match condensed_query_schema() {
             Ok(schema) => format!(
-                "{}\n\nQuery DSL Schema (TOON format):\n{}",
+                "{}\n\nQuery DSL Schema:\n<toon>\n{}\n</toon>",
                 base_description, schema
             ),
             Err(_) => base_description.to_string(),
