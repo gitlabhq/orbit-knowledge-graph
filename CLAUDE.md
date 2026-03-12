@@ -8,6 +8,8 @@ All tasks use mise. `mise build`, `mise test:fast`, `mise lint:code`, `mise serv
 Fix linting issues: `mise lint:code:fix`. Validate docs: `mise lint:docs`. Validate ontology: `mise ontology:validate`.
 Integration tests need Docker: `mise test:integration`.
 
+**Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
+
 ## How the system works
 
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). Code data via Gitaly `GetArchive` gRPC. GKG only writes to its own ClickHouse tables.

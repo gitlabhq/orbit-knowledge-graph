@@ -36,8 +36,8 @@ lychee = "0.21.0"
 lefthook = "2.1.3"
 
 [tasks."hooks:install"]
-run = "lefthook install"
-description = "Install git hooks via lefthook"
+run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
+description = "Install git hooks (lefthook + worktree support)"
 
 [tasks.build]
 run = "cargo build --release"
