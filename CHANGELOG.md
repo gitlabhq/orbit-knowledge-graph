@@ -1,3 +1,70 @@
+## [0.10.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.9.0...v0.10.0) (2026-03-12)
+
+### Features
+
+* **ci:** skip tilt-ci if infra files or ci config didn't change ([6f1a352](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6f1a3520af51a6b504a3a0f9b3f3758a6b736b05)) by Michael Usachenko
+* **cli:** rename gkg binary to orbit ([bb656e1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bb656e1c02ff55121720c3c014ff6fa0aebb216d)) by Michael Angelo Rivera
+* **dev:** add gkg-dev.sh script to manage local dev environment ([a7feb60](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a7feb601e7b137079fe80a037db3bc96380dc1db)) by Adam Mulvany
+* **dev:** add lefthook for pre-commit and pre-push hooks ([75f641a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/75f641ab8e4f94898d9819ccbe450a5837dc4f95)) by Michael Angelo Rivera
+* **gkg-server:** add get_public_id and Float64 column value ([f57f902](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f57f902f276d61ced27c5cf0eef6eb2d1c411283)) by Michael Angelo Rivera
+* **gkg-server:** add GraphFormatter with unified response schema ([3383510](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/33835107cd9be83c4f5ef564ad938cfd0d43b3b1)) by Michael Angelo Rivera
+* **gkg-server:** wire GraphFormatter and GoonFormatter into pipeline ([2bae6e2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2bae6e28c74d1bd8ae91dee725a9fe2c1abede8a)) by Michael Angelo Rivera
+* **indexer:** add gitlab auth check to readiness probe ([9b4eb60](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9b4eb607be4a15c3aef5114a44b51b60f608120d)) by Bohdan Parkhomchuk
+* **indexer:** add namespace deletion handler and scheduler ([517cd8f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/517cd8f3c7e3b21ed397ad0911e03412d5a9dacb)) by Jean-Gabriel Doyon
+* **indexer:** clean-up node tables with deleted entries ([09d3365](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/09d336518d9ea28e0833dfb5825b372edb385c61)) by Jean-Gabriel Doyon
+* **indexer:** migrate merge_requests from hierarchy view ([a509764](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a5097647199648e68d995a20937e8a1a369c8314)) by Jean-Gabriel Doyon
+* **indexer:** replace direct Gitaly access with Rails internal API ([2de7063](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2de70638df08412ac2bafb962e93222de4ec341a)) by Jean-Gabriel Doyon
+* **query-engine:** add EdgeMeta to ResultContext ([a977c27](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a977c27bfedb654d6ca621a38225ca41be7145f4)) by Michael Angelo Rivera
+* **simulator:** enable concurrent benchmarking ([cc75829](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cc758297e94444ef01a8fbd74c6551ac94048b3a)) by Michael Usachenko
+* **simulator:** granular control over fake data distribution ([2520630](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2520630452574869f1e913024a1fb593fe19c354)) by Michael Usachenko
+* **testing:** add data correctness harness + data integration tests ([a829d9d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a829d9d42ce3c6220f928de5bc3fe35089d5b6cf)) by Michael Usachenko
+* **testing:** introduce integration-tests crate ([54a51b8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/54a51b821af95ad1b588a8fa28a70380f202f87f)) by Michael Usachenko
+
+### Fixes
+
+* **ci:** skip lefthook install in CI pipelines ([4eff22c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4eff22c3930dbf4a1ec40735e12c1f77a54e54b9)) by Michael Angelo Rivera
+* **ci:** strip draft prefix before validating MR title ([4326cf0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4326cf05755389487cb995b0caf1dfe87ad1f799)) by Adam Mulvany
+* **ci:** switch small runners to medium runners ([470860b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/470860b47123c3e12803baafee451cb94f5c3546)) by Michael Angelo Rivera
+* **clickhouse:** restore TLS features removed by Renovate ([4879a5a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4879a5ac12a3c4f6e067b907a8104b90293ffce4)) by Bohdan Parkhomchuk
+* **code-graph:** assign node ids during indexing ([95515fe](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/95515fe4b0b5772c05b5f3ae5b72a21359342142)) by michaelangeloio
+* **hooks:** add post-checkout hook for worktree lefthook support ([1cfab33](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1cfab33a9140e93c4eabf1e873399710e534647e)) by Michael Angelo Rivera
+* **query-engine:** project all columns in multi-hop union arms ([0acf84c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0acf84c3cad21c3920f4269ba58994c131232320)) by Michael Angelo Rivera
+* **query-engine:** reject unsupported aggregation functions and validate numeric types ([359c3b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/359c3b94b9395964bbbc3403ce6eca09896219f7)) by Michael Angelo Rivera
+* **query-engine:** remove traversal path prefix from join conditions ([8dbf576](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8dbf5767e5f074c2dd48ffe98dfb2ef48d4be0cf)) by Michael Angelo Rivera
+* **query-engine:** resolve duplicate table aliases in fan-in joins ([ad08cec](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ad08cec60f9891c799a14dbae697017bc886bf2c)) by Michael Angelo Rivera
+* **query-engine:** track edge direction in bidirectional neighbor queries ([1ceba83](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1ceba83174709ebdbf26ba8ccbaef88c6cb0b19d)) by Michael Angelo Rivera
+* **querying:** graph formatter removes node sort order with hashmap - use indexmap instead ([f79f0a6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f79f0a650aa0cdcf654b7645716e5ec0e5699f77)) by Michael Usachenko
+* **simulator:** parameter interpolation broken for IN queries ([6f2653c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6f2653cfd7cdaa895cd1f1c062ef267d43b37c9f)) by Michael Usachenko
+* update siphon proto filename and exclude output/ from lychee ([fa91fc9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fa91fc914144d006058e62e6babc590b9853b54e)) by Michael Angelo Rivera
+
+### Other
+
+* add unified query response schema ADR ([0e5a522](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0e5a522020400b5bc970a37c96a7f00e4b3e4ad7)) by Michael Angelo Rivera
+* **ci:** cap ontology schema at 32 KB ([bb25136](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bb251362e65a2da542c376f10778823558858c1b)) by michaelangeloio
+* consolidate JSON schemas into config/schemas ([7b927f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7b927f20a52a7c9b82bddee5b1423d6c26f5bc8d)) by Michael Angelo Rivera
+* **deps:** update rust crate cliclack to v0.4.1 ([89d1024](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/89d10240d311bd6155add5afb9416690c534a452)) by GitLab Renovate Bot
+* **deps:** update rust crate config to v0.15.21 ([ce39c96](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ce39c96b641acfd2e5ccc52f90de809994fc2767)) by GitLab Renovate Bot
+* **deps:** update rust crate datafusion to v52.3.0 ([9ae6bcb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9ae6bcb2031ac9041324ce4cb21f6af140730301)) by GitLab Renovate Bot
+* **deps:** update rust crate once_cell to v1.21.4 ([926546c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/926546cb7a62293f87bdb2b3a275d738b6b15a27)) by GitLab Renovate Bot
+* **deps:** update rust crate tempfile to v3.27.0 ([78f75b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/78f75b7d6671fb6b8a5817dd69b955dcc16f405f)) by GitLab Renovate Bot
+* **dev:** make GDK_ROOT configurable in mise.toml ([b254091](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b254091d8db21c73024fb27ae771446b41948d08)) by Lyle Kozloff
+* discover cleanup tables dynamically from ClickHouse ([9cb840b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9cb840b926a053de9d8dc0bef32c880815dc2f23)) by Jean-Gabriel Doyon
+* **gkg-server:** add integration test harness for GraphFormatter ([50fede6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/50fede6e0f649302dc3fdd92d6a4dfb62c5ebd62)) by Michael Angelo Rivera
+* **gkg-server:** restructure formatter into module directory ([b96ac7b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b96ac7ba746a8c0995ef73b389189f2c8c65d8a2)) by Michael Angelo Rivera
+* **indexer:** extract llqm_v1 module from sdlc plan ([ec3227b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ec3227b8703fbfab92e3c19a068812019944c8c4)) by Jean-Gabriel Doyon
+* **indexer:** rename code watermark to checkpoint, add traversal_path ([a862469](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a86246937a1ff52de15d30b017e4e9770f0ba74e)) by Jean-Gabriel Doyon
+* **indexer:** schema changes for namespace deletion and make checkpoint re-usable ([f85cd83](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f85cd83955367f5fffefcfb509a63934e9a22b6c)) by Jean-Gabriel Doyon
+* **indexing:** update code indexing design document with as-built architecture ([78aa469](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/78aa46912e1766448e11490b6be61a77c11da5d0)) by Adam Mulvany
+* move ontology data into crate, graph.sql into config ([a26ec44](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a26ec44a86a0a5a5efa6d7391778b37609b1d8af)) by Michael Angelo Rivera
+* **simulator:** bump rand crate manually due to breaking changes ([245dcaf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/245dcaf5bb5f8bb822b3be5b043eba70958c631a)) by Michael Usachenko
+* **tests:** move health tests to integration-tests, extract MockRedactionService ([da75c89](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da75c895f0971c446cc0ee9012fcb4e82f889ffc)) by Michael Usachenko
+* **tests:** move indexer integration tests to integration-tests crate ([bcbcea3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bcbcea34d144d713c34e6fdd8ddb037db3cf6907)) by Jean-Gabriel Doyon
+* **tests:** replace IndexerTestExt god trait with composable free functions ([da7c35e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da7c35e69ee8ba6da5be3c9f1c33747dbaca217e)) by Jean-Gabriel Doyon
+* **tools:** wrap TOON schema in XML tags instead of labeling format ([55e180d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/55e180de069ea8715529ee2285ca5b0ba11688b8)) by Jean-Gabriel Doyon
+* unify siphon.sql into fixture/ and improve array_field schema docs ([47052b0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/47052b04ac0805082e238662cab1345537e5777a)) by Jean-Gabriel Doyon
+* **webserver:** replace health probes with /live and /ready ([a348b80](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a348b80006486568a2317c32a2a3ea7c2dbe8bcc)) by Bohdan Parkhomchuk
+* **xtask:** move simulation harness to xtask ([b19c097](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b19c097710d320f41a72becac9c63b4d3b41b1e5)) by Michael Usachenko
+
 ## [0.9.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.8.0...v0.9.0) (2026-03-10)
 
 ### Features
