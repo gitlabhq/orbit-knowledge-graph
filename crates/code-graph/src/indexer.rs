@@ -114,15 +114,39 @@ impl std::error::Error for FatalIndexingError {}
 pub struct RepositoryIndexer {
     pub name: String,
     pub path: String,
+    graph_identity: Option<GraphIdentity>,
+}
+
+#[derive(Debug, Clone)]
+struct GraphIdentity {
+    project_id: i64,
+    branch: String,
 }
 
 impl RepositoryIndexer {
     pub fn new(name: String, path: String) -> Self {
-        Self { name, path }
+        Self {
+            name,
+            path,
+            graph_identity: None,
+        }
     }
 
     pub fn with_name(name: String, path: String) -> Self {
-        Self { name, path }
+        Self::new(name, path)
+    }
+
+    pub fn with_graph_identity(
+        name: String,
+        path: String,
+        project_id: i64,
+        branch: String,
+    ) -> Self {
+        Self {
+            name,
+            path,
+            graph_identity: Some(GraphIdentity { project_id, branch }),
+        }
     }
 
     pub fn path(&self) -> &str {
@@ -151,13 +175,16 @@ impl RepositoryIndexer {
 
         let analysis_service = AnalysisService::new(self.name.clone(), self.path.clone());
 
-        let graph_data = analysis_service
+        let mut graph_data = analysis_service
             .analyze_results(file_results)
             .map_err(|e| {
                 FatalIndexingError::FailedToAnalyze(AnalyzeAndWriteErrors::FailedToAnalyze(
                     e.to_string(),
                 ))
             })?;
+        if let Some(graph_identity) = &self.graph_identity {
+            graph_data.assign_node_ids(graph_identity.project_id, &graph_identity.branch);
+        }
 
         let skipped_files_len = skipped_files.len();
         let errored_files_len = errored_files.len();

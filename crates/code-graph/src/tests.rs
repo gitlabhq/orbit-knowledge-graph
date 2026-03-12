@@ -123,7 +123,12 @@ async fn setup_indexing_test(language: SupportedLanguage) -> IndexingTestSetup {
     let local_repo = init_local_git_repository(language);
     let repo_path_str = local_repo.path.to_str().unwrap();
 
-    let indexer = RepositoryIndexer::new("test-repo".to_string(), repo_path_str.to_string());
+    let indexer = RepositoryIndexer::with_graph_identity(
+        "test-repo".to_string(),
+        repo_path_str.to_string(),
+        1,
+        "main".to_string(),
+    );
     let file_source = DirectoryFileSource::new(repo_path_str.to_string());
 
     let config = IndexingConfig {
@@ -137,8 +142,7 @@ async fn setup_indexing_test(language: SupportedLanguage) -> IndexingTestSetup {
         .await
         .expect("Failed to index repository");
 
-    let mut graph_data = indexing_result.graph_data.expect("Should have graph data");
-    graph_data.assign_node_ids(1, "main");
+    let graph_data = indexing_result.graph_data.expect("Should have graph data");
 
     IndexingTestSetup {
         _local_repo: local_repo,
@@ -152,7 +156,12 @@ async fn test_new_indexer_with_directory_file_source() {
     let temp_repo = init_local_git_repository(SupportedLanguage::Ruby);
     let repo_path = temp_repo.path.to_str().unwrap();
 
-    let indexer = RepositoryIndexer::new("test-repo".to_string(), repo_path.to_string());
+    let indexer = RepositoryIndexer::with_graph_identity(
+        "test-repo".to_string(),
+        repo_path.to_string(),
+        1,
+        "main".to_string(),
+    );
     let file_source = DirectoryFileSource::new(repo_path.to_string());
 
     let config = IndexingConfig {
@@ -172,6 +181,13 @@ async fn test_new_indexer_with_directory_file_source() {
     assert!(
         !graph_data.file_nodes.is_empty(),
         "Should have processed some files"
+    );
+    assert!(graph_data.file_nodes.iter().all(|node| node.id.is_some()));
+    assert!(
+        graph_data
+            .definition_nodes
+            .iter()
+            .all(|node| node.id.is_some())
     );
     assert_eq!(result.errored_files.len(), 0, "Should have no errors");
 

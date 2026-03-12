@@ -95,9 +95,11 @@ pub async fn setup_kotlin_reference_pipeline() -> KotlinReferenceTestSetup {
     let local_repo = init_kotlin_references_repository();
     let repo_path_str = local_repo.path.to_str().unwrap();
 
-    let indexer = RepositoryIndexer::new(
+    let indexer = RepositoryIndexer::with_graph_identity(
         "kotlin-references-test".to_string(),
         repo_path_str.to_string(),
+        1,
+        "main".to_string(),
     );
     let file_source = DirectoryFileSource::new(repo_path_str.to_string());
 
@@ -114,8 +116,7 @@ pub async fn setup_kotlin_reference_pipeline() -> KotlinReferenceTestSetup {
         .expect("Failed to index repository");
 
     // Verify we have graph data
-    let mut graph_data = indexing_result.graph_data.expect("Should have graph data");
-    graph_data.assign_node_ids(1, "main");
+    let graph_data = indexing_result.graph_data.expect("Should have graph data");
 
     KotlinReferenceTestSetup {
         _local_repo: local_repo,
