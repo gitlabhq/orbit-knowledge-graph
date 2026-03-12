@@ -2149,6 +2149,103 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Traversal chains (no traversal_path prefix in joins)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn traversal_chain_user_group_project(ctx: &TestContext) {
+    seed(ctx).await;
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
+            ],
+            "relationships": [
+                {"type": "MEMBER_OF", "from": "u", "to": "g"},
+                {"type": "CONTAINS", "from": "g", "to": "p"}
+            ],
+            "limit": 50
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert_valid(&value);
+    assert_eq!(value["query_type"], "traversal");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let user_ids = node_ids(nodes, "User");
+    let group_ids = node_ids(nodes, "Group");
+    let project_ids = node_ids(nodes, "Project");
+
+    assert!(user_ids.contains(&1), "alice should be present");
+    assert!(group_ids.contains(&100), "group 100 should be present");
+    assert!(
+        project_ids.contains(&1000),
+        "project 1000 should be present"
+    );
+
+    let edges = value["edges"].as_array().unwrap();
+    assert!(
+        edges.iter().any(|e| e["type"] == "MEMBER_OF"),
+        "MEMBER_OF edge should exist"
+    );
+    assert!(
+        edges.iter().any(|e| e["type"] == "CONTAINS"),
+        "CONTAINS edge should exist"
+    );
+}
+
+async fn traversal_chain_user_mr_note(ctx: &TestContext) {
+    seed(ctx).await;
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]},
+                {"id": "n", "entity": "Note", "columns": ["note"]}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+            ],
+            "limit": 50
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert_valid(&value);
+    assert_eq!(value["query_type"], "traversal");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let user_ids = node_ids(nodes, "User");
+    let mr_ids = node_ids(nodes, "MergeRequest");
+    let note_ids = node_ids(nodes, "Note");
+
+    assert!(user_ids.contains(&1), "alice should be present");
+    assert!(mr_ids.contains(&2000), "MR 2000 should be present");
+    assert!(note_ids.contains(&3000), "note 3000 should be present");
+
+    let edges = value["edges"].as_array().unwrap();
+    assert!(
+        edges.iter().any(|e| e["type"] == "AUTHORED"),
+        "AUTHORED edge should exist"
+    );
+    assert!(
+        edges.iter().any(|e| e["type"] == "HAS_NOTE"),
+        "HAS_NOTE edge should exist"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Test runner
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2183,6 +2280,9 @@ async fn graph_formatter_e2e() {
         traversal_both_direction,
         // Traversal — fan-in
         traversal_shared_target_node,
+        // Traversal — chains (no traversal_path prefix in joins)
+        traversal_chain_user_group_project,
+        traversal_chain_user_mr_note,
         // Aggregation — all functions
         aggregation_count_exact,
         aggregation_sum,
