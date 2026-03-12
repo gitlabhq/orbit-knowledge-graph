@@ -1398,3 +1398,267 @@ AuthorizationStage → RedactionStage → HydrationStage → FormattingStage
 | MAX_DYNAMIC_HYDRATION_RESULTS enforcement | **PASS** | Enforced server-side before execution. Effective cap is 500 (not 1000) due to `MAX_NODE_IDS` validation in `compile()`. >500 IDs fails hard, not graceful. |
 | Static templates cannot be manipulated | **PASS** | Dead code currently. If enabled: templates from validated input, IDs from authorized rows only, full `compile()` on hydration queries. |
 | Hydration of redacted rows impossible | **PASS** | Redaction before hydration. All 4 hydration code paths (static collect/merge, dynamic extract/merge) filter on `authorized_rows()`. |
+
+---
+
+# TQ11: Redaction Stream Integrity — Security Task Results
+
+## Task 1: Verify empty authorizations redact all rows
+
+**Status:** PASS — fail-closed, all rows denied
+
+When `apply_authorizations()` (`query_result.rs:318-359`) receives an empty `authorizations` slice (`&[]`), every call to `is_authorized()` fails at two points:
+
+1. **Line 382-387:** `authorizations.iter().find(|a| a.resource_type == auth_config.resource_type)` returns `None` because the slice is empty — returns `false`
+2. Even if somehow reached, **line 388:** `auth.authorized.get(&node_ref.id).copied().unwrap_or(false)` — `unwrap_or(false)` ensures missing keys default to deny
+
+Every row's `is_authorized()` returns `false` → `set_unauthorized()` is called → all rows redacted.
+
+Additionally, a `ResourceAuthorization` with an **empty** `authorized` map (`{}`) also denies all rows: the `get(&node_ref.id)` returns `None`, `unwrap_or(false)` yields `false`.
+
+**Test coverage:** `fail_closed_no_authorization_returns_nothing` (`redaction.rs:91`) — empty mock denies all 5 users. `no_authorizations_redacts_all` (`redaction.rs:98`).
+
+### References
+
+- `apply_authorizations()`: `crates/gkg-server/src/redaction/query_result.rs:318-359`
+- `is_authorized()` — three return paths, all default false: `crates/gkg-server/src/redaction/query_result.rs:374-389`
+- Empty auth → no match at line 382-387: `crates/gkg-server/src/redaction/query_result.rs:382-387`
+- Missing key → `unwrap_or(false)`: `crates/gkg-server/src/redaction/query_result.rs:388`
+- Integration test: `crates/integration-tests/tests/server/redaction.rs:91`
+
+---
+
+## Task 2: Verify missing resource types default to DENY
+
+**Status:** PASS — fail-closed
+
+`is_authorized()` at `query_result.rs:382-387`:
+
+```rust
+let Some(auth) = authorizations
+    .iter()
+    .find(|a| a.resource_type == auth_config.resource_type)
+else {
+    return false;
+};
+```
+
+If the row's entity maps to `resource_type: "project"` but no `ResourceAuthorization` with `resource_type == "project"` exists in the authorizations list, `find()` returns `None` and the function returns `false`. Row is denied.
+
+Additionally, if the entity type has no `EntityAuthConfig` at all (unknown entity type), the check at **line 379-381** returns `false` immediately:
+
+```rust
+let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
+    return false;
+};
+```
+
+**Test coverage:** `fail_closed_missing_resource_authorization` (`query_result.rs:883`).
+
+### References
+
+- Missing resource type → false: `crates/gkg-server/src/redaction/query_result.rs:382-387`
+- Unknown entity type → false: `crates/gkg-server/src/redaction/query_result.rs:379-381`
+- Test: `crates/gkg-server/src/redaction/query_result.rs:883`
+
+---
+
+## Task 3: Verify missing IDs default to DENY
+
+**Status:** PASS — fail-closed
+
+`is_authorized()` at `query_result.rs:388`:
+
+```rust
+auth.authorized.get(&node_ref.id).copied().unwrap_or(false)
+```
+
+If the `ResourceAuthorization` for the correct `resource_type` exists but the specific `id` is not a key in the `authorized` map, `get()` returns `None`, `unwrap_or(false)` yields `false`. Row is denied.
+
+NULL IDs are also handled fail-closed at `apply_authorizations()` lines 329-334:
+
+```rust
+let Some(node_ref) = row.node_ref(redaction_node) else {
+    // Fail closed: NULL IDs cannot be verified, so deny the row
+    row.set_unauthorized();
+    redacted_count += 1;
+    break;
+};
+```
+
+**Test coverage:** `fail_closed_partial_authorization_denies_unknown_ids` (`redaction.rs:122`) — 5 users, only 2 authorized, 3 denied. `fail_closed_null_id_denies_row` (`redaction.rs:863`). `fail_closed_null_type_denies_row` (`redaction.rs:1901`).
+
+### References
+
+- Missing ID → `unwrap_or(false)`: `crates/gkg-server/src/redaction/query_result.rs:388`
+- NULL id/type → fail-closed: `crates/gkg-server/src/redaction/query_result.rs:329-334`
+- Partial auth test: `crates/integration-tests/tests/server/redaction.rs:122`
+- NULL ID test: `crates/integration-tests/tests/server/redaction.rs:863`
+- NULL type test: `crates/integration-tests/tests/server/redaction.rs:1901`
+
+---
+
+## Task 4: Stream interruption mid-authorization (Rails goes down)
+
+**Status:** PASS — fail-closed on all stream errors, but no timeout
+
+The authorization exchange uses **bidirectional gRPC streaming** within the `ExecuteQuery` RPC (`gkg.proto:30`). The server sends a `RedactionRequired` message and waits for a `RedactionResponse` on the same stream.
+
+At `stream.rs:112-122`, `stream.next().await` handles three outcomes:
+
+```rust
+let redaction_msg = match stream.next().await {
+    Some(Ok(msg)) => msg,                    // success
+    Some(Err(e)) => {                        // gRPC transport error
+        return Err(RedactionExchangeError::ReceiveFailed(e));
+    }
+    None => {                                 // stream closed
+        return Err(RedactionExchangeError::StreamClosed);
+    }
+};
+```
+
+**Stream closed (Rails disconnects):** Returns `StreamClosed` → `Status::cancelled` (`stream.rs:26-28`). Query fails, no results returned.
+
+**gRPC transport error:** Returns `ReceiveFailed(status)` → original gRPC `Status` propagated (`stream.rs:29`). Query fails.
+
+**Client sends Error message instead of RedactionResponse:** `unwrap_redaction()` at `stream.rs:62-66` catches `Content::Error(e)` and returns `ClientError { code, message }` → `Status::aborted` (`stream.rs:35-38`). Query fails.
+
+**Client sends wrong message type:** `unwrap_redaction()` at `stream.rs:68-73` returns `InvalidMessage` → `Status::invalid_argument` (`stream.rs:30`). Query fails.
+
+**All paths are fail-closed.** No partial results are ever returned.
+
+**Gap — no timeout on `stream.next().await`:** If Rails hangs indefinitely without sending a response and without closing the stream, the `stream.next().await` will block forever. There is no `tokio::time::timeout` wrapping the await. The query will hang until the client (Rails) disconnects or the TCP connection times out at the OS level. This is the same class of issue as TQ5 (no query timeout).
+
+**Minor — `let _ =` on send:** At `stream.rs:110`, `let _ = tx.send(...)` silently discards the send result. If the channel is closed (client already disconnected), the send fails silently. However, the subsequent `stream.next().await` will return `None` → `StreamClosed` → fail-closed. So this is safe but a code smell — an explicit error log would aid debugging.
+
+### References
+
+- Stream read with three outcomes: `crates/gkg-server/src/redaction/stream.rs:112-122`
+- `StreamClosed` → `Status::cancelled`: `crates/gkg-server/src/redaction/stream.rs:26-28`
+- `ReceiveFailed` → original Status: `crates/gkg-server/src/redaction/stream.rs:29`
+- `ClientError` handling: `crates/gkg-server/src/redaction/stream.rs:62-66`
+- `InvalidMessage` handling: `crates/gkg-server/src/redaction/stream.rs:68-73`
+- No timeout on stream.next().await: `crates/gkg-server/src/redaction/stream.rs:112`
+- Silent send discard: `crates/gkg-server/src/redaction/stream.rs:110`
+- Error type → Status mapping: `crates/gkg-server/src/redaction/stream.rs:23-41`
+- Proto bidirectional streaming: `crates/gkg-server/proto/gkg.proto:30`
+
+---
+
+## Task 5: result_id mismatch handling — stale/confused responses
+
+**Status:** PASS — pipeline aborts on mismatch
+
+Each authorization request generates a fresh UUID v4 at `stream.rs:86`:
+
+```rust
+let result_id = Uuid::new_v4().to_string();
+```
+
+This `result_id` is embedded in the `RedactionRequired` message sent to Rails (`stream.rs:105`). Upon receiving the response, the server validates the `result_id` match at `stream.rs:136-141`:
+
+```rust
+if redaction_response.result_id != result_id {
+    return Err(RedactionExchangeError::ResultIdMismatch {
+        expected: result_id,
+        received: redaction_response.result_id,
+    });
+}
+```
+
+**On mismatch:** `ResultIdMismatch` is logged at warn level (`stream.rs:32`) and converted to `Status::invalid_argument("result_id mismatch in redaction response")` (`stream.rs:33`). The query fails entirely. No results are returned.
+
+**Proto fields:** `RedactionRequired.result_id` (`gkg.proto:179`) and `RedactionResponse.result_id` (`gkg.proto:192`) are both `string` fields.
+
+**Test coverage:** Unit test at `stream.rs:170-175` validates the error conversion. No integration test exercises an actual mismatch over a live stream.
+
+### References
+
+- UUID generation: `crates/gkg-server/src/redaction/stream.rs:86`
+- result_id in request: `crates/gkg-server/src/redaction/stream.rs:105`
+- result_id validation: `crates/gkg-server/src/redaction/stream.rs:136-141`
+- Mismatch → Status::invalid_argument: `crates/gkg-server/src/redaction/stream.rs:31-34`
+- Unit test for error conversion: `crates/gkg-server/src/redaction/stream.rs:170-175`
+- Proto RedactionRequired.result_id: `crates/gkg-server/proto/gkg.proto:179`
+- Proto RedactionResponse.result_id: `crates/gkg-server/proto/gkg.proto:192`
+
+---
+
+## Task 6: Verify mTLS is enforced on the authorization gRPC channel
+
+**Status:** FAIL — no TLS at the application layer; relies entirely on infrastructure
+
+The gRPC server is configured at `grpc/server.rs:47-49`:
+
+```rust
+TonicServer::builder()
+    .add_service(self.service)
+    .serve(self.addr)
+```
+
+No `ServerTlsConfig` is provided to the builder. No `ClientTlsConfig` exists anywhere in the gRPC server code. The connection is **plaintext** at the application level.
+
+**TLS mentions in the codebase:**
+- `rustls` is a dependency but used only for the `reqwest`-based `GitlabClient` (REST API for indexer, not authorization): `main.rs:25-27`
+- `health_client.rs:59` installs `rustls` provider for HTTPS health checks
+- Helm values show `ssl: false` for ClickHouse connections (`values.yaml:28,34`)
+- No Istio, Envoy, or service mesh configuration found in `helm-dev/`
+
+**The authorization exchange (RedactionRequired → RedactionResponse) travels over the same bidirectional gRPC stream as the client's ExecuteQuery request.** This means the transport security of the authorization exchange is determined by how the external client (Rails) connects to GKG — which is outside GKG's application code.
+
+**In production (GitLab.com):** Transport encryption is likely handled at the infrastructure level (K8s ingress, service mesh, or load balancer TLS termination), but this is not enforced or verified by the GKG application itself. GKG cannot distinguish a plaintext connection from an encrypted one.
+
+### References
+
+- gRPC server builder — no TLS: `crates/gkg-server/src/grpc/server.rs:47-49`
+- rustls used only for reqwest/health: `crates/gkg-server/src/main.rs:25-27`
+- No TLS grep hits in gRPC code: `crates/gkg-server/src/grpc/` (zero matches)
+- Helm ClickHouse ssl: false: `helm-dev/gkg/values.yaml:28,34`
+
+---
+
+## Task 7: Concurrent authorization requests do not share stream state
+
+**Status:** PASS — fully isolated per request
+
+Each `execute_query` call (`grpc/service.rs:105-137`) creates:
+
+1. **Per-request stream:** `let mut stream = request.into_inner()` (`service.rs:113`) — each gRPC call has its own `Streaming<ExecuteQueryMessage>`
+2. **Per-request channel:** `let (tx, rx) = mpsc::channel(4)` (`service.rs:114`) — fresh sender/receiver pair
+3. **Per-request context:** `QueryPipelineContext` created fresh in `run_query()` (`service.rs:44-49`) with `compiled: None`, `security_context: None`
+4. **Per-request pipeline request:** `PipelineRequest` at `service.rs:51-56` binds the per-request `tx` and `stream`
+
+`RedactionService` is a **stateless unit struct** (`stream.rs:78`) with no fields. `request_authorization()` is a static method that operates entirely on the per-request `tx`/`stream` arguments. There is no shared state between concurrent authorization exchanges.
+
+The only shared resources are `Arc<Ontology>` (immutable) and `Arc<ArrowClickHouseClient>` (connection-pooled HTTP client). Neither carries per-request state.
+
+Each request is spawned via `tokio::spawn` (`grpc/service.rs:119`), providing task-level isolation.
+
+### References
+
+- Per-request stream: `crates/gkg-server/src/grpc/service.rs:113`
+- Per-request channel: `crates/gkg-server/src/grpc/service.rs:114`
+- Per-request context: `crates/gkg-server/src/query_pipeline/service.rs:44-49`
+- Per-request pipeline request: `crates/gkg-server/src/query_pipeline/service.rs:51-56`
+- `RedactionService` stateless struct: `crates/gkg-server/src/redaction/stream.rs:78`
+- `request_authorization()` takes per-request args: `crates/gkg-server/src/redaction/stream.rs:81-84`
+- `tokio::spawn` per request: `crates/gkg-server/src/grpc/service.rs:119`
+- Shared immutable ontology: `crates/gkg-server/src/query_pipeline/service.rs:21`
+- Shared pooled ClickHouse client: `crates/gkg-server/src/query_pipeline/service.rs:22`
+
+---
+
+## Summary
+
+### TQ11: Redaction Stream Integrity
+
+| Task | Verdict | Open Items |
+|------|---------|------------|
+| Empty authorizations redact all rows | **PASS** | `unwrap_or(false)` at every level. Integration test coverage. |
+| Missing resource types default to DENY | **PASS** | `find()` returns None → false. Unknown entity type → false. |
+| Missing IDs default to DENY | **PASS** | `get().unwrap_or(false)`. NULL id/type → fail-closed. |
+| Stream interruption mid-authorization | **PASS** | All 4 error paths fail-closed (StreamClosed, ReceiveFailed, ClientError, InvalidMessage). **No timeout on `stream.next().await`** — hangs if Rails stalls without disconnecting (same class as TQ5). |
+| result_id mismatch handling | **PASS** | UUID v4 per request. Strict equality check. Mismatch → query abort. No integration test for live mismatch. |
+| mTLS on authorization gRPC channel | **FAIL** | No TLS at application layer. `TonicServer::builder()` with no `ServerTlsConfig`. Relies on infrastructure-level encryption. |
+| Concurrent requests don't share state | **PASS** | Per-request stream, channel, context, pipeline. Stateless `RedactionService`. `tokio::spawn` isolation. |
