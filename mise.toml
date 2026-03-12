@@ -2,7 +2,7 @@
 experimental = true
 
 [hooks]
-postinstall = "lefthook install --force"
+postinstall = "if [ -z \"$CI\" ]; then lefthook install --force; fi"
 
 [env]
 # GDK root directory. Override with an absolute path, e.g: export GDK_ROOT=$HOME/workspace/gdk
