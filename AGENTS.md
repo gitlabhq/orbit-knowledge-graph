@@ -86,8 +86,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `cli` | Local `orbit index` and `orbit query` commands |
 | `datalake-generator` | Synthetic GitLab data for load testing |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
-| `integration-testkit` | Shared ClickHouse testcontainer helpers and `MockRedactionService` for integration tests |
-| `integration-tests` | Integration tests for server (health, redaction, hydration); depends on gkg-server + integration-testkit |
+| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, and `ResponseView` assertion framework for integration tests |
+| `integration-tests` | Integration tests for server (health, redaction, hydration, data correctness, graph formatting); depends on gkg-server + integration-testkit |
 | `xtask` | Developer task runner (data generation, query evaluation, ClickHouse management) |
 
 ## Code quality

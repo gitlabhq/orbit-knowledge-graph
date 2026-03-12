@@ -10,14 +10,18 @@ without either of those needing to depend on each other.
 tests/
   common.rs            # Shared helpers: MockRedactionService, test fixtures, DummyClaims
   entrypoint.rs        # Test binary entry point (wires modules together)
+  indexer/             # Indexer integration tests (NATS, ClickHouse, SDLC, code, dispatcher)
   server/
-    redaction.rs       # Redaction pipeline tests (fail-closed, path finding, search, etc.)
-    hydration.rs       # Hydration pipeline tests (compile -> execute -> hydrate -> format)
+    data_correctness.rs # Seeds data, runs full pipeline, asserts values via ResponseView
+    graph_formatter.rs  # Graph formatter end-to-end tests
+    health.rs           # Health/readiness endpoint tests
+    hydration.rs        # Hydration pipeline tests (compile -> execute -> hydrate -> format)
+    redaction.rs        # Redaction pipeline tests (fail-closed, path finding, search, etc.)
 ```
 
 All tests in `server/` compile as a single test binary. Each orchestrator test
-(`redaction_integration`, `hydration_integration`) starts one ClickHouse container and
-uses `run_subtests!` to fork databases and run subtests in parallel.
+starts one ClickHouse container and uses `run_subtests!` to fork databases and
+run subtests in parallel.
 
 ## Running
 

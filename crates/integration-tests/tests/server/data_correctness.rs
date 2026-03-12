@@ -23,8 +23,8 @@ use crate::common::{
     load_ontology, run_redaction, test_security_context,
 };
 use gkg_server::query_pipeline::{
-    GraphFormatter, GraphResponse, HydrationStage, PipelineObserver, PipelineRequest,
-    PipelineStage, QueryPipelineContext, RedactionOutput, ResultFormatter,
+    GraphFormatter, HydrationStage, PipelineObserver, PipelineRequest, PipelineStage,
+    QueryPipelineContext, RedactionOutput, ResultFormatter,
 };
 use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests;
@@ -54,7 +54,7 @@ fn assert_valid(value: &Value) {
 // Infrastructure
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService) -> GraphResponse {
+async fn run_query(ctx: &TestContext, json: &str, svc: &MockRedactionService) -> ResponseView {
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
     let security_ctx = test_security_context();
@@ -94,7 +94,9 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
 
     let value = GraphFormatter.format(&output.query_result, &output.result_context, &pipeline_ctx);
     assert_valid(&value);
-    serde_json::from_value(value).expect("response should deserialize to GraphResponse")
+    let response =
+        serde_json::from_value(value).expect("response should deserialize to GraphResponse");
+    ResponseView::for_query(&compiled.input, response)
 }
 
 fn allow_all() -> MockRedactionService {
@@ -217,23 +219,19 @@ async fn seed(ctx: &TestContext) {
 
 async fn search_returns_correct_user_properties(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "search",
-                "node": {"id": "u", "entity": "User", "columns": ["username", "name", "state", "user_type"]},
-                "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-                "limit": 10
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "name", "state", "user_type"]},
+            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
-    assert_eq!(resp.query_type(), "search");
-    assert_eq!(resp.node_count(), 5);
-    assert_eq!(resp.edge_count(), 0, "search queries have no edges");
+    resp.assert_node_count(5);
     resp.assert_node_order("User", &[1, 2, 3, 4, 5]);
 
     let alice = resp.find_node("User", 1).unwrap();
@@ -254,20 +252,18 @@ async fn search_returns_correct_user_properties(ctx: &TestContext) {
 
 async fn search_returns_correct_project_properties(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "search",
-                "node": {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"]},
-                "limit": 10
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
-    assert_eq!(resp.node_count(), 5);
+    resp.assert_node_count(5);
 
     resp.assert_node("Project", 1000, |n| {
         n.prop_str("name") == Some("Public Project")
@@ -281,71 +277,65 @@ async fn search_returns_correct_project_properties(ctx: &TestContext) {
 
 async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "search",
-                "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
-                         "filters": {"state": "blocked"}},
-                "limit": 10
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+                     "filters": {"state": "blocked"}},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
-    assert_eq!(resp.node_count(), 1);
+    resp.assert_node_count(1);
+    resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("blocked"));
     let eve = resp.find_node("User", 5).unwrap();
-    eve.assert_str("state", "blocked");
     eve.assert_str("username", "eve");
 }
 
 async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "search",
-                "node": {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"],
-                         "filters": {"visibility_level": {"op": "in", "value": ["public", "internal"]}}},
-                "limit": 10
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"],
+                     "filters": {"visibility_level": {"op": "in", "value": ["public", "internal"]}}},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     let ids = resp.node_ids("Project");
     assert_eq!(ids, HashSet::from([1000, 1002, 1004]));
 
-    resp.assert_all_nodes(
-        |n| {
-            let vis = n.prop_str("visibility_level").unwrap_or("");
-            vis == "public" || vis == "internal"
-        },
-        "only public/internal projects should be returned",
-    );
+    resp.assert_filter("Project", "visibility_level", |n| {
+        let vis = n.prop_str("visibility_level").unwrap_or("");
+        vis == "public" || vis == "internal"
+    });
 }
 
 async fn search_filter_starts_with_returns_matching_rows(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "search",
-                "node": {"id": "u", "entity": "User", "columns": ["username"],
-                         "filters": {"username": {"op": "starts_with", "value": "a"}}},
-                "limit": 10
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"],
+                     "filters": {"username": {"op": "starts_with", "value": "a"}}},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
-    assert_eq!(resp.node_count(), 1);
+    resp.assert_node_count(1);
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.starts_with("a"))
+    });
     resp.find_node("User", 1)
         .unwrap()
         .assert_str("username", "alice");
@@ -353,18 +343,16 @@ async fn search_filter_starts_with_returns_matching_rows(ctx: &TestContext) {
 
 async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "search",
-                "node": {"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100, 102]},
-                "limit": 10
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100, 102]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     assert_eq!(resp.node_ids("Group"), HashSet::from([100, 102]));
     resp.find_node("Group", 100)
@@ -382,24 +370,20 @@ async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
 
 async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "columns": ["username"]},
-                    {"id": "g", "entity": "Group", "columns": ["name"]}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "limit": 20
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
-
-    assert_eq!(resp.query_type(), "traversal");
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     let expected_edges: HashSet<(i64, i64)> = HashSet::from([
         (1, 100),
@@ -438,26 +422,24 @@ async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext)
 
 async fn traversal_three_hop_returns_all_user_group_project_paths(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "columns": ["username"]},
-                    {"id": "g", "entity": "Group", "columns": ["name"]},
-                    {"id": "p", "entity": "Project", "columns": ["name"]}
-                ],
-                "relationships": [
-                    {"type": "MEMBER_OF", "from": "u", "to": "g"},
-                    {"type": "CONTAINS", "from": "g", "to": "p"}
-                ],
-                "limit": 30
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
+            ],
+            "relationships": [
+                {"type": "MEMBER_OF", "from": "u", "to": "g"},
+                {"type": "CONTAINS", "from": "g", "to": "p"}
+            ],
+            "limit": 30
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     resp.assert_referential_integrity();
 
@@ -488,22 +470,20 @@ async fn traversal_three_hop_returns_all_user_group_project_paths(ctx: &TestCont
 
 async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "columns": ["username"]},
-                    {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-                "limit": 20
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     resp.assert_referential_integrity();
 
@@ -527,22 +507,20 @@ async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
     svc.allow("user", &[1]);
     svc.allow("group", &[100]);
 
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "columns": ["username"]},
-                    {"id": "g", "entity": "Group", "columns": ["name"]}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "limit": 20
-            }"#,
-            &svc,
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 20
+        }"#,
+        &svc,
+    )
+    .await;
 
     assert_eq!(resp.node_ids("User"), HashSet::from([1]));
     assert_eq!(resp.node_ids("Group"), HashSet::from([100]));
@@ -557,26 +535,21 @@ async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
 
 async fn aggregation_count_returns_correct_values(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "columns": ["username"]},
-                    {"id": "mr", "entity": "MergeRequest"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-                "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
-                "limit": 10
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
-
-    assert_eq!(resp.query_type(), "aggregation");
-    assert_eq!(resp.edge_count(), 0, "aggregation has no edges");
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     resp.assert_node("User", 1, |n| {
         n.prop_str("username") == Some("alice") && n.prop_i64("mr_count") == Some(2)
@@ -593,23 +566,21 @@ async fn aggregation_count_returns_correct_values(ctx: &TestContext) {
 
 async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "g", "entity": "Group", "columns": ["name"]},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-                "aggregations": [{"function": "count", "target": "p", "group_by": "g", "alias": "project_count"}],
-                "limit": 10
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "p", "group_by": "g", "alias": "project_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     resp.assert_node("Group", 100, |n| {
         n.prop_str("name") == Some("Public Group") && n.prop_i64("project_count") == Some(2)
@@ -628,23 +599,20 @@ async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
 
 async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "start", "entity": "User", "node_ids": [1]},
-                    {"id": "end", "entity": "Project", "node_ids": [1000]}
-                ],
-                "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
-    assert_eq!(resp.query_type(), "path_finding");
     resp.assert_referential_integrity();
 
     let pids = resp.path_ids();
@@ -682,21 +650,19 @@ async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
 
 async fn path_finding_multiple_destinations_returns_distinct_paths(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "start", "entity": "User", "node_ids": [1]},
-                    {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
-                ],
-                "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     let pids = resp.path_ids();
     assert_eq!(
@@ -720,21 +686,19 @@ async fn path_finding_multiple_destinations_returns_distinct_paths(ctx: &TestCon
 
 async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "start", "entity": "User", "node_ids": [1]},
-                    {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
-                ],
-                "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     let pids = resp.path_ids();
     assert_eq!(
@@ -764,20 +728,17 @@ async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
 
 async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u", "direction": "outgoing"}
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
-    assert_eq!(resp.query_type(), "neighbors");
     resp.assert_referential_integrity();
 
     let neighbor_ids = resp.node_ids("Group");
@@ -792,18 +753,16 @@ async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
 
 async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "neighbors",
-                "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-                "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]}
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+            "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     let user_ids = resp.node_ids("User");
     assert_eq!(user_ids, HashSet::from([1, 2]));
@@ -814,41 +773,36 @@ async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
 
 async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "neighbors",
-                "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-                "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]}
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+            "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     let project_ids = resp.node_ids("Project");
     assert_eq!(project_ids, HashSet::from([1000, 1002]));
 
-    resp.visit_edges(|e| {
-        assert_eq!(e.edge_type, "CONTAINS");
-    });
+    let edges = resp.edges_of_type("CONTAINS");
+    assert_eq!(edges.len(), 2, "should have exactly 2 CONTAINS edges");
 }
 
 async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "neighbors",
-                "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-                "neighbors": {"node": "g", "direction": "both"}
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+            "neighbors": {"node": "g", "direction": "both"}
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     let user_ids = resp.node_ids("User");
     let project_ids = resp.node_ids("Project");
@@ -859,6 +813,7 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
     assert!(project_ids.contains(&1002));
 
     resp.assert_referential_integrity();
+    resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -867,33 +822,31 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
 
 async fn traversal_referential_integrity_on_complex_query(ctx: &TestContext) {
     seed(ctx).await;
-    let resp = ResponseView::new(
-        run_pipeline(
-            ctx,
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [
-                    {"type": "MEMBER_OF", "from": "u", "to": "g"},
-                    {"type": "CONTAINS", "from": "g", "to": "p"}
-                ],
-                "limit": 50
-            }"#,
-            &allow_all(),
-        )
-        .await,
-    );
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "g", "entity": "Group"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "MEMBER_OF", "from": "u", "to": "g"},
+                {"type": "CONTAINS", "from": "g", "to": "p"}
+            ],
+            "limit": 50
+        }"#,
+        &allow_all(),
+    )
+    .await;
 
     resp.assert_referential_integrity();
 
-    resp.visit_edges(|e| {
-        let valid_type = e.edge_type == "MEMBER_OF" || e.edge_type == "CONTAINS";
-        assert!(valid_type, "unexpected edge type: {}", e.edge_type);
-    });
+    let member_of = resp.edges_of_type("MEMBER_OF");
+    assert!(!member_of.is_empty(), "should have MEMBER_OF edges");
+    let contains = resp.edges_of_type("CONTAINS");
+    assert!(!contains.is_empty(), "should have CONTAINS edges");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
