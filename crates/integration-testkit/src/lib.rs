@@ -3,6 +3,7 @@ mod context;
 mod extract;
 pub mod mock_redaction;
 mod seed;
+pub mod visitor;
 
 pub use assertions::{
     assert_edge_count, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
