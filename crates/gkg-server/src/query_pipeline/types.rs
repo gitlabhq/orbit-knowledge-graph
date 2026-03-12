@@ -68,6 +68,16 @@ pub struct HydrationOutput {
     pub redacted_count: usize,
 }
 
+#[cfg(test)]
+pub fn dummy_clickhouse_client() -> Arc<ArrowClickHouseClient> {
+    Arc::new(ArrowClickHouseClient::new(
+        "http://localhost:0",
+        "default",
+        "default",
+        None,
+    ))
+}
+
 pub struct PipelineOutput {
     pub formatted_result: Value,
     pub query_type: String,

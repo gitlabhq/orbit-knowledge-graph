@@ -26,6 +26,7 @@ gitaly-client = { path = "../gitaly-client" }
 gitlab-client = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
+health-check = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 siphon-proto = { path = "../siphon-proto" }

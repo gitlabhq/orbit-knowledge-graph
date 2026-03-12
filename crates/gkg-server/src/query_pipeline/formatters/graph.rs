@@ -454,7 +454,7 @@ mod tests {
                 .unwrap(),
             })),
             ontology: Arc::new(Ontology::new()),
-            client: Arc::new(clickhouse_client::ArrowClickHouseClient::dummy()),
+            client: crate::query_pipeline::types::dummy_clickhouse_client(),
             security_context: None,
         };
 
@@ -538,7 +538,7 @@ mod tests {
                 .unwrap(),
             })),
             ontology: Arc::new(Ontology::new()),
-            client: Arc::new(clickhouse_client::ArrowClickHouseClient::dummy()),
+            client: crate::query_pipeline::types::dummy_clickhouse_client(),
             security_context: None,
         };
 
