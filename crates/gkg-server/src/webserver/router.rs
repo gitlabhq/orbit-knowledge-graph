@@ -1,114 +1,80 @@
-use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{Json, Router, routing::get};
+use clickhouse_client::ArrowClickHouseClient;
 use labkit_rs::correlation::http::{CorrelationIdLayer, PropagateCorrelationIdLayer};
 use labkit_rs::metrics::http::HttpMetricsLayer;
 use serde::Serialize;
+use tokio::time::timeout;
 use tower_http::trace::TraceLayer;
 
-use crate::cluster_health::ClusterHealthChecker;
-use crate::proto::{ClusterStatus, ResponseFormat, get_cluster_health_response};
-use crate::webserver::JwtValidator;
+const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct AppState {
-    pub cluster_health: Arc<ClusterHealthChecker>,
+    pub graph_client: ArrowClickHouseClient,
 }
 
 #[derive(Serialize)]
 struct HealthResponse {
     status: &'static str,
     version: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unhealthy_components: Vec<&'static str>,
 }
 
-#[derive(Serialize)]
-struct ClusterHealthResponse {
-    status: String,
-    timestamp: String,
-    version: String,
-    components: Vec<ComponentHealthResponse>,
-}
-
-#[derive(Serialize)]
-struct ComponentHealthResponse {
-    name: String,
-    status: String,
-    replicas: Option<ReplicaStatusResponse>,
-    metrics: std::collections::HashMap<String, String>,
-}
-
-#[derive(Serialize)]
-struct ReplicaStatusResponse {
-    ready: i32,
-    desired: i32,
-}
-
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok",
-        version: option_env!("GKG_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
-    })
-}
-
-fn status_label(val: i32) -> &'static str {
-    match ClusterStatus::try_from(val) {
-        Ok(ClusterStatus::Healthy) => "healthy",
-        Ok(ClusterStatus::Degraded) => "degraded",
-        Ok(ClusterStatus::Unhealthy) => "unhealthy",
-        _ => "unknown",
+fn version() -> &'static str {
+    match option_env!("GKG_VERSION") {
+        Some(v) => v,
+        None => env!("CARGO_PKG_VERSION"),
     }
 }
 
-async fn cluster_health_handler(State(state): State<AppState>) -> Json<ClusterHealthResponse> {
-    let health = state
-        .cluster_health
-        .get_cluster_health(ResponseFormat::Raw as i32)
-        .await;
-
-    let structured = match health.content {
-        Some(get_cluster_health_response::Content::Structured(s)) => s,
-        _ => {
-            return Json(ClusterHealthResponse {
-                status: "unknown".to_string(),
-                timestamp: String::new(),
-                version: String::new(),
-                components: vec![],
-            });
-        }
-    };
-
-    let components = structured
-        .components
-        .into_iter()
-        .map(|c| ComponentHealthResponse {
-            name: c.name,
-            status: status_label(c.status).to_string(),
-            replicas: c.replicas.map(|r| ReplicaStatusResponse {
-                ready: r.ready,
-                desired: r.desired,
-            }),
-            metrics: c.metrics,
-        })
-        .collect();
-
-    Json(ClusterHealthResponse {
-        status: status_label(structured.status).to_string(),
-        timestamp: structured.timestamp,
-        version: structured.version,
-        components,
+async fn live() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok",
+        version: version(),
+        unhealthy_components: Vec::new(),
     })
 }
 
-pub fn create_router(
-    _validator: JwtValidator,
-    cluster_health: Arc<ClusterHealthChecker>,
-) -> Router {
-    let state = AppState { cluster_health };
+async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    let graph_healthy = timeout(HEALTH_CHECK_TIMEOUT, state.graph_client.execute("SELECT 1"))
+        .await
+        .is_ok_and(|r| r.is_ok());
+
+    let mut unhealthy_components = Vec::new();
+    if !graph_healthy {
+        unhealthy_components.push("clickhouse_graph");
+    }
+
+    let healthy = unhealthy_components.is_empty();
+    let status_code = if healthy {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    let label = if healthy { "ok" } else { "unhealthy" };
+
+    (
+        status_code,
+        Json(HealthResponse {
+            status: label,
+            version: version(),
+            unhealthy_components,
+        }),
+    )
+}
+
+pub fn create_router(graph_client: ArrowClickHouseClient) -> Router {
+    let state = AppState { graph_client };
 
     Router::new()
-        .route("/health", get(health))
-        .route("/api/v1/cluster_health", get(cluster_health_handler))
+        .route("/live", get(live))
+        .route("/ready", get(ready))
         .with_state(state)
         .layer(HttpMetricsLayer::new())
         .layer(CorrelationIdLayer::new())
