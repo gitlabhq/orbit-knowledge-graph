@@ -1,3 +1,4 @@
+mod goon;
 mod graph;
 mod raw_row;
 
@@ -9,8 +10,9 @@ use query_engine::ResultContext;
 
 use super::types::QueryPipelineContext;
 
+pub use goon::GoonFormatter;
 pub use graph::GraphFormatter;
-pub use raw_row::{RawRowFormatter, row_to_json};
+pub use raw_row::row_to_json;
 
 pub trait ResultFormatter: Send + Sync {
     fn format(

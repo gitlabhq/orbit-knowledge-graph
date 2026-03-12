@@ -4,28 +4,9 @@ use query_engine::{
 };
 use serde_json::{Value, json};
 
-use crate::redaction::{NodeRef, QueryResult, QueryResultRow};
+use crate::redaction::{NodeRef, QueryResultRow};
 
-use super::super::types::QueryPipelineContext;
-use super::{ResultFormatter, column_value_to_json};
-
-#[derive(Clone, Copy)]
-pub struct RawRowFormatter;
-
-impl ResultFormatter for RawRowFormatter {
-    fn format(
-        &self,
-        result: &QueryResult,
-        ctx: &ResultContext,
-        _pipeline_ctx: &QueryPipelineContext,
-    ) -> Value {
-        let rows: Vec<Value> = result
-            .authorized_rows()
-            .map(|row| row_to_json(row, ctx))
-            .collect();
-        Value::Array(rows)
-    }
-}
+use super::column_value_to_json;
 
 pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
     let mut obj = serde_json::Map::new();
@@ -90,6 +71,7 @@ fn node_ref_to_json(node: &NodeRef) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::redaction::QueryResult;
     use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
     use arrow::buffer::OffsetBuffer;
     use arrow::datatypes::{DataType, Field, Schema};
