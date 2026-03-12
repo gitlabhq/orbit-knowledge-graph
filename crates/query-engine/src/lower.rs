@@ -42,6 +42,17 @@ fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
         .collect()
 }
 
+fn edge_depth_select_expr(alias: &str) -> SelectExpr {
+    SelectExpr::new(Expr::col(alias, "depth"), format!("{alias}_depth"))
+}
+
+fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
+    SelectExpr::new(
+        Expr::col(alias, "path_nodes"),
+        format!("{alias}_path_nodes"),
+    )
+}
+
 /// Derive LIMIT and OFFSET from the input's pagination fields.
 /// If `range` is set, limit = end - start and offset = start.
 /// Otherwise, limit = input.limit and offset = None.
@@ -113,9 +124,13 @@ fn add_edge_columns(
     rels: &[InputRelationship],
     edge_aliases: &HashMap<usize, String>,
 ) {
-    for (i, _rel) in rels.iter().enumerate() {
+    for (i, rel) in rels.iter().enumerate() {
         if let Some(alias) = edge_aliases.get(&i) {
             select.extend(edge_select_exprs(alias));
+            if rel.max_hops > 1 {
+                select.push(edge_depth_select_expr(alias));
+                select.push(edge_path_nodes_select_expr(alias));
+            }
         }
     }
 }
@@ -542,6 +557,11 @@ fn build_hop_union_all(rel: &InputRelationship, alias: &str) -> TableRef {
 /// Build one arm of the union: a chain of edge joins for a specific depth.
 fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direction) -> Query {
     let (start_col, end_col) = direction.edge_columns();
+    let end_type_col = match direction {
+        Direction::Outgoing | Direction::Both => "target_kind",
+        Direction::Incoming => "source_kind",
+    };
+    let last = format!("e{depth}");
 
     // Build chain: e1 -> e2 -> e3 -> ...
     let (mut from, first_type_cond) = edge_scan("e1", type_filter);
@@ -560,15 +580,58 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
         from = TableRef::join(JoinType::Inner, from, edge_table, join_cond);
     }
 
+    let (
+        relationship_kind_expr,
+        source_id_expr,
+        source_kind_expr,
+        target_id_expr,
+        target_kind_expr,
+    ) = match direction {
+        Direction::Outgoing | Direction::Both => (
+            Expr::col("e1", "relationship_kind"),
+            Expr::col("e1", "source_id"),
+            Expr::col("e1", "source_kind"),
+            Expr::col(&last, "target_id"),
+            Expr::col(&last, "target_kind"),
+        ),
+        Direction::Incoming => (
+            Expr::col(&last, "relationship_kind"),
+            Expr::col(&last, "source_id"),
+            Expr::col(&last, "source_kind"),
+            Expr::col("e1", "target_id"),
+            Expr::col("e1", "target_kind"),
+        ),
+    };
+
     Query {
         select: vec![
             SelectExpr::new(Expr::col("e1", start_col), "start_id"),
-            SelectExpr::new(Expr::col(format!("e{depth}"), end_col), "end_id"),
-            SelectExpr::new(Expr::int(depth as i64), "depth"),
+            SelectExpr::new(Expr::col(&last, end_col), "end_id"),
             SelectExpr::new(
-                Expr::col("e1", TRAVERSAL_PATH_COLUMN),
+                Expr::col(&last, TRAVERSAL_PATH_COLUMN),
                 TRAVERSAL_PATH_COLUMN,
             ),
+            SelectExpr::new(
+                Expr::func(
+                    "array",
+                    (1..=depth)
+                        .map(|index| {
+                            let edge = format!("e{index}");
+                            Expr::func(
+                                "tuple",
+                                vec![Expr::col(&edge, end_col), Expr::col(&edge, end_type_col)],
+                            )
+                        })
+                        .collect(),
+                ),
+                "path_nodes",
+            ),
+            SelectExpr::new(relationship_kind_expr, "relationship_kind"),
+            SelectExpr::new(source_id_expr, "source_id"),
+            SelectExpr::new(source_kind_expr, "source_kind"),
+            SelectExpr::new(target_id_expr, "target_id"),
+            SelectExpr::new(target_kind_expr, "target_kind"),
+            SelectExpr::new(Expr::int(depth as i64), "depth"),
         ],
         from,
         where_clause: first_type_cond,
@@ -1207,6 +1270,16 @@ mod tests {
         }
     }
 
+    fn find_union<'a>(table_ref: &'a TableRef, alias: &str) -> Option<&'a TableRef> {
+        match table_ref {
+            TableRef::Union { alias: a, .. } if a == alias => Some(table_ref),
+            TableRef::Join { left, right, .. } => {
+                find_union(left, alias).or_else(|| find_union(right, alias))
+            }
+            TableRef::Scan { .. } | TableRef::Union { .. } | TableRef::Subquery { .. } => None,
+        }
+    }
+
     #[test]
     fn test_lower_variable_length_path() {
         let input = validated_input(
@@ -1242,6 +1315,48 @@ mod tests {
             find_union_alias(&q.from, "hop_e0"),
             "expected union with alias hop_e0"
         );
+
+        let select_aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
+        assert!(select_aliases.contains(&&"hop_e0_path".to_string()));
+        assert!(select_aliases.contains(&&"hop_e0_type".to_string()));
+        assert!(select_aliases.contains(&&"hop_e0_src".to_string()));
+        assert!(select_aliases.contains(&&"hop_e0_src_type".to_string()));
+        assert!(select_aliases.contains(&&"hop_e0_dst".to_string()));
+        assert!(select_aliases.contains(&&"hop_e0_dst_type".to_string()));
+        assert!(select_aliases.contains(&&"hop_e0_depth".to_string()));
+        assert!(select_aliases.contains(&&"hop_e0_path_nodes".to_string()));
+
+        let Some(TableRef::Union { queries, .. }) = find_union(&q.from, "hop_e0") else {
+            panic!("expected hop_e0 union table");
+        };
+        assert_eq!(
+            queries.len(),
+            3,
+            "max_hops=3 should produce three union arms"
+        );
+
+        for query in queries {
+            let aliases: Vec<_> = query
+                .select
+                .iter()
+                .filter_map(|s| s.alias.as_deref())
+                .collect();
+            assert_eq!(
+                aliases,
+                vec![
+                    "start_id",
+                    "end_id",
+                    "traversal_path",
+                    "path_nodes",
+                    "relationship_kind",
+                    "source_id",
+                    "source_kind",
+                    "target_id",
+                    "target_kind",
+                    "depth",
+                ]
+            );
+        }
     }
 
     #[test]
