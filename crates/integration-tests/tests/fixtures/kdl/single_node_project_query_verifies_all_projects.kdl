@@ -1,0 +1,20 @@
+test "single_node_project_query_verifies_all_projects" seed="default"
+
+compile """
+  {
+      "query_type": "search",
+      "node": {"id": "p", "entity": "Project"},
+      "limit": 10
+  }
+"""
+
+execute
+
+raw-ids "p" 1000 1001 1002 1003 1004
+
+allow "project" 1000 1004
+
+redact
+
+authorized-ids "p" 1000 1004
+denied-ids "p" 1001 1002 1003

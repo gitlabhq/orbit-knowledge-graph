@@ -1,0 +1,19 @@
+test "fail_closed_partial_authorization_denies_unknown_ids" seed="default"
+
+compile """
+  {
+      "query_type": "search",
+      "node": {"id": "u", "entity": "User"},
+      "limit": 10
+  }
+"""
+
+execute expect=5
+
+allow "user" 1 2
+
+redact expect=3
+
+authorized-count 2
+authorized-ids "u" 1 2
+denied-ids "u" 3 4 5

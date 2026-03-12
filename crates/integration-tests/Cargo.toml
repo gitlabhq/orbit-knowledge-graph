@@ -12,6 +12,7 @@ gkg-server = { path = "../gkg-server", features = ["testkit"] }
 jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
+kdl-testkit = { path = "../kdl-testkit" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 arrow = { workspace = true }

@@ -1,0 +1,18 @@
+test "empty_query_result_stays_empty" seed="default"
+
+compile """
+  {
+      "query_type": "search",
+      "node": {"id": "u", "entity": "User", "filters": {"username": "nonexistent"}},
+      "limit": 10
+  }
+"""
+
+execute expect=0
+
+// Allow all users — but there are no rows to authorize.
+allow "user" 1 2 3 4 5
+
+redact expect=0
+
+authorized-count 0

@@ -1,0 +1,16 @@
+test "search_fail_closed_no_authorization" seed="default"
+
+compile """
+  {
+      "query_type": "search",
+      "node": {"id": "g", "entity": "Group"},
+      "limit": 100
+  }
+"""
+
+execute expect=3
+
+// No authorizations — fail closed.
+redact expect=3
+
+authorized-count 0

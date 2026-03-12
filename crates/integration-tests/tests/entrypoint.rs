@@ -1,5 +1,6 @@
 mod common;
 mod indexer;
+mod kdl_tests;
 
 mod server {
     pub mod graph_formatter;

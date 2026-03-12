@@ -9,6 +9,7 @@ pub use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, get_boolean_column, get_int64_column,
     get_string_column, get_uint64_column,
 };
+pub use integration_testkit::mock_redaction::MockRedactionService;
 
 pub fn load_ontology() -> Ontology {
     Ontology::load_embedded().expect("embedded ontology should load")

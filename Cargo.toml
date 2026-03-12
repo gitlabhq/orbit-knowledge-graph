@@ -22,6 +22,7 @@ members = [
   "crates/gitlab-client",
   "crates/xtask",
   "crates/integration-testkit",
+  "crates/kdl-testkit",
   "crates/utils",
   "crates/integration-tests",
 ]

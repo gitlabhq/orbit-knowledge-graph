@@ -1,0 +1,15 @@
+[package]
+name = "kdl-testkit"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+gkg-server = { path = "../gkg-server" }
+integration-testkit = { path = "../integration-testkit" }
+ontology = { path = "../ontology" }
+query-engine = { path = "../query-engine" }
+glob = "0.3"
+inventory = "0.3"
+kdl = "6.5.0"
+thiserror = { workspace = true }
