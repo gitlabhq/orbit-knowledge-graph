@@ -12,7 +12,7 @@ fi
 SAMPLING_INTERVAL=${2:-0.025}
 
 # Start the process in the background
-cargo run --release --bin gkg index "$1" > /dev/null 2>&1 &
+cargo run --release --bin orbit index "$1" > /dev/null 2>&1 &
 PROCESS_PID=$!
 
 # Wait a moment for the process to start

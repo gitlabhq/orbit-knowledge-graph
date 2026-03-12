@@ -83,7 +83,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | K8s readiness/liveness probes |
 | `treesitter-visit` | Tree-sitter language bindings wrapper |
-| `cli` | Local `gkg index` and `gkg query` commands |
+| `cli` | Local `orbit index` and `orbit query` commands |
 | `datalake-generator` | Synthetic GitLab data for load testing |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers and `MockRedactionService` for integration tests |

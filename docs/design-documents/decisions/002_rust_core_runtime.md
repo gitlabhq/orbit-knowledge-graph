@@ -43,7 +43,7 @@ The service is implemented as a Cargo workspace with 16 crates:
 | `labkit-rs` | Structured logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | Kubernetes readiness/liveness probes |
 | `treesitter-visit` | Tree-sitter language bindings wrapper |
-| `cli` | Local `gkg index` and `gkg query` commands |
+| `cli` | Local `orbit index` and `orbit query` commands |
 | `datalake-generator` | Synthetic GitLab data for load testing |
 | `xtask` | Build automation, synthetic data generation, query evaluation |
 
