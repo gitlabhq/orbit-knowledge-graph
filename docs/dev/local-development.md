@@ -103,6 +103,32 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
    tilt up
    ```
 
+## Quick start/stop script
+
+Once prerequisites are installed, you can use `scripts/gkg-dev.sh` to manage
+the full stack (K8s cluster, GDK, and Tilt) with a single command:
+
+```shell
+# Copy the config template and set your GDK path
+cp .gkg-dev.conf.example .gkg-dev.conf
+# Edit .gkg-dev.conf — at minimum, set GDK_ROOT if your GDK is not at ~/gdk
+
+# Verify everything is installed and configured correctly
+scripts/gkg-dev.sh check
+
+# Start all services (K8s → GDK → Tilt)
+scripts/gkg-dev.sh start
+
+# Check what's running
+scripts/gkg-dev.sh status
+
+# Stop all services (Tilt → GDK → K8s)
+scripts/gkg-dev.sh stop
+```
+
+See `.gkg-dev.conf.example` for all configuration options (K8s runtime,
+resource allocation, Tilt streaming mode).
+
 ## Access Services
 
 - **Tilt UI**: http://localhost:10350
