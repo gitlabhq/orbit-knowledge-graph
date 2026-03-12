@@ -1,6 +1,6 @@
 use arrow::array::UInt64Array;
 
-use crate::common::{
+use crate::indexer::common::{
     TestContext, get_string_column, handler_context, namespace_envelope, namespace_handler,
 };
 

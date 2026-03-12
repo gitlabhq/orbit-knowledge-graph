@@ -1,4 +1,5 @@
 mod common;
+mod indexer;
 
 mod server {
     pub mod hydration;

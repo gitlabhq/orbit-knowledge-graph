@@ -1,4 +1,4 @@
-mod common;
+use super::common;
 
 use std::sync::Arc;
 

@@ -1,6 +1,6 @@
 //! Integration tests for the dispatcher.
 
-mod common;
+use super::common;
 
 use std::collections::HashSet;
 
