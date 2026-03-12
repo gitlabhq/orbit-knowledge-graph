@@ -10,9 +10,8 @@ query """
 
 count raw=5
 
-allow "user" 1 2
-
-redact
+redact allow "user" 1 2
+redact run
 
 count authorized=2 redacted=3
 assert-ids authorized "u" 1 2

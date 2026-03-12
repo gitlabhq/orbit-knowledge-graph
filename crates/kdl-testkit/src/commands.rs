@@ -15,10 +15,7 @@ use integration_testkit::mock_redaction::MockRedactionService;
 
 register_command!("query", cmd_query);
 register_command!("extra-sql", cmd_extra_sql);
-register_command!("allow", cmd_allow);
-register_command!("deny", cmd_deny);
 register_command!("redact", cmd_redact);
-register_command!("reset-redaction", cmd_reset_redaction);
 register_command!("count", cmd_count);
 register_command!("assert-ids", cmd_assert_ids);
 register_command!("sql-contains", cmd_sql_contains);
@@ -61,33 +58,46 @@ async fn cmd_extra_sql(state: &mut TestState, node: &kdl::KdlNode) -> Result {
     Ok(())
 }
 
-async fn cmd_allow(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    let (entity, ids) = parse_entity_ids(node)?;
-    state.mock_service.allow(&entity, &ids);
-    Ok(())
-}
+/// Handles all redaction subcommands:
+///   redact allow "entity" id1 id2 ...   — authorize IDs
+///   redact deny "entity" id1 id2 ...    — deny IDs
+///   redact reset                         — clear mock service
+///   redact                               — execute redaction
+async fn cmd_redact(state: &mut TestState, node: &kdl::KdlNode) -> Result {
+    match node.get(0).and_then(|v| v.as_string()) {
+        Some("allow") => {
+            let (entity, ids) = parse_entity_ids(node, 1)?;
+            state.mock_service.allow(&entity, &ids);
+        }
+        Some("deny") => {
+            let (entity, ids) = parse_entity_ids(node, 1)?;
+            state.mock_service.deny(&entity, &ids);
+        }
+        Some("reset") => {
+            state.mock_service = MockRedactionService::new();
+        }
+        Some("run") => {
+            let result = state
+                .result
+                .as_mut()
+                .ok_or_else(|| RunnerError::StateError("`query` must run first".into()))?;
 
-async fn cmd_deny(state: &mut TestState, node: &kdl::KdlNode) -> Result {
-    let (entity, ids) = parse_entity_ids(node)?;
-    state.mock_service.deny(&entity, &ids);
-    Ok(())
-}
-
-async fn cmd_redact(state: &mut TestState, _node: &kdl::KdlNode) -> Result {
-    let result = state
-        .result
-        .as_mut()
-        .ok_or_else(|| RunnerError::StateError("`query` must run first".into()))?;
-
-    let checks = result.resource_checks();
-    let authorizations = state.mock_service.check(&checks);
-    let redacted = result.apply_authorizations(&authorizations);
-    state.last_redacted_count = Some(redacted);
-    Ok(())
-}
-
-async fn cmd_reset_redaction(state: &mut TestState, _node: &kdl::KdlNode) -> Result {
-    state.mock_service = MockRedactionService::new();
+            let checks = result.resource_checks();
+            let authorizations = state.mock_service.check(&checks);
+            let redacted = result.apply_authorizations(&authorizations);
+            state.last_redacted_count = Some(redacted);
+        }
+        Some(other) => {
+            return Err(RunnerError::MissingArg(format!(
+                "`redact` subcommand must be `allow`, `deny`, `reset`, or `run`, got `{other}`"
+            )));
+        }
+        None => {
+            return Err(RunnerError::MissingArg(
+                "`redact` requires a subcommand: `allow`, `deny`, `reset`, or `run`".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -196,10 +206,20 @@ fn assert_sql(state: &TestState, node: &kdl::KdlNode, expect_present: bool) -> R
     Ok(())
 }
 
-fn parse_entity_ids(node: &kdl::KdlNode) -> Result<(String, Vec<i64>)> {
+/// Parse entity type and IDs starting at the given offset.
+/// e.g. for `redact allow "user" 1 2 3`, offset=1 reads "user" at pos 1 and IDs from pos 2.
+fn parse_entity_ids(node: &kdl::KdlNode, offset: usize) -> Result<(String, Vec<i64>)> {
     let cmd = node.name().value();
-    let entity = require_string_arg(node, 0)?.to_string();
-    let ids = collect_trailing_ids(node, 1);
+    let entity = node
+        .get(offset)
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| {
+            RunnerError::MissingArg(format!(
+                "`{cmd}` requires an entity type at position {offset}"
+            ))
+        })?
+        .to_string();
+    let ids = collect_trailing_ids(node, offset + 1);
 
     if ids.is_empty() {
         return Err(RunnerError::MissingArg(format!(

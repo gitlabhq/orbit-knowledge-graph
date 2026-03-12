@@ -12,6 +12,6 @@ query """
 assert-ids raw "u" 1 2 3 4 5
 
 // No allow/deny rules — fail closed.
-redact
+redact run
 
 count authorized=0 redacted=5

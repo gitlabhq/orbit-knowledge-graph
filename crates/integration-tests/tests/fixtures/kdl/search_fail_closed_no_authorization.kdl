@@ -11,6 +11,6 @@ query """
 count raw=3
 
 // No authorizations — fail closed.
-redact
+redact run
 
 count authorized=0 redacted=3

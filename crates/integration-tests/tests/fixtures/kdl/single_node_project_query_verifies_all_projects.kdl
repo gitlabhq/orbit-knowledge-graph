@@ -10,9 +10,8 @@ query """
 
 assert-ids raw "p" 1000 1001 1002 1003 1004
 
-allow "project" 1000 1004
-
-redact
+redact allow "project" 1000 1004
+redact run
 
 assert-ids authorized "p" 1000 1004
 assert-ids denied "p" 1001 1002 1003

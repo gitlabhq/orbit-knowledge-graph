@@ -9,8 +9,7 @@ query """
 """
 
 // Allow all users — but there are no rows to authorize.
-allow "user" 1 2 3 4 5
-
-redact
+redact allow "user" 1 2 3 4 5
+redact run
 
 count authorized=0 redacted=0
