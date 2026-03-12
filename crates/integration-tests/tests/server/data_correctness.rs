@@ -526,6 +526,7 @@ async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
     assert_eq!(resp.node_ids("Group"), HashSet::from([100]));
     resp.assert_node_absent("User", 2);
     resp.assert_node_absent("Group", 102);
+    resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_absent("User", 1, "Group", 102, "MEMBER_OF");
 }
 
@@ -622,7 +623,7 @@ async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
         "exactly one shortest path from User 1 to Project 1000"
     );
 
-    for &pid in &pids {
+    for &pid in pids.iter() {
         let path = resp.path(pid);
         assert_eq!(path.len(), 2, "path {pid}: User→Group→Project = 2 edges");
 
@@ -707,7 +708,7 @@ async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
         "exactly 2 paths: to 1000 (via 100) and 1004 (via 102)"
     );
 
-    for &pid in &pids {
+    for &pid in pids.iter() {
         let path = resp.path(pid);
         assert_eq!(path.len(), 2, "path {pid}: User→Group→Project = 2 edges");
         for window in path.windows(2) {
@@ -747,8 +748,10 @@ async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 1, "Group", 102, "MEMBER_OF");
 
-    resp.assert_node("Group", 100, |n| n.has_prop("name"));
-    resp.assert_node("Group", 102, |n| n.has_prop("name"));
+    resp.assert_node("Group", 100, |n| n.prop_str("name") == Some("Public Group"));
+    resp.assert_node("Group", 102, |n| {
+        n.prop_str("name") == Some("Internal Group")
+    });
 }
 
 async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
@@ -807,10 +810,8 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
     let user_ids = resp.node_ids("User");
     let project_ids = resp.node_ids("Project");
 
-    assert!(user_ids.contains(&1));
-    assert!(user_ids.contains(&2));
-    assert!(project_ids.contains(&1000));
-    assert!(project_ids.contains(&1002));
+    assert_eq!(user_ids, HashSet::from([1, 2]));
+    assert_eq!(project_ids, HashSet::from([1000, 1002]));
 
     resp.assert_referential_integrity();
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");

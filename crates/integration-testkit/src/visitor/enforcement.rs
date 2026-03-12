@@ -99,7 +99,7 @@ impl QueryRequirements for Input {
             QueryType::Neighbors => {
                 reqs.insert(Requirement::Neighbors);
             }
-            _ => {}
+            QueryType::Traversal | QueryType::Search => {}
         }
 
         // Traversal queries with joins produce edges the test must verify per type.
@@ -445,7 +445,7 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_filter("User", "username", |n| n.prop_str("username").is_some());
-        view.assert_filter("User", "state", |_| true);
+        view.assert_filter("User", "state", |n| n.prop_str("username").is_some());
     }
 
     #[test]
@@ -458,7 +458,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
-        view.assert_filter("User", "username", |_| true);
+        view.assert_filter("User", "username", |n| n.prop_str("username").is_some());
         drop(view);
     }
 
@@ -470,7 +470,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
-        let _ = view.node_ids("User");
+        let _ = view.node_ids("User").into_inner();
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
-        view.assert_node("User", 1, |_| true);
+        view.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
         };
         let view = ResponseView::for_query(&input, resp);
-        let _ = view.path_ids();
+        let _ = view.path_ids().into_inner();
     }
 
     #[test]
@@ -514,7 +514,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
-        let _ = view.edges_of_type("MEMBER_OF");
+        let _ = view.edges_of_type("MEMBER_OF").into_inner();
     }
 
     #[test]
@@ -533,7 +533,8 @@ mod tests {
     }
 
     #[test]
-    fn for_query_relationship_satisfied_by_assert_edge_absent() {
+    #[should_panic(expected = "unsatisfied assertion requirements")]
+    fn for_query_relationship_not_satisfied_by_assert_edge_absent() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
                 "nodes": [
@@ -563,8 +564,8 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
-        let _ = view.edges_of_type("MEMBER_OF");
-        let _ = view.edges_of_type("CONTAINS");
+        let _ = view.edges_of_type("MEMBER_OF").into_inner();
+        let _ = view.edges_of_type("CONTAINS").into_inner();
     }
 
     #[test]
@@ -584,7 +585,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
-        let _ = view.edges_of_type("MEMBER_OF");
+        let _ = view.edges_of_type("MEMBER_OF").into_inner();
         drop(view);
     }
 
@@ -597,7 +598,7 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
-        let _ = view.node_ids("User");
+        let _ = view.node_ids("User").into_inner();
     }
 
     #[test]
@@ -608,8 +609,8 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
-        let _ = view.edges_of_type("MEMBER_OF");
-        let _ = view.node_ids("User");
+        let _ = view.edges_of_type("MEMBER_OF").into_inner();
+        let _ = view.node_ids("User").into_inner();
     }
 
     #[test]
@@ -623,7 +624,7 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
         view.assert_node_order("User", &[1, 2]);
-        view.assert_node("User", 1, |_| true);
+        view.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
     }
 
     #[test]
@@ -701,7 +702,7 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
-        let _ = view.node_ids("User");
+        let _ = view.node_ids("User").into_inner();
     }
 
     #[test]
@@ -750,5 +751,19 @@ mod tests {
     fn new_has_no_enforcement() {
         let view = ResponseView::new(sample_response());
         drop(view);
+    }
+
+    #[test]
+    #[should_panic(expected = "trivial predicate")]
+    fn assert_node_rejects_trivial_predicate() {
+        let view = ResponseView::new(sample_response());
+        view.assert_node("User", 1, |_| true);
+    }
+
+    #[test]
+    #[should_panic(expected = "trivial predicate")]
+    fn assert_filter_rejects_trivial_predicate() {
+        let view = ResponseView::new(sample_search_response());
+        view.assert_filter("User", "username", |_| true);
     }
 }
