@@ -1,4 +1,4 @@
-use crate::common::{
+use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, get_string_column,
     handler_context, namespace_envelope, namespace_handler,
 };

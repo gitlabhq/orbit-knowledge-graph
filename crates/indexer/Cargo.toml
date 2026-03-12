@@ -46,11 +46,6 @@ zstd = "0.13.3"
 sha2 = { workspace = true }
 internment = { workspace = true }
 parser-core = { workspace = true }
-query-engine = { path = "../query-engine" }
 smallvec = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }
-testcontainers = { workspace = true }
-testcontainers-modules = { workspace = true }
-tower = { workspace = true }
-integration-testkit = { path = "../integration-testkit" }

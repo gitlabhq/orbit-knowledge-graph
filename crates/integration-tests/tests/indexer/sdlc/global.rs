@@ -1,6 +1,6 @@
 use arrow::array::{BooleanArray, StringArray, UInt64Array};
 
-use crate::common::{
+use crate::indexer::common::{
     TestContext, assert_node_count, get_string_column, global_envelope, global_handler,
     handler_context,
 };

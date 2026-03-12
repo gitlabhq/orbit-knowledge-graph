@@ -4,9 +4,6 @@
 //! subtests in parallel, forking an isolated database per subtest to avoid
 //! cross-test contamination while eliminating per-test container startup overhead.
 
-#[path = "../common/mod.rs"]
-mod common;
-
 mod ci;
 mod global;
 mod groups;
@@ -20,7 +17,7 @@ mod security;
 mod watermarking;
 mod work_items;
 
-use common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
+use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
 use integration_testkit::run_subtests;
 
 #[tokio::test]
