@@ -91,8 +91,6 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .map(|r| r.id_column.clone())
             .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
 
-        node.has_traversal_path = node_entity.has_traversal_path;
-
         // Expand wildcard/empty column selections to explicit lists for lowering.
         // Redaction columns (_gkg_*) are added separately by enforce.rs.
         match &mut node.columns {
