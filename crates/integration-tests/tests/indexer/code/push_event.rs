@@ -159,6 +159,7 @@ fn push_event_payload(project_id: i64, commit_sha: &str, event_id: i64) -> Bytes
             operation: 2,
             columns,
         }],
+        version_hash: 0,
     }
     .encode_to_vec();
 

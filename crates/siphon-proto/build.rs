@@ -40,7 +40,7 @@ fn regenerate_protos() {
         format!("{proto_dir}/siphon/v1/text_array.proto"),
         format!("{proto_dir}/siphon/v1/value.proto"),
         format!("{proto_dir}/siphon/v1/replication_event.proto"),
-        format!("{proto_dir}/siphon/v1/repl_events.proto"),
+        format!("{proto_dir}/siphon/v1/replication_events.proto"),
     ];
 
     if let Ok(protoc) = protoc_bin_vendored::protoc_bin_path() {
