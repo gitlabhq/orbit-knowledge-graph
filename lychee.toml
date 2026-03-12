@@ -17,6 +17,7 @@ exclude = [
 exclude_path = [
   "target",
   "node_modules",
+  "output",
   ".claude/skills/pajamas",
 ]
 
