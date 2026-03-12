@@ -78,7 +78,28 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
 
    See: https://docs.gitlab.com/administration/gitaly/configure_gitaly
 
-## Setup
+## Automated setup with Claude Code
+
+The `/dev-environment-setup` Claude Code skill can walk you through the full setup interactively, installing missing tools and configuring services as it goes. It reads this document as its source of truth.
+
+```shell
+claude
+# then type: /dev-environment-setup
+```
+
+The skill needs `sudo` access to install system packages (Docker, build dependencies, etc.). Since the setup can take 30+ minutes, the default sudo password cache (15 minutes) may expire mid-run. To avoid this, temporarily enable passwordless sudo before running the skill:
+
+```shell
+# Enable passwordless sudo for the current user
+echo "$USER ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$USER
+
+# Run the skill...
+
+# Remove passwordless sudo when done
+sudo rm /etc/sudoers.d/$USER
+```
+
+## Manual setup
 
 1. **Install dependencies:**
 
