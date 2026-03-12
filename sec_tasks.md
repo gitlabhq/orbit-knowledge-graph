@@ -2458,3 +2458,133 @@ Both run inside `compile()` for every query type including aggregation. The `che
 | Entity coverage matrix | **PARTIAL** | 6 of 24 entities integration tested. 13 with zero test presence. Mitigated by entity-agnostic architecture. |
 | Multi-hop edge cases | **PASS** | Variable-length, 2-hop, 3-hop, mixed direction, intermediate filtering all covered in unit + integration tests. |
 | Aggregation + security interaction | **PARTIAL** | Aggregation + redaction tested. No explicit SQL-level assertion that `startsWith` is present. Enforced by `check_ast` invariant. |
+
+---
+
+# CI and Automation / Production Validation — Security Task Results
+
+## Task 1: CI automation for simulator evaluation
+
+**Status:** NOT IMPLEMENTED — evaluation framework exists but is not wired into CI
+
+The evaluation framework lives in `crates/xtask/src/synth/evaluation/` (7 files, ~2500 lines). It compiles GKG JSON DSL → SQL via `query_engine::compile()`, substitutes sampled parameters from live ClickHouse, executes queries, and generates text/JSON/markdown reports. Invoked via `cargo xtask synth evaluate`.
+
+**What it exercises:** 29 queries from `fixtures/queries/sdlc_queries.yaml` covering search (6), traversal (14), aggregation (8), path_finding (1). Zero neighbors queries. Each query is compiled with a real `SecurityContext` and executed against ClickHouse with safety settings (`max_memory_usage = 1GB`, `max_execution_time = 30s` at `executor.rs:21-26`).
+
+**Why it's not in CI:** Requires a ClickHouse instance loaded with synthetic data (3-step workflow: `generate` → `load` → `evaluate`). The CI environment runs testcontainers for integration tests but does not provision a persistent ClickHouse with loaded data.
+
+**CI config reviewed:** `.gitlab-ci.yml` (565 lines, 27 jobs). No job runs `cargo xtask synth evaluate`. No `mise` task exists for evaluation (`mise.toml`, 189 lines — no `eval`, `evaluate`, or `simulate` task).
+
+**Recommended implementation:** Add a CI job triggered on `main` (or manual on MR) that:
+1. Provisions ClickHouse via testcontainer
+2. Runs `cargo xtask synth generate` + `cargo xtask synth load`
+3. Runs `cargo xtask synth evaluate`
+4. Publishes report as CI artifact
+
+### References
+
+- Evaluation runner: `crates/xtask/src/synth/evaluation/run.rs:92-229`
+- Query executor with safety settings: `crates/xtask/src/synth/evaluation/executor.rs:21-26`
+- Fixture queries: `fixtures/queries/sdlc_queries.yaml` (29 queries)
+- CI config: `.gitlab-ci.yml` (27 jobs, none for evaluation)
+- mise tasks: `mise.toml` (no evaluation task)
+- Simulator config: `crates/xtask/simulator.yaml`
+
+---
+
+## Task 2: Golden file / snapshot tests for SQL regression
+
+**Status:** NOT IMPLEMENTED — no formal snapshot infrastructure; inline SQL assertions exist as partial substitute
+
+**No formal snapshot testing:**
+- `insta` (Rust snapshot crate): not in any `Cargo.toml`
+- `expect_test` (inline snapshots): not in any `Cargo.toml`
+- `goldenfile`: not in any `Cargo.toml`
+- `*.snap` files: zero in the entire repository
+
+**Existing de facto snapshot tests (inline SQL assertions):**
+
+**Exact SQL assertions (codegen.rs):** 8 tests at `codegen.rs:363-675` assert `assert_eq!(result.sql, "...")` against complete SQL strings. These operate on hand-crafted ASTs, not full `compile()` output. They catch SQL generation regressions for individual AST constructs (SELECT, JOIN, aggregation, IN, AND/OR, OFFSET, HAVING).
+
+**Fragment SQL assertions (lib.rs):** ~23 tests at `lib.rs:202-1106` compile full JSON queries through `compile()` and assert `result.base.sql.contains("...")` on SQL fragments. These cover all 5 query types, filter operators, pagination, multi-hop, security column injection. They use `contains()` checks, not exact string matching.
+
+**AST assertions (security.rs, lower.rs):** ~31 tests check AST structure (node aliases, WHERE clauses, UNION ALL arms) without asserting SQL strings.
+
+**What this misses:**
+
+1. **Additive regressions:** A `contains()` check passes even if the SQL gains unexpected clauses, aliases, or JOIN reordering. Only `codegen.rs` exact assertions would catch these, and those operate on isolated ASTs, not full pipeline output.
+2. **No full-pipeline SQL snapshot:** No test compiles a realistic query through `compile()` and asserts the exact complete SQL string. This is the highest-value missing test — it would catch any regression in lowering, security injection, codegen, or enforce_return.
+
+**Recommended implementation:** Add `insta` as a dev dependency and create snapshot tests in `lib.rs`:
+
+```rust
+#[test]
+fn snapshot_traversal_sql() {
+    let ontology = test_ontology();
+    let ctx = SecurityContext::new(1, vec!["1/22/".into()]).unwrap();
+    let compiled = compile(TRAVERSAL_JSON, &ontology, &ctx).unwrap();
+    insta::assert_snapshot!(compiled.base.sql);
+}
+```
+
+One snapshot per query type (search, traversal, aggregation, path_finding, neighbors) + one for multi-hop + one for aggregation with group_by. Run `cargo insta review` to accept/update baselines. This directly validates TQ1 (no new injection vectors) and TQ2 (security predicates present) on every CI run.
+
+### References
+
+- codegen.rs exact SQL assertions: `crates/query-engine/src/codegen.rs:363-675` (8 tests)
+- lib.rs fragment SQL assertions: `crates/query-engine/src/lib.rs:202-1106` (~23 tests)
+- security.rs AST assertions: `crates/query-engine/src/security.rs:224-448` (~11 tests)
+- No snapshot dependencies: all `Cargo.toml` files (zero hits for insta/expect_test/goldenfile)
+
+---
+
+## Task 3: Staging environment deployment and usage validation
+
+**Status:** PARTIAL — sandbox environment exists, deployment is manual, no CD pipeline
+
+**Sandbox environment (primary dev/test):**
+- Helm values: `helm-dev/gkg/values-sandbox.yaml` — production-like config for GKE cluster `knowledge-graph-test` in GCP project `gl-knowledgegraph-prj-f2eec59d`
+- Observability: `helm-dev/observability/values-sandbox.yaml` — Grafana, Prometheus, alerting
+- Manual deployment via `helm upgrade gkg ./helm-dev/gkg -n gkg -f ./helm-dev/gkg/values-sandbox.yaml` (documented in `docs/dev/RUNBOOK.md:147-184`)
+
+**Local E2E environment:**
+- `cargo xtask e2e setup` provisions a full stack (Colima + k3s + GitLab CNG + ClickHouse + Siphon + GKG) for local testing
+- Config: `config/e2e.yaml`
+- mise tasks: `e2e:setup`, `e2e:teardown`, `e2e:test` (`mise.toml:137-148`)
+
+**No CD pipeline:**
+- No `deploy-sandbox` job in `.gitlab-ci.yml` — documented as planned in `docs/dev/K8S_CICD_SETUP.md:114` but not implemented
+- No staging, pre-production, or canary deployment pipeline
+- No automated smoke test runs post-deployment
+- `tilt-ci` job (`gitlab-ci.yml:258-311`) provisions a full K8s stack in CI for smoke testing but does not deploy to sandbox
+
+**Environments:**
+
+| Environment | Type | Deployment | Validation |
+|-------------|------|------------|------------|
+| Local dev | Tilt / mise | Automatic (Tilt) | Manual |
+| Local E2E | xtask e2e | Semi-automated | `mise e2e:test` |
+| Sandbox (GKE) | Helm on GKE | Manual `helm upgrade` | Manual |
+| Production | — | Not applicable (pre-GA) | — |
+
+### References
+
+- Sandbox Helm values: `helm-dev/gkg/values-sandbox.yaml`
+- Deployment runbook: `docs/dev/RUNBOOK.md:147-184`
+- Planned deploy-sandbox job: `docs/dev/K8S_CICD_SETUP.md:114`
+- E2E config: `config/e2e.yaml`
+- E2E mise tasks: `mise.toml:137-148`
+- tilt-ci job: `.gitlab-ci.yml:258-311`
+- No CD pipeline: `.gitlab-ci.yml` (zero deploy jobs)
+
+---
+
+## Summary
+
+### CI and Automation / Production Validation
+
+| Task | Verdict | Open Items |
+|------|---------|------------|
+| CI automation for simulator evaluation | **NOT IMPLEMENTED** | Framework exists (29 queries, reporting). Not in CI or mise. Needs ClickHouse with data. |
+| Golden file / snapshot tests | **NOT IMPLEMENTED** | No `insta`/`expect_test`/`goldenfile`. 8 exact SQL assertions (codegen.rs) + 23 fragment checks (lib.rs) serve as partial substitute. No full-pipeline SQL snapshot. |
+| Staging deployment and validation | **PARTIAL** | Sandbox on GKE exists with Helm values. Deployment is manual. No CD pipeline. `deploy-sandbox` job planned but not implemented. |
