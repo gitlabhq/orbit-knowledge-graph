@@ -72,7 +72,7 @@ agent-file-sync-check:
   stage: lint
   image: alpine:latest
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   extends:
     - .mr-and-main-rules
   needs: []
@@ -83,7 +83,7 @@ mr-title-check:
   stage: lint
   image: node:lts-alpine
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   extends:
     - .mr-only-rules
   before_script:
@@ -95,7 +95,7 @@ ontology-schema-validate:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   extends:
     - .mr-and-main-rules
   needs: []
@@ -107,14 +107,14 @@ check-docs:
   stage: lint
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   extends:
     - .mr-and-main-rules
   needs: []
   script:
     - markdownlint-cli2 '**/*.md'
     - vale --minAlertLevel error .
-    - lychee --offline --include-fragments --exclude-path output '**/*.md'
+    - lychee --offline --include-fragments '**/*.md'
 
 fmt-check:
   stage: lint
@@ -345,7 +345,7 @@ docker-manifest:
   stage: build
   image: docker:29
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   needs:
     - docker-build-amd64
     - docker-build-arm64
@@ -365,7 +365,7 @@ docker-manifest:
 .helm-base:
   image: google/cloud-sdk:slim
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   before_script:
     - apt-get update && apt-get install -y curl
     - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
@@ -393,7 +393,7 @@ build-proto-gem:
   needs: []
   image: ruby:3.3
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   stage: build
   before_script: []
   script:
@@ -419,7 +419,7 @@ publish-proto-gem:
     - build-proto-gem
   image: ruby:3.3
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   stage: publish
   before_script: []
   script:
@@ -436,7 +436,7 @@ semantic-release:
   stage: release
   image: node:lts
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   variables:
     GIT_STRATEGY: clone
   needs:
@@ -483,7 +483,7 @@ release-manifest:
   stage: build
   image: docker:29
   tags:
-    - saas-linux-small-amd64
+    - saas-linux-medium-amd64
   needs:
     - release-build-amd64
     - release-build-arm64
