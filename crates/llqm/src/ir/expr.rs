@@ -72,6 +72,8 @@ pub enum Expr {
     },
     /// `expr IN (v1, v2, ...)`
     InList { expr: Box<Expr>, list: Vec<Expr> },
+    /// Struct/tuple field access: `expr.field` (ClickHouse named tuple field).
+    StructField { expr: Box<Expr>, field: String },
     /// Verbatim SQL fragment — escape hatch for migration from raw SQL.
     ///
     /// Stored as a `__raw_sql` extension function in the Substrait plan.
@@ -230,6 +232,14 @@ impl Expr {
         Expr::Cast {
             expr: Box::new(self),
             target_type,
+        }
+    }
+
+    /// Struct/tuple field access: `self.field_name`
+    pub fn field(self, field: &str) -> Expr {
+        Expr::StructField {
+            expr: Box::new(self),
+            field: field.into(),
         }
     }
 

@@ -6,6 +6,7 @@ use llqm::ir::plan::{Plan, Rel};
 use llqm::pipeline::{Frontend, IrPass, IrPhase, Pipeline};
 
 use super::frontend::*;
+use super::lower;
 use super::orchestrate::*;
 use super::types::*;
 
@@ -48,18 +49,7 @@ fn project_entity() -> EntityDef {
 
 fn user_extract() -> ExtractDef {
     ExtractDef::Table(ExtractInput {
-        entity: EntityDef::global(
-            "siphon_users",
-            "gl_user",
-            vec![
-                ColumnDef::new("id", DataType::Int64),
-                ColumnDef::new("name", DataType::String),
-                ColumnDef::new("username", DataType::String),
-            ],
-            vec!["id"],
-        ),
-        batch_size: 1_000_000,
-        cursor_values: vec![],
+        entity: user_entity(),
     })
 }
 
@@ -76,15 +66,13 @@ fn project_extract() -> ExtractDef {
         watermark: "project._siphon_replicated_at".into(),
         deleted: "project._siphon_deleted".into(),
         order_by: vec!["traversal_path".into(), "id".into()],
-        batch_size: 500_000,
         namespaced: true,
         traversal_path_filter: Some("startsWith(traversal_path, {traversal_path:String})".into()),
         additional_where: None,
-        cursor_values: vec![],
     })
 }
 
-fn table_extract(batch_size: u64) -> RawExtractInput {
+fn table_extract() -> RawExtractInput {
     RawExtractInput {
         columns: vec![
             RawExtractColumn::Bare("id".into()),
@@ -94,15 +82,13 @@ fn table_extract(batch_size: u64) -> RawExtractInput {
         watermark: "_siphon_replicated_at".into(),
         deleted: "_siphon_deleted".into(),
         order_by: vec!["id".into()],
-        batch_size,
         namespaced: false,
         traversal_path_filter: None,
         additional_where: None,
-        cursor_values: vec![],
     }
 }
 
-fn query_extract(batch_size: u64) -> RawExtractInput {
+fn query_extract() -> RawExtractInput {
     RawExtractInput {
         columns: vec![
             RawExtractColumn::Bare("project.id AS id".into()),
@@ -114,23 +100,30 @@ fn query_extract(batch_size: u64) -> RawExtractInput {
         watermark: "project._siphon_replicated_at".into(),
         deleted: "project._siphon_deleted".into(),
         order_by: vec!["traversal_path".into(), "id".into()],
-        batch_size,
         namespaced: true,
         traversal_path_filter: Some("startsWith(traversal_path, {traversal_path:String})".into()),
         additional_where: None,
-        cursor_values: vec![],
     }
 }
 
-fn emit_raw(input: RawExtractInput) -> String {
-    Pipeline::new()
-        .input(RawExtractFrontend, input)
-        .lower()
-        .unwrap()
-        .emit(&ClickHouseBackend)
-        .unwrap()
-        .finish()
-        .sql
+/// Emit raw extract base plan with pagination params applied.
+fn emit_raw(input: RawExtractInput, batch_size: u64) -> String {
+    let base = lower::raw_extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+    output.to_sql(&[], batch_size).sql
+}
+
+/// Emit raw extract with cursor values.
+fn emit_raw_cursor(input: RawExtractInput, batch_size: u64, cursor: &[(String, String)]) -> String {
+    let base = lower::raw_extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+    output.to_sql(cursor, batch_size).sql
 }
 
 fn emit_node(input: NodeTransformInput) -> String {
@@ -160,26 +153,21 @@ fn emit_pipeline(pipeline: Pipeline<IrPhase>) -> String {
 }
 
 // ===========================================================================
-// Extract — IndexerFrontend
+// Extract — IndexerFrontend (via ExtractPlanOutput::to_sql)
 // ===========================================================================
 
 #[test]
 fn extract_global() {
     let input = ExtractInput {
         entity: user_entity(),
-        batch_size: 1_000_000,
-        cursor_values: vec![],
     };
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+    let sql = output.to_sql(&[], 1_000_000).sql;
 
-    let pq = Pipeline::new()
-        .input(IndexerFrontend, input)
-        .lower()
-        .unwrap()
-        .emit(&ClickHouseBackend)
-        .unwrap()
-        .finish();
-
-    let sql = &pq.sql;
     assert!(sql.contains("siphon_users"), "sql: {sql}");
     assert!(sql.contains("{last_watermark:String}"), "sql: {sql}");
     assert!(sql.contains("{watermark:String}"), "sql: {sql}");
@@ -192,19 +180,14 @@ fn extract_global() {
 fn extract_namespaced_with_join() {
     let input = ExtractInput {
         entity: project_entity(),
-        batch_size: 500_000,
-        cursor_values: vec![],
     };
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+    let sql = output.to_sql(&[], 500_000).sql;
 
-    let pq = Pipeline::new()
-        .input(IndexerFrontend, input)
-        .lower()
-        .unwrap()
-        .emit(&ClickHouseBackend)
-        .unwrap()
-        .finish();
-
-    let sql = &pq.sql;
     assert!(sql.contains("siphon_projects"), "sql: {sql}");
     assert!(sql.contains("INNER JOIN"), "sql: {sql}");
     assert!(sql.contains("traversal_paths"), "sql: {sql}");
@@ -216,18 +199,13 @@ fn extract_namespaced_with_join() {
 fn extract_cursor_single_key() {
     let input = ExtractInput {
         entity: user_entity(),
-        batch_size: 1000,
-        cursor_values: vec![("id".into(), "42".into())],
     };
-
-    let sql = Pipeline::new()
-        .input(IndexerFrontend, input)
-        .lower()
-        .unwrap()
-        .emit(&ClickHouseBackend)
-        .unwrap()
-        .finish()
-        .sql;
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+    let sql = output.to_sql(&[("id".into(), "42".into())], 1000).sql;
 
     assert!(sql.contains("id > '42'"), "sql: {sql}");
 }
@@ -236,20 +214,20 @@ fn extract_cursor_single_key() {
 fn extract_cursor_composite_key() {
     let input = ExtractInput {
         entity: project_entity(),
-        batch_size: 1000,
-        cursor_values: vec![
-            ("traversal_path".into(), "1/2/".into()),
-            ("id".into(), "99".into()),
-        ],
     };
-
-    let sql = Pipeline::new()
-        .input(IndexerFrontend, input)
-        .lower()
-        .unwrap()
-        .emit(&ClickHouseBackend)
-        .unwrap()
-        .finish()
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+    let sql = output
+        .to_sql(
+            &[
+                ("traversal_path".into(), "1/2/".into()),
+                ("id".into(), "99".into()),
+            ],
+            1000,
+        )
         .sql;
 
     assert!(sql.contains("traversal_path > '1/2/'"), "sql: {sql}");
@@ -262,18 +240,13 @@ fn extract_cursor_composite_key() {
 fn extract_full_pipeline() {
     let input = ExtractInput {
         entity: project_entity(),
-        batch_size: 100_000,
-        cursor_values: vec![],
     };
-
-    let sql = Pipeline::new()
-        .input(IndexerFrontend, input)
-        .lower()
-        .unwrap()
-        .emit(&ClickHouseBackend)
-        .unwrap()
-        .finish()
-        .sql;
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+    let sql = output.to_sql(&[], 100_000).sql;
 
     assert!(sql.starts_with("SELECT"), "sql: {sql}");
     assert!(sql.contains("FROM"), "sql: {sql}");
@@ -288,16 +261,11 @@ fn extract_full_pipeline() {
 fn extract_from_plan_reentry() {
     let input = ExtractInput {
         entity: user_entity(),
-        batch_size: 1_000_000,
-        cursor_values: vec![],
     };
+    let base = lower::extract_base(&input).unwrap();
 
-    let plan = Pipeline::new()
-        .input(IndexerFrontend, input)
-        .lower()
-        .unwrap()
-        .into_plan();
-
+    // Extract plan, then re-enter pipeline to emit
+    let plan = Pipeline::from_plan(base.plan).into_plan();
     let sql = Pipeline::from_plan(plan)
         .emit(&ClickHouseBackend)
         .unwrap()
@@ -313,11 +281,7 @@ fn extract_from_plan_reentry() {
 fn extract_rejects_empty_columns() {
     let mut entity = user_entity();
     entity.columns.clear();
-    let input = ExtractInput {
-        entity,
-        batch_size: 1000,
-        cursor_values: vec![],
-    };
+    let input = ExtractInput { entity };
 
     let result = Pipeline::new().input(IndexerFrontend, input).lower();
     assert!(result.is_err());
@@ -325,12 +289,12 @@ fn extract_rejects_empty_columns() {
 }
 
 // ===========================================================================
-// Extract — RawExtractFrontend
+// Extract — RawExtractFrontend (via ExtractPlanOutput::to_sql)
 // ===========================================================================
 
 #[test]
 fn raw_extract_table_columns() {
-    let sql = emit_raw(table_extract(1000));
+    let sql = emit_raw(table_extract(), 1000);
 
     assert!(sql.contains("SELECT id, name,"), "sql: {sql}");
     assert!(
@@ -345,7 +309,7 @@ fn raw_extract_table_columns() {
 
 #[test]
 fn raw_extract_query_fields() {
-    let sql = emit_raw(query_extract(500));
+    let sql = emit_raw(query_extract(), 500);
 
     assert!(sql.contains("project.id AS id"), "sql: {sql}");
     assert!(
@@ -371,18 +335,18 @@ fn raw_extract_query_fields() {
 
 #[test]
 fn raw_extract_watermark() {
-    let sql = emit_raw(table_extract(500));
+    let sql = emit_raw(table_extract(), 500);
     assert!(sql.contains("{last_watermark:String}"), "sql: {sql}");
     assert!(sql.contains("{watermark:String}"), "sql: {sql}");
 }
 
 #[test]
 fn raw_extract_namespace_default() {
-    let mut input = table_extract(1000);
+    let mut input = table_extract();
     input.namespaced = true;
     input.traversal_path_filter = None;
 
-    let sql = emit_raw(input);
+    let sql = emit_raw(input, 1000);
     assert!(
         sql.contains("startsWith(traversal_path, {traversal_path:String})"),
         "sql: {sql}"
@@ -391,12 +355,12 @@ fn raw_extract_namespace_default() {
 
 #[test]
 fn raw_extract_namespace_custom() {
-    let mut input = table_extract(1000);
+    let mut input = table_extract();
     input.namespaced = true;
     input.traversal_path_filter =
         Some("startsWith(traversal_path, {traversal_path:String})".into());
 
-    let sql = emit_raw(input);
+    let sql = emit_raw(input, 1000);
     assert!(
         sql.contains("startsWith(traversal_path, {traversal_path:String})"),
         "sql: {sql}"
@@ -405,31 +369,29 @@ fn raw_extract_namespace_custom() {
 
 #[test]
 fn raw_extract_additional_where() {
-    let mut input = table_extract(1000);
+    let mut input = table_extract();
     input.additional_where = Some("type = 'active'".into());
 
-    let sql = emit_raw(input);
+    let sql = emit_raw(input, 1000);
     assert!(sql.contains("type = 'active'"), "sql: {sql}");
 }
 
 #[test]
 fn raw_extract_cursor_single() {
-    let mut input = table_extract(1000);
-    input.cursor_values = vec![("id".into(), "42".into())];
-
-    let sql = emit_raw(input);
+    let sql = emit_raw_cursor(table_extract(), 1000, &[("id".into(), "42".into())]);
     assert!(sql.contains("id > '42'"), "sql: {sql}");
 }
 
 #[test]
 fn raw_extract_cursor_composite() {
-    let mut input = query_extract(1000);
-    input.cursor_values = vec![
-        ("traversal_path".into(), "1/2/".into()),
-        ("id".into(), "42".into()),
-    ];
-
-    let sql = emit_raw(input);
+    let sql = emit_raw_cursor(
+        query_extract(),
+        1000,
+        &[
+            ("traversal_path".into(), "1/2/".into()),
+            ("id".into(), "42".into()),
+        ],
+    );
     assert!(sql.contains("traversal_path > '1/2/'"), "sql: {sql}");
     assert!(sql.contains("traversal_path = '1/2/'"), "sql: {sql}");
     assert!(sql.contains("id > '42'"), "sql: {sql}");
@@ -447,14 +409,12 @@ fn raw_extract_to_string_column() {
         watermark: "_siphon_replicated_at".into(),
         deleted: "_siphon_deleted".into(),
         order_by: vec!["id".into()],
-        batch_size: 1000,
         namespaced: false,
         traversal_path_filter: None,
         additional_where: None,
-        cursor_values: vec![],
     };
 
-    let sql = emit_raw(input);
+    let sql = emit_raw(input, 1000);
     assert!(sql.contains("toString(uuid)"), "sql: {sql}");
 }
 
@@ -466,16 +426,115 @@ fn raw_extract_rejects_empty_columns() {
         watermark: "w".into(),
         deleted: "d".into(),
         order_by: vec![],
-        batch_size: 100,
         namespaced: false,
         traversal_path_filter: None,
         additional_where: None,
-        cursor_values: vec![],
     };
 
     let result = Pipeline::new().input(RawExtractFrontend, input).lower();
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("no columns"));
+}
+
+// ===========================================================================
+// Pagination — multi-page simulation
+// ===========================================================================
+
+#[test]
+fn pagination_first_page_has_no_cursor() {
+    let input = ExtractInput {
+        entity: user_entity(),
+    };
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+    let sql = output.to_sql(&[], 1000).sql;
+
+    // First page: no cursor filter, just watermark + sort + limit
+    assert!(
+        !sql.contains("> '"),
+        "first page should have no cursor: {sql}"
+    );
+    assert!(sql.contains("ORDER BY"), "sql: {sql}");
+    assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
+}
+
+#[test]
+fn pagination_subsequent_page_injects_cursor() {
+    let input = ExtractInput {
+        entity: user_entity(),
+    };
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+
+    // Simulate page 2: cursor from end of page 1
+    let sql = output.to_sql(&[("id".into(), "500".into())], 1000).sql;
+    assert!(sql.contains("id > '500'"), "sql: {sql}");
+    assert!(sql.contains("ORDER BY"), "sql: {sql}");
+    assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
+
+    // Simulate page 3: cursor advances
+    let sql = output.to_sql(&[("id".into(), "1500".into())], 1000).sql;
+    assert!(sql.contains("id > '1500'"), "sql: {sql}");
+}
+
+#[test]
+fn pagination_composite_key_advances() {
+    let input = ExtractInput {
+        entity: project_entity(),
+    };
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+
+    // Page 1: no cursor — no DNF disjunction
+    let sql1 = output.to_sql(&[], 500).sql;
+    assert!(!sql1.contains(" OR "), "first page: {sql1}");
+
+    // Page 2: composite cursor
+    let sql2 = output
+        .to_sql(
+            &[
+                ("traversal_path".into(), "1/2/".into()),
+                ("id".into(), "99".into()),
+            ],
+            500,
+        )
+        .sql;
+    assert!(sql2.contains("traversal_path > '1/2/'"), "page 2: {sql2}");
+    assert!(sql2.contains("traversal_path = '1/2/'"), "page 2: {sql2}");
+    assert!(sql2.contains("id > '99'"), "page 2: {sql2}");
+    assert!(sql2.contains("OR"), "page 2 needs DNF: {sql2}");
+}
+
+#[test]
+fn pagination_base_plan_is_reusable() {
+    let input = ExtractInput {
+        entity: user_entity(),
+    };
+    let base = lower::extract_base(&input).unwrap();
+    let output = ExtractPlanOutput {
+        base: Pipeline::from_plan(base.plan),
+        sort_exprs: base.sort_exprs,
+    };
+
+    // Call to_sql multiple times — base is cloned each time, never consumed
+    let sql1 = output.to_sql(&[], 1000).sql;
+    let sql2 = output.to_sql(&[("id".into(), "100".into())], 1000).sql;
+    let sql3 = output.to_sql(&[], 500).sql;
+
+    assert!(sql1.contains("LIMIT 1000"), "sql1: {sql1}");
+    assert!(sql2.contains("id > '100'"), "sql2: {sql2}");
+    assert!(sql3.contains("LIMIT 500"), "sql3: {sql3}");
+    // sql1 and sql3 are different (different batch size)
+    assert_ne!(sql1, sql3);
 }
 
 // ===========================================================================
@@ -617,6 +676,56 @@ fn fk_edge_multi_value_exploded() {
     assert!(sql.contains("'User' AS source_kind"), "sql: {sql}");
     assert!(sql.contains("id AS target_id"), "sql: {sql}");
     assert!(sql.contains("'WorkItem' AS target_kind"), "sql: {sql}");
+}
+
+#[test]
+fn fk_edge_array_element() {
+    let sql = emit_edge(FkEdgeTransformInput {
+        relationship_kind: "assigned".into(),
+        source_id: EdgeId::ArrayElement {
+            column: "assignees".into(),
+            field: "user_id".into(),
+        },
+        source_kind: EdgeKind::Literal("User".into()),
+        target_id: EdgeId::Column("id".into()),
+        target_kind: EdgeKind::Literal("MergeRequest".into()),
+        filters: vec![EdgeFilter::ArrayNotEmpty("assignees".into())],
+        namespaced: true,
+    });
+
+    assert!(
+        sql.contains("unnest(assignees).user_id AS source_id"),
+        "sql: {sql}"
+    );
+    assert!(sql.contains("'User' AS source_kind"), "sql: {sql}");
+    assert!(sql.contains("id AS target_id"), "sql: {sql}");
+    assert!(sql.contains("'MergeRequest' AS target_kind"), "sql: {sql}");
+    assert!(sql.contains("cardinality(assignees)"), "sql: {sql}");
+}
+
+#[test]
+fn fk_edge_array_not_empty_filter() {
+    let sql = emit_edge(FkEdgeTransformInput {
+        relationship_kind: "has_label".into(),
+        source_id: EdgeId::ArrayElement {
+            column: "label_ids".into(),
+            field: "label_id".into(),
+        },
+        source_kind: EdgeKind::Literal("MergeRequest".into()),
+        target_id: EdgeId::Column("id".into()),
+        target_kind: EdgeKind::Literal("Label".into()),
+        filters: vec![EdgeFilter::ArrayNotEmpty("label_ids".into())],
+        namespaced: true,
+    });
+
+    assert!(
+        sql.contains("(cardinality(label_ids) > "),
+        "should use cardinality filter: {sql}"
+    );
+    assert!(
+        sql.contains("unnest(label_ids).label_id"),
+        "should use struct field access: {sql}"
+    );
 }
 
 #[test]
@@ -829,13 +938,7 @@ fn orchestrate_extract_emits_clickhouse() {
     )
     .unwrap();
 
-    let pq = plans.global[0]
-        .extract
-        .pipeline
-        .clone()
-        .emit(&ClickHouseBackend)
-        .unwrap()
-        .finish();
+    let pq = plans.global[0].extract.to_sql(&[], 1_000_000);
     assert!(pq.sql.contains("siphon_users"), "sql: {}", pq.sql);
     assert!(pq.sql.contains("ORDER BY"), "sql: {}", pq.sql);
     assert!(pq.sql.contains("LIMIT 1000000"), "sql: {}", pq.sql);
@@ -919,7 +1022,7 @@ fn orchestrate_query_extract_with_join() {
     )
     .unwrap();
 
-    let sql = emit_pipeline(plans.namespaced[0].extract.pipeline.clone());
+    let sql = plans.namespaced[0].extract.to_sql(&[], 500_000).sql;
     assert!(sql.contains("INNER JOIN"), "sql: {sql}");
     assert!(
         sql.contains("startsWith(traversal_path, {traversal_path:String})"),
@@ -1018,15 +1121,19 @@ fn orchestrate_ir_pass_before_emit() {
     )
     .unwrap();
 
-    let pq = plans.global[0]
+    // Apply pass to base, then paginate
+    let base_with_pass = plans.global[0]
         .extract
-        .pipeline
+        .base
         .clone()
         .pass(&NoopPass)
-        .unwrap()
-        .emit(&ClickHouseBackend)
-        .unwrap()
-        .finish();
+        .unwrap();
+
+    let pq = ExtractPlanOutput {
+        base: base_with_pass,
+        sort_exprs: plans.global[0].extract.sort_exprs.clone(),
+    }
+    .to_sql(&[], 1_000_000);
 
     assert!(pq.sql.contains("siphon_users"), "sql: {}", pq.sql);
 }

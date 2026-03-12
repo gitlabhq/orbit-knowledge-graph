@@ -607,6 +607,10 @@ impl CodegenContext {
                     .collect::<Result<_, _>>()?;
                 Ok(format!("{value} IN ({})", options.join(", ")))
             }
+            Expr::StructField { expr, field } => {
+                let inner = self.emit_expr(expr)?;
+                Ok(format!("{inner}.{field}"))
+            }
             Expr::Raw(sql) => Ok(sql.clone()),
         }
     }

@@ -1,6 +1,8 @@
 //! Frontend implementations for the indexer pipeline.
 //!
 //! Thin wrappers that implement `Frontend` and delegate to `lower::*`.
+//! Extract frontends return the base plan (no cursor/sort/limit);
+//! pagination is handled by `ExtractPlanOutput::to_sql()`.
 
 use super::lower::{self, LowerError};
 use super::types::*;
@@ -14,7 +16,7 @@ impl Frontend for IndexerFrontend {
     type Error = LowerError;
 
     fn lower(&self, input: Self::Input) -> Result<Plan, Self::Error> {
-        lower::extract(input)
+        lower::extract_base(&input).map(|b| b.plan)
     }
 }
 
@@ -25,7 +27,7 @@ impl Frontend for RawExtractFrontend {
     type Error = LowerError;
 
     fn lower(&self, input: Self::Input) -> Result<Plan, Self::Error> {
-        lower::raw_extract(input)
+        lower::raw_extract_base(&input).map(|b| b.plan)
     }
 }
 

@@ -114,6 +114,7 @@ fn walk_expr_children(expr: &Expr, visitor: &mut impl FnMut(&Expr) -> bool) {
                 item.walk(visitor);
             }
         }
+        Expr::StructField { expr, .. } => expr.walk(visitor),
         Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } | Expr::Raw(_) => {}
     }
 }
@@ -147,6 +148,7 @@ fn walk_expr_children_mut(expr: &mut Expr, visitor: &mut impl FnMut(&mut Expr) -
                 item.walk_mut(visitor);
             }
         }
+        Expr::StructField { expr, .. } => expr.walk_mut(visitor),
         Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } | Expr::Raw(_) => {}
     }
 }
@@ -181,6 +183,10 @@ fn transform_expr_children(expr: Expr, f: &mut impl FnMut(Expr) -> Expr) -> Expr
         Expr::InList { expr, list } => Expr::InList {
             expr: Box::new(expr.transform(f)),
             list: list.into_iter().map(|i| i.transform(&mut *f)).collect(),
+        },
+        Expr::StructField { expr, field } => Expr::StructField {
+            expr: Box::new(expr.transform(f)),
+            field,
         },
         leaf @ (Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } | Expr::Raw(_)) => leaf,
     }
@@ -227,6 +233,10 @@ fn try_transform_expr_children<E>(
                 .into_iter()
                 .map(|i| i.try_transform(&mut *f))
                 .collect::<Result<_, _>>()?,
+        }),
+        Expr::StructField { expr, field } => Ok(Expr::StructField {
+            expr: Box::new(expr.try_transform(f)?),
+            field,
         }),
         leaf @ (Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } | Expr::Raw(_)) => {
             Ok(leaf)

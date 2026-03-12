@@ -3,15 +3,21 @@
 //! Transforms indexer inputs into `Rel` trees. Called by the thin
 //! `Frontend` wrappers in `frontend.rs`.
 //!
+//! Extract functions produce a **base plan** (watermark filter + projection,
+//! no cursor/sort/limit) together with resolved sort expressions. Pagination
+//! (cursor injection, ORDER BY, LIMIT) is applied per-page by
+//! `ExtractPlanOutput::to_sql()` in the orchestration layer — mirroring
+//! the real indexer's `ExtractQuery`.
+//!
 //! | Entry point        | SQL target  | Query shape |
 //! |--------------------|-------------|-------------|
-//! | `extract`          | ClickHouse  | Read [→ Join] → Filter(watermark [+ cursor]) → Project → Sort → Fetch |
-//! | `raw_extract`      | ClickHouse  | Read_raw → Filter(watermark [+ ns + extra + cursor]) → Project → Sort → Fetch |
+//! | `extract_base`     | ClickHouse  | Read [→ Join] → Filter(watermark) → Project |
+//! | `raw_extract_base` | ClickHouse  | Read_raw → Filter(watermark [+ ns + extra]) → Project |
 //! | `node_transform`   | DataFusion  | Read(source_data) → Project |
 //! | `fk_edge_transform`| DataFusion  | Read(source_data) [→ Filter] → Project |
 
 use super::types::*;
-use llqm::ir::expr::{self, DataType, Expr};
+use llqm::ir::expr::{self, DataType, Expr, SortDir};
 use llqm::ir::plan::{Plan, Rel};
 
 const VERSION_ALIAS: &str = "_version";
@@ -24,11 +30,17 @@ pub enum LowerError {
     NoColumns(&'static str),
 }
 
+/// Base extract plan + resolved sort expressions. Pagination is applied separately.
+pub struct ExtractBase {
+    pub plan: Plan,
+    pub sort_exprs: Vec<(Expr, SortDir)>,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Table-based Extract
+// Table-based Extract (base plan — no cursor/sort/limit)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub fn extract(input: ExtractInput) -> Result<Plan, LowerError> {
+pub fn extract_base(input: &ExtractInput) -> Result<ExtractBase, LowerError> {
     let entity = &input.entity;
     if entity.columns.is_empty() && entity.join.as_ref().is_none_or(|j| j.columns.is_empty()) {
         return Err(LowerError::NoColumns("entity"));
@@ -41,22 +53,18 @@ pub fn extract(input: ExtractInput) -> Result<Plan, LowerError> {
     }
 
     rel = watermark_filter(rel, expr::col(&entity.source_alias, &entity.version_column));
-
-    if !input.cursor_values.is_empty() {
-        rel = cursor_filter(rel, &input.cursor_values);
-    }
-
     rel = extract_projection(rel, entity);
 
-    let sort_keys: Vec<_> = entity
+    let sort_exprs: Vec<_> = entity
         .sort_keys
         .iter()
-        .map(|k| (resolve_sort_column(entity, k), expr::SortDir::Asc))
+        .map(|k| (resolve_sort_column(entity, k), SortDir::Asc))
         .collect();
-    rel = rel.sort(&sort_keys);
-    rel = rel.fetch(input.batch_size, None);
 
-    Ok(rel.into_plan())
+    Ok(ExtractBase {
+        plan: rel.into_plan(),
+        sort_exprs,
+    })
 }
 
 fn extract_read(entity: &EntityDef) -> Rel {
@@ -105,7 +113,7 @@ fn col_def_item<'a>(col: &'a ColumnDef, default_table: &'a str) -> (Expr, &'a st
     (expr::col(table, &col.name), out)
 }
 
-fn resolve_sort_column(entity: &EntityDef, key: &str) -> Expr {
+pub fn resolve_sort_column(entity: &EntityDef, key: &str) -> Expr {
     if let Some(join) = &entity.join
         && join.columns.iter().any(|c| c.name == key)
     {
@@ -115,10 +123,10 @@ fn resolve_sort_column(entity: &EntityDef, key: &str) -> Expr {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Query-based Extract
+// Query-based Extract (base plan — no cursor/sort/limit)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub fn raw_extract(input: RawExtractInput) -> Result<Plan, LowerError> {
+pub fn raw_extract_base(input: &RawExtractInput) -> Result<ExtractBase, LowerError> {
     if input.columns.is_empty() {
         return Err(LowerError::NoColumns("extract"));
     }
@@ -152,10 +160,6 @@ pub fn raw_extract(input: RawExtractInput) -> Result<Plan, LowerError> {
         rel = rel.filter(expr::raw(extra));
     }
 
-    if !input.cursor_values.is_empty() {
-        rel = cursor_filter(rel, &input.cursor_values);
-    }
-
     let mut items: Vec<(Expr, &str)> = input
         .columns
         .iter()
@@ -171,15 +175,16 @@ pub fn raw_extract(input: RawExtractInput) -> Result<Plan, LowerError> {
     items.push((expr::raw(&input.deleted), DELETED_ALIAS));
     rel = rel.project(&items);
 
-    let sort_keys: Vec<_> = input
+    let sort_exprs: Vec<_> = input
         .order_by
         .iter()
-        .map(|k| (expr::raw(k), expr::SortDir::Asc))
+        .map(|k| (expr::raw(k), SortDir::Asc))
         .collect();
-    rel = rel.sort(&sort_keys);
-    rel = rel.fetch(input.batch_size, None);
 
-    Ok(rel.into_plan())
+    Ok(ExtractBase {
+        plan: rel.into_plan(),
+        sort_exprs,
+    })
 }
 
 /// `"project.id AS id"` → `"id"`, `"id"` → `"id"`
@@ -305,6 +310,9 @@ fn lower_edge_id(id: &EdgeId) -> Expr {
             )),
             target_type: DataType::Int64,
         },
+        EdgeId::ArrayElement { column, field } => {
+            expr::func("unnest", vec![expr::col("", column)]).field(field)
+        }
     }
 }
 
@@ -331,6 +339,9 @@ fn lower_edge_filter(filter: &EdgeFilter) -> Expr {
     match filter {
         EdgeFilter::IsNotNull(column) => expr::col("", column).is_not_null(),
         EdgeFilter::NotEmpty(column) => expr::col("", column).ne(expr::raw("''")),
+        EdgeFilter::ArrayNotEmpty(column) => {
+            expr::func("cardinality", vec![expr::col("", column)]).gt(expr::int(0))
+        }
         EdgeFilter::TypeIn { column, types } => {
             let list: Vec<Expr> = types.iter().map(|t| expr::string(t)).collect();
             expr::col("", column).in_list(list)
@@ -355,7 +366,7 @@ fn watermark_filter(rel: Rel, wm: Expr) -> Rel {
 ///
 /// For sort keys `[c1, c2, c3]` with values `[v1, v2, v3]`, generates:
 ///   `(c1 > v1) OR (c1 = v1 AND c2 > v2) OR (c1 = v1 AND c2 = v2 AND c3 > v3)`
-fn cursor_filter(rel: Rel, cursor_values: &[(String, String)]) -> Rel {
+pub fn cursor_filter(rel: Rel, cursor_values: &[(String, String)]) -> Rel {
     let disjuncts: Vec<Expr> = (0..cursor_values.len())
         .map(|i| {
             let mut conjuncts = Vec::with_capacity(i + 1);

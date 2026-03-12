@@ -746,6 +746,18 @@ fn encode_expr(
                 ))),
             })
         }
+        Expr::StructField { expr, field } => {
+            let inner = encode_expr(fns, expr, schema)?;
+            let anchor = fns.ensure("__struct_field");
+            Ok(make_scalar_fn(
+                anchor,
+                vec![
+                    make_value_arg(inner),
+                    make_literal_arg(&LiteralValue::String(field.clone())),
+                ],
+                string_type(),
+            ))
+        }
         Expr::Raw(sql) => {
             let anchor = fns.ensure("__raw_sql");
             Ok(make_scalar_fn(

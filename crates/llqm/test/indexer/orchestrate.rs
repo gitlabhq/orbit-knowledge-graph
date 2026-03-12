@@ -7,11 +7,25 @@
 //! `Frontend::lower()` directly. The output holds `Pipeline<IrPhase>`
 //! so consumers can add their own passes (security, check) and choose
 //! a backend before emitting.
+//!
+//! ## Pagination model
+//!
+//! Extract plans separate the **base query** (watermark filter + projection)
+//! from **per-page parameters** (cursor, ORDER BY, LIMIT). This mirrors
+//! the real indexer's `ExtractQuery` which clones its base AST, injects
+//! cursor/sort/limit, then emits SQL on each page.
+//!
+//! ```text
+//! ExtractPlanOutput::to_sql(&[], 1_000_000)     → first page (no cursor)
+//! ExtractPlanOutput::to_sql(&cursor, 1_000_000) → subsequent pages
+//! ```
 
-use super::frontend::{
-    FkEdgeTransformFrontend, IndexerFrontend, NodeTransformFrontend, RawExtractFrontend,
-};
+use super::frontend::{FkEdgeTransformFrontend, NodeTransformFrontend};
+use super::lower;
 use super::types::*;
+use llqm::backend::clickhouse::{ClickHouseBackend, ParameterizedQuery};
+use llqm::ir::expr::{Expr, SortDir};
+use llqm::ir::plan::Plan;
 use llqm::pipeline::{IrPhase, Pipeline};
 
 // ---------------------------------------------------------------------------
@@ -22,10 +36,7 @@ use llqm::pipeline::{IrPhase, Pipeline};
 ///
 /// All plans are at `Pipeline<IrPhase>` — consumers add passes and emit:
 /// ```ignore
-/// plan.extract.pipeline
-///     .pass(&security_pass)?
-///     .emit(&ClickHouseBackend)?
-///     .finish()
+/// plan.extract.to_sql(&[], 1_000_000)  // first page
 /// ```
 pub struct PipelinePlan {
     pub name: String,
@@ -33,10 +44,45 @@ pub struct PipelinePlan {
     pub transforms: Vec<TransformOutput>,
 }
 
+/// Paginated extract query, modeled after the real indexer's `ExtractQuery`.
+///
+/// Holds the base plan (without cursor/sort/limit) and resolved sort
+/// expressions. Per-page SQL is produced by `to_sql()` which clones
+/// the base, injects cursor filter + ORDER BY + LIMIT, then emits.
 pub struct ExtractPlanOutput {
-    pub pipeline: Pipeline<IrPhase>,
-    pub sort_keys: Vec<String>,
-    pub batch_size: u64,
+    pub base: Pipeline<IrPhase>,
+    pub sort_exprs: Vec<(Expr, SortDir)>,
+}
+
+impl ExtractPlanOutput {
+    /// Produce a parameterized SQL query for one page.
+    ///
+    /// Mirrors `ExtractQuery::to_sql()`: clones base plan, injects cursor
+    /// filter (if any), appends ORDER BY + LIMIT, emits via ClickHouse backend.
+    pub fn to_sql(
+        &self,
+        cursor_values: &[(String, String)],
+        batch_size: u64,
+    ) -> ParameterizedQuery {
+        let plan = self.base.clone().into_plan();
+        let mut root = plan.root;
+
+        if !cursor_values.is_empty() {
+            root = lower::cursor_filter(root, cursor_values);
+        }
+
+        root = root.sort(&self.sort_exprs).fetch(batch_size, None);
+
+        let plan = Plan {
+            output_names: plan.output_names,
+            root,
+            ctes: plan.ctes,
+        };
+        Pipeline::from_plan(plan)
+            .emit(&ClickHouseBackend)
+            .unwrap()
+            .finish()
+    }
 }
 
 pub struct TransformOutput {
@@ -127,7 +173,7 @@ pub fn lower_plans(
 }
 
 fn lower_node_plan(input: NodePlanInput) -> Result<PipelinePlan, OrchestrateError> {
-    let (extract_pipeline, sort_keys, batch_size) = lower_extract(&input.extract)?;
+    let extract = lower_extract(&input.extract)?;
 
     let node_pipeline = Pipeline::new()
         .input(
@@ -162,11 +208,7 @@ fn lower_node_plan(input: NodePlanInput) -> Result<PipelinePlan, OrchestrateErro
 
     Ok(PipelinePlan {
         name: input.name,
-        extract: ExtractPlanOutput {
-            pipeline: extract_pipeline,
-            sort_keys,
-            batch_size,
-        },
+        extract,
         transforms,
     })
 }
@@ -174,7 +216,7 @@ fn lower_node_plan(input: NodePlanInput) -> Result<PipelinePlan, OrchestrateErro
 fn lower_standalone_edge_plan(
     input: StandaloneEdgePlanInput,
 ) -> Result<PipelinePlan, OrchestrateError> {
-    let (extract_pipeline, sort_keys, batch_size) = lower_extract(&input.extract)?;
+    let extract = lower_extract(&input.extract)?;
 
     let edge_pipeline = Pipeline::new()
         .input(FkEdgeTransformFrontend, input.transform)
@@ -183,11 +225,7 @@ fn lower_standalone_edge_plan(
 
     Ok(PipelinePlan {
         name: input.name,
-        extract: ExtractPlanOutput {
-            pipeline: extract_pipeline,
-            sort_keys,
-            batch_size,
-        },
+        extract,
         transforms: vec![TransformOutput {
             pipeline: edge_pipeline,
             destination_table: input.edge_table,
@@ -195,27 +233,25 @@ fn lower_standalone_edge_plan(
     })
 }
 
-fn lower_extract(
-    def: &ExtractDef,
-) -> Result<(Pipeline<IrPhase>, Vec<String>, u64), OrchestrateError> {
+fn lower_extract(def: &ExtractDef) -> Result<ExtractPlanOutput, OrchestrateError> {
     match def {
         ExtractDef::Table(input) => {
-            let sort_keys = input.entity.sort_keys.clone();
-            let batch_size = input.batch_size;
-            let pipeline = Pipeline::new()
-                .input(IndexerFrontend, input.clone())
-                .lower()
-                .map_err(|e| OrchestrateError::Extract(e.to_string()))?;
-            Ok((pipeline, sort_keys, batch_size))
+            let base_result =
+                lower::extract_base(input).map_err(|e| OrchestrateError::Extract(e.to_string()))?;
+            let pipeline = Pipeline::from_plan(base_result.plan);
+            Ok(ExtractPlanOutput {
+                base: pipeline,
+                sort_exprs: base_result.sort_exprs,
+            })
         }
         ExtractDef::Query(input) => {
-            let sort_keys = input.order_by.clone();
-            let batch_size = input.batch_size;
-            let pipeline = Pipeline::new()
-                .input(RawExtractFrontend, input.clone())
-                .lower()
+            let base_result = lower::raw_extract_base(input)
                 .map_err(|e| OrchestrateError::Extract(e.to_string()))?;
-            Ok((pipeline, sort_keys, batch_size))
+            let pipeline = Pipeline::from_plan(base_result.plan);
+            Ok(ExtractPlanOutput {
+                base: pipeline,
+                sort_exprs: base_result.sort_exprs,
+            })
         }
     }
 }

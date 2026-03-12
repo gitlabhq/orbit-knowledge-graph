@@ -54,18 +54,17 @@ pub struct JoinDef {
     pub columns: Vec<ColumnDef>,
 }
 
-/// Runtime parameters for a single extract query invocation.
+/// Input for a table-based extract. Contains only entity definition — pagination
+/// params (batch_size, cursor_values) are applied per-page at the orchestration layer.
 #[derive(Debug, Clone)]
 pub struct ExtractInput {
     pub entity: EntityDef,
-    pub batch_size: u64,
-    /// Cursor column values from the previous page (empty on first page).
-    pub cursor_values: Vec<(String, String)>,
 }
 
 /// A raw extract plan for query-based ETL (raw FROM, raw SELECT columns).
 ///
 /// Used when the ontology defines `etl.type: query` instead of `etl.type: table`.
+/// Pagination params (batch_size, cursor_values) are applied per-page at the orchestration layer.
 #[derive(Debug, Clone)]
 pub struct RawExtractInput {
     pub columns: Vec<RawExtractColumn>,
@@ -73,11 +72,9 @@ pub struct RawExtractInput {
     pub watermark: String,
     pub deleted: String,
     pub order_by: Vec<String>,
-    pub batch_size: u64,
     pub namespaced: bool,
     pub traversal_path_filter: Option<String>,
     pub additional_where: Option<String>,
-    pub cursor_values: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +126,8 @@ pub enum EdgeId {
     Column(String),
     /// Multi-value column: `CAST(NULLIF(unnest(string_to_array(column, delimiter)), '') AS BIGINT)`.
     Exploded { column: String, delimiter: String },
+    /// Array of structs: `unnest(column).field` — e.g. MR assignees stored as `Array(Tuple(user_id Int64))`.
+    ArrayElement { column: String, field: String },
 }
 
 /// How to resolve an edge endpoint kind (source_kind / target_kind).
@@ -150,7 +149,12 @@ pub enum EdgeKind {
 pub enum EdgeFilter {
     IsNotNull(String),
     NotEmpty(String),
-    TypeIn { column: String, types: Vec<String> },
+    /// `cardinality(column) > 0` — array column is non-empty.
+    ArrayNotEmpty(String),
+    TypeIn {
+        column: String,
+        types: Vec<String>,
+    },
 }
 
 /// Input for an FK edge transform query.
