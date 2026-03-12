@@ -11,7 +11,7 @@ use query_engine::ResultContext;
 use super::types::QueryPipelineContext;
 
 pub use goon::GoonFormatter;
-pub use graph::GraphFormatter;
+pub use graph::{GraphEdge, GraphFormatter, GraphNode, GraphResponse};
 pub use raw_row::row_to_json;
 
 pub trait ResultFormatter: Send + Sync {

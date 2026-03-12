@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use query_engine::{
     EdgeMeta, NEIGHBOR_IS_OUTGOING_COLUMN, QueryType, RELATIONSHIP_TYPE_COLUMN, ResultContext,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::query_pipeline::QueryPipelineContext;
@@ -12,14 +12,14 @@ use crate::redaction::{QueryResult, QueryResultRow};
 
 use super::{ResultFormatter, column_value_to_json};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GraphResponse {
     pub query_type: String,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GraphNode {
     #[serde(rename = "type")]
     pub entity_type: String,
@@ -28,7 +28,7 @@ pub struct GraphNode {
     pub properties: serde_json::Map<String, Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GraphEdge {
     pub from: String,
     pub from_id: i64,
@@ -36,11 +36,11 @@ pub struct GraphEdge {
     pub to_id: i64,
     #[serde(rename = "type")]
     pub edge_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub depth: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path_id: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<usize>,
 }
 
