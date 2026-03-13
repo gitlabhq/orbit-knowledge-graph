@@ -13,7 +13,7 @@ TITLE=$(printf '%s\n' "$CI_MERGE_REQUEST_TITLE" | sed 's/^\(\[Draft\]\|(Draft)\|
 echo "Checking MR title against conventional commit format: $TITLE"
 
 # Check the MR title directly using commitlint
-if ! printf '%s\n' "$TITLE" | npx commitlint; then
+if ! printf '%s\n' "$TITLE" | commitlint; then
   echo "Merge request title does not follow conventional commit format."
   echo "Please update the title to follow the pattern: type(scope): description"
   echo "Examples: 'feat(api): add new endpoint', 'fix: resolve login issue'"
