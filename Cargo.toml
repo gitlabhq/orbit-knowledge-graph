@@ -87,7 +87,7 @@ tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = { version = "0.46.0", features = ["server_2_11"] }
 arrow-ipc = "57.2.0"
-clickhouse = { version = "0.14", features = ["inserter", "rustls-tls-ring", "rustls-tls-native-roots"] }
+clickhouse = { version = "0.14", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.1"
 testcontainers-modules = { version = "0.15.0", features = ["nats", "clickhouse"] }
 
@@ -134,7 +134,7 @@ bollard = "0.20"
 kube = { version = "3.0", features = ["client", "runtime", "ws"] }
 k8s-openapi = { version = "0.27", features = ["v1_31"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
-rustls = { version = "0.23.36", default-features = false, features = ["ring"] }
+rustls = { version = "0.23.36", default-features = false, features = ["aws_lc_rs"] }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 
