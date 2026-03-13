@@ -28,7 +28,7 @@ use gkg_server::query_pipeline::{
 };
 use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests_shared;
-use integration_testkit::visitor::{NodeExt, ResponseView};
+use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
 use query_engine::compile;
 use serde_json::Value;
 
@@ -512,6 +512,83 @@ async fn search_unicode_properties_survive_pipeline(ctx: &TestContext) {
         n.prop_str("username") == Some("用户_émoji_🎉")
             && n.prop_str("name") == Some("Ünïcödé Üser")
     });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Search: Pagination, Limits, Combined Features
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn search_range_returns_paginated_results(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "range": {"start": 1, "end": 3}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("User", &[2, 3]);
+}
+
+async fn search_limit_truncates_results(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "limit": 3
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_node_order("User", &[1, 2, 3]);
+}
+
+async fn search_filter_no_match_returns_empty(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"],
+                     "filters": {"username": "nonexistent_user"}},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "username".into(),
+    });
+    resp.assert_node_count(0);
+}
+
+async fn search_combined_filter_node_ids_order_by(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+                     "node_ids": [1, 2, 3, 5],
+                     "filters": {"state": "active"}},
+            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_order("User", &[3, 2, 1]);
+    resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
+    resp.assert_node_absent("User", 5);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1002,6 +1079,11 @@ async fn data_correctness() {
         search_no_auth_returns_empty,
         search_redaction_returns_only_allowed_ids,
         search_unicode_properties_survive_pipeline,
+        // search: pagination, limits, combined
+        search_range_returns_paginated_results,
+        search_limit_truncates_results,
+        search_filter_no_match_returns_empty,
+        search_combined_filter_node_ids_order_by,
         // traversal
         traversal_user_group_returns_correct_pairs_and_edges,
         traversal_three_hop_returns_all_user_group_project_paths,
