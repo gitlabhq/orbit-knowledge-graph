@@ -1,8 +1,6 @@
-use arrow::array::{BooleanArray, StringArray, UInt64Array};
-
 use crate::indexer::common::{
-    TestContext, assert_node_count, get_string_column, global_envelope, global_handler,
-    handler_context,
+    TestContext, assert_node_count, get_boolean_column, get_string_column, get_uint64_column,
+    global_envelope, global_handler, handler_context,
 };
 
 pub async fn processes_and_transforms_users(ctx: &TestContext) {
@@ -35,22 +33,12 @@ pub async fn processes_and_transforms_users(ctx: &TestContext) {
     let result = ctx.query("SELECT * FROM gl_user FINAL ORDER BY id").await;
     let batch = &result[0];
 
-    let user_type = batch
-        .column_by_name("user_type")
-        .expect("user_type column should exist")
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("user_type should be StringArray");
+    let user_type = get_string_column(batch, "user_type");
     assert_eq!(user_type.value(0), "human");
     assert_eq!(user_type.value(1), "support_bot");
     assert_eq!(user_type.value(2), "service_user");
 
-    let is_admin = batch
-        .column_by_name("is_admin")
-        .expect("is_admin column should exist")
-        .as_any()
-        .downcast_ref::<BooleanArray>()
-        .expect("is_admin should be BooleanArray");
+    let is_admin = get_boolean_column(batch, "is_admin");
     assert!(is_admin.value(0));
     assert!(!is_admin.value(1));
     assert!(!is_admin.value(2));
@@ -85,11 +73,7 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
         .expect("handler should succeed");
 
     let result = ctx.query("SELECT count() as cnt FROM gl_user FINAL").await;
-    let count = result[0]
-        .column(0)
-        .as_any()
-        .downcast_ref::<UInt64Array>()
-        .expect("expected UInt64Array");
+    let count = get_uint64_column(&result[0], "cnt");
     assert_eq!(
         count.value(0),
         1,

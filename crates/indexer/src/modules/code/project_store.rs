@@ -6,6 +6,7 @@ use crate::clickhouse::ArrowClickHouseClient;
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use gkg_utils::arrow::ArrowUtils;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -51,23 +52,14 @@ impl ClickHouseProjectStore {
             _ => return Ok(None),
         };
 
-        let project_id_col = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .ok_or(ProjectStoreError::InvalidType)?;
+        let project_id_col: &Int64Array =
+            ArrowUtils::get_column_by_index(&batch, 0).ok_or(ProjectStoreError::InvalidType)?;
 
-        let traversal_path_col = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or(ProjectStoreError::InvalidType)?;
+        let traversal_path_col: &StringArray =
+            ArrowUtils::get_column_by_index(&batch, 1).ok_or(ProjectStoreError::InvalidType)?;
 
-        let full_path_col = batch
-            .column(2)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or(ProjectStoreError::InvalidType)?;
+        let full_path_col: &StringArray =
+            ArrowUtils::get_column_by_index(&batch, 2).ok_or(ProjectStoreError::InvalidType)?;
 
         if project_id_col.is_null(0) {
             return Ok(None);

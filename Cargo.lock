@@ -3369,6 +3369,7 @@ dependencies = [
  "futures",
  "gitaly-client",
  "gitlab-client",
+ "gkg-utils",
  "internment",
  "moka",
  "ontology",
