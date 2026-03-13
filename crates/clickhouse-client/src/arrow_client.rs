@@ -29,7 +29,9 @@ impl ArrowClickHouseClient {
         let mut client = Client::default()
             .with_url(url)
             .with_database(database)
-            .with_user(username);
+            .with_user(username)
+            .with_option("output_format_arrow_string_as_string", "1")
+            .with_option("output_format_arrow_fixed_string_as_fixed_byte_array", "1");
 
         if let Some(password) = password {
             client = client.with_password(password);
