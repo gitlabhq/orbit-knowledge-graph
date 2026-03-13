@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfiguration;
 use labkit_rs::correlation::grpc::server_interceptor;
+use ontology::Ontology;
 use tonic::transport::Server as TonicServer;
 use tracing::info;
 
@@ -27,10 +28,12 @@ impl GrpcServer {
     pub fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
+        ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
     ) -> Self {
-        let service = KnowledgeGraphServiceImpl::new(validator, clickhouse_config, cluster_health);
+        let service =
+            KnowledgeGraphServiceImpl::new(validator, ontology, clickhouse_config, cluster_health);
         Self {
             addr,
             service: KnowledgeGraphServiceServer::with_interceptor(service, server_interceptor),
@@ -61,10 +64,16 @@ mod tests {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50054);
         let validator =
             Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let clickhouse_config = ClickHouseConfiguration::default();
-
         let cluster_health = ClusterHealthChecker::default().into_arc();
-        let server = GrpcServer::new(addr, validator, &clickhouse_config, cluster_health);
+        let server = GrpcServer::new(
+            addr,
+            validator,
+            ontology,
+            &clickhouse_config,
+            cluster_health,
+        );
         assert_eq!(server.addr(), addr);
     }
 }

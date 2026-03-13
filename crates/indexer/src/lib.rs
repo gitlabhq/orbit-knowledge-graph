@@ -119,7 +119,11 @@ pub enum IndexerError {
 }
 
 /// Runs the indexer until completion or until the token is cancelled.
-pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<(), IndexerError> {
+pub async fn run(
+    config: &IndexerConfig,
+    ontology: Arc<ontology::Ontology>,
+    shutdown: CancellationToken,
+) -> Result<(), IndexerError> {
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 
@@ -137,9 +141,6 @@ pub async fn run(config: &IndexerConfig, shutdown: CancellationToken) -> Result<
     )?);
 
     let registry = Arc::new(HandlerRegistry::default());
-
-    info!("loading embedded ontology");
-    let ontology = ontology::Ontology::load_embedded().map_err(HandlerInitError::new)?;
 
     info!("initializing SDLC handlers");
     modules::sdlc::register_handlers(&registry, config, &ontology).await?;
