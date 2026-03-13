@@ -62,6 +62,7 @@ async fn run_query(ctx: &TestContext, json: &str, svc: &MockRedactionService) ->
     let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
+
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
@@ -398,6 +399,119 @@ async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
         .unwrap()
         .assert_str("name", "Internal Group");
     resp.assert_node_absent("Group", 101);
+}
+
+async fn search_filter_contains_returns_substring_matches(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"],
+                     "filters": {"username": {"op": "contains", "value": "li"}}},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_ids("User", &[1, 3]);
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.contains("li"))
+    });
+}
+
+async fn search_filter_is_null_matches_unset_columns(ctx: &TestContext) {
+    // avatar_url is Nullable(String) in ClickHouse, so IS NULL matches
+    // rows where no avatar has been set (our seed data never sets it).
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "avatar_url"],
+                     "filters": {"avatar_url": {"op": "is_null", "value": true}}},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(6);
+    resp.assert_filter("User", "avatar_url", |n| {
+        n.prop_str("username").is_some() && n.prop("avatar_url").is_none()
+    });
+}
+
+async fn search_with_order_by_desc(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(6);
+    resp.assert_node_order("User", &[6, 5, 4, 3, 2, 1]);
+}
+
+async fn search_no_auth_returns_empty(ctx: &TestContext) {
+    let svc = MockRedactionService::new();
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#,
+        &svc,
+    )
+    .await;
+
+    resp.assert_node_count(0);
+}
+
+async fn search_redaction_returns_only_allowed_ids(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1, 3]);
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#,
+        &svc,
+    )
+    .await;
+
+    resp.assert_node_ids("User", &[1, 3]);
+    resp.assert_node_absent("User", 2);
+    resp.assert_node_absent("User", 5);
+}
+
+async fn search_unicode_properties_survive_pipeline(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "name"],
+                     "node_ids": [6]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_ids("User", &[6]);
+    resp.assert_node("User", 6, |n| {
+        n.prop_str("username") == Some("用户_émoji_🎉")
+            && n.prop_str("name") == Some("Ünïcödé Üser")
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -881,7 +995,13 @@ async fn data_correctness() {
         search_filter_eq_returns_matching_rows,
         search_filter_in_returns_matching_rows,
         search_filter_starts_with_returns_matching_rows,
+        search_filter_contains_returns_substring_matches,
+        search_filter_is_null_matches_unset_columns,
         search_node_ids_returns_only_specified,
+        search_with_order_by_desc,
+        search_no_auth_returns_empty,
+        search_redaction_returns_only_allowed_ids,
+        search_unicode_properties_survive_pipeline,
         // traversal
         traversal_user_group_returns_correct_pairs_and_edges,
         traversal_three_hop_returns_all_user_group_project_paths,
