@@ -1,3 +1,5 @@
+mod workspace;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
@@ -163,17 +165,13 @@ async fn main() -> Result<()> {
 }
 
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
-    let canonical_path = dunce::canonicalize(&path)?;
-    let path_str = canonical_path.to_string_lossy().to_string();
+    let store = workspace::IndexStore::open_default()?;
+    let repos = store.resolve_repos(&path).await?;
 
-    info!("Indexing repository at: {}", path_str);
-
-    let repo_name = canonical_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "repository".to_string());
-
-    let file_source = DirectoryFileSource::new(path_str.clone());
+    if repos.is_empty() {
+        info!("No git repositories found in {}", path.display());
+        return Ok(());
+    }
 
     let config = IndexingConfig {
         worker_threads: threads,
@@ -181,37 +179,77 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         respect_gitignore: true,
     };
 
-    info!("Using indexing config: {:?}", config);
+    for repo_path in &repos {
+        let key = repo_path.to_string_lossy().to_string();
+        store
+            .set_status(&key, workspace::Status::Indexing, None)
+            .await?;
 
-    let indexer = RepositoryIndexer::new(repo_name.clone(), path_str.clone());
-    let result = indexer.index_files(file_source, &config).await?;
+        info!("Indexing repository at: {}", key);
 
-    let (graph, rel_counts, def_counts) = if let Some(ref graph_data) = result.graph_data {
-        let mut rel_counts: HashMap<String, usize> = HashMap::new();
-        for rel in &graph_data.relationships {
-            let type_str = format!("{:?}", rel.relationship_type);
-            *rel_counts.entry(type_str).or_insert(0) += 1;
+        let repo_name = repo_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "repository".to_string());
+
+        let file_source = DirectoryFileSource::new(key.clone());
+        let indexer = RepositoryIndexer::new(repo_name.clone(), key.clone());
+
+        let result = match indexer.index_files(file_source, &config).await {
+            Ok(r) => {
+                store
+                    .set_status(&key, workspace::Status::Indexed, None)
+                    .await?;
+                r
+            }
+            Err(e) => {
+                store
+                    .set_status(&key, workspace::Status::Error, Some(e.to_string()))
+                    .await?;
+                anyhow::bail!("{e}");
+            }
+        };
+
+        let output = build_index_output(&repo_name, &key, &result, show_stats);
+        info!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
+    Ok(())
+}
+
+fn build_index_output(
+    repo_name: &str,
+    path: &str,
+    result: &code_graph::indexer::RepositoryIndexingResult,
+    show_stats: bool,
+) -> IndexOutput {
+    let (graph, rel_counts, def_counts) = match result.graph_data {
+        Some(ref gd) => {
+            let mut rel_counts: HashMap<String, usize> = HashMap::new();
+            for rel in &gd.relationships {
+                *rel_counts
+                    .entry(format!("{:?}", rel.relationship_type))
+                    .or_default() += 1;
+            }
+            let mut def_counts: HashMap<String, usize> = HashMap::new();
+            for def in &gd.definition_nodes {
+                *def_counts
+                    .entry(format!("{:?}", def.definition_type))
+                    .or_default() += 1;
+            }
+            (
+                GraphStats {
+                    directories: gd.directory_nodes.len(),
+                    files: gd.file_nodes.len(),
+                    definitions: gd.definition_nodes.len(),
+                    imported_symbols: gd.imported_symbol_nodes.len(),
+                    relationships: gd.relationships.len(),
+                },
+                rel_counts,
+                def_counts,
+            )
         }
-
-        let mut def_counts: HashMap<String, usize> = HashMap::new();
-        for def in &graph_data.definition_nodes {
-            let type_str = format!("{:?}", def.definition_type);
-            *def_counts.entry(type_str).or_insert(0) += 1;
-        }
-
-        (
-            GraphStats {
-                directories: graph_data.directory_nodes.len(),
-                files: graph_data.file_nodes.len(),
-                definitions: graph_data.definition_nodes.len(),
-                imported_symbols: graph_data.imported_symbol_nodes.len(),
-                relationships: graph_data.relationships.len(),
-            },
-            rel_counts,
-            def_counts,
-        )
-    } else {
-        (
+        None => (
             GraphStats {
                 directories: 0,
                 files: 0,
@@ -221,37 +259,33 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             },
             HashMap::new(),
             HashMap::new(),
-        )
+        ),
     };
 
-    let detailed = if show_stats {
-        Some(DetailedStats {
-            skipped_files: result
-                .skipped_files
-                .iter()
-                .map(|s| SkippedFile {
-                    path: s.file_path.clone(),
-                    reason: s.reason.clone(),
-                })
-                .collect(),
-            errored_files: result
-                .errored_files
-                .iter()
-                .map(|e| ErroredFile {
-                    path: e.file_path.clone(),
-                    error: e.error_message.clone(),
-                })
-                .collect(),
-            relationship_types: rel_counts,
-            definition_types: def_counts,
-        })
-    } else {
-        None
-    };
+    let detailed = show_stats.then(|| DetailedStats {
+        skipped_files: result
+            .skipped_files
+            .iter()
+            .map(|s| SkippedFile {
+                path: s.file_path.clone(),
+                reason: s.reason.clone(),
+            })
+            .collect(),
+        errored_files: result
+            .errored_files
+            .iter()
+            .map(|e| ErroredFile {
+                path: e.file_path.clone(),
+                error: e.error_message.clone(),
+            })
+            .collect(),
+        relationship_types: rel_counts,
+        definition_types: def_counts,
+    });
 
-    let output = IndexOutput {
-        repository: repo_name,
-        path: path_str,
+    IndexOutput {
+        repository: repo_name.to_string(),
+        path: path.to_string(),
         time_seconds: result.total_processing_time.as_secs_f64(),
         graph,
         processing: ProcessingStats {
@@ -259,10 +293,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             errored_files: result.errored_files.len(),
         },
         detailed,
-    };
-
-    info!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    }
 }
 
 #[derive(Serialize)]
