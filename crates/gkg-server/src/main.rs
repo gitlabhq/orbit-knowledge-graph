@@ -30,7 +30,8 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
     let config = AppConfig::load()?;
-    ontology::constants::validate_ontology_constants();
+    let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
+    ontology::constants::validate_ontology_constants(&ontology);
 
     let _metrics = labkit_rs::metrics::try_init_with_config(config.metrics.clone()).ok();
 
@@ -47,7 +48,6 @@ async fn main() -> anyhow::Result<()> {
             let metrics = ScheduledTaskMetrics::new();
             let lock_service = services.lock_service.clone();
 
-            let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
             let deletion_graph = Arc::new(config.graph.build_client());
             let deletion_datalake = Arc::new(config.datalake.build_client());
             let deletion_store: Arc<dyn NamespaceDeletionStore> =
@@ -104,11 +104,11 @@ async fn main() -> anyhow::Result<()> {
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
             };
-            indexer::run(&indexer_config, shutdown)
+            indexer::run(&indexer_config, ontology, shutdown)
                 .await
                 .map_err(Into::into)
         }
-        Mode::Webserver => run_webserver(&config).await,
+        Mode::Webserver => run_webserver(&config, ontology).await,
     };
 
     signal_task.abort();
@@ -116,7 +116,10 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
+async fn run_webserver(
+    config: &AppConfig,
+    ontology: Arc<ontology::Ontology>,
+) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,
@@ -131,6 +134,7 @@ async fn run_webserver(config: &AppConfig) -> anyhow::Result<()> {
     let grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
+        ontology,
         &config.graph,
         cluster_health,
     );

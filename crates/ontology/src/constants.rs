@@ -40,9 +40,7 @@ pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 /// Panics if compile-time constants diverge from the embedded ontology YAML.
 ///
 /// Call this at startup and in a `#[test]` so CI catches stale constants.
-pub fn validate_ontology_constants() {
-    let ontology = crate::Ontology::load_embedded().expect("embedded ontology must be valid");
-
+pub fn validate_ontology_constants(ontology: &crate::Ontology) {
     assert_eq!(
         ontology.table_prefix(),
         GL_TABLE_PREFIX,
@@ -66,6 +64,7 @@ mod tests {
 
     #[test]
     fn ontology_constants_match_yaml() {
-        validate_ontology_constants();
+        let ontology = crate::Ontology::load_embedded().expect("embedded ontology must be valid");
+        validate_ontology_constants(&ontology);
     }
 }

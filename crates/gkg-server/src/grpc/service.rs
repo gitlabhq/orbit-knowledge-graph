@@ -44,10 +44,10 @@ pub struct KnowledgeGraphServiceImpl {
 impl KnowledgeGraphServiceImpl {
     pub fn new(
         validator: Arc<JwtValidator>,
+        ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
     ) -> Self {
-        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
         let query_pipeline =
@@ -387,6 +387,10 @@ mod tests {
         JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap()
     }
 
+    fn test_ontology() -> Arc<Ontology> {
+        Arc::new(Ontology::load_embedded().expect("ontology must load"))
+    }
+
     fn test_config() -> ClickHouseConfiguration {
         ClickHouseConfiguration::default()
     }
@@ -396,6 +400,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -421,6 +426,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -448,6 +454,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -481,6 +488,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -502,6 +510,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -517,6 +526,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -543,6 +553,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -564,6 +575,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -589,6 +601,7 @@ mod tests {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
             validator,
+            test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
