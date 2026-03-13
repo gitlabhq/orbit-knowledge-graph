@@ -1006,6 +1006,54 @@ async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
     }
 }
 
+async fn path_finding_max_depth_too_shallow_returns_empty(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert!(
+        pids.is_empty(),
+        "max_depth=1 cannot reach User→Group→Project (needs 2 hops)"
+    );
+}
+
+async fn path_finding_redaction_blocks_intermediate_node(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1]);
+    svc.allow("project", &[1000]);
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#,
+        &svc,
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert!(
+        pids.is_empty(),
+        "path through unauthorized Group 100 should be blocked by redaction"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Neighbors: Relationship Metadata Correctness
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1176,6 +1224,8 @@ async fn data_correctness() {
         path_finding_returns_valid_complete_paths,
         path_finding_multiple_destinations_returns_distinct_paths,
         path_finding_consecutive_edges_connect,
+        path_finding_max_depth_too_shallow_returns_empty,
+        path_finding_redaction_blocks_intermediate_node,
         // neighbors
         neighbors_outgoing_returns_correct_targets,
         neighbors_incoming_returns_correct_sources,
