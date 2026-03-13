@@ -27,7 +27,7 @@ use gkg_server::query_pipeline::{
     QueryPipelineContext, RedactionOutput, ResultFormatter,
 };
 use gkg_server::redaction::QueryResult;
-use integration_testkit::run_subtests;
+use integration_testkit::run_subtests_shared;
 use integration_testkit::visitor::{NodeExt, ResponseView};
 use query_engine::compile;
 use serde_json::Value;
@@ -212,6 +212,8 @@ async fn seed(ctx: &TestContext) {
          ('1/102/1004/', 3, 'User', 'AUTHORED', 2003, 'MergeRequest')",
     )
     .await;
+
+    ctx.optimize_all().await;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,7 +221,6 @@ async fn seed(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_returns_correct_user_properties(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -252,7 +253,6 @@ async fn search_returns_correct_user_properties(ctx: &TestContext) {
 }
 
 async fn search_returns_correct_project_properties(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -277,7 +277,6 @@ async fn search_returns_correct_project_properties(ctx: &TestContext) {
 }
 
 async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -297,7 +296,6 @@ async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
 }
 
 async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -319,7 +317,6 @@ async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
 }
 
 async fn search_filter_starts_with_returns_matching_rows(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -342,7 +339,6 @@ async fn search_filter_starts_with_returns_matching_rows(ctx: &TestContext) {
 }
 
 async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -369,7 +365,6 @@ async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -408,7 +403,6 @@ async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext)
 }
 
 async fn traversal_three_hop_returns_all_user_group_project_paths(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -456,7 +450,6 @@ async fn traversal_three_hop_returns_all_user_group_project_paths(ctx: &TestCont
 }
 
 async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -488,8 +481,6 @@ async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestContext) {
 }
 
 async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
-    seed(ctx).await;
-
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);
     svc.allow("group", &[100]);
@@ -522,7 +513,6 @@ async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn aggregation_count_returns_correct_values(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -553,7 +543,6 @@ async fn aggregation_count_returns_correct_values(ctx: &TestContext) {
 }
 
 async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -586,7 +575,6 @@ async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -637,7 +625,6 @@ async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
 }
 
 async fn path_finding_multiple_destinations_returns_distinct_paths(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -673,7 +660,6 @@ async fn path_finding_multiple_destinations_returns_distinct_paths(ctx: &TestCon
 }
 
 async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -715,7 +701,6 @@ async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -741,7 +726,6 @@ async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
 }
 
 async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -760,7 +744,6 @@ async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
 }
 
 async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -777,7 +760,6 @@ async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
 }
 
 async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -801,7 +783,6 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_referential_integrity_on_complex_query(ctx: &TestContext) {
-    seed(ctx).await;
     let resp = run_query(
         ctx,
         r#"{
@@ -836,7 +817,11 @@ async fn traversal_referential_integrity_on_complex_query(ctx: &TestContext) {
 #[tokio::test]
 async fn data_correctness() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
-    run_subtests!(
+    seed(&ctx).await;
+
+    // All subtests are read-only against the same seed data, so they share
+    // one database instead of forking a copy per subtest.
+    run_subtests_shared!(
         &ctx,
         // search
         search_returns_correct_user_properties,

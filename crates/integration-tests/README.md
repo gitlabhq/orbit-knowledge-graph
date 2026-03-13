@@ -8,32 +8,60 @@ without either of those needing to depend on each other.
 
 ```plaintext
 tests/
-  common.rs            # Shared helpers: MockRedactionService, test fixtures, DummyClaims
-  entrypoint.rs        # Test binary entry point (wires modules together)
-  indexer/             # Indexer integration tests (NATS, ClickHouse, SDLC, code, dispatcher)
+  common.rs              # Shared helpers: MockRedactionService, test fixtures, DummyClaims
+  entrypoint.rs          # Test binary entry point (wires modules together)
+  canary/
+    setup_test.rs        # Infrastructure canary (validates TestContext, macros, isolation)
+  indexer/               # Indexer integration tests (NATS, ClickHouse, SDLC, code, dispatcher)
   server/
-    data_correctness.rs # Seeds data, runs full pipeline, asserts values via ResponseView
-    graph_formatter.rs  # Graph formatter end-to-end tests
-    health.rs           # Health/readiness endpoint tests
-    hydration.rs        # Hydration pipeline tests (compile -> execute -> hydrate -> format)
-    redaction.rs        # Redaction pipeline tests (fail-closed, path finding, search, etc.)
+    data_correctness.rs  # Seeds data, runs full pipeline, asserts values via ResponseView
+    graph_formatter.rs   # Graph formatter end-to-end tests
+    health.rs            # Health/readiness endpoint tests
+    hydration.rs         # Hydration pipeline tests (compile -> execute -> hydrate -> format)
+    redaction.rs         # Redaction pipeline tests (fail-closed, path finding, search, etc.)
 ```
 
-All tests in `server/` compile as a single test binary. Each orchestrator test
-starts one ClickHouse container and uses `run_subtests!` to fork databases and
-run subtests in parallel.
+All tests in `server/` compile as a single test binary. Each orchestrator test starts
+one ClickHouse container, seeds data once, and runs subtests in parallel.
 
 ## Running
 
+Requires Docker via Colima. All tasks are defined in `mise.toml` at the repo root:
+
 ```shell
-mise run test:integration          # all integration tests across the workspace
-cargo nextest run -p integration-tests  # just this crate
+mise colima:start                                   # start Docker runtime (12 GB RAM)
+mise test:integration                               # run all integration tests
+mise colima:stop                                    # stop when done
 ```
 
-Requires Docker. Start with `mise colima:start`.
+To run specific suites or tests directly:
+
+```shell
+export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
+cargo nextest run --all-features --test '*'                              # all
+cargo nextest run --all-features --test '*' -E 'test(data_correctness)'  # one suite
+cargo nextest run --all-features --test '*' -E 'test(infra_canary)'      # canary
+```
+
+## Test architecture
+
+Each `server/*.rs` module follows the same structure:
+
+1. **Seed function** — inserts known data, calls `ctx.optimize_all()` at the end.
+2. **Subtests** — async functions that receive `&TestContext` and run queries.
+3. **Orchestrator** — a single `#[tokio::test]` that creates the container, seeds
+   once, and dispatches subtests via macros.
+
+Read-only subtests use `run_subtests_shared!` (one shared DB). Subtests that write
+additional data use `run_subtests!` (forked DB per subtest). See the
+[integration-testkit README](../integration-testkit/README.md) for details on choosing
+between them.
 
 ## Adding tests
 
-1. Add async test functions to the appropriate `server/*.rs` module.
-2. Register them in the `run_subtests!` invocation at the bottom of that module.
-3. If you need a new module, add `pub mod foo;` to `entrypoint.rs` and create `server/foo.rs`.
+1. Write an `async fn my_test(ctx: &TestContext)` in the appropriate module.
+2. If it only reads seeded data, add it to the `run_subtests_shared!` block.
+3. If it writes extra data, add it to the `run_subtests!` block and call the seed
+   function at the top of the test body.
+4. If you need a new module, add `pub mod foo;` to `entrypoint.rs` and create
+   `server/foo.rs`.

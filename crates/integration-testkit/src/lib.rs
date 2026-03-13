@@ -17,6 +17,10 @@ pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "
 pub const GRAPH_SCHEMA_SQL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph.sql"));
 
 /// Fork a database per subtest and run all subtests in parallel.
+///
+/// Each subtest gets its own isolated ClickHouse database via
+/// [`TestContext::fork`]. Use this when subtests write data beyond the
+/// initial seed (e.g. additional INSERTs in specific test cases).
 #[macro_export]
 macro_rules! run_subtests {
     ($ctx:expr, $($test_fn:path),+ $(,)?) => {
@@ -27,6 +31,25 @@ macro_rules! run_subtests {
                     let db = $ctx.fork(&name).await;
                     eprintln!("--- {}", name);
                     $test_fn(&db).await;
+                }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
+            )+
+        ]).await;
+    };
+}
+
+/// Run all subtests in parallel against the same shared database.
+///
+/// Unlike [`run_subtests!`], this does NOT fork a separate database per
+/// subtest. All subtests share the caller's [`TestContext`] directly.
+/// Use this when all subtests are read-only against pre-seeded data.
+#[macro_export]
+macro_rules! run_subtests_shared {
+    ($ctx:expr, $($test_fn:path),+ $(,)?) => {
+        futures::future::join_all(vec![
+            $(
+                Box::pin(async {
+                    eprintln!("--- {}", stringify!($test_fn));
+                    $test_fn($ctx).await;
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
             )+
         ]).await;

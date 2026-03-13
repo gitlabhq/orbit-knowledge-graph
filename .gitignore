@@ -47,3 +47,6 @@ lefthook-local.yml
 # Local planning docs
 todo.md
 plan.md
+
+# Session logs
+.sessions/

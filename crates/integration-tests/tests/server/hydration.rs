@@ -18,7 +18,7 @@ use gkg_server::query_pipeline::{
     RedactionOutput, row_to_json,
 };
 use gkg_server::redaction::QueryResult;
-use integration_testkit::run_subtests;
+use integration_testkit::run_subtests_shared;
 use query_engine::{HydrationPlan, SecurityContext, compile};
 
 async fn setup_test_data(ctx: &TestContext) {
@@ -60,6 +60,8 @@ async fn setup_test_data(ctx: &TestContext) {
          ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project')",
     )
     .await;
+
+    ctx.optimize_all().await;
 }
 
 /// Compile, execute base query, skip redaction, run hydration.
@@ -164,8 +166,6 @@ fn make_test_resources(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_dynamic_hydration(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -226,8 +226,6 @@ async fn path_finding_dynamic_hydration(ctx: &TestContext) {
 }
 
 async fn path_finding_hydrated_property_values(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -288,8 +286,6 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
 }
 
 async fn path_finding_json_format(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -343,8 +339,6 @@ async fn path_finding_json_format(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn neighbors_dynamic_hydration(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -371,8 +365,6 @@ async fn neighbors_dynamic_hydration(ctx: &TestContext) {
 }
 
 async fn neighbors_hydrated_property_values(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -402,8 +394,6 @@ async fn neighbors_hydrated_property_values(ctx: &TestContext) {
 }
 
 async fn neighbors_json_format(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -439,9 +429,7 @@ async fn neighbors_json_format(ctx: &TestContext) {
 // Hydration Plan Selection
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn search_produces_no_hydration_plan(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
+async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -459,9 +447,7 @@ async fn search_produces_no_hydration_plan(ctx: &TestContext) {
     );
 }
 
-async fn traversal_produces_no_hydration_plan(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
+async fn traversal_produces_no_hydration_plan(_ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -488,8 +474,6 @@ async fn traversal_produces_no_hydration_plan(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -563,8 +547,6 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
 }
 
 async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -615,8 +597,6 @@ async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
 }
 
 async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
-    setup_test_data(ctx).await;
-
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
@@ -651,7 +631,9 @@ async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
 #[tokio::test]
 async fn hydration_integration() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
-    run_subtests!(
+    setup_test_data(&ctx).await;
+
+    run_subtests_shared!(
         &ctx,
         // path finding hydration
         path_finding_dynamic_hydration,
