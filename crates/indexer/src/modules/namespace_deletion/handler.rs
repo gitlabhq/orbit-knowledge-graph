@@ -183,7 +183,7 @@ mod tests {
     use crate::destination::Destination;
     use crate::handler::HandlerContext;
     use crate::locking::LockService;
-    use crate::nats::NatsServices;
+    use crate::nats::{NatsServices, ProgressNotifier};
     use crate::testkit::mocks::{MockDestination, MockLockService, MockNatsServices};
     use crate::types::Envelope;
 
@@ -194,6 +194,7 @@ mod tests {
             Arc::new(MockDestination::new()) as Arc<dyn Destination>,
             Arc::new(MockNatsServices::new()) as Arc<dyn NatsServices>,
             Arc::new(MockLockService::new()) as Arc<dyn LockService>,
+            ProgressNotifier::noop(),
         )
     }
 

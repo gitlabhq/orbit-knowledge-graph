@@ -207,6 +207,7 @@ mod tests {
     use crate::modules::code::push_event_store::test_utils::MockPushEventStore;
     use crate::modules::code::repository_service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
+    use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices};
     use chrono::Utc;
 
@@ -281,6 +282,7 @@ mod tests {
                 Arc::new(MockDestination::new()),
                 self.mock_nats.clone(),
                 self.mock_locks.clone(),
+                ProgressNotifier::noop(),
             )
         }
 

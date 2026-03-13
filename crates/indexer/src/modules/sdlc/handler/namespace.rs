@@ -95,7 +95,12 @@ impl Handler for NamespaceHandler {
 
         let result = self
             .pipeline
-            .run(&self.plans, &pipeline_context, context.destination.as_ref())
+            .run(
+                &self.plans,
+                &pipeline_context,
+                context.destination.as_ref(),
+                &context.progress,
+            )
             .await;
 
         let elapsed = started_at.elapsed();
@@ -119,6 +124,7 @@ mod tests {
     use super::*;
     use crate::modules::sdlc::plan::build_plans;
     use crate::modules::sdlc::test_fixtures::{EmptyDatalake, MockCheckpointStore, test_metrics};
+    use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use ontology::Ontology;
 
@@ -153,6 +159,7 @@ mod tests {
             destination,
             Arc::new(MockNatsServices::new()),
             Arc::new(MockLockService::new()),
+            ProgressNotifier::noop(),
         );
 
         let result = handler.handle(context, envelope).await;

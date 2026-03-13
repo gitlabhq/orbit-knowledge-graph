@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use indexer::clickhouse::ClickHouseDestination;
 use indexer::handler::{Handler, HandlerContext, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
+use indexer::nats::ProgressNotifier;
 use indexer::testkit::{
     MockLockService, MockNatsServices, TestEnvelopeFactory, create_test_indexer_config,
 };
@@ -18,6 +19,7 @@ pub fn handler_context(ctx: &TestContext) -> HandlerContext {
         Arc::new(destination),
         Arc::new(MockNatsServices::new()),
         Arc::new(MockLockService::new()),
+        ProgressNotifier::noop(),
     )
 }
 
