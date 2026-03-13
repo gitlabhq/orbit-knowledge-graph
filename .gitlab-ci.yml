@@ -87,7 +87,7 @@ mr-title-check:
   extends:
     - .mr-only-rules
   before_script:
-    - npm install -g @commitlint/cli @commitlint/config-conventional
+    - npm install -g @commitlint/cli@19 @commitlint/config-conventional@19
   script:
     - ./scripts/check-mr-title.sh
 
