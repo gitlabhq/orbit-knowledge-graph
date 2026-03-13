@@ -18,20 +18,7 @@ static ADDRESS_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         .expect("invalid address regex")
 });
 
-fn normalize_path(path: &Path) -> std::path::PathBuf {
-    use std::path::Component;
-    path.components()
-        .fold(std::path::PathBuf::new(), |mut acc, c| {
-            match c {
-                Component::ParentDir => {
-                    acc.pop();
-                }
-                Component::CurDir => {}
-                _ => acc.push(c),
-            }
-            acc
-        })
-}
+use gkg_utils::path::normalize_path;
 
 fn extract_archive<R: std::io::Read>(
     archive: &mut tar::Archive<R>,

@@ -22,6 +22,7 @@ tonic-prost-build = { workspace = true, optional = true }
 
 [dependencies]
 async-trait = { workspace = true }
+gkg-utils = { path = "../utils" }
 hex = { workspace = true }
 hmac = { workspace = true }
 hyper-util = { workspace = true }

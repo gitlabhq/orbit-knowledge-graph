@@ -2720,6 +2720,7 @@ name = "gitaly-client"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "gkg-utils",
  "hex",
  "hmac",
  "hyper-util",
