@@ -1,3 +1,20 @@
+## [0.11.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.10.0...v0.11.0) (2026-03-13)
+
+### Features
+
+* **cli:** add workspace manager with index store and advisory locking ([523e5c4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/523e5c4bcbb6161cba6720ba1b7f2488e7e3ff7c)) by Michael Angelo Rivera
+* **testing:** enforce assertion usage via query introspection in data correctness harness ([d2881ae](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d2881ae3d5b070b73e9aefb6172a3e9a71e5bc19)) by Michael Usachenko
+
+### Fixes
+
+* **clickhouse-client:** set Arrow string format options to match Cloud defaults ([f81b79d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f81b79d60ba11bc1b3ddd154c7fe28b60d2730ed)) by Jean-Gabriel Doyon
+
+### Other
+
+* **cleanup:** continue hardening data correctness harness + remove cruft ([fedad0b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fedad0b7386f0f4e59dd883d6f2ac4f5dab4ccf7)) by Michael Usachenko
+* **ontology:** load embedded ontology once via [secure] Arc ([eb4485a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eb4485a40cbbdad5201890a807d97dda9a9f8c19)) by Adam Mulvany
+* **testing:** harden assertion enforcement ([698c80a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/698c80aef969bebe903d0f2875bc93ea7b4af72e)) by Michael Usachenko
+
 ## [0.10.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.9.0...v0.10.0) (2026-03-12)
 
 ### Features
