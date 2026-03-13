@@ -31,7 +31,7 @@ use crate::{
     configuration::HandlerConfiguration,
     destination::Destination,
     locking::LockService,
-    nats::NatsServices,
+    nats::{NatsServices, ProgressNotifier},
     types::{Envelope, Topic},
 };
 
@@ -82,6 +82,9 @@ pub struct HandlerContext {
 
     /// Distributed lock service for coordinating concurrent processing.
     pub lock_service: Arc<dyn LockService>,
+
+    /// Signals in-progress processing to prevent NATS message redelivery.
+    pub progress: ProgressNotifier,
 }
 
 impl HandlerContext {
@@ -90,11 +93,13 @@ impl HandlerContext {
         destination: Arc<dyn Destination>,
         nats: Arc<dyn NatsServices>,
         lock_service: Arc<dyn LockService>,
+        progress: ProgressNotifier,
     ) -> Self {
         HandlerContext {
             destination,
             nats,
             lock_service,
+            progress,
         }
     }
 }

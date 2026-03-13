@@ -275,7 +275,10 @@ impl NatsBroker {
             attempt,
         };
 
-        Ok(NatsMessage { envelope, acker })
+        Ok(NatsMessage {
+            envelope,
+            acker: Arc::new(acker),
+        })
     }
 
     pub async fn publish(&self, topic: &Topic, envelope: &Envelope) -> Result<(), NatsError> {

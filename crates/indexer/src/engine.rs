@@ -204,10 +204,11 @@ impl Engine {
                 _ = self.cancel.cancelled() => break,
                 Some(message) = subscription.next() => {
                     let message = message?;
+                    let progress = message.progress_notifier();
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&topic),
-                        HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone()),
+                        HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone(), progress),
                         runtime.clone(),
                         topic_name.clone(),
                     ));
@@ -419,6 +420,7 @@ fn extract_panic_message(payload: &Box<dyn Any + Send>) -> String {
 mod tests {
     use super::*;
     use crate::configuration::HandlerConfiguration;
+    use crate::nats::ProgressNotifier;
     use crate::testkit::mocks::{
         MockDestination, MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
@@ -428,6 +430,7 @@ mod tests {
             Arc::new(MockDestination::new()),
             Arc::new(MockNatsServices::new()),
             Arc::new(MockLockService::new()),
+            ProgressNotifier::noop(),
         )
     }
 

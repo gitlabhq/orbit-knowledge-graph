@@ -3,6 +3,7 @@
 //! These tests require a Docker-compatible runtime (Docker, Colima, etc).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use indexer::metrics::EngineMetrics;
@@ -388,4 +389,62 @@ async fn idempotent_when_stream_exists() {
         result2.is_ok(),
         "ensure_streams should be idempotent on second call"
     );
+}
+
+#[tokio::test]
+async fn in_progress_prevents_redelivery() {
+    let (_container, url) = start_nats_container().await;
+    create_test_stream(&url).await;
+
+    let ack_wait = Duration::from_secs(2);
+    let config = NatsConfiguration {
+        url,
+        ack_wait_secs: ack_wait.as_secs(),
+        ..Default::default()
+    };
+
+    let broker = NatsBroker::connect(&config)
+        .await
+        .expect("failed to connect");
+
+    let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
+
+    let mut subscription = broker
+        .subscribe(&topic, Arc::new(EngineMetrics::new()))
+        .await
+        .expect("failed to subscribe");
+
+    let event = TestEvent {
+        id: "progress-test".to_string(),
+        value: 7,
+    };
+    let envelope = Envelope::new(&event).expect("failed to create envelope");
+    broker
+        .publish(&topic, &envelope)
+        .await
+        .expect("failed to publish");
+
+    let message = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+        .await
+        .expect("timed out waiting for message")
+        .expect("subscription ended")
+        .expect("failed to receive message");
+
+    let progress = message.progress_notifier();
+
+    // Send in-progress after 1s (before the 2s ack_wait expires).
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    progress.notify_in_progress().await;
+
+    // Wait another 1.5s — past the original 2s deadline, but within the reset window.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    // No redelivery should have happened during that time.
+    let redelivery = tokio::time::timeout(Duration::from_millis(500), subscription.next()).await;
+    assert!(
+        redelivery.is_err(),
+        "message should NOT be redelivered after in-progress signal"
+    );
+
+    message.ack().await.expect("failed to ack");
 }
