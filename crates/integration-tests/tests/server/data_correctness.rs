@@ -1308,6 +1308,64 @@ async fn traversal_referential_integrity_on_complex_query(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Edge Cases
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn giant_string_survives_pipeline(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_ids("Note", &[3002]);
+    resp.assert_node("Note", 3002, |n| {
+        n.prop_str("note")
+            .is_some_and(|s| s.len() == 10_000 && s.chars().all(|c| c == 'x'))
+    });
+}
+
+async fn sql_injection_string_preserved(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_ids("Note", &[3003]);
+    resp.assert_node("Note", 3003, |n| {
+        n.prop_str("note").is_some_and(|s| s.contains("DROP TABLE"))
+    });
+}
+
+async fn empty_result_has_valid_schema(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_node_count(0);
+    assert_eq!(resp.edge_count(), 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Orchestrator
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1366,6 +1424,10 @@ async fn data_correctness() {
         neighbors_both_direction_returns_all_connected,
         neighbors_mixed_entity_types,
         neighbors_redaction_removes_unauthorized_targets,
+        // edge cases
+        giant_string_survives_pipeline,
+        sql_injection_string_preserved,
+        empty_result_has_valid_schema,
         // referential integrity
         traversal_referential_integrity_on_complex_query,
     );
