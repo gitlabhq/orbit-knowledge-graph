@@ -22,9 +22,10 @@ use serde_json::Value;
 
 static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
     std::sync::LazyLock::new(|| {
-        let schema: Value = serde_json::from_str(include_str!(
-            "../../../gkg-server/schemas/query_response.json"
-        ))
+        let schema: Value = serde_json::from_str(include_str!(concat!(
+            env!("GKG_SERVER_SCHEMAS_DIR"),
+            "/query_response.json"
+        )))
         .unwrap();
         jsonschema::validator_for(&schema).unwrap()
     });

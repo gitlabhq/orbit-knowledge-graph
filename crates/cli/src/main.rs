@@ -350,14 +350,7 @@ fn run_query(
     let queries: HashMap<String, Value> = serde_json::from_str(&json_str)
         .context("failed to parse JSON as object with string keys")?;
 
-    let ontology_dir = ontology_path.unwrap_or_else(|| {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("config/ontology")
-    });
+    let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
 
     let ontology = Ontology::load_from_dir(&ontology_dir)
         .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
