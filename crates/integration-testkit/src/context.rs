@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,6 +6,10 @@ use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfiguration};
 use query_engine::ParameterizedQuery;
+use testcontainers::bollard::Docker;
+use testcontainers::bollard::query_parameters::{
+    ListContainersOptionsBuilder, RemoveContainerOptionsBuilder,
+};
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
@@ -19,8 +24,19 @@ const TEST_DATABASE: &str = "test";
 const TEST_USERNAME: &str = "default";
 const TEST_PASSWORD: &str = "testpass";
 
-const MAX_CONNECTION_ATTEMPTS: u32 = 30;
-const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(500);
+const CONTAINER_LABEL_KEY: &str = "gkg-integration-test";
+const SESSION_LABEL_KEY: &str = "gkg-session-id";
+
+fn session_id() -> &'static str {
+    use std::sync::OnceLock;
+    static ID: OnceLock<String> = OnceLock::new();
+    ID.get_or_init(|| {
+        std::env::var("NEXTEST_RUN_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string())
+    })
+}
+
+const MAX_CONNECTION_ATTEMPTS: u32 = 200;
+const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 pub struct TestContext {
     _container: Arc<ContainerAsync<GenericImage>>,
@@ -88,6 +104,30 @@ impl TestContext {
             .expect("parameterized query failed")
     }
 
+    /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
+    /// every inserted row. Queries `system.tables` for the current database
+    /// and runs `OPTIMIZE TABLE … FINAL` on each table concurrently.
+    pub async fn optimize_all(&self) {
+        let batches = self
+            .query(&format!(
+                "SELECT name FROM system.tables WHERE database = '{}' AND engine NOT IN ('View', 'MaterializedView')",
+                self.config.database
+            ))
+            .await;
+
+        let stmts: Vec<String> = batches
+            .iter()
+            .flat_map(|batch| {
+                let col = get_string_column(batch, "name");
+                (0..batch.num_rows())
+                    .map(|i| format!("OPTIMIZE TABLE `{}` FINAL", col.value(i)))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        futures::future::join_all(stmts.iter().map(|sql| self.execute(sql))).await;
+    }
+
     pub async fn truncate_all_tables(&self) {
         let batches = self
             .query(&format!(
@@ -138,6 +178,8 @@ impl TestContext {
     }
 
     async fn start_container() -> ContainerAsync<GenericImage> {
+        Self::cleanup_stale_containers().await;
+
         let port = ContainerPort::Tcp(CLICKHOUSE_HTTP_PORT);
 
         GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
@@ -145,9 +187,60 @@ impl TestContext {
             .with_env_var("CLICKHOUSE_USER", TEST_USERNAME)
             .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
             .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
+            .with_label(CONTAINER_LABEL_KEY, "true")
+            .with_label(SESSION_LABEL_KEY, session_id())
             .start()
             .await
             .expect("failed to start ClickHouse container")
+    }
+
+    /// Remove containers from previous test runs that weren't cleaned up
+    /// (e.g. because the process was killed without running Drop handlers).
+    /// Only targets containers with the `gkg-integration-test` label whose
+    /// `gkg-session-id` differs from the current run, so concurrent tests
+    /// within the same nextest invocation never kill each other.
+    async fn cleanup_stale_containers() {
+        let docker = match Docker::connect_with_defaults() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+
+        let current_session = session_id();
+
+        let filters = HashMap::from([(
+            "label".to_string(),
+            vec![format!("{CONTAINER_LABEL_KEY}=true")],
+        )]);
+
+        let options = ListContainersOptionsBuilder::default()
+            .all(true)
+            .filters(&filters)
+            .build();
+
+        let containers = docker
+            .list_containers(Some(options))
+            .await
+            .unwrap_or_default();
+
+        let remove_opts = RemoveContainerOptionsBuilder::default().force(true).build();
+
+        for container in containers {
+            let is_current_session = container
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.get(SESSION_LABEL_KEY))
+                .is_some_and(|id| id == current_session);
+
+            if is_current_session {
+                continue;
+            }
+
+            if let Some(id) = container.id {
+                let _ = docker
+                    .remove_container(&id, Some(remove_opts.clone()))
+                    .await;
+            }
+        }
     }
 
     async fn extract_url(container: &ContainerAsync<GenericImage>) -> String {
