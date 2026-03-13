@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use arrow::array::{Int32Array, StringArray, UInt64Array};
+use arrow::array::{Int32Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
@@ -269,16 +269,11 @@ impl TestContext {
         );
 
         let batches = client
-            .query_arrow(&format!("SELECT count() FROM {TABLE}"))
+            .query_arrow(&format!("SELECT count() as cnt FROM {TABLE}"))
             .await
             .expect("query failed");
 
-        batches[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .expect("expected UInt64Array")
-            .value(0)
+        integration_testkit::get_uint64_column(&batches[0], "cnt").value(0)
     }
 }
 

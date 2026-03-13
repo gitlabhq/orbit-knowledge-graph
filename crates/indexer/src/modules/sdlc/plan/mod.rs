@@ -6,8 +6,8 @@ pub(crate) use crate::llqm_v1::codegen;
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
-use arrow::array::Array;
 use arrow::record_batch::RecordBatch;
+use gkg_utils::arrow::ArrowUtils;
 
 use crate::checkpoint::Checkpoint;
 use ast::{Expr, Op, OrderExpr, Query};
@@ -120,7 +120,12 @@ impl ExtractQuery {
                 });
 
                 let column = batch.column(column_index);
-                array_value_to_string(column, last_row)
+                ArrowUtils::array_value_to_string(column.as_ref(), last_row).unwrap_or_else(|| {
+                    panic!(
+                        "unsupported sort key column type for cursor: {}",
+                        column.data_type()
+                    )
+                })
             })
             .collect()
     }
@@ -162,75 +167,6 @@ pub(in crate::modules::sdlc) fn build_plans(
         global_batch_size,
         namespaced_batch_size,
     )
-}
-
-fn array_value_to_string(array: &dyn Array, row: usize) -> String {
-    use arrow::array::*;
-    use arrow::datatypes::DataType;
-
-    match array.data_type() {
-        DataType::Int8 => array
-            .as_any()
-            .downcast_ref::<Int8Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::Int16 => array
-            .as_any()
-            .downcast_ref::<Int16Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::Int32 => array
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::Int64 => array
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::UInt8 => array
-            .as_any()
-            .downcast_ref::<UInt8Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::UInt16 => array
-            .as_any()
-            .downcast_ref::<UInt16Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::UInt32 => array
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::UInt64 => array
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::Utf8 => array
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::LargeUtf8 => array
-            .as_any()
-            .downcast_ref::<LargeStringArray>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        other => panic!("unsupported sort key column type for cursor: {other}"),
-    }
 }
 
 #[cfg(test)]
