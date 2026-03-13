@@ -12,21 +12,11 @@ use tracing_test::traced_test;
 fn init_local_git_repository(language: SupportedLanguage) -> LocalGitRepository {
     let mut local_repo = LocalGitRepository::new(None);
     if language == SupportedLanguage::Ruby {
-        let fixtures_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/code/test-repo");
-        local_repo.copy_dir(&fixtures_path);
+        let fixtures_path = Path::new(concat!(env!("FIXTURES_DIR"), "/code/test-repo"));
+        local_repo.copy_dir(fixtures_path);
     } else if language == SupportedLanguage::TypeScript {
-        let fixtures_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/code/typescript/test-repo");
-        local_repo.copy_dir(&fixtures_path);
+        let fixtures_path = Path::new(concat!(env!("FIXTURES_DIR"), "/code/typescript/test-repo"));
+        local_repo.copy_dir(fixtures_path);
     }
     local_repo.add_all().commit("Initial commit");
     local_repo

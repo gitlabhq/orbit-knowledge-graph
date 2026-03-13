@@ -11,13 +11,8 @@ use tracing_test::traced_test;
 /// Initialize a local git repository with Ruby reference test fixtures
 fn init_ruby_references_repository() -> LocalGitRepository {
     let mut local_repo = LocalGitRepository::new(None);
-    let fixtures_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("fixtures/code/ruby-references");
-    local_repo.copy_dir(&fixtures_path);
+    let fixtures_path = Path::new(concat!(env!("FIXTURES_DIR"), "/code/ruby-references"));
+    local_repo.copy_dir(fixtures_path);
     local_repo
         .add_all()
         .commit("Initial commit with Ruby reference examples");
