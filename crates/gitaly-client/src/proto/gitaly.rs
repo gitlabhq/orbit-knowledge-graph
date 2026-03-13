@@ -5888,6 +5888,8 @@ pub struct CountCommitsRequest {
     #[prost(message, optional, tag = "1")]
     pub repository: ::core::option::Option<Repository>,
     /// revision is a commitish which is the start point for the traversal of commits.
+    /// Deprecated: Use the 'revisions' field instead. See <https://gitlab.com/gitlab-org/gitlab/-/issues/588471>
+    #[deprecated]
     #[prost(bytes = "vec", tag = "2")]
     pub revision: ::prost::alloc::vec::Vec<u8>,
     /// after is used to filter commits more recent than a specific date.
@@ -5904,6 +5906,8 @@ pub struct CountCommitsRequest {
     pub max_count: i32,
     /// all is used to consider all refs (including HEAD) as the start point for the traversal.
     /// all and Revision options are mutually exclusive.
+    /// Deprecated: Use revisions with '--all' pseudo-revision instead. See <https://gitlab.com/gitlab-org/gitlab/-/issues/588471>
+    #[deprecated]
     #[prost(bool, tag = "7")]
     pub all: bool,
     /// first_parent ensures that only the first parent commit is followed in the traversal.
@@ -5915,7 +5919,8 @@ pub struct CountCommitsRequest {
     /// revisions is the set of revisions which should be walked to enumerate
     /// commits. Accepts all notation as documented in gitrevisions(7) as well as
     /// the pseudo-revisions `--not` and `--all` as documented in git-rev-list(1).
-    /// If set, this takes precedence over 'revision' and 'all' fields.
+    /// This is the preferred way to specify revisions; the 'revision' and 'all'
+    /// fields are deprecated.
     #[prost(bytes = "vec", repeated, tag = "10")]
     pub revisions: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
@@ -10925,6 +10930,14 @@ pub struct CommitDiffResponse {
     /// therefore not be expanded.
     #[prost(bool, tag = "13")]
     pub too_large: bool,
+    /// lines_added is the number of lines added in the diff. This count always represents the
+    /// full diff, even when it is pruned.
+    #[prost(int32, tag = "14")]
+    pub lines_added: i32,
+    /// lines_removed is the number of lines removed in the diff. This count always represents the
+    /// full diff, even when it is pruned.
+    #[prost(int32, tag = "15")]
+    pub lines_removed: i32,
 }
 /// CommitDeltaRequest is a request for the CommitDelta RPC.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -11645,6 +11658,14 @@ pub struct DiffBlobsResponse {
     /// follow-up DiffBlobs request by increasing the patch_bytes_limit to a "hard" limit.
     #[prost(int32, tag = "7")]
     pub patch_size: i32,
+    /// lines_added is the number of lines added in the diff. This count always represents the
+    /// full diff, even when it is pruned.
+    #[prost(int32, tag = "8")]
+    pub lines_added: i32,
+    /// lines_removed is the number of lines removed in the diff. This count always represents the
+    /// full diff, even when it is pruned.
+    #[prost(int32, tag = "9")]
+    pub lines_removed: i32,
 }
 /// Nested message and enum types in `DiffBlobsResponse`.
 pub mod diff_blobs_response {
