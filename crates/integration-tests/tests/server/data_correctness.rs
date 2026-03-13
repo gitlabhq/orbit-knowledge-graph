@@ -220,7 +220,6 @@ async fn seed(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_returns_correct_user_properties(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -253,7 +252,6 @@ async fn search_returns_correct_user_properties(ctx: &TestContext) {
 }
 
 async fn search_returns_correct_project_properties(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -278,7 +276,6 @@ async fn search_returns_correct_project_properties(ctx: &TestContext) {
 }
 
 async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -298,7 +295,6 @@ async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
 }
 
 async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -320,7 +316,6 @@ async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
 }
 
 async fn search_filter_starts_with_returns_matching_rows(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -343,7 +338,6 @@ async fn search_filter_starts_with_returns_matching_rows(ctx: &TestContext) {
 }
 
 async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -370,7 +364,6 @@ async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -409,7 +402,6 @@ async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext)
 }
 
 async fn traversal_three_hop_returns_all_user_group_project_paths(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -457,7 +449,6 @@ async fn traversal_three_hop_returns_all_user_group_project_paths(ctx: &TestCont
 }
 
 async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -489,8 +480,6 @@ async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestContext) {
 }
 
 async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
-
-
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);
     svc.allow("group", &[100]);
@@ -523,7 +512,6 @@ async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn aggregation_count_returns_correct_values(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -554,7 +542,6 @@ async fn aggregation_count_returns_correct_values(ctx: &TestContext) {
 }
 
 async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -587,7 +574,6 @@ async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -638,7 +624,6 @@ async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
 }
 
 async fn path_finding_multiple_destinations_returns_distinct_paths(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -674,7 +659,6 @@ async fn path_finding_multiple_destinations_returns_distinct_paths(ctx: &TestCon
 }
 
 async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -716,7 +700,6 @@ async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -742,7 +725,6 @@ async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
 }
 
 async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -761,7 +743,6 @@ async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
 }
 
 async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -778,7 +759,6 @@ async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
 }
 
 async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{
@@ -802,7 +782,6 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_referential_integrity_on_complex_query(ctx: &TestContext) {
-
     let resp = run_query(
         ctx,
         r#"{

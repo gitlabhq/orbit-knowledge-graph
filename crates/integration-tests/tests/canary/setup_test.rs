@@ -16,7 +16,9 @@ async fn seed(ctx: &TestContext) {
 }
 
 async fn shared_subtest_reads_seeded_data(ctx: &TestContext) {
-    let batches = ctx.query("SELECT id, username FROM gl_user ORDER BY id").await;
+    let batches = ctx
+        .query("SELECT id, username FROM gl_user ORDER BY id")
+        .await;
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].num_rows(), 1);
 }
@@ -42,7 +44,11 @@ async fn forked_subtest_can_write(ctx: &TestContext) {
 async fn forked_write_does_not_leak_to_shared(ctx: &TestContext) {
     let batches = ctx.query("SELECT count() AS cnt FROM gl_user").await;
     let col = integration_testkit::get_uint64_column(&batches[0], "cnt");
-    assert_eq!(col.value(0), 1, "shared DB should still have only the seed row");
+    assert_eq!(
+        col.value(0),
+        1,
+        "shared DB should still have only the seed row"
+    );
 }
 
 #[tokio::test]

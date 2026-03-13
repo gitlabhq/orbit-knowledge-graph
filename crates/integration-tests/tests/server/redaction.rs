@@ -91,7 +91,6 @@ async fn setup_test_data(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -121,7 +120,6 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
 }
 
 async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -161,7 +159,6 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
 }
 
 async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -195,7 +192,6 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
 }
 
 async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -262,7 +258,6 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
 }
 
 async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -307,7 +302,6 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
 }
 
 async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -376,7 +370,6 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
 }
 
 async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -441,7 +434,6 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
 }
 
 async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -500,7 +492,6 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
 }
 
 async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -538,7 +529,6 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
 }
 
 async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -589,7 +579,6 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
 }
 
 async fn empty_query_result_stays_empty(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -615,7 +604,6 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
 }
 
 async fn all_authorized_preserves_all_data(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -649,7 +637,6 @@ async fn all_authorized_preserves_all_data(ctx: &TestContext) {
 }
 
 async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -751,7 +738,6 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
 }
 
 async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -797,7 +783,6 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
 }
 
 async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -921,7 +906,6 @@ fn fail_closed_null_id_denies_row() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -975,7 +959,6 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
 }
 
 async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1003,7 +986,6 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
 }
 
 async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1078,7 +1060,6 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
 }
 
 async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1127,7 +1108,6 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
 }
 
 async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1158,7 +1138,6 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
 }
 
 async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1200,7 +1179,6 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
 /// must check ALL nodes in EACH path independently. Denying a node in one path
 /// should not affect other paths that don't traverse that node.
 async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1251,7 +1229,6 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
 /// Verify that path finding correctly handles the case where the same node
 /// appears at different depths. Each path instance is checked independently.
 async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1297,7 +1274,6 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
 /// Path finding with max depth traversal - verifies that authorization
 /// is checked for ALL nodes in paths, not just start/end.
 async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1357,7 +1333,6 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
 
 /// Verify path finding with zero valid paths after authorization returns empty.
 async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1399,7 +1374,6 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
 /// - edge_kinds are preserved in authorized paths after partial redaction
 /// - edge_kinds are not leaked through redacted paths
 async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1514,7 +1488,6 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1575,7 +1548,6 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
 }
 
 async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1623,7 +1595,6 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
 }
 
 async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1669,7 +1640,6 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
 }
 
 async fn search_with_id_range_filter(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1706,7 +1676,6 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
 }
 
 async fn search_with_specific_node_ids(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1749,7 +1718,6 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
 }
 
 async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1781,7 +1749,6 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
 }
 
 async fn search_fail_closed_no_authorization(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1814,7 +1781,6 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
 }
 
 async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -1932,7 +1898,6 @@ fn fail_closed_null_type_denies_row() {
 /// Verify mandatory columns (`_gkg_*_id`, `_gkg_*_type`) are present when
 /// requesting specific columns, and redaction works correctly.
 async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2003,7 +1968,6 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
 /// and redaction works correctly with all columns selected.
 /// Uses Group entity which has all ontology columns present in the test schema.
 async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2074,7 +2038,6 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
 /// Verify omitting `columns` entirely still includes mandatory columns
 /// and redaction works correctly.
 async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2132,7 +2095,6 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
 /// column selections on each node. Redaction must verify authorization
 /// for every node in the path.
 async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2225,7 +2187,6 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
 /// Authorization checks depend on mandatory columns - if they were missing,
 /// redaction would fail or behave incorrectly.
 async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2281,7 +2242,6 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
 /// Deep test: Verify that denying ANY node in a path filters the entire row,
 /// even when using column selection. This ensures fail-closed behavior.
 async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2329,7 +2289,6 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
 /// Deep test: Verify column values are preserved correctly through
 /// the entire query and redaction pipeline.
 async fn column_selection_data_values_preserved_through_redaction(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2379,7 +2338,6 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
 /// (e.g., "id" in the columns list) doesn't cause duplicates or errors,
 /// and redaction still works correctly.
 async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2622,7 +2580,6 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
 /// Deep test: Verify that column selection with traversal maintains proper
 /// JOIN semantics. Rows should still match correctly across relationships.
 async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2685,7 +2642,6 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
 /// Even if a column is used in a filter, it must be explicitly requested
 /// or only mandatory columns appear.
 async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2737,7 +2693,6 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
 /// Deep test: Ensure that column selection with no authorization
 /// still exhibits fail-closed behavior.
 async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2783,7 +2738,6 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
 /// - Different directions (outgoing, incoming) work correctly
 /// - Relationship type filtering works with redaction
 async fn neighbors_query_comprehensive(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2918,7 +2872,6 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
 
 /// Tests that denying the center node filters ALL its neighbors.
 async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2947,7 +2900,6 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
 
 /// Tests neighbors query with multiple center nodes and mixed authorization.
 async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2993,7 +2945,6 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
 
 /// Tests incoming direction with neighbor authorization.
 async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -3370,7 +3321,6 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
 /// - Edge columns are preserved in authorized rows after redaction
 /// - Redacted rows still had valid edge data before being filtered
 async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -3539,7 +3489,6 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
 /// Verifies multi-hop traversals have edge columns for each relationship,
 /// and that edge data is correctly associated with its hop after redaction.
 async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -3764,7 +3713,6 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
 /// This ensures the normalization layer correctly distinguishes between enum storage types
 /// and only applies int→string coercion where appropriate.
 async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -3961,7 +3909,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn range_pagination_comprehensive(ctx: &TestContext) {
-
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -4239,7 +4186,6 @@ async fn range_pagination_comprehensive(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_merge_requests_with_redaction(ctx: &TestContext) {
-
     let (_, mut result) = compile_and_execute(
         ctx,
         r#"{
@@ -4279,7 +4225,6 @@ async fn search_merge_requests_with_redaction(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn redaction_preserves_row_order(ctx: &TestContext) {
-
     let (_, mut result) = compile_and_execute(
         ctx,
         r#"{
@@ -4314,7 +4259,6 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
 }
 
 async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
-
     let (_, mut result) = compile_and_execute(
         ctx,
         r#"{
@@ -4352,7 +4296,6 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_no_path_exists_returns_empty(ctx: &TestContext) {
-
     let (_, mut result) = compile_and_execute(
         ctx,
         r#"{

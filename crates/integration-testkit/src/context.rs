@@ -222,9 +222,7 @@ impl TestContext {
             .await
             .unwrap_or_default();
 
-        let remove_opts = RemoveContainerOptionsBuilder::default()
-            .force(true)
-            .build();
+        let remove_opts = RemoveContainerOptionsBuilder::default().force(true).build();
 
         for container in containers {
             let is_current_session = container
