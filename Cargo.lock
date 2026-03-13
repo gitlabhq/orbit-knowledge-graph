@@ -3447,6 +3447,7 @@ dependencies = [
  "serde_json",
  "testcontainers",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

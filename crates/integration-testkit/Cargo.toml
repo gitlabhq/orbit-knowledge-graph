@@ -12,3 +12,4 @@ query-engine = { path = "../query-engine" }
 serde_json = { workspace = true }
 testcontainers = { workspace = true }
 tokio = { workspace = true }
+uuid = { workspace = true }
