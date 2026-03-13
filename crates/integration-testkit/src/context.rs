@@ -35,8 +35,8 @@ fn session_id() -> &'static str {
     })
 }
 
-const MAX_CONNECTION_ATTEMPTS: u32 = 30;
-const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(500);
+const MAX_CONNECTION_ATTEMPTS: u32 = 200;
+const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 pub struct TestContext {
     _container: Arc<ContainerAsync<GenericImage>>,
