@@ -3,6 +3,7 @@
 //! These tests require a Docker-compatible runtime (Docker, Colima, etc).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use indexer::metrics::EngineMetrics;
@@ -16,6 +17,7 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
 const TEST_STREAM: &str = "test_stream";
 const TEST_SUBJECT: &str = "test.events";
+const RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct TestEvent {
@@ -54,6 +56,19 @@ async fn start_nats_container() -> (testcontainers::ContainerAsync<Nats>, String
     (container, url)
 }
 
+fn default_config(url: &str) -> NatsConfiguration {
+    NatsConfiguration {
+        url: url.to_string(),
+        ..Default::default()
+    }
+}
+
+async fn connect_broker(config: &NatsConfiguration) -> NatsBroker {
+    NatsBroker::connect(config)
+        .await
+        .expect("failed to connect broker")
+}
+
 async fn create_test_stream(url: &str) {
     let client = async_nats::connect(format!("nats://{url}"))
         .await
@@ -71,14 +86,73 @@ async fn create_test_stream(url: &str) {
         .expect("failed to create stream");
 }
 
+async fn publish_event(broker: &NatsBroker, topic: &Topic, id: &str, value: i32) {
+    let event = TestEvent {
+        id: id.to_string(),
+        value,
+    };
+    let envelope = Envelope::new(&event).expect("failed to create envelope");
+    broker
+        .publish(topic, &envelope)
+        .await
+        .expect("failed to publish");
+}
+
+async fn receive_event(
+    subscription: &mut (
+             impl StreamExt<Item = Result<indexer::nats::NatsMessage, indexer::nats::NatsError>> + Unpin
+         ),
+) -> TestEvent {
+    let message = tokio::time::timeout(RECEIVE_TIMEOUT, subscription.next())
+        .await
+        .expect("timed out waiting for message")
+        .expect("subscription ended")
+        .expect("failed to receive message");
+
+    let event: TestEvent = message.envelope.to_event().expect("failed to deserialize");
+    message.ack().await.expect("failed to ack");
+    event
+}
+
+async fn assert_stream_not_exists(url: &str, stream_name: &str) {
+    let jetstream = jetstream_client(url).await;
+    let result = jetstream.get_stream(stream_name).await;
+    assert!(result.is_err(), "stream '{stream_name}' should not exist");
+}
+
+async fn stream_config(url: &str, stream_name: &str) -> async_nats::jetstream::stream::Config {
+    let jetstream = jetstream_client(url).await;
+    let mut stream = jetstream
+        .get_stream(stream_name)
+        .await
+        .unwrap_or_else(|_| panic!("stream '{stream_name}' should exist"));
+    let info = stream.info().await.expect("failed to get stream info");
+    info.config.clone()
+}
+
+async fn assert_stream_has_subjects(url: &str, stream_name: &str, expected_subjects: &[&str]) {
+    let config = stream_config(url, stream_name).await;
+
+    for subject in expected_subjects {
+        assert!(
+            config.subjects.contains(&subject.to_string()),
+            "stream '{stream_name}' should contain subject '{subject}', got {:?}",
+            config.subjects
+        );
+    }
+}
+
+async fn jetstream_client(url: &str) -> async_nats::jetstream::Context {
+    let client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("failed to connect to NATS");
+    async_nats::jetstream::new(client)
+}
+
 #[tokio::test]
 async fn connect_to_nats() {
     let (_container, url) = start_nats_container().await;
-
-    let config = NatsConfiguration {
-        url,
-        ..Default::default()
-    };
+    let config = default_config(&url);
 
     let result = NatsBroker::connect(&config).await;
     assert!(result.is_ok(), "should connect to NATS");
@@ -89,15 +163,7 @@ async fn publish_and_subscribe() {
     let (_container, url) = start_nats_container().await;
     create_test_stream(&url).await;
 
-    let config = NatsConfiguration {
-        url,
-        ..Default::default()
-    };
-
-    let broker = NatsBroker::connect(&config)
-        .await
-        .expect("failed to connect");
-
+    let broker = connect_broker(&default_config(&url)).await;
     let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker
@@ -105,29 +171,11 @@ async fn publish_and_subscribe() {
         .await
         .expect("failed to subscribe");
 
-    let event = TestEvent {
-        id: "test-1".to_string(),
-        value: 42,
-    };
-    let envelope = Envelope::new(&event).expect("failed to create envelope");
+    publish_event(&broker, &topic, "test-1", 42).await;
 
-    broker
-        .publish(&topic, &envelope)
-        .await
-        .expect("failed to publish");
-
-    let received = tokio::time::timeout(std::time::Duration::from_secs(5), subscription.next())
-        .await
-        .expect("timed out waiting for message")
-        .expect("subscription ended")
-        .expect("failed to receive message");
-
-    let received_event: TestEvent = received.envelope.to_event().expect("failed to deserialize");
-
-    assert_eq!(received_event.id, "test-1");
-    assert_eq!(received_event.value, 42);
-
-    received.ack().await.expect("failed to ack");
+    let event = receive_event(&mut subscription).await;
+    assert_eq!(event.id, "test-1");
+    assert_eq!(event.value, 42);
 }
 
 #[tokio::test]
@@ -135,15 +183,7 @@ async fn nack_redelivers_message() {
     let (_container, url) = start_nats_container().await;
     create_test_stream(&url).await;
 
-    let config = NatsConfiguration {
-        url,
-        ..Default::default()
-    };
-
-    let broker = NatsBroker::connect(&config)
-        .await
-        .expect("failed to connect");
-
+    let broker = connect_broker(&default_config(&url)).await;
     let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker
@@ -151,17 +191,9 @@ async fn nack_redelivers_message() {
         .await
         .expect("failed to subscribe");
 
-    let event = TestEvent {
-        id: "nack-test".to_string(),
-        value: 99,
-    };
-    let envelope = Envelope::new(&event).expect("failed to create envelope");
-    broker
-        .publish(&topic, &envelope)
-        .await
-        .expect("failed to publish");
+    publish_event(&broker, &topic, "nack-test", 99).await;
 
-    let first = tokio::time::timeout(std::time::Duration::from_secs(5), subscription.next())
+    let first = tokio::time::timeout(RECEIVE_TIMEOUT, subscription.next())
         .await
         .expect("timed out")
         .expect("ended")
@@ -169,30 +201,15 @@ async fn nack_redelivers_message() {
 
     first.nack().await.expect("failed to nack");
 
-    let second = tokio::time::timeout(std::time::Duration::from_secs(5), subscription.next())
-        .await
-        .expect("timed out waiting for redelivery")
-        .expect("ended")
-        .expect("failed");
-
-    let redelivered: TestEvent = second.envelope.to_event().expect("deserialize failed");
-    assert_eq!(redelivered.id, "nack-test");
-
-    second.ack().await.expect("failed to ack");
+    let event = receive_event(&mut subscription).await;
+    assert_eq!(event.id, "nack-test");
 }
 
 #[tokio::test]
 async fn nonexistent_stream() {
     let (_container, url) = start_nats_container().await;
 
-    let config = NatsConfiguration {
-        url,
-        ..Default::default()
-    };
-
-    let broker = NatsBroker::connect(&config)
-        .await
-        .expect("failed to connect");
+    let broker = connect_broker(&default_config(&url)).await;
 
     let topic = Topic::owned("nonexistent", "subject");
     let result = broker
@@ -205,35 +222,27 @@ async fn nonexistent_stream() {
 async fn multiple_streams() {
     let (_container, url) = start_nats_container().await;
 
-    let client = async_nats::connect(format!("nats://{url}"))
+    let jetstream = jetstream_client(&url).await;
+
+    jetstream
+        .create_stream(async_nats::jetstream::stream::Config {
+            name: "stream_a".to_string(),
+            subjects: vec!["a.>".to_string()],
+            ..Default::default()
+        })
         .await
-        .expect("connect");
-    let js = async_nats::jetstream::new(client);
+        .expect("create stream_a");
 
-    js.create_stream(async_nats::jetstream::stream::Config {
-        name: "stream_a".to_string(),
-        subjects: vec!["a.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .expect("create stream_a");
-
-    js.create_stream(async_nats::jetstream::stream::Config {
-        name: "stream_b".to_string(),
-        subjects: vec!["b.>".to_string()],
-        ..Default::default()
-    })
-    .await
-    .expect("create stream_b");
-
-    let config = NatsConfiguration {
-        url,
-        ..Default::default()
-    };
-
-    let broker = NatsBroker::connect(&config)
+    jetstream
+        .create_stream(async_nats::jetstream::stream::Config {
+            name: "stream_b".to_string(),
+            subjects: vec!["b.>".to_string()],
+            ..Default::default()
+        })
         .await
-        .expect("failed to connect");
+        .expect("create stream_b");
+
+    let broker = connect_broker(&default_config(&url)).await;
 
     let topic_a = Topic::owned("stream_a", "a.events");
     let topic_b = Topic::owned("stream_b", "b.events");
@@ -247,46 +256,14 @@ async fn multiple_streams() {
         .await
         .expect("sub b");
 
-    let event_a = TestEvent {
-        id: "from-a".to_string(),
-        value: 1,
-    };
-    let envelope_a = Envelope::new(&event_a).unwrap();
-    broker
-        .publish(&topic_a, &envelope_a)
-        .await
-        .expect("publish a");
+    publish_event(&broker, &topic_a, "from-a", 1).await;
+    publish_event(&broker, &topic_b, "from-b", 2).await;
 
-    let event_b = TestEvent {
-        id: "from-b".to_string(),
-        value: 2,
-    };
-    let envelope_b = Envelope::new(&event_b).unwrap();
-    broker
-        .publish(&topic_b, &envelope_b)
-        .await
-        .expect("publish b");
+    let event_a = receive_event(&mut sub_a).await;
+    let event_b = receive_event(&mut sub_b).await;
 
-    let msg_a = tokio::time::timeout(std::time::Duration::from_secs(5), sub_a.next())
-        .await
-        .expect("timeout a")
-        .expect("end a")
-        .expect("err a");
-
-    let msg_b = tokio::time::timeout(std::time::Duration::from_secs(5), sub_b.next())
-        .await
-        .expect("timeout b")
-        .expect("end b")
-        .expect("err b");
-
-    let recv_a: TestEvent = msg_a.envelope.to_event().unwrap();
-    let recv_b: TestEvent = msg_b.envelope.to_event().unwrap();
-
-    assert_eq!(recv_a.id, "from-a");
-    assert_eq!(recv_b.id, "from-b");
-
-    msg_a.ack().await.unwrap();
-    msg_b.ack().await.unwrap();
+    assert_eq!(event_a.id, "from-a");
+    assert_eq!(event_b.id, "from-b");
 }
 
 #[tokio::test]
@@ -301,32 +278,23 @@ async fn auto_creates_stream_with_configured_settings() {
         ..Default::default()
     };
 
-    let broker = NatsBroker::connect(&config)
-        .await
-        .expect("failed to connect");
+    let broker = connect_broker(&config).await;
 
     let topic = Topic::owned("auto_created_stream", "auto.events");
-    let topics = vec![topic.clone()];
-
     broker
-        .ensure_streams(&topics)
+        .ensure_streams(&[topic])
         .await
         .expect("failed to ensure streams");
 
-    let client = async_nats::connect(format!("nats://{url}"))
-        .await
-        .expect("connect");
-    let jetstream = async_nats::jetstream::new(client);
+    assert_stream_has_subjects(&url, "auto_created_stream", &["auto.events"]).await;
 
+    let jetstream = jetstream_client(&url).await;
     let mut stream = jetstream
         .get_stream("auto_created_stream")
         .await
         .expect("stream should exist");
-
     let info = stream.info().await.expect("failed to get stream info");
-    assert_eq!(info.config.name, "auto_created_stream");
-    assert!(info.config.subjects.contains(&"auto.events".to_string()));
-    assert_eq!(info.config.max_age, std::time::Duration::from_secs(3600));
+    assert_eq!(info.config.max_age, Duration::from_secs(3600));
 }
 
 #[tokio::test]
@@ -339,107 +307,77 @@ async fn skips_creation_when_disabled() {
         ..Default::default()
     };
 
-    let broker = NatsBroker::connect(&config)
-        .await
-        .expect("failed to connect");
+    let broker = connect_broker(&config).await;
 
     let topic = Topic::owned("should_not_exist", "skip.events");
-    let topics = vec![topic];
-
     broker
-        .ensure_streams(&topics)
+        .ensure_streams(&[topic])
         .await
         .expect("ensure_streams should succeed even when disabled");
 
-    let client = async_nats::connect(format!("nats://{url}"))
-        .await
-        .expect("connect");
-    let jetstream = async_nats::jetstream::new(client);
-
-    let result = jetstream.get_stream("should_not_exist").await;
-    assert!(
-        result.is_err(),
-        "stream should not exist when auto-create is disabled"
-    );
+    assert_stream_not_exists(&url, "should_not_exist").await;
 }
 
 #[tokio::test]
-async fn updates_stream_config_without_error() {
-    // Regression test for https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/261
-    //
-    // Previously, ensure_streams used create_stream which rejected config changes with error 10058
-    // ("stream name already in use with a different configuration"), causing CrashLoopBackOff
-    // during rolling updates when stream subjects changed between versions.
+async fn updates_stream_config_during_rolling_update() {
+    // Guards against error 10058 during rolling deploys when stream config changes
+    // between versions. See https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/261
     let (_container, url) = start_nats_container().await;
 
-    let config = NatsConfiguration {
+    let config_v1 = NatsConfiguration {
         url: url.clone(),
         auto_create_streams: true,
+        stream_max_age_secs: Some(3600),
         ..Default::default()
     };
 
-    let broker = NatsBroker::connect(&config)
-        .await
-        .expect("failed to connect");
-
-    // First deploy: create stream with initial subject set
+    let broker_old = connect_broker(&config_v1).await;
     let topic_v1 = Topic::owned(TEST_STREAM, TEST_SUBJECT);
-    broker
-        .ensure_streams(&[topic_v1])
+    broker_old
+        .ensure_streams(std::slice::from_ref(&topic_v1))
         .await
-        .expect("should create stream on first deploy");
+        .expect("old broker should create stream");
 
-    // Second deploy: new broker instance with an expanded subject set (simulates version upgrade)
-    let broker2 = NatsBroker::connect(&config)
+    let mut old_subscription = broker_old
+        .subscribe(&topic_v1, Arc::new(EngineMetrics::new()))
         .await
-        .expect("failed to connect second broker");
+        .expect("old broker should subscribe");
 
+    let config_v2 = NatsConfiguration {
+        url: url.clone(),
+        auto_create_streams: true,
+        stream_max_age_secs: Some(7200),
+        ..Default::default()
+    };
+
+    let broker_new = connect_broker(&config_v2).await;
     let topic_v2_existing = Topic::owned(TEST_STREAM, TEST_SUBJECT);
     let topic_v2_new = Topic::owned(TEST_STREAM, "test.new_subject");
-    broker2
-        .ensure_streams(&[topic_v2_existing, topic_v2_new])
+    broker_new
+        .ensure_streams(&[topic_v2_existing.clone(), topic_v2_new.clone()])
         .await
-        .expect("should update stream config without error 10058");
+        .expect("new broker should update stream config while old consumer is active");
 
-    // Verify the stream now includes the new subject
-    let client = async_nats::connect(format!("nats://{url}"))
-        .await
-        .expect("connect");
-    let jetstream = async_nats::jetstream::new(client);
-    let mut stream = jetstream
-        .get_stream(TEST_STREAM)
-        .await
-        .expect("stream should exist");
-    let info = stream.info().await.expect("failed to get stream info");
-    assert!(
-        info.config.subjects.contains(&"test.new_subject".to_string()),
-        "stream should have updated subjects after config change"
+    let updated = stream_config(&url, TEST_STREAM).await;
+    assert_stream_has_subjects(&url, TEST_STREAM, &[TEST_SUBJECT, "test.new_subject"]).await;
+    assert_eq!(
+        updated.max_age,
+        Duration::from_secs(7200),
+        "stream max_age should reflect the v2 config"
     );
-}
 
-#[tokio::test]
-async fn idempotent_when_stream_exists() {
-    let (_container, url) = start_nats_container().await;
+    // Old consumer still receives on original subject after config update
+    publish_event(&broker_new, &topic_v2_existing, "after-update", 1).await;
+    let event = receive_event(&mut old_subscription).await;
+    assert_eq!(event.id, "after-update");
 
-    let config = NatsConfiguration {
-        url: url.clone(),
-        auto_create_streams: true,
-        ..Default::default()
-    };
-
-    let broker = NatsBroker::connect(&config)
+    // New consumer receives on the newly added subject
+    let mut new_subscription = broker_new
+        .subscribe(&topic_v2_new, Arc::new(EngineMetrics::new()))
         .await
-        .expect("failed to connect");
+        .expect("new broker should subscribe to new subject");
 
-    let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
-    let topics = vec![topic];
-
-    let result = broker.ensure_streams(&topics).await;
-    assert!(result.is_ok(), "ensure_streams should create stream");
-
-    let result2 = broker.ensure_streams(&topics).await;
-    assert!(
-        result2.is_ok(),
-        "ensure_streams should be idempotent on second call"
-    );
+    publish_event(&broker_new, &topic_v2_new, "new-subject", 2).await;
+    let new_event = receive_event(&mut new_subscription).await;
+    assert_eq!(new_event.id, "new-subject");
 }
