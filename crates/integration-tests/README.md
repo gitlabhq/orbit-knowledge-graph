@@ -8,15 +8,17 @@ without either of those needing to depend on each other.
 
 ```plaintext
 tests/
-  common.rs            # Shared helpers: MockRedactionService, test fixtures, DummyClaims
-  entrypoint.rs        # Test binary entry point (wires modules together)
-  indexer/             # Indexer integration tests (NATS, ClickHouse, SDLC, code, dispatcher)
+  common.rs              # Shared helpers: MockRedactionService, test fixtures, DummyClaims
+  entrypoint.rs          # Test binary entry point (wires modules together)
+  canary/
+    setup_test.rs        # Infrastructure canary (validates TestContext, macros, isolation)
+  indexer/               # Indexer integration tests (NATS, ClickHouse, SDLC, code, dispatcher)
   server/
-    data_correctness.rs # Seeds data, runs full pipeline, asserts values via ResponseView
-    graph_formatter.rs  # Graph formatter end-to-end tests
-    health.rs           # Health/readiness endpoint tests
-    hydration.rs        # Hydration pipeline tests (compile -> execute -> hydrate -> format)
-    redaction.rs        # Redaction pipeline tests (fail-closed, path finding, search, etc.)
+    data_correctness.rs  # Seeds data, runs full pipeline, asserts values via ResponseView
+    graph_formatter.rs   # Graph formatter end-to-end tests
+    health.rs            # Health/readiness endpoint tests
+    hydration.rs         # Hydration pipeline tests (compile -> execute -> hydrate -> format)
+    redaction.rs         # Redaction pipeline tests (fail-closed, path finding, search, etc.)
 ```
 
 All tests in `server/` compile as a single test binary. Each orchestrator test starts
@@ -24,14 +26,22 @@ one ClickHouse container, seeds data once, and runs subtests in parallel.
 
 ## Running
 
+Requires Docker via Colima. All tasks are defined in `mise.toml` at the repo root:
+
 ```shell
-mise run test:integration                           # all integration tests
-cargo nextest run -p integration-tests              # just this crate
-cargo nextest run --all-features --test '*' \
-  -E 'test(data_correctness)' --retries 0           # one suite
+mise colima:start                                   # start Docker runtime (12 GB RAM)
+mise test:integration                               # run all integration tests
+mise colima:stop                                    # stop when done
 ```
 
-Requires Docker. Start with `mise colima:start`.
+To run specific suites or tests directly:
+
+```shell
+export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
+cargo nextest run --all-features --test '*'                              # all
+cargo nextest run --all-features --test '*' -E 'test(data_correctness)'  # one suite
+cargo nextest run --all-features --test '*' -E 'test(infra_canary)'      # canary
+```
 
 ## Test architecture
 

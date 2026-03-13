@@ -19,6 +19,48 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
 - **`ResponseView`** — Typed wrapper over `GraphResponse` for asserting query pipeline
   output. Includes assertion enforcement that catches under-tested queries.
 
+## Prerequisites
+
+Integration tests need a Docker-compatible runtime. The project uses Colima, managed
+through `mise.toml`:
+
+```shell
+mise colima:start        # start the gkg Colima instance (12 GB RAM)
+mise test:integration    # run all integration tests (sets DOCKER_HOST automatically)
+mise colima:stop         # stop when done
+```
+
+See `mise.toml` for the full task definitions. The `test:integration` task sets
+`DOCKER_HOST` to the Colima socket automatically. If running `cargo nextest` directly,
+export it yourself:
+
+```shell
+export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
+cargo nextest run --all-features --test '*'
+```
+
+## Usage
+
+This crate is a dependency (not dev-dependency) because test crates like
+`integration-tests` and `indexer` import it as a regular dependency in their
+`[dev-dependencies]` section.
+
+```rust
+use integration_testkit::{TestContext, run_subtests, SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL};
+
+#[tokio::test]
+async fn my_integration_test() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    run_subtests!(&ctx, subtest_a, subtest_b);
+}
+
+async fn subtest_a(ctx: &TestContext) {
+    ctx.execute("INSERT INTO ...").await;
+    let batches = ctx.query("SELECT ...").await;
+    // assertions
+}
+```
+
 ## Choosing a test macro
 
 | Macro | DB per subtest | Use when |
