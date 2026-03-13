@@ -1,6 +1,6 @@
 use crate::context::TestContext;
 
-const SEED_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/seeds");
+const SEED_DIR: &str = env!("SEEDS_DIR");
 
 pub async fn load_seed(ctx: &TestContext, name: &str) {
     let path = format!("{SEED_DIR}/{name}.sql");

@@ -584,12 +584,7 @@ mod tests {
     use crate::loading::{EtlSettings, NodeYaml, ReadOntologyFile, load_with};
 
     fn fixtures_dir() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates directory should exist")
-            .parent()
-            .expect("workspace root should exist")
-            .join("config/ontology")
+        Path::new(env!("ONTOLOGY_DIR")).to_path_buf()
     }
 
     #[test]
