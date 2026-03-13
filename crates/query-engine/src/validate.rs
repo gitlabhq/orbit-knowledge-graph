@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
-use ontology::{DataType, Ontology};
+use ontology::{DataType, EDGE_RESERVED_COLUMNS, Ontology};
 
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
@@ -93,6 +93,31 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
         serde_json::Value::Array(_) => "an array",
         serde_json::Value::Object(_) => "an object",
     }
+}
+
+/// Map an edge reserved column name to its `DataType`.
+///
+/// The edge table schema is fixed (not YAML-driven), so the types are hardcoded
+/// here, matching `EDGE_RESERVED_COLUMNS` order from the ontology constants.
+/// See also `xtask/src/synth/arrow_schema.rs` which maintains the same mapping
+/// for Arrow schema generation.
+fn edge_column_type(column: &str) -> Option<DataType> {
+    // Positional types matching EDGE_RESERVED_COLUMNS:
+    //   traversal_path(String), relationship_kind(String),
+    //   source_id(Int), source_kind(String), target_id(Int), target_kind(String)
+    const EDGE_COLUMN_TYPES: &[DataType] = &[
+        DataType::String, // traversal_path
+        DataType::String, // relationship_kind
+        DataType::Int,    // source_id
+        DataType::String, // source_kind
+        DataType::Int,    // target_id
+        DataType::String, // target_kind
+    ];
+
+    EDGE_RESERVED_COLUMNS
+        .iter()
+        .position(|&c| c == column)
+        .map(|i| EDGE_COLUMN_TYPES[i])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,6 +248,10 @@ impl<'a> Validator<'a> {
     /// query is rejected. Ops that carry no value (`is_null`, `is_not_null`)
     /// are skipped. Filters on unknown entities or fields are skipped —
     /// `check_ontology` catches those.
+    ///
+    /// Relationship filters are validated against the fixed edge table schema.
+    /// Unknown edge columns are rejected (fail closed) since they would
+    /// produce broken SQL at runtime.
     fn check_filter_types(&self, input: &Input) -> Result<()> {
         for node in &input.nodes {
             let Some(entity) = node.entity.as_deref() else {
@@ -235,6 +264,18 @@ impl<'a> Validator<'a> {
                 self.check_one_filter(entity, prop, filter, data_type)?;
             }
         }
+
+        for (i, rel) in input.relationships.iter().enumerate() {
+            for (prop, filter) in &rel.filters {
+                let Some(data_type) = edge_column_type(prop) else {
+                    return Err(QueryError::Validation(format!(
+                        "relationship[{i}] filter on unknown edge column \"{prop}\""
+                    )));
+                };
+                self.check_one_filter(&format!("relationship[{i}]"), prop, filter, data_type)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -1111,5 +1152,157 @@ mod tests {
             validator.check_references(&input).is_err(),
             "IN filter with a mismatched element must reject the query"
         );
+    }
+
+    // ── Relationship filter type validation ─────────────────────────
+
+    #[test]
+    fn accepts_int_filter_on_edge_source_id() {
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{
+                    "type": "AUTHORED", "from": "u", "to": "n",
+                    "filters": {"source_id": 42}
+                }]
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_string_filter_on_edge_relationship_kind() {
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{
+                    "type": "AUTHORED", "from": "u", "to": "n",
+                    "filters": {"source_kind": "User"}
+                }]
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_is_null_on_edge_column() {
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{
+                    "type": "AUTHORED", "from": "u", "to": "n",
+                    "filters": {"target_kind": {"op": "is_null"}}
+                }]
+            }"#,
+        );
+    }
+
+    #[test]
+    fn accepts_in_filter_on_edge_int_column() {
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{
+                    "type": "AUTHORED", "from": "u", "to": "n",
+                    "filters": {"target_id": {"op": "in", "value": [1, 2, 3]}}
+                }]
+            }"#,
+        );
+    }
+
+    #[test]
+    fn rejects_string_on_edge_int_column() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{
+                    "type": "AUTHORED", "from": "u", "to": "n",
+                    "filters": {"source_id": "not-a-number"}
+                }]
+            }"#,
+            "expected Int",
+        );
+    }
+
+    #[test]
+    fn rejects_int_on_edge_string_column() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{
+                    "type": "AUTHORED", "from": "u", "to": "n",
+                    "filters": {"target_kind": 123}
+                }]
+            }"#,
+            "expected String",
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_edge_column_filter() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{
+                    "type": "AUTHORED", "from": "u", "to": "n",
+                    "filters": {"bogus_column": 42}
+                }]
+            }"#,
+            "unknown edge column \"bogus_column\"",
+        );
+    }
+
+    #[test]
+    fn rejects_mixed_types_in_edge_in_filter() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "n", "entity": "Note"}
+                ],
+                "relationships": [{
+                    "type": "AUTHORED", "from": "u", "to": "n",
+                    "filters": {"source_id": {"op": "in", "value": [1, "bad", 3]}}
+                }]
+            }"#,
+            "element [1]",
+        );
+    }
+
+    #[test]
+    fn edge_column_type_covers_all_reserved_columns() {
+        for col in ontology::EDGE_RESERVED_COLUMNS {
+            assert!(
+                super::edge_column_type(col).is_some(),
+                "edge_column_type must cover reserved column \"{col}\""
+            );
+        }
     }
 }
