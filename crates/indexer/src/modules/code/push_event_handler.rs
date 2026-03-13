@@ -1,4 +1,4 @@
-//! Handler for processing push events and triggering code indexing.
+//! Handler for processing code indexing tasks dispatched by Rails.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -11,12 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use super::checkpoint_store::CodeCheckpointStore;
 use super::config::CODE_LOCK_TTL;
-use super::config::{siphon_actions, siphon_ref_types, subjects};
+use super::config::subjects;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::locking::project_lock_key;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::project_store::{ProjectInfo, ProjectStore};
-use super::repository_service::RepositoryService;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
@@ -27,7 +25,7 @@ fn default_events_stream_name() -> String {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct PushEventHandlerConfig {
+pub struct CodeIndexingTaskHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
 
@@ -35,7 +33,7 @@ pub struct PushEventHandlerConfig {
     pub events_stream_name: String,
 }
 
-impl Default for PushEventHandlerConfig {
+impl Default for CodeIndexingTaskHandlerConfig {
     fn default() -> Self {
         Self {
             engine: HandlerConfiguration::default(),
@@ -44,29 +42,23 @@ impl Default for PushEventHandlerConfig {
     }
 }
 
-pub struct PushEventHandler {
+pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,
-    repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
-    project_store: Arc<dyn ProjectStore>,
     metrics: CodeMetrics,
-    config: PushEventHandlerConfig,
+    config: CodeIndexingTaskHandlerConfig,
 }
 
-impl PushEventHandler {
+impl CodeIndexingTaskHandler {
     pub fn new(
         pipeline: Arc<CodeIndexingPipeline>,
-        repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
-        project_store: Arc<dyn ProjectStore>,
         metrics: CodeMetrics,
-        config: PushEventHandlerConfig,
+        config: CodeIndexingTaskHandlerConfig,
     ) -> Self {
         Self {
             pipeline,
-            repository_service,
             checkpoint_store,
-            project_store,
             metrics,
             config,
         }
@@ -74,9 +66,9 @@ impl PushEventHandler {
 }
 
 #[async_trait]
-impl Handler for PushEventHandler {
+impl Handler for CodeIndexingTaskHandler {
     fn name(&self) -> &str {
-        "code_push_event"
+        "code_indexing_task"
     }
 
     fn topic(&self) -> Topic {
@@ -85,7 +77,7 @@ impl Handler for PushEventHandler {
             format!(
                 "{}.{}",
                 self.config.events_stream_name,
-                subjects::PUSH_EVENT_PAYLOADS
+                subjects::CODE_INDEXING_TASKS
             ),
         )
     }
@@ -95,10 +87,10 @@ impl Handler for PushEventHandler {
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
-        debug!(message_id = %message.id.0, "received push event payload");
+        debug!(message_id = %message.id.0, "received code indexing task");
 
         let replication_events = decode_logical_replication_events(&message.payload)
-            .inspect_err(|e| warn!(message_id = %message.id.0, error = %e, "failed to decode push event payload"))
+            .inspect_err(|e| warn!(message_id = %message.id.0, error = %e, "failed to decode code indexing task"))
             .map_err(HandlerError::Processing)
             .record_error_stage(&self.metrics, "decode")?;
 
@@ -110,25 +102,23 @@ impl Handler for PushEventHandler {
                 continue;
             }
 
-            let Some(push_event) = PushEventPayload::extract(&extractor, event) else {
-                debug!("failed to extract push event payload, skipping");
+            let Some(task) = CodeIndexingTask::extract(&extractor, event) else {
+                debug!("failed to extract code indexing task, skipping");
                 continue;
             };
 
             debug!(
-                event_id = push_event.event_id,
-                project_id = push_event.project_id,
-                ref_name = %push_event.ref_name,
-                "processing push event"
+                task_id = task.id,
+                project_id = task.project_id,
+                "processing code indexing task"
             );
 
-            if let Err(e) = self.process_push_event(&context, &push_event).await {
+            if let Err(e) = self.process_task(&context, &task).await {
                 warn!(
-                    event_id = push_event.event_id,
-                    project_id = push_event.project_id,
-                    ref_name = %push_event.ref_name,
+                    task_id = task.id,
+                    project_id = task.project_id,
                     error = %e,
-                    "failed to process push event"
+                    "failed to process code indexing task"
                 );
             }
         }
@@ -137,67 +127,28 @@ impl Handler for PushEventHandler {
     }
 }
 
-impl PushEventHandler {
-    async fn process_push_event(
+impl CodeIndexingTaskHandler {
+    async fn process_task(
         &self,
         context: &HandlerContext,
-        event: &PushEventPayload,
+        task: &CodeIndexingTask,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
-        let Some(branch) = self.validate_push_event(event) else {
-            return Ok(());
-        };
+        let branch = task.branch_name();
 
-        let project_id = event.project_id;
-
-        let project_info = self
-            .repository_service
-            .project_info(project_id)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to fetch project info: {e}")))
-            .record_error_stage(&self.metrics, "repository_fetch")?;
-
-        let default_branch = project_info
-            .default_branch
-            .strip_prefix("refs/heads/")
-            .unwrap_or(&project_info.default_branch);
-
-        if branch != default_branch {
-            debug!(
-                event_id = event.event_id,
-                project_id,
-                branch = %branch,
-                "skipping non-default branch"
-            );
-            self.metrics.record_outcome("skipped_branch");
-            return Ok(());
-        }
-
-        let Some(project) = self.lookup_project(event.event_id, project_id).await? else {
-            self.metrics.record_outcome("skipped_project_not_found");
-            return Err(HandlerError::Processing(
-                "project not found in knowledge graph".into(),
-            ));
-        };
-
-        if self
-            .is_already_indexed(event, &project.traversal_path, project_id, &branch)
-            .await
-        {
+        if self.is_already_indexed(task, &branch).await {
             self.metrics.record_outcome("skipped_checkpoint");
             return Ok(());
         }
 
         info!(
-            event_id = event.event_id,
-            project_id,
+            task_id = task.id,
+            project_id = task.project_id,
             branch = %branch,
             "starting code indexing"
         );
 
-        let result = self
-            .index_with_lock(context, event, project_id, &branch, &project)
-            .await;
+        let result = self.index_with_lock(context, task, &branch).await;
 
         let outcome = if result.is_ok() { "indexed" } else { "error" };
         self.metrics.record_outcome(outcome);
@@ -211,14 +162,14 @@ impl PushEventHandler {
     async fn index_with_lock(
         &self,
         context: &HandlerContext,
-        event: &PushEventPayload,
-        project_id: i64,
+        task: &CodeIndexingTask,
         branch: &str,
-        project: &ProjectInfo,
     ) -> Result<(), HandlerError> {
+        let project_id = task.project_id;
+
         if !self.try_acquire_lock(context, project_id, branch).await? {
             debug!(
-                event_id = event.event_id,
+                task_id = task.id,
                 project_id,
                 branch = %branch,
                 "lock held by another indexer, skipping"
@@ -234,9 +185,9 @@ impl PushEventHandler {
                 &IndexingRequest {
                     project_id,
                     branch: branch.to_string(),
-                    traversal_path: project.traversal_path.clone(),
-                    event_id: event.event_id,
-                    commit_sha: event.revision_after.clone(),
+                    traversal_path: task.traversal_path.clone(),
+                    event_id: task.id,
+                    commit_sha: task.commit_sha.clone(),
                 },
             )
             .await;
@@ -253,69 +204,22 @@ impl PushEventHandler {
     }
 }
 
-impl PushEventHandler {
-    fn validate_push_event(&self, event: &PushEventPayload) -> Option<String> {
-        if event.ref_type != siphon_ref_types::BRANCH {
-            debug!(event_id = event.event_id, "skipping non-branch push");
-            return None;
-        }
-
-        if event.action != siphon_actions::PUSHED {
-            debug!(event_id = event.event_id, "skipping non-push action");
-            return None;
-        }
-
-        Some(Self::extract_branch_name(&event.ref_name))
-    }
-
-    fn extract_branch_name(ref_name: &str) -> String {
-        ref_name
-            .strip_prefix("refs/heads/")
-            .unwrap_or(ref_name)
-            .to_string()
-    }
-}
-
-impl PushEventHandler {
-    async fn lookup_project(
-        &self,
-        event_id: i64,
-        project_id: i64,
-    ) -> Result<Option<ProjectInfo>, HandlerError> {
-        match self.project_store.get_project(project_id).await {
-            Ok(info) => {
-                if info.is_none() {
-                    debug!(event_id, project_id, "project not in knowledge graph");
-                }
-                Ok(info)
-            }
-            Err(e) => Err(HandlerError::Processing(format!(
-                "project lookup failed: {e}"
-            ))),
-        }
-    }
-
-    async fn is_already_indexed(
-        &self,
-        event: &PushEventPayload,
-        traversal_path: &str,
-        project_id: i64,
-        branch: &str,
-    ) -> bool {
+impl CodeIndexingTaskHandler {
+    async fn is_already_indexed(&self, task: &CodeIndexingTask, branch: &str) -> bool {
         if let Ok(Some(checkpoint)) = self
             .checkpoint_store
-            .get_checkpoint(traversal_path, project_id, branch)
+            .get_checkpoint(&task.traversal_path, task.project_id, branch)
             .await
-            && checkpoint.last_event_id >= event.event_id
+            && checkpoint.last_event_id >= task.id
         {
-            debug!(event_id = event.event_id, "already indexed, skipping");
+            debug!(task_id = task.id, "already indexed, skipping");
             return true;
         }
         false
     }
 }
 
-impl PushEventHandler {
+impl CodeIndexingTaskHandler {
     async fn try_acquire_lock(
         &self,
         ctx: &HandlerContext,
@@ -344,50 +248,49 @@ impl PushEventHandler {
 }
 
 #[derive(Debug, Clone)]
-struct PushEventPayload {
-    event_id: i64,
+struct CodeIndexingTask {
+    id: i64,
     project_id: i64,
-    ref_type: i32,
-    action: i32,
     ref_name: String,
-    revision_after: String,
+    commit_sha: String,
+    traversal_path: String,
 }
 
-impl PushEventPayload {
+impl CodeIndexingTask {
     fn extract(
         extractor: &ColumnExtractor<'_>,
         event: &siphon_proto::ReplicationEvent,
     ) -> Option<Self> {
         Some(Self {
-            event_id: extractor.get_i64(event, "event_id")?,
+            id: extractor.get_i64(event, "id")?,
             project_id: extractor.get_i64(event, "project_id")?,
-            ref_type: extractor.get_i32(event, "ref_type")?,
-            action: extractor.get_i32(event, "action")?,
             ref_name: extractor.get_string(event, "ref")?.to_string(),
-            revision_after: Self::parse_commit(extractor.get_string(event, "commit_to")?),
+            commit_sha: extractor.get_string(event, "commit_sha")?.to_string(),
+            traversal_path: extractor.get_string(event, "traversal_path")?.to_string(),
         })
     }
 
-    fn parse_commit(value: &str) -> String {
-        value.strip_prefix("\\x").unwrap_or(value).to_string()
+    fn branch_name(&self) -> String {
+        self.ref_name
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&self.ref_name)
+            .to_string()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::PushEventHandlerConfig;
     use super::*;
     use crate::handler::Handler;
     use crate::modules::code::checkpoint_store::CodeCheckpointStore;
     use crate::modules::code::checkpoint_store::CodeIndexingCheckpoint;
     use crate::modules::code::checkpoint_store::test_utils::MockCodeCheckpointStore;
     use crate::modules::code::metrics::CodeMetrics;
-    use crate::modules::code::project_store::ProjectInfo;
-    use crate::modules::code::project_store::test_utils::MockProjectStore;
-    use crate::modules::code::repository_service::RepositoryService;
     use crate::modules::code::repository_service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
-    use crate::modules::code::test_helpers::{build_replication_events, push_payload_columns};
+    use crate::modules::code::test_helpers::{
+        build_replication_events, code_indexing_task_columns,
+    };
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use chrono::Utc;
@@ -397,19 +300,18 @@ mod tests {
     }
 
     struct TestContext {
-        handler: PushEventHandler,
+        handler: CodeIndexingTaskHandler,
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
-        project_store: Arc<MockProjectStore>,
     }
 
     impl TestContext {
-        fn with_repository_service(repository_service: Arc<dyn RepositoryService>) -> Self {
+        fn new() -> Self {
+            let mock_repo = MockRepositoryService::with_default_branch(123, "main");
             let mock_nats = Arc::new(MockNatsServices::new());
             let mock_locks = Arc::new(MockLockService::new());
             let mock_checkpoints = Arc::new(MockCodeCheckpointStore::new());
-            let project_store = Arc::new(MockProjectStore::new());
             let stale_data_cleaner = Arc::new(MockStaleDataCleaner::default());
             let metrics = test_metrics();
 
@@ -422,20 +324,18 @@ mod tests {
             );
 
             let pipeline = Arc::new(CodeIndexingPipeline::new(
-                Arc::clone(&repository_service),
+                mock_repo,
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
             ));
 
-            let handler = PushEventHandler::new(
+            let handler = CodeIndexingTaskHandler::new(
                 pipeline,
-                repository_service,
                 Arc::clone(&checkpoint_store),
-                project_store.clone(),
                 metrics,
-                PushEventHandlerConfig::default(),
+                CodeIndexingTaskHandlerConfig::default(),
             );
 
             Self {
@@ -443,7 +343,6 @@ mod tests {
                 mock_nats,
                 mock_locks,
                 mock_checkpoints,
-                project_store,
             }
         }
 
@@ -456,21 +355,16 @@ mod tests {
             )
         }
 
-        fn add_project(&self, project_id: i64) {
-            self.project_store.projects.lock().insert(
-                project_id,
-                ProjectInfo {
-                    project_id,
-                    traversal_path: format!("/org/project-{}", project_id),
-                    full_path: format!("org/project-{}", project_id),
-                },
-            );
-        }
-
-        async fn set_checkpoint(&self, project_id: i64, branch: &str, last_event_id: i64) {
+        async fn set_checkpoint(
+            &self,
+            project_id: i64,
+            traversal_path: &str,
+            branch: &str,
+            last_event_id: i64,
+        ) {
             self.mock_checkpoints
                 .set_checkpoint(&CodeIndexingCheckpoint {
-                    traversal_path: format!("/org/project-{}", project_id),
+                    traversal_path: traversal_path.to_string(),
                     project_id,
                     branch: branch.to_string(),
                     last_event_id,
@@ -493,31 +387,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ignores_non_default_branch_pushes() {
-        let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
-        let ctx = TestContext::with_repository_service(mock_repo);
-        ctx.add_project(123);
-
-        let payload = build_replication_events(vec![
-            push_payload_columns(1, 123, "refs/heads/feature/new-thing", "abc123").build(),
-        ]);
-        let envelope = TestEnvelopeFactory::with_bytes(payload);
-
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
-
-        assert!(result.is_ok());
-        assert!(!ctx.lock_exists(123, "feature/new-thing"));
-    }
-
-    #[tokio::test]
     async fn skips_already_indexed_commits() {
-        let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
-        let ctx = TestContext::with_repository_service(mock_repo);
-        ctx.add_project(123);
-        ctx.set_checkpoint(123, "main", 100).await;
+        let ctx = TestContext::new();
+        ctx.set_checkpoint(123, "/org/project-123", "main", 100)
+            .await;
 
         let payload = build_replication_events(vec![
-            push_payload_columns(50, 123, "refs/heads/main", "abc123").build(),
+            code_indexing_task_columns(50, 123, "main", "abc123", "/org/project-123").build(),
         ]);
         let envelope = TestEnvelopeFactory::with_bytes(payload);
 
@@ -528,32 +404,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn does_not_acquire_lock_when_project_not_in_knowledge_graph() {
-        let mock_repo = MockRepositoryService::with_default_branch(999, "refs/heads/main");
-        let ctx = TestContext::with_repository_service(mock_repo);
-
-        let payload = build_replication_events(vec![
-            push_payload_columns(100, 999, "refs/heads/main", "abc123").build(),
-        ]);
-        let envelope = TestEnvelopeFactory::with_bytes(payload);
-
-        ctx.handler
-            .handle(ctx.handler_context(), envelope)
-            .await
-            .unwrap();
-
-        assert!(!ctx.lock_exists(999, "main"));
-    }
-
-    #[tokio::test]
     async fn skips_when_lock_already_held() {
-        let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
-        let ctx = TestContext::with_repository_service(mock_repo);
-        ctx.add_project(123);
+        let ctx = TestContext::new();
         ctx.set_lock(123, "main");
 
         let payload = build_replication_events(vec![
-            push_payload_columns(100, 123, "refs/heads/main", "abc123").build(),
+            code_indexing_task_columns(100, 123, "main", "abc123", "/org/project-123").build(),
         ]);
         let envelope = TestEnvelopeFactory::with_bytes(payload);
 
@@ -566,12 +422,10 @@ mod tests {
     async fn skips_initial_snapshot_events() {
         use siphon_proto::replication_event::Operation;
 
-        let mock_repo = MockRepositoryService::with_default_branch(123, "refs/heads/main");
-        let ctx = TestContext::with_repository_service(mock_repo);
-        ctx.add_project(123);
+        let ctx = TestContext::new();
 
         let payload = build_replication_events(vec![
-            push_payload_columns(100, 123, "refs/heads/main", "abc123")
+            code_indexing_task_columns(100, 123, "main", "abc123", "/org/project-123")
                 .with_operation(Operation::InitialSnapshot as i32)
                 .build(),
         ]);
@@ -581,5 +435,31 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!ctx.lock_exists(123, "main"));
+    }
+
+    #[tokio::test]
+    async fn strips_refs_heads_prefix_from_ref() {
+        let task = CodeIndexingTask {
+            id: 1,
+            project_id: 123,
+            ref_name: "refs/heads/main".to_string(),
+            commit_sha: "abc123".to_string(),
+            traversal_path: "/org/project-123".to_string(),
+        };
+
+        assert_eq!(task.branch_name(), "main");
+    }
+
+    #[tokio::test]
+    async fn handles_ref_without_prefix() {
+        let task = CodeIndexingTask {
+            id: 1,
+            project_id: 123,
+            ref_name: "main".to_string(),
+            commit_sha: "abc123".to_string(),
+            traversal_path: "/org/project-123".to_string(),
+        };
+
+        assert_eq!(task.branch_name(), "main");
     }
 }
