@@ -254,6 +254,7 @@ mod tests {
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::NodeIds));
+        assert_eq!(reqs.len(), 1);
     }
 
     #[test]
@@ -272,6 +273,7 @@ mod tests {
             !reqs.contains(&Requirement::NodeIds),
             "path_finding node_ids are endpoints, not result filters"
         );
+        assert_eq!(reqs.len(), 1);
     }
 
     #[test]
@@ -284,6 +286,7 @@ mod tests {
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Aggregation));
+        assert_eq!(reqs.len(), 1);
     }
 
     #[test]
@@ -376,6 +379,7 @@ mod tests {
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Neighbors));
         assert!(reqs.contains(&Requirement::NodeIds));
+        assert_eq!(reqs.len(), 2);
     }
 
     #[test]
@@ -390,6 +394,7 @@ mod tests {
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::AggregationSort));
         assert!(reqs.contains(&Requirement::Aggregation));
+        assert_eq!(reqs.len(), 2);
     }
 
     #[test]
@@ -400,7 +405,9 @@ mod tests {
                 "range": {"start": 0, "end": 5},
                 "limit": 10}"#,
         );
-        assert!(input.requirements().contains(&Requirement::Range));
+        let reqs = input.requirements();
+        assert!(reqs.contains(&Requirement::Range));
+        assert_eq!(reqs.len(), 1);
     }
 
     // ── Assertion enforcement ────────────────────────────────────────
@@ -445,7 +452,9 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_filter("User", "username", |n| n.prop_str("username").is_some());
-        view.assert_filter("User", "state", |n| n.prop_str("username").is_some());
+        view.assert_filter("User", "state", |n| {
+            matches!(n.prop_str("username"), Some("alice" | "bob"))
+        });
     }
 
     #[test]
@@ -639,6 +648,54 @@ mod tests {
         view.assert_node_count(2);
     }
 
+    #[test]
+    fn for_query_node_ids_satisfied_by_assert_node_ids() {
+        let input = parse_test_input(
+            r#"{"query_type": "search",
+                "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                "limit": 10}"#,
+        );
+        let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_ids("User", &[1, 2]);
+    }
+
+    #[test]
+    fn for_query_neighbors_satisfied_by_assert_edge_set() {
+        let input = parse_test_input(
+            r#"{"query_type": "neighbors",
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+        );
+        let view = ResponseView::for_query(&input, sample_neighbors_response());
+        view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 101)]);
+        let _ = view.node_ids("User").into_inner();
+    }
+
+    #[test]
+    fn for_query_neighbors_satisfied_by_assert_edge_count() {
+        let input = parse_test_input(
+            r#"{"query_type": "neighbors",
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+        );
+        let view = ResponseView::for_query(&input, sample_neighbors_response());
+        view.assert_edge_count("MEMBER_OF", 2);
+        let _ = view.node_ids("User").into_inner();
+    }
+
+    #[test]
+    #[should_panic(expected = "unsatisfied assertion requirements")]
+    fn for_query_node_ids_not_satisfied_by_assert_node_count() {
+        let input = parse_test_input(
+            r#"{"query_type": "search",
+                "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                "limit": 10}"#,
+        );
+        let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_count(2);
+        drop(view);
+    }
+
     // ── Panic on unsatisfied ─────────────────────────────────────────
 
     #[test]
@@ -716,6 +773,69 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         drop(view);
+    }
+
+    #[test]
+    #[should_panic(expected = "unsatisfied assertion requirements")]
+    fn for_query_panics_on_unsatisfied_path_finding() {
+        let input = parse_test_input(
+            r#"{"query_type": "path_finding",
+                "nodes": [{"id": "s", "entity": "User", "node_ids": [1]},
+                           {"id": "e", "entity": "Project", "node_ids": [1000]}],
+                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
+        );
+        let resp = GraphResponse {
+            query_type: "path_finding".to_string(),
+            nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
+            edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
+        };
+        let view = ResponseView::for_query(&input, resp);
+        drop(view);
+    }
+
+    #[test]
+    #[should_panic(expected = "unsatisfied assertion requirements")]
+    fn for_query_panics_on_unsatisfied_aggregation_sort() {
+        let input = parse_test_input(
+            r#"{"query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User"}],
+                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+                "limit": 10}"#,
+        );
+        let view = ResponseView::for_query(&input, sample_aggregation_response());
+        view.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
+        drop(view);
+    }
+
+    #[test]
+    #[should_panic(expected = "unsatisfied assertion requirements")]
+    fn for_query_panics_on_unsatisfied_node_ids() {
+        let input = parse_test_input(
+            r#"{"query_type": "search",
+                "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                "limit": 10}"#,
+        );
+        let view = ResponseView::for_query(&input, sample_search_response());
+        drop(view);
+    }
+
+    #[test]
+    fn for_query_combined_features_requires_all() {
+        let input = parse_test_input(
+            r#"{"query_type": "search",
+                "node": {"id": "u", "entity": "User", "node_ids": [1, 2],
+                         "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}},
+                "order_by": {"node": "u", "property": "id"},
+                "range": {"start": 0, "end": 5},
+                "limit": 10}"#,
+        );
+        let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_order("User", &[1, 2]);
+        view.assert_node_count(2);
+        view.assert_filter("User", "username", |n| {
+            matches!(n.prop_str("username"), Some("alice" | "bob"))
+        });
     }
 
     // ── Skip + new() ─────────────────────────────────────────────────
