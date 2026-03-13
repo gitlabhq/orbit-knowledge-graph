@@ -2,10 +2,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server::webserver::create_router;
-use integration_testkit::TestContext;
+use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};
 use tower::ServiceExt;
-
-const GRAPH_SCHEMA_SQL: &str = include_str!("../../../../config/graph.sql");
 
 fn live_request() -> Request<Body> {
     Request::get("/live").body(Body::empty()).unwrap()

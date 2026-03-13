@@ -35,7 +35,7 @@ enum SynthCommand {
     /// Generate synthetic SDLC data to Parquet files.
     Generate {
         /// Path to YAML configuration file.
-        #[arg(short, long, default_value = "crates/xtask/simulator.yaml")]
+        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"))]
         config: std::path::PathBuf,
 
         /// Print the generation plan without executing.
@@ -49,7 +49,7 @@ enum SynthCommand {
     /// Load generated Parquet data into ClickHouse.
     Load {
         /// Path to YAML configuration file.
-        #[arg(short, long, default_value = "crates/xtask/simulator.yaml")]
+        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"))]
         config: std::path::PathBuf,
 
         /// Skip creating/dropping tables (useful for reloading).
@@ -75,7 +75,7 @@ enum SynthCommand {
     /// Execute SDLC queries and collect statistics.
     Evaluate {
         /// Path to YAML configuration file.
-        #[arg(short, long, default_value = "crates/xtask/simulator.yaml")]
+        #[arg(short, long, default_value = concat!(env!("XTASK_DIR"), "/simulator.yaml"))]
         config: std::path::PathBuf,
 
         /// Verbose output.

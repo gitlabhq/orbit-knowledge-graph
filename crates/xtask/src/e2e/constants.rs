@@ -21,7 +21,7 @@ pub const SSA_FIELD_MANAGER: &str = "xtask";
 
 // -- Config file path ---------------------------------------------------------
 
-pub const CONFIG_YAML: &str = "config/e2e.yaml";
+pub const CONFIG_YAML: &str = concat!(env!("CONFIG_DIR"), "/e2e.yaml");
 
 // -- Table lists (iteration targets, not config) ------------------------------
 
@@ -61,24 +61,30 @@ pub const GL_TABLES: &[&str] = &[
     "gl_edge",
 ];
 
-// -- Directories (relative to GKG repo root) ----------------------------------
+// -- Directories (derived from .cargo/config.toml env vars) -------------------
 
-pub const CNG_DIR: &str = "e2e/cng";
+pub const CNG_DIR: &str = concat!(env!("E2E_DIR"), "/cng");
 pub const LOG_DIR: &str = ".dev";
-pub const E2E_TESTS_DIR: &str = "e2e/tests";
+pub const E2E_TESTS_DIR: &str = concat!(env!("E2E_DIR"), "/tests");
 
-// -- Paths (relative to GKG repo root) ----------------------------------------
+// -- Paths (derived from .cargo/config.toml env vars) -------------------------
 
-pub const GRAPH_SQL_PATH: &str = "config/graph.sql";
-pub const GKG_CHART_PATH: &str = "helm-dev/gkg";
-pub const HELM_VALUES_YAML: &str = "e2e/helm-values.yaml";
-pub const BUILD_DEV_SCRIPT: &str = "scripts/build-dev.sh";
-pub const DISPATCH_JOB_TEMPLATE: &str = "e2e/templates/dispatch-indexing-job.yaml.tmpl";
-pub const RAILS_CLICKHOUSE_CONFIG_TEMPLATE: &str = "e2e/templates/rails-clickhouse-config.yml.tmpl";
+pub const GRAPH_SQL_PATH: &str = concat!(env!("CONFIG_DIR"), "/graph.sql");
+pub const GKG_CHART_PATH: &str = concat!(env!("HELM_DEV_DIR"), "/gkg");
+pub const HELM_VALUES_YAML: &str = concat!(env!("E2E_DIR"), "/helm-values.yaml");
+pub const BUILD_DEV_SCRIPT: &str = concat!(env!("SCRIPTS_DIR"), "/build-dev.sh");
+pub const DISPATCH_JOB_TEMPLATE: &str = concat!(
+    env!("E2E_DIR"),
+    "/templates/dispatch-indexing-job.yaml.tmpl"
+);
+pub const RAILS_CLICKHOUSE_CONFIG_TEMPLATE: &str = concat!(
+    env!("E2E_DIR"),
+    "/templates/rails-clickhouse-config.yml.tmpl"
+);
 
 // -- Filenames ----------------------------------------------------------------
 
-pub const CLICKHOUSE_YAML_TEMPLATE: &str = "e2e/cng/clickhouse.yaml.tmpl";
+pub const CLICKHOUSE_YAML_TEMPLATE: &str = concat!(env!("E2E_DIR"), "/cng/clickhouse.yaml.tmpl");
 pub const CREATE_TEST_DATA_LOG: &str = "create-test-data.log";
 pub const MANIFEST_JSON: &str = "manifest.json";
 pub const TRAEFIK_VALUES_YAML: &str = "traefik-values.yaml";
