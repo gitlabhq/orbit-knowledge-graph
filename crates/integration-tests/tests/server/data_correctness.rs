@@ -741,6 +741,92 @@ async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
     resp.assert_edge_absent("User", 1, "Group", 102, "MEMBER_OF");
 }
 
+async fn traversal_with_order_by(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_order("User", &[6, 5, 4, 3, 2, 1]);
+    let _ = resp.edges_of_type("MEMBER_OF").into_inner();
+}
+
+async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
+                {"id": "child", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "min_hops": 1, "max_hops": 2}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_ids("Group", &[100, 200, 300]);
+    resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
+    resp.assert_edge_exists("Group", 100, "Group", 300, "CONTAINS");
+}
+
+async fn traversal_incoming_direction(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100]},
+                {"id": "u", "entity": "User", "columns": ["username"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_ids("User", &[1, 2, 6]);
+    resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_exists("User", 2, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_exists("User", 6, "Group", 100, "MEMBER_OF");
+}
+
+async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username", "state"],
+                 "filters": {"state": "blocked"}},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_ids("User", &[5]);
+    resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("blocked"));
+    resp.assert_edge_exists("User", 5, "Group", 101, "MEMBER_OF");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Aggregation: Result Value Correctness
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1214,6 +1300,10 @@ async fn data_correctness() {
         traversal_three_hop_returns_all_user_group_project_paths,
         traversal_user_authored_mr_returns_correct_edges,
         traversal_redaction_removes_unauthorized_data,
+        traversal_with_order_by,
+        traversal_variable_length_reaches_depth_2,
+        traversal_incoming_direction,
+        traversal_with_filter_narrows_results,
         // aggregation
         aggregation_count_returns_correct_values,
         aggregation_count_group_contains_projects,
