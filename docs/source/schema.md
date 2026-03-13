@@ -26,10 +26,6 @@ title: Graph schema
 The knowledge graph schema defines the objects Orbit indexes and
 the relationships it tracks.
 
-The schema is organized into domains, which are logical groupings of related node types.
-In each domain, there are nodes, which represent indexed objects, and relationships,
-which define the edges between nodes.
-
 ## Node types
 
 A node represents an indexed object. Each node has a type, which defines its properties.
@@ -102,3 +98,54 @@ The `source_code` domain covers the structure of your repository.
 | `File` | A file in the repository. |
 | `Definition` | A code definition such as a class, function, method, or module. |
 | `ImportedSymbol` | An imported symbol or module reference in a source file. |
+
+## Relationships
+
+Relationshps define the edges that connect nodes.
+Relationships have variants, which are combinations of source and target node type.
+For example, the `Authored` relationship connects `User` nodes to `MergeRequest`, `Note`, `Vulnerability, and `WorkItem` nodes.
+
+### Available relationships
+
+The following table lists the relationships available by default:
+
+| Relationship | Variants (Source → Target) |
+|---|---|
+| `AUTHORED` | `User` → `MergeRequest` <br> `User` → `Note` <br> `User` → `Vulnerability` <br> `User` → `WorkItem` |
+| `ASSIGNED` | `User` → `MergeRequest` <br> `User` → `WorkItem` |
+| `REVIEWER` | `MergeRequest` → `User` |
+| `MERGED_BY` | `MergeRequest` → `User` |
+| `CREATOR` | `User` → `Project` |
+| `OWNER` | `User` → `Group` |
+| `MEMBER_OF` | `User` → `Group` <br> `User` → `Project` |
+| `CONTAINS` | `Directory` → `Directory` <br> `Directory` → `File` <br> `Group` → `Group` <br> `Group` → `Project` <br> `User` → `Project` <br> `WorkItem` → `WorkItem` |
+| `IN_PROJECT` | `Finding` → `Project` <br> `Job` → `Project` <br> `Label` → `Project` <br> `MergeRequest` → `Project` <br> `Milestone` → `Project` <br> `Note` → `Project` <br> `Pipeline` → `Project` <br> `SecurityScan` → `Project` <br> `Stage` → `Project` <br> `Vulnerability` → `Project` <br> `VulnerabilityIdentifier` → `Project` <br> `WorkItem` → `Project` |
+| `IN_GROUP` | `Label` → `Group` <br> `Milestone` → `Group` <br> `WorkItem` → `Group` |
+| `IN_MILESTONE` | `MergeRequest` → `Milestone` <br> `WorkItem` → `Milestone` |
+| `HAS_LABEL` | `MergeRequest` → `Label` <br> `WorkItem` → `Label` |
+| `HAS_NOTE` | `MergeRequest` → `Note` <br> `Vulnerability` → `Note` <br> `WorkItem` → `Note` |
+| `HAS_DIFF` | `MergeRequest` → `MergeRequestDiff` |
+| `HAS_FILE` | `MergeRequestDiff` → `MergeRequestDiffFile` |
+| `HAS_STAGE` | `Pipeline` → `Stage` |
+| `HAS_JOB` | `Stage` → `Job` |
+| `HAS_FINDING` | `SecurityScan` → `Finding` <br> `Vulnerability` → `Finding` |
+| `HAS_IDENTIFIER` | `Finding` → `VulnerabilityIdentifier` <br> `VulnerabilityOccurrence` → `VulnerabilityIdentifier` |
+| `TRIGGERED` | `MergeRequest` → `Pipeline` <br> `User` → `Job` <br> `User` → `Pipeline` |
+| `IN_PIPELINE` | `SecurityScan` → `Pipeline` |
+| `RAN_BY` | `SecurityScan` → `Job` |
+| `DETECTED_BY` | `Finding` → `VulnerabilityScanner` <br> `VulnerabilityOccurrence` → `VulnerabilityScanner` |
+| `DETECTED_IN` | `Finding` → `Pipeline` |
+| `OCCURRENCE_OF` | `VulnerabilityOccurrence` → `Vulnerability` |
+| `SCANS` | `VulnerabilityScanner` → `Project` |
+| `CONFIRMED_BY` | `User` → `Vulnerability` |
+| `RESOLVED_BY` | `User` → `Vulnerability` |
+| `DISMISSED_BY` | `User` → `Vulnerability` |
+| `FIXES` | `MergeRequest` → `Vulnerability` |
+| `CLOSES` | `MergeRequest` → `WorkItem` |
+| `RELATED_TO` | `WorkItem` → `WorkItem` |
+| `FROM_BRANCH` | `MergeRequest` → `Branch` |
+| `TARGETS` | `MergeRequest` → `Branch` |
+| `ON_BRANCH` | `Definition` → `Branch` <br> `Directory` → `Branch` <br> `File` → `Branch` <br> `ImportedSymbol` → `Branch` |
+| `DEFINES` | `Definition` → `Definition` <br> `Definition` → `ImportedSymbol` <br> `File` → `Definition` |
+| `IMPORTS` | `File` → `ImportedSymbol` <br> `ImportedSymbol` → `Definition` <br> `ImportedSymbol` → `File` <br> `ImportedSymbol` → `ImportedSymbol` |
+| `CALLS` | `Definition` → `Definition` <br> `Definition` → `ImportedSymbol` <br> `File` → `Definition` <br> `File` → `ImportedSymbol` |

@@ -31,7 +31,7 @@ The service scans your workspace to index:
 
 Orbit maps the relationships that connect each object, and stores this information in a knowledge graph.
 View the knowledge graph in the UI to understand your entire software development lifecycle (SDLC) at a glance.
-Or, connect an AI system like the GitLab Duo Agent Platform to give your agents permission-aware access to SDLC data.
+Or, connect an AI platform like the GitLab Duo Agent Platform to give your agents permission-aware access to SDLC data.
 
 With Orbit, you can:
 
@@ -43,7 +43,7 @@ With Orbit, you can:
 
 ## Turn Orbit on or off
 
-You can turn Orbit on to add a top-level group to the knowledge graph.
+Turn Orbit on for a top-level group to add it to the knowledge graph.
 To remove a group from the graph, turn Orbit off.
 
 Prerequisites:
