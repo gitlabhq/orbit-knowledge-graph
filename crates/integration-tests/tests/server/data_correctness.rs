@@ -1232,6 +1232,49 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
     resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
 }
 
+async fn neighbors_mixed_entity_types(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+            "neighbors": {"node": "mr", "direction": "both"}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_referential_integrity();
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("Note", &[3000, 3002, 3003]);
+
+    resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+    resp.assert_edge_exists("MergeRequest", 2000, "Note", 3000, "HAS_NOTE");
+    resp.assert_edge_exists("MergeRequest", 2000, "Note", 3002, "HAS_NOTE");
+    resp.assert_edge_exists("MergeRequest", 2000, "Note", 3003, "HAS_NOTE");
+}
+
+async fn neighbors_redaction_removes_unauthorized_targets(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1]);
+    svc.allow("group", &[100]);
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]}
+        }"#,
+        &svc,
+    )
+    .await;
+
+    resp.assert_node_ids("Group", &[100]);
+    resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_absent("User", 1, "Group", 102, "MEMBER_OF");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cross-cutting: Referential Integrity
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1321,6 +1364,8 @@ async fn data_correctness() {
         neighbors_incoming_returns_correct_sources,
         neighbors_rel_types_filter_works,
         neighbors_both_direction_returns_all_connected,
+        neighbors_mixed_entity_types,
+        neighbors_redaction_removes_unauthorized_targets,
         // referential integrity
         traversal_referential_integrity_on_complex_query,
     );
