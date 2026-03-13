@@ -26,14 +26,17 @@
 //! engine.stop();
 //! ```
 
+use std::any::Any;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures::FutureExt;
 use futures::StreamExt;
 use opentelemetry::KeyValue;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
@@ -253,6 +256,7 @@ impl Engine {
 enum HandlersOutcome {
     Success,
     Failed { retry_delay: Option<Duration> },
+    TerminalFailure,
 }
 
 struct EngineRuntime {
@@ -278,7 +282,29 @@ async fn process_message(
     }
 
     let message_start = Instant::now();
-    let outcome = run_handlers(&handlers, &context, &message.envelope, &runtime).await;
+    let caught = AssertUnwindSafe(run_handlers(
+        &handlers,
+        &context,
+        &message.envelope,
+        &runtime,
+    ))
+    .catch_unwind()
+    .await;
+
+    let outcome = match caught {
+        Ok(outcome) => outcome,
+        Err(panic_payload) => {
+            let panic_message = extract_panic_message(&panic_payload);
+            error!(
+                topic = %topic_name,
+                %message_id,
+                attempt,
+                panic = %panic_message,
+                "handler panicked, term-acking to free subject slot"
+            );
+            HandlersOutcome::TerminalFailure
+        }
+    };
 
     let outcome_label = match outcome {
         HandlersOutcome::Success => {
@@ -297,6 +323,12 @@ async fn process_message(
                 warn!(%error, %message_id, "failed to nack message");
             }
             "nack"
+        }
+        HandlersOutcome::TerminalFailure => {
+            if let Err(error) = message.term_ack().await {
+                warn!(%error, %message_id, "failed to term-ack message");
+            }
+            "term"
         }
     };
 
@@ -346,22 +378,21 @@ async fn run_handlers(
 
             if let Some(max_attempts) = max_attempts {
                 if envelope.attempt >= max_attempts {
-                    warn!(
+                    error!(
                         handler = handler.name(),
                         message_id = %envelope.id.0,
                         attempt = envelope.attempt,
                         %max_attempts,
                         %error,
-                        "max attempts reached, acking message"
+                        "max attempts reached, term-acking message"
                     );
-                    continue;
+                    return HandlersOutcome::TerminalFailure;
                 }
 
                 let retry_delay = handler_config.retry_interval();
                 return HandlersOutcome::Failed { retry_delay };
             }
 
-            // No retry config: ack the message (retries are opt-in)
             warn!(
                 handler = handler.name(),
                 message_id = %envelope.id.0,
@@ -372,6 +403,16 @@ async fn run_handlers(
         }
     }
     HandlersOutcome::Success
+}
+
+fn extract_panic_message(payload: &Box<dyn Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
 }
 
 #[cfg(test)]
@@ -421,7 +462,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handler_failure_at_retry_limit_returns_success() {
+    async fn handler_failure_at_retry_limit_returns_terminal_failure() {
         let configuration = EngineConfiguration::default();
 
         let handler = MockHandler::new("stream", "subject")
@@ -437,7 +478,7 @@ mod tests {
         let runtime = test_runtime(&configuration);
         let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
 
-        assert!(matches!(outcome, HandlersOutcome::Success));
+        assert!(matches!(outcome, HandlersOutcome::TerminalFailure));
     }
 
     #[tokio::test]

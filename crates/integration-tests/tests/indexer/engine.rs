@@ -4,6 +4,7 @@
 //! They require a Docker-compatible runtime (Docker, Colima, etc).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use arrow::array::{Int32Array, StringArray, UInt64Array};
@@ -217,13 +218,18 @@ impl TestContext {
     }
 
     async fn create_broker(&self) -> Arc<NatsBroker> {
+        self.create_broker_with_config(NatsConfiguration {
+            url: self.nats_url.clone(),
+            ..Default::default()
+        })
+        .await
+    }
+
+    async fn create_broker_with_config(&self, config: NatsConfiguration) -> Arc<NatsBroker> {
         Arc::new(
-            NatsBroker::connect(&NatsConfiguration {
-                url: self.nats_url.clone(),
-                ..Default::default()
-            })
-            .await
-            .expect("failed to connect to NATS"),
+            NatsBroker::connect(&config)
+                .await
+                .expect("failed to connect to NATS"),
         )
     }
 
@@ -347,4 +353,155 @@ async fn multiple_handlers_receive_same_message() {
     run_engine_for(engine, Duration::from_secs(2)).await;
 
     assert_eq!(context.query_count().await, 2);
+}
+
+const PANIC_STREAM: &str = "panic_test_stream";
+const PANIC_SUBJECT: &str = "panic.events";
+
+fn panic_topic() -> Topic {
+    Topic::owned(PANIC_STREAM, PANIC_SUBJECT)
+}
+
+struct PanickingHandler {
+    should_panic: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl Handler for PanickingHandler {
+    fn name(&self) -> &str {
+        "panicking-handler"
+    }
+
+    fn topic(&self) -> Topic {
+        panic_topic()
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        static CONFIG: HandlerConfiguration = HandlerConfiguration {
+            concurrency_group: None,
+            max_attempts: None,
+            retry_interval_secs: None,
+        };
+        &CONFIG
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        if self.should_panic.load(Ordering::SeqCst) {
+            panic!("intentional panic in handler");
+        }
+
+        let event: TestEvent = message
+            .to_event()
+            .map_err(|error| HandlerError::Processing(error.to_string()))?;
+
+        let writer = context
+            .destination
+            .new_batch_writer(TABLE)
+            .await
+            .map_err(|error| HandlerError::Processing(error.to_string()))?;
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("name", DataType::Utf8, false),
+        ]));
+
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int32Array::from(vec![event.id])),
+                Arc::new(StringArray::from(vec![event.name.as_str()])),
+            ],
+        )
+        .map_err(|error| HandlerError::Processing(error.to_string()))?;
+
+        writer
+            .write_batch(&[batch])
+            .await
+            .map_err(|error| HandlerError::Processing(error.to_string()))?;
+
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn subject_is_unblocked_after_handler_panic() {
+    let context = TestContext::new().await;
+
+    let nats_config = NatsConfiguration {
+        url: context.nats_url.clone(),
+        max_deliver: Some(1),
+        consumer_name: Some("panic-test-consumer".into()),
+        ..Default::default()
+    };
+
+    let should_panic = Arc::new(AtomicBool::new(true));
+    let destination = context.create_destination().await;
+
+    // Phase 1: publish a message that will cause the handler to panic.
+    // The engine should catch the panic and term-ack the message, freeing the subject slot.
+    {
+        let broker = context.create_broker_with_config(nats_config.clone()).await;
+
+        broker
+            .ensure_streams(&[panic_topic()])
+            .await
+            .expect("stream creation should succeed");
+
+        let envelope = Envelope::new(&TestEvent {
+            id: 1,
+            name: "will-panic".into(),
+        })
+        .expect("envelope");
+        broker
+            .publish(&panic_topic(), &envelope)
+            .await
+            .expect("first publish should succeed");
+
+        let handler = PanickingHandler {
+            should_panic: should_panic.clone(),
+        };
+        let engine = create_engine(broker.clone(), destination.clone(), Box::new(handler));
+
+        run_engine_for(engine, Duration::from_secs(2)).await;
+
+        let broker = Arc::try_unwrap(broker)
+            .ok()
+            .expect("broker has no other owners");
+        broker.shutdown().await;
+    }
+
+    assert_eq!(
+        context.query_count().await,
+        0,
+        "panicked message should not be written"
+    );
+
+    // Phase 2: the subject slot is now free. Publish a new message and verify it
+    // is processed by a non-panicking handler.
+    should_panic.store(false, Ordering::SeqCst);
+
+    let broker = context.create_broker_with_config(nats_config).await;
+
+    let envelope = Envelope::new(&TestEvent {
+        id: 2,
+        name: "after-panic".into(),
+    })
+    .expect("envelope");
+    broker
+        .publish(&panic_topic(), &envelope)
+        .await
+        .expect("republish should succeed after term-ack freed the subject slot");
+
+    let handler = PanickingHandler {
+        should_panic: should_panic.clone(),
+    };
+    let engine = create_engine(broker.clone(), destination, Box::new(handler));
+
+    run_engine_for(engine, Duration::from_secs(2)).await;
+
+    assert_eq!(
+        context.query_count().await,
+        1,
+        "second message should be processed"
+    );
 }
