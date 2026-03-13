@@ -364,6 +364,60 @@ async fn skips_creation_when_disabled() {
 }
 
 #[tokio::test]
+async fn updates_stream_config_without_error() {
+    // Regression test for https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/261
+    //
+    // Previously, ensure_streams used create_stream which rejected config changes with error 10058
+    // ("stream name already in use with a different configuration"), causing CrashLoopBackOff
+    // during rolling updates when stream subjects changed between versions.
+    let (_container, url) = start_nats_container().await;
+
+    let config = NatsConfiguration {
+        url: url.clone(),
+        auto_create_streams: true,
+        ..Default::default()
+    };
+
+    let broker = NatsBroker::connect(&config)
+        .await
+        .expect("failed to connect");
+
+    // First deploy: create stream with initial subject set
+    let topic_v1 = Topic::owned(TEST_STREAM, TEST_SUBJECT);
+    broker
+        .ensure_streams(&[topic_v1])
+        .await
+        .expect("should create stream on first deploy");
+
+    // Second deploy: new broker instance with an expanded subject set (simulates version upgrade)
+    let broker2 = NatsBroker::connect(&config)
+        .await
+        .expect("failed to connect second broker");
+
+    let topic_v2_existing = Topic::owned(TEST_STREAM, TEST_SUBJECT);
+    let topic_v2_new = Topic::owned(TEST_STREAM, "test.new_subject");
+    broker2
+        .ensure_streams(&[topic_v2_existing, topic_v2_new])
+        .await
+        .expect("should update stream config without error 10058");
+
+    // Verify the stream now includes the new subject
+    let client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("connect");
+    let jetstream = async_nats::jetstream::new(client);
+    let mut stream = jetstream
+        .get_stream(TEST_STREAM)
+        .await
+        .expect("stream should exist");
+    let info = stream.info().await.expect("failed to get stream info");
+    assert!(
+        info.config.subjects.contains(&"test.new_subject".to_string()),
+        "stream should have updated subjects after config change"
+    );
+}
+
+#[tokio::test]
 async fn idempotent_when_stream_exists() {
     let (_container, url) = start_nats_container().await;
 
