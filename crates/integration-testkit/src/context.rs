@@ -88,6 +88,30 @@ impl TestContext {
             .expect("parameterized query failed")
     }
 
+    /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
+    /// every inserted row. Queries `system.tables` for the current database
+    /// and runs `OPTIMIZE TABLE … FINAL` on each table concurrently.
+    pub async fn optimize_all(&self) {
+        let batches = self
+            .query(&format!(
+                "SELECT name FROM system.tables WHERE database = '{}' AND engine NOT IN ('View', 'MaterializedView')",
+                self.config.database
+            ))
+            .await;
+
+        let stmts: Vec<String> = batches
+            .iter()
+            .flat_map(|batch| {
+                let col = get_string_column(batch, "name");
+                (0..batch.num_rows())
+                    .map(|i| format!("OPTIMIZE TABLE `{}` FINAL", col.value(i)))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        futures::future::join_all(stmts.iter().map(|sql| self.execute(sql))).await;
+    }
+
     pub async fn truncate_all_tables(&self) {
         let batches = self
             .query(&format!(

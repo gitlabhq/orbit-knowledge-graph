@@ -8,36 +8,86 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
   and exposes `query()`, `execute()`, and `query_parameterized()` for Arrow-based results.
 - **`TestContext::fork()`** — Creates an isolated database per subtest so subtests can run
   in parallel against one container.
+- **`TestContext::optimize_all()`** — Queries `system.tables` for the current database and
+  runs `OPTIMIZE TABLE … FINAL` concurrently on every table. Call after seeding data.
+- **`run_subtests_shared!`** — Macro that runs all subtests in parallel against the same
+  shared database. Use for read-only subtests.
 - **`run_subtests!`** — Macro that forks a database per subtest and runs them concurrently.
+  Use for subtests that write data beyond the initial seed.
 - **Arrow extractors** — `get_string_column`, `get_int64_column`, `get_uint64_column`,
   `get_boolean_column` for pulling typed columns out of `RecordBatch`.
 - **`ResponseView`** — Typed wrapper over `GraphResponse` for asserting query pipeline
   output. Includes assertion enforcement that catches under-tested queries.
 
-## Usage
+## Choosing a test macro
 
-This crate is a dependency (not dev-dependency) because test crates like
-`integration-tests` and `indexer` import it as a regular dependency in their
-`[dev-dependencies]` section.
+| Macro | DB per subtest | Use when |
+|---|---|---|
+| `run_subtests_shared!` | No (shared) | All subtests only SELECT against seeded data |
+| `run_subtests!` | Yes (forked) | Subtests INSERT/UPDATE/DELETE beyond the seed |
+
+Most test suites are read-only. The typical pattern is:
 
 ```rust
-use integration_testkit::{TestContext, run_subtests, SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL};
+use integration_testkit::{run_subtests, run_subtests_shared, TestContext,
+                          SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL};
 
 #[tokio::test]
-async fn my_integration_test() {
+async fn my_test_suite() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
-    run_subtests!(&ctx, subtest_a, subtest_b);
-}
+    seed(&ctx).await;
 
-async fn subtest_a(ctx: &TestContext) {
-    ctx.execute("INSERT INTO ...").await;
-    let batches = ctx.query("SELECT ...").await;
-    // assertions
+    // Read-only subtests: seed once, query many.
+    run_subtests_shared!(&ctx,
+        search_returns_correct_values,
+        traversal_joins_are_correct,
+    );
+
+    // Mutating subtests: each gets its own forked DB.
+    run_subtests!(&ctx,
+        writes_extra_data_then_queries,
+    );
 }
 ```
 
-Requires Docker (via Colima or native). Start with `mise colima:start` before running
-integration tests.
+### Writing a seed function
+
+Seed functions insert test data and call `optimize_all()` at the end:
+
+```rust
+async fn seed(ctx: &TestContext) {
+    ctx.execute("INSERT INTO gl_user ...").await;
+    ctx.execute("INSERT INTO gl_edge ...").await;
+    ctx.optimize_all().await;
+}
+```
+
+`optimize_all()` forces ClickHouse to merge ReplacingMergeTree parts so all
+inserted rows are visible to subsequent queries. Without it, concurrent reads
+can intermittently miss freshly-written data.
+
+### Writing subtests
+
+Read-only subtests receive a shared `&TestContext` and only query:
+
+```rust
+async fn search_returns_correct_values(ctx: &TestContext) {
+    let resp = run_query(ctx, "...", &allow_all()).await;
+    resp.assert_node_count(5);
+}
+```
+
+Mutating subtests call their own seed and do additional writes. They go in the
+`run_subtests!` block so they get an isolated database:
+
+```rust
+async fn writes_extra_data_then_queries(ctx: &TestContext) {
+    seed(ctx).await;
+    ctx.execute("INSERT INTO gl_note ...").await;
+    let resp = run_query(ctx, "...", &allow_all()).await;
+    // ...
+}
+```
 
 ## ResponseView
 

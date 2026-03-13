@@ -16,7 +16,7 @@ use gkg_server::query_pipeline::{
     QueryPipelineContext, RedactionOutput, ResultFormatter,
 };
 use gkg_server::redaction::QueryResult;
-use integration_testkit::run_subtests;
+use integration_testkit::{run_subtests, run_subtests_shared};
 use query_engine::compile;
 use serde_json::Value;
 
@@ -139,6 +139,8 @@ async fn seed(ctx: &TestContext) {
          ('1/101/1001/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note')",
     )
     .await;
+
+    ctx.optimize_all().await;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,7 +205,6 @@ fn allow_all() -> MockRedactionService {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_exact_properties(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -253,7 +254,6 @@ async fn search_exact_properties(ctx: &TestContext) {
 }
 
 async fn search_unicode_properties(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -273,7 +273,6 @@ async fn search_unicode_properties(ctx: &TestContext) {
 }
 
 async fn search_redaction_exact(ctx: &TestContext) {
-    seed(ctx).await;
 
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 3, 5]);
@@ -306,7 +305,6 @@ async fn search_redaction_exact(ctx: &TestContext) {
 }
 
 async fn search_no_authorization_returns_empty(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -327,7 +325,6 @@ async fn search_no_authorization_returns_empty(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_single_hop_exact(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -410,7 +407,6 @@ async fn traversal_single_hop_exact(ctx: &TestContext) {
 }
 
 async fn traversal_redaction_removes_unauthorized_paths(ctx: &TestContext) {
-    seed(ctx).await;
 
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 2, 3, 4, 5]);
@@ -454,7 +450,6 @@ async fn traversal_redaction_removes_unauthorized_paths(ctx: &TestContext) {
 }
 
 async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -486,7 +481,6 @@ async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
 }
 
 async fn traversal_with_filter(ctx: &TestContext) {
-    seed(ctx).await;
 
     // Only active users → groups
     let value = run_pipeline(
@@ -529,7 +523,6 @@ async fn traversal_with_filter(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn aggregation_count_exact(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -588,7 +581,6 @@ async fn aggregation_count_exact(ctx: &TestContext) {
 }
 
 async fn aggregation_redaction(ctx: &TestContext) {
-    seed(ctx).await;
 
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 2]);
@@ -630,7 +622,6 @@ async fn aggregation_redaction(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_exact_path(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -704,7 +695,6 @@ async fn path_finding_exact_path(ctx: &TestContext) {
 }
 
 async fn path_finding_redaction_blocks_path(ctx: &TestContext) {
-    seed(ctx).await;
 
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);
@@ -733,7 +723,6 @@ async fn path_finding_redaction_blocks_path(ctx: &TestContext) {
 }
 
 async fn path_finding_max_depth(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -766,7 +755,6 @@ async fn path_finding_max_depth(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn neighbors_outgoing_exact(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -830,7 +818,6 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
 }
 
 async fn neighbors_incoming_exact(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -873,7 +860,6 @@ async fn neighbors_incoming_exact(ctx: &TestContext) {
 }
 
 async fn neighbors_both_exact(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -943,7 +929,6 @@ async fn neighbors_both_exact(ctx: &TestContext) {
 }
 
 async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
-    seed(ctx).await;
 
     // User 1 is MEMBER_OF Group 100 (User→Group edge in gl_edge)
     // Query neighbors of User 1 in both directions
@@ -972,7 +957,6 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
 }
 
 async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
-    seed(ctx).await;
 
     // MR 2000 has incoming AUTHORED from User 1 and outgoing HAS_NOTE to Notes 3000, 3002, 3003
     let value = run_pipeline(
@@ -1020,7 +1004,6 @@ async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
 }
 
 async fn neighbors_redaction(ctx: &TestContext) {
-    seed(ctx).await;
 
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);
@@ -1063,7 +1046,6 @@ async fn neighbors_redaction(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn giant_string_survives_pipeline(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1090,7 +1072,6 @@ async fn giant_string_survives_pipeline(ctx: &TestContext) {
 }
 
 async fn sql_injection_string_preserved(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1125,7 +1106,6 @@ async fn sql_injection_string_preserved(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn aggregation_sum(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1174,7 +1154,6 @@ async fn aggregation_sum(ctx: &TestContext) {
 }
 
 async fn aggregation_avg(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1216,7 +1195,6 @@ async fn aggregation_avg(ctx: &TestContext) {
 }
 
 async fn aggregation_min_max(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1251,7 +1229,6 @@ async fn aggregation_min_max(ctx: &TestContext) {
 }
 
 async fn aggregation_min_string(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1283,7 +1260,6 @@ async fn aggregation_min_string(ctx: &TestContext) {
 }
 
 async fn aggregation_multiple_functions(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1346,7 +1322,6 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_incoming_direction(ctx: &TestContext) {
-    seed(ctx).await;
 
     // Incoming: Group ← User via MEMBER_OF (reversed: "from": "g", "to": "u", direction: incoming)
     // This finds which users are members of groups, but from the group's perspective
@@ -1390,7 +1365,6 @@ async fn traversal_incoming_direction(ctx: &TestContext) {
 }
 
 async fn traversal_both_direction(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1481,7 +1455,6 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_boolean_columns(ctx: &TestContext) {
-    seed(ctx).await;
 
     // Note.confidential is Bool, Note.internal is Bool
     let value = run_pipeline(
@@ -1555,7 +1528,6 @@ async fn search_datetime_columns(ctx: &TestContext) {
 }
 
 async fn search_nullable_columns(ctx: &TestContext) {
-    seed(ctx).await;
 
     // Note 3000 has no created_at → should be null
     let value = run_pipeline(
@@ -1587,7 +1559,6 @@ async fn search_nullable_columns(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_wildcard_columns(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1626,7 +1597,6 @@ async fn search_wildcard_columns(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_all_shortest(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1665,7 +1635,6 @@ async fn path_finding_all_shortest(ctx: &TestContext) {
 }
 
 async fn path_finding_any(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1699,7 +1668,6 @@ async fn path_finding_any(ctx: &TestContext) {
 }
 
 async fn path_finding_with_rel_types(ctx: &TestContext) {
-    seed(ctx).await;
 
     // Only follow MEMBER_OF edges — should find User→Group but not Group→Project (CONTAINS)
     let value = run_pipeline(
@@ -1727,7 +1695,6 @@ async fn path_finding_with_rel_types(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
-    seed(ctx).await;
 
     // User 1 has outgoing: MEMBER_OF (to groups) and AUTHORED (to MRs)
     // Filter to only AUTHORED → should only see MergeRequest neighbors
@@ -1776,7 +1743,6 @@ async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
 }
 
 async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1825,7 +1791,6 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn filter_in_operator(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1852,7 +1817,6 @@ async fn filter_in_operator(ctx: &TestContext) {
 }
 
 async fn filter_contains_operator(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1880,7 +1844,6 @@ async fn filter_contains_operator(ctx: &TestContext) {
 }
 
 async fn filter_starts_with_operator(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1902,7 +1865,6 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
 }
 
 async fn filter_is_null_operator(ctx: &TestContext) {
-    seed(ctx).await;
 
     // Users without created_at (all seeded users have no created_at)
     let value = run_pipeline(
@@ -1937,7 +1899,6 @@ async fn filter_is_null_operator(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_node_ids_filtering(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1967,7 +1928,6 @@ async fn search_node_ids_filtering(ctx: &TestContext) {
 }
 
 async fn search_with_order_by(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -1997,7 +1957,6 @@ async fn search_with_order_by(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn empty_result_all_fields_present(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -2022,7 +1981,6 @@ async fn empty_result_all_fields_present(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -2067,7 +2025,6 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
 }
 
 async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -2105,7 +2062,6 @@ async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
 }
 
 async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
-    seed(ctx).await;
 
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 2, 3, 4, 5]);
@@ -2153,7 +2109,6 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_chain_user_group_project(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -2201,7 +2156,6 @@ async fn traversal_chain_user_group_project(ctx: &TestContext) {
 }
 
 async fn traversal_chain_user_mr_note(ctx: &TestContext) {
-    seed(ctx).await;
 
     let value = run_pipeline(
         ctx,
@@ -2252,7 +2206,10 @@ async fn traversal_chain_user_mr_note(ctx: &TestContext) {
 #[tokio::test]
 async fn graph_formatter_e2e() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
-    run_subtests!(
+    seed(&ctx).await;
+
+    // Read-only subtests share one database (seed once, query many).
+    run_subtests_shared!(
         &ctx,
         // Search — properties and redaction
         search_exact_properties,
@@ -2264,7 +2221,6 @@ async fn graph_formatter_e2e() {
         search_with_order_by,
         // Search — column types
         search_boolean_columns,
-        search_datetime_columns,
         search_nullable_columns,
         // Traversal — basic
         traversal_single_hop_exact,
@@ -2278,8 +2234,6 @@ async fn graph_formatter_e2e() {
         // Traversal — direction
         traversal_incoming_direction,
         traversal_both_direction,
-        // Traversal — fan-in
-        traversal_shared_target_node,
         // Traversal — chains (no traversal_path prefix in joins)
         traversal_chain_user_group_project,
         traversal_chain_user_mr_note,
@@ -2316,5 +2270,12 @@ async fn graph_formatter_e2e() {
         giant_string_survives_pipeline,
         sql_injection_string_preserved,
         empty_result_all_fields_present,
+    );
+
+    // Mutating subtests need their own forked databases.
+    run_subtests!(
+        &ctx,
+        traversal_shared_target_node,
+        search_datetime_columns,
     );
 }
