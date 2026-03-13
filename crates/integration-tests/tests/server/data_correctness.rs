@@ -102,10 +102,11 @@ async fn run_query(ctx: &TestContext, json: &str, svc: &MockRedactionService) ->
 
 fn allow_all() -> MockRedactionService {
     let mut svc = MockRedactionService::new();
-    svc.allow("user", &[1, 2, 3, 4, 5]);
-    svc.allow("group", &[100, 101, 102]);
+    svc.allow("user", &[1, 2, 3, 4, 5, 6]);
+    svc.allow("group", &[100, 101, 102, 200, 300]);
     svc.allow("project", &[1000, 1001, 1002, 1003, 1004]);
     svc.allow("merge_request", &[2000, 2001, 2002, 2003]);
+    svc.allow("note", &[3000, 3001, 3002, 3003]);
     svc
 }
 
@@ -121,11 +122,14 @@ fn allow_all() -> MockRedactionService {
 //     3 charlie (active,  human)
 //     4 diana   (active,  project_bot)
 //     5 eve     (blocked, service_account)
+//     6 用户_émoji_🎉 (active, human) — unicode stress test
 //
 //   Groups:
 //     100 Public Group   (public,   path 1/100/)
 //     101 Private Group  (private,  path 1/101/)
 //     102 Internal Group (internal, path 1/102/)
+//     200 Deep Group A   (public,   path 1/100/200/)
+//     300 Deep Group B   (public,   path 1/100/200/300/)
 //
 //   Projects:
 //     1000 Public Project   (public,   path 1/100/1000/)
@@ -140,19 +144,33 @@ fn allow_all() -> MockRedactionService {
 //     2002 Refactor C    (merged, path 1/101/1001/)
 //     2003 Update D      (closed, path 1/102/1004/)
 //
+//   Notes:
+//     3000 Normal note           (MR 2000, not confidential, not internal)
+//     3001 Confidential note     (MR 2001, confidential=true)
+//     3002 Giant string note     (MR 2000, 10000 chars)
+//     3003 SQL injection note    (MR 2000, DROP TABLE payload)
+//
 //   MEMBER_OF edges:
 //     User 1 → Group 100, User 1 → Group 102
 //     User 2 → Group 100, User 3 → Group 101
 //     User 4 → Group 101, User 4 → Group 102, User 5 → Group 101
+//     User 6 → Group 100, User 6 → Group 101
 //
 //   CONTAINS edges:
 //     Group 100 → Project 1000, Group 100 → Project 1002
+//     Group 100 → Group 200 (subgroup)
+//     Group 200 → Group 300 (subgroup depth 2)
 //     Group 101 → Project 1001, Group 101 → Project 1003
 //     Group 102 → Project 1004
 //
 //   AUTHORED edges:
 //     User 1 → MR 2000, User 1 → MR 2001
 //     User 2 → MR 2002, User 3 → MR 2003
+//     User 1 → Note 3000
+//
+//   HAS_NOTE edges:
+//     MR 2000 → Note 3000, MR 2000 → Note 3002, MR 2000 → Note 3003
+//     MR 2001 → Note 3001
 
 async fn seed(ctx: &TestContext) {
     ctx.execute(
@@ -161,7 +179,8 @@ async fn seed(ctx: &TestContext) {
          (2, 'bob', 'Bob Builder', 'active', 'human'),
          (3, 'charlie', 'Charlie Private', 'active', 'human'),
          (4, 'diana', 'Diana Developer', 'active', 'project_bot'),
-         (5, 'eve', 'Eve External', 'blocked', 'service_account')",
+         (5, 'eve', 'Eve External', 'blocked', 'service_account'),
+         (6, '用户_émoji_🎉', 'Ünïcödé Üser', 'active', 'human')",
     )
     .await;
 
@@ -169,7 +188,9 @@ async fn seed(ctx: &TestContext) {
         "INSERT INTO gl_group (id, name, visibility_level, traversal_path) VALUES
          (100, 'Public Group', 'public', '1/100/'),
          (101, 'Private Group', 'private', '1/101/'),
-         (102, 'Internal Group', 'internal', '1/102/')",
+         (102, 'Internal Group', 'internal', '1/102/'),
+         (200, 'Deep Group A', 'public', '1/100/200/'),
+         (300, 'Deep Group B', 'public', '1/100/200/300/')",
     )
     .await;
 
@@ -192,6 +213,16 @@ async fn seed(ctx: &TestContext) {
     )
     .await;
 
+    let giant_string = "x".repeat(10_000);
+    ctx.execute(&format!(
+        "INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, traversal_path) VALUES
+         (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '1/100/1000/'),
+         (3001, 'Confidential feedback on bug B', 'MergeRequest', 2001, true, false, '1/100/1000/'),
+         (3002, '{giant_string}', 'MergeRequest', 2000, false, false, '1/100/1000/'),
+         (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, '1/100/1000/')",
+    ))
+    .await;
+
     ctx.execute(
         "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
@@ -201,6 +232,10 @@ async fn seed(ctx: &TestContext) {
          ('1/101/', 4, 'User', 'MEMBER_OF', 101, 'Group'),
          ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group'),
          ('1/101/', 5, 'User', 'MEMBER_OF', 101, 'Group'),
+         ('1/100/', 6, 'User', 'MEMBER_OF', 100, 'Group'),
+         ('1/101/', 6, 'User', 'MEMBER_OF', 101, 'Group'),
+         ('1/100/200/', 100, 'Group', 'CONTAINS', 200, 'Group'),
+         ('1/100/200/300/', 200, 'Group', 'CONTAINS', 300, 'Group'),
          ('1/100/1000/', 100, 'Group', 'CONTAINS', 1000, 'Project'),
          ('1/100/1002/', 100, 'Group', 'CONTAINS', 1002, 'Project'),
          ('1/101/1001/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
@@ -209,7 +244,12 @@ async fn seed(ctx: &TestContext) {
          ('1/100/1000/', 1, 'User', 'AUTHORED', 2000, 'MergeRequest'),
          ('1/100/1000/', 1, 'User', 'AUTHORED', 2001, 'MergeRequest'),
          ('1/101/1001/', 2, 'User', 'AUTHORED', 2002, 'MergeRequest'),
-         ('1/102/1004/', 3, 'User', 'AUTHORED', 2003, 'MergeRequest')",
+         ('1/102/1004/', 3, 'User', 'AUTHORED', 2003, 'MergeRequest'),
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 3000, 'Note'),
+         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3000, 'Note'),
+         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3002, 'Note'),
+         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3003, 'Note'),
+         ('1/100/1000/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note')",
     )
     .await;
 
@@ -233,8 +273,8 @@ async fn search_returns_correct_user_properties(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_count(5);
-    resp.assert_node_order("User", &[1, 2, 3, 4, 5]);
+    resp.assert_node_count(6);
+    resp.assert_node_order("User", &[1, 2, 3, 4, 5, 6]);
 
     let alice = resp.find_node("User", 1).unwrap();
     alice.assert_str("username", "alice");
@@ -390,6 +430,8 @@ async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext)
             (4, 101),
             (4, 102),
             (5, 101),
+            (6, 100),
+            (6, 101),
         ],
     );
 
@@ -714,10 +756,15 @@ async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
 
     resp.assert_referential_integrity();
 
+    resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("Group", &[100, 102]);
+    resp.assert_node_ids("MergeRequest", &[2000, 2001]);
+    resp.assert_node_ids("Note", &[3000]);
 
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 1, "Group", 102, "MEMBER_OF");
+    resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+    resp.assert_edge_exists("User", 1, "Note", 3000, "AUTHORED");
 
     resp.assert_node("Group", 100, |n| n.prop_str("name") == Some("Public Group"));
     resp.assert_node("Group", 102, |n| {
@@ -737,10 +784,12 @@ async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_ids("User", &[1, 2]);
+    resp.assert_node_ids("Group", &[100]);
+    resp.assert_node_ids("User", &[1, 2, 6]);
 
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 2, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_exists("User", 6, "Group", 100, "MEMBER_OF");
 }
 
 async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
@@ -755,8 +804,9 @@ async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_ids("Group", &[100, 200]);
     resp.assert_node_ids("Project", &[1000, 1002]);
-    resp.assert_edge_count("CONTAINS", 2);
+    resp.assert_edge_count("CONTAINS", 3);
 }
 
 async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
@@ -771,11 +821,13 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_ids("User", &[1, 2]);
+    resp.assert_node_ids("Group", &[100, 200]);
+    resp.assert_node_ids("User", &[1, 2, 6]);
     resp.assert_node_ids("Project", &[1000, 1002]);
 
     resp.assert_referential_integrity();
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
