@@ -15,6 +15,7 @@ use indexer::modules::code::{
     ProjectCodeIndexingHandlerConfig, PushEventHandler, PushEventHandlerConfig, RepositoryService,
     RepositoryServiceError, config::CodeTableNames, metrics::CodeMetrics,
 };
+use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use integration_testkit::TestContext;
 use sha2::{Digest, Sha256};
@@ -191,6 +192,7 @@ pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
         Arc::new(destination),
         Arc::new(MockNatsServices::new()),
         Arc::new(MockLockService::new()),
+        ProgressNotifier::noop(),
     )
 }
 

@@ -13,6 +13,7 @@ use tracing::{debug, info, warn};
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::destination::Destination;
 use crate::handler::HandlerError;
+use crate::nats::ProgressNotifier;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
@@ -50,11 +51,12 @@ impl Pipeline {
         plans: &[PipelinePlan],
         context: &PipelineContext,
         destination: &dyn Destination,
+        progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         let mut errors = Vec::new();
 
         for plan in plans {
-            if let Err(err) = self.run_plan(plan, context, destination).await {
+            if let Err(err) = self.run_plan(plan, context, destination, progress).await {
                 self.metrics
                     .record_pipeline_error(&plan.name, err.error_kind());
                 errors.push(format!("{}: {err}", plan.name));
@@ -76,6 +78,7 @@ impl Pipeline {
         plan: &PipelinePlan,
         context: &PipelineContext,
         destination: &dyn Destination,
+        progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
         let mut extract_query = plan.extract_query.clone();
@@ -134,6 +137,8 @@ impl Pipeline {
                         plan.name
                     ))
                 })?;
+
+            progress.notify_in_progress().await;
 
             if rows_in_batch < plan.extract_query.batch_size() {
                 break;
@@ -448,6 +453,7 @@ mod tests {
 
     use crate::modules::sdlc::test_fixtures::EmptyDatalake;
     use crate::modules::sdlc::test_fixtures::FailingDatalake;
+    use crate::nats::ProgressNotifier;
 
     struct MultiBatchDatalake {
         call_count: Mutex<u32>,
@@ -536,7 +542,12 @@ mod tests {
         let destination = MockDestination::new();
 
         let result = pipeline
-            .run(&[simple_plan("Test")], &test_context(), &destination)
+            .run(
+                &[simple_plan("Test")],
+                &test_context(),
+                &destination,
+                &ProgressNotifier::noop(),
+            )
             .await;
         assert!(result.is_ok());
     }
@@ -557,7 +568,14 @@ mod tests {
         );
         let destination = MockDestination::new();
 
-        let result = pipeline.run(&[plan], &test_context(), &destination).await;
+        let result = pipeline
+            .run(
+                &[plan],
+                &test_context(),
+                &destination,
+                &ProgressNotifier::noop(),
+            )
+            .await;
 
         assert!(result.is_ok());
 
@@ -575,7 +593,14 @@ mod tests {
         let destination = MockDestination::new();
 
         let plans = vec![simple_plan("First"), simple_plan("Second")];
-        let result = pipeline.run(&plans, &test_context(), &destination).await;
+        let result = pipeline
+            .run(
+                &plans,
+                &test_context(),
+                &destination,
+                &ProgressNotifier::noop(),
+            )
+            .await;
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -596,7 +621,12 @@ mod tests {
         let destination = MockDestination::new();
 
         let result = pipeline
-            .run(&[simple_plan("Test")], &test_context(), &destination)
+            .run(
+                &[simple_plan("Test")],
+                &test_context(),
+                &destination,
+                &ProgressNotifier::noop(),
+            )
             .await;
 
         assert!(result.is_ok());
