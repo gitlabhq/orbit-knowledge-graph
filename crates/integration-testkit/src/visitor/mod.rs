@@ -345,20 +345,6 @@ impl ResponseView {
         edges
     }
 
-    // ── Visitor ──────────────────────────────────────────────────────
-
-    pub fn visit_nodes(&self, mut f: impl FnMut(&GraphNode)) {
-        for node in &self.response.nodes {
-            f(node);
-        }
-    }
-
-    pub fn visit_edges(&self, mut f: impl FnMut(&GraphEdge)) {
-        for edge in &self.response.edges {
-            f(edge);
-        }
-    }
-
     // ── Assertions ───────────────────────────────────────────────────
 
     pub fn assert_node_exists(&self, entity_type: &str, id: i64) {
@@ -493,6 +479,58 @@ impl ResponseView {
         }
     }
 
+    /// Assert that the IDs of nodes with `entity_type` match `expected` exactly (unordered).
+    /// Satisfies [`Requirement::NodeIds`].
+    pub fn assert_node_ids(&self, entity_type: &str, expected: &[i64]) {
+        self.tracker.satisfy(Requirement::NodeIds);
+        let actual: HashSet<i64> = self
+            .response
+            .nodes
+            .iter()
+            .filter(|n| n.entity_type == entity_type)
+            .map(|n| n.id)
+            .collect();
+        let expected_set: HashSet<i64> = expected.iter().copied().collect();
+        assert_eq!(actual, expected_set, "{entity_type} node IDs mismatch");
+    }
+
+    /// Assert the exact set of `(from_id, to_id)` pairs for edges of `edge_type`.
+    /// Satisfies [`Requirement::Relationship`] and [`Requirement::Neighbors`].
+    pub fn assert_edge_set(&self, edge_type: &str, expected: &[(i64, i64)]) {
+        self.tracker.satisfy(Requirement::Relationship {
+            edge_type: edge_type.to_string(),
+        });
+        self.tracker.satisfy(Requirement::Neighbors);
+        let actual: HashSet<(i64, i64)> = self
+            .response
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == edge_type)
+            .map(|e| (e.from_id, e.to_id))
+            .collect();
+        let expected_set: HashSet<(i64, i64)> = expected.iter().copied().collect();
+        assert_eq!(actual, expected_set, "{edge_type} edge set mismatch");
+    }
+
+    /// Assert the number of edges with `edge_type`.
+    /// Satisfies [`Requirement::Relationship`] and [`Requirement::Neighbors`].
+    pub fn assert_edge_count(&self, edge_type: &str, expected: usize) {
+        self.tracker.satisfy(Requirement::Relationship {
+            edge_type: edge_type.to_string(),
+        });
+        self.tracker.satisfy(Requirement::Neighbors);
+        let actual = self
+            .response
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == edge_type)
+            .count();
+        assert_eq!(
+            actual, expected,
+            "expected {expected} {edge_type} edges, got {actual}"
+        );
+    }
+
     /// Assert that nodes of the given type appear in exactly this ID order.
     /// Satisfies [`Requirement::OrderBy`], [`Requirement::NodeIds`], and
     /// [`Requirement::AggregationSort`].
@@ -614,38 +652,6 @@ impl NodeExt for GraphNode {
             self.entity_type,
             self.id
         );
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EdgeExt
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub trait EdgeExt {
-    fn connects(&self, from: &str, from_id: i64, to: &str, to_id: i64) -> bool;
-}
-
-impl EdgeExt for GraphEdge {
-    fn connects(&self, from: &str, from_id: i64, to: &str, to_id: i64) -> bool {
-        self.from == from && self.from_id == from_id && self.to == to && self.to_id == to_id
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ResponseVisitor trait
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub trait ResponseVisitor {
-    fn visit_node(&mut self, _node: &GraphNode) {}
-    fn visit_edge(&mut self, _edge: &GraphEdge) {}
-}
-
-pub fn walk_response(response: &ResponseView, visitor: &mut impl ResponseVisitor) {
-    for node in &response.response.nodes {
-        visitor.visit_node(node);
-    }
-    for edge in &response.response.edges {
-        visitor.visit_edge(edge);
     }
 }
 
@@ -936,24 +942,6 @@ pub(crate) mod tests {
         assert!(view.path(99).is_empty());
     }
 
-    // ── Visitor helpers ──────────────────────────────────────────────
-
-    #[test]
-    fn visit_nodes_visits_all() {
-        let view = ResponseView::new(sample_response());
-        let mut count = 0;
-        view.visit_nodes(|_| count += 1);
-        assert_eq!(count, 4);
-    }
-
-    #[test]
-    fn visit_edges_visits_all() {
-        let view = ResponseView::new(sample_response());
-        let mut count = 0;
-        view.visit_edges(|_| count += 1);
-        assert_eq!(count, 3);
-    }
-
     // ── Assertions ───────────────────────────────────────────────────
 
     #[test]
@@ -1147,46 +1135,6 @@ pub(crate) mod tests {
     fn assert_prop_passes_for_exact_match() {
         let node = make_node("User", 1, &[("tags", json!(["a", "b"]))]);
         node.assert_prop("tags", &json!(["a", "b"]));
-    }
-
-    // ── EdgeExt ──────────────────────────────────────────────────────
-
-    #[test]
-    fn connects_returns_true_for_matching_endpoints() {
-        let edge = make_edge("User", 1, "Group", 100, "MEMBER_OF");
-        assert!(edge.connects("User", 1, "Group", 100));
-    }
-
-    #[test]
-    fn connects_returns_false_for_wrong_endpoints() {
-        let edge = make_edge("User", 1, "Group", 100, "MEMBER_OF");
-        assert!(!edge.connects("User", 1, "Group", 999));
-        assert!(!edge.connects("User", 2, "Group", 100));
-        assert!(!edge.connects("Project", 1, "Group", 100));
-    }
-
-    // ── walk_response ────────────────────────────────────────────────
-
-    #[test]
-    fn walk_response_visits_all_nodes_and_edges() {
-        struct Counter {
-            nodes: usize,
-            edges: usize,
-        }
-        impl ResponseVisitor for Counter {
-            fn visit_node(&mut self, _: &GraphNode) {
-                self.nodes += 1;
-            }
-            fn visit_edge(&mut self, _: &GraphEdge) {
-                self.edges += 1;
-            }
-        }
-
-        let view = ResponseView::new(sample_response());
-        let mut counter = Counter { nodes: 0, edges: 0 };
-        walk_response(&view, &mut counter);
-        assert_eq!(counter.nodes, 4);
-        assert_eq!(counter.edges, 3);
     }
 
     // ── Empty response ───────────────────────────────────────────────

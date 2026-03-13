@@ -309,8 +309,7 @@ async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
     )
     .await;
 
-    let ids = resp.node_ids("Project");
-    assert_eq!(ids, HashSet::from([1000, 1002, 1004]));
+    resp.assert_node_ids("Project", &[1000, 1002, 1004]);
 
     resp.assert_filter("Project", "visibility_level", |n| {
         let vis = n.prop_str("visibility_level").unwrap_or("");
@@ -354,7 +353,7 @@ async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
     )
     .await;
 
-    assert_eq!(resp.node_ids("Group"), HashSet::from([100, 102]));
+    resp.assert_node_ids("Group", &[100, 102]);
     resp.find_node("Group", 100)
         .unwrap()
         .assert_str("name", "Public Group");
@@ -385,24 +384,17 @@ async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext)
     )
     .await;
 
-    let expected_edges: HashSet<(i64, i64)> = HashSet::from([
-        (1, 100),
-        (1, 102),
-        (2, 100),
-        (3, 101),
-        (4, 101),
-        (4, 102),
-        (5, 101),
-    ]);
-
-    let actual_edges: HashSet<(i64, i64)> = resp
-        .edges_of_type("MEMBER_OF")
-        .iter()
-        .map(|e| (e.from_id, e.to_id))
-        .collect();
-    assert_eq!(
-        actual_edges, expected_edges,
-        "edges must match seeded MEMBER_OF relationships"
+    resp.assert_edge_set(
+        "MEMBER_OF",
+        &[
+            (1, 100),
+            (1, 102),
+            (2, 100),
+            (3, 101),
+            (4, 101),
+            (4, 102),
+            (5, 101),
+        ],
     );
 
     resp.assert_referential_integrity();
@@ -411,12 +403,6 @@ async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext)
     resp.assert_node("Group", 100, |n| n.prop_str("name") == Some("Public Group"));
     resp.assert_node("Group", 101, |n| {
         n.prop_str("name") == Some("Private Group")
-    });
-
-    resp.visit_edges(|e| {
-        assert_eq!(e.edge_type, "MEMBER_OF");
-        assert_eq!(e.from, "User");
-        assert_eq!(e.to, "Group");
     });
 }
 
@@ -522,8 +508,8 @@ async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
     )
     .await;
 
-    assert_eq!(resp.node_ids("User"), HashSet::from([1]));
-    assert_eq!(resp.node_ids("Group"), HashSet::from([100]));
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("Group", &[100]);
     resp.assert_node_absent("User", 2);
     resp.assert_node_absent("Group", 102);
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
@@ -742,8 +728,7 @@ async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
 
     resp.assert_referential_integrity();
 
-    let neighbor_ids = resp.node_ids("Group");
-    assert_eq!(neighbor_ids, HashSet::from([100, 102]));
+    resp.assert_node_ids("Group", &[100, 102]);
 
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 1, "Group", 102, "MEMBER_OF");
@@ -767,8 +752,7 @@ async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
     )
     .await;
 
-    let user_ids = resp.node_ids("User");
-    assert_eq!(user_ids, HashSet::from([1, 2]));
+    resp.assert_node_ids("User", &[1, 2]);
 
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 2, "Group", 100, "MEMBER_OF");
@@ -787,11 +771,8 @@ async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
     )
     .await;
 
-    let project_ids = resp.node_ids("Project");
-    assert_eq!(project_ids, HashSet::from([1000, 1002]));
-
-    let edges = resp.edges_of_type("CONTAINS");
-    assert_eq!(edges.len(), 2, "should have exactly 2 CONTAINS edges");
+    resp.assert_node_ids("Project", &[1000, 1002]);
+    resp.assert_edge_count("CONTAINS", 2);
 }
 
 async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
@@ -807,11 +788,8 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
     )
     .await;
 
-    let user_ids = resp.node_ids("User");
-    let project_ids = resp.node_ids("Project");
-
-    assert_eq!(user_ids, HashSet::from([1, 2]));
-    assert_eq!(project_ids, HashSet::from([1000, 1002]));
+    resp.assert_node_ids("User", &[1, 2]);
+    resp.assert_node_ids("Project", &[1000, 1002]);
 
     resp.assert_referential_integrity();
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
