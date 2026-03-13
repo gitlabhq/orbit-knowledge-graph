@@ -433,14 +433,16 @@ async fn in_progress_prevents_redelivery() {
     let progress = message.progress_notifier();
 
     // Send in-progress after 3s (before the 5s ack_wait expires).
+    // This resets the deadline to ~8s from message delivery.
     tokio::time::sleep(Duration::from_secs(3)).await;
     progress.notify_in_progress().await;
 
-    // Wait another 4s — past the original 5s deadline, but within the reset window.
-    tokio::time::sleep(Duration::from_secs(4)).await;
+    // Wait another 3s — now at ~6s total, past the original 5s deadline
+    // but safely within the reset window (new deadline ~8s).
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
-    // No redelivery should have happened during that time.
-    let redelivery = tokio::time::timeout(Duration::from_secs(2), subscription.next()).await;
+    // Check for 1s — ends at ~7s, still before the 8s reset deadline.
+    let redelivery = tokio::time::timeout(Duration::from_secs(1), subscription.next()).await;
     assert!(
         redelivery.is_err(),
         "message should NOT be redelivered after in-progress signal"
