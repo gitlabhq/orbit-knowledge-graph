@@ -81,7 +81,7 @@ agent-file-sync-check:
 
 mr-title-check:
   stage: lint
-  image: oven/bun:alpine
+  image: oven/bun:1.3-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
