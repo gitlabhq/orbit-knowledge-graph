@@ -20,6 +20,14 @@ impl NatsMessage {
         self.acker.ack().await.map_err(map_ack_error)
     }
 
+    /// Tells NATS this message failed permanently, removing it from the stream.
+    pub async fn term_ack(self) -> Result<(), NatsError> {
+        self.acker
+            .ack_with(AckKind::Term)
+            .await
+            .map_err(map_ack_error)
+    }
+
     /// Negatively acknowledges the message for immediate redelivery.
     pub async fn nack(self) -> Result<(), NatsError> {
         self.acker
