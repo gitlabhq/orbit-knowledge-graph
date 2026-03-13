@@ -171,11 +171,19 @@ impl NatsBroker {
             ..Default::default()
         };
 
-        let stream = self
-            .jetstream
-            .create_stream(stream_config)
+        self.jetstream
+            .create_or_update_stream(stream_config)
             .await
             .map_err(|e| NatsError::StreamCreationFailed {
+                stream: stream_name.to_string(),
+                source: e,
+            })?;
+
+        let stream = self
+            .jetstream
+            .get_stream(stream_name.as_ref())
+            .await
+            .map_err(|e| NatsError::StreamNotFound {
                 stream: stream_name.to_string(),
                 source: e,
             })?;
