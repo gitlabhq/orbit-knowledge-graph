@@ -803,6 +803,83 @@ async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
     });
 }
 
+async fn aggregation_sort_orders_by_aggregate_value(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_order("Group", &[101, 100, 102]);
+
+    resp.assert_node("Group", 101, |n| n.prop_i64("member_count") == Some(4));
+    resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+    resp.assert_node("Group", 102, |n| n.prop_i64("member_count") == Some(2));
+}
+
+async fn aggregation_sum_produces_correct_totals(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "sum", "target": "u", "property": "id", "group_by": "g", "alias": "id_sum"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node("Group", 100, |n| n.prop_i64("id_sum") == Some(1 + 2 + 6));
+    resp.assert_node("Group", 101, |n| {
+        n.prop_i64("id_sum") == Some(3 + 4 + 5 + 6)
+    });
+    resp.assert_node("Group", 102, |n| n.prop_i64("id_sum") == Some(1 + 4));
+}
+
+async fn aggregation_redaction_excludes_unauthorized_from_counts(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1, 2]);
+    svc.allow("group", &[100, 101, 102, 200, 300]);
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &svc,
+    )
+    .await;
+
+    // Aggregation counts are computed in ClickHouse SQL before redaction.
+    // Redaction removes unauthorized *rows* (entity-level), not aggregated
+    // values within surviving rows. Group 100 has 3 MEMBER_OF edges in the
+    // DB so count stays 3 even though only users 1,2 are authorized.
+    resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Path Finding: Path Composition Correctness
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1092,6 +1169,9 @@ async fn data_correctness() {
         // aggregation
         aggregation_count_returns_correct_values,
         aggregation_count_group_contains_projects,
+        aggregation_sort_orders_by_aggregate_value,
+        aggregation_sum_produces_correct_totals,
+        aggregation_redaction_excludes_unauthorized_from_counts,
         // path finding
         path_finding_returns_valid_complete_paths,
         path_finding_multiple_destinations_returns_distinct_paths,
