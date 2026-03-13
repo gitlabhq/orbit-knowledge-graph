@@ -2,7 +2,7 @@
 name = "gkg-utils"
 version.workspace = true
 edition = "2024"
-license = "LicenseRef-EE"
+license = "MIT"
 
 [dependencies]
 arrow = { workspace = true }
