@@ -62,7 +62,7 @@ async fn run_query(ctx: &TestContext, json: &str, svc: &MockRedactionService) ->
     let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
-    
+
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
@@ -402,7 +402,6 @@ async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
 }
 
 async fn search_filter_contains_returns_substring_matches(ctx: &TestContext) {
-    
     let resp = run_query(
         ctx,
         r#"{
@@ -443,7 +442,6 @@ async fn search_filter_is_null_matches_unset_columns(ctx: &TestContext) {
 }
 
 async fn search_with_order_by_desc(ctx: &TestContext) {
-    
     let resp = run_query(
         ctx,
         r#"{
@@ -461,7 +459,6 @@ async fn search_with_order_by_desc(ctx: &TestContext) {
 }
 
 async fn search_no_auth_returns_empty(ctx: &TestContext) {
-    
     let svc = MockRedactionService::new();
     let resp = run_query(
         ctx,
@@ -478,7 +475,6 @@ async fn search_no_auth_returns_empty(ctx: &TestContext) {
 }
 
 async fn search_redaction_returns_only_allowed_ids(ctx: &TestContext) {
-    
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 3]);
 
@@ -499,7 +495,6 @@ async fn search_redaction_returns_only_allowed_ids(ctx: &TestContext) {
 }
 
 async fn search_unicode_properties_survive_pipeline(ctx: &TestContext) {
-    
     let resp = run_query(
         ctx,
         r#"{
