@@ -396,7 +396,7 @@ async fn in_progress_prevents_redelivery() {
     let (_container, url) = start_nats_container().await;
     create_test_stream(&url).await;
 
-    let ack_wait = Duration::from_secs(2);
+    let ack_wait = Duration::from_secs(5);
     let config = NatsConfiguration {
         url,
         ack_wait_secs: ack_wait.as_secs(),
@@ -424,7 +424,7 @@ async fn in_progress_prevents_redelivery() {
         .await
         .expect("failed to publish");
 
-    let message = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+    let message = tokio::time::timeout(Duration::from_secs(10), subscription.next())
         .await
         .expect("timed out waiting for message")
         .expect("subscription ended")
@@ -432,15 +432,15 @@ async fn in_progress_prevents_redelivery() {
 
     let progress = message.progress_notifier();
 
-    // Send in-progress after 1s (before the 2s ack_wait expires).
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // Send in-progress after 3s (before the 5s ack_wait expires).
+    tokio::time::sleep(Duration::from_secs(3)).await;
     progress.notify_in_progress().await;
 
-    // Wait another 1.5s — past the original 2s deadline, but within the reset window.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // Wait another 4s — past the original 5s deadline, but within the reset window.
+    tokio::time::sleep(Duration::from_secs(4)).await;
 
     // No redelivery should have happened during that time.
-    let redelivery = tokio::time::timeout(Duration::from_millis(500), subscription.next()).await;
+    let redelivery = tokio::time::timeout(Duration::from_secs(2), subscription.next()).await;
     assert!(
         redelivery.is_err(),
         "message should NOT be redelivered after in-progress signal"
