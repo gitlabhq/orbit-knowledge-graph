@@ -103,7 +103,7 @@ The `source_code` domain covers the structure of your repository.
 
 Relationshps define the edges that connect nodes.
 Relationships have variants, which are combinations of source and target node type.
-For example, the `Authored` relationship connects `User` nodes to `MergeRequest`, `Note`, `Vulnerability, and `WorkItem` nodes.
+For example, the `Authored` relationship connects `User` nodes to `MergeRequest`, `Note`, `Vulnerability`, and `WorkItem` nodes.
 
 ### Available relationships
 
