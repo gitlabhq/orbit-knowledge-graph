@@ -81,7 +81,7 @@ agent-file-sync-check:
 
 mr-title-check:
   stage: lint
-  image: node:lts-alpine
+  image: node:22-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
