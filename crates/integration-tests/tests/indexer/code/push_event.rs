@@ -9,34 +9,35 @@ use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 use super::helpers::*;
 
 #[tokio::test]
-async fn indexes_repository_from_gitaly() {
+async fn indexes_repository() {
     let project_id: i64 = 1;
+    let commit_sha = "abc123";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
         integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
-    let (gitaly_address, _container) = start_gitaly().await;
 
-    let repo_path = hashed_repo_path(project_id);
-    let commit_sha = create_test_repo(
-        &_container,
-        &repo_path,
-        "src/Main.java",
-        "public class Main {
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main {
             public void save() { validate(); }
             public void validate() {}
         }",
-    )
-    .await;
+        )],
+    );
 
     create_project_in_graph(&clickhouse, project_id, "/test", "test/repo").await;
 
-    let deps = CodeIndexingDeps::new(&gitaly_address, &clickhouse);
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.push_event_handler();
     let context = handler_context(&clickhouse);
-    let envelope = TestEnvelopeFactory::with_bytes(push_event_payload(project_id, &commit_sha, 1));
+    let envelope = TestEnvelopeFactory::with_bytes(push_event_payload(project_id, commit_sha, 1));
 
     let result = handler.handle(context, envelope).await;
     assert!(result.is_ok(), "handler failed: {:?}", result);
@@ -53,24 +54,25 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
         integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
-    let (gitaly_address, gitaly_container) = start_gitaly().await;
-    let repo_path = hashed_repo_path(project_id);
 
-    create_project_in_graph(&clickhouse, project_id, "/stale-test", "stale/test").await;
-    let deps = CodeIndexingDeps::new(&gitaly_address, &clickhouse);
-    let handler = deps.push_event_handler();
-
-    let first_commit = create_test_repo(
-        &gitaly_container,
-        &repo_path,
-        "src/Main.java",
-        "public class Main {
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main {
             public void save() { validate(); }
             public void validate() {}
         }",
-    )
-    .await;
-    index_push_event(&handler, &clickhouse, project_id, &first_commit, 1).await;
+        )],
+    );
+
+    create_project_in_graph(&clickhouse, project_id, "/stale-test", "stale/test").await;
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.push_event_handler();
+
+    index_push_event(&handler, &clickhouse, project_id, "commit1", 1).await;
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_active_definitions(
@@ -86,17 +88,16 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
         "Main→save and Main→validate DEFINES edges should exist"
     );
 
-    let second_commit = update_repo_file(
-        &gitaly_container,
-        &repo_path,
-        "src/Main.java",
-        "src/Other.java",
-        "public class Other {
+    mock.replace_archive(
+        project_id,
+        &[(
+            "src/Other.java",
+            "public class Other {
             public void run() {}
         }",
-    )
-    .await;
-    index_push_event(&handler, &clickhouse, project_id, &second_commit, 2).await;
+        )],
+    );
+    index_push_event(&handler, &clickhouse, project_id, "commit2", 2).await;
 
     assert_file_not_active(&clickhouse, project_id, "src/Main.java").await;
     assert_no_active_definitions(&clickhouse, project_id, "src/Main.java").await;
