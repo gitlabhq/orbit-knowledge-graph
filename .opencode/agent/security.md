@@ -40,7 +40,7 @@ Only flag real security issues, not theoretical risks or style preferences.
 
 Trace untrusted input from where it enters the system to where it could do damage. Flag paths where data reaches a sink without validation.
 
-Sources of untrusted input: gRPC request fields, NATS/Siphon CDC payloads, Gitaly archive contents, ClickHouse query results containing user data.
+Sources of untrusted input: gRPC request fields, NATS/Siphon CDC payloads, repository archive contents, ClickHouse query results containing user data.
 
 Where it can do damage: ClickHouse queries (dynamic table/column names), log statements (PII), gRPC responses (unredacted data), file writes (path traversal).
 
@@ -49,7 +49,7 @@ Flows to trace:
 - JWT claims → security context → ClickHouse WHERE clauses (query pipeline authorization stage)
 - CDC events → indexer transform SQL → ClickHouse INSERT
 - Query JSON → AST lowering → SQL codegen → ClickHouse execution
-- Gitaly archive → temp dir → tree-sitter parsing → code graph → ClickHouse INSERT
+- Repository archive → temp dir → tree-sitter parsing → code graph → ClickHouse INSERT
 
 Check `~/refs/siphon` for CDC payload shapes and `~/refs/gitlab` for Rails auth when needed.
 

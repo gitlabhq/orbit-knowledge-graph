@@ -21,7 +21,7 @@ The architecture is documented in the [design documents](docs/design-documents/)
 ```mermaid
 flowchart LR
     GitLab[GitLab Core] -- CDC replication --> DIP[Data Insights Platform]
-    GKG -- Git RPC --> GitLab
+    GKG -- internal API --> GitLab
     DIP -- datalake --> CH[(ClickHouse)]
     CH <-- graph tables --> GKG[Knowledge Graph · Orbit]
     GitLab -. gRPC / AuthZ .-> GKG
@@ -32,10 +32,10 @@ flowchart LR
     style GKG fill:#FC6D26,color:#fff,stroke:#FC6D26
 ```
 
-- **GitLab Core** -- PostgreSQL (OLTP), Gitaly (Git storage), and Rails (application server). The source of all SDLC and code data. Handles authentication and authorization for graph queries.
+- **GitLab Core** -- PostgreSQL (OLTP) and Rails (application server). The source of all SDLC and code data. Handles authentication and authorization for graph queries. Rails proxies repository archive downloads for code indexing.
 - **Data Insights Platform** -- Siphon (CDC) streams PostgreSQL logical replication events through NATS JetStream into ClickHouse.
 - **ClickHouse** -- Columnar database serving two logical databases on one instance: the datalake (raw CDC rows from Siphon) and the graph database (indexed property graph tables).
-- **Knowledge Graph (Orbit)** -- Rust service that transforms datalake rows into a property graph, parses code via Gitaly, and serves graph queries over gRPC. Single binary running as indexer, webserver, scheduler, and health-check.
+- **Knowledge Graph (Orbit)** -- Rust service that transforms datalake rows into a property graph, parses code via the Rails internal API, and serves graph queries over gRPC. Single binary running as indexer, webserver, scheduler, and health-check.
 
 | Resource | Location |
 |---|---|
@@ -107,8 +107,7 @@ Filtered by `knowledge graph` label:
 
 | Repository | Purpose |
 |---|---|
-| [gitlab-org/gitlab](https://gitlab.com/gitlab-org/gitlab) | Rails integration: AuthZ redaction exchange, feature flags, MCP endpoint (`/api/v4/mcp-orbit`) |
-| [gitlab-org/gitaly](https://gitlab.com/gitlab-org/gitaly) | Git RPC service -- code indexer fetches repository archives via `GetArchive` gRPC |
+| [gitlab-org/gitlab](https://gitlab.com/gitlab-org/gitlab) | Rails integration: AuthZ redaction exchange, feature flags, MCP endpoint (`/api/v4/mcp-orbit`), internal API for code archive downloads |
 | [gitlab-org/gitlab-zoekt-indexer](https://gitlab.com/gitlab-org/gitlab-zoekt-indexer) | Zoekt code search indexer (historical context: early KG integration MRs in CNG attempted embedding KG via Zoekt FFI) |
 
 ### Infrastructure (ops.gitlab.net)
@@ -226,7 +225,6 @@ All Terraform lives in [config-mgmt](https://ops.gitlab.net/gitlab-com/gl-infra/
 | GKG Server | [`gitlab-org/orbit/knowledge-graph/gkg`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/container_registry) |
 | Siphon | [`gitlab-org/analytics-section/siphon`](https://gitlab.com/gitlab-org/analytics-section/siphon/container_registry) |
 | Rust Builder | [`gitlab-org/orbit/build-images/rust-builder`](https://gitlab.com/gitlab-org/orbit/build-images/container_registry) |
-| CNG Gitaly (CI only) | [`gitlab-org/build/cng/gitaly`](https://gitlab.com/gitlab-org/build/CNG/container_registry) |
 
 ---
 

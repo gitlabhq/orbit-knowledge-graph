@@ -32,7 +32,7 @@ Static internal IP reserved in GCP ensures the address persists across service r
 | Name | Purpose |
 |------|---------|
 | clickhouse-password | ClickHouse default user |
-| gitaly-token | Gitaly gRPC authentication |
+| gitaly-token | Gitaly gRPC authentication (legacy, no longer used by GKG) |
 | gkg-jwt-secret | GitLab internal API JWT signing |
 | postgres-password | PostgreSQL gitlab user |
 | runner_authentication_token | GitLab Runner registration token (glrt-) |
@@ -57,7 +57,7 @@ DNS for `gkg.dev` is managed externally.
 | allow-gke-pods-to-postgres | 10.83.0.0/17 | tcp:5432 | gitlab-omnibus-vm |
 <!-- vale gitlab_base.Substitutions = YES -->
 | allow-gke-pods-to-clickhouse | 10.83.0.0/17 | tcp:8123,8443,9000 | clickhouse-vm |
-| allow-gke-pods-to-gitaly | 10.83.0.0/17 | tcp:8075 | gitlab-omnibus-vm |
+| allow-gke-pods-to-gitaly | 10.83.0.0/17 | tcp:8075 | gitlab-omnibus-vm | <!-- legacy, GKG no longer connects to Gitaly directly -->
 | default-allow-internal | 10.128.0.0/9 | all | all instances |
 
 ## PostgreSQL (Linux package)

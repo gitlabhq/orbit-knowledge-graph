@@ -8,7 +8,7 @@ If we want the Knowledge Graph to answer questions about code, it needs to under
 
 The ETL pipeline:
 
-- Reads code from GitLab repositories through Gitaly RPC calls
+- Reads code from GitLab repositories through the Rails internal API
 - Transforms it into a call graph and file system hierarchy
 - Writes entities and relationships to ClickHouse
 
@@ -89,8 +89,8 @@ graph LR
 graph LR
     Siphon["Siphon CDC"] --> NATS["NATS JetStream"]
     NATS --> GKG["gkg-server<br/>(Indexer mode)"]
-    GKG --> Gitaly["Gitaly<br/>GetArchive RPC"]
-    Gitaly --> CodeGraph["code-graph<br/>(parse + analyze)"]
+    GKG --> Rails["Rails internal API<br/>(archive download)"]
+    Rails --> CodeGraph["code-graph<br/>(parse + analyze)"]
     CodeGraph --> Arrow["ArrowConverter"]
     Arrow --> ClickHouse["ClickHouse"]
 ```
@@ -102,12 +102,12 @@ graph LR
 | `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
 | `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
 | `indexer` crate | NATS consumer, ETL engine, code indexing task handler, Arrow conversion, ClickHouse writes |
-| `gitaly-client` crate | Gitaly gRPC client for `GetArchive` RPC |
+
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the datalake and the property graph |
-| Gitaly | GitLab Git storage service; code indexer uses `GetArchive` RPC |
+| Rails internal API | Proxies repository archive downloads and project info lookups |
 
 For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 [SDLC indexing design document](sdlc_indexing.md).
@@ -163,7 +163,7 @@ Example NATS KV:
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 1 hour (estimated based on the amount of resources)
 
-After acquiring the lock, the service makes an RPC call to Gitaly to download the repository archive to a temp directory.
+After acquiring the lock, the service downloads the repository archive from the Rails internal API.
 
 #### Transform (call graph construction)
 
@@ -235,7 +235,7 @@ The code indexing handler subscribes to code indexing tasks from NATS. On each t
 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
-3. Fetches the repository archive from Gitaly and extracts it to a temp directory
+3. Downloads the repository archive from the Rails internal API and extracts it to a temp directory
 4. Runs the streaming indexing pipeline to produce the graph
 5. Converts the graph to Arrow record batches and writes them to ClickHouse
 6. Cleans up stale data from the previous indexing run
@@ -270,7 +270,7 @@ Rails (p_knowledge_graph_code_indexing_tasks)
         |
         |- 1. Check checkpoint (skip already-indexed commits)
         |- 2. Acquire distributed lock via NATS KV
-        |- 3. Fetch repository archive from Gitaly
+        |- 3. Download repository archive from Rails internal API
         |- 4. Extract to temp directory
         |- 5. Run indexing pipeline
         |       |- File discovery (respects .gitignore)
@@ -291,7 +291,7 @@ tool. Here are the main architectural differences in the current service:
 | Aspect | Original (local) | Current (service) |
 |---|---|---|
 | Graph database | lbug (embedded) | ClickHouse |
-| Code access | Local filesystem | Gitaly `GetArchive` RPC |
+| Code access | Local filesystem | Rails internal API (archive download) |
 | Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC code indexing tasks via NATS |
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |

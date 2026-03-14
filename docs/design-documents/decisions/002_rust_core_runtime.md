@@ -53,7 +53,7 @@ Runtime dependencies worth noting: Tokio (async runtime), Axum (HTTP), Tonic (gR
 
 ### Memory safety without garbage collection
 
-The service handles untrusted input at multiple boundaries (user queries, CDC events, Gitaly tar streams) in a multi-tenant environment. Rust's ownership model eliminates use-after-free, double-free, buffer overflows, and data races at compile time. We enforce `unsafe_code = "forbid"` across the workspace. A GC'd language provides memory safety but introduces unpredictable pause times during the gRPC bidirectional streaming redaction exchange, which blocks a Puma thread on the Rails side.
+The service handles untrusted input at multiple boundaries (user queries, CDC events, repository archives) in a multi-tenant environment. Rust's ownership model eliminates use-after-free, double-free, buffer overflows, and data races at compile time. We enforce `unsafe_code = "forbid"` across the workspace. A GC'd language provides memory safety but introduces unpredictable pause times during the gRPC bidirectional streaming redaction exchange, which blocks a Puma thread on the Rails side.
 
 ### Single binary deployment
 
@@ -65,7 +65,7 @@ Rust compiles to a statically linked binary with no runtime dependencies. The co
 
 Everything runs on Tokio:
 
-- The indexer runs configurable worker pools that consume NATS messages, fetch Gitaly archives, parse code, and write to ClickHouse concurrently. `tokio-rayon` bridges CPU-bound tree-sitter parsing into the async runtime without blocking the executor.
+- The indexer runs configurable worker pools that consume NATS messages, fetch repository archives, parse code, and write to ClickHouse concurrently. `tokio-rayon` bridges CPU-bound tree-sitter parsing into the async runtime without blocking the executor.
 - The webserver handles concurrent gRPC streams, each running a ClickHouse query and a redaction exchange. Tokio maps each stream to a lightweight task rather than an OS thread.
 - The health-check mode uses the `kube` crate to watch Kubernetes pod status asynchronously.
 
@@ -129,7 +129,7 @@ Ruby is the primary language at GitLab, and Rails already handles authorization,
 
 The code parser needs to call tree-sitter (C library) and SWC (Rust library) with no serialization overhead, processing repository archives in-memory across seven languages. Ruby's C extension API can wrap tree-sitter, but the resulting code is harder to make memory-safe than Rust's FFI, and there is no path to SWC without shelling out or adding a Rust FFI layer anyway.
 
-The indexer runs concurrent worker pools consuming NATS messages, fetching Gitaly archives, and writing to ClickHouse simultaneously. Ruby's GIL limits CPU-bound parallelism to forked processes, which increases memory usage and complicates shared state. The query path requires sub-300ms p95 latency for compiled SQL execution plus a gRPC redaction exchange -- Ruby's interpreter overhead and GC pauses make this harder to achieve.
+The indexer runs concurrent worker pools consuming NATS messages, fetching repository archives, and writing to ClickHouse simultaneously. Ruby's GIL limits CPU-bound parallelism to forked processes, which increases memory usage and complicates shared state. The query path requires sub-300ms p95 latency for compiled SQL execution plus a gRPC redaction exchange -- Ruby's interpreter overhead and GC pauses make this harder to achieve.
 
 The columnar data pipeline (Arrow-IPC streaming from ClickHouse, DataFusion for SQL validation) has no mature Ruby equivalent. We would need to wrap the Rust libraries via FFI from Ruby, which reintroduces the same problems we encountered embedding Rust in Go.
 

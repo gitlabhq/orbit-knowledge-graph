@@ -4,7 +4,7 @@
 
 The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agents can run graph queries without having to write Cypher or SQL directly. This server adds three major capabilities:
 
-- A **dedicated web server** (`gkg-webserver`) that serves queries by connecting to ClickHouse, NATS, and Gitaly to build the graph queries and serve the results.
+- A **dedicated web server** (`gkg-webserver`) that serves queries by connecting to ClickHouse and NATS to build the graph queries and serve the results.
 - A **graph query engine** that compiles high‑level graph operations into ClickHouse SQL and executes them directly on adjacency‑ordered edge tables and typed node tables.
 - An **intermediate query language** expressed as JSON schemas that LLMs or UI clients can fill in deterministically. These schemas translate into parameterized ClickHouse SQL executed by the graph query engine.
 
@@ -34,7 +34,7 @@ The web server will expose endpoints for GitLab Rails to consume. This will powe
 
 ### Request Routing and Query Execution
 
-- **REST endpoints** under `/api/graph/*` and `/api/v1/*` serve code graph workflows (symbols, references, dependencies) and namespace graph analytics. Each handler resolves the target scope (tenant/namespace/project), constructs a `DatabaseQueryingService`, executes parameterized SQL, and optionally enriches results with Gitaly content.
+- **REST endpoints** under `/api/graph/*` and `/api/v1/*` serve code graph workflows (symbols, references, dependencies) and namespace graph analytics. Each handler resolves the target scope (tenant/namespace/project), constructs a `DatabaseQueryingService`, and executes parameterized SQL.
 - **MCP interface** mounts under `/mcp`. The adapter shares the same query services, exposing the intermediate JSON language so agents receive both the generated SQL (for transparency) and the actual query results.
 - **Web server process** (`gkg-webserver`) runs as the query front end in deployed environments. It connects to ClickHouse in read‑only mode, ensuring the query tier cannot mutate graph state while still serving low‑latency requests across multiple replicas.
 
@@ -52,7 +52,6 @@ flowchart LR
 
     subgraph GitLab Services
         E[Internal API]
-        F[Gitaly]
     end
 
     A --> B --> C
