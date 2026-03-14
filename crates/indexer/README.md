@@ -187,7 +187,10 @@ Three error types, nested:
 - `HandlerError` has `Processing(String)` and `Deserialization(serde_json::Error)`
 - `BrokerError` has variants for publish, subscribe, ack, nack, connection issues, etc.
 
-When a handler returns an error, the engine nacks the message so the broker can redeliver it (if retries are configured for that handler).
+When a handler returns an error, the engine nacks the message so the broker can redeliver it (if retries are configured for that handler). When retries are exhausted, the outcome depends on the topic:
+
+- **External topics** (e.g. Siphon CDC): the message is published to the `GKG_DEAD_LETTERS` stream for inspection and replay, then acked. If the DLQ publish fails, the message is nacked for redelivery instead.
+- **Owned topics** (internal dispatch): the message is term-acked, since it will be regenerated on the next dispatch cycle.
 
 `IndexerError` wraps top-level failures: NATS connection, ClickHouse connection, engine errors, and handler initialization.
 
