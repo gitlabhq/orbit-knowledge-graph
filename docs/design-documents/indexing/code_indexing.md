@@ -102,7 +102,7 @@ graph LR
 | `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
 | `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
 | `indexer` crate | NATS consumer, ETL engine, push event handler, Arrow conversion, ClickHouse writes |
-| `gitaly-client` crate | Gitaly gRPC client for `GetArchive` RPC |
+
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |

@@ -12,7 +12,7 @@ members = [
   "crates/indexer",
   "crates/query-engine",
   "crates/cli",
-  "crates/gitaly-client",
+
   "crates/gkg-server",
   "crates/ontology",
 
@@ -102,7 +102,7 @@ sqlformat = "0.5"
 tabled = "0.20"
 indicatif = "0.18"
 
-# Gitaly client dependencies
+
 regex = "1.12.2"
 hex = "0.4.3"
 hmac = "0.12.1"

@@ -228,31 +228,7 @@ integration-test:
       docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
       docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/nats:2.11-alpine nats:2.11-alpine
   script:
-    - cargo nextest run --profile ci --all-features --test '*' --ignore-default-filter -E 'not package(gitaly-client)'
-    - sccache --show-stats || true
-
-gitaly-integration-test:
-  stage: test
-  extends:
-    - .test-template
-    - .mr-and-main-rules
-  needs: []
-  services:
-    - name: registry.gitlab.com/gitlab-org/build/cng/gitaly:17-7-stable
-      alias: gitaly
-      command:
-        - bash
-        - -c
-        - |
-          mkdir -p /home/git/repositories
-          rm -rf /srv/gitlab-shell/hooks/*
-          echo -e '\n[auth]\ntoken = "secret_token"\n' >> /etc/gitaly/config.toml
-          exec /usr/bin/env GITALY_TESTING_NO_GIT_HOOKS=1 /scripts/process-wrapper
-  variables:
-    RUST_BACKTRACE: "1"
-    GITALY_CONNECTION_INFO: '{"address":"tcp://gitaly:8075","storage":"default","token":"secret_token"}'
-  script:
-    - cargo nextest run --profile ci -p gitaly-client --features integration
+    - cargo nextest run --profile ci --all-features --test '*'
     - sccache --show-stats || true
 
 tilt-ci:
