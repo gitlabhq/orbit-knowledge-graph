@@ -334,7 +334,6 @@ async fn process_message(
         }
         HandlersOutcome::Exhausted { error } => {
             if topic.owned {
-                warn!(%message_id, topic = %topic_name, "owned message exhausted, term-acking");
                 if let Err(term_error) = message.term_ack().await {
                     warn!(%term_error, %message_id, "failed to term-ack exhausted message");
                 }
@@ -400,7 +399,7 @@ async fn run_handlers(
                         attempt = envelope.attempt,
                         %max_attempts,
                         %error,
-                        "retry attempts exhausted, sending to dead letter queue"
+                        "retry attempts exhausted"
                     );
                     return HandlersOutcome::Exhausted {
                         error: error.to_string(),

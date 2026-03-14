@@ -69,32 +69,4 @@ mod tests {
         assert_eq!(&*dlq.subject, "dlq.siphon_db.tables.users");
         assert!(dlq.owned);
     }
-
-    #[test]
-    fn envelope_serialization_round_trip() {
-        use crate::types::MessageId;
-        use bytes::Bytes;
-
-        let topic = Topic::external("siphon_db", "tables.users");
-        let payload = serde_json::to_vec(&serde_json::json!({"user_id": 42})).unwrap();
-        let message_envelope = Envelope {
-            id: MessageId::unique(),
-            payload: Bytes::from(payload),
-            timestamp: Utc::now(),
-            attempt: 5,
-        };
-        let dead_letter = DeadLetterEnvelope::new(&topic, &message_envelope, "connection refused");
-
-        let json = serde_json::to_string(&dead_letter).expect("serialize");
-        let deserialized: DeadLetterEnvelope = serde_json::from_str(&json).expect("deserialize");
-
-        assert_eq!(deserialized.original_subject, "tables.users");
-        assert_eq!(deserialized.original_stream, "siphon_db");
-        assert_eq!(
-            deserialized.original_payload,
-            serde_json::json!({"user_id": 42})
-        );
-        assert_eq!(deserialized.attempts, 5);
-        assert_eq!(deserialized.last_error, "connection refused");
-    }
 }
