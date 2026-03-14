@@ -1,12 +1,13 @@
 //! Code Indexing Module
 //!
-//! This module processes git push events from the Siphon CDC stream,
+//! This module processes code indexing tasks from the Siphon CDC stream,
 //! fetches repository code from Gitaly, runs the code-graph, and
 //! writes the resulting graph data to ClickHouse.
 
 mod archive;
 mod arrow_converter;
 mod checkpoint_store;
+mod code_indexing_task_handler;
 pub mod config;
 pub mod dispatch;
 pub mod indexing_pipeline;
@@ -14,7 +15,6 @@ pub mod locking;
 pub mod metrics;
 mod project_code_indexing_handler;
 mod project_store;
-mod push_event_handler;
 mod push_event_store;
 mod repository_service;
 mod siphon_decoder;
@@ -26,17 +26,17 @@ use std::sync::Arc;
 
 use crate::IndexerConfig;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
 pub use project_code_indexing_handler::ProjectCodeIndexingHandlerConfig;
-pub use push_event_handler::PushEventHandlerConfig;
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
+pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use project_code_indexing_handler::ProjectCodeIndexingHandler;
 pub use project_store::ClickHouseProjectStore;
-pub use push_event_handler::PushEventHandler;
 pub use push_event_store::ClickHousePushEventStore;
 pub use repository_service::{
     CachingRepositoryService, RailsRepositoryService, RepositoryService, RepositoryServiceError,
@@ -53,7 +53,7 @@ pub fn register_handlers(
         return Ok(());
     };
 
-    let push_event_config = config.engine.handlers.code_push_event.clone();
+    let code_indexing_task_config = config.engine.handlers.code_indexing_task.clone();
     let project_reconciliation_config = config.engine.handlers.code_project_reconciliation.clone();
 
     let table_names =
@@ -85,13 +85,11 @@ pub fn register_handlers(
         table_names,
     ));
 
-    registry.register_handler(Box::new(PushEventHandler::new(
+    registry.register_handler(Box::new(CodeIndexingTaskHandler::new(
         Arc::clone(&pipeline),
-        Arc::clone(&repository_service),
         Arc::clone(&checkpoint_store),
-        Arc::clone(&project_store),
         metrics.clone(),
-        push_event_config,
+        code_indexing_task_config,
     )));
 
     registry.register_handler(Box::new(

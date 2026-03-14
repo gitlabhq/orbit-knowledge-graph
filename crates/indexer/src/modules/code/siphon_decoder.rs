@@ -34,14 +34,6 @@ pub fn extract_i64(value: &Value) -> Option<i64> {
     }
 }
 
-pub fn extract_i32(value: &Value) -> Option<i32> {
-    match &value.value {
-        Some(value::Value::Int16Value(v)) => Some(*v),
-        Some(value::Value::Int64Value(v)) => Some(*v as i32),
-        _ => None,
-    }
-}
-
 pub struct ColumnExtractor<'a> {
     events: &'a LogicalReplicationEvents,
 }
@@ -55,12 +47,6 @@ impl<'a> ColumnExtractor<'a> {
         let index = get_column_index(self.events, column_name)?;
         let value = get_column_value(event, index)?;
         extract_i64(value)
-    }
-
-    pub fn get_i32(&self, event: &ReplicationEvent, column_name: &str) -> Option<i32> {
-        let index = get_column_index(self.events, column_name)?;
-        let value = get_column_value(event, index)?;
-        extract_i32(value)
     }
 
     pub fn get_string(&self, event: &'a ReplicationEvent, column_name: &str) -> Option<&'a str> {

@@ -15,8 +15,8 @@ use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseProjectStore, ClickHousePushEventStore,
-    ClickHouseStaleDataCleaner, CodeIndexingPipeline, ProjectCodeIndexingHandler,
-    ProjectCodeIndexingHandlerConfig, PushEventHandler, PushEventHandlerConfig,
+    ClickHouseStaleDataCleaner, CodeIndexingPipeline, CodeIndexingTaskHandler,
+    CodeIndexingTaskHandlerConfig, ProjectCodeIndexingHandler, ProjectCodeIndexingHandlerConfig,
     RailsRepositoryService, RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
 };
 use indexer::nats::ProgressNotifier;
@@ -74,14 +74,12 @@ impl CodeIndexingDeps {
         }
     }
 
-    pub fn push_event_handler(&self) -> PushEventHandler {
-        PushEventHandler::new(
+    pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
+        CodeIndexingTaskHandler::new(
             Arc::clone(&self.pipeline),
-            Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
-            Arc::clone(&self.project_store) as _,
             self.metrics.clone(),
-            PushEventHandlerConfig::default(),
+            CodeIndexingTaskHandlerConfig::default(),
         )
     }
 

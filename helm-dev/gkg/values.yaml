@@ -119,7 +119,7 @@ engine:
       concurrency_group: sdlc
       max_attempts: 1  # re-dispatched every minute, no need to retry
       retry_interval_secs: 60
-    code_push_event:
+    code_indexing_task:
       concurrency_group: code
       max_attempts: 5  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
