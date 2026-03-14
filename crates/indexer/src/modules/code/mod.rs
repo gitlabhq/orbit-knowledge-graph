@@ -7,6 +7,7 @@
 mod archive;
 mod arrow_converter;
 mod checkpoint_store;
+mod code_indexing_task_handler;
 pub mod config;
 pub mod dispatch;
 pub mod indexing_pipeline;
@@ -14,7 +15,6 @@ pub mod locking;
 pub mod metrics;
 mod project_code_indexing_handler;
 mod project_store;
-mod push_event_handler;
 mod push_event_store;
 mod repository_service;
 mod siphon_decoder;
@@ -26,17 +26,17 @@ use std::sync::Arc;
 
 use crate::IndexerConfig;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
 pub use project_code_indexing_handler::ProjectCodeIndexingHandlerConfig;
-pub use push_event_handler::CodeIndexingTaskHandlerConfig;
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
+pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use project_code_indexing_handler::ProjectCodeIndexingHandler;
 pub use project_store::ClickHouseProjectStore;
-pub use push_event_handler::CodeIndexingTaskHandler;
 pub use push_event_store::ClickHousePushEventStore;
 pub use repository_service::{
     CachingRepositoryService, RailsRepositoryService, RepositoryService, RepositoryServiceError,

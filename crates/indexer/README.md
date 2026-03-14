@@ -38,7 +38,7 @@ Indexes software development lifecycle entities from Siphon CDC events: projects
 
 ### Code
 
-Indexes git repositories via Gitaly. Fetches archives on push events, runs the code-graph to extract call graphs, definitions, and references, then writes results to ClickHouse. Requires a Gitaly connection to be configured; disabled otherwise.
+Indexes git repositories via Gitaly. Fetches archives on code indexing tasks, runs the code-graph to extract call graphs, definitions, and references, then writes results to ClickHouse. Requires a Gitaly connection to be configured; disabled otherwise.
 
 ## Engine internals
 
@@ -165,7 +165,7 @@ code = 4
 concurrency_group = "sdlc"
 max_attempts = 1
 
-[handlers.code-push-event]
+[handlers.code-indexing-task]
 concurrency_group = "code"
 max_attempts = 5
 retry_interval_secs = 60
