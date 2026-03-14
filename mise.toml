@@ -9,8 +9,6 @@ postinstall = "if [ -z \"$CI\" ]; then lefthook install --force; fi"
 # Do not use ~ (tilde is not expanded in variable values).
 GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}"
 
-# Path to Gitaly repository for proto compilation (gitaly-client crate)
-GITALY_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/gitaly"
 
 # Path to Siphon repository for proto compilation (siphon-proto crate)
 # Clone from: https://gitlab.com/gitlab-org/analytics-section/siphon

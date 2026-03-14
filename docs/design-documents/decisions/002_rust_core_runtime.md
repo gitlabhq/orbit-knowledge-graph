@@ -38,7 +38,7 @@ The service is implemented as a Cargo workspace with 16 crates:
 | `code-parser` | Multi-language parser (7 langs) via tree-sitter + SWC |
 | `code-graph` | In-memory property graph construction from parsed code |
 | `clickhouse-client` | Async ClickHouse client with Arrow-IPC streaming |
-| `gitaly-client` | Gitaly gRPC client with HMAC authentication |
+
 | `siphon-proto` | Protobuf types for Siphon CDC replication events |
 | `labkit-rs` | Structured logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | Kubernetes readiness/liveness probes |
@@ -80,8 +80,6 @@ SWC (Rust-native JS/TS parser) runs alongside tree-sitter for JS/TS-specific ana
 ### gRPC and protobuf ecosystem
 
 We use Tonic for gRPC (client and server) and Prost for protobuf codegen. `gkg.proto` defines the service contract; `tonic-build` generates Rust server traits and client stubs at compile time. The same proto file generates the `gitlab-gkg-proto` Ruby gem for the Rails client, so the contract is shared between Rust and Ruby. Schema mismatches get caught at compile time on the Rust side.
-
-The Gitaly client (`gitaly-client` crate) uses the same Tonic/Prost stack to call Gitaly's `GetArchive` RPC. This follows the same patterns GitLab uses for Gitaly (Go) and is consistent with GLAZ (also Rust).
 
 ### Columnar data processing
 
