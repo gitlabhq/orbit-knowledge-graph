@@ -29,7 +29,7 @@ flowchart TD
   %% === Shared Infrastructure ===
   subgraph SOURCES["GitLab Sources"]
     PG["PostgreSQL (SDLC)"]
-    Gitaly["Gitaly (Code)"]
+    Rails["GitLab Rails (Code Archives)"]
   end
 
   subgraph DIP["Data Insights Platform (Shared)"]
@@ -59,7 +59,7 @@ flowchart TD
   SYP -- CDC Events --> JS
   JS -- Event Streams --> SDLC_IDX
   JS -- Code Indexing Tasks --> CODE_IDX
-  CODE_IDX -- Git RPC --> Gitaly
+  CODE_IDX -- Archive Download --> Rails
 
   SDLC_IDX -- Queries --> CH_RAW
   SDLC_IDX -- Writes --> CH_GRAPH
@@ -79,7 +79,7 @@ flowchart TD
   classDef storage fill:#ecfeff,stroke:#06b6d4,color:#0e7490
   classDef query fill:#f0fdf4,stroke:#16a34a,color:#065f46
 
-  class PG,Gitaly source
+  class PG,Rails source
   class SYP,JS,KV,CH_RAW platform
   class SDLC_IDX,CODE_IDX indexer
   class CH_GRAPH storage
@@ -103,7 +103,7 @@ Siphon uses PostgreSQL's logical replication to capture changes from the write-a
 
 **Shared Use**:
 
-- Delivers and distributes needed CDC events (like `events` and `p_knowledge_graph_code_indexing_tasks`) to indexing workers via NATS JetStream subjects.
+- Delivers and distributes CDC events (including `p_knowledge_graph_code_indexing_tasks`) to indexing workers via NATS JetStream subjects.
 - Distributes workload across multiple indexer replicas
 - Provides NATS KV for code handler mutual exclusion (code_indexing_task vs project_code) and cadence coordination. SDLC dispatch deduplication uses per-subject message limits on the JetStream stream.
 
