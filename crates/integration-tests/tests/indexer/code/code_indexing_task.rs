@@ -74,7 +74,15 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    index_code(&handler, &clickhouse, project_id, "commit1", 1, "/stale-test").await;
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        "/stale-test",
+    )
+    .await;
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_active_definitions(
@@ -99,7 +107,15 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
         }",
         )],
     );
-    index_code(&handler, &clickhouse, project_id, "commit2", 2, "/stale-test").await;
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        "/stale-test",
+    )
+    .await;
 
     assert_file_not_active(&clickhouse, project_id, "src/Main.java").await;
     assert_no_active_definitions(&clickhouse, project_id, "src/Main.java").await;
