@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::modules::code::SiphonCodeIndexingTaskDispatcherConfig;
-use crate::modules::code::dispatch::ProjectCodeDispatcherConfig;
-use crate::modules::code::{CodeIndexingTaskHandlerConfig, ProjectCodeIndexingHandlerConfig};
+use crate::modules::code::{
+    CodeBackfillDispatchHandlerConfig, CodeBackfillHandlerConfig, CodeIndexingTaskHandlerConfig,
+    SiphonCodeIndexingTaskDispatcherConfig,
+};
 use crate::modules::namespace_deletion::{
     NamespaceDeletionHandlerConfig, NamespaceDeletionSchedulerConfig,
 };
@@ -61,7 +62,9 @@ pub struct HandlersConfiguration {
     #[serde(default)]
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
     #[serde(default)]
-    pub code_project_reconciliation: ProjectCodeIndexingHandlerConfig,
+    pub code_backfill: CodeBackfillHandlerConfig,
+    #[serde(default)]
+    pub code_backfill_dispatch: CodeBackfillDispatchHandlerConfig,
     #[serde(default)]
     pub namespace_deletion: NamespaceDeletionHandlerConfig,
 }
@@ -91,8 +94,6 @@ pub struct ScheduledTasksConfiguration {
     pub global: GlobalDispatcherConfig,
     #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
-    #[serde(default)]
-    pub project_code: ProjectCodeDispatcherConfig,
     #[serde(default)]
     pub code_indexing_task: SiphonCodeIndexingTaskDispatcherConfig,
     #[serde(default)]

@@ -11,46 +11,38 @@ use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::locking::project_lock_key;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::project_store::ProjectStore;
-use super::push_event_store::PushEventStore;
 use super::repository_service::RepositoryService;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::topic::ProjectCodeIndexingRequest;
+use crate::topic::CodeBackfillRequest;
 use crate::types::{Envelope, Event, Subscription};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct ProjectCodeIndexingHandlerConfig {
+pub struct CodeBackfillHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
 }
 
-pub struct ProjectCodeIndexingHandler {
+pub struct CodeBackfillHandler {
     pipeline: Arc<CodeIndexingPipeline>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
-    project_store: Arc<dyn ProjectStore>,
-    push_event_store: Arc<dyn PushEventStore>,
     metrics: CodeMetrics,
-    config: ProjectCodeIndexingHandlerConfig,
+    config: CodeBackfillHandlerConfig,
 }
 
-impl ProjectCodeIndexingHandler {
+impl CodeBackfillHandler {
     pub fn new(
         pipeline: Arc<CodeIndexingPipeline>,
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
-        project_store: Arc<dyn ProjectStore>,
-        push_event_store: Arc<dyn PushEventStore>,
         metrics: CodeMetrics,
-        config: ProjectCodeIndexingHandlerConfig,
+        config: CodeBackfillHandlerConfig,
     ) -> Self {
         Self {
             pipeline,
             repository_service,
             checkpoint_store,
-            project_store,
-            push_event_store,
             metrics,
             config,
         }
@@ -58,13 +50,13 @@ impl ProjectCodeIndexingHandler {
 }
 
 #[async_trait]
-impl Handler for ProjectCodeIndexingHandler {
+impl Handler for CodeBackfillHandler {
     fn name(&self) -> &str {
-        "code_project_reconciliation"
+        "code_backfill"
     }
 
     fn subscription(&self) -> Subscription {
-        ProjectCodeIndexingRequest::subscription()
+        CodeBackfillRequest::subscription().dead_letter_on_exhaustion(true)
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
@@ -72,40 +64,26 @@ impl Handler for ProjectCodeIndexingHandler {
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
-        let request: ProjectCodeIndexingRequest = serde_json::from_slice(&message.payload)
-            .map_err(|e| {
+        let request: CodeBackfillRequest =
+            serde_json::from_slice(&message.payload).map_err(|e| {
                 HandlerError::Processing(format!("failed to deserialize indexing request: {e}"))
             })?;
 
-        debug!(
-            project_id = request.project_id,
-            "received reconciliation request"
-        );
+        debug!(project_id = request.project_id, "received backfill request");
 
-        self.process_request(&context, request.project_id).await
+        self.process_request(&context, &request).await
     }
 }
 
-impl ProjectCodeIndexingHandler {
+impl CodeBackfillHandler {
     async fn process_request(
         &self,
         context: &HandlerContext,
-        project_id: i64,
+        request: &CodeBackfillRequest,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
         let metrics = &self.metrics;
-
-        let project = self
-            .project_store
-            .get_project(project_id)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("project lookup failed: {e}")))?;
-
-        let Some(project) = project else {
-            debug!(project_id, "project not found in knowledge graph, skipping");
-            metrics.record_outcome("skipped_project_not_found");
-            return Ok(());
-        };
+        let project_id = request.project_id;
 
         let project_info = self
             .repository_service
@@ -116,24 +94,12 @@ impl ProjectCodeIndexingHandler {
 
         let default_branch = &project_info.default_branch;
 
-        let Some(push_event) = self
-            .push_event_store
-            .latest_push_on_branch(project_id, default_branch)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("push event lookup failed: {e}")))?
-        else {
-            debug!(project_id, branch = %default_branch, "no push event found on default branch");
-            metrics.record_outcome("skipped_no_push");
-            return Ok(());
-        };
-
-        if let Ok(Some(checkpoint)) = self
+        if let Ok(Some(_checkpoint)) = self
             .checkpoint_store
-            .get_checkpoint(&project.traversal_path, project_id, default_branch)
+            .get_checkpoint(&request.traversal_path, project_id, default_branch)
             .await
-            && checkpoint.last_task_id >= push_event.event_id
         {
-            debug!(project_id, "already indexed, skipping reconciliation");
+            debug!(project_id, "already indexed, skipping backfill");
             metrics.record_outcome("skipped_checkpoint");
             return Ok(());
         }
@@ -154,8 +120,7 @@ impl ProjectCodeIndexingHandler {
         info!(
             project_id,
             branch = %default_branch,
-            commit_sha = %push_event.commit_sha,
-            "starting reconciliation code indexing"
+            "starting backfill code indexing"
         );
 
         let result = self
@@ -165,9 +130,9 @@ impl ProjectCodeIndexingHandler {
                 &IndexingRequest {
                     project_id,
                     branch: default_branch.to_string(),
-                    traversal_path: project.traversal_path.clone(),
-                    task_id: push_event.event_id,
-                    commit_sha: Some(push_event.commit_sha.clone()),
+                    traversal_path: request.traversal_path.clone(),
+                    task_id: 0,
+                    commit_sha: Some(default_branch.to_string()),
                 },
             )
             .await;
@@ -177,7 +142,7 @@ impl ProjectCodeIndexingHandler {
         }
 
         if let Err(e) = &result {
-            warn!(project_id, error = %e, "failed to index code during reconciliation");
+            warn!(project_id, error = %e, "failed to index code during backfill");
             metrics.record_outcome("error");
             metrics
                 .handler_duration
@@ -202,9 +167,6 @@ mod tests {
     use crate::modules::code::checkpoint_store::test_utils::MockCodeCheckpointStore;
     use crate::modules::code::indexing_pipeline::CodeIndexingPipeline;
     use crate::modules::code::metrics::CodeMetrics;
-    use crate::modules::code::project_store::ProjectInfo;
-    use crate::modules::code::project_store::test_utils::MockProjectStore;
-    use crate::modules::code::push_event_store::test_utils::MockPushEventStore;
     use crate::modules::code::repository_service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
@@ -216,12 +178,10 @@ mod tests {
     }
 
     struct TestContext {
-        handler: ProjectCodeIndexingHandler,
+        handler: CodeBackfillHandler,
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
-        project_store: Arc<MockProjectStore>,
-        push_event_store: Arc<MockPushEventStore>,
     }
 
     impl TestContext {
@@ -236,8 +196,6 @@ mod tests {
             let mock_nats = Arc::new(MockNatsServices::new());
             let mock_locks = Arc::new(MockLockService::new());
             let mock_checkpoints = Arc::new(MockCodeCheckpointStore::new());
-            let project_store = Arc::new(MockProjectStore::new());
-            let push_event_store = Arc::new(MockPushEventStore::new());
             let stale_data_cleaner = Arc::new(MockStaleDataCleaner::default());
             let metrics = test_metrics();
 
@@ -257,14 +215,12 @@ mod tests {
                 table_names,
             ));
 
-            let handler = ProjectCodeIndexingHandler::new(
+            let handler = CodeBackfillHandler::new(
                 pipeline,
                 repository_service,
                 Arc::clone(&checkpoint_store),
-                project_store.clone(),
-                push_event_store.clone(),
                 metrics,
-                ProjectCodeIndexingHandlerConfig::default(),
+                CodeBackfillHandlerConfig::default(),
             );
 
             Self {
@@ -272,8 +228,6 @@ mod tests {
                 mock_nats,
                 mock_locks,
                 mock_checkpoints,
-                project_store,
-                push_event_store,
             }
         }
 
@@ -286,57 +240,26 @@ mod tests {
             )
         }
 
-        fn add_project(&self, project_id: i64) {
-            self.project_store.projects.lock().insert(
-                project_id,
-                ProjectInfo {
-                    project_id,
-                    traversal_path: format!("/org/project-{}", project_id),
-                    full_path: format!("org/project-{}", project_id),
-                },
-            );
-        }
-
         fn make_request(project_id: i64) -> Envelope {
-            Envelope::new(&ProjectCodeIndexingRequest { project_id }).unwrap()
+            Envelope::new(&CodeBackfillRequest {
+                project_id,
+                traversal_path: format!("/org/project-{}", project_id),
+            })
+            .unwrap()
         }
-    }
-
-    #[tokio::test]
-    async fn skips_when_project_not_found() {
-        let ctx = TestContext::new();
-
-        let envelope = TestContext::make_request(999);
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn skips_when_no_push_event_on_default_branch() {
-        let ctx = TestContext::new();
-        ctx.add_project(123);
-
-        let envelope = TestContext::make_request(123);
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
-
-        assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn skips_when_already_indexed() {
         let ctx = TestContext::new();
-        ctx.add_project(123);
-        ctx.push_event_store
-            .add_push_event(123, "main", 50, "abc123");
 
         ctx.mock_checkpoints
             .set_checkpoint(&CodeIndexingCheckpoint {
                 traversal_path: "/org/project-123".to_string(),
                 project_id: 123,
                 branch: "main".to_string(),
-                last_task_id: 100,
-                last_commit: Some("abc".to_string()),
+                last_task_id: 0,
+                last_commit: Some("main".to_string()),
                 indexed_at: Utc::now(),
             })
             .await
@@ -351,9 +274,6 @@ mod tests {
     #[tokio::test]
     async fn skips_when_lock_held() {
         let ctx = TestContext::new();
-        ctx.add_project(123);
-        ctx.push_event_store
-            .add_push_event(123, "main", 100, "abc123");
         let lock_key = project_lock_key(123, "main");
         ctx.mock_locks.set_lock(&lock_key);
 
@@ -366,14 +286,14 @@ mod tests {
     #[test]
     fn handler_name() {
         let ctx = TestContext::new();
-        assert_eq!(ctx.handler.name(), "code_project_reconciliation");
+        assert_eq!(ctx.handler.name(), "code_backfill");
     }
 
     #[test]
     fn handler_subscription_matches_request_subscription() {
         let ctx = TestContext::new();
         let subscription = ctx.handler.subscription();
-        let expected = ProjectCodeIndexingRequest::subscription();
+        let expected = CodeBackfillRequest::subscription();
         assert_eq!(subscription.stream, expected.stream);
         assert_eq!(subscription.subject, expected.subject);
     }
