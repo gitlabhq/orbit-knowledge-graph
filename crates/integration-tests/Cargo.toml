@@ -24,12 +24,14 @@ chrono = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
 gitlab-client = { workspace = true }
+parking_lot = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 health-check = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 siphon-proto = { path = "../siphon-proto" }
+tar = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
 tokio = { workspace = true }
