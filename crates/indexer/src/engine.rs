@@ -43,7 +43,7 @@ use crate::destination::Destination;
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use crate::locking::{LockService, NatsLockService};
 use crate::metrics::EngineMetrics;
-use crate::nats::{NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
+use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
 use crate::types::{Envelope, Topic};
 use crate::worker_pool::WorkerPool;
 
@@ -209,7 +209,9 @@ impl Engine {
                         message,
                         self.registry.handlers_for(&topic),
                         HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone(), progress),
+                        self.broker.clone(),
                         runtime.clone(),
+                        topic.clone(),
                         topic_name.clone(),
                     ));
                 }
@@ -254,10 +256,11 @@ impl Engine {
     }
 }
 
+#[derive(Debug)]
 enum HandlersOutcome {
     Success,
     Failed { retry_delay: Option<Duration> },
-    TerminalFailure,
+    Exhausted { error: String },
 }
 
 struct EngineRuntime {
@@ -269,7 +272,9 @@ async fn process_message(
     message: NatsMessage,
     handlers: Vec<Arc<dyn Handler>>,
     context: HandlerContext,
+    broker: Arc<NatsBroker>,
     runtime: Arc<EngineRuntime>,
+    topic: Topic,
     topic_name: String,
 ) {
     let message_id = message.envelope.id.0.clone();
@@ -301,9 +306,11 @@ async fn process_message(
                 %message_id,
                 attempt,
                 panic = %panic_message,
-                "handler panicked, term-acking to free subject slot"
+                "handler panicked"
             );
-            HandlersOutcome::TerminalFailure
+            HandlersOutcome::Exhausted {
+                error: format!("handler panicked: {panic_message}"),
+            }
         }
     };
 
@@ -325,11 +332,19 @@ async fn process_message(
             }
             "nack"
         }
-        HandlersOutcome::TerminalFailure => {
-            if let Err(error) = message.term_ack().await {
-                warn!(%error, %message_id, "failed to term-ack message");
+        HandlersOutcome::Exhausted { error } => {
+            if topic.owned {
+                warn!(%message_id, topic = %topic_name, "owned message exhausted, term-acking");
+                if let Err(term_error) = message.term_ack().await {
+                    warn!(%term_error, %message_id, "failed to term-ack exhausted message");
+                }
+                "term"
+            } else {
+                match message.to_dlq(&broker, &topic, &error).await {
+                    DlqResult::Published => "dead_letter",
+                    DlqResult::Nacked => "nack",
+                }
             }
-            "term"
         }
     };
 
@@ -379,15 +394,17 @@ async fn run_handlers(
 
             if let Some(max_attempts) = max_attempts {
                 if envelope.attempt >= max_attempts {
-                    error!(
+                    warn!(
                         handler = handler.name(),
                         message_id = %envelope.id.0,
                         attempt = envelope.attempt,
                         %max_attempts,
                         %error,
-                        "max attempts reached, term-acking message"
+                        "retry attempts exhausted, sending to dead letter queue"
                     );
-                    return HandlersOutcome::TerminalFailure;
+                    return HandlersOutcome::Exhausted {
+                        error: error.to_string(),
+                    };
                 }
 
                 let retry_delay = handler_config.retry_interval();
@@ -465,7 +482,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handler_failure_at_retry_limit_returns_terminal_failure() {
+    async fn handler_failure_at_retry_limit_returns_exhausted() {
         let configuration = EngineConfiguration::default();
 
         let handler = MockHandler::new("stream", "subject")
@@ -481,7 +498,12 @@ mod tests {
         let runtime = test_runtime(&configuration);
         let outcome = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
 
-        assert!(matches!(outcome, HandlersOutcome::TerminalFailure));
+        match outcome {
+            HandlersOutcome::Exhausted { error } => {
+                assert!(error.contains("boom"));
+            }
+            other => panic!("expected Exhausted, got {other:?}"),
+        }
     }
 
     #[tokio::test]

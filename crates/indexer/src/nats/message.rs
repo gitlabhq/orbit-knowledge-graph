@@ -8,8 +8,9 @@ use async_nats::jetstream::AckKind;
 use futures::stream::Stream as FuturesStream;
 use tracing::warn;
 
+use super::broker::NatsBroker;
 use super::error::{NatsError, map_ack_error, map_nack_error};
-use crate::types::Envelope;
+use crate::types::{Envelope, Topic};
 
 pub struct NatsMessage {
     /// The message envelope containing payload and metadata.
@@ -51,6 +52,42 @@ impl NatsMessage {
             .await
             .map_err(map_nack_error)
     }
+
+    /// Publishes the message to the dead letter queue, then acks it.
+    ///
+    /// If the DLQ publish fails, the message is nacked for redelivery instead.
+    pub async fn to_dlq(self, broker: &NatsBroker, topic: &Topic, error: &str) -> DlqResult {
+        let message_id = self.envelope.id.0.clone();
+
+        let dlq_result = broker
+            .publish_dead_letter(topic, &self.envelope, error)
+            .await;
+
+        match dlq_result {
+            Ok(()) => {
+                if let Err(ack_error) = self.ack().await {
+                    warn!(%ack_error, %message_id, "failed to ack exhausted message");
+                }
+                DlqResult::Published
+            }
+            Err(dlq_error) => {
+                warn!(
+                    %dlq_error,
+                    %message_id,
+                    "failed to publish to dead letter queue, nacking for redelivery"
+                );
+                if let Err(nack_error) = self.nack().await {
+                    warn!(%nack_error, %message_id, "failed to nack message after DLQ failure");
+                }
+                DlqResult::Nacked
+            }
+        }
+    }
+}
+
+pub enum DlqResult {
+    Published,
+    Nacked,
 }
 
 /// Tells NATS "I'm still working on this" so it doesn't redeliver the message.
