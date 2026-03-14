@@ -91,6 +91,5 @@ Rails could publish events directly to NATS, bypassing both PostgreSQL and Sipho
 - [Rails MR !227200: Add Knowledge Graph code indexing task on push to default branch](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/227200)
 - [GKG MR !556: Consume code indexing tasks instead of push events](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/556)
 - [Code indexing design document](../indexing/code_indexing.md)
-- [SDLC indexing design document](../indexing/sdlc_indexing.md)
 - [GitLab time-range partitioning documentation](https://docs.gitlab.com/development/database/partitioning/date_range/#using-time-range-partitioning)
 - [Flow triggers and event design ADR](https://gitlab.com/gitlab-com/content-sites/handbook/-/merge_requests/18106#note_3096730268)
