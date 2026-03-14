@@ -90,7 +90,6 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 
     mock.replace_archive(
         project_id,
-        "main",
         &[(
             "src/Other.java",
             "public class Other {

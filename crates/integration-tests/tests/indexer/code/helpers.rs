@@ -108,7 +108,7 @@ struct MockState {
 
 struct ProjectData {
     default_branch: String,
-    archives: HashMap<String, Vec<u8>>,
+    archive: Vec<u8>,
 }
 
 pub struct MockGitlabServer {
@@ -157,24 +157,19 @@ impl MockGitlabServer {
     }
 
     pub fn add_project(&self, project_id: i64, default_branch: &str, files: &[(&str, &str)]) {
-        let tar_gz = build_tar_gz(files);
-        let mut archives = HashMap::new();
-        archives.insert(default_branch.to_string(), tar_gz);
-
         self.state.projects.lock().insert(
             project_id,
             ProjectData {
                 default_branch: default_branch.to_string(),
-                archives,
+                archive: build_tar_gz(files),
             },
         );
     }
 
-    pub fn replace_archive(&self, project_id: i64, ref_name: &str, files: &[(&str, &str)]) {
-        let tar_gz = build_tar_gz(files);
+    pub fn replace_archive(&self, project_id: i64, files: &[(&str, &str)]) {
         let mut projects = self.state.projects.lock();
         if let Some(project) = projects.get_mut(&project_id) {
-            project.archives.insert(ref_name.to_string(), tar_gz);
+            project.archive = build_tar_gz(files);
         }
     }
 }
@@ -205,14 +200,11 @@ async fn handle_project_info(
 async fn handle_download_archive(
     State(state): State<Arc<MockState>>,
     Path(project_id): Path<i64>,
-    Query(query): Query<ArchiveQuery>,
+    Query(_query): Query<ArchiveQuery>,
 ) -> impl IntoResponse {
     let projects = state.projects.lock();
     match projects.get(&project_id) {
-        Some(p) => match p.archives.get(&query.ref_name) {
-            Some(bytes) => (StatusCode::OK, bytes.clone()).into_response(),
-            None => StatusCode::NOT_FOUND.into_response(),
-        },
+        Some(p) => (StatusCode::OK, p.archive.clone()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
