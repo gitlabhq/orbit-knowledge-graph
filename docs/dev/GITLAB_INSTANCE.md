@@ -4,15 +4,6 @@ VM: `vm-gitlab-omnibus` (10.128.0.4)
 
 ## Secrets
 
-### Gitaly Token
-
-Used for authenticated gRPC calls to Gitaly.
-
-| Location | Path |
-|----------|------|
-| GCP Secret Manager | `gitaly-token` |
-| VM | `/var/opt/gitlab/gitaly/config.toml` (`[auth].token`) |
-
 ### Shell Secret (JWT)
 
 Used to sign JWT tokens for GitLab internal API authentication (e.g., `/api/v4/internal/*` endpoints).
@@ -121,4 +112,3 @@ kubectl rollout restart deployment/siphon-producer -n gkg
 ## Related Documentation
 
 - [GitLab Internal API](https://docs.gitlab.com/ee/development/internal_api/) - JWT authentication details
-- [Configure Gitaly](https://docs.gitlab.com/administration/gitaly/configure_gitaly/) - Gitaly token configuration
