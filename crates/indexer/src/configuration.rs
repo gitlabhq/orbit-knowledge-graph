@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::modules::code::dispatch::ProjectCodeDispatcherConfig;
-use crate::modules::code::{ProjectCodeIndexingHandlerConfig, PushEventHandlerConfig};
+use crate::modules::code::{CodeIndexingTaskHandlerConfig, ProjectCodeIndexingHandlerConfig};
 use crate::modules::namespace_deletion::{
     NamespaceDeletionHandlerConfig, NamespaceDeletionSchedulerConfig,
 };
@@ -58,7 +58,7 @@ pub struct HandlersConfiguration {
     #[serde(default)]
     pub namespace_handler: NamespaceHandlerConfig,
     #[serde(default)]
-    pub code_push_event: PushEventHandlerConfig,
+    pub code_indexing_task: CodeIndexingTaskHandlerConfig,
     #[serde(default)]
     pub code_project_reconciliation: ProjectCodeIndexingHandlerConfig,
     #[serde(default)]

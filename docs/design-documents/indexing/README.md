@@ -58,7 +58,7 @@ flowchart TD
   PG -- Logical Replication --> SYP
   SYP -- CDC Events --> JS
   JS -- Event Streams --> SDLC_IDX
-  JS -- Push Events --> CODE_IDX
+  JS -- Code Indexing Tasks --> CODE_IDX
   CODE_IDX -- Git RPC --> Gitaly
 
   SDLC_IDX -- Queries --> CH_RAW
@@ -93,7 +93,7 @@ flowchart TD
 **Shared Use**:
 
 - SDLC indexing: Receives events for issues, merge requests, pipelines, projects, namespaces, and other SDLC entities
-- Code indexing: Receives `push_event_payloads` to trigger repository indexing
+- Code indexing: Receives `p_knowledge_graph_code_indexing_tasks` to trigger repository indexing
 
 Siphon uses PostgreSQL's logical replication to capture changes from the write-ahead log (WAL), publishing them as protobuf messages to NATS JetStream. This decouples the Knowledge Graph from the production database.
 
@@ -103,9 +103,9 @@ Siphon uses PostgreSQL's logical replication to capture changes from the write-a
 
 **Shared Use**:
 
-- Delivers and distributes needed CDC events (like `events` and `push_event_payloads`) to indexing workers via NATS JetStream subjects.
+- Delivers and distributes needed CDC events (like `events` and `p_knowledge_graph_code_indexing_tasks`) to indexing workers via NATS JetStream subjects.
 - Distributes workload across multiple indexer replicas
-- Provides NATS KV for code handler mutual exclusion (push_event vs project_code) and cadence coordination. SDLC dispatch deduplication uses per-subject message limits on the JetStream stream.
+- Provides NATS KV for code handler mutual exclusion (code_indexing_task vs project_code) and cadence coordination. SDLC dispatch deduplication uses per-subject message limits on the JetStream stream.
 
 Both indexing pipelines subscribe to relevant NATS subjects and use the same NATS deployment for event distribution and coordination.
 
