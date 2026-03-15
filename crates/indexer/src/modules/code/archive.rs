@@ -1,8 +1,7 @@
 use std::io::Read;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use flate2::read::GzDecoder;
-use gkg_utils::path::normalize_path;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {
@@ -97,6 +96,19 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
     }
 
     Ok(())
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    path.components().fold(PathBuf::new(), |mut acc, c| {
+        match c {
+            Component::ParentDir => {
+                acc.pop();
+            }
+            Component::CurDir => {}
+            _ => acc.push(c),
+        }
+        acc
+    })
 }
 
 #[cfg(test)]
