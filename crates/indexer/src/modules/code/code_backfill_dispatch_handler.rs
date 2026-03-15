@@ -35,6 +35,14 @@ impl Default for CodeBackfillDispatchHandlerConfig {
     }
 }
 
+const NAMESPACE_TRAVERSAL_PATH_QUERY: &str = r#"
+SELECT traversal_path
+FROM namespace_traversal_paths
+WHERE id = {namespace_id:Int64}
+  AND deleted = false
+LIMIT 1
+"#;
+
 const NAMESPACE_PROJECTS_QUERY: &str = r#"
 SELECT project.id AS project_id, traversal_paths.traversal_path
 FROM siphon_projects project
@@ -114,12 +122,40 @@ impl Handler for CodeBackfillDispatchHandler {
 }
 
 impl CodeBackfillDispatchHandler {
+    async fn resolve_namespace_traversal_path(
+        &self,
+        root_namespace_id: i64,
+    ) -> Result<Option<String>, HandlerError> {
+        let batches = self
+            .datalake
+            .query(NAMESPACE_TRAVERSAL_PATH_QUERY)
+            .param("namespace_id", root_namespace_id)
+            .fetch_arrow()
+            .await
+            .map_err(|e| {
+                HandlerError::Processing(format!("failed to query namespace traversal path: {e}"))
+            })?;
+
+        let paths = String::extract_column(&batches, 0)
+            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+
+        Ok(paths.into_iter().next())
+    }
+
     async fn dispatch_projects_for_namespace(
         &self,
         context: &HandlerContext,
         root_namespace_id: i64,
     ) -> Result<(), HandlerError> {
-        let namespace_prefix = format!("{root_namespace_id}/");
+        let Some(traversal_path) = self
+            .resolve_namespace_traversal_path(root_namespace_id)
+            .await?
+        else {
+            debug!(root_namespace_id, "namespace traversal path not found");
+            return Ok(());
+        };
+
+        let namespace_prefix = traversal_path;
 
         let batches = self
             .datalake
