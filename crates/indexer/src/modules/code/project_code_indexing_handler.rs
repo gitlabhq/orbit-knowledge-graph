@@ -131,7 +131,7 @@ impl ProjectCodeIndexingHandler {
             .checkpoint_store
             .get_checkpoint(&project.traversal_path, project_id, default_branch)
             .await
-            && checkpoint.last_event_id >= push_event.event_id
+            && checkpoint.last_task_id >= push_event.event_id
         {
             debug!(project_id, "already indexed, skipping reconciliation");
             metrics.record_outcome("skipped_checkpoint");
@@ -166,8 +166,8 @@ impl ProjectCodeIndexingHandler {
                     project_id,
                     branch: default_branch.to_string(),
                     traversal_path: project.traversal_path.clone(),
-                    event_id: push_event.event_id,
-                    commit_sha: push_event.commit_sha.clone(),
+                    task_id: push_event.event_id,
+                    commit_sha: Some(push_event.commit_sha.clone()),
                 },
             )
             .await;
@@ -335,8 +335,8 @@ mod tests {
                 traversal_path: "/org/project-123".to_string(),
                 project_id: 123,
                 branch: "main".to_string(),
-                last_event_id: 100,
-                last_commit: "abc".to_string(),
+                last_task_id: 100,
+                last_commit: Some("abc".to_string()),
                 indexed_at: Utc::now(),
             })
             .await

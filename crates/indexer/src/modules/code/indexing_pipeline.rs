@@ -22,8 +22,8 @@ pub struct IndexingRequest {
     pub project_id: i64,
     pub branch: String,
     pub traversal_path: String,
-    pub event_id: i64,
-    pub commit_sha: String,
+    pub task_id: i64,
+    pub commit_sha: Option<String>,
 }
 
 pub struct CodeIndexingPipeline {
@@ -60,9 +60,10 @@ impl CodeIndexingPipeline {
             .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
 
         let fetch_start = Instant::now();
+        let ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
         let archive_bytes = self
             .repository_service
-            .download_archive(request.project_id, &request.commit_sha)
+            .download_archive(request.project_id, ref_name)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))
             .record_error_stage(&self.metrics, "repository_fetch")?;
@@ -93,8 +94,8 @@ impl CodeIndexingPipeline {
             &request.traversal_path,
             request.project_id,
             &request.branch,
-            request.event_id,
-            &request.commit_sha,
+            request.task_id,
+            request.commit_sha.as_deref(),
             indexed_at,
         )
         .await
@@ -105,16 +106,16 @@ impl CodeIndexingPipeline {
         traversal_path: &str,
         project_id: i64,
         branch: &str,
-        event_id: i64,
-        commit_sha: &str,
+        task_id: i64,
+        last_commit: Option<&str>,
         indexed_at: DateTime<Utc>,
     ) -> Result<(), HandlerError> {
         let checkpoint = CodeIndexingCheckpoint {
             traversal_path: traversal_path.to_string(),
             project_id,
             branch: branch.to_string(),
-            last_event_id: event_id,
-            last_commit: commit_sha.to_string(),
+            last_task_id: task_id,
+            last_commit: last_commit.map(|s| s.to_string()),
             indexed_at,
         };
 
@@ -127,8 +128,8 @@ impl CodeIndexingPipeline {
         info!(
             project_id,
             branch = %branch,
-            commit = %commit_sha,
-            event_id,
+            commit = ?last_commit,
+            task_id,
             "completed code indexing"
         );
 

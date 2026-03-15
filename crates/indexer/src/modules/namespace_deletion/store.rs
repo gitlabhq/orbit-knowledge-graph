@@ -59,12 +59,12 @@ HAVING argMax(_deleted, _version) = false
 "#;
 
 const DELETE_CODE_CHECKPOINTS: &str = r#"
-INSERT INTO code_indexing_checkpoint (traversal_path, project_id, branch, last_event_id, last_commit, indexed_at, _deleted)
+INSERT INTO code_indexing_checkpoint (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, _deleted)
 SELECT
     traversal_path,
     project_id,
     branch,
-    argMax(last_event_id, _version),
+    argMax(last_task_id, _version),
     argMax(last_commit, _version),
     argMax(indexed_at, _version),
     true
