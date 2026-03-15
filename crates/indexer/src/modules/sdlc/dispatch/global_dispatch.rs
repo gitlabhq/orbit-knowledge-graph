@@ -74,7 +74,7 @@ impl GlobalDispatcher {
 
         match self
             .nats
-            .publish(&GlobalIndexingRequest::topic(), &envelope)
+            .publish(&GlobalIndexingRequest::subscription(), &envelope)
             .await
         {
             Ok(()) => {

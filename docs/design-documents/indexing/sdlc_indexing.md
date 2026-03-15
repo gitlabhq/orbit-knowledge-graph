@@ -256,7 +256,7 @@ WHERE id = '{namespace_id}';
 INSERT INTO knowledge_graph_indexing_job_events (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'error', NOW());
 ```
 
-If the worker fails unexpectedly, the unacked message will be redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the topic: external messages (e.g. Siphon CDC) are published to the `GKG_DEAD_LETTERS` stream for inspection and replay, while owned messages (internal dispatch) are discarded since the next dispatch cycle will re-create the request. This leverages eventual consistency which is acceptable since we're not aiming for real-time consistency.
+If the worker fails unexpectedly, the unacked message will be redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting: subscriptions with `dead_letter_on_exhaustion: true` (e.g. Siphon CDC) publish the message to the `GKG_DEAD_LETTERS` stream for inspection and replay, while subscriptions with `dead_letter_on_exhaustion: false` (internal dispatch, the default) term-ack the message since the next dispatch cycle will re-create the request. This leverages eventual consistency which is acceptable since we're not aiming for real-time consistency.
 
 ##### ETL
 

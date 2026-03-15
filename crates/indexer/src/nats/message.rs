@@ -10,7 +10,7 @@ use tracing::warn;
 
 use super::broker::NatsBroker;
 use super::error::{NatsError, map_ack_error, map_nack_error};
-use crate::types::{Envelope, Topic};
+use crate::types::{Envelope, Subscription};
 
 pub struct NatsMessage {
     /// The message envelope containing payload and metadata.
@@ -56,11 +56,16 @@ impl NatsMessage {
     /// Publishes the message to the dead letter queue, then acks it.
     ///
     /// If the DLQ publish fails, the message is nacked for redelivery instead.
-    pub async fn to_dlq(self, broker: &NatsBroker, topic: &Topic, error: &str) -> DlqResult {
+    pub async fn to_dlq(
+        self,
+        broker: &NatsBroker,
+        subscription: &Subscription,
+        error: &str,
+    ) -> DlqResult {
         let message_id = self.envelope.id.0.clone();
 
         let dlq_result = broker
-            .publish_dead_letter(topic, &self.envelope, error)
+            .publish_dead_letter(subscription, &self.envelope, error)
             .await;
 
         match dlq_result {

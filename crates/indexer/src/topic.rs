@@ -1,4 +1,4 @@
-use crate::types::{Event, Topic};
+use crate::types::{Event, Subscription};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -18,8 +18,8 @@ pub struct GlobalIndexingRequest {
 }
 
 impl Event for GlobalIndexingRequest {
-    fn topic() -> Topic {
-        Topic::owned(INDEXER_STREAM, GLOBAL_INDEXING_SUBJECT)
+    fn subscription() -> Subscription {
+        Subscription::new(INDEXER_STREAM, GLOBAL_INDEXING_SUBJECT)
     }
 }
 
@@ -31,8 +31,8 @@ pub struct NamespaceIndexingRequest {
 }
 
 impl NamespaceIndexingRequest {
-    pub fn publish_topic(&self) -> Topic {
-        Topic::owned(
+    pub fn publish_subscription(&self) -> Subscription {
+        Subscription::new(
             INDEXER_STREAM,
             format!(
                 "{}.{}.{}",
@@ -43,8 +43,8 @@ impl NamespaceIndexingRequest {
 }
 
 impl Event for NamespaceIndexingRequest {
-    fn topic() -> Topic {
-        Topic::owned(INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN)
+    fn subscription() -> Subscription {
+        Subscription::new(INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN)
     }
 }
 
@@ -54,8 +54,8 @@ pub struct ProjectCodeIndexingRequest {
 }
 
 impl ProjectCodeIndexingRequest {
-    pub fn publish_topic(&self) -> Topic {
-        Topic::owned(
+    pub fn publish_subscription(&self) -> Subscription {
+        Subscription::new(
             INDEXER_STREAM,
             format!(
                 "{}.{}",
@@ -66,8 +66,8 @@ impl ProjectCodeIndexingRequest {
 }
 
 impl Event for ProjectCodeIndexingRequest {
-    fn topic() -> Topic {
-        Topic::owned(INDEXER_STREAM, PROJECT_CODE_INDEXING_SUBJECT_PATTERN)
+    fn subscription() -> Subscription {
+        Subscription::new(INDEXER_STREAM, PROJECT_CODE_INDEXING_SUBJECT_PATTERN)
     }
 }
 
@@ -81,8 +81,8 @@ pub struct NamespaceDeletionRequest {
 }
 
 impl NamespaceDeletionRequest {
-    pub fn publish_topic(&self) -> Topic {
-        Topic::owned(
+    pub fn publish_subscription(&self) -> Subscription {
+        Subscription::new(
             INDEXER_STREAM,
             format!(
                 "{}.{}",
@@ -93,7 +93,7 @@ impl NamespaceDeletionRequest {
 }
 
 impl Event for NamespaceDeletionRequest {
-    fn topic() -> Topic {
-        Topic::owned(INDEXER_STREAM, NAMESPACE_DELETION_SUBJECT_PATTERN)
+    fn subscription() -> Subscription {
+        Subscription::new(INDEXER_STREAM, NAMESPACE_DELETION_SUBJECT_PATTERN)
     }
 }

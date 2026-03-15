@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::checkpoint::namespace_position_key;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::types::{Envelope, Event, SerializationError, Topic};
+use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -63,8 +63,8 @@ impl Handler for NamespaceHandler {
         "namespace_handler"
     }
 
-    fn topic(&self) -> Topic {
-        NamespaceIndexingRequest::topic()
+    fn subscription(&self) -> Subscription {
+        NamespaceIndexingRequest::subscription()
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
