@@ -155,6 +155,8 @@ Rails writes to a dedicated `p_knowledge_graph_code_indexing_tasks` table only w
 
 Each task carries `project_id`, `ref`, `commit_sha`, and `traversal_path` directly, so the handler does not need to call Rails for default branch validation or query ClickHouse for the namespace hierarchy.
 
+For the full rationale behind this approach and the alternatives that were considered, see [ADR 005: PostgreSQL task table for code indexing triggers](../decisions/005_code_indexing_task_table.md).
+
 The handler acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.
 
 Example NATS KV:
