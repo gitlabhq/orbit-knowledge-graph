@@ -166,14 +166,14 @@ async fn publish_and_subscribe() {
     let broker = connect_broker(&default_config(&url)).await;
     let subscription = Subscription::new(TEST_STREAM, TEST_SUBJECT);
 
-    let mut subscription = broker
+    let mut messages = broker
         .subscribe(&subscription, Arc::new(EngineMetrics::new()))
         .await
         .expect("failed to subscribe");
 
     publish_event(&broker, &subscription, "test-1", 42).await;
 
-    let event = receive_event(&mut subscription).await;
+    let event = receive_event(&mut messages).await;
     assert_eq!(event.id, "test-1");
     assert_eq!(event.value, 42);
 }
@@ -186,14 +186,14 @@ async fn nack_redelivers_message() {
     let broker = connect_broker(&default_config(&url)).await;
     let subscription = Subscription::new(TEST_STREAM, TEST_SUBJECT);
 
-    let mut subscription = broker
+    let mut messages = broker
         .subscribe(&subscription, Arc::new(EngineMetrics::new()))
         .await
         .expect("failed to subscribe");
 
     publish_event(&broker, &subscription, "nack-test", 99).await;
 
-    let first = tokio::time::timeout(RECEIVE_TIMEOUT, subscription.next())
+    let first = tokio::time::timeout(RECEIVE_TIMEOUT, messages.next())
         .await
         .expect("timed out")
         .expect("ended")
@@ -201,7 +201,7 @@ async fn nack_redelivers_message() {
 
     first.nack().await.expect("failed to nack");
 
-    let event = receive_event(&mut subscription).await;
+    let event = receive_event(&mut messages).await;
     assert_eq!(event.id, "nack-test");
 }
 
@@ -403,7 +403,7 @@ async fn in_progress_prevents_redelivery() {
 
     let subscription = Subscription::new(TEST_STREAM, TEST_SUBJECT);
 
-    let mut subscription = broker
+    let mut messages = broker
         .subscribe(&subscription, Arc::new(EngineMetrics::new()))
         .await
         .expect("failed to subscribe");
@@ -418,7 +418,7 @@ async fn in_progress_prevents_redelivery() {
         .await
         .expect("failed to publish");
 
-    let message = tokio::time::timeout(Duration::from_secs(10), subscription.next())
+    let message = tokio::time::timeout(Duration::from_secs(10), messages.next())
         .await
         .expect("timed out waiting for message")
         .expect("subscription ended")
@@ -436,7 +436,7 @@ async fn in_progress_prevents_redelivery() {
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check for 1s — ends at ~7s, still before the 8s reset deadline.
-    let redelivery = tokio::time::timeout(Duration::from_secs(1), subscription.next()).await;
+    let redelivery = tokio::time::timeout(Duration::from_secs(1), messages.next()).await;
     assert!(
         redelivery.is_err(),
         "message should NOT be redelivered after in-progress signal"

@@ -35,7 +35,7 @@ const PASSWORD: &str = "testpass";
 const DATABASE: &str = "test";
 
 fn test_subscription() -> Subscription {
-    Subscription::new(STREAM, SUBJECT)
+    Subscription::new(STREAM, SUBJECT).manage_stream(false)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
