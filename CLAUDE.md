@@ -12,7 +12,7 @@ Integration tests need Docker: `mise test:integration`.
 
 ## How the system works
 
-- **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). Code data via Gitaly `GetArchive` gRPC. GKG only writes to its own ClickHouse tables.
+- **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). GKG only writes to its own ClickHouse tables.
 - **Rails owns authorization.** GKG delegates all access decisions to Rails via gRPC (traversal IDs, resource permissions). See `docs/design-documents/security.md`.
 - **ClickHouse = datalake + graph.** Datalake DB holds raw Siphon rows; graph DB holds indexed property graph tables. The indexer transforms between them.
 - **Ontology-driven graph.** YAML in `config/ontology/nodes/` drives ETL, query validation, and redaction. New entity types start there, not in Rust. Schema: `config/schemas/ontology.schema.json`.
@@ -28,7 +28,6 @@ Integration tests need Docker: `mise test:integration`.
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
 - Unit tests via nextest (`unit-test`)
 - Integration tests with Docker testcontainers (`integration-test`)
-- Gitaly integration tests with real Gitaly container (`gitaly-integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
 - Helm chart linting and template validation (`helm-lint`)
@@ -59,6 +58,7 @@ Integration tests need Docker: `mise test:integration`.
 | Local development guide | `docs/dev/local-development.md` |
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbook | `docs/dev/RUNBOOK.md` |
+| Architecture Decision Records | `docs/design-documents/decisions/` |
 | Helm charts (dev) | `helm-dev/gkg/`, `helm-dev/observability/` |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
@@ -78,7 +78,6 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `code-graph` | Builds in-memory property graphs from parsed code |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`) and Arrow extraction utilities |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming |
-| `gitaly-client` | Gitaly gRPC client, HMAC auth, GetArchive RPC |
 | `siphon-proto` | Protobuf types for CDC replication events |
 | `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | K8s readiness/liveness probes |

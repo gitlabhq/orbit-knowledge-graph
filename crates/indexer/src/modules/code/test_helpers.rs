@@ -33,16 +33,6 @@ impl EventBuilder {
         self
     }
 
-    pub fn with_i32(mut self, name: &'static str, val: i32) -> Self {
-        self.columns.push((
-            name,
-            Value {
-                value: Some(value::Value::Int16Value(val)),
-            },
-        ));
-        self
-    }
-
     pub fn with_string(mut self, name: &'static str, val: &str) -> Self {
         self.columns.push((
             name,
@@ -80,7 +70,7 @@ pub fn build_replication_events(events: Vec<(Vec<String>, ReplicationEvent)>) ->
 
     let payload = LogicalReplicationEvents {
         event: 1,
-        table: "events".to_string(),
+        table: "p_knowledge_graph_code_indexing_tasks".to_string(),
         schema: "public".to_string(),
         application_identifier: "test".to_string(),
         events,
@@ -93,19 +83,17 @@ pub fn build_replication_events(events: Vec<(Vec<String>, ReplicationEvent)>) ->
     Bytes::from(compressed)
 }
 
-pub fn push_payload_columns(
-    event_id: i64,
+pub fn code_indexing_task_columns(
+    id: i64,
     project_id: i64,
     ref_name: &str,
-    commit: &str,
+    commit_sha: &str,
+    traversal_path: &str,
 ) -> EventBuilder {
-    use super::config::{siphon_actions, siphon_ref_types};
-
     EventBuilder::new()
-        .with_i64("event_id", event_id)
+        .with_i64("id", id)
         .with_i64("project_id", project_id)
-        .with_i32("ref_type", siphon_ref_types::BRANCH)
-        .with_i32("action", siphon_actions::PUSHED)
         .with_string("ref", ref_name)
-        .with_string("commit_to", commit)
+        .with_string("commit_sha", commit_sha)
+        .with_string("traversal_path", traversal_path)
 }

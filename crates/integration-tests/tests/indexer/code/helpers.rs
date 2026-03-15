@@ -3,29 +3,30 @@
 use std::io::Write;
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use axum::Router;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use base64::Engine;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use gitaly_client::{GitalyClient, GitalyRepositoryConfig, RepositorySource};
-use gitlab_client::ProjectInfo;
+use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseProjectStore, ClickHousePushEventStore,
-    ClickHouseStaleDataCleaner, CodeIndexingPipeline, ProjectCodeIndexingHandler,
-    ProjectCodeIndexingHandlerConfig, PushEventHandler, PushEventHandlerConfig, RepositoryService,
-    RepositoryServiceError, config::CodeTableNames, metrics::CodeMetrics,
+    ClickHouseStaleDataCleaner, CodeIndexingPipeline, CodeIndexingTaskHandler,
+    CodeIndexingTaskHandlerConfig, ProjectCodeIndexingHandler, ProjectCodeIndexingHandlerConfig,
+    RailsRepositoryService, RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use integration_testkit::TestContext;
-use sha2::{Digest, Sha256};
-use testcontainers::GenericImage;
-use testcontainers::core::{ContainerPort, ExecCommand, ImageExt, WaitFor};
-use testcontainers::runners::AsyncRunner;
+use parking_lot::Mutex;
+use serde::Deserialize;
+use std::collections::HashMap;
 
-pub const GITALY_IMAGE: &str = "registry.gitlab.com/gitlab-org/build/cng/gitaly";
-pub const GITALY_TAG: &str = "17-7-stable";
-pub const GITALY_TOKEN: &str = "secret_token";
+const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
 pub struct CodeIndexingDeps {
     pub pipeline: Arc<CodeIndexingPipeline>,
@@ -37,8 +38,8 @@ pub struct CodeIndexingDeps {
 }
 
 impl CodeIndexingDeps {
-    pub fn new(gitaly_address: &str, clickhouse: &TestContext) -> Self {
-        let repository_service = create_direct_gitaly_service(gitaly_address, GITALY_TOKEN);
+    pub fn new(mock: &MockGitlabServer, clickhouse: &TestContext) -> Self {
+        let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client());
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
             &graph_client,
@@ -73,14 +74,12 @@ impl CodeIndexingDeps {
         }
     }
 
-    pub fn push_event_handler(&self) -> PushEventHandler {
-        PushEventHandler::new(
+    pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
+        CodeIndexingTaskHandler::new(
             Arc::clone(&self.pipeline),
-            Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
-            Arc::clone(&self.project_store) as _,
             self.metrics.clone(),
-            PushEventHandlerConfig::default(),
+            CodeIndexingTaskHandlerConfig::default(),
         )
     }
 
@@ -97,86 +96,142 @@ impl CodeIndexingDeps {
     }
 }
 
-struct DirectGitalyRepositoryService {
-    address: String,
-    storage: String,
-    token: Option<String>,
+// ---------------------------------------------------------------------------
+// Mock GitLab server — serves /api/v4/internal/orbit/project/... endpoints
+// ---------------------------------------------------------------------------
+
+struct MockState {
+    projects: Mutex<HashMap<i64, ProjectData>>,
 }
 
-#[async_trait]
-impl RepositoryService for DirectGitalyRepositoryService {
-    async fn project_info(&self, project_id: i64) -> Result<ProjectInfo, RepositoryServiceError> {
-        let config = GitalyRepositoryConfig {
-            address: self.address.clone(),
-            storage: self.storage.clone(),
-            relative_path: hashed_repo_path(project_id),
-            token: self.token.clone(),
-        };
-        let client = GitalyClient::connect(config)
-            .await
-            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
-        let raw_branch = client
-            .find_default_branch_name()
-            .await
-            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))?
-            .ok_or_else(|| {
-                RepositoryServiceError::Archive(format!(
-                    "no default branch for project {project_id}"
-                ))
-            })?;
-        let default_branch = raw_branch
-            .strip_prefix("refs/heads/")
-            .unwrap_or(&raw_branch)
-            .to_string();
+struct ProjectData {
+    default_branch: String,
+    archive: Vec<u8>,
+}
 
-        Ok(ProjectInfo {
+pub struct MockGitlabServer {
+    state: Arc<MockState>,
+    base_url: String,
+}
+
+impl MockGitlabServer {
+    pub async fn start() -> Self {
+        let state = Arc::new(MockState {
+            projects: Mutex::new(HashMap::new()),
+        });
+
+        let app = Router::new()
+            .route(
+                "/api/v4/internal/orbit/project/{project_id}/info",
+                get(handle_project_info),
+            )
+            .route(
+                "/api/v4/internal/orbit/project/{project_id}/repository/archive",
+                get(handle_download_archive),
+            )
+            .with_state(Arc::clone(&state));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind failed");
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        Self {
+            state,
+            base_url: format!("http://{addr}"),
+        }
+    }
+
+    pub fn gitlab_client(&self) -> GitlabClient {
+        let config = GitlabClientConfiguration {
+            base_url: self.base_url.clone(),
+            signing_key: base64::engine::general_purpose::STANDARD.encode(SIGNING_KEY),
+            resolve_host: None,
+        };
+        GitlabClient::new(config).expect("failed to create GitlabClient")
+    }
+
+    pub fn add_project(&self, project_id: i64, default_branch: &str, files: &[(&str, &str)]) {
+        self.state.projects.lock().insert(
             project_id,
-            default_branch,
-        })
+            ProjectData {
+                default_branch: default_branch.to_string(),
+                archive: build_tar_gz(files),
+            },
+        );
     }
 
-    async fn download_archive(
-        &self,
-        project_id: i64,
-        ref_name: &str,
-    ) -> Result<Vec<u8>, RepositoryServiceError> {
-        let temp_dir =
-            tempfile::tempdir().map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
-        let config = GitalyRepositoryConfig {
-            address: self.address.clone(),
-            storage: self.storage.clone(),
-            relative_path: hashed_repo_path(project_id),
-            token: self.token.clone(),
-        };
-        let client =
-            GitalyClient::connect(config)
-                .await
-                .map_err(|e: gitaly_client::GitalyError| {
-                    RepositoryServiceError::Archive(e.to_string())
-                })?;
-        let tar_path = client
-            .fetch_archive(temp_dir.path(), Some(ref_name))
-            .await
-            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
-        let tar_bytes =
-            std::fs::read(&tar_path).map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
-        encoder
-            .write_all(&tar_bytes)
-            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))?;
-        encoder
-            .finish()
-            .map_err(|e| RepositoryServiceError::Archive(e.to_string()))
+    pub fn replace_archive(&self, project_id: i64, files: &[(&str, &str)]) {
+        let mut projects = self.state.projects.lock();
+        if let Some(project) = projects.get_mut(&project_id) {
+            project.archive = build_tar_gz(files);
+        }
     }
 }
 
-fn create_direct_gitaly_service(address: &str, token: &str) -> Arc<dyn RepositoryService> {
-    Arc::new(DirectGitalyRepositoryService {
-        address: address.to_string(),
-        storage: "default".to_string(),
-        token: Some(token.to_string()),
-    })
+#[derive(Deserialize)]
+struct ArchiveQuery {
+    #[serde(rename = "ref")]
+    ref_name: String,
 }
+
+async fn handle_project_info(
+    State(state): State<Arc<MockState>>,
+    Path(project_id): Path<i64>,
+) -> impl IntoResponse {
+    let projects = state.projects.lock();
+    match projects.get(&project_id) {
+        Some(p) => {
+            let info = serde_json::json!({
+                "project_id": project_id,
+                "default_branch": p.default_branch,
+            });
+            (StatusCode::OK, axum::Json(info)).into_response()
+        }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn handle_download_archive(
+    State(state): State<Arc<MockState>>,
+    Path(project_id): Path<i64>,
+    Query(_query): Query<ArchiveQuery>,
+) -> impl IntoResponse {
+    let projects = state.projects.lock();
+    match projects.get(&project_id) {
+        Some(p) => (StatusCode::OK, p.archive.clone()).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+fn build_tar_gz(files: &[(&str, &str)]) -> Vec<u8> {
+    let mut tar_builder = tar::Builder::new(Vec::new());
+
+    for (path, content) in files {
+        let content_bytes = content.as_bytes();
+        let mut header = tar::Header::new_gnu();
+        header.set_path(path).unwrap();
+        header.set_size(content_bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar_builder
+            .append(&header, content_bytes)
+            .expect("tar append failed");
+    }
+
+    let tar_bytes = tar_builder.into_inner().expect("tar finish failed");
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    encoder.write_all(&tar_bytes).expect("gz write failed");
+    encoder.finish().expect("gz finish failed")
+}
+
+// ---------------------------------------------------------------------------
+// Shared test helpers
+// ---------------------------------------------------------------------------
 
 pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
     use indexer::clickhouse::ClickHouseDestination;
@@ -258,125 +313,4 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
         defines_edges.first().is_some_and(|b| b.num_rows() > 0),
         "no DEFINES edges indexed"
     );
-}
-
-pub fn hashed_repo_path(project_id: i64) -> String {
-    let hash = format!("{:x}", Sha256::digest(project_id.to_string()));
-    format!("@hashed/{}/{}/{}.git", &hash[0..2], &hash[2..4], hash)
-}
-
-pub async fn start_gitaly() -> (String, testcontainers::ContainerAsync<GenericImage>) {
-    let container = GenericImage::new(GITALY_IMAGE, GITALY_TAG)
-        .with_wait_for(WaitFor::message_on_stderr("Starting Gitaly"))
-        .with_exposed_port(ContainerPort::Tcp(8075))
-        .with_env_var("GITALY_TESTING_NO_GIT_HOOKS", "1")
-        .with_cmd([
-            "bash",
-            "-c",
-            "mkdir -p /home/git/repositories && \
-             echo -e '[auth]\\ntoken = \"secret_token\"' >> /etc/gitaly/config.toml && \
-             exec /scripts/process-wrapper",
-        ])
-        .start()
-        .await
-        .expect("failed to start Gitaly");
-
-    let host = container.get_host().await.unwrap().to_string();
-    let port = container
-        .get_host_port_ipv4(ContainerPort::Tcp(8075))
-        .await
-        .unwrap();
-    let host = if host == "localhost" {
-        "127.0.0.1".to_string()
-    } else {
-        host
-    };
-    let address = format!("tcp://{}:{}", host, port);
-
-    for _ in 0..30 {
-        let cfg = GitalyRepositoryConfig {
-            address: address.clone(),
-            storage: "default".into(),
-            relative_path: "x.git".into(),
-            token: Some(GITALY_TOKEN.into()),
-        };
-        if let Ok(c) = GitalyClient::connect(cfg).await
-            && c.exists().await.is_ok()
-        {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
-
-    (address, container)
-}
-
-pub async fn create_test_repo(
-    container: &testcontainers::ContainerAsync<GenericImage>,
-    repo_path: &str,
-    file_path: &str,
-    file_content: &str,
-) -> String {
-    let script = format!(
-        r#"
-set -e
-GIT=/usr/local/bin/gitaly-git-v2.47
-mkdir -p $(dirname /home/git/repositories/{repo_path})
-$GIT init -q --bare /home/git/repositories/{repo_path}
-rm -rf /tmp/work && mkdir -p /tmp/work && cd /tmp/work
-$GIT init -q && $GIT config user.email x@x && $GIT config user.name x
-mkdir -p $(dirname {file_path})
-cat > {file_path} << 'SRCEOF'
-{file_content}
-SRCEOF
-$GIT add . && $GIT -c maintenance.auto=false commit -q -m init
-cp -r .git/objects/* /home/git/repositories/{repo_path}/objects/
-mkdir -p /home/git/repositories/{repo_path}/refs/heads
-$GIT rev-parse HEAD > /home/git/repositories/{repo_path}/refs/heads/main
-echo 'ref: refs/heads/main' > /home/git/repositories/{repo_path}/HEAD
-$GIT rev-parse HEAD
-"#
-    );
-
-    exec_git_script(container, &script).await
-}
-
-pub async fn update_repo_file(
-    container: &testcontainers::ContainerAsync<GenericImage>,
-    repo_path: &str,
-    old_file: &str,
-    new_file: &str,
-    new_content: &str,
-) -> String {
-    let script = format!(
-        r#"
-set -e
-GIT=/usr/local/bin/gitaly-git-v2.47
-cd /tmp/work
-$GIT rm -q {old_file}
-mkdir -p $(dirname {new_file})
-cat > {new_file} << 'SRCEOF'
-{new_content}
-SRCEOF
-$GIT add . && $GIT -c maintenance.auto=false commit -q -m "replace {old_file} with {new_file}"
-cp -rf .git/objects/* /home/git/repositories/{repo_path}/objects/
-$GIT rev-parse HEAD > /home/git/repositories/{repo_path}/refs/heads/main
-$GIT rev-parse HEAD
-"#
-    );
-
-    exec_git_script(container, &script).await
-}
-
-async fn exec_git_script(
-    container: &testcontainers::ContainerAsync<GenericImage>,
-    script: &str,
-) -> String {
-    let mut result = container
-        .exec(ExecCommand::new(["bash", "-c", script]))
-        .await
-        .expect("exec failed");
-
-    let stdout = result.stdout_to_vec().await.unwrap();
-    String::from_utf8_lossy(&stdout).trim().to_string()
 }

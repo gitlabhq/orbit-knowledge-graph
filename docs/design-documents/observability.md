@@ -42,7 +42,7 @@ The indexer emits metrics under five OpenTelemetry meters: `etl_engine` for the 
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `etl.messages.processed` | Counter | count | `topic`, `outcome` (ack/nack) | Total messages processed |
+| `etl.messages.processed` | Counter | count | `topic`, `outcome` (ack/nack/term/dead_letter) | Total messages processed |
 | `etl.message.duration` | Histogram | s | `topic` | End-to-end time per message through dispatch |
 | `etl.handler.duration` | Histogram | s | `handler` | Time inside each handler's `handle()` call |
 | `etl.handler.errors` | Counter | count | `handler`, `error_kind` | Handler errors at the engine dispatch level |
@@ -82,9 +82,9 @@ The indexer emits metrics under five OpenTelemetry meters: `etl_engine` for the 
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_branch, skipped_checkpoint, skipped_lock, skipped_project_not_found, error) | Total push events processed by the code handler |
-| `indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single push event |
-| `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of fetching a repository archive from Gitaly |
+| `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error) | Total code indexing tasks processed |
+| `indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
+| `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of fetching a repository archive from the Rails internal API |
 | `indexer.code.repository.extract.duration` | Histogram | s | | Duration of extracting a repository archive to disk |
 | `indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
 | `indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |

@@ -43,7 +43,7 @@ axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
-gitaly-client = { path = "../gitaly-client" }
+
 sha2 = { workspace = true }
 internment = { workspace = true }
 parser-core = { workspace = true }

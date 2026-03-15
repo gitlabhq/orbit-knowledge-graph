@@ -182,11 +182,11 @@ Building a Knowledge Graph is a ***data engineering problem***. The Knowledge Gr
 We will then build a secure query layer on top of the Data Insights Platform to allow developers and AI agents to query the graph for various product use cases. The Knowledge Graph tech stack will look like the following:
 
 - [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) acts as the CDC bridge, streaming PostgreSQL logical replication events into NATS.
-- [NATS](https://docs.nats.io/) acts as the durable message broker between Siphon and ClickHouse. Additionally, we will leverage NATS to power all event-driven logic, high availability, and queuing, such as listening to [`push_event_payloads`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/push_event_payloads.yml) for listening to branch pushes in code indexing.
+- [NATS](https://docs.nats.io/) acts as the durable message broker between Siphon and ClickHouse. Additionally, we will leverage NATS to power all event-driven logic, high availability, and queuing, such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
 - [ClickHouse](https://clickhouse.com/) will act as the primary data store and data lake. With ClickHouse, we will build namespace property graphs and project-level indexes. We will never establish a direct connection to the OLTP database.
 - **Knowledge Graph Web Server and Indexer** as a unified binary with two modes:
   - **`gkg-webserver`**: Serves web traffic requests coming from the Rails instance, executes GKG MCP tool calls, shares logic with the indexer, builds the graph queries, communicates with NATS for indexing status and namespace routing, and writes to ClickHouse to record customer usage for impact analytics and usage billing.
-  - **`gkg-indexer`**: Performs SDLC ETL indexing for each customer's top-level namespace metadata by converting normalized tables into property graph tables, computing traversal_ids as needed for each entity type, and listening to branch push table events for fetching from Gitaly and indexing code, and leverages NATS as the distributed queuing and locking system across indexing types.
+  - **`gkg-indexer`**: Performs SDLC ETL indexing for each customer's top-level namespace metadata by converting normalized tables into property graph tables, computing traversal_ids as needed for each entity type, and consuming code indexing tasks to fetch repository archives via the Rails internal API for code indexing. Leverages NATS as the distributed queuing and locking system across indexing types.
 - **The Software Architecture Map (UI)** will be a Vue3-based visual explorer embedded directly into Rails and will communicate with the Knowledge Graph service. It will auto-discover components and dependencies from the Knowledge Graph to visualize lineage and ownership. Teams can use it for faster onboarding, blast radius and impact analysis during incidents/changes, and more precise service ownership boundaries for structural lineage. Additionally, we will use this same UI to power Knowledge Graph usage analytics and admin settings.
 
 ```mermaid
@@ -236,6 +236,8 @@ Please see the following design documents for more details on the Knowledge Grap
 - [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md)
 - [ADR: Rust Core Runtime](decisions/002_rust_core_runtime.md)
 - [ADR: API Design — Unified REST + GraphQL](decisions/003_api_design.md)
+- [ADR: Unified Response Schema](decisions/004_unified_response_schema.md)
+- [ADR: PostgreSQL Task Table for Code Indexing Triggers](decisions/005_code_indexing_task_table.md)
 
 ## Binary Breakdown
 
@@ -252,7 +254,6 @@ flowchart TD
   %% ====== Environments ======
   subgraph GitLab_VM[GitLab VM]
     PG[(PostgreSQL)]
-    Gitaly[(Gitaly)]
     RailsAPI[GitLab Rails / Duo / UI]:::ext
   end
 
@@ -284,7 +285,7 @@ flowchart TD
   SiphonCI --> JS
 
   JS -->|CDC events| IDX
-  IDX -- Git RPC --> Gitaly
+  IDX -- archive download --> RailsAPI
 
   %% Durable store: ClickHouse only
   IDX -- INSERT/UPSERT graph tables --> CH

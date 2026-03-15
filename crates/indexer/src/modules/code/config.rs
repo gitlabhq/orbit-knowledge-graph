@@ -6,16 +6,8 @@ use ontology::{Ontology, OntologyError};
 
 pub const CODE_LOCK_TTL: Duration = Duration::from_secs(60);
 
-pub mod siphon_actions {
-    pub const PUSHED: i32 = 2;
-}
-
-pub mod siphon_ref_types {
-    pub const BRANCH: i32 = 0;
-}
-
 pub mod subjects {
-    pub const PUSH_EVENT_PAYLOADS: &str = "push_event_payloads";
+    pub const CODE_INDEXING_TASKS: &str = "p_knowledge_graph_code_indexing_tasks";
 }
 
 /// ClickHouse table names for code graph entities, derived from the ontology.

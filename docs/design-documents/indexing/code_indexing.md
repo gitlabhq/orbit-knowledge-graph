@@ -8,7 +8,7 @@ If we want the Knowledge Graph to answer questions about code, it needs to under
 
 The ETL pipeline:
 
-- Reads code from GitLab repositories through Gitaly RPC calls
+- Reads code from GitLab repositories through the Rails internal API
 - Transforms it into a call graph and file system hierarchy
 - Writes entities and relationships to ClickHouse
 
@@ -89,8 +89,8 @@ graph LR
 graph LR
     Siphon["Siphon CDC"] --> NATS["NATS JetStream"]
     NATS --> GKG["gkg-server<br/>(Indexer mode)"]
-    GKG --> Gitaly["Gitaly<br/>GetArchive RPC"]
-    Gitaly --> CodeGraph["code-graph<br/>(parse + analyze)"]
+    GKG --> Rails["Rails internal API<br/>(archive download)"]
+    Rails --> CodeGraph["code-graph<br/>(parse + analyze)"]
     CodeGraph --> Arrow["ArrowConverter"]
     Arrow --> ClickHouse["ClickHouse"]
 ```
@@ -101,13 +101,13 @@ graph LR
 |---|---|
 | `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
 | `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
-| `indexer` crate | NATS consumer, ETL engine, push event handler, Arrow conversion, ClickHouse writes |
-| `gitaly-client` crate | Gitaly gRPC client for `GetArchive` RPC |
+| `indexer` crate | NATS consumer, ETL engine, code indexing task handler, Arrow conversion, ClickHouse writes |
+
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the datalake and the property graph |
-| Gitaly | GitLab Git storage service; code indexer uses `GetArchive` RPC |
+| Rails internal API | Proxies repository archive downloads and project info lookups |
 
 For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 [SDLC indexing design document](sdlc_indexing.md).
@@ -147,27 +147,25 @@ The first milestone is indexing the main branch for every repository. This cover
 
 #### Extract
 
-The extract phase listens to push events from NATS and uses ClickHouse to derive project hierarchies and full paths.
+The extract phase listens to code indexing tasks from NATS.
 
-Push events from the GitLab PostgreSQL database are published to NATS JetStream subjects like:
+Rails writes to a dedicated `p_knowledge_graph_code_indexing_tasks` table only when a push lands on the default branch of a namespace with Knowledge Graph indexing enabled. These rows are replicated via Siphon CDC to NATS JetStream:
 
-- `gkg_siphon_stream.events`
-- `gkg_siphon_stream.push_event_payloads`
+- `gkg_siphon_stream.p_knowledge_graph_code_indexing_tasks`
 
-The indexing service subscribes to these subjects and correlates events across tables:
+Each task carries `project_id`, `ref`, `commit_sha`, and `traversal_path` directly, so the handler does not need to call Rails for default branch validation or query ClickHouse for the namespace hierarchy.
 
-- Events table: contains `event_id`, `project_id`, `author_id`, and push action.
-- Push payloads table: contains `event_id`, `ref` (branch name), `commit_to` (SHA) and ref type.
+For the full rationale behind this approach and the alternatives that were considered, see [ADR 005: PostgreSQL task table for code indexing triggers](../decisions/005_code_indexing_task_table.md).
 
-The indexer confirms it's a push to the `main` branch before proceeding. Then it acquires a lock on the project + branch + ref combination to prevent other workers from indexing the same branch concurrently.
+The handler acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.
 
 Example NATS KV:
 
-- Key: `/gkg-indexer/indexing/{project_id}/{branch_name}/{ref_type}/lock`
+- Key: `/gkg-indexer/indexing/{project_id}/{branch_name}/lock`
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 1 hour (estimated based on the amount of resources)
 
-After acquiring the lock, the service makes an RPC call to Gitaly to download the repository archive to a temp directory. It also queries ClickHouse to build the namespace hierarchy and gather metadata for the project's code graph.
+After acquiring the lock, the service downloads the repository archive from the Rails internal API.
 
 #### Transform (call graph construction)
 
@@ -233,17 +231,17 @@ The engine subscribes to NATS topics, routes messages to the appropriate module'
 
 Handlers don't write to ClickHouse directly. They receive a trait-based storage abstraction and create table-specific writers on demand. The abstraction has two implementations: a production writer that serializes Arrow record batches and streams them to ClickHouse, and a mock that captures writes in memory for test assertions. Because handlers only depend on the trait, they are database-independent and can be tested without any external infrastructure.
 
-##### Push event flow
+##### Code indexing task flow
 
-The code indexing handler subscribes to push event payloads from NATS. On each event the handler:
+The code indexing handler subscribes to code indexing tasks from NATS. On each task the handler:
 
-1. Validates the event is a push to the default branch and hasn't already been processed (watermark check)
+1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
-3. Fetches the repository archive from Gitaly and extracts it to a temp directory
+3. Downloads the repository archive from the Rails internal API and extracts it to a temp directory
 4. Runs the streaming indexing pipeline to produce the graph
 5. Converts the graph to Arrow record batches and writes them to ClickHouse
 6. Cleans up stale data from the previous indexing run
-7. Updates the watermark and releases the lock
+7. Updates the checkpoint and releases the lock
 
 ##### Storage in ClickHouse
 
@@ -255,26 +253,26 @@ Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). It serves two purposes:
 
-- The push event handler and reconciliation handler check it to skip already-indexed events.
+- The code indexing task handler and reconciliation handler check it to skip already-indexed commits.
 - The dispatch query anti-joins against it to find projects that have never been indexed.
 
 #### Flow visual representation
 
 ```plaintext
-Siphon CDC (push events)
+Rails (p_knowledge_graph_code_indexing_tasks)
         |
         v
-  NATS JetStream
+  Siphon CDC → NATS JetStream
         |
         v
   gkg-server (Indexer mode)
         |
         v
-  Push event handler
+  Code indexing task handler
         |
-        |- 1. Validate event (default branch only, not already indexed)
+        |- 1. Check checkpoint (skip already-indexed commits)
         |- 2. Acquire distributed lock via NATS KV
-        |- 3. Fetch repository archive from Gitaly
+        |- 3. Download repository archive from Rails internal API
         |- 4. Extract to temp directory
         |- 5. Run indexing pipeline
         |       |- File discovery (respects .gitignore)
@@ -284,7 +282,7 @@ Siphon CDC (push events)
         |- 6. Convert graph to Arrow record batches
         |- 7. Write to ClickHouse (5 tables)
         |- 8. Clean up stale data
-        \- 9. Update watermark, release lock
+        \- 9. Update checkpoint, release lock
 ```
 
 ### Differences from the original local tool
@@ -295,8 +293,8 @@ tool. Here are the main architectural differences in the current service:
 | Aspect | Original (local) | Current (service) |
 |---|---|---|
 | Graph database | lbug (embedded) | ClickHouse |
-| Code access | Local filesystem | Gitaly `GetArchive` RPC |
-| Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC push events via NATS |
+| Code access | Local filesystem | Rails internal API (archive download) |
+| Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC code indexing tasks via NATS |
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
 | Authorization | None (local tool) | Rails gRPC delegation |
@@ -320,7 +318,7 @@ As stated above GitLab has the concept of a branch being "active" or "stale". An
 
 For the amount of data and uneven query distribution (some branches are never going to be queried), it's best we don't keep the data against the main branches in the same database since that would result in a lot of wasted storage and compute resources.
 
-Ideally, we would re-use the same indexing strategy as the main branch where we can index the active branches by listening to push events from NATS, but instead of loading the data into ClickHouse, we would store the data in cold storage (like S3 or GCS).
+Ideally, we would re-use the same indexing strategy as the main branch where we can index the active branches by listening to code indexing tasks from NATS, but instead of loading the data into ClickHouse, we would store the data in cold storage (like S3 or GCS).
 
 On request, we would load the data into ClickHouse from cold storage in materialized tables. This would allow us to then query the data in ClickHouse during the current session and then unload the data from ClickHouse after the session is complete (based on a variable TTL).
 

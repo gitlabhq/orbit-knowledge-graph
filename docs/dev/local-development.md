@@ -66,18 +66,6 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
 
    See: [GDK Siphon documentation](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/siphon.md)
 
-8. **Expose Gitaly on network interface** (for code indexing):
-
-   By default, GDK's Gitaly only listens on a Unix socket. To allow K8s pods to connect, edit `$GDK_ROOT/gitaly/gitaly.config.toml`:
-
-   ```toml
-   listen_addr = '0.0.0.0:8075'
-   ```
-
-   Then restart Gitaly: `gdk restart gitaly`
-
-   See: https://docs.gitlab.com/administration/gitaly/configure_gitaly
-
 ## Setup
 
 1. **Install dependencies:**
@@ -170,12 +158,6 @@ GDK Host (localhost)                    Kubernetes Cluster
 
 - Verify ClickHouse is running: `gdk status clickhouse`
 - Check HTTP port: `curl "http://localhost:8123/ping"`
-
-**Gitaly connection refused:**
-
-- Verify Gitaly is configured to listen on network: check `listen_addr` in `$GDK_ROOT/gitaly/gitaly.config.toml`
-- Check if port is accessible: `nc -zv localhost 8075`
-- Restart Gitaly after config changes: `gdk restart gitaly`
 
 **No data in graph:**
 

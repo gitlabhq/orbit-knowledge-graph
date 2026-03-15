@@ -38,7 +38,7 @@ Indexes software development lifecycle entities from Siphon CDC events: projects
 
 ### Code
 
-Indexes git repositories via Gitaly. Fetches archives on push events, runs the code-graph to extract call graphs, definitions, and references, then writes results to ClickHouse. Requires a Gitaly connection to be configured; disabled otherwise.
+Indexes git repositories via the Rails internal API. Fetches archives on code indexing tasks, runs the code-graph to extract call graphs, definitions, and references, then writes results to ClickHouse.
 
 ## Engine internals
 
@@ -165,7 +165,7 @@ code = 4
 concurrency_group = "sdlc"
 max_attempts = 1
 
-[handlers.code-push-event]
+[handlers.code-indexing-task]
 concurrency_group = "code"
 max_attempts = 5
 retry_interval_secs = 60
@@ -187,7 +187,10 @@ Three error types, nested:
 - `HandlerError` has `Processing(String)` and `Deserialization(serde_json::Error)`
 - `BrokerError` has variants for publish, subscribe, ack, nack, connection issues, etc.
 
-When a handler returns an error, the engine nacks the message so the broker can redeliver it (if retries are configured for that handler).
+When a handler returns an error, the engine nacks the message so the broker can redeliver it (if retries are configured for that handler). When retries are exhausted, the outcome depends on the topic:
+
+- **External topics** (e.g. Siphon CDC): the message is published to the `GKG_DEAD_LETTERS` stream for inspection and replay, then acked. If the DLQ publish fails, the message is nacked for redelivery instead.
+- **Owned topics** (internal dispatch): the message is term-acked, since it will be regenerated on the next dispatch cycle.
 
 `IndexerError` wraps top-level failures: NATS connection, ClickHouse connection, engine errors, and handler initialization.
 

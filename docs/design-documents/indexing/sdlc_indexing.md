@@ -256,7 +256,7 @@ WHERE id = '{namespace_id}';
 INSERT INTO knowledge_graph_indexing_job_events (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'error', NOW());
 ```
 
-If the worker fails unexpectedly, the unacked message will be redelivered by NATS to another worker. If the message exceeds `max_deliver`, it is discarded and the next dispatch cycle will re-create the request. This leverages eventual consistency which is acceptable since we're not aiming for real-time consistency.
+If the worker fails unexpectedly, the unacked message will be redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the topic: external messages (e.g. Siphon CDC) are published to the `GKG_DEAD_LETTERS` stream for inspection and replay, while owned messages (internal dispatch) are discarded since the next dispatch cycle will re-create the request. This leverages eventual consistency which is acceptable since we're not aiming for real-time consistency.
 
 ##### ETL
 
