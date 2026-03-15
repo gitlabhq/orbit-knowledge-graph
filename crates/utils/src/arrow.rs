@@ -155,73 +155,43 @@ impl ArrowUtils {
 
     /// Extract a typed `ColumnValue` from an Arrow array at the given row index.
     pub fn extract_value(array: &dyn Array, idx: usize) -> ColumnValue {
+        macro_rules! downcast {
+            ($arr_ty:ty, $val:ident => $expr:expr) => {
+                if let Some(arr) = array.as_any().downcast_ref::<$arr_ty>() {
+                    let $val = arr.value(idx);
+                    return $expr;
+                }
+            };
+        }
+
         if array.is_null(idx) {
             return ColumnValue::Null;
         }
 
-        if let Some(arr) = array.as_any().downcast_ref::<Int8Array>() {
-            return ColumnValue::Int64(i64::from(arr.value(idx)));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<Int16Array>() {
-            return ColumnValue::Int64(i64::from(arr.value(idx)));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<Int32Array>() {
-            return ColumnValue::Int64(i64::from(arr.value(idx)));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
-            return ColumnValue::Int64(arr.value(idx));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<UInt8Array>() {
-            return ColumnValue::Int64(i64::from(arr.value(idx)));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<UInt16Array>() {
-            return ColumnValue::Int64(i64::from(arr.value(idx)));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<UInt32Array>() {
-            return ColumnValue::Int64(i64::from(arr.value(idx)));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<UInt64Array>() {
-            let val = arr.value(idx);
-            return ColumnValue::Int64(i64::try_from(val).unwrap_or(i64::MAX));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
-            return ColumnValue::String(arr.value(idx).to_string());
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<LargeStringArray>() {
-            return ColumnValue::String(arr.value(idx).to_string());
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
-            return ColumnValue::Float64(arr.value(idx));
-        }
+        downcast!(Int8Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(Int16Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(Int32Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(Int64Array, v => ColumnValue::Int64(v));
+        downcast!(UInt8Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(UInt16Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(UInt32Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(UInt64Array, v => ColumnValue::Int64(i64::try_from(v).unwrap_or(i64::MAX)));
+        downcast!(StringArray, v => ColumnValue::String(v.to_string()));
+        downcast!(LargeStringArray, v => ColumnValue::String(v.to_string()));
+        downcast!(Float64Array, v => ColumnValue::Float64(v));
+        downcast!(BooleanArray, v => ColumnValue::String(v.to_string()));
 
         if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
         }
-
         if let Some(arr) = array.as_any().downcast_ref::<TimestampMillisecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
         }
-
         if let Some(arr) = array.as_any().downcast_ref::<TimestampMicrosecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
         }
-
         if let Some(arr) = array.as_any().downcast_ref::<TimestampNanosecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
-            return ColumnValue::String(arr.value(idx).to_string());
         }
 
         ColumnValue::Null
