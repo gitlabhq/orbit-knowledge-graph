@@ -8,6 +8,8 @@ All tasks use mise. `mise build`, `mise test:fast`, `mise lint:code`, `mise serv
 Fix linting issues: `mise lint:code:fix`. Validate docs: `mise lint:docs`. Validate ontology: `mise ontology:validate`.
 Integration tests need Docker: `mise test:integration`.
 
+**Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
+
 ## How the system works
 
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). Code data via Gitaly `GetArchive` gRPC. GKG only writes to its own ClickHouse tables.
@@ -57,6 +59,7 @@ Integration tests need Docker: `mise test:integration`.
 | Local development guide | `docs/dev/local-development.md` |
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbook | `docs/dev/RUNBOOK.md` |
+| Architecture Decision Records | `docs/design-documents/decisions/` |
 | Helm charts (dev) | `helm-dev/gkg/`, `helm-dev/observability/` |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
@@ -85,8 +88,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `cli` | Local `gkg index` and `gkg query` commands |
 | `datalake-generator` | Synthetic GitLab data for load testing |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
-| `integration-testkit` | Shared ClickHouse testcontainer helpers and `MockRedactionService` for integration tests |
-| `integration-tests` | Integration tests for server (health, redaction, hydration); depends on gkg-server + integration-testkit |
+| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, and `ResponseView` assertion framework for integration tests |
+| `integration-tests` | Integration tests for server (health, redaction, hydration, data correctness, graph formatting); depends on gkg-server + integration-testkit |
 | `xtask` | Developer task runner (data generation, query evaluation, ClickHouse management) |
 
 ## Code quality
