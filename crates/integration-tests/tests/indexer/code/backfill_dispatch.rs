@@ -11,8 +11,6 @@ use prost::Message;
 use siphon_proto::replication_event::Column;
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 
-use super::helpers::*;
-
 fn build_namespace_enabled_payload(root_namespace_id: i64) -> Bytes {
     let columns = vec![Column {
         column_index: 0,
