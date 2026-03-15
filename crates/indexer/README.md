@@ -13,7 +13,7 @@ The crate has two layers:
 1. **Engine** - generic message routing, concurrency control, and destination abstraction
 2. **Domain modules** - the actual indexing logic for SDLC entities and code
 
-The engine subscribes to NATS topics, dispatches messages to handlers, and acks or nacks based on the handler result. Domain modules provide the handlers that transform GitLab events into property graph records.
+The engine subscribes to NATS JetStream subscriptions, dispatches messages to handlers, and acks or nacks based on the handler result. Domain modules provide the handlers that transform GitLab events into property graph records.
 
 ## Quick start
 
@@ -44,7 +44,7 @@ Indexes git repositories via the Rails internal API. Fetches archives on code in
 
 ### Handlers
 
-A handler listens to one topic and processes messages from it. Return `Ok(())` to ack, return an error to nack (the message gets redelivered). Each handler provides its own `engine_config()` controlling retry policy and concurrency group.
+A handler listens on one subscription and processes messages from it. Return `Ok(())` to ack, return an error to nack (the message gets redelivered). Each handler provides its own `engine_config()` controlling retry policy and concurrency group.
 
 ```rust
 pub struct UserCreatedHandler;
@@ -55,8 +55,8 @@ impl Handler for UserCreatedHandler {
         "user-created"
     }
 
-    fn topic(&self) -> Topic {
-        Topic::new("users", "user.created")
+    fn subscription(&self) -> Subscription {
+        Subscription::new("users", "user.created")
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
@@ -187,10 +187,10 @@ Three error types, nested:
 - `HandlerError` has `Processing(String)` and `Deserialization(serde_json::Error)`
 - `BrokerError` has variants for publish, subscribe, ack, nack, connection issues, etc.
 
-When a handler returns an error, the engine nacks the message so the broker can redeliver it (if retries are configured for that handler). When retries are exhausted, the outcome depends on the topic:
+When a handler returns an error, the engine nacks the message so the broker can redeliver it (if retries are configured for that handler). When retries are exhausted, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting:
 
-- **External topics** (e.g. Siphon CDC): the message is published to the `GKG_DEAD_LETTERS` stream for inspection and replay, then acked. If the DLQ publish fails, the message is nacked for redelivery instead.
-- **Owned topics** (internal dispatch): the message is term-acked, since it will be regenerated on the next dispatch cycle.
+- **`dead_letter_on_exhaustion: true`** (e.g. Siphon CDC subscriptions): the message is published to the `GKG_DEAD_LETTERS` stream for inspection and replay, then acked. If the DLQ publish fails, the message is nacked for redelivery instead.
+- **`dead_letter_on_exhaustion: false`** (default, used by internal dispatch subscriptions): the message is term-acked, since it will be regenerated on the next dispatch cycle.
 
 `IndexerError` wraps top-level failures: NATS connection, ClickHouse connection, engine errors, and handler initialization.
 

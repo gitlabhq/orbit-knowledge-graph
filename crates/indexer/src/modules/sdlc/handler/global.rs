@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::types::{Envelope, Event, SerializationError, Topic};
+use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -62,8 +62,8 @@ impl Handler for GlobalHandler {
         "global_handler"
     }
 
-    fn topic(&self) -> Topic {
-        GlobalIndexingRequest::topic()
+    fn subscription(&self) -> Subscription {
+        GlobalIndexingRequest::subscription()
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {

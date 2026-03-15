@@ -18,7 +18,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::types::{Envelope, Topic};
+use crate::types::{Envelope, Subscription};
 
 fn default_events_stream_name() -> String {
     "siphon_stream_main_db".to_string()
@@ -71,8 +71,8 @@ impl Handler for CodeIndexingTaskHandler {
         "code_indexing_task"
     }
 
-    fn topic(&self) -> Topic {
-        Topic::external(
+    fn subscription(&self) -> Subscription {
+        Subscription::new(
             self.config.events_stream_name.clone(),
             format!(
                 "{}.{}",
@@ -80,6 +80,8 @@ impl Handler for CodeIndexingTaskHandler {
                 subjects::CODE_INDEXING_TASKS
             ),
         )
+        .manage_stream(false)
+        .dead_letter_on_exhaustion(true)
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
