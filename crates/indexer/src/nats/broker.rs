@@ -318,6 +318,7 @@ impl NatsBroker {
 
         let envelope = Envelope {
             id: MessageId(Arc::from(message_id)),
+            subject: Arc::from(message_data.subject.as_str()),
             payload: message_data.payload,
             timestamp,
             attempt,
