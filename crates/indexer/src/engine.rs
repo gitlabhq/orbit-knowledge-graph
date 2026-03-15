@@ -44,7 +44,7 @@ use crate::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use crate::locking::{LockService, NatsLockService};
 use crate::metrics::EngineMetrics;
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
-use crate::types::{Envelope, Topic};
+use crate::types::{Envelope, Subscription};
 use crate::worker_pool::WorkerPool;
 
 /// Errors that can occur during engine operation.
@@ -167,51 +167,55 @@ impl Engine {
     ///
     /// Returns when stopped via [`Engine::stop`] or when all subscriptions end.
     pub async fn run(&self, configuration: &EngineConfiguration) -> Result<(), EngineError> {
-        let topics = self.registry.topics();
-        if topics.is_empty() {
+        let subscriptions = self.registry.subscriptions();
+        if subscriptions.is_empty() {
             return Ok(());
         }
 
         self.validate_concurrency_groups(configuration)?;
 
-        self.broker.ensure_streams(&topics).await?;
+        self.broker.ensure_streams(&subscriptions).await?;
 
         let runtime = Arc::new(EngineRuntime {
             worker_pool: WorkerPool::new(configuration, self.metrics.clone()),
             metrics: self.metrics.clone(),
         });
-        let tasks: Vec<_> = topics
+        let tasks: Vec<_> = subscriptions
             .into_iter()
-            .map(|topic| self.listen(topic, runtime.clone()))
+            .map(|subscription| self.listen(subscription, runtime.clone()))
             .collect();
         futures::future::try_join_all(tasks).await?;
 
         Ok(())
     }
 
-    async fn listen(&self, topic: Topic, runtime: Arc<EngineRuntime>) -> Result<(), EngineError> {
-        let topic_name = format!("{}.{}", topic.stream, topic.subject);
+    async fn listen(
+        &self,
+        subscription: Subscription,
+        runtime: Arc<EngineRuntime>,
+    ) -> Result<(), EngineError> {
+        let topic_name = format!("{}.{}", subscription.stream, subscription.subject);
         info!(topic = %topic_name, "topic listener starting");
 
-        let mut subscription = self
+        let mut messages = self
             .broker
-            .subscribe(&topic, runtime.metrics.clone())
+            .subscribe(&subscription, runtime.metrics.clone())
             .await?;
         let mut inflight = tokio::task::JoinSet::new();
 
         loop {
             tokio::select! {
                 _ = self.cancel.cancelled() => break,
-                Some(message) = subscription.next() => {
+                Some(message) = messages.next() => {
                     let message = message?;
                     let progress = message.progress_notifier();
                     inflight.spawn(process_message(
                         message,
-                        self.registry.handlers_for(&topic),
+                        self.registry.handlers_for(&subscription),
                         HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone(), progress),
                         self.broker.clone(),
                         runtime.clone(),
-                        topic.clone(),
+                        subscription.clone(),
                         topic_name.clone(),
                     ));
                 }
@@ -233,8 +237,8 @@ impl Engine {
         &self,
         configuration: &EngineConfiguration,
     ) -> Result<(), EngineError> {
-        for topic in &self.registry.topics() {
-            for handler in self.registry.handlers_for(topic) {
+        for subscription in &self.registry.subscriptions() {
+            for handler in self.registry.handlers_for(subscription) {
                 if let Some(group) = &handler.engine_config().concurrency_group
                     && !configuration.concurrency_groups.contains_key(group)
                 {
@@ -274,7 +278,7 @@ async fn process_message(
     context: HandlerContext,
     broker: Arc<NatsBroker>,
     runtime: Arc<EngineRuntime>,
-    topic: Topic,
+    subscription: Subscription,
     topic_name: String,
 ) {
     let message_id = message.envelope.id.0.clone();
@@ -333,16 +337,16 @@ async fn process_message(
             "nack"
         }
         HandlersOutcome::Exhausted { error } => {
-            if topic.owned {
+            if subscription.dead_letter_on_exhaustion {
+                match message.to_dlq(&broker, &subscription, &error).await {
+                    DlqResult::Published => "dead_letter",
+                    DlqResult::Nacked => "nack",
+                }
+            } else {
                 if let Err(term_error) = message.term_ack().await {
                     warn!(%term_error, %message_id, "failed to term-ack exhausted message");
                 }
                 "term"
-            } else {
-                match message.to_dlq(&broker, &topic, &error).await {
-                    DlqResult::Published => "dead_letter",
-                    DlqResult::Nacked => "nack",
-                }
             }
         }
     };

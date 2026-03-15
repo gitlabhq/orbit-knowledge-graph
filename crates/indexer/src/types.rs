@@ -18,35 +18,48 @@ pub enum SerializationError {
     Json(#[from] serde_json::Error),
 }
 
-/// A NATS topic consisting of a stream and subject.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Topic {
-    /// The NATS JetStream stream name.
+/// A NATS JetStream subscription target: a stream name paired with a subject filter.
+#[derive(Clone, Debug)]
+pub struct Subscription {
     pub stream: Arc<str>,
-    /// The subject filter within the stream.
     pub subject: Arc<str>,
-    /// Whether we own this stream and should manage its configuration.
-    /// External streams (e.g. Siphon CDC) are not owned and their config is never modified.
-    pub owned: bool,
+    pub manage_stream: bool,
+    pub dead_letter_on_exhaustion: bool,
 }
 
-impl Topic {
-    /// Creates a new topic for a stream we own and manage.
-    pub fn owned(stream: impl Into<Arc<str>>, subject: impl Into<Arc<str>>) -> Self {
+impl PartialEq for Subscription {
+    fn eq(&self, other: &Self) -> bool {
+        self.stream == other.stream && self.subject == other.subject
+    }
+}
+
+impl Eq for Subscription {}
+
+impl std::hash::Hash for Subscription {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.stream.hash(state);
+        self.subject.hash(state);
+    }
+}
+
+impl Subscription {
+    pub fn new(stream: impl Into<Arc<str>>, subject: impl Into<Arc<str>>) -> Self {
         Self {
             stream: stream.into(),
             subject: subject.into(),
-            owned: true,
+            manage_stream: true,
+            dead_letter_on_exhaustion: false,
         }
     }
 
-    /// Creates a new topic for an external stream we only consume from.
-    pub fn external(stream: impl Into<Arc<str>>, subject: impl Into<Arc<str>>) -> Self {
-        Self {
-            stream: stream.into(),
-            subject: subject.into(),
-            owned: false,
-        }
+    pub fn manage_stream(mut self, value: bool) -> Self {
+        self.manage_stream = value;
+        self
+    }
+
+    pub fn dead_letter_on_exhaustion(mut self, value: bool) -> Self {
+        self.dead_letter_on_exhaustion = value;
+        self
     }
 }
 
@@ -71,7 +84,7 @@ impl MessageId {
 /// # Creating an Envelope
 ///
 /// ```ignore
-/// use etl_engine::types::{Envelope, Event, Topic};
+/// use etl_engine::types::{Envelope, Event, Subscription};
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Serialize, Deserialize)]
@@ -81,8 +94,8 @@ impl MessageId {
 /// }
 ///
 /// impl Event for UserCreated {
-///     fn topic() -> Topic {
-///         Topic::owned("users-stream", "user.created")
+///     fn subscription() -> Subscription {
+///         Subscription::new("users-stream", "user.created")
 ///     }
 /// }
 ///
@@ -104,15 +117,15 @@ pub struct Envelope {
     pub attempt: u32,
 }
 
-/// A typed event that can be published to a specific topic.
+/// A typed event that can be published to a specific subscription.
 ///
 /// Implement this trait for your domain events to enable type-safe
-/// serialization and topic routing.
+/// serialization and subscription routing.
 ///
 /// # Example
 ///
 /// ```ignore
-/// use etl_engine::types::{Event, Topic};
+/// use etl_engine::types::{Event, Subscription};
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Serialize, Deserialize)]
@@ -122,14 +135,14 @@ pub struct Envelope {
 /// }
 ///
 /// impl Event for OrderPlaced {
-///     fn topic() -> Topic {
-///         Topic::owned("orders-stream", "orders.placed")
+///     fn subscription() -> Subscription {
+///         Subscription::new("orders-stream", "orders.placed")
 ///     }
 /// }
 /// ```
 pub trait Event: Serialize + DeserializeOwned + Send + Sync + 'static {
-    /// Returns the topic this event should be published to.
-    fn topic() -> Topic;
+    /// Returns the subscription this event should be published to.
+    fn subscription() -> Subscription;
 }
 
 impl Envelope {
@@ -171,8 +184,8 @@ mod tests {
     }
 
     impl Event for TestEvent {
-        fn topic() -> Topic {
-            Topic::owned("test-stream", "test-events")
+        fn subscription() -> Subscription {
+            Subscription::new("test-stream", "test-events")
         }
     }
 

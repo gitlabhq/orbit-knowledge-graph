@@ -152,7 +152,10 @@ pub async fn run(
     info!("initializing Namespace Deletion handler");
     modules::namespace_deletion::register_handlers(&registry, config, &ontology)?;
 
-    info!(topics = registry.topics().len(), "registered handlers");
+    info!(
+        subscriptions = registry.subscriptions().len(),
+        "registered handlers"
+    );
 
     let gitlab_client = config
         .gitlab

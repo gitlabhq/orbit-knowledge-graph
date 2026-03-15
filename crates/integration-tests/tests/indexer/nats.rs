@@ -8,7 +8,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::{NatsBroker, NatsConfiguration};
-use indexer::types::{Envelope, Event, Topic};
+use indexer::types::{Envelope, Event, Subscription};
 use serde::{Deserialize, Serialize};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -26,8 +26,8 @@ struct TestEvent {
 }
 
 impl Event for TestEvent {
-    fn topic() -> Topic {
-        Topic::owned(TEST_STREAM, TEST_SUBJECT)
+    fn subscription() -> Subscription {
+        Subscription::new(TEST_STREAM, TEST_SUBJECT)
     }
 }
 
@@ -86,14 +86,14 @@ async fn create_test_stream(url: &str) {
         .expect("failed to create stream");
 }
 
-async fn publish_event(broker: &NatsBroker, topic: &Topic, id: &str, value: i32) {
+async fn publish_event(broker: &NatsBroker, subscription: &Subscription, id: &str, value: i32) {
     let event = TestEvent {
         id: id.to_string(),
         value,
     };
     let envelope = Envelope::new(&event).expect("failed to create envelope");
     broker
-        .publish(topic, &envelope)
+        .publish(subscription, &envelope)
         .await
         .expect("failed to publish");
 }
@@ -164,14 +164,14 @@ async fn publish_and_subscribe() {
     create_test_stream(&url).await;
 
     let broker = connect_broker(&default_config(&url)).await;
-    let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
+    let subscription = Subscription::new(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker
-        .subscribe(&topic, Arc::new(EngineMetrics::new()))
+        .subscribe(&subscription, Arc::new(EngineMetrics::new()))
         .await
         .expect("failed to subscribe");
 
-    publish_event(&broker, &topic, "test-1", 42).await;
+    publish_event(&broker, &subscription, "test-1", 42).await;
 
     let event = receive_event(&mut subscription).await;
     assert_eq!(event.id, "test-1");
@@ -184,14 +184,14 @@ async fn nack_redelivers_message() {
     create_test_stream(&url).await;
 
     let broker = connect_broker(&default_config(&url)).await;
-    let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
+    let subscription = Subscription::new(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker
-        .subscribe(&topic, Arc::new(EngineMetrics::new()))
+        .subscribe(&subscription, Arc::new(EngineMetrics::new()))
         .await
         .expect("failed to subscribe");
 
-    publish_event(&broker, &topic, "nack-test", 99).await;
+    publish_event(&broker, &subscription, "nack-test", 99).await;
 
     let first = tokio::time::timeout(RECEIVE_TIMEOUT, subscription.next())
         .await
@@ -211,9 +211,9 @@ async fn nonexistent_stream() {
 
     let broker = connect_broker(&default_config(&url)).await;
 
-    let topic = Topic::owned("nonexistent", "subject");
+    let subscription = Subscription::new("nonexistent", "subject");
     let result = broker
-        .subscribe(&topic, Arc::new(EngineMetrics::new()))
+        .subscribe(&subscription, Arc::new(EngineMetrics::new()))
         .await;
     assert!(result.is_err());
 }
@@ -244,23 +244,23 @@ async fn multiple_streams() {
 
     let broker = connect_broker(&default_config(&url)).await;
 
-    let topic_a = Topic::owned("stream_a", "a.events");
-    let topic_b = Topic::owned("stream_b", "b.events");
+    let subscription_a = Subscription::new("stream_a", "a.events");
+    let subscription_b = Subscription::new("stream_b", "b.events");
 
-    let mut sub_a = broker
-        .subscribe(&topic_a, Arc::new(EngineMetrics::new()))
+    let mut messages_a = broker
+        .subscribe(&subscription_a, Arc::new(EngineMetrics::new()))
         .await
         .expect("sub a");
-    let mut sub_b = broker
-        .subscribe(&topic_b, Arc::new(EngineMetrics::new()))
+    let mut messages_b = broker
+        .subscribe(&subscription_b, Arc::new(EngineMetrics::new()))
         .await
         .expect("sub b");
 
-    publish_event(&broker, &topic_a, "from-a", 1).await;
-    publish_event(&broker, &topic_b, "from-b", 2).await;
+    publish_event(&broker, &subscription_a, "from-a", 1).await;
+    publish_event(&broker, &subscription_b, "from-b", 2).await;
 
-    let event_a = receive_event(&mut sub_a).await;
-    let event_b = receive_event(&mut sub_b).await;
+    let event_a = receive_event(&mut messages_a).await;
+    let event_b = receive_event(&mut messages_b).await;
 
     assert_eq!(event_a.id, "from-a");
     assert_eq!(event_b.id, "from-b");
@@ -280,9 +280,9 @@ async fn auto_creates_stream_with_configured_settings() {
 
     let broker = connect_broker(&config).await;
 
-    let topic = Topic::owned("auto_created_stream", "auto.events");
+    let subscription = Subscription::new("auto_created_stream", "auto.events");
     broker
-        .ensure_streams(&[topic])
+        .ensure_streams(&[subscription])
         .await
         .expect("failed to ensure streams");
 
@@ -309,9 +309,9 @@ async fn skips_creation_when_disabled() {
 
     let broker = connect_broker(&config).await;
 
-    let topic = Topic::owned("should_not_exist", "skip.events");
+    let subscription = Subscription::new("should_not_exist", "skip.events");
     broker
-        .ensure_streams(&[topic])
+        .ensure_streams(&[subscription])
         .await
         .expect("ensure_streams should succeed even when disabled");
 
@@ -332,14 +332,14 @@ async fn updates_stream_config_during_rolling_update() {
     };
 
     let broker_old = connect_broker(&config_v1).await;
-    let topic_v1 = Topic::owned(TEST_STREAM, TEST_SUBJECT);
+    let subscription_v1 = Subscription::new(TEST_STREAM, TEST_SUBJECT);
     broker_old
-        .ensure_streams(std::slice::from_ref(&topic_v1))
+        .ensure_streams(std::slice::from_ref(&subscription_v1))
         .await
         .expect("old broker should create stream");
 
     let mut old_subscription = broker_old
-        .subscribe(&topic_v1, Arc::new(EngineMetrics::new()))
+        .subscribe(&subscription_v1, Arc::new(EngineMetrics::new()))
         .await
         .expect("old broker should subscribe");
 
@@ -351,10 +351,13 @@ async fn updates_stream_config_during_rolling_update() {
     };
 
     let broker_new = connect_broker(&config_v2).await;
-    let topic_v2_existing = Topic::owned(TEST_STREAM, TEST_SUBJECT);
-    let topic_v2_new = Topic::owned(TEST_STREAM, "test.new_subject");
+    let subscription_v2_existing = Subscription::new(TEST_STREAM, TEST_SUBJECT);
+    let subscription_v2_new = Subscription::new(TEST_STREAM, "test.new_subject");
     broker_new
-        .ensure_streams(&[topic_v2_existing.clone(), topic_v2_new.clone()])
+        .ensure_streams(&[
+            subscription_v2_existing.clone(),
+            subscription_v2_new.clone(),
+        ])
         .await
         .expect("new broker should update stream config while old consumer is active");
 
@@ -367,17 +370,17 @@ async fn updates_stream_config_during_rolling_update() {
     );
 
     // Old consumer still receives on original subject after config update
-    publish_event(&broker_new, &topic_v2_existing, "after-update", 1).await;
+    publish_event(&broker_new, &subscription_v2_existing, "after-update", 1).await;
     let event = receive_event(&mut old_subscription).await;
     assert_eq!(event.id, "after-update");
 
     // New consumer receives on the newly added subject
     let mut new_subscription = broker_new
-        .subscribe(&topic_v2_new, Arc::new(EngineMetrics::new()))
+        .subscribe(&subscription_v2_new, Arc::new(EngineMetrics::new()))
         .await
         .expect("new broker should subscribe to new subject");
 
-    publish_event(&broker_new, &topic_v2_new, "new-subject", 2).await;
+    publish_event(&broker_new, &subscription_v2_new, "new-subject", 2).await;
     let new_event = receive_event(&mut new_subscription).await;
     assert_eq!(new_event.id, "new-subject");
 }
@@ -398,10 +401,10 @@ async fn in_progress_prevents_redelivery() {
         .await
         .expect("failed to connect");
 
-    let topic = Topic::owned(TEST_STREAM, TEST_SUBJECT);
+    let subscription = Subscription::new(TEST_STREAM, TEST_SUBJECT);
 
     let mut subscription = broker
-        .subscribe(&topic, Arc::new(EngineMetrics::new()))
+        .subscribe(&subscription, Arc::new(EngineMetrics::new()))
         .await
         .expect("failed to subscribe");
 
@@ -411,7 +414,7 @@ async fn in_progress_prevents_redelivery() {
     };
     let envelope = Envelope::new(&event).expect("failed to create envelope");
     broker
-        .publish(&topic, &envelope)
+        .publish(&subscription, &envelope)
         .await
         .expect("failed to publish");
 

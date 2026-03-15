@@ -17,7 +17,7 @@ use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
 use indexer::nats::{NatsBroker, NatsConfiguration};
-use indexer::types::{Envelope, Event, Topic};
+use indexer::types::{Envelope, Event, Subscription};
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt, WaitFor};
@@ -34,8 +34,8 @@ const USERNAME: &str = "default";
 const PASSWORD: &str = "testpass";
 const DATABASE: &str = "test";
 
-fn test_topic() -> Topic {
-    Topic::external(STREAM, SUBJECT)
+fn test_subscription() -> Subscription {
+    Subscription::new(STREAM, SUBJECT)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -45,8 +45,8 @@ struct TestEvent {
 }
 
 impl Event for TestEvent {
-    fn topic() -> Topic {
-        test_topic()
+    fn subscription() -> Subscription {
+        test_subscription()
     }
 }
 
@@ -58,8 +58,8 @@ impl Handler for TestHandler {
         "test-handler"
     }
 
-    fn topic(&self) -> Topic {
-        test_topic()
+    fn subscription(&self) -> Subscription {
+        test_subscription()
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
@@ -255,7 +255,7 @@ impl TestContext {
         };
         let envelope = Envelope::new(&event).expect("failed to create envelope");
         broker
-            .publish(&test_topic(), &envelope)
+            .publish(&test_subscription(), &envelope)
             .await
             .expect("failed to publish");
     }
@@ -358,8 +358,8 @@ async fn multiple_handlers_receive_same_message() {
 const PANIC_STREAM: &str = "panic_test_stream";
 const PANIC_SUBJECT: &str = "panic.events";
 
-fn panic_topic() -> Topic {
-    Topic::owned(PANIC_STREAM, PANIC_SUBJECT)
+fn panic_subscription() -> Subscription {
+    Subscription::new(PANIC_STREAM, PANIC_SUBJECT)
 }
 
 struct PanickingHandler {
@@ -372,8 +372,8 @@ impl Handler for PanickingHandler {
         "panicking-handler"
     }
 
-    fn topic(&self) -> Topic {
-        panic_topic()
+    fn subscription(&self) -> Subscription {
+        panic_subscription()
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
@@ -443,7 +443,7 @@ async fn subject_is_unblocked_after_handler_panic() {
         let broker = context.create_broker_with_config(nats_config.clone()).await;
 
         broker
-            .ensure_streams(&[panic_topic()])
+            .ensure_streams(&[panic_subscription()])
             .await
             .expect("stream creation should succeed");
 
@@ -453,7 +453,7 @@ async fn subject_is_unblocked_after_handler_panic() {
         })
         .expect("envelope");
         broker
-            .publish(&panic_topic(), &envelope)
+            .publish(&panic_subscription(), &envelope)
             .await
             .expect("first publish should succeed");
 
@@ -488,7 +488,7 @@ async fn subject_is_unblocked_after_handler_panic() {
     })
     .expect("envelope");
     broker
-        .publish(&panic_topic(), &envelope)
+        .publish(&panic_subscription(), &envelope)
         .await
         .expect("republish should succeed after term-ack freed the subject slot");
 

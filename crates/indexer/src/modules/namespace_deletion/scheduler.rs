@@ -166,13 +166,13 @@ impl NamespaceDeletionScheduler {
                 traversal_path: entry.traversal_path.clone(),
             };
 
-            let topic = request.publish_topic();
+            let subscription = request.publish_subscription();
             let envelope = Envelope::new(&request).map_err(|error| {
                 self.metrics.record_error(self.name(), "publish");
                 TaskError::new(error)
             })?;
 
-            match self.nats.publish(&topic, &envelope).await {
+            match self.nats.publish(&subscription, &envelope).await {
                 Ok(()) => {
                     dispatched += 1;
                     debug!(
@@ -212,7 +212,7 @@ mod tests {
 
     use crate::checkpoint::{Checkpoint, CheckpointError};
     use crate::nats::{NatsError, NatsServices};
-    use crate::types::{Envelope, Topic};
+    use crate::types::{Envelope, Subscription};
 
     struct MockCheckpointStore;
 
@@ -345,7 +345,11 @@ mod tests {
 
     #[async_trait]
     impl NatsServices for DuplicateNatsServices {
-        async fn publish(&self, _topic: &Topic, _envelope: &Envelope) -> Result<(), NatsError> {
+        async fn publish(
+            &self,
+            _subscription: &Subscription,
+            _envelope: &Envelope,
+        ) -> Result<(), NatsError> {
             Err(NatsError::PublishDuplicate)
         }
 

@@ -17,7 +17,7 @@ use super::repository_service::RepositoryService;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::ProjectCodeIndexingRequest;
-use crate::types::{Envelope, Event, Topic};
+use crate::types::{Envelope, Event, Subscription};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ProjectCodeIndexingHandlerConfig {
@@ -63,8 +63,8 @@ impl Handler for ProjectCodeIndexingHandler {
         "code_project_reconciliation"
     }
 
-    fn topic(&self) -> Topic {
-        ProjectCodeIndexingRequest::topic()
+    fn subscription(&self) -> Subscription {
+        ProjectCodeIndexingRequest::subscription()
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
@@ -370,11 +370,11 @@ mod tests {
     }
 
     #[test]
-    fn handler_topic_matches_request_topic() {
+    fn handler_subscription_matches_request_subscription() {
         let ctx = TestContext::new();
-        let topic = ctx.handler.topic();
-        let expected = ProjectCodeIndexingRequest::topic();
-        assert_eq!(topic.stream, expected.stream);
-        assert_eq!(topic.subject, expected.subject);
+        let subscription = ctx.handler.subscription();
+        let expected = ProjectCodeIndexingRequest::subscription();
+        assert_eq!(subscription.stream, expected.stream);
+        assert_eq!(subscription.subject, expected.subject);
     }
 }

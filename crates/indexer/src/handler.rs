@@ -2,7 +2,7 @@
 //!
 //! ```ignore
 //! use etl_engine::handler::{Handler, HandlerContext, HandlerError};
-//! use etl_engine::types::{Envelope, Topic};
+//! use etl_engine::types::{Envelope, Subscription};
 //! use async_trait::async_trait;
 //!
 //! struct MyHandler;
@@ -10,7 +10,7 @@
 //! #[async_trait]
 //! impl Handler for MyHandler {
 //!     fn name(&self) -> &str { "my-handler" }
-//!     fn topic(&self) -> Topic { Topic::owned("my-stream", "my-subject") }
+//!     fn subscription(&self) -> Subscription { Subscription::new("my-stream", "my-subject") }
 //!
 //!     async fn handle(&self, ctx: HandlerContext, msg: Envelope) -> Result<(), HandlerError> {
 //!         // ctx.destination has your writers
@@ -32,7 +32,7 @@ use crate::{
     destination::Destination,
     locking::LockService,
     nats::{NatsServices, ProgressNotifier},
-    types::{Envelope, Topic},
+    types::{Envelope, Subscription},
 };
 
 /// Errors that can occur during message handling.
@@ -116,8 +116,8 @@ pub trait Handler: Send + Sync {
     /// Used for metrics labeling, config lookup, and debugging. Should be a stable identifier.
     fn name(&self) -> &str;
 
-    /// Returns the topic this handler subscribes to.
-    fn topic(&self) -> Topic;
+    /// Returns the subscription this handler listens on.
+    fn subscription(&self) -> Subscription;
 
     /// Returns the engine configuration for this handler (retry policy, concurrency group).
     ///
@@ -139,39 +139,44 @@ pub trait Handler: Send + Sync {
 /// for the engine to dispatch messages.
 #[derive(Default)]
 pub struct HandlerRegistry {
-    handlers_by_topic: RwLock<HashMap<Topic, Vec<Arc<dyn Handler>>>>,
+    handlers_by_subscription: RwLock<HashMap<Subscription, Vec<Arc<dyn Handler>>>>,
 }
 
 impl HandlerRegistry {
-    /// Registers a handler, adding it to the registry under its topic.
+    /// Registers a handler, adding it to the registry under its subscription.
     pub fn register_handler(&self, handler: Box<dyn Handler>) {
-        let mut handlers_by_topic = self.handlers_by_topic.write();
-        let topic = handler.topic();
-        handlers_by_topic
-            .entry(topic)
+        let mut handlers_by_subscription = self.handlers_by_subscription.write();
+        let subscription = handler.subscription();
+        handlers_by_subscription
+            .entry(subscription)
             .or_default()
             .push(Arc::from(handler));
     }
 
-    /// Returns all handlers registered for a given topic.
-    pub fn handlers_for(&self, topic: &Topic) -> Vec<Arc<dyn Handler>> {
-        self.handlers_by_topic
+    /// Returns all handlers registered for a given subscription.
+    pub fn handlers_for(&self, subscription: &Subscription) -> Vec<Arc<dyn Handler>> {
+        self.handlers_by_subscription
             .read()
-            .get(topic)
+            .get(subscription)
             .cloned()
             .unwrap_or_default()
     }
 
-    /// Returns all unique topics that have registered handlers.
-    pub fn topics(&self) -> Vec<Topic> {
-        let mut topics: Vec<_> = self.handlers_by_topic.read().keys().cloned().collect();
-        topics.sort_by(|a, b| (&*a.stream, &*a.subject).cmp(&(&*b.stream, &*b.subject)));
-        topics
+    /// Returns all unique subscriptions that have registered handlers.
+    pub fn subscriptions(&self) -> Vec<Subscription> {
+        let mut subscriptions: Vec<_> = self
+            .handlers_by_subscription
+            .read()
+            .keys()
+            .cloned()
+            .collect();
+        subscriptions.sort_by(|a, b| (&*a.stream, &*a.subject).cmp(&(&*b.stream, &*b.subject)));
+        subscriptions
     }
 
-    /// Finds a handler by name across all topics.
+    /// Finds a handler by name across all subscriptions.
     pub fn find_by_name(&self, name: &str) -> Option<Arc<dyn Handler>> {
-        self.handlers_by_topic
+        self.handlers_by_subscription
             .read()
             .values()
             .flatten()
@@ -192,14 +197,14 @@ mod tests {
         registry.register_handler(Box::new(MockHandler::new("stream1", "subject1")));
         registry.register_handler(Box::new(MockHandler::new("stream1", "subject1")));
 
-        let topic = Topic::owned("stream1", "subject1");
-        let handlers = registry.handlers_for(&topic);
+        let subscription = Subscription::new("stream1", "subject1");
+        let handlers = registry.handlers_for(&subscription);
         assert_eq!(handlers.len(), 2);
 
-        let unknown = Topic::owned("unknown", "unknown");
+        let unknown = Subscription::new("unknown", "unknown");
         assert!(registry.handlers_for(&unknown).is_empty());
 
-        assert_eq!(registry.topics(), vec![topic]);
+        assert_eq!(registry.subscriptions(), vec![subscription]);
     }
 
     #[tokio::test]
@@ -210,9 +215,9 @@ mod tests {
         registry.register_handler(Box::new(MockHandler::new("stream", "s1")));
         registry.register_handler(Box::new(MockHandler::new("stream", "s2")));
 
-        let t0 = Topic::owned("stream", "s0");
-        let t1 = Topic::owned("stream", "s1");
-        let t2 = Topic::owned("stream", "s2");
+        let t0 = Subscription::new("stream", "s0");
+        let t1 = Subscription::new("stream", "s1");
+        let t2 = Subscription::new("stream", "s2");
 
         let handles: Vec<_> = (0..50)
             .map(|_| {

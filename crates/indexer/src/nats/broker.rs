@@ -25,7 +25,7 @@ use crate::dead_letter::{
     DEAD_LETTER_STREAM, DEAD_LETTER_SUBJECT_PREFIX, DeadLetterEnvelope, dead_letter_subject,
 };
 use crate::metrics::EngineMetrics;
-use crate::types::{Envelope, MessageId, Topic};
+use crate::types::{Envelope, MessageId, Subscription};
 
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::{PublishError, PublishErrorKind};
@@ -97,30 +97,30 @@ impl NatsBroker {
         options
     }
 
-    pub async fn ensure_streams(&self, topics: &[Topic]) -> Result<(), NatsError> {
+    pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
         if !self.config.auto_create_streams {
             return Ok(());
         }
 
-        let mut owned_streams: HashMap<&Arc<str>, Vec<String>> = HashMap::new();
-        let mut external_streams: Vec<&Arc<str>> = Vec::new();
+        let mut managed_streams: HashMap<&Arc<str>, Vec<String>> = HashMap::new();
+        let mut unmanaged_streams: Vec<&Arc<str>> = Vec::new();
 
-        for topic in topics {
-            if topic.owned {
-                owned_streams
-                    .entry(&topic.stream)
+        for subscription in subscriptions {
+            if subscription.manage_stream {
+                managed_streams
+                    .entry(&subscription.stream)
                     .or_default()
-                    .push(topic.subject.to_string());
+                    .push(subscription.subject.to_string());
             } else {
-                external_streams.push(&topic.stream);
+                unmanaged_streams.push(&subscription.stream);
             }
         }
 
-        for (stream_name, subjects) in owned_streams {
+        for (stream_name, subjects) in managed_streams {
             self.create_or_update_stream(stream_name, subjects).await?;
         }
 
-        for stream_name in external_streams {
+        for stream_name in unmanaged_streams {
             self.get_stream(stream_name).await?;
         }
 
@@ -139,11 +139,11 @@ impl NatsBroker {
 
     pub async fn publish_dead_letter(
         &self,
-        original_topic: &Topic,
+        original_subscription: &Subscription,
         envelope: &Envelope,
         error: &str,
     ) -> Result<(), NatsError> {
-        let dead_letter = DeadLetterEnvelope::new(original_topic, envelope, error);
+        let dead_letter = DeadLetterEnvelope::new(original_subscription, envelope, error);
 
         let payload = serde_json::to_vec(&dead_letter)
             .map(Bytes::from)
@@ -151,7 +151,7 @@ impl NatsBroker {
                 NatsError::Publish(format!("failed to serialize dead letter: {error}"))
             })?;
 
-        let subject = dead_letter_subject(original_topic);
+        let subject = dead_letter_subject(original_subscription);
         self.jetstream
             .publish(subject.clone(), payload)
             .await
@@ -329,15 +329,19 @@ impl NatsBroker {
         })
     }
 
-    pub async fn publish(&self, topic: &Topic, envelope: &Envelope) -> Result<(), NatsError> {
+    pub async fn publish(
+        &self,
+        subscription: &Subscription,
+        envelope: &Envelope,
+    ) -> Result<(), NatsError> {
         let ack_future = self
             .jetstream
-            .publish(topic.subject.to_string(), envelope.payload.clone())
+            .publish(subscription.subject.to_string(), envelope.payload.clone())
             .await
             .map_err(|e| {
                 NatsError::Publish(format!(
                     "failed to publish to '{}' (stream '{}'): {e}",
-                    topic.subject, topic.stream
+                    subscription.subject, subscription.stream
                 ))
             })?;
 
@@ -348,18 +352,20 @@ impl NatsBroker {
             }
             Err(e) => Err(NatsError::Publish(format!(
                 "publish ack failed for '{}' (stream '{}'): {e}",
-                topic.subject, topic.stream
+                subscription.subject, subscription.stream
             ))),
         }
     }
 
     pub async fn subscribe(
         &self,
-        topic: &Topic,
+        subscription: &Subscription,
         metrics: Arc<EngineMetrics>,
     ) -> Result<NatsSubscription, NatsError> {
-        let stream = self.get_stream(&topic.stream).await?;
-        let consumer = self.get_or_create_consumer(&stream, &topic.subject).await?;
+        let stream = self.get_stream(&subscription.stream).await?;
+        let consumer = self
+            .get_or_create_consumer(&stream, &subscription.subject)
+            .await?;
 
         let consumer_type = match &self.config.consumer_name {
             Some(name) => format!("durable({})", name),
@@ -367,7 +373,7 @@ impl NatsBroker {
         };
         let batch_size = self.config.batch_size();
         info!(
-            topic = %format!("{}.{}", topic.stream, topic.subject),
+            topic = %format!("{}.{}", subscription.stream, subscription.subject),
             consumer_type,
             batch_size,
             "subscription started"
