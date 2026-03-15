@@ -26,7 +26,7 @@ Pick an issue and prepare a clean branch to work on it.
 List open, unassigned issues:
 
 ```bash
-glab issue list --assignee="" --label="knowledge graph"
+glab issue list --assignee=""
 ```
 
 Present the top candidates with title, labels, and URL. Include your recommendation and reasoning (e.g. highest priority, smallest scope, good first step). Ask the user which one to take.
