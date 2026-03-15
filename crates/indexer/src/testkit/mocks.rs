@@ -316,7 +316,18 @@ impl TestEnvelopeFactory {
     pub fn simple(payload: &str) -> Envelope {
         Envelope {
             id: MessageId(Uuid::new_v4().to_string().into()),
+            subject: Arc::from(""),
             payload: Bytes::from(payload.to_string()),
+            timestamp: Utc::now(),
+            attempt: 1,
+        }
+    }
+
+    pub fn with_subject(subject: &str, payload: Bytes) -> Envelope {
+        Envelope {
+            id: MessageId(Uuid::new_v4().to_string().into()),
+            subject: Arc::from(subject),
+            payload,
             timestamp: Utc::now(),
             attempt: 1,
         }
@@ -325,6 +336,7 @@ impl TestEnvelopeFactory {
     pub fn with_attempt(payload: &str, attempt: u32) -> Envelope {
         Envelope {
             id: MessageId(Uuid::new_v4().to_string().into()),
+            subject: Arc::from(""),
             payload: Bytes::from(payload.to_string()),
             timestamp: Utc::now(),
             attempt,
@@ -340,6 +352,7 @@ impl TestEnvelopeFactory {
     pub fn with_bytes(payload: Bytes) -> Envelope {
         Envelope {
             id: MessageId(Uuid::new_v4().to_string().into()),
+            subject: Arc::from(""),
             payload,
             timestamp: Utc::now(),
             attempt: 1,

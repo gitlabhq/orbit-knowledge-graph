@@ -107,6 +107,10 @@ pub struct Envelope {
     /// Unique identifier for this message.
     pub id: MessageId,
 
+    /// The NATS subject this message was published to.
+    /// Empty for outbound envelopes created via `Envelope::new`.
+    pub subject: Arc<str>,
+
     /// The serialized message payload.
     pub payload: Bytes,
 
@@ -154,6 +158,7 @@ impl Envelope {
 
         Ok(Envelope {
             id: MessageId::unique(),
+            subject: Arc::from(""),
             payload,
             timestamp: Utc::now(),
             attempt: 1,

@@ -264,6 +264,7 @@ mod tests {
 
         let bad_envelope = Envelope {
             id: crate::types::MessageId::unique(),
+            subject: std::sync::Arc::from(""),
             payload: bytes::Bytes::from_static(b"not json"),
             timestamp: chrono::Utc::now(),
             attempt: 1,
