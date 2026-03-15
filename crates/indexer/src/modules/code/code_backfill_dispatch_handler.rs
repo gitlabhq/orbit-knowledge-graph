@@ -94,8 +94,8 @@ impl Handler for CodeBackfillDispatchHandler {
         let extractor = ColumnExtractor::new(&replication_events);
 
         for event in &replication_events.events {
-            if event.operation == Operation::Delete as i32 {
-                debug!("skipping delete event");
+            if event.operation != Operation::Insert as i32 {
+                debug!(operation = event.operation, "skipping non-insert event");
                 continue;
             }
 
