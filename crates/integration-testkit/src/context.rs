@@ -47,11 +47,22 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn new(schema_sqls: &[&str]) -> Self {
+        let t0 = std::time::Instant::now();
         let container = Self::start_container().await;
-        let url = Self::extract_url(&container).await;
+        eprintln!("[context] start_container: {:.2?}", t0.elapsed());
 
+        let t1 = std::time::Instant::now();
+        let url = Self::extract_url(&container).await;
+        eprintln!("[context] extract_url: {:.2?}", t1.elapsed());
+
+        let t2 = std::time::Instant::now();
         Self::wait_for_ready(&url).await;
+        eprintln!("[context] wait_for_ready: {:.2?}", t2.elapsed());
+
+        let t3 = std::time::Instant::now();
         Self::run_schema_in(&url, TEST_DATABASE, schema_sqls).await;
+        eprintln!("[context] run_schema: {:.2?}", t3.elapsed());
+        eprintln!("[context] total new(): {:.2?}", t0.elapsed());
 
         let config = ClickHouseConfiguration {
             database: TEST_DATABASE.to_string(),
@@ -108,9 +119,10 @@ impl TestContext {
     /// every inserted row. Queries `system.tables` for the current database
     /// and runs `OPTIMIZE TABLE … FINAL` on each table concurrently.
     pub async fn optimize_all(&self) {
+        let t0 = std::time::Instant::now();
         let batches = self
             .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{}' AND engine NOT IN ('View', 'MaterializedView')",
+                "SELECT table FROM system.parts WHERE database = '{}' AND active GROUP BY table",
                 self.config.database
             ))
             .await;
@@ -118,14 +130,16 @@ impl TestContext {
         let stmts: Vec<String> = batches
             .iter()
             .flat_map(|batch| {
-                let col = get_string_column(batch, "name");
+                let col = get_string_column(batch, "table");
                 (0..batch.num_rows())
                     .map(|i| format!("OPTIMIZE TABLE `{}` FINAL", col.value(i)))
                     .collect::<Vec<_>>()
             })
             .collect();
+        eprintln!("[optimize_all] {} tables to optimize", stmts.len());
 
         futures::future::join_all(stmts.iter().map(|sql| self.execute(sql))).await;
+        eprintln!("[optimize_all] done: {:.2?}", t0.elapsed());
     }
 
     pub async fn truncate_all_tables(&self) {

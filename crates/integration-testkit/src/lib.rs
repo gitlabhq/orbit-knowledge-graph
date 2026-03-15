@@ -37,23 +37,40 @@ macro_rules! run_subtests {
     };
 }
 
-/// Run all subtests in parallel against the same shared database.
+/// Run all subtests against the same shared database with bounded concurrency.
 ///
 /// Unlike [`run_subtests!`], this does NOT fork a separate database per
 /// subtest. All subtests share the caller's [`TestContext`] directly.
 /// Use this when all subtests are read-only against pre-seeded data.
+///
+/// At most `SUBTEST_CONCURRENCY` subtests run at a time (default 8, env
+/// var override).
 #[macro_export]
 macro_rules! run_subtests_shared {
-    ($ctx:expr, $($test_fn:path),+ $(,)?) => {
-        futures::future::join_all(vec![
+    ($ctx:expr, $($test_fn:path),+ $(,)?) => {{
+        use futures::stream::StreamExt as _;
+
+        let _concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8);
+
+        let _futs = vec![
             $(
                 Box::pin(async {
+                    let _t = std::time::Instant::now();
                     eprintln!("--- {}", stringify!($test_fn));
                     $test_fn($ctx).await;
+                    eprintln!("    {} {:.2?}", stringify!($test_fn), _t.elapsed());
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
             )+
-        ]).await;
-    };
+        ];
+
+        futures::stream::iter(_futs)
+            .buffer_unordered(_concurrency)
+            .collect::<Vec<()>>()
+            .await;
+    }};
 }
 
 /// Run a subtest with automatic table truncation afterward.

@@ -56,15 +56,22 @@ fn assert_valid(value: &Value) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn run_query(ctx: &TestContext, json: &str, svc: &MockRedactionService) -> ResponseView {
+    let t0 = std::time::Instant::now();
+
     let ontology = Arc::new(load_ontology());
+    let t_ontology = t0.elapsed();
+
     let client = Arc::new(ctx.create_client());
     let security_ctx = test_security_context();
     let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
+    let t_compile = t0.elapsed();
 
     let batches = ctx.query_parameterized(&compiled.base).await;
+    let t_query = t0.elapsed();
 
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
+    let t_redact = t0.elapsed();
 
     let mut pipeline_ctx = QueryPipelineContext {
         compiled: Some(Arc::clone(&compiled)),
@@ -93,9 +100,21 @@ async fn run_query(ctx: &TestContext, json: &str, svc: &MockRedactionService) ->
         )
         .await
         .expect("pipeline should succeed");
+    let t_hydrate = t0.elapsed();
 
     let value = GraphFormatter.format(&output.query_result, &output.result_context, &pipeline_ctx);
     assert_valid(&value);
+    let t_total = t0.elapsed();
+
+    eprintln!(
+        "[run_query] ontology={t_ontology:.1?} compile={:.1?} query={:.1?} redact={:.1?} hydrate={:.1?} format={:.1?} total={t_total:.1?}",
+        t_compile - t_ontology,
+        t_query - t_compile,
+        t_redact - t_query,
+        t_hydrate - t_redact,
+        t_total - t_hydrate,
+    );
+
     let response =
         serde_json::from_value(value).expect("response should deserialize to GraphResponse");
     ResponseView::for_query(&compiled.input, response)
@@ -1371,8 +1390,16 @@ async fn empty_result_has_valid_schema(ctx: &TestContext) {
 
 #[tokio::test]
 async fn data_correctness() {
+    let wall = std::time::Instant::now();
+
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    eprintln!("[test] TestContext::new: {:.2?}", wall.elapsed());
+
+    let t_seed = std::time::Instant::now();
     seed(&ctx).await;
+    eprintln!("[test] seed (inserts + optimize_all): {:.2?}", t_seed.elapsed());
+
+    let t_subtests = std::time::Instant::now();
 
     // All subtests are read-only against the same seed data, so they share
     // one database instead of forking a copy per subtest.
@@ -1431,4 +1458,7 @@ async fn data_correctness() {
         // referential integrity
         traversal_referential_integrity_on_complex_query,
     );
+
+    eprintln!("[test] subtests: {:.2?}", t_subtests.elapsed());
+    eprintln!("[test] total wall: {:.2?}", wall.elapsed());
 }
