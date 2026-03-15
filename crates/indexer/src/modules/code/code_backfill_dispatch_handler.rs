@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use siphon_proto::replication_event::Operation;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use serde::{Deserialize, Serialize};
 
@@ -100,7 +100,7 @@ impl Handler for CodeBackfillDispatchHandler {
             }
 
             let Some(root_namespace_id) = extractor.get_i64(event, "root_namespace_id") else {
-                debug!("failed to extract root_namespace_id, skipping");
+                warn!("failed to extract root_namespace_id, skipping");
                 continue;
             };
 
@@ -113,7 +113,7 @@ impl Handler for CodeBackfillDispatchHandler {
                 .dispatch_projects_for_namespace(&context, root_namespace_id)
                 .await
             {
-                warn!(root_namespace_id, error = %e, "failed to dispatch code backfill for namespace");
+                error!(root_namespace_id, error = %e, "failed to dispatch code backfill for namespace");
             }
         }
 
@@ -151,16 +151,14 @@ impl CodeBackfillDispatchHandler {
             .resolve_namespace_traversal_path(root_namespace_id)
             .await?
         else {
-            debug!(root_namespace_id, "namespace traversal path not found");
+            error!(root_namespace_id, "namespace traversal path not found");
             return Ok(());
         };
-
-        let namespace_prefix = traversal_path;
 
         let batches = self
             .datalake
             .query(NAMESPACE_PROJECTS_QUERY)
-            .param("namespace_prefix", &namespace_prefix)
+            .param("namespace_prefix", &traversal_path)
             .fetch_arrow()
             .await
             .map_err(|e| {
