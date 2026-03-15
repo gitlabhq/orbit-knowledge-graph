@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use indexer::handler::Handler;
-use indexer::testkit::TestEnvelopeFactory;
 use indexer::topic::{CODE_BACKFILL_SUBJECT_PREFIX, CodeBackfillRequest};
 use indexer::types::Envelope;
 
