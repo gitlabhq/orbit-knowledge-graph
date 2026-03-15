@@ -182,7 +182,7 @@ Building a Knowledge Graph is a ***data engineering problem***. The Knowledge Gr
 We will then build a secure query layer on top of the Data Insights Platform to allow developers and AI agents to query the graph for various product use cases. The Knowledge Graph tech stack will look like the following:
 
 - [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) acts as the CDC bridge, streaming PostgreSQL logical replication events into NATS.
-- [NATS](https://docs.nats.io/) acts as the durable message broker between Siphon and ClickHouse. Additionally, we will leverage NATS to power all event-driven logic, high availability, and queuing, such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing.
+- [NATS](https://docs.nats.io/) acts as the durable message broker between Siphon and ClickHouse. Additionally, we will leverage NATS to power all event-driven logic, high availability, and queuing, such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
 - [ClickHouse](https://clickhouse.com/) will act as the primary data store and data lake. With ClickHouse, we will build namespace property graphs and project-level indexes. We will never establish a direct connection to the OLTP database.
 - **Knowledge Graph Web Server and Indexer** as a unified binary with two modes:
   - **`gkg-webserver`**: Serves web traffic requests coming from the Rails instance, executes GKG MCP tool calls, shares logic with the indexer, builds the graph queries, communicates with NATS for indexing status and namespace routing, and writes to ClickHouse to record customer usage for impact analytics and usage billing.
@@ -236,6 +236,8 @@ Please see the following design documents for more details on the Knowledge Grap
 - [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md)
 - [ADR: Rust Core Runtime](decisions/002_rust_core_runtime.md)
 - [ADR: API Design — Unified REST + GraphQL](decisions/003_api_design.md)
+- [ADR: Unified Response Schema](decisions/004_unified_response_schema.md)
+- [ADR: PostgreSQL Task Table for Code Indexing Triggers](decisions/005_code_indexing_task_table.md)
 
 ## Binary Breakdown
 

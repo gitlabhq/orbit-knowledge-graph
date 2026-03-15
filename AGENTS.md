@@ -58,6 +58,7 @@ Integration tests need Docker: `mise test:integration`.
 | Local development guide | `docs/dev/local-development.md` |
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbook | `docs/dev/RUNBOOK.md` |
+| Architecture Decision Records | `docs/design-documents/decisions/` |
 | Helm charts (dev) | `helm-dev/gkg/`, `helm-dev/observability/` |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
