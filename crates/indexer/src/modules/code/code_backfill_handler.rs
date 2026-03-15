@@ -133,6 +133,7 @@ impl CodeBackfillHandler {
                     traversal_path: request.traversal_path.clone(),
                     // Zero so any CDC-driven CodeIndexingTask (task_id > 0) naturally supersedes this backfill checkpoint.
                     task_id: 0,
+                    // Branch name used as ref — GitLab resolves it to HEAD. The actual SHA is unknown at dispatch time.
                     commit_sha: Some(default_branch.to_string()),
                 },
             )
