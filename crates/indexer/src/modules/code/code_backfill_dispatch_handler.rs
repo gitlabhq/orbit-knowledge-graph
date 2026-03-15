@@ -91,11 +91,6 @@ impl Handler for CodeBackfillDispatchHandler {
                 continue;
             }
 
-            if event.operation == Operation::InitialSnapshot as i32 {
-                debug!("skipping initial snapshot event");
-                continue;
-            }
-
             let Some(root_namespace_id) = extractor.get_i64(event, "root_namespace_id") else {
                 debug!("failed to extract root_namespace_id, skipping");
                 continue;
@@ -228,23 +223,6 @@ mod tests {
         let payload = build_replication_events(vec![
             namespace_enabled_columns(42)
                 .with_operation(Operation::Delete as i32)
-                .build(),
-        ]);
-        let envelope = TestEnvelopeFactory::with_bytes(payload);
-
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn skips_initial_snapshot_events() {
-        use siphon_proto::replication_event::Operation;
-
-        let ctx = TestContext::new();
-
-        let payload = build_replication_events(vec![
-            namespace_enabled_columns(42)
-                .with_operation(Operation::InitialSnapshot as i32)
                 .build(),
         ]);
         let envelope = TestEnvelopeFactory::with_bytes(payload);
