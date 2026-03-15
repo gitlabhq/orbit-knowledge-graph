@@ -188,8 +188,8 @@ impl CodeIndexingTaskHandler {
                     project_id,
                     branch: branch.to_string(),
                     traversal_path: task.traversal_path.clone(),
-                    event_id: task.id,
-                    commit_sha: task.commit_sha.clone(),
+                    task_id: task.id,
+                    commit_sha: Some(task.commit_sha.clone()),
                 },
             )
             .await;
@@ -212,7 +212,7 @@ impl CodeIndexingTaskHandler {
             .checkpoint_store
             .get_checkpoint(&task.traversal_path, task.project_id, branch)
             .await
-            && checkpoint.last_event_id >= task.id
+            && checkpoint.last_task_id >= task.id
         {
             debug!(task_id = task.id, "already indexed, skipping");
             return true;
@@ -362,15 +362,15 @@ mod tests {
             project_id: i64,
             traversal_path: &str,
             branch: &str,
-            last_event_id: i64,
+            last_task_id: i64,
         ) {
             self.mock_checkpoints
                 .set_checkpoint(&CodeIndexingCheckpoint {
                     traversal_path: traversal_path.to_string(),
                     project_id,
                     branch: branch.to_string(),
-                    last_event_id,
-                    last_commit: "abc".to_string(),
+                    last_task_id,
+                    last_commit: Some("abc".to_string()),
                     indexed_at: Utc::now(),
                 })
                 .await
