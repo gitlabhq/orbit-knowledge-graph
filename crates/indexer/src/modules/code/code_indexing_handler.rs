@@ -317,7 +317,6 @@ mod tests {
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::topic::CodeBackfillRequest;
-    use crate::types::Event;
     use chrono::Utc;
 
     fn test_metrics() -> CodeMetrics {
