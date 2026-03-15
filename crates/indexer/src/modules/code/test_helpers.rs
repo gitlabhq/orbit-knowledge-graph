@@ -97,7 +97,3 @@ pub fn code_indexing_task_columns(
         .with_string("commit_sha", commit_sha)
         .with_string("traversal_path", traversal_path)
 }
-
-pub fn namespace_enabled_columns(root_namespace_id: i64) -> EventBuilder {
-    EventBuilder::new().with_i64("root_namespace_id", root_namespace_id)
-}
