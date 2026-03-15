@@ -103,10 +103,13 @@ impl NatsBroker {
         }
 
         let mut managed_streams: HashMap<&Arc<str>, Vec<String>> = HashMap::new();
+        let mut sourced_streams: Vec<&Subscription> = Vec::new();
         let mut unmanaged_streams: Vec<&Arc<str>> = Vec::new();
 
         for subscription in subscriptions {
-            if subscription.manage_stream {
+            if !subscription.sources.is_empty() {
+                sourced_streams.push(subscription);
+            } else if subscription.manage_stream {
                 managed_streams
                     .entry(&subscription.stream)
                     .or_default()
@@ -118,6 +121,10 @@ impl NatsBroker {
 
         for (stream_name, subjects) in managed_streams {
             self.create_or_update_stream(stream_name, subjects).await?;
+        }
+
+        for subscription in sourced_streams {
+            self.create_sourced_stream(subscription).await?;
         }
 
         for stream_name in unmanaged_streams {
@@ -235,6 +242,76 @@ impl NatsBroker {
         Ok(stream)
     }
 
+    async fn create_sourced_stream(
+        &self,
+        subscription: &Subscription,
+    ) -> Result<Stream, NatsError> {
+        for source in &subscription.sources {
+            if source.manage_stream {
+                self.create_or_update_stream(&source.stream, vec![source.subject.to_string()])
+                    .await?;
+            } else {
+                self.get_stream(&source.stream).await?;
+            }
+        }
+
+        let stream_name = &subscription.stream;
+        let nats_sources: Vec<async_nats::jetstream::stream::Source> = subscription
+            .sources
+            .iter()
+            .map(|s| async_nats::jetstream::stream::Source {
+                name: s.stream.to_string(),
+                filter_subject: Some(s.subject.to_string()),
+                ..Default::default()
+            })
+            .collect();
+
+        let source_names: Vec<&str> = subscription
+            .sources
+            .iter()
+            .map(|s| s.stream.as_ref())
+            .collect();
+
+        let stream_config = async_nats::jetstream::stream::Config {
+            name: stream_name.to_string(),
+            sources: Some(nats_sources),
+            num_replicas: self.config.stream_replicas,
+            max_age: self.config.stream_max_age().unwrap_or_default(),
+            max_bytes: self.config.stream_max_bytes.unwrap_or(-1),
+            max_messages: self.config.stream_max_messages.unwrap_or(-1),
+            storage: async_nats::jetstream::stream::StorageType::File,
+            retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+            ..Default::default()
+        };
+
+        self.jetstream
+            .create_or_update_stream(stream_config)
+            .await
+            .map_err(|e| NatsError::StreamCreationFailed {
+                stream: stream_name.to_string(),
+                source: e,
+            })?;
+
+        let stream = self
+            .jetstream
+            .get_stream(stream_name.as_ref())
+            .await
+            .map_err(|e| NatsError::StreamNotFound {
+                stream: stream_name.to_string(),
+                source: e,
+            })?;
+
+        info!(
+            stream = %stream_name,
+            sources = ?source_names,
+            "sourced stream created or updated"
+        );
+
+        let mut cache = self.streams.write().await;
+        cache.insert(stream_name.clone(), stream.clone());
+        Ok(stream)
+    }
+
     async fn get_stream(&self, stream_name: &Arc<str>) -> Result<Stream, NatsError> {
         {
             let cache = self.streams.read().await;
@@ -271,7 +348,10 @@ impl NatsBroker {
         let durable_name = self.config.consumer_name.as_ref().map(|base| {
             format!(
                 "{base}-{}",
-                subject.replace('.', "-").replace('*', "wildcard")
+                subject
+                    .replace('.', "-")
+                    .replace('*', "wildcard")
+                    .replace('>', "all")
             )
         });
 
@@ -318,6 +398,7 @@ impl NatsBroker {
 
         let envelope = Envelope {
             id: MessageId(Arc::from(message_id)),
+            subject: Arc::from(message_data.subject.as_str()),
             payload: message_data.payload,
             timestamp,
             attempt,

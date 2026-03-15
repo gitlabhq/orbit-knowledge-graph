@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use indexer::handler::Handler;
-use indexer::modules::code::CodeIndexingTaskHandler;
+use indexer::modules::code::CodeIndexingHandler;
 use indexer::testkit::TestEnvelopeFactory;
 use prost::Message;
 use siphon_proto::replication_event::Column;
@@ -35,11 +35,12 @@ async fn indexes_repository() {
     create_project_in_graph(&clickhouse, project_id, "/test", "test/repo").await;
 
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let handler = deps.code_indexing_task_handler();
+    let handler = deps.code_indexing_handler();
     let context = handler_context(&clickhouse);
-    let envelope = TestEnvelopeFactory::with_bytes(code_indexing_task_payload(
-        project_id, commit_sha, 1, "/test",
-    ));
+    let envelope = TestEnvelopeFactory::with_subject(
+        "siphon_stream_main_db.p_knowledge_graph_code_indexing_tasks",
+        code_indexing_task_payload(project_id, commit_sha, 1, "/test"),
+    );
 
     let result = handler.handle(context, envelope).await;
     assert!(result.is_ok(), "handler failed: {:?}", result);
@@ -72,7 +73,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 
     create_project_in_graph(&clickhouse, project_id, "/stale-test", "stale/test").await;
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let handler = deps.code_indexing_task_handler();
+    let handler = deps.code_indexing_handler();
 
     index_code(
         &handler,
@@ -131,7 +132,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 }
 
 async fn index_code(
-    handler: &CodeIndexingTaskHandler,
+    handler: &CodeIndexingHandler,
     clickhouse: &integration_testkit::TestContext,
     project_id: i64,
     commit_sha: &str,
@@ -139,12 +140,10 @@ async fn index_code(
     traversal_path: &str,
 ) {
     let context = handler_context(clickhouse);
-    let envelope = TestEnvelopeFactory::with_bytes(code_indexing_task_payload(
-        project_id,
-        commit_sha,
-        task_id,
-        traversal_path,
-    ));
+    let envelope = TestEnvelopeFactory::with_subject(
+        "siphon_stream_main_db.p_knowledge_graph_code_indexing_tasks",
+        code_indexing_task_payload(project_id, commit_sha, task_id, traversal_path),
+    );
 
     handler
         .handle(context, envelope)

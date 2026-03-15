@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::modules::code::{
-    CodeBackfillDispatchHandlerConfig, CodeBackfillHandlerConfig, CodeIndexingTaskHandlerConfig,
-};
+use crate::modules::code::{CodeBackfillDispatchHandlerConfig, CodeIndexingHandlerConfig};
 use crate::modules::namespace_deletion::{
     NamespaceDeletionHandlerConfig, NamespaceDeletionSchedulerConfig,
 };
@@ -59,9 +57,7 @@ pub struct HandlersConfiguration {
     #[serde(default)]
     pub namespace_handler: NamespaceHandlerConfig,
     #[serde(default)]
-    pub code_indexing_task: CodeIndexingTaskHandlerConfig,
-    #[serde(default)]
-    pub code_backfill: CodeBackfillHandlerConfig,
+    pub code_indexing: CodeIndexingHandlerConfig,
     #[serde(default)]
     pub code_backfill_dispatch: CodeBackfillDispatchHandlerConfig,
     #[serde(default)]

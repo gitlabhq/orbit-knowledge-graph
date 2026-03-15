@@ -1,15 +1,17 @@
 //! Code Indexing Module
 //!
-//! This module processes code indexing tasks from the Siphon CDC stream,
-//! fetches repository code from Gitaly, runs the code-graph, and
-//! writes the resulting graph data to ClickHouse.
+//! This module processes code indexing from two sources via a fan-in stream:
+//! 1. Siphon CDC events for code indexing tasks dispatched by Rails
+//! 2. Backfill requests triggered when a namespace is enabled
+//!
+//! Both sources feed into a single handler that fetches repository code,
+//! runs the code-graph indexer, and writes graph data to ClickHouse.
 
 mod archive;
 mod arrow_converter;
 mod checkpoint_store;
 mod code_backfill_dispatch_handler;
-mod code_backfill_handler;
-mod code_indexing_task_handler;
+mod code_indexing_handler;
 pub mod config;
 pub mod indexing_pipeline;
 pub mod locking;
@@ -26,10 +28,8 @@ use crate::IndexerConfig;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 pub use code_backfill_dispatch_handler::CodeBackfillDispatchHandler;
 pub use code_backfill_dispatch_handler::CodeBackfillDispatchHandlerConfig;
-pub use code_backfill_handler::CodeBackfillHandler;
-pub use code_backfill_handler::CodeBackfillHandlerConfig;
-pub use code_indexing_task_handler::CodeIndexingTaskHandler;
-pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
+pub use code_indexing_handler::CodeIndexingHandler;
+pub use code_indexing_handler::CodeIndexingHandlerConfig;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
@@ -51,8 +51,7 @@ pub fn register_handlers(
         return Ok(());
     };
 
-    let code_indexing_task_config = config.engine.handlers.code_indexing_task.clone();
-    let backfill_config = config.engine.handlers.code_backfill.clone();
+    let code_indexing_config = config.engine.handlers.code_indexing.clone();
     let backfill_dispatch_config = config.engine.handlers.code_backfill_dispatch.clone();
 
     let table_names =
@@ -79,19 +78,12 @@ pub fn register_handlers(
         table_names,
     ));
 
-    registry.register_handler(Box::new(CodeIndexingTaskHandler::new(
-        Arc::clone(&pipeline),
-        Arc::clone(&checkpoint_store),
-        metrics.clone(),
-        code_indexing_task_config,
-    )));
-
-    registry.register_handler(Box::new(CodeBackfillHandler::new(
+    registry.register_handler(Box::new(CodeIndexingHandler::new(
         Arc::clone(&pipeline),
         Arc::clone(&repository_service),
         Arc::clone(&checkpoint_store),
         metrics,
-        backfill_config,
+        code_indexing_config,
     )));
 
     registry.register_handler(Box::new(CodeBackfillDispatchHandler::new(

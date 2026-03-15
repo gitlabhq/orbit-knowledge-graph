@@ -1,7 +1,9 @@
-use bytes::Bytes;
+use std::sync::Arc;
+
 use indexer::handler::Handler;
 use indexer::testkit::TestEnvelopeFactory;
-use indexer::topic::CodeBackfillRequest;
+use indexer::topic::{CODE_BACKFILL_SUBJECT_PREFIX, CodeBackfillRequest};
+use indexer::types::Envelope;
 
 use super::helpers::*;
 
@@ -27,22 +29,21 @@ async fn indexes_project_with_backfill_event_id() {
         )],
     );
 
+    create_project_in_graph(&clickhouse, project_id, "/reconcile", "reconcile/repo").await;
+
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let handler = deps.backfill_handler();
+    let handler = deps.code_indexing_handler();
     let context = handler_context(&clickhouse);
-    let payload = serde_json::to_vec(&CodeBackfillRequest {
+
+    let request = CodeBackfillRequest {
         project_id,
         traversal_path: "/reconcile".to_string(),
-    })
-    .unwrap();
-    let envelope = TestEnvelopeFactory::with_bytes(Bytes::from(payload));
+    };
+    let mut envelope = Envelope::new(&request).unwrap();
+    envelope.subject = Arc::from(format!("{CODE_BACKFILL_SUBJECT_PREFIX}.{project_id}"));
 
     let result = handler.handle(context, envelope).await;
-    assert!(
-        result.is_ok(),
-        "reconciliation handler failed: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "backfill handler failed: {:?}", result);
 
     assert_code_indexed(&clickhouse, project_id).await;
 }

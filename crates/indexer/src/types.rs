@@ -18,13 +18,41 @@ pub enum SerializationError {
     Json(#[from] serde_json::Error),
 }
 
+/// A stream to source messages from when creating a fan-in subscription.
+#[derive(Clone, Debug)]
+pub struct SubscriptionSource {
+    pub stream: Arc<str>,
+    pub subject: Arc<str>,
+    pub manage_stream: bool,
+}
+
+impl SubscriptionSource {
+    pub fn new(stream: impl Into<Arc<str>>, subject: impl Into<Arc<str>>) -> Self {
+        Self {
+            stream: stream.into(),
+            subject: subject.into(),
+            manage_stream: true,
+        }
+    }
+
+    pub fn manage_stream(mut self, value: bool) -> Self {
+        self.manage_stream = value;
+        self
+    }
+}
+
 /// A NATS JetStream subscription target: a stream name paired with a subject filter.
+///
+/// Can also represent a fan-in stream that sources from multiple streams via `sources`.
+/// Each source carries its own `manage_stream` flag, so external streams (like Siphon)
+/// can coexist with managed streams in the same fan-in.
 #[derive(Clone, Debug)]
 pub struct Subscription {
     pub stream: Arc<str>,
     pub subject: Arc<str>,
     pub manage_stream: bool,
     pub dead_letter_on_exhaustion: bool,
+    pub sources: Vec<SubscriptionSource>,
 }
 
 impl PartialEq for Subscription {
@@ -49,6 +77,17 @@ impl Subscription {
             subject: subject.into(),
             manage_stream: true,
             dead_letter_on_exhaustion: false,
+            sources: Vec::new(),
+        }
+    }
+
+    pub fn sourced(stream: impl Into<Arc<str>>, sources: Vec<SubscriptionSource>) -> Self {
+        Self {
+            stream: stream.into(),
+            subject: Arc::from(">"),
+            manage_stream: true,
+            dead_letter_on_exhaustion: false,
+            sources,
         }
     }
 
@@ -107,6 +146,10 @@ pub struct Envelope {
     /// Unique identifier for this message.
     pub id: MessageId,
 
+    /// The NATS subject this message was published to.
+    /// Empty for outbound envelopes created via `Envelope::new`.
+    pub subject: Arc<str>,
+
     /// The serialized message payload.
     pub payload: Bytes,
 
@@ -154,6 +197,7 @@ impl Envelope {
 
         Ok(Envelope {
             id: MessageId::unique(),
+            subject: Arc::from(""),
             payload,
             timestamp: Utc::now(),
             attempt: 1,
