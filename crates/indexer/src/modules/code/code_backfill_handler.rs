@@ -131,6 +131,7 @@ impl CodeBackfillHandler {
                     project_id,
                     branch: default_branch.to_string(),
                     traversal_path: request.traversal_path.clone(),
+                    // Zero so any CDC-driven CodeIndexingTask (task_id > 0) naturally supersedes this backfill checkpoint.
                     task_id: 0,
                     commit_sha: Some(default_branch.to_string()),
                 },
