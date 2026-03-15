@@ -42,7 +42,7 @@ The indexer emits metrics under five OpenTelemetry meters: `etl_engine` for the 
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `etl.messages.processed` | Counter | count | `topic`, `outcome` (ack/nack) | Total messages processed |
+| `etl.messages.processed` | Counter | count | `topic`, `outcome` (ack/nack/term/dead_letter) | Total messages processed |
 | `etl.message.duration` | Histogram | s | `topic` | End-to-end time per message through dispatch |
 | `etl.handler.duration` | Histogram | s | `handler` | Time inside each handler's `handle()` call |
 | `etl.handler.errors` | Counter | count | `handler`, `error_kind` | Handler errors at the engine dispatch level |

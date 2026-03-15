@@ -21,6 +21,9 @@ use tokio_util::sync::CancellationToken;
 
 use tracing::{debug, info, warn};
 
+use crate::dead_letter::{
+    DEAD_LETTER_STREAM, DEAD_LETTER_SUBJECT_PREFIX, DeadLetterEnvelope, dead_letter_subject,
+};
 use crate::metrics::EngineMetrics;
 use crate::types::{Envelope, MessageId, Topic};
 
@@ -120,6 +123,43 @@ impl NatsBroker {
         for stream_name in external_streams {
             self.get_stream(stream_name).await?;
         }
+
+        self.ensure_dead_letter_stream().await?;
+
+        Ok(())
+    }
+
+    async fn ensure_dead_letter_stream(&self) -> Result<(), NatsError> {
+        let stream_name: Arc<str> = Arc::from(DEAD_LETTER_STREAM);
+        let subject = format!("{}.>", DEAD_LETTER_SUBJECT_PREFIX);
+        self.create_or_update_stream(&stream_name, vec![subject])
+            .await?;
+        Ok(())
+    }
+
+    pub async fn publish_dead_letter(
+        &self,
+        original_topic: &Topic,
+        envelope: &Envelope,
+        error: &str,
+    ) -> Result<(), NatsError> {
+        let dead_letter = DeadLetterEnvelope::new(original_topic, envelope, error);
+
+        let payload = serde_json::to_vec(&dead_letter)
+            .map(Bytes::from)
+            .map_err(|error| {
+                NatsError::Publish(format!("failed to serialize dead letter: {error}"))
+            })?;
+
+        let subject = dead_letter_subject(original_topic);
+        self.jetstream
+            .publish(subject.clone(), payload)
+            .await
+            .map_err(|error| {
+                NatsError::Publish(format!(
+                    "failed to publish dead letter to '{subject}': {error}"
+                ))
+            })?;
 
         Ok(())
     }

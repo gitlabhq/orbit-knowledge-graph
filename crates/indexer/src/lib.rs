@@ -29,6 +29,7 @@
 pub mod checkpoint;
 pub mod clickhouse;
 pub mod configuration;
+pub mod dead_letter;
 pub mod destination;
 pub mod engine;
 pub(crate) mod env;
