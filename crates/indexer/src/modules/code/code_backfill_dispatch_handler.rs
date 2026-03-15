@@ -44,12 +44,10 @@ LIMIT 1
 "#;
 
 const NAMESPACE_PROJECTS_QUERY: &str = r#"
-SELECT project.id AS project_id, traversal_paths.traversal_path
-FROM siphon_projects project
-INNER JOIN project_namespace_traversal_paths traversal_paths
-  ON project.id = traversal_paths.id
-WHERE project._siphon_deleted = false
-  AND startsWith(traversal_paths.traversal_path, {namespace_prefix:String})
+SELECT id AS project_id, traversal_path
+FROM project_namespace_traversal_paths
+WHERE deleted = false
+  AND startsWith(traversal_path, {namespace_prefix:String})
 "#;
 
 pub struct CodeBackfillDispatchHandler {
@@ -209,5 +207,77 @@ impl CodeBackfillDispatchHandler {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+    use prost::Message;
+    use siphon_proto::replication_event::Column;
+    use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
+
+    use super::*;
+    use crate::handler::Handler;
+    use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
+
+    fn build_payload(root_namespace_id: i64, operation: i32) -> Bytes {
+        let columns = vec![Column {
+            column_index: 0,
+            value: Some(Value {
+                value: Some(value::Value::Int64Value(root_namespace_id)),
+            }),
+        }];
+
+        let encoded = LogicalReplicationEvents {
+            event: 1,
+            table: "knowledge_graph_enabled_namespaces".into(),
+            schema: "public".into(),
+            application_identifier: "test".into(),
+            columns: vec!["root_namespace_id".to_string()],
+            events: vec![ReplicationEvent { operation, columns }],
+            version_hash: 0,
+        }
+        .encode_to_vec();
+
+        let compressed = zstd::encode_all(encoded.as_slice(), 0).expect("compression failed");
+        Bytes::from(compressed)
+    }
+
+    fn test_context(nats: Arc<MockNatsServices>) -> HandlerContext {
+        use crate::nats::ProgressNotifier;
+        use crate::testkit::MockDestination;
+
+        HandlerContext::new(
+            Arc::new(MockDestination::new()),
+            nats,
+            Arc::new(MockLockService::new()),
+            ProgressNotifier::noop(),
+        )
+    }
+
+    #[tokio::test]
+    async fn skips_non_insert_events() {
+        let datalake = ArrowClickHouseClient::new("http://localhost:0", "default", "default", None);
+        let handler = CodeBackfillDispatchHandler::new(
+            datalake,
+            CodeBackfillDispatchHandlerConfig::default(),
+        );
+
+        let nats = Arc::new(MockNatsServices::new());
+        let context = test_context(Arc::clone(&nats));
+        let envelope = TestEnvelopeFactory::with_bytes(build_payload(200, 4));
+
+        let result = handler.handle(context, envelope).await;
+        assert!(result.is_ok(), "dispatch handler failed: {:?}", result);
+
+        let published = nats.get_published();
+        assert!(
+            published.is_empty(),
+            "expected no backfill requests for delete event, got {}",
+            published.len()
+        );
     }
 }

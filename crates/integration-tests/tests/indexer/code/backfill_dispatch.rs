@@ -84,14 +84,6 @@ async fn dispatches_backfill_requests_for_projects_in_namespace() {
 
     clickhouse
         .execute(&format!(
-            "INSERT INTO siphon_projects (id, namespace_id, _siphon_deleted) VALUES \
-             ({project_a_id}, {root_namespace_id}, false), \
-             ({project_b_id}, {root_namespace_id}, false)"
-        ))
-        .await;
-
-    clickhouse
-        .execute(&format!(
             "INSERT INTO project_namespace_traversal_paths (id, traversal_path, deleted) VALUES \
              ({project_a_id}, '{traversal_path}{project_a_id}/', false), \
              ({project_b_id}, '{traversal_path}{project_b_id}/', false)"
@@ -127,55 +119,4 @@ async fn dispatches_backfill_requests_for_projects_in_namespace() {
     dispatched_project_ids.sort();
 
     assert_eq!(dispatched_project_ids, vec![project_a_id, project_b_id]);
-}
-
-#[tokio::test]
-async fn skips_non_insert_events() {
-    let root_namespace_id: i64 = 200;
-
-    let clickhouse = integration_testkit::TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
-
-    let columns = vec![Column {
-        column_index: 0,
-        value: Some(Value {
-            value: Some(value::Value::Int64Value(root_namespace_id)),
-        }),
-    }];
-
-    let encoded = LogicalReplicationEvents {
-        event: 1,
-        table: "knowledge_graph_enabled_namespaces".into(),
-        schema: "public".into(),
-        application_identifier: "test".into(),
-        columns: vec!["root_namespace_id".to_string()],
-        events: vec![ReplicationEvent {
-            operation: 4, // Delete
-            columns,
-        }],
-        version_hash: 0,
-    }
-    .encode_to_vec();
-
-    let compressed = zstd::encode_all(encoded.as_slice(), 0).expect("compression failed");
-    let payload = Bytes::from(compressed);
-
-    let datalake = clickhouse.config.build_client();
-    let handler = dispatch_handler(datalake);
-    let nats = Arc::new(MockNatsServices::new());
-    let context = dispatch_context(&clickhouse, Arc::clone(&nats));
-    let envelope = TestEnvelopeFactory::with_bytes(payload);
-
-    let result = handler.handle(context, envelope).await;
-    assert!(result.is_ok(), "dispatch handler failed: {:?}", result);
-
-    let published = nats.get_published();
-    assert!(
-        published.is_empty(),
-        "expected no backfill requests for delete event, got {}",
-        published.len()
-    );
 }
