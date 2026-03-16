@@ -30,6 +30,11 @@ pub enum Requirement {
     AggregationSort,
     /// Query has `range` — test must call `assert_node_count`.
     Range,
+    /// Query returns nodes — test must call `assert_node_count`.
+    ///
+    /// Always derived for `search`, `traversal`, and `neighbors` queries
+    /// to ensure no unexpected rows leak into the response.
+    NodeCount,
 }
 
 impl std::fmt::Display for Requirement {
@@ -53,6 +58,9 @@ impl std::fmt::Display for Requirement {
                 )
             }
             Self::Range => write!(f, "Range (query has range — call assert_node_count)"),
+            Self::NodeCount => {
+                write!(f, "NodeCount (call assert_node_count to verify total rows)")
+            }
         }
     }
 }
@@ -98,8 +106,11 @@ impl QueryRequirements for Input {
             }
             QueryType::Neighbors => {
                 reqs.insert(Requirement::Neighbors);
+                reqs.insert(Requirement::NodeCount);
             }
-            QueryType::Traversal | QueryType::Search => {}
+            QueryType::Traversal | QueryType::Search => {
+                reqs.insert(Requirement::NodeCount);
+            }
         }
 
         // Traversal queries with joins produce edges the test must verify per type.
@@ -210,7 +221,8 @@ mod tests {
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::OrderBy));
-        assert_eq!(reqs.len(), 1);
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 2);
     }
 
     #[test]
@@ -224,7 +236,8 @@ mod tests {
         assert!(reqs.contains(&Requirement::Filter {
             field: "state".into()
         }));
-        assert_eq!(reqs.len(), 1);
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 2);
     }
 
     #[test]
@@ -242,7 +255,8 @@ mod tests {
         assert!(reqs.contains(&Requirement::Filter {
             field: "user_type".into()
         }));
-        assert_eq!(reqs.len(), 2);
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 3);
     }
 
     #[test]
@@ -254,7 +268,8 @@ mod tests {
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::NodeIds));
-        assert_eq!(reqs.len(), 1);
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 2);
     }
 
     #[test]
@@ -290,13 +305,14 @@ mod tests {
     }
 
     #[test]
-    fn requirements_from_plain_search_is_empty() {
+    fn requirements_from_plain_search_has_node_count() {
         let input = parse_test_input(
             r#"{"query_type": "search",
                 "node": {"id": "u", "entity": "User"},
                 "limit": 10}"#,
         );
-        assert!(input.requirements().is_empty());
+        let reqs = input.requirements();
+        assert_eq!(reqs, HashSet::from([Requirement::NodeCount]));
     }
 
     #[test]
@@ -319,7 +335,8 @@ mod tests {
         assert!(reqs.contains(&Requirement::Relationship {
             edge_type: "MEMBER_OF".into()
         }));
-        assert_eq!(reqs.len(), 1);
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 2);
     }
 
     #[test]
@@ -344,7 +361,8 @@ mod tests {
         assert!(reqs.contains(&Requirement::Relationship {
             edge_type: "CONTAINS".into()
         }));
-        assert_eq!(reqs.len(), 2);
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 3);
     }
 
     #[test]
@@ -379,7 +397,8 @@ mod tests {
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Neighbors));
         assert!(reqs.contains(&Requirement::NodeIds));
-        assert_eq!(reqs.len(), 2);
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 3);
     }
 
     #[test]
@@ -407,18 +426,19 @@ mod tests {
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Range));
-        assert_eq!(reqs.len(), 1);
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 2);
     }
 
     // ── Assertion enforcement ────────────────────────────────────────
 
     #[test]
-    fn for_query_with_no_requirements_drops_cleanly() {
+    fn for_query_plain_search_requires_node_count() {
         let input = parse_test_input(
             r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}, "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
-        drop(view);
+        view.assert_node_count(2);
     }
 
     #[test]
@@ -428,6 +448,7 @@ mod tests {
                 "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_count(2);
         view.assert_node_order("User", &[1, 2]);
     }
 
@@ -439,6 +460,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_count(2);
         view.assert_filter("User", "username", |n| n.prop_str("username").is_some());
     }
 
@@ -451,6 +473,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_count(2);
         view.assert_filter("User", "username", |n| n.prop_str("username").is_some());
         view.assert_filter("User", "state", |n| {
             matches!(n.prop_str("username"), Some("alice" | "bob"))
@@ -479,6 +502,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_count(2);
         let _ = view.node_ids("User").into_inner();
     }
 
@@ -523,6 +547,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
+        view.assert_node_count(4);
         let _ = view.edges_of_type("MEMBER_OF").into_inner();
     }
 
@@ -538,6 +563,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
+        view.assert_node_count(4);
         view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     }
 
@@ -573,6 +599,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
+        view.assert_node_count(4);
         let _ = view.edges_of_type("MEMBER_OF").into_inner();
         let _ = view.edges_of_type("CONTAINS").into_inner();
     }
@@ -606,6 +633,7 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
+        view.assert_node_count(3);
         view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
         let _ = view.node_ids("User").into_inner();
     }
@@ -618,6 +646,7 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
+        view.assert_node_count(3);
         let _ = view.edges_of_type("MEMBER_OF").into_inner();
         let _ = view.node_ids("User").into_inner();
     }
@@ -632,6 +661,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
+        // aggregation queries don't require NodeCount
         view.assert_node_order("User", &[1, 2]);
         view.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
     }
@@ -656,6 +686,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_count(2);
         view.assert_node_ids("User", &[1, 2]);
     }
 
@@ -667,6 +698,7 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
+        view.assert_node_count(3);
         view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 101)]);
         let _ = view.node_ids("User").into_inner();
     }
@@ -679,6 +711,7 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
+        view.assert_node_count(3);
         view.assert_edge_count("MEMBER_OF", 2);
         let _ = view.node_ids("User").into_inner();
     }
@@ -697,6 +730,18 @@ mod tests {
     }
 
     // ── Panic on unsatisfied ─────────────────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "NodeCount")]
+    fn for_query_panics_on_unsatisfied_node_count() {
+        let input = parse_test_input(
+            r#"{"query_type": "search",
+                "node": {"id": "u", "entity": "User"},
+                "limit": 10}"#,
+        );
+        let view = ResponseView::for_query(&input, sample_search_response());
+        drop(view);
+    }
 
     #[test]
     #[should_panic(expected = "unsatisfied assertion requirements")]
@@ -847,6 +892,7 @@ mod tests {
                 "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
+        view.assert_node_count(2);
         view.skip_requirement(Requirement::OrderBy);
     }
 
@@ -862,6 +908,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
+        view.assert_node_count(4);
         view.skip_requirement(Requirement::Relationship {
             edge_type: "MEMBER_OF".into(),
         });

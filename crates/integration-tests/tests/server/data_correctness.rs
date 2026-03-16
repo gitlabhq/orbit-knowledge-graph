@@ -349,6 +349,7 @@ async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(3);
     resp.assert_node_ids("Project", &[1000, 1002, 1004]);
 
     resp.assert_filter("Project", "visibility_level", |n| {
@@ -391,6 +392,7 @@ async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(2);
     resp.assert_node_ids("Group", &[100, 102]);
     resp.find_node("Group", 100)
         .unwrap()
@@ -414,6 +416,7 @@ async fn search_filter_contains_returns_substring_matches(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(2);
     resp.assert_node_ids("User", &[1, 3]);
     resp.assert_filter("User", "username", |n| {
         n.prop_str("username").is_some_and(|u| u.contains("li"))
@@ -489,6 +492,7 @@ async fn search_redaction_returns_only_allowed_ids(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(2);
     resp.assert_node_ids("User", &[1, 3]);
     resp.assert_node_absent("User", 2);
     resp.assert_node_absent("User", 5);
@@ -507,6 +511,7 @@ async fn search_unicode_properties_survive_pipeline(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(1);
     resp.assert_node_ids("User", &[6]);
     resp.assert_node("User", 6, |n| {
         n.prop_str("username") == Some("用户_émoji_🎉")
@@ -586,6 +591,7 @@ async fn search_combined_filter_node_ids_order_by(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(3);
     resp.assert_node_order("User", &[3, 2, 1]);
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
     resp.assert_node_absent("User", 5);
@@ -611,6 +617,7 @@ async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &TestContext)
     )
     .await;
 
+    resp.assert_node_count(9);
     resp.assert_edge_set(
         "MEMBER_OF",
         &[
@@ -655,6 +662,7 @@ async fn traversal_three_hop_returns_all_user_group_project_paths(ctx: &TestCont
     )
     .await;
 
+    resp.assert_node_count(14);
     resp.assert_referential_integrity();
 
     let member_of: HashSet<(i64, i64)> = resp
@@ -698,6 +706,7 @@ async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(7);
     resp.assert_referential_integrity();
 
     resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
@@ -733,6 +742,7 @@ async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(2);
     resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("Group", &[100]);
     resp.assert_node_absent("User", 2);
@@ -758,6 +768,7 @@ async fn traversal_with_order_by(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(9);
     resp.assert_node_order("User", &[6, 5, 4, 3, 2, 1]);
     let _ = resp.edges_of_type("MEMBER_OF").into_inner();
 }
@@ -778,6 +789,7 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(3);
     resp.assert_node_ids("Group", &[100, 200, 300]);
     resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
     resp.assert_edge_exists("Group", 100, "Group", 300, "CONTAINS");
@@ -799,6 +811,7 @@ async fn traversal_incoming_direction(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(4);
     resp.assert_node_ids("User", &[1, 2, 6]);
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 2, "Group", 100, "MEMBER_OF");
@@ -822,6 +835,7 @@ async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(2);
     resp.assert_node_ids("User", &[5]);
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("blocked"));
     resp.assert_edge_exists("User", 5, "Group", 101, "MEMBER_OF");
@@ -1156,6 +1170,7 @@ async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(6);
     resp.assert_referential_integrity();
 
     resp.assert_node_ids("User", &[1]);
@@ -1186,6 +1201,7 @@ async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(4);
     resp.assert_node_ids("Group", &[100]);
     resp.assert_node_ids("User", &[1, 2, 6]);
 
@@ -1206,6 +1222,7 @@ async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(4);
     resp.assert_node_ids("Group", &[100, 200]);
     resp.assert_node_ids("Project", &[1000, 1002]);
     resp.assert_edge_count("CONTAINS", 3);
@@ -1223,6 +1240,7 @@ async fn neighbors_both_direction_returns_all_connected(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(7);
     resp.assert_node_ids("Group", &[100, 200]);
     resp.assert_node_ids("User", &[1, 2, 6]);
     resp.assert_node_ids("Project", &[1000, 1002]);
@@ -1244,6 +1262,7 @@ async fn neighbors_mixed_entity_types(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(5);
     resp.assert_referential_integrity();
     resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("Note", &[3000, 3002, 3003]);
@@ -1270,6 +1289,7 @@ async fn neighbors_redaction_removes_unauthorized_targets(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(2);
     resp.assert_node_ids("Group", &[100]);
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_absent("User", 1, "Group", 102, "MEMBER_OF");
@@ -1299,6 +1319,7 @@ async fn traversal_referential_integrity_on_complex_query(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(14);
     resp.assert_referential_integrity();
 
     let member_of = resp.edges_of_type("MEMBER_OF");
@@ -1323,6 +1344,7 @@ async fn giant_string_survives_pipeline(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(1);
     resp.assert_node_ids("Note", &[3002]);
     resp.assert_node("Note", 3002, |n| {
         n.prop_str("note")
@@ -1342,6 +1364,7 @@ async fn sql_injection_string_preserved(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(1);
     resp.assert_node_ids("Note", &[3003]);
     resp.assert_node("Note", 3003, |n| {
         n.prop_str("note").is_some_and(|s| s.contains("DROP TABLE"))

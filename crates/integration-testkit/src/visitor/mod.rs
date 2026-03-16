@@ -181,12 +181,14 @@ impl ResponseView {
         self.response.nodes.len()
     }
 
-    /// Assert exact node count. Satisfies [`Requirement::Range`].
+    /// Assert exact node count. Satisfies [`Requirement::Range`] and
+    /// [`Requirement::NodeCount`].
     ///
     /// Does NOT satisfy [`Requirement::NodeIds`] — use [`node_ids`](Self::node_ids)
     /// or [`assert_node_order`](Self::assert_node_order) to verify which IDs were returned.
     pub fn assert_node_count(&self, expected: usize) {
         self.tracker.satisfy(Requirement::Range);
+        self.tracker.satisfy(Requirement::NodeCount);
         assert_eq!(
             self.response.nodes.len(),
             expected,
