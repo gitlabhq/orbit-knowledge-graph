@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::future::try_join_all;
@@ -215,7 +216,7 @@ impl HydrationStage {
 
         for batch in batches {
             for row in 0..batch.num_rows() {
-                let Some(id) = ArrowUtils::get_column_i64(batch, &id_column, row) else {
+                let Some(id) = ArrowUtils::get_column::<Int64Type>(batch, &id_column, row) else {
                     continue;
                 };
 

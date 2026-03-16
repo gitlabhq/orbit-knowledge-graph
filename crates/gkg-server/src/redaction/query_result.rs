@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use query_engine::GKG_COLUMN_PREFIX;
 use query_engine::constants::{
@@ -196,11 +197,12 @@ impl QueryResult {
                         .collect()
                 } else if is_neighbors {
                     // Neighbor node from _gkg_neighbor_id / _gkg_neighbor_type columns
-                    let neighbor = ArrowUtils::get_column_i64(batch, NEIGHBOR_ID_COLUMN, row_idx)
-                        .and_then(|id| {
-                            ArrowUtils::get_column_string(batch, NEIGHBOR_TYPE_COLUMN, row_idx)
-                                .map(|t| NodeRef::new(id, t))
-                        });
+                    let neighbor =
+                        ArrowUtils::get_column::<Int64Type>(batch, NEIGHBOR_ID_COLUMN, row_idx)
+                            .and_then(|id| {
+                                ArrowUtils::get_column_string(batch, NEIGHBOR_TYPE_COLUMN, row_idx)
+                                    .map(|t| NodeRef::new(id, t))
+                            });
                     neighbor.into_iter().collect()
                 } else if !traversal_path_columns.is_empty() {
                     traversal_path_columns

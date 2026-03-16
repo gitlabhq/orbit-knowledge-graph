@@ -4,6 +4,7 @@ use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use arrow::array::{Array, StringArray, TimestampMicrosecondArray};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
+use gkg_utils::arrow::ArrowUtils;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -108,10 +109,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             _ => return Ok(None),
         };
 
-        let timestamps = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<TimestampMicrosecondArray>()
+        let timestamps: &TimestampMicrosecondArray = ArrowUtils::get_column_by_index(&batch, 0)
             .ok_or_else(|| CheckpointError::Store("invalid watermark type".to_string()))?;
 
         if timestamps.is_null(0) {
@@ -128,11 +126,8 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .single()
             .ok_or_else(|| CheckpointError::Store("invalid timestamp".to_string()))?;
 
-        let cursor_json = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .and_then(|arr| {
+        let cursor_json =
+            ArrowUtils::get_column_by_index::<StringArray>(&batch, 1).and_then(|arr| {
                 if arr.is_null(0) || arr.value(0).is_empty() {
                     None
                 } else {

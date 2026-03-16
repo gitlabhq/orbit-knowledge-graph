@@ -120,7 +120,7 @@ impl Pipeline {
             )
             .await?;
 
-            extract_query = extract_query.advance(batches.last().unwrap());
+            extract_query = extract_query.advance(batches.last().unwrap())?;
 
             self.checkpoint_store
                 .save_progress(

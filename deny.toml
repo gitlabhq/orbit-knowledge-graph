@@ -62,7 +62,6 @@ name = "ontology"
 expression = "LicenseRef-EE"
 license-files = []
 
-
 [[licenses.clarify]]
 name = "indexer"
 expression = "LicenseRef-EE"
@@ -90,6 +89,11 @@ license-files = []
 
 [[licenses.clarify]]
 name = "integration-tests"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
+name = "gkg-utils"
 expression = "LicenseRef-EE"
 license-files = []
 
