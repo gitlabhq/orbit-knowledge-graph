@@ -149,8 +149,9 @@ impl CodeBackfillDispatchHandler {
             .resolve_namespace_traversal_path(root_namespace_id)
             .await?
         else {
-            error!(root_namespace_id, "namespace traversal path not found");
-            return Ok(());
+            return Err(HandlerError::Processing(format!(
+                "namespace traversal path not found for root_namespace_id={root_namespace_id}"
+            )));
         };
 
         let batches = self
