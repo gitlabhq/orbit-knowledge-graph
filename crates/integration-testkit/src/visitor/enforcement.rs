@@ -507,7 +507,7 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
-        let _ = view.node_ids("User").into_inner();
+        view.assert_node_ids("User", &[1, 2]);
     }
 
     #[test]
@@ -536,7 +536,7 @@ mod tests {
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
         };
         let view = ResponseView::for_query(&input, resp);
-        let _ = view.path_ids().into_inner();
+        assert_eq!(view.path_ids().len(), 1);
     }
 
     #[test]
@@ -552,7 +552,7 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_response());
         view.assert_node_count(4);
-        let _ = view.edges_of_type("MEMBER_OF").into_inner();
+        view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 101), (2, 100)]);
     }
 
     #[test]
@@ -604,8 +604,8 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_response());
         view.assert_node_count(4);
-        let _ = view.edges_of_type("MEMBER_OF").into_inner();
-        let _ = view.edges_of_type("CONTAINS").into_inner();
+        view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 101), (2, 100)]);
+        view.assert_edge_count("CONTAINS", 0);
     }
 
     #[test]
@@ -625,7 +625,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
-        let _ = view.edges_of_type("MEMBER_OF").into_inner();
+        view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 101), (2, 100)]);
         drop(view);
     }
 
@@ -639,7 +639,7 @@ mod tests {
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
         view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
-        let _ = view.node_ids("User").into_inner();
+        view.assert_node_ids("User", &[1]);
     }
 
     #[test]
@@ -651,8 +651,8 @@ mod tests {
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
-        let _ = view.edges_of_type("MEMBER_OF").into_inner();
-        let _ = view.node_ids("User").into_inner();
+        view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 101)]);
+        view.assert_node_ids("User", &[1]);
     }
 
     #[test]
@@ -704,7 +704,7 @@ mod tests {
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
         view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 101)]);
-        let _ = view.node_ids("User").into_inner();
+        view.assert_node_ids("User", &[1]);
     }
 
     #[test]
@@ -717,7 +717,7 @@ mod tests {
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
         view.assert_edge_count("MEMBER_OF", 2);
-        let _ = view.node_ids("User").into_inner();
+        view.assert_node_ids("User", &[1]);
     }
 
     #[test]
@@ -808,7 +808,7 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
-        let _ = view.node_ids("User").into_inner();
+        view.assert_node_ids("User", &[1]);
     }
 
     #[test]

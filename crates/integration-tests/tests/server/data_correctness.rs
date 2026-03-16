@@ -770,7 +770,20 @@ async fn traversal_with_order_by(ctx: &TestContext) {
 
     resp.assert_node_count(9);
     resp.assert_node_order("User", &[6, 5, 4, 3, 2, 1]);
-    let _ = resp.edges_of_type("MEMBER_OF").into_inner();
+    resp.assert_edge_set(
+        "MEMBER_OF",
+        &[
+            (1, 100),
+            (1, 102),
+            (2, 100),
+            (3, 101),
+            (4, 101),
+            (4, 102),
+            (5, 101),
+            (6, 100),
+            (6, 101),
+        ],
+    );
 }
 
 async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
