@@ -985,12 +985,17 @@ async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
 
 async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
     // Redact Group 200 (the intermediate node in the 100→200→300 chain).
-    // Fail-closed redaction checks ALL entity IDs in each result row. The
-    // depth-1 row (parent=100, child=200) is denied because 200 is unauthorized.
-    // The depth-2 row reaching 300 may also be denied if the intermediate 200
-    // appears as a column value in that row.
     //
-    // The key guarantee: Group 200 must NEVER appear in the response.
+    // Variable-length traversals carry intermediate node IDs in a `path_nodes`
+    // array column (built by `build_hop_arm` in lower.rs). Redaction extracts
+    // these into `dynamic_nodes` and checks each one. Since Group 200 appears
+    // in `path_nodes` for every depth-2 row (as the intermediate hop), and in
+    // the child column for every depth-1 row, ALL rows are denied:
+    //   - Depth-1 (parent=100, child=200): denied — child 200 unauthorized
+    //   - Depth-2 (parent=100, child=300): denied — path_nodes contains 200
+    //
+    // This is security-correct: without it, a multi-hop traversal could bypass
+    // namespace authorization on intermediate nodes.
     let mut svc = MockRedactionService::new();
     svc.allow("group", &[100, 300]);
 
