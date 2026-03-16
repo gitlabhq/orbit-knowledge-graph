@@ -246,12 +246,7 @@ async fn query_active_definition_names(
     let Some(batch) = result.first() else {
         return Vec::new();
     };
-    let names = batch
-        .column_by_name("name")
-        .expect("name column should exist")
-        .as_any()
-        .downcast_ref::<arrow::array::StringArray>()
-        .expect("name should be StringArray");
+    let names = integration_testkit::get_string_column(batch, "name");
     (0..batch.num_rows())
         .map(|i| names.value(i).to_string())
         .collect()

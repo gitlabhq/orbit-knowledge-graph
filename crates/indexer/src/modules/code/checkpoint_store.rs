@@ -7,6 +7,7 @@ use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
+use gkg_utils::arrow::ArrowUtils;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -68,23 +69,14 @@ impl ClickHouseCodeCheckpointStore {
             _ => return Ok(None),
         };
 
-        let last_task_id_col = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .ok_or(CheckpointError::InvalidType)?;
+        let last_task_id_col: &Int64Array =
+            ArrowUtils::get_column_by_index(&batch, 0).ok_or(CheckpointError::InvalidType)?;
 
-        let last_commit_col = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or(CheckpointError::InvalidType)?;
+        let last_commit_col: &StringArray =
+            ArrowUtils::get_column_by_index(&batch, 1).ok_or(CheckpointError::InvalidType)?;
 
-        let indexed_at_col = batch
-            .column(2)
-            .as_any()
-            .downcast_ref::<TimestampMicrosecondArray>()
-            .ok_or(CheckpointError::InvalidType)?;
+        let indexed_at_col: &TimestampMicrosecondArray =
+            ArrowUtils::get_column_by_index(&batch, 2).ok_or(CheckpointError::InvalidType)?;
 
         if last_task_id_col.is_null(0) {
             return Ok(None);

@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use arrow::array::{Int32Array, StringArray, UInt64Array};
+use arrow::array::{Int32Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
@@ -212,12 +212,7 @@ async fn write_multiple_batches(context: &TestContext) {
         .query(&format!("SELECT count() as cnt FROM {TEST_TABLE}"))
         .await;
 
-    let count_array = result[0]
-        .column(0)
-        .as_any()
-        .downcast_ref::<UInt64Array>()
-        .expect("expected UInt64Array");
-
+    let count_array = integration_testkit::get_uint64_column(&result[0], "cnt");
     assert_eq!(count_array.value(0), 5);
 }
 

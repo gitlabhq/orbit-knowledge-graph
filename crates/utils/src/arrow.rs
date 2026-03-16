@@ -3,10 +3,12 @@
 use std::collections::HashMap;
 
 use arrow::array::{
-    Array, BooleanArray, Float64Array, Int64Array, ListArray, StringArray, StructArray,
+    Array, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+    LargeStringArray, ListArray, PrimitiveArray, StringArray, StructArray,
     TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-    TimestampSecondArray, UInt64Array,
+    TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
+use arrow::datatypes::ArrowPrimitiveType;
 use arrow::record_batch::RecordBatch;
 
 #[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
@@ -37,11 +39,18 @@ impl ArrowUtils {
         map
     }
 
-    /// Look up a column by name and return its `i64` value at the given row,
-    /// or `None` if the column is missing, not an `Int64Array`, or null.
-    pub fn get_column_i64(batch: &RecordBatch, col_name: &str, row: usize) -> Option<i64> {
+    /// Look up a column by name and return its primitive value at the given row,
+    /// or `None` if the column is missing, cannot be downcast, or is null.
+    pub fn get_column<T: ArrowPrimitiveType>(
+        batch: &RecordBatch,
+        col_name: &str,
+        row: usize,
+    ) -> Option<T::Native> {
         let idx = batch.schema().index_of(col_name).ok()?;
-        let arr = batch.column(idx).as_any().downcast_ref::<Int64Array>()?;
+        let arr = batch
+            .column(idx)
+            .as_any()
+            .downcast_ref::<PrimitiveArray<T>>()?;
         if arr.is_null(row) {
             return None;
         }
@@ -119,47 +128,74 @@ impl ArrowUtils {
             .collect()
     }
 
+    /// Downcast a column by positional index to the requested Arrow array type.
+    ///
+    /// Returns `None` if the index is out of range or the column cannot be
+    /// downcast to `A`.
+    pub fn get_column_by_index<A: 'static>(batch: &RecordBatch, col: usize) -> Option<&A> {
+        batch.column(col).as_any().downcast_ref::<A>()
+    }
+
+    /// Downcast a column by name to the requested Arrow array type.
+    ///
+    /// Returns `None` if the column is missing or cannot be downcast to `A`.
+    pub fn get_column_by_name<'a, A: 'static>(batch: &'a RecordBatch, name: &str) -> Option<&'a A> {
+        batch.column_by_name(name)?.as_any().downcast_ref::<A>()
+    }
+
+    /// Convert a single Arrow array cell to its string representation.
+    ///
+    /// Covers all integer widths (Int8–Int64, UInt8–UInt64), Utf8,
+    /// LargeUtf8, Float64, Boolean, and all timestamp precisions.
+    /// Returns `None` for null cells or unsupported types.
+    pub fn array_value_to_string(array: &dyn Array, row: usize) -> Option<String> {
+        match Self::extract_value(array, row) {
+            ColumnValue::Int64(v) => Some(v.to_string()),
+            ColumnValue::Float64(v) => Some(v.to_string()),
+            ColumnValue::String(v) => Some(v),
+            ColumnValue::Null => None,
+        }
+    }
+
     /// Extract a typed `ColumnValue` from an Arrow array at the given row index.
     pub fn extract_value(array: &dyn Array, idx: usize) -> ColumnValue {
+        macro_rules! downcast {
+            ($arr_ty:ty, $val:ident => $expr:expr) => {
+                if let Some(arr) = array.as_any().downcast_ref::<$arr_ty>() {
+                    let $val = arr.value(idx);
+                    return $expr;
+                }
+            };
+        }
+
         if array.is_null(idx) {
             return ColumnValue::Null;
         }
 
-        if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
-            return ColumnValue::Int64(arr.value(idx));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<UInt64Array>() {
-            let val = arr.value(idx);
-            return ColumnValue::Int64(i64::try_from(val).unwrap_or(i64::MAX));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
-            return ColumnValue::String(arr.value(idx).to_string());
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
-            return ColumnValue::Float64(arr.value(idx));
-        }
+        downcast!(Int8Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(Int16Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(Int32Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(Int64Array, v => ColumnValue::Int64(v));
+        downcast!(UInt8Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(UInt16Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(UInt32Array, v => ColumnValue::Int64(i64::from(v)));
+        downcast!(UInt64Array, v => ColumnValue::Int64(i64::try_from(v).unwrap_or(i64::MAX)));
+        downcast!(StringArray, v => ColumnValue::String(v.to_string()));
+        downcast!(LargeStringArray, v => ColumnValue::String(v.to_string()));
+        downcast!(Float64Array, v => ColumnValue::Float64(v));
+        downcast!(BooleanArray, v => ColumnValue::String(v.to_string()));
 
         if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
         }
-
         if let Some(arr) = array.as_any().downcast_ref::<TimestampMillisecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
         }
-
         if let Some(arr) = array.as_any().downcast_ref::<TimestampMicrosecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
         }
-
         if let Some(arr) = array.as_any().downcast_ref::<TimestampNanosecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
-        }
-
-        if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
-            return ColumnValue::String(arr.value(idx).to_string());
         }
 
         ColumnValue::Null
@@ -178,7 +214,7 @@ mod tests {
         Int64Builder, ListBuilder, StringBuilder, StructBuilder, TimestampMicrosecondArray,
         TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
     };
-    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::datatypes::{DataType, Field, Int64Type, Schema, UInt64Type};
     use std::sync::Arc;
 
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
@@ -345,12 +381,18 @@ mod tests {
             ("id", Arc::new(Int64Array::from(vec![42]))),
             ("name", Arc::new(StringArray::from(vec!["bob"]))),
         ]);
-        assert_eq!(ArrowUtils::get_column_i64(&batch, "id", 0), Some(42));
+        assert_eq!(
+            ArrowUtils::get_column::<Int64Type>(&batch, "id", 0),
+            Some(42)
+        );
         assert_eq!(
             ArrowUtils::get_column_string(&batch, "name", 0),
             Some("bob".into())
         );
-        assert_eq!(ArrowUtils::get_column_i64(&batch, "missing", 0), None);
+        assert_eq!(
+            ArrowUtils::get_column::<Int64Type>(&batch, "missing", 0),
+            None
+        );
         assert_eq!(ArrowUtils::get_column_string(&batch, "missing", 0), None);
     }
 
@@ -360,7 +402,7 @@ mod tests {
             "id",
             Arc::new(Int64Array::from(vec![Option::<i64>::None])),
         )]);
-        assert_eq!(ArrowUtils::get_column_i64(&batch, "id", 0), None);
+        assert_eq!(ArrowUtils::get_column::<Int64Type>(&batch, "id", 0), None);
     }
 
     // -- list column getters --
@@ -391,5 +433,106 @@ mod tests {
         );
         assert!(ArrowUtils::get_i64_string_pairs(&batch, "path", 1).is_empty());
         assert!(ArrowUtils::get_i64_string_pairs(&batch, "missing", 0).is_empty());
+    }
+
+    // -- get_column_by_index --
+
+    #[test]
+    fn get_column_by_index_returns_typed_ref() {
+        let batch = make_batch(vec![
+            ("a", Arc::new(Int64Array::from(vec![7]))),
+            ("b", Arc::new(StringArray::from(vec!["x"]))),
+        ]);
+        let col: &Int64Array = ArrowUtils::get_column_by_index(&batch, 0).unwrap();
+        assert_eq!(col.value(0), 7);
+        let col: &StringArray = ArrowUtils::get_column_by_index(&batch, 1).unwrap();
+        assert_eq!(col.value(0), "x");
+        assert!(ArrowUtils::get_column_by_index::<UInt64Array>(&batch, 0).is_none());
+    }
+
+    // -- get_column (uint64) --
+
+    #[test]
+    fn get_column_uint64_returns_value() {
+        let batch = make_batch(vec![("n", Arc::new(UInt64Array::from(vec![42u64])))]);
+        assert_eq!(
+            ArrowUtils::get_column::<UInt64Type>(&batch, "n", 0),
+            Some(42)
+        );
+        assert_eq!(
+            ArrowUtils::get_column::<UInt64Type>(&batch, "missing", 0),
+            None
+        );
+    }
+
+    #[test]
+    fn get_column_uint64_null_returns_none() {
+        let batch = make_batch(vec![(
+            "n",
+            Arc::new(UInt64Array::from(vec![Option::<u64>::None])),
+        )]);
+        assert_eq!(ArrowUtils::get_column::<UInt64Type>(&batch, "n", 0), None);
+    }
+
+    // -- extract_value with small integer widths --
+
+    #[test]
+    fn extract_small_integer_widths() {
+        let batch = make_batch(vec![
+            ("i8", Arc::new(Int8Array::from(vec![i8::MIN]))),
+            ("i16", Arc::new(Int16Array::from(vec![1000i16]))),
+            ("i32", Arc::new(Int32Array::from(vec![100_000i32]))),
+            ("u8", Arc::new(UInt8Array::from(vec![255u8]))),
+            ("u16", Arc::new(UInt16Array::from(vec![60_000u16]))),
+            ("u32", Arc::new(UInt32Array::from(vec![4_000_000_000u32]))),
+        ]);
+        let row = ArrowUtils::extract_row(&batch, 0);
+        assert_eq!(row.get("i8"), Some(&ColumnValue::Int64(i64::from(i8::MIN))));
+        assert_eq!(row.get("i16"), Some(&ColumnValue::Int64(1000)));
+        assert_eq!(row.get("i32"), Some(&ColumnValue::Int64(100_000)));
+        assert_eq!(row.get("u8"), Some(&ColumnValue::Int64(255)));
+        assert_eq!(row.get("u16"), Some(&ColumnValue::Int64(60_000)));
+        assert_eq!(row.get("u32"), Some(&ColumnValue::Int64(4_000_000_000)));
+    }
+
+    #[test]
+    fn extract_large_string() {
+        let batch = make_batch(vec![(
+            "ls",
+            Arc::new(LargeStringArray::from(vec!["large"])),
+        )]);
+        assert_eq!(
+            ArrowUtils::extract_row(&batch, 0).get("ls"),
+            Some(&ColumnValue::String("large".into())),
+        );
+    }
+
+    // -- array_value_to_string --
+
+    #[test]
+    fn array_value_to_string_returns_formatted() {
+        let arr = Int64Array::from(vec![42]);
+        assert_eq!(
+            ArrowUtils::array_value_to_string(&arr, 0),
+            Some("42".to_string()),
+        );
+
+        let arr = StringArray::from(vec!["hello"]);
+        assert_eq!(
+            ArrowUtils::array_value_to_string(&arr, 0),
+            Some("hello".to_string()),
+        );
+
+        let arr = UInt8Array::from(vec![255u8]);
+        assert_eq!(
+            ArrowUtils::array_value_to_string(&arr, 0),
+            Some("255".to_string()),
+        );
+    }
+
+    #[test]
+    fn array_value_to_string_null_returns_none() {
+        let arr = Int64Array::from(vec![Option::<i64>::None]);
+        assert_eq!(ArrowUtils::array_value_to_string(&arr, 0), None);
     }
 }

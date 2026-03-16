@@ -7,10 +7,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use arrow::array::{Int32Array, StringArray, UInt64Array};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::array::{Int32Array, StringArray};
+use arrow::datatypes::{DataType, Field, Schema, UInt64Type};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
 use indexer::configuration::{EngineConfiguration, HandlerConfiguration};
 use indexer::engine::{Engine, EngineBuilder};
@@ -269,16 +270,11 @@ impl TestContext {
         );
 
         let batches = client
-            .query_arrow(&format!("SELECT count() FROM {TABLE}"))
+            .query_arrow(&format!("SELECT count() as cnt FROM {TABLE}"))
             .await
             .expect("query failed");
 
-        batches[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .expect("expected UInt64Array")
-            .value(0)
+        ArrowUtils::get_column::<UInt64Type>(&batches[0], "cnt", 0).expect("count should exist")
     }
 }
 
