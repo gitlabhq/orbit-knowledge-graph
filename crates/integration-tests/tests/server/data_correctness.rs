@@ -620,7 +620,16 @@ async fn search_nullable_datetime_returns_null_when_unset(ctx: &TestContext) {
 
     resp.assert_node_count(1);
     resp.assert_node_ids("Note", &[3002]);
-    resp.assert_node("Note", 3002, |n| n.prop("created_at").is_none());
+
+    // created_at was not set in seed data for Note 3002, so it should be NULL.
+    // Can't use assert_node here because is_none() is trivially true on a blank node.
+    let note = resp.find_node("Note", 3002).unwrap();
+    assert!(
+        note.prop("created_at").is_none(),
+        "created_at should be null for Note 3002"
+    );
+    // Verify the note itself has data (not a blank response).
+    assert!(note.prop_str("note").is_some_and(|s| s.len() == 10_000));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
