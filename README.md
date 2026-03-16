@@ -58,7 +58,7 @@ flowchart LR
 
 | Workstream | Epic | Lead(s) | Description |
 |---|---|---|---|
-| Product | [#20884](https://gitlab.com/groups/gitlab-org/-/work_items/20884) | Meg Corren, Angelo Rivera | GTM strategy, pricing, legal review, design |
+| Product | [#20884](https://gitlab.com/groups/gitlab-org/-/work_items/20884) | Meg Corren, Angelo Rivera, Mark Unthank | GTM strategy, pricing, legal review, design |
 | Core Development | [#20357](https://gitlab.com/groups/gitlab-org/-/work_items/20357) | Angelo Rivera, J-G Doyon, M. Usachenko, Bohdan | Indexing, query engine, web server, Rails integration, ontology |
 | Security | [#20248](https://gitlab.com/groups/gitlab-org/-/work_items/20248) | Gus Gray, Angelo Rivera | AuthZ model, threat modeling, AppSec review, penetration testing |
 | Infra / Delivery / PREP | [#36](https://gitlab.com/groups/gitlab-org/rust/-/work_items/36) | Stephanie Jackson, Jason Plum | Production readiness ([PREP MR !64](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64)), Siphon deployment ([epic #16](https://gitlab.com/groups/gitlab-org/analytics-section/-/work_items/16)), observability, self-managed strategy |
@@ -132,6 +132,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | [orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and summary (Feb 3-5, 2026): architecture, indexing, query engine, infra, DIP, deployment, billing |
 | [Readiness reviews (old)](https://gitlab.com/gitlab-com/gl-infra/readiness) | Legacy readiness repo. Siphon review [MR !231](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/231) (open, 78 comments), NATS review [MR !240](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/240) (merged). |
 | In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) and [RUNBOOK.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/RUNBOOK.md) -- GCP sandbox environment details and operational runbook (dev/sandbox only) |
+| [Design Specs (Figma)](https://www.figma.com/design/GOrqDStp1E1SE0Ms7lVbXF/--588317--Orbit-GA-Designs?t=SLZ2CosGuBAzjC6r-0) | UI/UX design specs and visual references for Orbit GA features |
 
 ---
 
@@ -295,4 +296,4 @@ Jerome Ng (@jeromezng, usage billing system architect).
 | Jason Plum (@WarheadsSE) | Delivery, SM/Dedicated |
 | Brian Greene (@bgreene1) | Ontology Standards |
 | Dennis Tang (@dennis) | Analytics Stage, ClickHouse Operations |
-| Mark Unthank (@munthank) | Product Designer |
+| Mark Unthank (@munthank) | Design |
