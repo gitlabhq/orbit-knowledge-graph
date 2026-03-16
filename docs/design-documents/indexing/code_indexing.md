@@ -263,7 +263,7 @@ Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). It serves two purposes:
 
-- The code indexing task handler and reconciliation handler check it to skip already-indexed commits.
+- The code indexing task handler and code backfill handler check it to skip already-indexed commits.
 - The dispatch query anti-joins against it to find projects that have never been indexed.
 
 #### Flow visual representation
