@@ -1,6 +1,9 @@
+use arrow::array::{BooleanArray, Int64Array, StringArray};
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::indexer::common::{
-    TestContext, assert_edges_have_traversal_path, assert_node_count, get_boolean_column,
-    get_int64_column, get_string_column, handler_context, namespace_envelope, namespace_handler,
+    TestContext, assert_edges_have_traversal_path, assert_node_count, handler_context,
+    namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_merge_request_diffs_with_edges(ctx: &TestContext) {
@@ -35,7 +38,8 @@ pub async fn processes_merge_request_diffs_with_edges(ctx: &TestContext) {
     let result = ctx
         .query("SELECT state FROM gl_merge_request_diff FINAL ORDER BY id")
         .await;
-    let states = get_string_column(&result[0], "state");
+    let states =
+        ArrowUtils::get_column_by_name::<StringArray>(&result[0], "state").expect("state column");
     assert_eq!(states.value(0), "collected");
     assert_eq!(states.value(1), "collected");
 
@@ -95,12 +99,14 @@ pub async fn processes_merge_request_diff_files_with_edges(ctx: &TestContext) {
         .await;
     let batch = &result[0];
 
-    let merge_request_ids = get_int64_column(batch, "merge_request_id");
+    let merge_request_ids = ArrowUtils::get_column_by_name::<Int64Array>(batch, "merge_request_id")
+        .expect("merge_request_id column");
     for i in 0..batch.num_rows() {
         assert_eq!(merge_request_ids.value(i), 1);
     }
 
-    let new_file_flags = get_boolean_column(batch, "new_file");
+    let new_file_flags =
+        ArrowUtils::get_column_by_name::<BooleanArray>(batch, "new_file").expect("new_file column");
     assert!((0..batch.num_rows()).any(|i| new_file_flags.value(i)));
 
     assert_edges_have_traversal_path(
