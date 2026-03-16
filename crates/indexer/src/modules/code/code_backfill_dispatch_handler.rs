@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use siphon_proto::replication_event::Operation;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use serde::{Deserialize, Serialize};
 
@@ -92,8 +92,14 @@ impl Handler for CodeBackfillDispatchHandler {
         let extractor = ColumnExtractor::new(&replication_events);
 
         for event in &replication_events.events {
-            if event.operation != Operation::Insert as i32 {
-                debug!(operation = event.operation, "skipping non-insert event");
+            let is_insert = event.operation == Operation::Insert as i32;
+            let is_snapshot = event.operation == Operation::InitialSnapshot as i32;
+
+            if !is_insert && !is_snapshot {
+                debug!(
+                    operation = event.operation,
+                    "skipping non-insert/snapshot event"
+                );
                 continue;
             }
 
@@ -107,12 +113,8 @@ impl Handler for CodeBackfillDispatchHandler {
                 "namespace enabled, dispatching code backfill"
             );
 
-            if let Err(e) = self
-                .dispatch_projects_for_namespace(&context, root_namespace_id)
-                .await
-            {
-                error!(root_namespace_id, error = %e, "failed to dispatch code backfill for namespace");
-            }
+            self.dispatch_projects_for_namespace(&context, root_namespace_id)
+                .await?;
         }
 
         Ok(())
