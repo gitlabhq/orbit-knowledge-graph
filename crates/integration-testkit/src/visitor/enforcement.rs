@@ -316,8 +316,12 @@ mod tests {
     }
 
     #[test]
-    fn requirements_from_default_input_is_empty() {
-        assert!(Input::default().requirements().is_empty());
+    fn requirements_from_default_input_has_node_count() {
+        // Input::default() has query_type Search, which always requires NodeCount.
+        assert_eq!(
+            Input::default().requirements(),
+            HashSet::from([Requirement::NodeCount])
+        );
     }
 
     #[test]
