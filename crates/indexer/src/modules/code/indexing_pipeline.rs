@@ -71,6 +71,8 @@ impl CodeIndexingPipeline {
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
 
+        context.progress.notify_in_progress().await;
+
         let extract_start = Instant::now();
         archive::extract_tar_gz(&archive_bytes, temp_dir.path())
             .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
@@ -78,6 +80,8 @@ impl CodeIndexingPipeline {
         self.metrics
             .repository_extract_duration
             .record(extract_start.elapsed().as_secs_f64(), &[]);
+
+        context.progress.notify_in_progress().await;
 
         let indexed_at = Utc::now();
         self.run_indexing(
@@ -177,6 +181,8 @@ impl CodeIndexingPipeline {
                 "some files failed to parse during code indexing"
             );
         }
+
+        context.progress.notify_in_progress().await;
 
         let Some(graph_data) = result.graph_data else {
             debug!(project_id, branch = %branch, "indexing produced no graph data, skipping write");
