@@ -10,6 +10,7 @@ use arrow::record_batch::RecordBatch;
 use gkg_utils::arrow::ArrowUtils;
 
 use crate::checkpoint::Checkpoint;
+use crate::handler::HandlerError;
 use ast::{Expr, Op, OrderExpr, Query};
 
 /// Paginated ClickHouse extract query. Owns its cursor state and generates
@@ -52,11 +53,11 @@ impl ExtractQuery {
         codegen::emit_sql(&query)
     }
 
-    pub fn advance(&self, batch: &RecordBatch) -> Self {
-        let cursor_values = self.extract_cursor_values(batch);
+    pub fn advance(&self, batch: &RecordBatch) -> Result<Self, HandlerError> {
+        let cursor_values = self.extract_cursor_values(batch)?;
         let mut next = self.clone();
         next.cursor_values = cursor_values;
-        next
+        Ok(next)
     }
 
     pub fn resume_from(mut self, position: &Checkpoint) -> Self {
@@ -109,22 +110,24 @@ impl ExtractQuery {
         Expr::or_all(disjuncts)
     }
 
-    fn extract_cursor_values(&self, batch: &RecordBatch) -> Vec<String> {
+    fn extract_cursor_values(&self, batch: &RecordBatch) -> Result<Vec<String>, HandlerError> {
         let last_row = batch.num_rows() - 1;
 
         self.sort_key_columns
             .iter()
             .map(|column_name| {
-                let column_index = batch.schema().index_of(column_name).unwrap_or_else(|_| {
-                    panic!("sort key column '{column_name}' not found in batch")
-                });
+                let column_index = batch.schema().index_of(column_name).map_err(|_| {
+                    HandlerError::Processing(format!(
+                        "sort key column '{column_name}' not found in batch"
+                    ))
+                })?;
 
                 let column = batch.column(column_index);
-                ArrowUtils::array_value_to_string(column.as_ref(), last_row).unwrap_or_else(|| {
-                    panic!(
+                ArrowUtils::array_value_to_string(column.as_ref(), last_row).ok_or_else(|| {
+                    HandlerError::Processing(format!(
                         "unsupported sort key column type for cursor: {}",
                         column.data_type()
-                    )
+                    ))
                 })
             })
             .collect()
@@ -382,7 +385,7 @@ mod tests {
         .unwrap();
 
         let query = simple_query(vec!["traversal_path", "id"], 1000);
-        let advanced = query.advance(&batch);
+        let advanced = query.advance(&batch).unwrap();
 
         assert_eq!(advanced.cursor_values(), &["1/4/", "30"]);
     }
