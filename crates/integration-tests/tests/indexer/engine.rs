@@ -274,7 +274,9 @@ impl TestContext {
             .await
             .expect("query failed");
 
-        ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt").expect("cnt column")
+        ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt")
+            .expect("cnt column")
+            .value(0)
     }
 }
 
