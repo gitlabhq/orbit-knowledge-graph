@@ -47,7 +47,7 @@ const NAMESPACE_PROJECTS_QUERY: &str = r#"
 SELECT id AS project_id, traversal_path
 FROM project_namespace_traversal_paths
 WHERE deleted = false
-  AND startsWith(traversal_path, {namespace_prefix:String})
+  AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
 pub struct CodeBackfillDispatchHandler {
@@ -156,7 +156,7 @@ impl CodeBackfillDispatchHandler {
         let batches = self
             .datalake
             .query(NAMESPACE_PROJECTS_QUERY)
-            .param("namespace_prefix", &traversal_path)
+            .param("traversal_path", &traversal_path)
             .fetch_arrow()
             .await
             .map_err(|e| {
