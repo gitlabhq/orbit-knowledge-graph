@@ -1,6 +1,9 @@
+use arrow::array::StringArray;
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    create_project, get_string_column, handler_context, namespace_envelope, namespace_handler,
+    create_project, handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_labels_with_edges(ctx: &TestContext) {
@@ -29,12 +32,14 @@ pub async fn processes_labels_with_edges(ctx: &TestContext) {
         .query("SELECT title, color FROM gl_label FINAL ORDER BY id")
         .await;
     let batch = &result[0];
-    let titles = get_string_column(batch, "title");
+    let titles =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "title").expect("title column");
     assert_eq!(titles.value(0), "bug");
     assert_eq!(titles.value(1), "feature");
     assert_eq!(titles.value(2), "priority");
 
-    let colors = get_string_column(batch, "color");
+    let colors =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "color").expect("color column");
     assert_eq!(colors.value(0), "#ff0000");
     assert_eq!(colors.value(1), "#00ff00");
     assert_eq!(colors.value(2), "#0000ff");

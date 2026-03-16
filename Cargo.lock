@@ -3414,6 +3414,7 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "gkg-server",
+ "gkg-utils",
  "query-engine",
  "serde_json",
  "testcontainers",

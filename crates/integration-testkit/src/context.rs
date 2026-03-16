@@ -14,7 +14,8 @@ use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
 
-use crate::get_string_column;
+use arrow::array::StringArray;
+use gkg_utils::arrow::ArrowUtils;
 
 const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
 const CLICKHOUSE_TAG: &str = "25.12";
@@ -118,7 +119,8 @@ impl TestContext {
         let stmts: Vec<String> = batches
             .iter()
             .flat_map(|batch| {
-                let col = get_string_column(batch, "name");
+                let col = ArrowUtils::get_column_by_name::<StringArray>(batch, "name")
+                    .expect("name column");
                 (0..batch.num_rows())
                     .map(|i| format!("OPTIMIZE TABLE `{}` FINAL", col.value(i)))
                     .collect::<Vec<_>>()
@@ -136,7 +138,8 @@ impl TestContext {
             ))
             .await;
         for batch in &batches {
-            let names = get_string_column(batch, "name");
+            let names =
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
             for i in 0..batch.num_rows() {
                 self.execute(&format!("TRUNCATE TABLE `{}`", names.value(i)))
                     .await;
