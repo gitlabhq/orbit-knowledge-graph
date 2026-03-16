@@ -4,10 +4,11 @@ use std::collections::HashMap;
 
 use arrow::array::{
     Array, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
-    LargeStringArray, ListArray, StringArray, StructArray, TimestampMicrosecondArray,
-    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt8Array,
-    UInt16Array, UInt32Array, UInt64Array,
+    LargeStringArray, ListArray, PrimitiveArray, StringArray, StructArray,
+    TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+    TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
+use arrow::datatypes::ArrowPrimitiveType;
 use arrow::record_batch::RecordBatch;
 
 #[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
@@ -38,11 +39,18 @@ impl ArrowUtils {
         map
     }
 
-    /// Look up a column by name and return its `i64` value at the given row,
-    /// or `None` if the column is missing, not an `Int64Array`, or null.
-    pub fn get_column_i64(batch: &RecordBatch, col_name: &str, row: usize) -> Option<i64> {
+    /// Look up a column by name and return its primitive value at the given row,
+    /// or `None` if the column is missing, cannot be downcast, or is null.
+    pub fn get_column<T: ArrowPrimitiveType>(
+        batch: &RecordBatch,
+        col_name: &str,
+        row: usize,
+    ) -> Option<T::Native> {
         let idx = batch.schema().index_of(col_name).ok()?;
-        let arr = batch.column(idx).as_any().downcast_ref::<Int64Array>()?;
+        let arr = batch
+            .column(idx)
+            .as_any()
+            .downcast_ref::<PrimitiveArray<T>>()?;
         if arr.is_null(row) {
             return None;
         }
@@ -128,17 +136,6 @@ impl ArrowUtils {
         batch.column(col).as_any().downcast_ref::<A>()
     }
 
-    /// Look up a column by name and return its `u64` value at the given row,
-    /// or `None` if the column is missing, not a `UInt64Array`, or null.
-    pub fn get_column_uint64(batch: &RecordBatch, col_name: &str, row: usize) -> Option<u64> {
-        let idx = batch.schema().index_of(col_name).ok()?;
-        let arr = batch.column(idx).as_any().downcast_ref::<UInt64Array>()?;
-        if arr.is_null(row) {
-            return None;
-        }
-        Some(arr.value(row))
-    }
-
     /// Convert a single Arrow array cell to its string representation.
     ///
     /// Covers all integer widths (Int8–Int64, UInt8–UInt64), Utf8,
@@ -210,7 +207,7 @@ mod tests {
         Int64Builder, ListBuilder, StringBuilder, StructBuilder, TimestampMicrosecondArray,
         TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
     };
-    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::datatypes::{DataType, Field, Int64Type, Schema, UInt64Type};
     use std::sync::Arc;
 
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
@@ -377,12 +374,18 @@ mod tests {
             ("id", Arc::new(Int64Array::from(vec![42]))),
             ("name", Arc::new(StringArray::from(vec!["bob"]))),
         ]);
-        assert_eq!(ArrowUtils::get_column_i64(&batch, "id", 0), Some(42));
+        assert_eq!(
+            ArrowUtils::get_column::<Int64Type>(&batch, "id", 0),
+            Some(42)
+        );
         assert_eq!(
             ArrowUtils::get_column_string(&batch, "name", 0),
             Some("bob".into())
         );
-        assert_eq!(ArrowUtils::get_column_i64(&batch, "missing", 0), None);
+        assert_eq!(
+            ArrowUtils::get_column::<Int64Type>(&batch, "missing", 0),
+            None
+        );
         assert_eq!(ArrowUtils::get_column_string(&batch, "missing", 0), None);
     }
 
@@ -392,7 +395,7 @@ mod tests {
             "id",
             Arc::new(Int64Array::from(vec![Option::<i64>::None])),
         )]);
-        assert_eq!(ArrowUtils::get_column_i64(&batch, "id", 0), None);
+        assert_eq!(ArrowUtils::get_column::<Int64Type>(&batch, "id", 0), None);
     }
 
     // -- list column getters --
@@ -440,13 +443,19 @@ mod tests {
         assert!(ArrowUtils::get_column_by_index::<UInt64Array>(&batch, 0).is_none());
     }
 
-    // -- get_column_uint64 --
+    // -- get_column (uint64) --
 
     #[test]
     fn get_column_uint64_returns_value() {
         let batch = make_batch(vec![("n", Arc::new(UInt64Array::from(vec![42u64])))]);
-        assert_eq!(ArrowUtils::get_column_uint64(&batch, "n", 0), Some(42));
-        assert_eq!(ArrowUtils::get_column_uint64(&batch, "missing", 0), None);
+        assert_eq!(
+            ArrowUtils::get_column::<UInt64Type>(&batch, "n", 0),
+            Some(42)
+        );
+        assert_eq!(
+            ArrowUtils::get_column::<UInt64Type>(&batch, "missing", 0),
+            None
+        );
     }
 
     #[test]
@@ -455,7 +464,7 @@ mod tests {
             "n",
             Arc::new(UInt64Array::from(vec![Option::<u64>::None])),
         )]);
-        assert_eq!(ArrowUtils::get_column_uint64(&batch, "n", 0), None);
+        assert_eq!(ArrowUtils::get_column::<UInt64Type>(&batch, "n", 0), None);
     }
 
     // -- extract_value with small integer widths --
