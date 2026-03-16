@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use arrow::array::{Int32Array, StringArray};
-use arrow::datatypes::{DataType, Field, Schema, UInt64Type};
+use arrow::array::{Int32Array, StringArray, UInt64Array};
+use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use gkg_utils::arrow::ArrowUtils;
@@ -274,7 +274,9 @@ impl TestContext {
             .await
             .expect("query failed");
 
-        ArrowUtils::get_column::<UInt64Type>(&batches[0], "cnt", 0).expect("count should exist")
+        ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt")
+            .expect("cnt column")
+            .value(0)
     }
 }
 

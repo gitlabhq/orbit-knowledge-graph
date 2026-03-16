@@ -1,9 +1,10 @@
-use arrow::array::Array;
+use arrow::array::{Array, BooleanArray, StringArray};
+
+use gkg_utils::arrow::ArrowUtils;
 
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    create_project, get_boolean_column, get_string_column, handler_context, namespace_envelope,
-    namespace_handler,
+    create_project, handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_vulnerabilities(ctx: &TestContext) {
@@ -38,15 +39,18 @@ pub async fn processes_vulnerabilities(ctx: &TestContext) {
         .await;
     let batch = &result[0];
 
-    let titles = get_string_column(batch, "title");
+    let titles =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "title").expect("title column");
     assert_eq!(titles.value(0), "SQL Injection in login");
     assert_eq!(titles.value(1), "XSS in comments");
 
-    let states = get_string_column(batch, "state");
+    let states =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "state").expect("state column");
     assert_eq!(states.value(0), "confirmed");
     assert_eq!(states.value(1), "detected");
 
-    let severities = get_string_column(batch, "severity");
+    let severities =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "severity").expect("severity column");
     assert_eq!(severities.value(0), "critical");
     assert_eq!(severities.value(1), "medium");
 
@@ -80,11 +84,12 @@ pub async fn processes_scanners(ctx: &TestContext) {
         .query("SELECT name, external_id FROM gl_vulnerability_scanner FINAL ORDER BY id")
         .await;
     let batch = &result[0];
-    let names = get_string_column(batch, "name");
+    let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
     assert_eq!(names.value(0), "Gemnasium");
     assert_eq!(names.value(1), "Bandit");
 
-    let external_ids = get_string_column(batch, "external_id");
+    let external_ids = ArrowUtils::get_column_by_name::<StringArray>(batch, "external_id")
+        .expect("external_id column");
     assert_eq!(external_ids.value(0), "gemnasium");
     assert_eq!(external_ids.value(1), "bandit");
 
@@ -118,15 +123,17 @@ pub async fn processes_vulnerability_identifiers(ctx: &TestContext) {
         .await;
     let batch = &result[0];
 
-    let names = get_string_column(batch, "name");
+    let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
     assert_eq!(names.value(0), "Log4Shell");
     assert_eq!(names.value(1), "SQL Injection");
 
-    let external_types = get_string_column(batch, "external_type");
+    let external_types = ArrowUtils::get_column_by_name::<StringArray>(batch, "external_type")
+        .expect("external_type column");
     assert_eq!(external_types.value(0), "cve");
     assert_eq!(external_types.value(1), "cwe");
 
-    let external_ids = get_string_column(batch, "external_id");
+    let external_ids = ArrowUtils::get_column_by_name::<StringArray>(batch, "external_id")
+        .expect("external_id column");
     assert_eq!(external_ids.value(0), "CVE-2021-44228");
     assert_eq!(external_ids.value(1), "CWE-89");
 
@@ -174,27 +181,31 @@ pub async fn processes_findings(ctx: &TestContext) {
         .await;
     let batch = &result[0];
 
-    let uuids = get_string_column(batch, "uuid");
+    let uuids = ArrowUtils::get_column_by_name::<StringArray>(batch, "uuid").expect("uuid column");
     assert_eq!(uuids.value(0), "00000000-0000-0000-0000-000000000f01");
     assert_eq!(uuids.value(1), "00000000-0000-0000-0000-000000000f02");
 
-    let names = get_string_column(batch, "name");
+    let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
     assert_eq!(names.value(0), "SQL Injection");
     assert_eq!(names.value(1), "XSS");
 
-    let descriptions = get_string_column(batch, "description");
+    let descriptions = ArrowUtils::get_column_by_name::<StringArray>(batch, "description")
+        .expect("description column");
     assert_eq!(descriptions.value(0), "A SQL injection vulnerability");
     assert!(descriptions.is_null(1));
 
-    let solutions = get_string_column(batch, "solution");
+    let solutions =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "solution").expect("solution column");
     assert_eq!(solutions.value(0), "Use parameterized queries");
     assert!(solutions.is_null(1));
 
-    let severities = get_string_column(batch, "severity");
+    let severities =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "severity").expect("severity column");
     assert_eq!(severities.value(0), "critical");
     assert_eq!(severities.value(1), "medium");
 
-    let deduplicated = get_boolean_column(batch, "deduplicated");
+    let deduplicated = ArrowUtils::get_column_by_name::<BooleanArray>(batch, "deduplicated")
+        .expect("deduplicated column");
     assert!(deduplicated.value(0));
     assert!(!deduplicated.value(1));
 
@@ -338,27 +349,32 @@ pub async fn processes_vulnerability_occurrences(ctx: &TestContext) {
         .await;
     let batch = &result[0];
 
-    let uuids = get_string_column(batch, "uuid");
+    let uuids = ArrowUtils::get_column_by_name::<StringArray>(batch, "uuid").expect("uuid column");
     assert_eq!(uuids.value(0), "00000000-0000-0000-0000-0000000000a1");
     assert_eq!(uuids.value(1), "00000000-0000-0000-0000-0000000000a2");
 
-    let names = get_string_column(batch, "name");
+    let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
     assert_eq!(names.value(0), "SQL Injection");
     assert_eq!(names.value(1), "XSS Vulnerability");
 
-    let descriptions = get_string_column(batch, "description");
+    let descriptions = ArrowUtils::get_column_by_name::<StringArray>(batch, "description")
+        .expect("description column");
     assert_eq!(descriptions.value(0), "A SQL injection vulnerability");
     assert_eq!(descriptions.value(1), "");
 
-    let severities = get_string_column(batch, "severity");
+    let severities =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "severity").expect("severity column");
     assert_eq!(severities.value(0), "critical");
     assert_eq!(severities.value(1), "medium");
 
-    let report_types = get_string_column(batch, "report_type");
+    let report_types = ArrowUtils::get_column_by_name::<StringArray>(batch, "report_type")
+        .expect("report_type column");
     assert_eq!(report_types.value(0), "sast");
     assert_eq!(report_types.value(1), "dast");
 
-    let detection_methods = get_string_column(batch, "detection_method");
+    let detection_methods =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "detection_method")
+            .expect("detection_method column");
     assert_eq!(detection_methods.value(0), "gitlab_security_report");
     assert_eq!(detection_methods.value(1), "external_security_report");
 
@@ -551,15 +567,18 @@ pub async fn processes_security_scans(ctx: &TestContext) {
         .await;
     let batch = &result[0];
 
-    let scan_types = get_string_column(batch, "scan_type");
+    let scan_types = ArrowUtils::get_column_by_name::<StringArray>(batch, "scan_type")
+        .expect("scan_type column");
     assert_eq!(scan_types.value(0), "sast");
     assert_eq!(scan_types.value(1), "dependency_scanning");
 
-    let statuses = get_string_column(batch, "status");
+    let statuses =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "status").expect("status column");
     assert_eq!(statuses.value(0), "succeeded");
     assert_eq!(statuses.value(1), "succeeded");
 
-    let latest_values = get_boolean_column(batch, "latest");
+    let latest_values =
+        ArrowUtils::get_column_by_name::<BooleanArray>(batch, "latest").expect("latest column");
     assert!(latest_values.value(0));
     assert!(latest_values.value(1));
 

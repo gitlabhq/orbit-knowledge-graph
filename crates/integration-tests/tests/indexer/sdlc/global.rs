@@ -1,6 +1,8 @@
+use arrow::array::{BooleanArray, StringArray, UInt64Array};
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::indexer::common::{
-    TestContext, assert_node_count, get_boolean_column, get_string_column, get_uint64_column,
-    global_envelope, global_handler, handler_context,
+    TestContext, assert_node_count, global_envelope, global_handler, handler_context,
 };
 
 pub async fn processes_and_transforms_users(ctx: &TestContext) {
@@ -33,12 +35,14 @@ pub async fn processes_and_transforms_users(ctx: &TestContext) {
     let result = ctx.query("SELECT * FROM gl_user FINAL ORDER BY id").await;
     let batch = &result[0];
 
-    let user_type = get_string_column(batch, "user_type");
+    let user_type = ArrowUtils::get_column_by_name::<StringArray>(batch, "user_type")
+        .expect("user_type column");
     assert_eq!(user_type.value(0), "human");
     assert_eq!(user_type.value(1), "support_bot");
     assert_eq!(user_type.value(2), "service_user");
 
-    let is_admin = get_boolean_column(batch, "is_admin");
+    let is_admin =
+        ArrowUtils::get_column_by_name::<BooleanArray>(batch, "is_admin").expect("is_admin column");
     assert!(is_admin.value(0));
     assert!(!is_admin.value(1));
     assert!(!is_admin.value(2));
@@ -73,7 +77,8 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
         .expect("handler should succeed");
 
     let result = ctx.query("SELECT count() as cnt FROM gl_user FINAL").await;
-    let count = get_uint64_column(&result[0], "cnt");
+    let count =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&result[0], "cnt").expect("cnt column");
     assert_eq!(
         count.value(0),
         1,
@@ -81,6 +86,7 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
     );
 
     let usernames = ctx.query("SELECT username FROM gl_user FINAL").await;
-    let username = get_string_column(&usernames[0], "username");
+    let username = ArrowUtils::get_column_by_name::<StringArray>(&usernames[0], "username")
+        .expect("username column");
     assert_eq!(username.value(0), "new_user");
 }

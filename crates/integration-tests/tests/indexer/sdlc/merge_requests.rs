@@ -1,6 +1,9 @@
+use arrow::array::StringArray;
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    get_string_column, handler_context, namespace_envelope, namespace_handler,
+    handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
@@ -35,11 +38,13 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
         .query("SELECT title, state FROM gl_merge_request FINAL ORDER BY id")
         .await;
     let batch = &result[0];
-    let titles = get_string_column(batch, "title");
+    let titles =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "title").expect("title column");
     assert_eq!(titles.value(0), "Add feature X");
     assert_eq!(titles.value(1), "Fix bug Y");
 
-    let states = get_string_column(batch, "state");
+    let states =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "state").expect("state column");
     assert_eq!(states.value(0), "opened");
     assert_eq!(states.value(1), "merged");
 
