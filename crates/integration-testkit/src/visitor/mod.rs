@@ -41,8 +41,8 @@ use serde_json::Value;
 /// iterate, or call methods without ceremony. Panics on drop only if the
 /// value was never accessed at all (the "satisfy and discard" pattern).
 ///
-/// Use [`into_inner`](Self::into_inner) to take ownership when needed
-/// (e.g. in enforcement tests that satisfy the tracker without data checks).
+/// Use [`Deref`] to access the value, or call assertion methods directly
+/// on the [`ResponseView`] that returned this wrapper.
 pub struct MustInspect<T> {
     value: Option<T>,
     accessed: std::cell::Cell<bool>,
@@ -56,12 +56,6 @@ impl<T> MustInspect<T> {
             accessed: std::cell::Cell::new(false),
             context,
         }
-    }
-
-    /// Extract the inner value, consuming the wrapper.
-    pub fn into_inner(mut self) -> T {
-        self.accessed.set(true);
-        self.value.take().unwrap()
     }
 }
 
