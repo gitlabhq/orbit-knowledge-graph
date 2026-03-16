@@ -265,12 +265,26 @@
           "minItems": 1,
           "uniqueItems": true
         },
+        "edge_columns": {
+          "type": "array",
+          "description": "Column definitions for the unified edge table, in schema order.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string", "description": "Column name."},
+              "type": {"$ref": "#/definitions/propertyType", "description": "Column data type."}
+            },
+            "required": ["name", "type"],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."
         }
       },
-      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "etl"],
+      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "etl"],
       "additionalProperties": false
     },
 

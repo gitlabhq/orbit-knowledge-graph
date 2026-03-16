@@ -27,8 +27,8 @@ pub use constants::{
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 pub use entities::{
-    DataType, DomainInfo, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig,
-    EnumType, Field, NodeEntity, NodeStyle, RedactionConfig,
+    DataType, DomainInfo, EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity,
+    EdgeSourceEtlConfig, EnumType, Field, NodeEntity, NodeStyle, RedactionConfig,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -91,6 +91,7 @@ pub struct Ontology {
     pub(crate) default_entity_sort_key: Vec<String>,
     /// ORDER BY columns for the edge table (dedup key for ReplacingMergeTree).
     pub(crate) edge_sort_key: Vec<String>,
+    pub(crate) edge_columns: Vec<EdgeColumn>,
     pub(crate) domains: BTreeMap<String, DomainInfo>,
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
@@ -122,6 +123,7 @@ impl Ontology {
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect(),
+            edge_columns: Vec::new(),
             domains: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
@@ -163,6 +165,37 @@ impl Ontology {
             self.edges.insert(name.into(), vec![]);
         }
         self
+    }
+
+    /// Builder: set edge columns (for testing).
+    #[must_use]
+    pub fn with_edge_columns(
+        mut self,
+        columns: impl IntoIterator<Item = (impl Into<String>, DataType)>,
+    ) -> Self {
+        self.edge_columns = columns
+            .into_iter()
+            .map(|(name, data_type)| EdgeColumn {
+                name: name.into(),
+                data_type,
+            })
+            .collect();
+        self
+    }
+
+    /// Columns of the unified edge table, in schema order.
+    #[must_use]
+    pub fn edge_columns(&self) -> &[EdgeColumn] {
+        &self.edge_columns
+    }
+
+    /// Look up the `DataType` of an edge table column by name.
+    #[must_use]
+    pub fn get_edge_column_type(&self, name: &str) -> Option<DataType> {
+        self.edge_columns
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| c.data_type)
     }
 
     /// Add fields to an existing node.
@@ -1218,6 +1251,13 @@ settings:
   edge_table: "kg_edge"
   default_entity_sort_key: [traversal_path, id]
   edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+  edge_columns:
+    - {name: traversal_path, type: string}
+    - {name: relationship_kind, type: string}
+    - {name: source_id, type: int64}
+    - {name: source_kind, type: string}
+    - {name: target_id, type: int64}
+    - {name: target_kind, type: string}
   etl:
     default_watermark: _siphon_replicated_at
     default_deleted: _siphon_deleted

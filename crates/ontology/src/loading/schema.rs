@@ -1,3 +1,4 @@
+use crate::entities::DataType;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -13,11 +14,19 @@ pub(super) struct SchemaYaml {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct EdgeColumnYaml {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub data_type: DataType,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct SettingsYaml {
     pub table_prefix: String,
     pub edge_table: String,
     pub default_entity_sort_key: Vec<String>,
     pub edge_sort_key: Vec<String>,
+    pub edge_columns: Vec<EdgeColumnYaml>,
     pub etl: EtlSettingsYaml,
 }
 

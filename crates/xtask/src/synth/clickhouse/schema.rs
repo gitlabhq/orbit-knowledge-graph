@@ -43,7 +43,7 @@ impl<'a> SchemaGenerator<'a> {
         }
 
         // Edge table
-        let edge_schema = edge_schema();
+        let edge_schema = edge_schema(self.ontology);
         let primary_key: Vec<&str> = self
             .config
             .edge_primary_key
