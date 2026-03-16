@@ -1,11 +1,11 @@
-use ontology::{constants::TRAVERSAL_PATH_COLUMN, EtlScope};
+use ontology::{EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::ast::{Expr, Op, Query, SelectExpr, TableRef};
 use super::input::{
     EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan, ExtractSource, FkEdgeTransform,
     NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
 };
-use super::{ExtractQuery, PipelinePlan, Plans, Transformation, SOURCE_DATA_TABLE};
+use super::{ExtractQuery, PipelinePlan, Plans, SOURCE_DATA_TABLE, Transformation};
 const VERSION_ALIAS: &str = "_version";
 const DELETED_ALIAS: &str = "_deleted";
 

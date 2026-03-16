@@ -8,9 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use arrow::array::{Int32Array, StringArray};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Field, Schema, UInt64Type};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
 use indexer::configuration::{EngineConfiguration, HandlerConfiguration};
 use indexer::engine::{Engine, EngineBuilder};
@@ -273,7 +274,7 @@ impl TestContext {
             .await
             .expect("query failed");
 
-        integration_testkit::get_uint64_column(&batches[0], "cnt").value(0)
+        ArrowUtils::get_column::<UInt64Type>(&batches[0], "cnt", 0).expect("count should exist")
     }
 }
 

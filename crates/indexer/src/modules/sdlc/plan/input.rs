@@ -1,6 +1,6 @@
 use ontology::{
-    constants::TRAVERSAL_PATH_COLUMN, DataType, EdgeDirection, EdgeEndpointType,
-    EdgeSourceEtlConfig, EdgeTarget, EnumType, EtlConfig, EtlScope, NodeEntity, Ontology,
+    DataType, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget, EnumType,
+    EtlConfig, EtlScope, NodeEntity, Ontology, constants::TRAVERSAL_PATH_COLUMN,
 };
 use std::collections::BTreeMap;
 

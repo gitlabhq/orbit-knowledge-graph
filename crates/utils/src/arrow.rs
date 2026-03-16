@@ -136,6 +136,13 @@ impl ArrowUtils {
         batch.column(col).as_any().downcast_ref::<A>()
     }
 
+    /// Downcast a column by name to the requested Arrow array type.
+    ///
+    /// Returns `None` if the column is missing or cannot be downcast to `A`.
+    pub fn get_column_by_name<'a, A: 'static>(batch: &'a RecordBatch, name: &str) -> Option<&'a A> {
+        batch.column_by_name(name)?.as_any().downcast_ref::<A>()
+    }
+
     /// Convert a single Arrow array cell to its string representation.
     ///
     /// Covers all integer widths (Int8–Int64, UInt8–UInt64), Utf8,

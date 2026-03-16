@@ -3437,6 +3437,7 @@ dependencies = [
  "futures",
  "gitlab-client",
  "gkg-server",
+ "gkg-utils",
  "health-check",
  "indexer",
  "integration-testkit",
