@@ -612,7 +612,15 @@ impl NodeExt for GraphNode {
     }
 
     fn prop_bool(&self, key: &str) -> Option<bool> {
-        self.properties.get(key)?.as_bool()
+        let v = self.properties.get(key)?;
+        v.as_bool().or_else(|| match v.as_str()? {
+            "true" => Some(true),
+            "false" => Some(false),
+            other => panic!(
+                "{}:{} property '{key}' has non-boolean string value: {other:?}",
+                self.entity_type, self.id
+            ),
+        })
     }
 
     fn has_prop(&self, key: &str) -> bool {
