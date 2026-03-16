@@ -146,10 +146,10 @@ fn allow_all() -> MockRedactionService {
 //     2003 Update D      (closed, path 1/102/1004/)
 //
 //   Notes:
-//     3000 Normal note           (MR 2000, not confidential, not internal)
-//     3001 Confidential note     (MR 2001, confidential=true)
-//     3002 Giant string note     (MR 2000, 10000 chars)
-//     3003 SQL injection note    (MR 2000, DROP TABLE payload)
+//     3000 Normal note           (MR 2000, not confidential, not internal, created_at=2024-01-15T10:30:00)
+//     3001 Confidential note     (MR 2001, confidential=true, created_at=2024-02-20T14:45:00)
+//     3002 Giant string note     (MR 2000, 10000 chars, created_at=NULL)
+//     3003 SQL injection note    (MR 2000, DROP TABLE payload, created_at=NULL)
 //
 //   MEMBER_OF edges:
 //     User 1 → Group 100, User 1 → Group 102
@@ -216,11 +216,11 @@ async fn seed(ctx: &TestContext) {
 
     let giant_string = "x".repeat(10_000);
     ctx.execute(&format!(
-        "INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, traversal_path) VALUES
-         (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '1/100/1000/'),
-         (3001, 'Confidential feedback on bug B', 'MergeRequest', 2001, true, false, '1/100/1000/'),
-         (3002, '{giant_string}', 'MergeRequest', 2000, false, false, '1/100/1000/'),
-         (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, '1/100/1000/')",
+        "INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, created_at, traversal_path) VALUES
+         (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '2024-01-15 10:30:00', '1/100/1000/'),
+         (3001, 'Confidential feedback on bug B', 'MergeRequest', 2001, true, false, '2024-02-20 14:45:00', '1/100/1000/'),
+         (3002, '{giant_string}', 'MergeRequest', 2000, false, false, NULL, '1/100/1000/'),
+         (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, NULL, '1/100/1000/')",
     ))
     .await;
 
@@ -517,6 +517,110 @@ async fn search_unicode_properties_survive_pipeline(ctx: &TestContext) {
         n.prop_str("username") == Some("用户_émoji_🎉")
             && n.prop_str("name") == Some("Ünïcödé Üser")
     });
+}
+
+async fn search_wildcard_columns_returns_all_ontology_fields(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("User", &[1]);
+
+    let alice = resp.find_node("User", 1).unwrap();
+    alice.assert_str("username", "alice");
+    alice.assert_str("name", "Alice Admin");
+    alice.assert_str("state", "active");
+    alice.assert_str("user_type", "human");
+
+    // Wildcard must not leak internal columns (traversal_path, _version, _deleted).
+    assert!(
+        alice.prop("traversal_path").is_none(),
+        "traversal_path is internal and should not be exposed"
+    );
+    assert!(
+        alice.prop("_version").is_none(),
+        "_version is internal and should not be exposed"
+    );
+    assert!(
+        alice.prop("_deleted").is_none(),
+        "_deleted is internal and should not be exposed"
+    );
+}
+
+async fn search_boolean_columns_have_correct_values(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "n", "entity": "Note", "columns": ["note", "confidential", "internal"],
+                     "node_ids": [3000, 3001]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_ids("Note", &[3000, 3001]);
+
+    resp.assert_node("Note", 3000, |n| {
+        n.prop_bool("confidential") == Some(false) && n.prop_bool("internal") == Some(false)
+    });
+    resp.assert_node("Note", 3001, |n| {
+        n.prop_bool("confidential") == Some(true) && n.prop_bool("internal") == Some(false)
+    });
+}
+
+async fn search_datetime_columns_serialize_as_strings(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"],
+                     "node_ids": [3000, 3001]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_ids("Note", &[3000, 3001]);
+
+    resp.assert_node("Note", 3000, |n| {
+        n.prop_str("created_at")
+            .is_some_and(|s| s.contains("2024") && s.contains("01") && s.contains("15"))
+    });
+    resp.assert_node("Note", 3001, |n| {
+        n.prop_str("created_at")
+            .is_some_and(|s| s.contains("2024") && s.contains("02") && s.contains("20"))
+    });
+}
+
+async fn search_nullable_datetime_returns_null_when_unset(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"],
+                     "node_ids": [3002]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("Note", &[3002]);
+    resp.assert_node("Note", 3002, |n| n.prop("created_at").is_none());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -854,6 +958,106 @@ async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
     resp.assert_edge_exists("User", 5, "Group", 101, "MEMBER_OF");
 }
 
+async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
+    // min_hops=2 should skip Group 200 (depth 1) and only return Group 300 (depth 2).
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
+                {"id": "child", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "min_hops": 2, "max_hops": 3}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_ids("Group", &[100, 300]);
+    resp.assert_node_absent("Group", 200);
+    resp.assert_edge_exists("Group", 100, "Group", 300, "CONTAINS");
+}
+
+async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
+    // Redact Group 200 (the intermediate node). Group 300 was reached via the
+    // depth-2 join in SQL, so it still appears in raw results. Redaction then
+    // removes Group 200 rows, but Group 300 rows that don't reference 200 as
+    // a result node survive.
+    let mut svc = MockRedactionService::new();
+    svc.allow("group", &[100, 300]);
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
+                {"id": "child", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "min_hops": 1, "max_hops": 2}],
+            "limit": 10
+        }"#,
+        &svc,
+    )
+    .await;
+
+    resp.assert_node_absent("Group", 200);
+    resp.assert_node_exists("Group", 100);
+}
+
+async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
+    // Users 1 and 2 are both MEMBER_OF Group 100. The response should
+    // contain Group 100 exactly once, not duplicated per fan-in path.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // User 1 → Group 100, 102. User 2 → Group 100. Group 100 appears once.
+    resp.assert_node_count(4);
+    resp.assert_node_ids("User", &[1, 2]);
+    resp.assert_node_ids("Group", &[100, 102]);
+    resp.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 102), (2, 100)]);
+}
+
+async fn traversal_shared_target_fan_in(ctx: &TestContext) {
+    // Multiple MRs on the same project each have notes. MR 2000 has notes
+    // 3000, 3002, 3003. This tests fan-out from a single source correctly
+    // produces unique target nodes.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"], "node_ids": [2000]},
+                {"id": "n", "entity": "Note", "columns": ["note"]}
+            ],
+            "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(4);
+    resp.assert_node_ids("MergeRequest", &[2000]);
+    resp.assert_node_ids("Note", &[3000, 3002, 3003]);
+    resp.assert_edge_set("HAS_NOTE", &[(2000, 3000), (2000, 3002), (2000, 3003)]);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Aggregation: Result Value Correctness
 // ─────────────────────────────────────────────────────────────────────────────
@@ -991,6 +1195,131 @@ async fn aggregation_redaction_excludes_unauthorized_from_counts(ctx: &TestConte
     // values within surviving rows. Group 100 has 3 MEMBER_OF edges in the
     // DB so count stays 3 even though only users 1,2 are authorized.
     resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+}
+
+async fn aggregation_avg_produces_correct_values(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "avg", "target": "u", "property": "id", "group_by": "g", "alias": "avg_id"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // Group 100: users 1,2,6 → avg = 3.0
+    // Group 101: users 3,4,5,6 → avg = 4.5
+    // Group 102: users 1,4 → avg = 2.5
+    resp.assert_node("Group", 100, |n| n.prop_f64("avg_id") == Some(3.0));
+    resp.assert_node("Group", 101, |n| n.prop_f64("avg_id") == Some(4.5));
+    resp.assert_node("Group", 102, |n| n.prop_f64("avg_id") == Some(2.5));
+}
+
+async fn aggregation_min_max_produce_correct_values(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [
+                {"function": "min", "target": "u", "property": "id", "group_by": "g", "alias": "min_id"},
+                {"function": "max", "target": "u", "property": "id", "group_by": "g", "alias": "max_id"}
+            ],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // Group 100: users 1,2,6 → min=1 max=6
+    // Group 101: users 3,4,5,6 → min=3 max=6
+    // Group 102: users 1,4 → min=1 max=4
+    resp.assert_node("Group", 100, |n| {
+        n.prop_i64("min_id") == Some(1) && n.prop_i64("max_id") == Some(6)
+    });
+    resp.assert_node("Group", 101, |n| {
+        n.prop_i64("min_id") == Some(3) && n.prop_i64("max_id") == Some(6)
+    });
+    resp.assert_node("Group", 102, |n| {
+        n.prop_i64("min_id") == Some(1) && n.prop_i64("max_id") == Some(4)
+    });
+}
+
+async fn aggregation_min_on_string_column(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "min", "target": "u", "property": "username", "group_by": "g", "alias": "first_username"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // Lexicographic min: Group 100 (alice,bob,用户) → alice
+    // Group 101 (charlie,diana,eve,用户) → charlie
+    // Group 102 (alice,diana) → alice
+    resp.assert_node("Group", 100, |n| {
+        n.prop_str("first_username") == Some("alice")
+    });
+    resp.assert_node("Group", 101, |n| {
+        n.prop_str("first_username") == Some("charlie")
+    });
+    resp.assert_node("Group", 102, |n| {
+        n.prop_str("first_username") == Some("alice")
+    });
+}
+
+async fn aggregation_multiple_functions_in_one_query(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [
+                {"function": "count", "target": "u", "group_by": "g", "alias": "cnt"},
+                {"function": "avg", "target": "u", "property": "id", "group_by": "g", "alias": "avg_id"},
+                {"function": "min", "target": "u", "property": "id", "group_by": "g", "alias": "min_id"}
+            ],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // Group 100: 3 members, avg=3.0, min=1
+    resp.assert_node("Group", 100, |n| {
+        n.prop_i64("cnt") == Some(3)
+            && n.prop_f64("avg_id") == Some(3.0)
+            && n.prop_i64("min_id") == Some(1)
+    });
+    // Group 101: 4 members, avg=4.5, min=3
+    resp.assert_node("Group", 101, |n| {
+        n.prop_i64("cnt") == Some(4)
+            && n.prop_f64("avg_id") == Some(4.5)
+            && n.prop_i64("min_id") == Some(3)
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1167,6 +1496,131 @@ async fn path_finding_redaction_blocks_intermediate_node(ctx: &TestContext) {
     );
 }
 
+async fn path_finding_all_shortest_returns_valid_paths(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000]}
+            ],
+            "path": {"type": "all_shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert!(
+        !pids.is_empty(),
+        "all_shortest should find at least one path from User 1 to Project 1000"
+    );
+
+    for &pid in pids.iter() {
+        let path = resp.path(pid);
+        assert_eq!(path.len(), 2, "path {pid}: User→Group→Project = 2 edges");
+
+        let first = path[0];
+        assert_eq!(first.from, "User");
+        assert_eq!(first.from_id, 1);
+
+        let last = path.last().unwrap();
+        assert_eq!(last.to, "Project");
+        assert_eq!(last.to_id, 1000);
+    }
+
+    resp.assert_referential_integrity();
+}
+
+async fn path_finding_any_returns_at_least_one_path(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000]}
+            ],
+            "path": {"type": "any", "from": "start", "to": "end", "max_depth": 3}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert!(
+        !pids.is_empty(),
+        "any should find at least one path from User 1 to Project 1000"
+    );
+
+    for &pid in pids.iter() {
+        let path = resp.path(pid);
+        assert!(!path.is_empty(), "path {pid} should have at least one edge");
+        assert_eq!(path[0].from, "User");
+        assert_eq!(path[0].from_id, 1);
+        assert_eq!(path.last().unwrap().to, "Project");
+        assert_eq!(path.last().unwrap().to_id, 1000);
+    }
+    resp.assert_referential_integrity();
+}
+
+async fn path_finding_rel_types_restricts_traversal(ctx: &TestContext) {
+    // Only allow MEMBER_OF edges. The path User→Group→Project requires
+    // a CONTAINS edge for the second hop, so no path should be found.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert!(
+        pids.is_empty(),
+        "MEMBER_OF-only path cannot reach Project from User (needs CONTAINS)"
+    );
+}
+
+async fn path_finding_step_indices_are_sequential(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert!(!pids.is_empty());
+
+    for &pid in pids.iter() {
+        let path = resp.path(pid);
+        for (i, edge) in path.iter().enumerate() {
+            assert_eq!(
+                edge.step,
+                Some(i),
+                "edge {i} in path {pid} should have step={i}, got {:?}",
+                edge.step
+            );
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Neighbors: Relationship Metadata Correctness
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1308,6 +1762,73 @@ async fn neighbors_redaction_removes_unauthorized_targets(ctx: &TestContext) {
     resp.assert_edge_absent("User", 1, "Group", 102, "MEMBER_OF");
 }
 
+async fn neighbors_dynamic_columns_all_returns_properties(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+            "options": {"dynamic_columns": "*"}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("Group", &[100, 102]);
+
+    // With dynamic_columns: "*", neighbor nodes should have all ontology columns.
+    resp.assert_node("Group", 100, |n| {
+        n.prop_str("name") == Some("Public Group")
+            && n.prop_str("visibility_level") == Some("public")
+    });
+    resp.assert_node("Group", 102, |n| {
+        n.prop_str("name") == Some("Internal Group")
+            && n.prop_str("visibility_level") == Some("internal")
+    });
+}
+
+async fn neighbors_both_direction_preserves_edge_direction(ctx: &TestContext) {
+    // Group 100 has incoming MEMBER_OF from users and outgoing CONTAINS to
+    // projects/subgroups. With direction: "both", edges should preserve their
+    // actual direction (from→to) regardless of how they were discovered.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+            "neighbors": {"node": "g", "direction": "both"}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(7);
+    resp.assert_referential_integrity();
+
+    // Incoming MEMBER_OF: User→Group (not reversed)
+    resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_exists("User", 2, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_exists("User", 6, "Group", 100, "MEMBER_OF");
+
+    // Outgoing CONTAINS: Group→target (not reversed)
+    resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
+    resp.assert_edge_exists("Group", 100, "Project", 1000, "CONTAINS");
+    resp.assert_edge_exists("Group", 100, "Project", 1002, "CONTAINS");
+
+    // No reversed edges: Group 100 should never appear as edge target for MEMBER_OF
+    // or as edge source for an incoming relationship.
+    let edges = resp.edges_of_type("MEMBER_OF");
+    for edge in edges.iter() {
+        assert_ne!(
+            edge.from_id, 100,
+            "Group 100 should not be source of MEMBER_OF (edges should not be reversed)"
+        );
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cross-cutting: Referential Integrity
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1414,7 +1935,7 @@ async fn data_correctness() {
     // one database instead of forking a copy per subtest.
     run_subtests_shared!(
         &ctx,
-        // search
+        // search: column value correctness
         search_returns_correct_user_properties,
         search_returns_correct_project_properties,
         search_filter_eq_returns_matching_rows,
@@ -1427,6 +1948,10 @@ async fn data_correctness() {
         search_no_auth_returns_empty,
         search_redaction_returns_only_allowed_ids,
         search_unicode_properties_survive_pipeline,
+        search_wildcard_columns_returns_all_ontology_fields,
+        search_boolean_columns_have_correct_values,
+        search_datetime_columns_serialize_as_strings,
+        search_nullable_datetime_returns_null_when_unset,
         // search: pagination, limits, combined
         search_range_returns_paginated_results,
         search_limit_truncates_results,
@@ -1441,18 +1966,30 @@ async fn data_correctness() {
         traversal_variable_length_reaches_depth_2,
         traversal_incoming_direction,
         traversal_with_filter_narrows_results,
+        traversal_variable_length_min_hops_skips_shallow,
+        traversal_variable_length_with_redaction_at_depth,
+        traversal_deduplicates_shared_nodes,
+        traversal_shared_target_fan_in,
         // aggregation
         aggregation_count_returns_correct_values,
         aggregation_count_group_contains_projects,
         aggregation_sort_orders_by_aggregate_value,
         aggregation_sum_produces_correct_totals,
         aggregation_redaction_excludes_unauthorized_from_counts,
+        aggregation_avg_produces_correct_values,
+        aggregation_min_max_produce_correct_values,
+        aggregation_min_on_string_column,
+        aggregation_multiple_functions_in_one_query,
         // path finding
         path_finding_returns_valid_complete_paths,
         path_finding_multiple_destinations_returns_distinct_paths,
         path_finding_consecutive_edges_connect,
         path_finding_max_depth_too_shallow_returns_empty,
         path_finding_redaction_blocks_intermediate_node,
+        path_finding_all_shortest_returns_valid_paths,
+        path_finding_any_returns_at_least_one_path,
+        path_finding_rel_types_restricts_traversal,
+        path_finding_step_indices_are_sequential,
         // neighbors
         neighbors_outgoing_returns_correct_targets,
         neighbors_incoming_returns_correct_sources,
@@ -1460,6 +1997,8 @@ async fn data_correctness() {
         neighbors_both_direction_returns_all_connected,
         neighbors_mixed_entity_types,
         neighbors_redaction_removes_unauthorized_targets,
+        neighbors_dynamic_columns_all_returns_properties,
+        neighbors_both_direction_preserves_edge_direction,
         // edge cases
         giant_string_survives_pipeline,
         sql_injection_string_preserved,
