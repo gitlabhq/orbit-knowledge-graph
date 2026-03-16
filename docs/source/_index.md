@@ -89,14 +89,22 @@ Orbit ingests two categories of data:
 ```mermaid
 flowchart LR
   accTitle: Orbit architecture
-  accDescr: Data flows from PostgreSQL and Gitaly through the Data Insights Platform and into Orbit, which is then queried by AI agents and services.
-  subgraph GitLabCore[GitLab core]
+  accDescr: Data flows from PostgreSQL and Gitaly through Siphon, NATS, and ClickHouse into the Orbit service, which is then queried by AI agents and services.
+
+  subgraph GitLabCore[GitLab Core]
     PG[(PostgreSQL)]
     Gitaly[Gitaly]
   end
-  PG -- "CDC events" --> DIP[Data Insights Platform]
-  DIP -- "streamed SDLC data" --> CH[(ClickHouse)]
-  Gitaly -- "Git RPC (code fetch)" --> Orbit[Orbit service]
+
+  subgraph DataPipeline[Data Insights Platform]
+    Siphon[Siphon]
+    NATS[NATS]
+  end
+
+  PG -- "CDC events" --> Siphon
+  Siphon -- "streamed events" --> NATS
+  NATS -- "SDLC data" --> CH[ClickHouse]
+  Gitaly <-- "Git RPC" --> Orbit[Orbit service]
   CH <--> Orbit
   Clients[AI agents and services] --> Orbit
 ```
