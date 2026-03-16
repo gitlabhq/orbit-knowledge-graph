@@ -845,10 +845,9 @@ pub(crate) mod tests {
     #[test]
     fn find_edge_returns_none_for_wrong_type() {
         let view = ResponseView::new(sample_response());
-        assert!(
-            view.find_edge("User", 1, "Group", 100, "CONTAINS")
-                .is_none()
-        );
+        assert!(view
+            .find_edge("User", 1, "Group", 100, "CONTAINS")
+            .is_none());
     }
 
     #[test]
@@ -1096,9 +1095,21 @@ pub(crate) mod tests {
 
     #[test]
     fn prop_bool_returns_boolean_values() {
-        let node = make_node("User", 1, &[("active", json!(true)), ("name", json!("x"))]);
+        let node = make_node(
+            "User",
+            1,
+            &[("active", json!(true)), ("flag", json!("true"))],
+        );
         assert_eq!(node.prop_bool("active"), Some(true));
-        assert_eq!(node.prop_bool("name"), None);
+        assert_eq!(node.prop_bool("flag"), Some(true));
+        assert_eq!(node.prop_bool("missing"), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-boolean string value")]
+    fn prop_bool_panics_on_non_boolean_string() {
+        let node = make_node("User", 1, &[("name", json!("x"))]);
+        node.prop_bool("name");
     }
 
     #[test]
