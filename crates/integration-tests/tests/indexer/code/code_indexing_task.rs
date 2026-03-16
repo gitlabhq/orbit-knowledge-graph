@@ -1,4 +1,6 @@
+use arrow::array::StringArray;
 use bytes::Bytes;
+use gkg_utils::arrow::ArrowUtils;
 use indexer::handler::Handler;
 use indexer::modules::code::CodeIndexingTaskHandler;
 use indexer::testkit::TestEnvelopeFactory;
@@ -246,7 +248,7 @@ async fn query_active_definition_names(
     let Some(batch) = result.first() else {
         return Vec::new();
     };
-    let names = integration_testkit::get_string_column(batch, "name");
+    let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
     (0..batch.num_rows())
         .map(|i| names.value(i).to_string())
         .collect()

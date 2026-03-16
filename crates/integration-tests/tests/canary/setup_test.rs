@@ -3,6 +3,9 @@
 //! These validate that `TestContext`, `optimize_all`, `run_subtests_shared!`,
 //! `run_subtests!`, and stale container cleanup all work correctly.
 
+use arrow::array::UInt64Array;
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL};
 use integration_testkit::{TestContext, run_subtests, run_subtests_shared};
 
@@ -25,7 +28,8 @@ async fn shared_subtest_reads_seeded_data(ctx: &TestContext) {
 
 async fn shared_subtest_sees_same_data(ctx: &TestContext) {
     let batches = ctx.query("SELECT count() AS cnt FROM gl_user").await;
-    let col = integration_testkit::get_uint64_column(&batches[0], "cnt");
+    let col =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt").expect("cnt column");
     assert_eq!(col.value(0), 1);
 }
 
@@ -37,13 +41,15 @@ async fn forked_subtest_can_write(ctx: &TestContext) {
     )
     .await;
     let batches = ctx.query("SELECT count() AS cnt FROM gl_user").await;
-    let col = integration_testkit::get_uint64_column(&batches[0], "cnt");
+    let col =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt").expect("cnt column");
     assert_eq!(col.value(0), 2);
 }
 
 async fn forked_write_does_not_leak_to_shared(ctx: &TestContext) {
     let batches = ctx.query("SELECT count() AS cnt FROM gl_user").await;
-    let col = integration_testkit::get_uint64_column(&batches[0], "cnt");
+    let col =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt").expect("cnt column");
     assert_eq!(
         col.value(0),
         1,
