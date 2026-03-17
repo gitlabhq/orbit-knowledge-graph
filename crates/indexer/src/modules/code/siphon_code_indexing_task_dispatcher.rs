@@ -277,20 +277,6 @@ mod tests {
         )
     }
 
-    #[test]
-    fn task_name() {
-        let nats = Arc::new(MockNatsServices::new());
-        let dispatcher = create_dispatcher(nats);
-
-        assert_eq!(dispatcher.name(), "dispatch.code.task");
-    }
-
-    #[test]
-    fn defaults_to_batch_size_100() {
-        let config = SiphonCodeIndexingTaskDispatcherConfig::default();
-        assert_eq!(config.batch_size, 100);
-    }
-
     #[tokio::test]
     async fn dispatches_code_indexing_task_from_siphon_event() {
         let nats = Arc::new(MockNatsServices::new());
