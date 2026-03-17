@@ -69,6 +69,7 @@ impl CodeIndexingDeps {
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
         CodeIndexingTaskHandler::new(
             Arc::clone(&self.pipeline),
+            Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             CodeIndexingTaskHandlerConfig::default(),

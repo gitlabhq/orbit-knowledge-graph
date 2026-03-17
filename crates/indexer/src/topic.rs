@@ -76,20 +76,23 @@ pub const CODE_INDEXING_TASK_SUBJECT_PATTERN: &str = "code.task.indexing.request
 pub struct CodeIndexingTaskRequest {
     pub task_id: i64,
     pub project_id: i64,
-    pub branch: String,
-    pub commit_sha: String,
+    pub branch: Option<String>,
+    pub commit_sha: Option<String>,
     pub traversal_path: String,
 }
 
 impl CodeIndexingTaskRequest {
     pub fn publish_subscription(&self) -> Subscription {
         use base64::Engine;
-        let encoded_branch = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&self.branch);
+        let branch_component = match &self.branch {
+            Some(branch) => base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch),
+            None => "_".to_string(),
+        };
         Subscription::new(
             INDEXER_STREAM,
             format!(
                 "{}.{}.{}",
-                CODE_INDEXING_TASK_SUBJECT_PREFIX, self.project_id, encoded_branch
+                CODE_INDEXING_TASK_SUBJECT_PREFIX, self.project_id, branch_component
             ),
         )
     }

@@ -153,8 +153,8 @@ fn code_indexing_task_envelope(
     Envelope::new(&CodeIndexingTaskRequest {
         task_id,
         project_id,
-        branch: "main".to_string(),
-        commit_sha: commit_sha.to_string(),
+        branch: Some("main".to_string()),
+        commit_sha: Some(commit_sha.to_string()),
         traversal_path: traversal_path.to_string(),
     })
     .expect("failed to create envelope")

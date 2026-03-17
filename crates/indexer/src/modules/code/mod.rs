@@ -14,6 +14,7 @@ pub mod config;
 pub mod indexing_pipeline;
 pub mod locking;
 pub mod metrics;
+mod namespace_backfill_dispatcher;
 mod repository_service;
 mod siphon_code_indexing_task_dispatcher;
 mod siphon_decoder;
@@ -34,7 +35,6 @@ pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
-mod namespace_backfill_dispatcher;
 pub use namespace_backfill_dispatcher::{
     NamespaceCodeBackfillDispatcher, NamespaceCodeBackfillDispatcherConfig,
 };
@@ -89,6 +89,7 @@ pub fn register_handlers(
 
     registry.register_handler(Box::new(CodeIndexingTaskHandler::new(
         Arc::clone(&pipeline),
+        Arc::clone(&repository_service),
         Arc::clone(&checkpoint_store),
         metrics.clone(),
         code_indexing_task_config,
