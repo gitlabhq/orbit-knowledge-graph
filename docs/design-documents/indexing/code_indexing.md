@@ -87,9 +87,11 @@ graph LR
 
 ```mermaid
 graph LR
-    Siphon["Siphon CDC"] --> NATS["NATS JetStream"]
-    NATS --> GKG["gkg-server<br/>(Indexer mode)"]
-    GKG --> Rails["Rails internal API<br/>(archive download)"]
+    Siphon["Siphon CDC"] --> ExtNATS["NATS JetStream<br/>(Siphon stream)"]
+    ExtNATS --> Dispatcher["SiphonCodeIndexingTaskDispatcher<br/>(DispatchIndexing mode)"]
+    Dispatcher --> IntNATS["NATS JetStream<br/>(GKG_INDEXER stream)"]
+    IntNATS --> Handler["CodeIndexingTaskHandler<br/>(Indexer mode)"]
+    Handler --> Rails["Rails internal API<br/>(archive download)"]
     Rails --> CodeGraph["code-graph<br/>(parse + analyze)"]
     CodeGraph --> Arrow["ArrowConverter"]
     Arrow --> ClickHouse["ClickHouse"]
@@ -101,7 +103,7 @@ graph LR
 |---|---|
 | `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
 | `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
-| `indexer` crate | NATS consumer, ETL engine, code indexing task handler, Arrow conversion, ClickHouse writes |
+| `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
 
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
@@ -147,7 +149,7 @@ The first milestone is indexing the main branch for every repository. This cover
 
 #### Extract
 
-The extract phase listens to code indexing tasks from NATS.
+The extract phase uses a two-hop dispatch model to decouple Siphon CDC consumption from indexing.
 
 Rails writes to a dedicated `p_knowledge_graph_code_indexing_tasks` table only when a push lands on the default branch of a namespace with Knowledge Graph indexing enabled. These rows are replicated via Siphon CDC to NATS JetStream:
 
@@ -157,7 +159,15 @@ Each task carries `project_id`, `ref`, `commit_sha`, and `traversal_path` direct
 
 For the full rationale behind this approach and the alternatives that were considered, see [ADR 005: PostgreSQL task table for code indexing triggers](../decisions/005_code_indexing_task_table.md).
 
-The handler acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.
+##### Dispatch
+
+The `SiphonCodeIndexingTaskDispatcher` runs as a `ScheduledTask` in DispatchIndexing mode. On each run it batch-pulls pending Siphon CDC messages, decodes the protobuf `LogicalReplicationEvents`, and publishes a `CodeIndexingTaskRequest` (JSON) per event to the internal `GKG_INDEXER` NATS stream. The subject pattern `code.task.indexing.requested.<project_id>.<branch>` combined with `max_messages_per_subject: 1` deduplicates in-flight requests per project and branch.
+
+This separation lets task dispatching be stopped independently from the indexer — the handler keeps draining whatever was already dispatched, but no new work enters the pipeline.
+
+##### Handler
+
+The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.
 
 Example NATS KV:
 
@@ -233,7 +243,7 @@ Handlers don't write to ClickHouse directly. They receive a trait-based storage 
 
 ##### Code indexing task flow
 
-The code indexing handler subscribes to code indexing tasks from NATS. On each task the handler:
+The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from the internal `GKG_INDEXER` NATS stream. On each task the handler:
 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
@@ -262,27 +272,34 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
 Rails (p_knowledge_graph_code_indexing_tasks)
         |
         v
-  Siphon CDC → NATS JetStream
+  Siphon CDC → NATS JetStream (Siphon stream)
         |
         v
-  gkg-server (Indexer mode)
+  SiphonCodeIndexingTaskDispatcher (DispatchIndexing mode)
+        |- Batch-pull Siphon messages
+        |- Decode protobuf, publish CodeIndexingTaskRequest JSON
+        \- Subject: code.task.indexing.requested.<project_id>.<branch>
         |
         v
-  Code indexing task handler
+  NATS JetStream (GKG_INDEXER stream)
         |
-        |- 1. Check checkpoint (skip already-indexed commits)
-        |- 2. Acquire distributed lock via NATS KV
-        |- 3. Download repository archive from Rails internal API
-        |- 4. Extract to temp directory
-        |- 5. Run indexing pipeline
+        v
+  CodeIndexingTaskHandler (Indexer mode)
+        |
+        |- 1. Deserialize CodeIndexingTaskRequest
+        |- 2. Check checkpoint (skip already-indexed commits)
+        |- 3. Acquire distributed lock via NATS KV
+        |- 4. Download repository archive from Rails internal API
+        |- 5. Extract to temp directory
+        |- 6. Run indexing pipeline
         |       |- File discovery (respects .gitignore)
         |       |- Async file reads
         |       |- CPU-bound parsing (bounded parallelism)
         |       \- Analysis phase -> graph
-        |- 6. Convert graph to Arrow record batches
-        |- 7. Write to ClickHouse (5 tables)
-        |- 8. Clean up stale data
-        \- 9. Update checkpoint, release lock
+        |- 7. Convert graph to Arrow record batches
+        |- 8. Write to ClickHouse (5 tables)
+        |- 9. Clean up stale data
+        \- 10. Update checkpoint, release lock
 ```
 
 ### Differences from the original local tool
@@ -294,7 +311,7 @@ tool. Here are the main architectural differences in the current service:
 |---|---|---|
 | Graph database | lbug (embedded) | ClickHouse |
 | Code access | Local filesystem | Rails internal API (archive download) |
-| Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC code indexing tasks via NATS |
+| Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC → dispatcher → internal NATS stream |
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
 | Authorization | None (local tool) | Rails gRPC delegation |

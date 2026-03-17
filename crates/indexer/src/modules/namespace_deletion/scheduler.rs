@@ -378,5 +378,13 @@ mod tests {
         async fn kv_keys(&self, _bucket: &str) -> Result<Vec<String>, NatsError> {
             unimplemented!()
         }
+
+        async fn consume_pending(
+            &self,
+            _subscription: &Subscription,
+            _batch_size: usize,
+        ) -> Result<Vec<crate::nats::NatsMessage>, NatsError> {
+            unimplemented!()
+        }
     }
 }

@@ -11,7 +11,7 @@ use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use indexer::IndexerConfig;
 use indexer::checkpoint::ClickHouseCheckpointStore;
-use indexer::modules::code::dispatch::ProjectCodeDispatcher;
+use indexer::modules::code::SiphonCodeIndexingTaskDispatcher;
 use indexer::modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
@@ -70,11 +70,10 @@ async fn main() -> anyhow::Result<()> {
                     metrics.clone(),
                     config.schedule.tasks.namespace.clone(),
                 )),
-                Box::new(ProjectCodeDispatcher::new(
+                Box::new(SiphonCodeIndexingTaskDispatcher::new(
                     services.nats.clone(),
-                    graph.clone(),
                     metrics.clone(),
-                    config.schedule.tasks.project_code.clone(),
+                    config.schedule.tasks.code_indexing_task.clone(),
                 )),
                 Box::new(TableCleanup::new(
                     graph,

@@ -53,6 +53,7 @@ use crate::types::{Envelope, Subscription};
 
 use super::error::NatsError;
 use super::kv_types::{KvEntry, KvPutOptions, KvPutResult};
+use super::message::NatsMessage;
 
 /// Mockable interface for NATS operations used by handlers.
 ///
@@ -80,6 +81,12 @@ pub trait NatsServices: Send + Sync {
     async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError>;
 
     async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError>;
+
+    async fn consume_pending(
+        &self,
+        subscription: &Subscription,
+        batch_size: usize,
+    ) -> Result<Vec<NatsMessage>, NatsError>;
 }
 
 pub struct NatsServicesImpl {
@@ -122,5 +129,13 @@ impl NatsServices for NatsServicesImpl {
 
     async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
         self.broker.kv_keys(bucket).await
+    }
+
+    async fn consume_pending(
+        &self,
+        subscription: &Subscription,
+        batch_size: usize,
+    ) -> Result<Vec<NatsMessage>, NatsError> {
+        self.broker.consume_pending(subscription, batch_size).await
     }
 }
