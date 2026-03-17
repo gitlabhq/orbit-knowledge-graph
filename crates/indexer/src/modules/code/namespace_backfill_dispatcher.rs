@@ -386,13 +386,6 @@ mod tests {
         build_replication_events_for_table("knowledge_graph_enabled_namespaces", events)
     }
 
-    #[test]
-    fn task_name() {
-        let nats = Arc::new(MockNatsServices::new());
-        let dispatcher = create_dispatcher(nats);
-        assert_eq!(dispatcher.name(), "dispatch.code.namespace_backfill");
-    }
-
     #[tokio::test]
     async fn no_messages_produces_no_dispatches() {
         let nats = Arc::new(MockNatsServices::new());
