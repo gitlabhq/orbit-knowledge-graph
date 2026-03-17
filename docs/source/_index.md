@@ -36,8 +36,8 @@ Explore the graph in the GitLab UI, or query it with the GitLab Duo Agent Platfo
 
 You can use Orbit to get answers to questions like:
 
-- Based on past reviews and file ownership, Who should review this change?
-- Have any vulnerabilities been found in this project, and and are any unresolved?
+- Based on past reviews and file ownership, who should review this change?
+- Have any vulnerabilities been found in this project, and are any unresolved?
 - Which projects depend on this module or library?
 - What work items are assigned to this user across all projects?
 
