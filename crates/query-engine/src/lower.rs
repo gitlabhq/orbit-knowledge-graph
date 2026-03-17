@@ -3,6 +3,7 @@
 //! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+use crate::codegen::SqlDialect;
 use crate::constants::{
     EDGE_ALIAS_SUFFIXES, NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN,
     RELATIONSHIP_TYPE_COLUMN,
@@ -54,10 +55,14 @@ fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
 /// Note: Ontology-dependent transformations (wildcard expansion, enum coercion)
 /// are handled in normalize.rs. Lowering is purely mechanical.
 pub fn lower(input: &Input) -> Result<Node> {
+    lower_with_dialect(input, SqlDialect::default())
+}
+
+pub fn lower_with_dialect(input: &Input, dialect: SqlDialect) -> Result<Node> {
     match input.query_type {
         QueryType::Traversal | QueryType::Search => lower_traversal(input),
         QueryType::Aggregation => lower_aggregation(input),
-        QueryType::PathFinding => lower_path_finding(input),
+        QueryType::PathFinding => lower_path_finding(input, dialect),
         QueryType::Neighbors => lower_neighbors(input),
     }
 }
@@ -197,7 +202,7 @@ fn agg_expr(agg: &InputAggregation) -> Expr {
 // Path Finding (recursive CTE)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_path_finding(input: &Input) -> Result<Node> {
+fn lower_path_finding(input: &Input, dialect: SqlDialect) -> Result<Node> {
     let path = input
         .path
         .as_ref()
@@ -213,20 +218,25 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         .as_deref()
         .ok_or_else(|| QueryError::Lowering("start node has no entity".into()))?;
 
-    // Recursive CTE with path materialization.
-    // Limited to 1000 paths to prevent memory explosion in dense graphs.
-    // The CTE carries a slim edge_kinds Array(String) per hop instead of
-    // the full edge tuple — enough to reconstruct edges when combined with
-    // the typed node path.
-    //
-    // No traversal_path conditions inside the CTE: path-finding can traverse
-    // across namespace boundaries (e.g. cross-project RELATED_TO edges), so
-    // consecutive edges may have unrelated paths.
     let mut base = path_base_query(&start.node_ids, &start_table, &start.id, start_entity);
-    let forward = path_recursive_branch(path.max_depth, true, &end.node_ids, &path.rel_types);
-    let reverse = path_recursive_branch(path.max_depth, false, &end.node_ids, &path.rel_types);
-    base.union_all = vec![forward, reverse];
-    base.limit = Some(1000);
+
+    match dialect {
+        SqlDialect::DuckDb => {
+            // DuckDB requires exactly one UNION ALL branch in recursive CTEs.
+            // Combine forward+reverse into a single bidirectional branch.
+            let bidirectional =
+                path_recursive_branch_bidirectional(path.max_depth, &end.node_ids, &path.rel_types);
+            base.union_all = vec![bidirectional];
+        }
+        SqlDialect::ClickHouse => {
+            let forward =
+                path_recursive_branch(path.max_depth, true, &end.node_ids, &path.rel_types);
+            let reverse =
+                path_recursive_branch(path.max_depth, false, &end.node_ids, &path.rel_types);
+            base.union_all = vec![forward, reverse];
+            base.limit = Some(1000);
+        }
+    }
 
     let recursive_cte = Cte::recursive("paths", base);
 
@@ -392,6 +402,139 @@ fn path_recursive_branch(
     // No traversal_path condition: path-finding can cross namespace boundaries,
     // so the CTE row's context and the next edge may have unrelated paths.
     let join_cond = Expr::eq(Expr::col("p", "node_id"), Expr::col("e", join_col));
+
+    Query {
+        select,
+        from: TableRef::join(
+            JoinType::Inner,
+            TableRef::scan("paths", "p"),
+            TableRef::scan(EDGE_TABLE, "e"),
+            join_cond,
+        ),
+        where_clause,
+        ..Default::default()
+    }
+}
+
+/// Single bidirectional recursive branch for DuckDB (which requires exactly one
+/// UNION ALL branch in recursive CTEs). Uses a bidirectional edge join with
+/// CASE WHEN to determine direction.
+fn path_recursive_branch_bidirectional(
+    max_depth: u32,
+    target_ids: &[i64],
+    rel_types: &[String],
+) -> Query {
+    let is_forward = Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id"));
+
+    let next_node_id = Expr::func(
+        "if",
+        vec![
+            is_forward.clone(),
+            Expr::col("e", "target_id"),
+            Expr::col("e", "source_id"),
+        ],
+    );
+
+    let next_tuple = Expr::func(
+        "tuple",
+        vec![
+            next_node_id.clone(),
+            Expr::func(
+                "if",
+                vec![
+                    is_forward.clone(),
+                    Expr::col("e", "target_kind"),
+                    Expr::col("e", "source_kind"),
+                ],
+            ),
+        ],
+    );
+
+    let depth_check = Expr::binary(Op::Lt, Expr::col("p", "depth"), Expr::int(max_depth as i64));
+
+    let cycle_check = Expr::unary(
+        Op::Not,
+        Expr::func(
+            "has",
+            vec![Expr::col("p", "path_ids"), next_node_id.clone()],
+        ),
+    );
+
+    let early_term = if target_ids.is_empty() {
+        None
+    } else {
+        let target_array = Expr::func(
+            "array",
+            target_ids.iter().map(|id| Expr::int(*id)).collect(),
+        );
+        Some(Expr::unary(
+            Op::Not,
+            Expr::func("has", vec![target_array, Expr::col("p", "node_id")]),
+        ))
+    };
+
+    let rel_filter = Expr::col_in(
+        "e",
+        "relationship_kind",
+        ChType::String,
+        rel_types.iter().map(|t| Value::String(t.clone())).collect(),
+    );
+
+    let where_clause =
+        Expr::and_all([Some(depth_check), Some(cycle_check), early_term, rel_filter]);
+
+    let select = vec![
+        SelectExpr::new(next_node_id, "node_id"),
+        SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "path_ids"),
+                    Expr::func(
+                        "array",
+                        vec![Expr::func(
+                            "if",
+                            vec![
+                                is_forward.clone(),
+                                Expr::col("e", "target_id"),
+                                Expr::col("e", "source_id"),
+                            ],
+                        )],
+                    ),
+                ],
+            ),
+            "path_ids",
+        ),
+        SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "path"),
+                    Expr::func("array", vec![next_tuple]),
+                ],
+            ),
+            "path",
+        ),
+        SelectExpr::new(
+            Expr::func(
+                "arrayConcat",
+                vec![
+                    Expr::col("p", "edge_kinds"),
+                    Expr::func("array", vec![Expr::col("e", "relationship_kind")]),
+                ],
+            ),
+            "edge_kinds",
+        ),
+        SelectExpr::new(
+            Expr::binary(Op::Add, Expr::col("p", "depth"), Expr::int(1)),
+            "depth",
+        ),
+    ];
+
+    let join_cond = Expr::or(
+        Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "source_id")),
+        Expr::eq(Expr::col("p", "node_id"), Expr::col("e", "target_id")),
+    );
 
     Query {
         select,

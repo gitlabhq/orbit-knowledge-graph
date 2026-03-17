@@ -47,7 +47,8 @@ pub mod validate;
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use check::check_ast;
 pub use codegen::{
-    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
+    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery,
+    SqlDialect, codegen,
 };
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_KINDS_COLUMN, EDGE_SRC_SUFFIX,
@@ -59,7 +60,7 @@ pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
 pub use input::{DynamicColumnMode, EntityAuthConfig};
 pub use input::{Input, QueryType, parse_input};
-pub use lower::lower;
+pub use lower::{lower, lower_with_dialect};
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use normalize::{build_entity_auth, normalize};
 pub use ontology::constants::EDGE_TABLE;
@@ -83,6 +84,17 @@ fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
     normalize(input, ontology).count_err()
 }
 
+/// Validate for local mode: skip base JSON Schema (allows negative node_ids)
+/// but keep ontology and reference checks.
+fn validated_input_local(json_input: &str, ontology: &Ontology) -> Result<Input> {
+    let v = Validator::new(ontology);
+    let value: serde_json::Value = serde_json::from_str(json_input).count_err()?;
+    v.check_ontology(&value).count_err()?;
+    let input: Input = serde_json::from_value(value).count_err()?;
+    v.check_references(&input).count_err()?;
+    normalize(input, ontology).count_err()
+}
+
 /// Compile a JSON query into a [`CompiledQueryContext`].
 ///
 /// The context contains the parameterized SQL, bind parameters, result context
@@ -99,11 +111,33 @@ pub fn compile(
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx).count_err()?;
     check_ast(&node, ctx).count_err()?;
-    let base = codegen(&node, result_context).count_err()?;
+    let base = codegen(&node, result_context, SqlDialect::default()).count_err()?;
 
     let hydration = build_hydration_plan(&input);
     let query_type = input.query_type;
 
+    Ok(CompiledQueryContext {
+        query_type,
+        base,
+        hydration,
+        input,
+    })
+}
+
+/// Compile a JSON query for local execution (no security context or redaction).
+/// Skips the base JSON Schema check (which enforces node_ids minimum: 1)
+/// to allow hash-based IDs that can be negative.
+pub fn compile_local(
+    json_input: &str,
+    ontology: &Ontology,
+    dialect: SqlDialect,
+) -> Result<CompiledQueryContext> {
+    let input = validated_input_local(json_input, ontology)?;
+    let node = lower_with_dialect(&input, dialect)?;
+    let result_context = ResultContext::new();
+    let base = codegen(&node, result_context, dialect)?;
+    let hydration = HydrationPlan::None;
+    let query_type = input.query_type;
     Ok(CompiledQueryContext {
         query_type,
         base,

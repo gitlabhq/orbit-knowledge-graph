@@ -2,13 +2,20 @@
 //!
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
-use crate::ast::{ChType, Cte, Expr, Node, Op, Query, TableRef};
+use crate::ast::{ChScalar, ChType, Cte, Expr, Node, Op, Query, TableRef};
 use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
 use serde_json::Value;
 use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SqlDialect {
+    #[default]
+    ClickHouse,
+    DuckDb,
+}
 
 /// A query parameter with its ClickHouse type and JSON value.
 #[derive(Debug, Clone, PartialEq)]
@@ -89,8 +96,12 @@ impl std::fmt::Display for ParameterizedQuery {
     }
 }
 
-pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
-    let mut ctx = Context::new();
+pub fn codegen(
+    ast: &Node,
+    result_context: ResultContext,
+    dialect: SqlDialect,
+) -> Result<ParameterizedQuery> {
+    let mut ctx = Context::new(dialect);
     let sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
     };
@@ -107,21 +118,26 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
 
 struct Context {
     params: HashMap<String, ParamValue>,
+    dialect: SqlDialect,
+    param_counter: usize,
 }
 
 impl Context {
-    fn new() -> Self {
+    fn new(dialect: SqlDialect) -> Self {
         Self {
             params: HashMap::new(),
+            dialect,
+            param_counter: 0,
         }
     }
 
     fn emit_query(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
-        // SET statements (must come before WITH for recursive CTEs)
-        for (key, value) in &q.set_statements {
-            parts.push(format!("SET {key} = {value};"));
+        if self.dialect == SqlDialect::ClickHouse {
+            for (key, value) in &q.set_statements {
+                parts.push(format!("SET {key} = {value};"));
+            }
         }
 
         // WITH clause (CTEs)
@@ -146,12 +162,24 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
-                let inner = self.emit_query_body(&cte.query)?;
-                Ok(format!("{} AS ({})", cte.name, inner))
+                if cte.recursive && self.dialect == SqlDialect::DuckDb {
+                    let inner = self.emit_query_body_without_limit(&cte.query)?;
+                    Ok(format!("{} AS ({})", cte.name, inner))
+                } else {
+                    let inner = self.emit_query_body(&cte.query)?;
+                    Ok(format!("{} AS ({})", cte.name, inner))
+                }
             })
             .collect::<Result<Vec<_>>>()?;
 
         Ok(format!("{} {}", keyword, cte_parts.join(", ")))
+    }
+
+    fn emit_query_body_without_limit(&mut self, q: &Query) -> Result<String> {
+        let mut copy = q.clone();
+        copy.limit = None;
+        copy.offset = None;
+        self.emit_query_body(&copy)
     }
 
     /// Emit the query body (SELECT through LIMIT/OFFSET, including UNION ALL).
@@ -228,8 +256,27 @@ impl Context {
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => {
-                let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
-                format!("{}({})", name, args.join(", "))
+                let args_sql: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
+                if self.dialect == SqlDialect::DuckDb {
+                    if name == "if" && args_sql.len() == 3 {
+                        return format!(
+                            "CASE WHEN {} THEN {} ELSE {} END",
+                            args_sql[0], args_sql[1], args_sql[2]
+                        );
+                    }
+                    let mapped = match name.as_str() {
+                        "startsWith" => "starts_with",
+                        "has" => "list_contains",
+                        "array" => "list_value",
+                        "arrayConcat" => "list_concat",
+                        "arrayResize" => "list_resize",
+                        "tuple" => "row",
+                        _ => name.as_str(),
+                    };
+                    format!("{}({})", mapped, args_sql.join(", "))
+                } else {
+                    format!("{}({})", name, args_sql.join(", "))
+                }
             }
             Expr::BinaryOp { op, left, right } => {
                 let l = self.emit_expr(left);
@@ -253,9 +300,15 @@ impl Context {
     }
 
     fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
+        match self.dialect {
+            SqlDialect::ClickHouse => self.emit_param_clickhouse(data_type, v),
+            SqlDialect::DuckDb => self.emit_param_duckdb(data_type, v),
+        }
+    }
+
+    fn emit_param_clickhouse(&mut self, data_type: ChType, v: &Value) -> String {
         match v {
             Value::Null => "NULL".into(),
-            // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
             Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
                 let name = format!("p{}", self.params.len());
                 let placeholder = format!("{{{name}:{data_type}}}");
@@ -268,7 +321,6 @@ impl Context {
                 );
                 placeholder
             }
-            // Scalar ChType with array value: expand element-by-element (Literal fallback).
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
@@ -298,6 +350,49 @@ impl Context {
                     },
                 );
                 placeholder
+            }
+        }
+    }
+
+    fn emit_param_duckdb(&mut self, data_type: ChType, v: &Value) -> String {
+        match v {
+            Value::Null => "NULL".into(),
+            Value::Array(arr) => {
+                let placeholders: Vec<_> = arr
+                    .iter()
+                    .map(|item| {
+                        self.param_counter += 1;
+                        let name = format!("${}", self.param_counter);
+                        let scalar_type = match data_type {
+                            ChType::Array(ChScalar::String) => ChType::String,
+                            ChType::Array(ChScalar::Int64) => ChType::Int64,
+                            ChType::Array(ChScalar::Float64) => ChType::Float64,
+                            ChType::Array(ChScalar::Bool) => ChType::Bool,
+                            other => other,
+                        };
+                        self.params.insert(
+                            name.clone(),
+                            ParamValue {
+                                ch_type: scalar_type,
+                                value: item.clone(),
+                            },
+                        );
+                        name
+                    })
+                    .collect();
+                format!("({})", placeholders.join(", "))
+            }
+            _ => {
+                self.param_counter += 1;
+                let name = format!("${}", self.param_counter);
+                self.params.insert(
+                    name.clone(),
+                    ParamValue {
+                        ch_type: data_type,
+                        value: v.clone(),
+                    },
+                );
+                name
             }
         }
     }
@@ -379,7 +474,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
@@ -412,7 +512,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, e.label AS rel_type FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id)"
@@ -441,7 +546,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label ORDER BY COUNT(n.id) DESC"
@@ -468,7 +578,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE n.label IN ({p0:String}, {p1:String}, {p2:String})"
@@ -497,7 +612,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE ((n.label = {p0:String}) AND ((n.created_at > {p1:String}) OR (n.deleted_at IS NULL)))"
@@ -506,7 +626,7 @@ mod tests {
 
     #[test]
     fn literals() {
-        let mut ctx = Context::new();
+        let mut ctx = Context::new(SqlDialect::default());
 
         assert_eq!(ctx.emit_literal(&Value::from("hello")), "{p0:String}");
         assert_eq!(ctx.emit_literal(&Value::from(42)), "{p1:Int64}");
@@ -520,7 +640,7 @@ mod tests {
 
     #[test]
     fn unary_ops() {
-        let mut ctx = Context::new();
+        let mut ctx = Context::new(SqlDialect::default());
 
         assert_eq!(
             ctx.emit_expr(&Expr::unary(Op::IsNull, Expr::col("t", "deleted_at"))),
@@ -551,7 +671,12 @@ mod tests {
             ),
             ..Default::default()
         };
-        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let r = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(
             r.sql.contains("e.relationship_kind = {p0:String}"),
             "{}",
@@ -586,7 +711,12 @@ mod tests {
             ),
             ..Default::default()
         };
-        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let r = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(
             r.sql.contains("e.relationship_kind IN {p0:Array(String)}"),
             "{}",
@@ -613,7 +743,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), ctx).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), ctx, SqlDialect::default()).unwrap();
         assert_eq!(result.result_context.len(), 1);
         assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
     }
@@ -631,7 +761,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert_eq!(result.sql, "SELECT n.id FROM nodes AS n LIMIT 10 OFFSET 40");
 
         // limit without offset
@@ -645,7 +780,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("LIMIT 30"));
         assert!(!result.sql.contains("OFFSET"));
     }
@@ -667,7 +807,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label HAVING (COUNT(n.id) > {p0:Int64})"
@@ -690,7 +835,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("HAVING"));
         assert!(!result.sql.contains("GROUP BY"));
     }
@@ -713,7 +863,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(outer)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(
             result.sql.contains("(SELECT"),
             "expected subquery: {}",
@@ -758,7 +913,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(outer)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(
             result.sql.contains("INNER JOIN (SELECT"),
             "expected join with subquery: {}",
@@ -803,7 +963,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(
             result.sql.contains("WITH RECURSIVE"),
             "expected WITH RECURSIVE: {}",
@@ -830,7 +995,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(
             result.sql.contains("UNION ALL"),
             "expected UNION ALL: {}",
@@ -868,7 +1038,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            SqlDialect::default(),
+        )
+        .unwrap();
         assert!(
             result.sql.contains("UNION ALL"),
             "expected UNION ALL: {}",
@@ -878,6 +1053,185 @@ mod tests {
             result.sql.contains(") AS all_edges"),
             "expected derived table alias: {}",
             result.sql
+        );
+    }
+
+    #[test]
+    fn duckdb_param_placeholders() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: Some("node_id".into()),
+            }],
+            from: TableRef::scan("nodes", "n"),
+            where_clause: Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let ch = codegen(
+            &Node::Query(Box::new(q.clone())),
+            empty_ctx(),
+            SqlDialect::ClickHouse,
+        )
+        .unwrap();
+        let duck = codegen(&Node::Query(Box::new(q)), empty_ctx(), SqlDialect::DuckDb).unwrap();
+
+        assert!(
+            ch.sql.contains("{p0:String}"),
+            "ClickHouse should use {{pN:Type}} placeholders: {}",
+            ch.sql
+        );
+        assert!(
+            duck.sql.contains("$1"),
+            "DuckDB should use $N placeholders: {}",
+            duck.sql
+        );
+        assert!(
+            !duck.sql.contains("{p"),
+            "DuckDB should not have ClickHouse placeholders: {}",
+            duck.sql
+        );
+    }
+
+    #[test]
+    fn duckdb_function_remapping() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::func("startsWith", vec![Expr::col("n", "name"), Expr::lit("foo")]),
+                alias: Some("match".into()),
+            }],
+            from: TableRef::scan("nodes", "n"),
+            ..Default::default()
+        };
+
+        let ch = codegen(
+            &Node::Query(Box::new(q.clone())),
+            empty_ctx(),
+            SqlDialect::ClickHouse,
+        )
+        .unwrap();
+        let duck = codegen(&Node::Query(Box::new(q)), empty_ctx(), SqlDialect::DuckDb).unwrap();
+
+        assert!(
+            ch.sql.contains("startsWith("),
+            "ClickHouse should keep startsWith: {}",
+            ch.sql
+        );
+        assert!(
+            duck.sql.contains("starts_with("),
+            "DuckDB should remap to starts_with: {}",
+            duck.sql
+        );
+    }
+
+    #[test]
+    fn duckdb_skips_set_statements() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            set_statements: vec![("max_threads".into(), "4".into())],
+            ..Default::default()
+        };
+
+        let ch = codegen(
+            &Node::Query(Box::new(q.clone())),
+            empty_ctx(),
+            SqlDialect::ClickHouse,
+        )
+        .unwrap();
+        let duck = codegen(&Node::Query(Box::new(q)), empty_ctx(), SqlDialect::DuckDb).unwrap();
+
+        assert!(
+            ch.sql.contains("SET max_threads"),
+            "ClickHouse should include SET: {}",
+            ch.sql
+        );
+        assert!(
+            !duck.sql.contains("SET"),
+            "DuckDB should skip SET: {}",
+            duck.sql
+        );
+    }
+
+    #[test]
+    fn duckdb_array_in_expanded() {
+        let type_filter = Expr::col_in(
+            "e",
+            "kind",
+            ChType::String,
+            vec![Value::from("A"), Value::from("B"), Value::from("C")],
+        )
+        .unwrap();
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("e", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("edges", "e"),
+            where_clause: Some(type_filter),
+            ..Default::default()
+        };
+
+        let ch = codegen(
+            &Node::Query(Box::new(q.clone())),
+            empty_ctx(),
+            SqlDialect::ClickHouse,
+        )
+        .unwrap();
+        let duck = codegen(&Node::Query(Box::new(q)), empty_ctx(), SqlDialect::DuckDb).unwrap();
+
+        assert!(
+            ch.sql.contains("IN {p0:Array(String)}"),
+            "ClickHouse should bind array as single param: {}",
+            ch.sql
+        );
+        assert!(
+            duck.sql.contains("IN ($1, $2, $3)"),
+            "DuckDB should expand array elements: {}",
+            duck.sql
+        );
+    }
+
+    #[test]
+    fn duckdb_if_to_case_when() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::func(
+                    "if",
+                    vec![Expr::col("n", "active"), Expr::lit("yes"), Expr::lit("no")],
+                ),
+                alias: Some("status".into()),
+            }],
+            from: TableRef::scan("nodes", "n"),
+            ..Default::default()
+        };
+
+        let ch = codegen(
+            &Node::Query(Box::new(q.clone())),
+            empty_ctx(),
+            SqlDialect::ClickHouse,
+        )
+        .unwrap();
+        let duck = codegen(&Node::Query(Box::new(q)), empty_ctx(), SqlDialect::DuckDb).unwrap();
+
+        assert!(
+            ch.sql.contains("if("),
+            "ClickHouse should use if(): {}",
+            ch.sql
+        );
+        assert!(
+            duck.sql.contains("CASE WHEN n.active THEN"),
+            "DuckDB should use CASE WHEN: {}",
+            duck.sql
+        );
+        assert!(
+            duck.sql.contains("ELSE") && duck.sql.contains("END"),
+            "DuckDB CASE should have ELSE/END: {}",
+            duck.sql
         );
     }
 }

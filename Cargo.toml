@@ -24,6 +24,7 @@ members = [
   "crates/integration-testkit",
   "crates/utils",
   "crates/integration-tests",
+  "crates/duckdb-client",
 ]
 
 [workspace.dependencies]
@@ -137,6 +138,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 rustls = { version = "0.23.36", default-features = false, features = ["aws_lc_rs"] }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
+duckdb-client = { path = "crates/duckdb-client" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

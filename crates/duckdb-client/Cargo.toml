@@ -1,0 +1,17 @@
+[package]
+name = "duckdb-client"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+duckdb = { version = "1.10500.0", features = ["bundled", "vtab-arrow"] }
+arrow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
