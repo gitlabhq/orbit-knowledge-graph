@@ -93,7 +93,7 @@ message ExecuteQueryError {
 
 // Request to retrieve the graph schema with optional node expansion.
 message GetGraphSchemaRequest {
-  repeated string expand_nodes = 1;  // node names to include full properties/relationships
+  repeated string expand_nodes = 1;  // node names to include full properties/relationships; pass "*" to expand all
   ResponseFormat format = 2;         // RAW: StructuredSchema; LLM: TOON text
 }
 
