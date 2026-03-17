@@ -1137,10 +1137,11 @@ mod tests {
             panic!("expected Query");
         };
         assert!(!q.group_by.is_empty());
-        assert!(q
-            .select
-            .iter()
-            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"))
+        );
     }
 
     #[test]
