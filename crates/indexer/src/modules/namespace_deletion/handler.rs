@@ -8,7 +8,7 @@ use tracing::{error, info, warn};
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::NamespaceDeletionRequest;
-use crate::types::{Envelope, Event, SerializationError, Topic};
+use crate::types::{Envelope, Event, SerializationError, Subscription};
 
 use super::metrics::DeletionMetrics;
 use super::store::NamespaceDeletionStore;
@@ -56,8 +56,8 @@ impl Handler for NamespaceDeletionHandler {
         "namespace_deletion_handler"
     }
 
-    fn topic(&self) -> Topic {
-        NamespaceDeletionRequest::topic()
+    fn subscription(&self) -> Subscription {
+        NamespaceDeletionRequest::subscription()
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
@@ -264,6 +264,7 @@ mod tests {
 
         let bad_envelope = Envelope {
             id: crate::types::MessageId::unique(),
+            subject: std::sync::Arc::from(""),
             payload: bytes::Bytes::from_static(b"not json"),
             timestamp: chrono::Utc::now(),
             attempt: 1,

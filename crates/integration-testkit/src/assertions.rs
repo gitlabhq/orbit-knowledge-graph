@@ -1,5 +1,7 @@
+use arrow::array::StringArray;
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::context::TestContext;
-use crate::extract::get_string_column;
 
 pub async fn assert_node_count(ctx: &TestContext, table: &str, expected: usize) {
     let result = ctx.query(&format!("SELECT 1 FROM {table} FINAL")).await;
@@ -81,7 +83,8 @@ pub async fn assert_edges_have_traversal_path(
         expected_count,
         "expected {expected_count} {relationship_kind} edges from {source_kind} to {target_kind}"
     );
-    let paths = get_string_column(batch, "traversal_path");
+    let paths = ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path")
+        .expect("traversal_path column");
     for i in 0..batch.num_rows() {
         assert_eq!(
             paths.value(i),

@@ -16,8 +16,10 @@ use crate::configuration::HandlerConfiguration;
 use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
-use crate::nats::{KvEntry, KvPutOptions, KvPutResult, NatsError, NatsServices};
-use crate::types::{Envelope, MessageId, Topic};
+use crate::nats::{
+    KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
+};
+use crate::types::{Envelope, MessageId, Subscription};
 
 /// Mock implementation of [`NatsServices`] for testing handlers.
 ///
@@ -37,7 +39,8 @@ use crate::types::{Envelope, MessageId, Topic};
 /// ```
 #[derive(Clone, Default)]
 pub struct MockNatsServices {
-    published: Arc<Mutex<Vec<(Topic, Envelope)>>>,
+    published: Arc<Mutex<Vec<(Subscription, Envelope)>>>,
+    pending_messages: Arc<Mutex<Vec<Envelope>>>,
     kv_stores: Arc<Mutex<HashMap<String, HashMap<String, MockKvEntry>>>>,
 }
 
@@ -52,7 +55,7 @@ impl MockNatsServices {
         Self::default()
     }
 
-    pub fn get_published(&self) -> Vec<(Topic, Envelope)> {
+    pub fn get_published(&self) -> Vec<(Subscription, Envelope)> {
         self.published.lock().clone()
     }
 
@@ -62,6 +65,10 @@ impl MockNatsServices {
             .get(bucket)
             .and_then(|b| b.get(key))
             .map(|e| e.value.clone())
+    }
+
+    pub fn add_pending_message(&self, envelope: Envelope) {
+        self.pending_messages.lock().push(envelope);
     }
 
     pub fn set_kv(&self, bucket: &str, key: &str, value: Bytes) {
@@ -74,10 +81,14 @@ impl MockNatsServices {
 
 #[async_trait]
 impl NatsServices for MockNatsServices {
-    async fn publish(&self, topic: &Topic, envelope: &Envelope) -> Result<(), NatsError> {
+    async fn publish(
+        &self,
+        subscription: &Subscription,
+        envelope: &Envelope,
+    ) -> Result<(), NatsError> {
         self.published
             .lock()
-            .push((topic.clone(), envelope.clone()));
+            .push((subscription.clone(), envelope.clone()));
         Ok(())
     }
 
@@ -144,6 +155,19 @@ impl NatsServices for MockNatsServices {
             .unwrap_or_default();
         Ok(keys)
     }
+
+    async fn consume_pending(
+        &self,
+        _subscription: &Subscription,
+        _batch_size: usize,
+    ) -> Result<Vec<NatsMessage>, NatsError> {
+        let envelopes: Vec<Envelope> = self.pending_messages.lock().drain(..).collect();
+        let messages = envelopes
+            .into_iter()
+            .map(|envelope| NatsMessage::new(envelope, NoopAcker))
+            .collect();
+        Ok(messages)
+    }
 }
 
 /// Mock destination for testing.
@@ -192,7 +216,7 @@ impl BatchWriter for MockBatchWriter {
 /// Mock handler for testing.
 pub struct MockHandler {
     name: String,
-    topic: Topic,
+    subscription: Subscription,
     delay: Option<Duration>,
     error: Option<HandlerError>,
     engine_config: HandlerConfiguration,
@@ -204,7 +228,7 @@ impl MockHandler {
     pub fn new(stream: &'static str, subject: &'static str) -> Self {
         Self {
             name: format!("mock-handler-{}:{}", stream, subject),
-            topic: Topic::owned(stream, subject),
+            subscription: Subscription::new(stream, subject),
             delay: None,
             error: None,
             engine_config: HandlerConfiguration::default(),
@@ -240,8 +264,8 @@ impl Handler for MockHandler {
         &self.name
     }
 
-    fn topic(&self) -> Topic {
-        self.topic.clone()
+    fn subscription(&self) -> Subscription {
+        self.subscription.clone()
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
@@ -311,7 +335,18 @@ impl TestEnvelopeFactory {
     pub fn simple(payload: &str) -> Envelope {
         Envelope {
             id: MessageId(Uuid::new_v4().to_string().into()),
+            subject: Arc::from(""),
             payload: Bytes::from(payload.to_string()),
+            timestamp: Utc::now(),
+            attempt: 1,
+        }
+    }
+
+    pub fn with_subject(subject: &str, payload: Bytes) -> Envelope {
+        Envelope {
+            id: MessageId(Uuid::new_v4().to_string().into()),
+            subject: Arc::from(subject),
+            payload,
             timestamp: Utc::now(),
             attempt: 1,
         }
@@ -320,6 +355,7 @@ impl TestEnvelopeFactory {
     pub fn with_attempt(payload: &str, attempt: u32) -> Envelope {
         Envelope {
             id: MessageId(Uuid::new_v4().to_string().into()),
+            subject: Arc::from(""),
             payload: Bytes::from(payload.to_string()),
             timestamp: Utc::now(),
             attempt,
@@ -335,6 +371,7 @@ impl TestEnvelopeFactory {
     pub fn with_bytes(payload: Bytes) -> Envelope {
         Envelope {
             id: MessageId(Uuid::new_v4().to_string().into()),
+            subject: Arc::from(""),
             payload,
             timestamp: Utc::now(),
             attempt: 1,

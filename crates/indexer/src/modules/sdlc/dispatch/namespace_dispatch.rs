@@ -108,13 +108,13 @@ impl NamespaceDispatcher {
                 watermark,
             };
 
-            let topic = request.publish_topic();
+            let subscription = request.publish_subscription();
             let envelope = Envelope::new(&request).map_err(|error| {
                 self.metrics.record_error(self.name(), "publish");
                 TaskError::new(error)
             })?;
 
-            match self.nats.publish(&topic, &envelope).await {
+            match self.nats.publish(&subscription, &envelope).await {
                 Ok(()) => {
                     dispatched += 1;
                     debug!(

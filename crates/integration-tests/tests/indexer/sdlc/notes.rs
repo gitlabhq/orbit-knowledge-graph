@@ -1,6 +1,9 @@
+use arrow::array::StringArray;
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::indexer::common::{
-    TestContext, assert_edges_have_traversal_path, assert_node_count, get_string_column,
-    handler_context, namespace_envelope, namespace_handler,
+    TestContext, assert_edges_have_traversal_path, assert_node_count, handler_context,
+    namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_notes_with_edges(ctx: &TestContext) {
@@ -32,7 +35,9 @@ pub async fn processes_notes_with_edges(ctx: &TestContext) {
     assert!(!has_note_edges.is_empty(), "HAS_NOTE edges should exist");
     assert_eq!(has_note_edges[0].num_rows(), 3);
 
-    let source_kind = get_string_column(&has_note_edges[0], "source_kind");
+    let source_kind =
+        ArrowUtils::get_column_by_name::<StringArray>(&has_note_edges[0], "source_kind")
+            .expect("source_kind column");
     assert_eq!(source_kind.value(0), "MergeRequest");
     assert_eq!(source_kind.value(1), "WorkItem");
     assert_eq!(source_kind.value(2), "Vulnerability");

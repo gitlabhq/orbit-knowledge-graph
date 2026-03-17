@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::modules::code::SiphonCodeIndexingTaskDispatcherConfig;
 use crate::modules::code::dispatch::ProjectCodeDispatcherConfig;
 use crate::modules::code::{CodeIndexingTaskHandlerConfig, ProjectCodeIndexingHandlerConfig};
 use crate::modules::namespace_deletion::{
@@ -92,6 +93,8 @@ pub struct ScheduledTasksConfiguration {
     pub namespace: NamespaceDispatcherConfig,
     #[serde(default)]
     pub project_code: ProjectCodeDispatcherConfig,
+    #[serde(default)]
+    pub code_indexing_task: SiphonCodeIndexingTaskDispatcherConfig,
     #[serde(default)]
     pub table_cleanup: TableCleanupConfig,
     #[serde(default)]

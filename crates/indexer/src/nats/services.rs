@@ -10,8 +10,8 @@
 //! ```ignore
 //! async fn handle(&self, ctx: HandlerContext, envelope: Envelope) -> Result<(), HandlerError> {
 //!     let derived = DerivedEvent { /* ... */ };
-//!     let topic = Topic::owned("stream", "subject");
-//!     ctx.nats.publish(&topic, &Envelope::new(&derived)?).await?;
+//!     let subscription = Subscription::new("stream", "subject");
+//!     ctx.nats.publish(&subscription, &Envelope::new(&derived)?).await?;
 //!     Ok(())
 //! }
 //! ```
@@ -49,10 +49,11 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 
-use crate::types::{Envelope, Topic};
+use crate::types::{Envelope, Subscription};
 
 use super::error::NatsError;
 use super::kv_types::{KvEntry, KvPutOptions, KvPutResult};
+use super::message::NatsMessage;
 
 /// Mockable interface for NATS operations used by handlers.
 ///
@@ -61,7 +62,11 @@ use super::kv_types::{KvEntry, KvPutOptions, KvPutResult};
 /// the real NATS broker directly.
 #[async_trait]
 pub trait NatsServices: Send + Sync {
-    async fn publish(&self, topic: &Topic, envelope: &Envelope) -> Result<(), NatsError>;
+    async fn publish(
+        &self,
+        subscription: &Subscription,
+        envelope: &Envelope,
+    ) -> Result<(), NatsError>;
 
     async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError>;
 
@@ -76,6 +81,12 @@ pub trait NatsServices: Send + Sync {
     async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError>;
 
     async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError>;
+
+    async fn consume_pending(
+        &self,
+        subscription: &Subscription,
+        batch_size: usize,
+    ) -> Result<Vec<NatsMessage>, NatsError>;
 }
 
 pub struct NatsServicesImpl {
@@ -90,8 +101,12 @@ impl NatsServicesImpl {
 
 #[async_trait]
 impl NatsServices for NatsServicesImpl {
-    async fn publish(&self, topic: &Topic, envelope: &Envelope) -> Result<(), NatsError> {
-        self.broker.publish(topic, envelope).await
+    async fn publish(
+        &self,
+        subscription: &Subscription,
+        envelope: &Envelope,
+    ) -> Result<(), NatsError> {
+        self.broker.publish(subscription, envelope).await
     }
 
     async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
@@ -114,5 +129,13 @@ impl NatsServices for NatsServicesImpl {
 
     async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
         self.broker.kv_keys(bucket).await
+    }
+
+    async fn consume_pending(
+        &self,
+        subscription: &Subscription,
+        batch_size: usize,
+    ) -> Result<Vec<NatsMessage>, NatsError> {
+        self.broker.consume_pending(subscription, batch_size).await
     }
 }

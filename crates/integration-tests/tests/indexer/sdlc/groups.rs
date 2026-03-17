@@ -1,7 +1,10 @@
+use arrow::array::StringArray;
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::indexer::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
-    assert_node_count, create_member, create_namespace, create_user, get_string_column,
-    handler_context, namespace_envelope, namespace_handler,
+    assert_node_count, create_member, create_namespace, create_user, handler_context,
+    namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_and_transforms_groups(ctx: &TestContext) {
@@ -20,7 +23,8 @@ pub async fn processes_and_transforms_groups(ctx: &TestContext) {
     let result = ctx
         .query("SELECT visibility_level FROM gl_group FINAL ORDER BY id")
         .await;
-    let visibility = get_string_column(&result[0], "visibility_level");
+    let visibility = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "visibility_level")
+        .expect("visibility_level column");
     assert_eq!(visibility.value(0), "private");
     assert_eq!(visibility.value(1), "internal");
     assert_eq!(visibility.value(2), "public");

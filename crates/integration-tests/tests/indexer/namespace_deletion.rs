@@ -78,7 +78,7 @@ async fn seed_code_checkpoints(context: &TestContext) {
     context
         .execute(
             "INSERT INTO code_indexing_checkpoint \
-             (traversal_path, project_id, branch, last_event_id, last_commit, indexed_at) VALUES \
+             (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at) VALUES \
              ('1/100/', 10, 'main', 1, 'abc123', '2024-01-01 00:00:00.000000'), \
              ('1/200/', 20, 'main', 1, 'def456', '2024-01-01 00:00:00.000000')",
         )

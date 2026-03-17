@@ -1,10 +1,10 @@
 //! NATS JetStream message broker.
 //!
-//! # Topic format
+//! # Subscription format
 //!
-//! Topics are `stream:subject`. Both parts are required.
+//! Subscriptions are `stream:subject`. Both parts are required.
 //!
-//! | Topic | Stream | Subject |
+//! | Subscription | Stream | Subject |
 //! |-------|--------|---------|
 //! | `"my_stream:orders.created"` | `my_stream` | `orders.created` |
 //! | `"siphon_db:tables.users"` | `siphon_db` | `tables.users` |
@@ -26,7 +26,10 @@
 //!
 //! ```ignore
 //! impl Handler for UserTableHandler {
-//!     fn topic() -> &'static str { "siphon_db:tables.users" }
+//!     fn subscription(&self) -> Subscription {
+//!         Subscription::new("siphon_db", "tables.users")
+//!             .manage_stream(false)
+//!     }
 //! }
 //! ```
 //!
@@ -43,5 +46,7 @@ pub use broker::NatsBroker;
 pub use configuration::NatsConfiguration;
 pub use error::NatsError;
 pub use kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
-pub use message::{DlqResult, NatsMessage, NatsSubscription, ProgressNotifier};
+pub use message::{
+    DlqResult, MessageAcker, NatsMessage, NatsSubscription, NoopAcker, ProgressNotifier,
+};
 pub use services::{NatsServices, NatsServicesImpl};

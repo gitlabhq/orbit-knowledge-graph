@@ -6,10 +6,11 @@ pub(crate) use crate::llqm_v1::codegen;
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
-use arrow::array::Array;
 use arrow::record_batch::RecordBatch;
+use gkg_utils::arrow::ArrowUtils;
 
 use crate::checkpoint::Checkpoint;
+use crate::handler::HandlerError;
 use ast::{Expr, Op, OrderExpr, Query};
 
 /// Paginated ClickHouse extract query. Owns its cursor state and generates
@@ -52,11 +53,11 @@ impl ExtractQuery {
         codegen::emit_sql(&query)
     }
 
-    pub fn advance(&self, batch: &RecordBatch) -> Self {
-        let cursor_values = self.extract_cursor_values(batch);
+    pub fn advance(&self, batch: &RecordBatch) -> Result<Self, HandlerError> {
+        let cursor_values = self.extract_cursor_values(batch)?;
         let mut next = self.clone();
         next.cursor_values = cursor_values;
-        next
+        Ok(next)
     }
 
     pub fn resume_from(mut self, position: &Checkpoint) -> Self {
@@ -109,18 +110,25 @@ impl ExtractQuery {
         Expr::or_all(disjuncts)
     }
 
-    fn extract_cursor_values(&self, batch: &RecordBatch) -> Vec<String> {
+    fn extract_cursor_values(&self, batch: &RecordBatch) -> Result<Vec<String>, HandlerError> {
         let last_row = batch.num_rows() - 1;
 
         self.sort_key_columns
             .iter()
             .map(|column_name| {
-                let column_index = batch.schema().index_of(column_name).unwrap_or_else(|_| {
-                    panic!("sort key column '{column_name}' not found in batch")
-                });
+                let column_index = batch.schema().index_of(column_name).map_err(|_| {
+                    HandlerError::Processing(format!(
+                        "sort key column '{column_name}' not found in batch"
+                    ))
+                })?;
 
                 let column = batch.column(column_index);
-                array_value_to_string(column, last_row)
+                ArrowUtils::array_value_to_string(column.as_ref(), last_row).ok_or_else(|| {
+                    HandlerError::Processing(format!(
+                        "unsupported sort key column type for cursor: {}",
+                        column.data_type()
+                    ))
+                })
             })
             .collect()
     }
@@ -162,75 +170,6 @@ pub(in crate::modules::sdlc) fn build_plans(
         global_batch_size,
         namespaced_batch_size,
     )
-}
-
-fn array_value_to_string(array: &dyn Array, row: usize) -> String {
-    use arrow::array::*;
-    use arrow::datatypes::DataType;
-
-    match array.data_type() {
-        DataType::Int8 => array
-            .as_any()
-            .downcast_ref::<Int8Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::Int16 => array
-            .as_any()
-            .downcast_ref::<Int16Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::Int32 => array
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::Int64 => array
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::UInt8 => array
-            .as_any()
-            .downcast_ref::<UInt8Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::UInt16 => array
-            .as_any()
-            .downcast_ref::<UInt16Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::UInt32 => array
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::UInt64 => array
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::Utf8 => array
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        DataType::LargeUtf8 => array
-            .as_any()
-            .downcast_ref::<LargeStringArray>()
-            .unwrap()
-            .value(row)
-            .to_string(),
-        other => panic!("unsupported sort key column type for cursor: {other}"),
-    }
 }
 
 #[cfg(test)]
@@ -446,7 +385,7 @@ mod tests {
         .unwrap();
 
         let query = simple_query(vec!["traversal_path", "id"], 1000);
-        let advanced = query.advance(&batch);
+        let advanced = query.advance(&batch).unwrap();
 
         assert_eq!(advanced.cursor_values(), &["1/4/", "30"]);
     }

@@ -7,6 +7,7 @@ use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
+use gkg_utils::arrow::ArrowUtils;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -26,8 +27,8 @@ pub struct CodeIndexingCheckpoint {
     pub traversal_path: String,
     pub project_id: i64,
     pub branch: String,
-    pub last_event_id: i64,
-    pub last_commit: String,
+    pub last_task_id: i64,
+    pub last_commit: Option<String>,
     pub indexed_at: DateTime<Utc>,
 }
 
@@ -68,30 +69,25 @@ impl ClickHouseCodeCheckpointStore {
             _ => return Ok(None),
         };
 
-        let last_event_id_col = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .ok_or(CheckpointError::InvalidType)?;
+        let last_task_id_col: &Int64Array =
+            ArrowUtils::get_column_by_index(&batch, 0).ok_or(CheckpointError::InvalidType)?;
 
-        let last_commit_col = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or(CheckpointError::InvalidType)?;
+        let last_commit_col: &StringArray =
+            ArrowUtils::get_column_by_index(&batch, 1).ok_or(CheckpointError::InvalidType)?;
 
-        let indexed_at_col = batch
-            .column(2)
-            .as_any()
-            .downcast_ref::<TimestampMicrosecondArray>()
-            .ok_or(CheckpointError::InvalidType)?;
+        let indexed_at_col: &TimestampMicrosecondArray =
+            ArrowUtils::get_column_by_index(&batch, 2).ok_or(CheckpointError::InvalidType)?;
 
-        if last_event_id_col.is_null(0) {
+        if last_task_id_col.is_null(0) {
             return Ok(None);
         }
 
-        let last_event_id = last_event_id_col.value(0);
-        let last_commit = last_commit_col.value(0).to_string();
+        let last_task_id = last_task_id_col.value(0);
+        let last_commit = if last_commit_col.is_null(0) {
+            None
+        } else {
+            Some(last_commit_col.value(0).to_string())
+        };
         let indexed_at_micros = indexed_at_col.value(0);
         let indexed_at = Utc
             .timestamp_micros(indexed_at_micros)
@@ -102,7 +98,7 @@ impl ClickHouseCodeCheckpointStore {
             traversal_path: traversal_path.to_string(),
             project_id,
             branch: branch.to_string(),
-            last_event_id,
+            last_task_id,
             last_commit,
             indexed_at,
         }))
@@ -119,7 +115,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
     ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError> {
         let query = r#"
             SELECT
-                argMax(last_event_id, _version) as last_event_id,
+                argMax(last_task_id, _version) as last_task_id,
                 argMax(last_commit, _version) as last_commit,
                 argMax(indexed_at, _version) as indexed_at
             FROM code_indexing_checkpoint
@@ -151,14 +147,14 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .query(
                 r#"
                 INSERT INTO code_indexing_checkpoint
-                (traversal_path, project_id, branch, last_event_id, last_commit, indexed_at)
-                VALUES ({traversal_path:String}, {project_id:Int64}, {branch:String}, {last_event_id:Int64}, {last_commit:String}, {indexed_at:String})
+                (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at)
+                VALUES ({traversal_path:String}, {project_id:Int64}, {branch:String}, {last_task_id:Int64}, {last_commit:Nullable(String)}, {indexed_at:String})
             "#,
             )
             .param("traversal_path", &checkpoint.traversal_path)
             .param("project_id", checkpoint.project_id)
             .param("branch", &checkpoint.branch)
-            .param("last_event_id", checkpoint.last_event_id)
+            .param("last_task_id", checkpoint.last_task_id)
             .param("last_commit", &checkpoint.last_commit)
             .param("indexed_at", formatted_timestamp)
             .execute()

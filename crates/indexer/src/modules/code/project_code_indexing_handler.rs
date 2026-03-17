@@ -17,7 +17,7 @@ use super::repository_service::RepositoryService;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::ProjectCodeIndexingRequest;
-use crate::types::{Envelope, Event, Topic};
+use crate::types::{Envelope, Event, Subscription};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ProjectCodeIndexingHandlerConfig {
@@ -63,8 +63,8 @@ impl Handler for ProjectCodeIndexingHandler {
         "code_project_reconciliation"
     }
 
-    fn topic(&self) -> Topic {
-        ProjectCodeIndexingRequest::topic()
+    fn subscription(&self) -> Subscription {
+        ProjectCodeIndexingRequest::subscription()
     }
 
     fn engine_config(&self) -> &HandlerConfiguration {
@@ -131,7 +131,7 @@ impl ProjectCodeIndexingHandler {
             .checkpoint_store
             .get_checkpoint(&project.traversal_path, project_id, default_branch)
             .await
-            && checkpoint.last_event_id >= push_event.event_id
+            && checkpoint.last_task_id >= push_event.event_id
         {
             debug!(project_id, "already indexed, skipping reconciliation");
             metrics.record_outcome("skipped_checkpoint");
@@ -166,8 +166,8 @@ impl ProjectCodeIndexingHandler {
                     project_id,
                     branch: default_branch.to_string(),
                     traversal_path: project.traversal_path.clone(),
-                    event_id: push_event.event_id,
-                    commit_sha: push_event.commit_sha.clone(),
+                    task_id: push_event.event_id,
+                    commit_sha: Some(push_event.commit_sha.clone()),
                 },
             )
             .await;
@@ -335,8 +335,8 @@ mod tests {
                 traversal_path: "/org/project-123".to_string(),
                 project_id: 123,
                 branch: "main".to_string(),
-                last_event_id: 100,
-                last_commit: "abc".to_string(),
+                last_task_id: 100,
+                last_commit: Some("abc".to_string()),
                 indexed_at: Utc::now(),
             })
             .await
@@ -370,11 +370,11 @@ mod tests {
     }
 
     #[test]
-    fn handler_topic_matches_request_topic() {
+    fn handler_subscription_matches_request_subscription() {
         let ctx = TestContext::new();
-        let topic = ctx.handler.topic();
-        let expected = ProjectCodeIndexingRequest::topic();
-        assert_eq!(topic.stream, expected.stream);
-        assert_eq!(topic.subject, expected.subject);
+        let subscription = ctx.handler.subscription();
+        let expected = ProjectCodeIndexingRequest::subscription();
+        assert_eq!(subscription.stream, expected.stream);
+        assert_eq!(subscription.subject, expected.subject);
     }
 }

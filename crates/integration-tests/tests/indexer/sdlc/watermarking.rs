@@ -1,8 +1,7 @@
-use arrow::array::UInt64Array;
+use arrow::array::{StringArray, UInt64Array};
+use gkg_utils::arrow::ArrowUtils;
 
-use crate::indexer::common::{
-    TestContext, get_string_column, handler_context, namespace_envelope, namespace_handler,
-};
+use crate::indexer::common::{TestContext, handler_context, namespace_envelope, namespace_handler};
 
 pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
     ctx.execute(
@@ -38,14 +37,12 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
         .expect("handler should succeed");
 
     let result = ctx.query("SELECT count() as cnt FROM gl_group FINAL").await;
-    let count = result[0]
-        .column(0)
-        .as_any()
-        .downcast_ref::<UInt64Array>()
-        .expect("expected UInt64Array");
+    let count =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&result[0], "cnt").expect("cnt column");
     assert_eq!(count.value(0), 1, "should only process new-team, not org1");
 
     let names = ctx.query("SELECT name FROM gl_group FINAL").await;
-    let name = get_string_column(&names[0], "name");
+    let name =
+        ArrowUtils::get_column_by_name::<StringArray>(&names[0], "name").expect("name column");
     assert_eq!(name.value(0), "new-team");
 }

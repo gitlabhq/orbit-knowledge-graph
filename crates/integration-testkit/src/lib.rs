@@ -1,6 +1,5 @@
 mod assertions;
 mod context;
-mod extract;
 pub mod mock_redaction;
 mod seed;
 pub mod visitor;
@@ -10,7 +9,6 @@ pub use assertions::{
     assert_node_count,
 };
 pub use context::TestContext;
-pub use extract::{get_boolean_column, get_int64_column, get_string_column, get_uint64_column};
 pub use seed::load_seed;
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));

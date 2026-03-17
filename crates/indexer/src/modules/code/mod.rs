@@ -17,6 +17,7 @@ mod project_code_indexing_handler;
 mod project_store;
 mod push_event_store;
 mod repository_service;
+mod siphon_code_indexing_task_dispatcher;
 mod siphon_decoder;
 mod stale_data_cleaner;
 #[cfg(test)]
@@ -31,6 +32,9 @@ use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
 pub use project_code_indexing_handler::ProjectCodeIndexingHandlerConfig;
+pub use siphon_code_indexing_task_dispatcher::{
+    SiphonCodeIndexingTaskDispatcher, SiphonCodeIndexingTaskDispatcherConfig,
+};
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use code_indexing_task_handler::CodeIndexingTaskHandler;
