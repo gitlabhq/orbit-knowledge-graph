@@ -1,12 +1,9 @@
 use arrow::array::StringArray;
-use bytes::Bytes;
 use gkg_utils::arrow::ArrowUtils;
 use indexer::handler::Handler;
 use indexer::modules::code::CodeIndexingTaskHandler;
-use indexer::testkit::TestEnvelopeFactory;
-use prost::Message;
-use siphon_proto::replication_event::Column;
-use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
+use indexer::topic::CodeIndexingTaskRequest;
+use indexer::types::Envelope;
 
 use super::helpers::*;
 
@@ -39,9 +36,7 @@ async fn indexes_repository() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
     let context = handler_context(&clickhouse);
-    let envelope = TestEnvelopeFactory::with_bytes(code_indexing_task_payload(
-        project_id, commit_sha, 1, "/test",
-    ));
+    let envelope = code_indexing_task_envelope(project_id, commit_sha, 1, "/test");
 
     let result = handler.handle(context, envelope).await;
     assert!(result.is_ok(), "handler failed: {:?}", result);
@@ -141,12 +136,7 @@ async fn index_code(
     traversal_path: &str,
 ) {
     let context = handler_context(clickhouse);
-    let envelope = TestEnvelopeFactory::with_bytes(code_indexing_task_payload(
-        project_id,
-        commit_sha,
-        task_id,
-        traversal_path,
-    ));
+    let envelope = code_indexing_task_envelope(project_id, commit_sha, task_id, traversal_path);
 
     handler
         .handle(context, envelope)
@@ -154,50 +144,20 @@ async fn index_code(
         .unwrap_or_else(|e| panic!("indexing commit {commit_sha} (task {task_id}) failed: {e}"));
 }
 
-fn code_indexing_task_payload(
+fn code_indexing_task_envelope(
     project_id: i64,
     commit_sha: &str,
     task_id: i64,
     traversal_path: &str,
-) -> Bytes {
-    let cols = [
-        ("id", value::Value::Int64Value(task_id)),
-        ("project_id", value::Value::Int64Value(project_id)),
-        ("ref", value::Value::StringValue("main".into())),
-        ("commit_sha", value::Value::StringValue(commit_sha.into())),
-        (
-            "traversal_path",
-            value::Value::StringValue(traversal_path.into()),
-        ),
-    ];
-
-    let columns: Vec<Column> = cols
-        .iter()
-        .enumerate()
-        .map(|(i, (_, v))| Column {
-            column_index: i as u32,
-            value: Some(Value {
-                value: Some(v.clone()),
-            }),
-        })
-        .collect();
-
-    let encoded = LogicalReplicationEvents {
-        event: 1,
-        table: "p_knowledge_graph_code_indexing_tasks".into(),
-        schema: "public".into(),
-        application_identifier: "test".into(),
-        columns: cols.iter().map(|(n, _)| n.to_string()).collect(),
-        events: vec![ReplicationEvent {
-            operation: 2,
-            columns,
-        }],
-        version_hash: 0,
-    }
-    .encode_to_vec();
-
-    let compressed = zstd::encode_all(encoded.as_slice(), 0).expect("compression failed");
-    Bytes::from(compressed)
+) -> Envelope {
+    Envelope::new(&CodeIndexingTaskRequest {
+        task_id,
+        project_id,
+        branch: "main".to_string(),
+        commit_sha: commit_sha.to_string(),
+        traversal_path: traversal_path.to_string(),
+    })
+    .expect("failed to create envelope")
 }
 
 async fn assert_file_not_active(
