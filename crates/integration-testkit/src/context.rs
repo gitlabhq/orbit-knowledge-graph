@@ -106,12 +106,12 @@ impl TestContext {
     }
 
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
-    /// every inserted row. Queries `system.tables` for the current database
-    /// and runs `OPTIMIZE TABLE … FINAL` on each table concurrently.
+    /// every inserted row. Only optimizes tables that have active data parts,
+    /// skipping the many empty tables created by the schema.
     pub async fn optimize_all(&self) {
         let batches = self
             .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{}' AND engine NOT IN ('View', 'MaterializedView')",
+                "SELECT table FROM system.parts WHERE database = '{}' AND active GROUP BY table",
                 self.config.database
             ))
             .await;
@@ -119,8 +119,8 @@ impl TestContext {
         let stmts: Vec<String> = batches
             .iter()
             .flat_map(|batch| {
-                let col = ArrowUtils::get_column_by_name::<StringArray>(batch, "name")
-                    .expect("name column");
+                let col = ArrowUtils::get_column_by_name::<StringArray>(batch, "table")
+                    .expect("table column");
                 (0..batch.num_rows())
                     .map(|i| format!("OPTIMIZE TABLE `{}` FINAL", col.value(i)))
                     .collect::<Vec<_>>()

@@ -22,35 +22,46 @@ pub const GRAPH_SCHEMA_SQL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/gr
 #[macro_export]
 macro_rules! run_subtests {
     ($ctx:expr, $($test_fn:path),+ $(,)?) => {
-        futures::future::join_all(vec![
-            $(
-                Box::pin(async {
-                    let name = stringify!($test_fn).replace("::", "_").replace(' ', "");
-                    let db = $ctx.fork(&name).await;
-                    eprintln!("--- {}", name);
-                    $test_fn(&db).await;
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
-            )+
-        ]).await;
+        {
+            let sem = tokio::sync::Semaphore::new(8);
+            futures::future::join_all(vec![
+                $(
+                    Box::pin(async {
+                        let _permit = sem.acquire().await.unwrap();
+                        let name = stringify!($test_fn).replace("::", "_").replace(' ', "");
+                        let db = $ctx.fork(&name).await;
+                        eprintln!("--- {}", name);
+                        $test_fn(&db).await;
+                    }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
+                )+
+            ]).await;
+        }
     };
 }
 
-/// Run all subtests in parallel against the same shared database.
+/// Run subtests concurrently against the same shared database.
 ///
 /// Unlike [`run_subtests!`], this does NOT fork a separate database per
 /// subtest. All subtests share the caller's [`TestContext`] directly.
 /// Use this when all subtests are read-only against pre-seeded data.
+///
+/// Concurrency is bounded to 8 to avoid overwhelming the ClickHouse
+/// testcontainer with too many simultaneous queries.
 #[macro_export]
 macro_rules! run_subtests_shared {
     ($ctx:expr, $($test_fn:path),+ $(,)?) => {
-        futures::future::join_all(vec![
-            $(
-                Box::pin(async {
-                    eprintln!("--- {}", stringify!($test_fn));
-                    $test_fn($ctx).await;
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
-            )+
-        ]).await;
+        {
+            let sem = tokio::sync::Semaphore::new(8);
+            futures::future::join_all(vec![
+                $(
+                    Box::pin(async {
+                        let _permit = sem.acquire().await.unwrap();
+                        eprintln!("--- {}", stringify!($test_fn));
+                        $test_fn($ctx).await;
+                    }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
+                )+
+            ]).await;
+        }
     };
 }
 
