@@ -13,6 +13,7 @@ pub mod indexing_pipeline;
 pub mod locking;
 pub mod metrics;
 mod namespace_backfill_dispatcher;
+pub mod repository_cache;
 mod repository_service;
 mod siphon_code_indexing_task_dispatcher;
 mod siphon_decoder;
@@ -38,6 +39,7 @@ pub use siphon_code_indexing_task_dispatcher::{
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
+pub use repository_cache::{LocalRepositoryCache, RepositoryCache};
 pub use repository_service::{
     CachingRepositoryService, RailsRepositoryService, RepositoryService, RepositoryServiceError,
 };
