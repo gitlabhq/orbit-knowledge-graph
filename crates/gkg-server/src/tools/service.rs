@@ -105,7 +105,7 @@ impl ToolService {
                 node.domain.clone()
             };
 
-            let should_expand = expand_nodes.iter().any(|n| n == &node.name);
+            let should_expand = expand_nodes.iter().any(|n| n == "*" || n == &node.name);
 
             let node_info = if should_expand {
                 let props: Vec<String> = node
@@ -476,5 +476,30 @@ mod tests {
             .build_schema_toon(&["FakeNode".to_string()])
             .expect("Should succeed without error");
         assert!(toon.contains("domains"), "Should still return valid schema");
+    }
+
+    #[test]
+    fn test_expand_all_wildcard() {
+        let output = get_toon_output(r#"{"expand_nodes": ["*"]}"#);
+
+        assert!(output.contains("props"), "Wildcard should expand nodes");
+        assert!(output.contains("username"), "User should be expanded");
+    }
+
+    #[test]
+    fn test_build_domains_wildcard_expands_all() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let domains = service.build_domains(&["*".to_string()]);
+
+        for domain in &domains {
+            for node in &domain.nodes {
+                assert!(
+                    matches!(node, NodeInfo::Expanded { .. }),
+                    "All nodes should be expanded with wildcard"
+                );
+            }
+        }
     }
 }
