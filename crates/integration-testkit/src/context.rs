@@ -48,22 +48,12 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn new(schema_sqls: &[&str]) -> Self {
-        let t0 = std::time::Instant::now();
+        let t = std::time::Instant::now();
         let container = Self::start_container().await;
-        eprintln!("[context] start_container: {:.2?}", t0.elapsed());
-
-        let t1 = std::time::Instant::now();
         let url = Self::extract_url(&container).await;
-        eprintln!("[context] extract_url: {:.2?}", t1.elapsed());
-
-        let t2 = std::time::Instant::now();
         Self::wait_for_ready(&url).await;
-        eprintln!("[context] wait_for_ready: {:.2?}", t2.elapsed());
-
-        let t3 = std::time::Instant::now();
         Self::run_schema_in(&url, TEST_DATABASE, schema_sqls).await;
-        eprintln!("[context] run_schema: {:.2?}", t3.elapsed());
-        eprintln!("[context] total new(): {:.2?}", t0.elapsed());
+        eprintln!("[context] new(): {:.2?}", t.elapsed());
 
         let config = ClickHouseConfiguration {
             database: TEST_DATABASE.to_string(),
@@ -120,7 +110,7 @@ impl TestContext {
     /// every inserted row. Queries `system.tables` for the current database
     /// and runs `OPTIMIZE TABLE … FINAL` on each table concurrently.
     pub async fn optimize_all(&self) {
-        let t0 = std::time::Instant::now();
+        let t = std::time::Instant::now();
         let batches = self
             .query(&format!(
                 "SELECT table FROM system.parts WHERE database = '{}' AND active GROUP BY table",
@@ -138,10 +128,13 @@ impl TestContext {
                     .collect::<Vec<_>>()
             })
             .collect();
-        eprintln!("[optimize_all] {} tables to optimize", stmts.len());
 
         futures::future::join_all(stmts.iter().map(|sql| self.execute(sql))).await;
-        eprintln!("[optimize_all] done: {:.2?}", t0.elapsed());
+        eprintln!(
+            "[optimize_all] {} tables in {:.2?}",
+            stmts.len(),
+            t.elapsed()
+        );
     }
 
     pub async fn truncate_all_tables(&self) {
@@ -195,11 +188,12 @@ impl TestContext {
     }
 
     async fn start_container() -> ContainerAsync<GenericImage> {
+        let t = std::time::Instant::now();
         Self::cleanup_stale_containers().await;
 
         let port = ContainerPort::Tcp(CLICKHOUSE_HTTP_PORT);
 
-        GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
+        let container = GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
             .with_exposed_port(port)
             .with_env_var("CLICKHOUSE_USER", TEST_USERNAME)
             .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
@@ -208,7 +202,9 @@ impl TestContext {
             .with_label(SESSION_LABEL_KEY, session_id())
             .start()
             .await
-            .expect("failed to start ClickHouse container")
+            .expect("failed to start ClickHouse container");
+        eprintln!("[context] start_container: {:.2?}", t.elapsed());
+        container
     }
 
     /// Remove containers from previous test runs that weren't cleaned up
@@ -261,6 +257,7 @@ impl TestContext {
     }
 
     async fn extract_url(container: &ContainerAsync<GenericImage>) -> String {
+        let t = std::time::Instant::now();
         let host = container
             .get_host()
             .await
@@ -276,14 +273,18 @@ impl TestContext {
             other => other.to_string(),
         };
 
-        format!("http://{host}:{port}")
+        let url = format!("http://{host}:{port}");
+        eprintln!("[context] extract_url: {:.2?}", t.elapsed());
+        url
     }
 
     async fn wait_for_ready(url: &str) {
+        let t = std::time::Instant::now();
         let client = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
 
         for attempt in 1..=MAX_CONNECTION_ATTEMPTS {
             if client.execute("SELECT 1").await.is_ok() {
+                eprintln!("[context] wait_for_ready: {:.2?}", t.elapsed());
                 return;
             }
             if attempt == MAX_CONNECTION_ATTEMPTS {
@@ -294,6 +295,7 @@ impl TestContext {
     }
 
     async fn run_schema_in(url: &str, database: &str, schema_sqls: &[&str]) {
+        let t = std::time::Instant::now();
         let client = ArrowClickHouseClient::new(url, database, TEST_USERNAME, Some(TEST_PASSWORD));
 
         for schema_sql in schema_sqls {
@@ -308,5 +310,6 @@ impl TestContext {
                     .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
             }
         }
+        eprintln!("[context] run_schema: {:.2?}", t.elapsed());
     }
 }
