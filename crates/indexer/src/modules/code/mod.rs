@@ -7,8 +7,6 @@
 mod archive;
 mod arrow_converter;
 mod checkpoint_store;
-mod code_backfill_dispatch_handler;
-mod code_backfill_handler;
 mod code_indexing_task_handler;
 pub mod config;
 pub mod indexing_pipeline;
@@ -26,10 +24,6 @@ use std::sync::Arc;
 
 use crate::IndexerConfig;
 use crate::handler::{HandlerInitError, HandlerRegistry};
-pub use code_backfill_dispatch_handler::CodeBackfillDispatchHandler;
-pub use code_backfill_dispatch_handler::CodeBackfillDispatchHandlerConfig;
-pub use code_backfill_handler::CodeBackfillHandler;
-pub use code_backfill_handler::CodeBackfillHandlerConfig;
 pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
 use config::CodeTableNames;
@@ -60,8 +54,6 @@ pub fn register_handlers(
     };
 
     let code_indexing_task_config = config.engine.handlers.code_indexing_task.clone();
-    let backfill_config = config.engine.handlers.code_backfill.clone();
-    let backfill_dispatch_config = config.engine.handlers.code_backfill_dispatch.clone();
 
     let table_names =
         Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
@@ -91,21 +83,8 @@ pub fn register_handlers(
         Arc::clone(&pipeline),
         Arc::clone(&repository_service),
         Arc::clone(&checkpoint_store),
-        metrics.clone(),
-        code_indexing_task_config,
-    )));
-
-    registry.register_handler(Box::new(CodeBackfillHandler::new(
-        Arc::clone(&pipeline),
-        Arc::clone(&repository_service),
-        Arc::clone(&checkpoint_store),
         metrics,
-        backfill_config,
-    )));
-
-    registry.register_handler(Box::new(CodeBackfillDispatchHandler::new(
-        config.datalake.build_client(),
-        backfill_dispatch_config,
+        code_indexing_task_config,
     )));
 
     Ok(())

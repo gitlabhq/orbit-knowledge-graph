@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::modules::code::{
-    CodeBackfillDispatchHandlerConfig, CodeBackfillHandlerConfig, CodeIndexingTaskHandlerConfig,
-    NamespaceCodeBackfillDispatcherConfig, SiphonCodeIndexingTaskDispatcherConfig,
+    CodeIndexingTaskHandlerConfig, NamespaceCodeBackfillDispatcherConfig,
+    SiphonCodeIndexingTaskDispatcherConfig,
 };
 use crate::modules::namespace_deletion::{
     NamespaceDeletionHandlerConfig, NamespaceDeletionSchedulerConfig,
@@ -61,10 +61,6 @@ pub struct HandlersConfiguration {
     pub namespace_handler: NamespaceHandlerConfig,
     #[serde(default)]
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
-    #[serde(default)]
-    pub code_backfill: CodeBackfillHandlerConfig,
-    #[serde(default)]
-    pub code_backfill_dispatch: CodeBackfillDispatchHandlerConfig,
     #[serde(default)]
     pub namespace_deletion: NamespaceDeletionHandlerConfig,
 }

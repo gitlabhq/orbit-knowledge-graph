@@ -9,9 +9,6 @@ pub const GLOBAL_INDEXING_SUBJECT: &str = "sdlc.global.indexing.requested";
 pub const NAMESPACE_INDEXING_SUBJECT_PREFIX: &str = "sdlc.namespace.indexing.requested";
 pub const NAMESPACE_INDEXING_SUBJECT_PATTERN: &str = "sdlc.namespace.indexing.requested.*.*";
 
-pub const CODE_BACKFILL_SUBJECT_PREFIX: &str = "code.backfill.requested";
-pub const CODE_BACKFILL_SUBJECT_PATTERN: &str = "code.backfill.requested.*";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalIndexingRequest {
     pub watermark: DateTime<Utc>,
@@ -45,27 +42,6 @@ impl NamespaceIndexingRequest {
 impl Event for NamespaceIndexingRequest {
     fn subscription() -> Subscription {
         Subscription::new(INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CodeBackfillRequest {
-    pub project_id: i64,
-    pub traversal_path: String,
-}
-
-impl CodeBackfillRequest {
-    pub fn publish_subscription(&self) -> Subscription {
-        Subscription::new(
-            INDEXER_STREAM,
-            format!("{}.{}", CODE_BACKFILL_SUBJECT_PREFIX, self.project_id),
-        )
-    }
-}
-
-impl Event for CodeBackfillRequest {
-    fn subscription() -> Subscription {
-        Subscription::new(INDEXER_STREAM, CODE_BACKFILL_SUBJECT_PATTERN)
     }
 }
 

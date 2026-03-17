@@ -14,10 +14,9 @@ use flate2::write::GzEncoder;
 use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
-    ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeBackfillHandler,
-    CodeBackfillHandlerConfig, CodeIndexingPipeline, CodeIndexingTaskHandler,
-    CodeIndexingTaskHandlerConfig, RailsRepositoryService, RepositoryService,
-    config::CodeTableNames, metrics::CodeMetrics,
+    ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
+    CodeIndexingTaskHandler, CodeIndexingTaskHandlerConfig, RailsRepositoryService,
+    RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
@@ -73,16 +72,6 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             CodeIndexingTaskHandlerConfig::default(),
-        )
-    }
-
-    pub fn backfill_handler(&self) -> CodeBackfillHandler {
-        CodeBackfillHandler::new(
-            Arc::clone(&self.pipeline),
-            Arc::clone(&self.repository_service),
-            Arc::clone(&self.checkpoint_store) as _,
-            self.metrics.clone(),
-            CodeBackfillHandlerConfig::default(),
         )
     }
 }
