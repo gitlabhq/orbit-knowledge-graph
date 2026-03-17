@@ -61,6 +61,13 @@ async fn data_correctness() {
         aggregation::aggregation_min_max_produce_correct_values,
         aggregation::aggregation_min_on_string_column,
         aggregation::aggregation_multiple_functions_in_one_query,
+        // aggregation: traversal path authorization
+        aggregation::aggregation_path_single_nested_group,
+        aggregation::aggregation_path_multiple_groups,
+        aggregation::aggregation_sum_with_restricted_path,
+        aggregation::aggregation_nested_path_includes_child_projects,
+        aggregation::aggregation_non_nested_path_only,
+        aggregation::aggregation_empty_security_context_rejects_at_compile,
         // path finding
         path_finding::path_finding_returns_valid_complete_paths,
         path_finding::path_finding_multiple_destinations_returns_distinct_paths,

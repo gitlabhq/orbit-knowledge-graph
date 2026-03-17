@@ -259,3 +259,206 @@ pub(super) async fn aggregation_multiple_functions_in_one_query(ctx: &TestContex
             && n.prop_i64("min_id") == Some(3)
     });
 }
+
+// ── Traversal path authorization ────────────────────────────────────────────
+
+pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
+    // Security context limited to 1/100/ — only Group 100 and its descendants
+    // (Groups 200/300, Projects 1000/1002) are visible. Groups 101, 102 are
+    // outside this path and must not appear in results.
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        security_ctx,
+    )
+    .await;
+
+    // MEMBER_OF edges under 1/100/: User 1→100, User 2→100, User 6→100 → count = 3
+    resp.assert_node("Group", 100, |n| {
+        n.prop_str("name") == Some("Public Group") && n.prop_i64("member_count") == Some(3)
+    });
+    resp.assert_node_absent("Group", 101);
+    resp.assert_node_absent("Group", 102);
+
+    // Also verify project visibility under the same restricted path.
+    // Projects 1000 and 1002 are under 1/100/, so CONTAINS count = 2.
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "p", "group_by": "g", "alias": "project_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        security_ctx,
+    )
+    .await;
+
+    resp.assert_node("Group", 100, |n| n.prop_i64("project_count") == Some(2));
+    resp.assert_node_absent("Group", 101);
+    resp.assert_node_absent("Group", 102);
+}
+
+pub(super) async fn aggregation_path_multiple_groups(ctx: &TestContext) {
+    // Access to 1/100/ (nested, has subgroups) and 1/102/ (flat, no subgroups).
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap();
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        security_ctx,
+    )
+    .await;
+
+    // Group 100 (under 1/100/): users 1, 2, 6 → count = 3
+    resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+    // Group 102 (under 1/102/): users 1, 4 → count = 2
+    resp.assert_node("Group", 102, |n| n.prop_i64("member_count") == Some(2));
+    // Group 101 (path 1/101/) not in security context
+    resp.assert_node_absent("Group", 101);
+}
+
+pub(super) async fn aggregation_sum_with_restricted_path(ctx: &TestContext) {
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "sum", "target": "u", "property": "id", "group_by": "g", "alias": "id_sum"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        security_ctx,
+    )
+    .await;
+
+    // Group 100: users 1, 2, 6 (edges under 1/100/) → sum = 9
+    resp.assert_node("Group", 100, |n| n.prop_i64("id_sum") == Some(1 + 2 + 6));
+    resp.assert_node_absent("Group", 101);
+    resp.assert_node_absent("Group", 102);
+}
+
+pub(super) async fn aggregation_nested_path_includes_child_projects(ctx: &TestContext) {
+    // Path 1/100/ includes Group 100's children: Projects 1000 (path 1/100/1000/)
+    // and 1002 (path 1/100/1002/), plus subgroups 200, 300.
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "p", "group_by": "g", "alias": "project_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        security_ctx,
+    )
+    .await;
+
+    // Group 100 CONTAINS Projects 1000, 1002 (both under 1/100/) → count = 2
+    resp.assert_node("Group", 100, |n| n.prop_i64("project_count") == Some(2));
+    resp.assert_node_absent("Group", 101);
+    resp.assert_node_absent("Group", 102);
+}
+
+pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
+    // Only 1/102/ — flat group with one project and two MEMBER_OF edges.
+    let security_ctx = SecurityContext::new(1, vec!["1/102/".into()]).unwrap();
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        security_ctx,
+    )
+    .await;
+
+    // Group 102: users 1, 4 (edges under 1/102/) → count = 2
+    resp.assert_node("Group", 102, |n| {
+        n.prop_str("name") == Some("Internal Group") && n.prop_i64("member_count") == Some(2)
+    });
+    resp.assert_node_absent("Group", 100);
+    resp.assert_node_absent("Group", 101);
+}
+
+pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &TestContext) {
+    // Empty traversal_paths — the query engine refuses to compile rather than
+    // silently returning empty results. The defense-in-depth check_ast pass
+    // requires every gl_* alias to have a valid startsWith predicate, which
+    // cannot be satisfied with zero paths.
+    let _ = ctx;
+    let security_ctx = SecurityContext::new(1, vec![]).unwrap();
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &security_ctx,
+    );
+
+    assert!(
+        result.is_err(),
+        "empty security context should reject at compile time, got: {result:?}"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("traversal_path"),
+        "error should mention traversal_path filter, got: {err}"
+    );
+}

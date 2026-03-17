@@ -16,7 +16,9 @@ use crate::configuration::HandlerConfiguration;
 use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
-use crate::nats::{KvEntry, KvPutOptions, KvPutResult, NatsError, NatsServices};
+use crate::nats::{
+    KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
+};
 use crate::types::{Envelope, MessageId, Subscription};
 
 /// Mock implementation of [`NatsServices`] for testing handlers.
@@ -38,7 +40,7 @@ use crate::types::{Envelope, MessageId, Subscription};
 #[derive(Clone, Default)]
 pub struct MockNatsServices {
     published: Arc<Mutex<Vec<(Subscription, Envelope)>>>,
-
+    pending_messages: Arc<Mutex<Vec<Envelope>>>,
     kv_stores: Arc<Mutex<HashMap<String, HashMap<String, MockKvEntry>>>>,
 }
 
@@ -63,6 +65,10 @@ impl MockNatsServices {
             .get(bucket)
             .and_then(|b| b.get(key))
             .map(|e| e.value.clone())
+    }
+
+    pub fn add_pending_message(&self, envelope: Envelope) {
+        self.pending_messages.lock().push(envelope);
     }
 
     pub fn set_kv(&self, bucket: &str, key: &str, value: Bytes) {
@@ -148,6 +154,19 @@ impl NatsServices for MockNatsServices {
             .map(|b| b.keys().cloned().collect())
             .unwrap_or_default();
         Ok(keys)
+    }
+
+    async fn consume_pending(
+        &self,
+        _subscription: &Subscription,
+        _batch_size: usize,
+    ) -> Result<Vec<NatsMessage>, NatsError> {
+        let envelopes: Vec<Envelope> = self.pending_messages.lock().drain(..).collect();
+        let messages = envelopes
+            .into_iter()
+            .map(|envelope| NatsMessage::new(envelope, NoopAcker))
+            .collect();
+        Ok(messages)
     }
 }
 
