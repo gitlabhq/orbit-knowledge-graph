@@ -73,23 +73,17 @@ Orbit ingests two categories of data:
    - Pipelines
    - Vulnerabilities and security findings
 
-   GitLab data is streamed from PostgreSQL through the GitLab Data Insights Platform into ClickHouse,
-   where Orbit reads it using change data capture (CDC) events. CDC events track every addition, update, and deletion in the database,
-   so the knowledge graph stays current automatically.
-
-1. Code data includes the content of your repositories:
+1. Code includes the content of your repositories:
 
    - Files and directories
    - Function, class, and module definitions
    - Imports and cross-file references
-   - Call graphs and data flows
-
-   Code data is fetched directly from Gitaly using Git RPC calls. Orbit ingests code from only the default branch.
 
 ```mermaid
+%%{init: { "fontFamily": "GitLab Sans" }}%%
 flowchart LR
   accTitle: Orbit architecture
-  accDescr: Data flows from PostgreSQL and Gitaly through Siphon, NATS, and ClickHouse into the Orbit service, which is then queried by AI agents and services.
+  accDescr: Data flows from PostgreSQL through Siphon, NATS, and ClickHouse into the Orbit service, which is then queried by AI agents and services.
 
   subgraph GitLabCore[GitLab Core]
     PG[(PostgreSQL)]
@@ -98,18 +92,23 @@ flowchart LR
 
   subgraph DataPipeline[Data Insights Platform]
     Siphon[Siphon]
-    NATS[NATS]
+    NATS[NATS JetStream]
   end
 
   PG -- "CDC events" --> Siphon
   Siphon -- "streamed events" --> NATS
-  NATS -- "SDLC data" --> CH[ClickHouse]
-  Gitaly <-- "Git RPC" --> Orbit[Orbit service]
-  CH <--> Orbit
+  NATS --> CH[ClickHouse]
+  Gitaly --> Rails[Rails internal API]
+  Rails --> CH
+  CH <--> Orbit[Orbit service]
   Clients[AI agents and services] --> Orbit
 ```
 
-For a full list of indexed object types and relationships, see the [knowledge graph schema](schema.md).
+GitLab data and code‑indexing tasks are streamed from PostgreSQL into the GitLab Data Insights Platform as change data capture (CDC) events.
+CDC events track every addition, update, and deletion in the database, so the knowledge graph stays current automatically.
+
+Code itself is ingested separately when Orbit downloads repository archives through the GitLab Rails internal API and parses those files into the graph.
+Orbit ingests code from the repository’s default branch only.
 
 ### Supported languages
 
