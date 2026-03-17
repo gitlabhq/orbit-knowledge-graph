@@ -34,6 +34,10 @@ pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
+mod namespace_backfill_dispatcher;
+pub use namespace_backfill_dispatcher::{
+    NamespaceCodeBackfillDispatcher, NamespaceCodeBackfillDispatcherConfig,
+};
 pub use siphon_code_indexing_task_dispatcher::{
     SiphonCodeIndexingTaskDispatcher, SiphonCodeIndexingTaskDispatcherConfig,
 };

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::modules::code::{
     CodeBackfillDispatchHandlerConfig, CodeBackfillHandlerConfig, CodeIndexingTaskHandlerConfig,
-    SiphonCodeIndexingTaskDispatcherConfig,
+    NamespaceCodeBackfillDispatcherConfig, SiphonCodeIndexingTaskDispatcherConfig,
 };
 use crate::modules::namespace_deletion::{
     NamespaceDeletionHandlerConfig, NamespaceDeletionSchedulerConfig,
@@ -96,6 +96,8 @@ pub struct ScheduledTasksConfiguration {
     pub namespace: NamespaceDispatcherConfig,
     #[serde(default)]
     pub code_indexing_task: SiphonCodeIndexingTaskDispatcherConfig,
+    #[serde(default)]
+    pub namespace_code_backfill: NamespaceCodeBackfillDispatcherConfig,
     #[serde(default)]
     pub table_cleanup: TableCleanupConfig,
     #[serde(default)]
