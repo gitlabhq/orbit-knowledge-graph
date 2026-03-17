@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,6 +15,8 @@ use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
+
+type ProjectBranch = (i64, String);
 
 fn default_events_stream_name() -> String {
     "siphon_stream_main_db".to_string()
@@ -103,8 +106,8 @@ impl ScheduledTask for SiphonCodeIndexingTaskDispatcher {
 impl SiphonCodeIndexingTaskDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
         let subscription = self.siphon_subscription();
-        let mut total_dispatched: u64 = 0;
-        let mut total_skipped: u64 = 0;
+        let mut dispatched: u64 = 0;
+        let mut skipped: u64 = 0;
 
         loop {
             let messages = self
@@ -120,11 +123,43 @@ impl SiphonCodeIndexingTaskDispatcher {
                 break;
             }
 
-            for message in messages {
-                let (dispatched, skipped) = self.dispatch_siphon_message(&message.envelope).await?;
-                total_dispatched += dispatched;
-                total_skipped += skipped;
+            let requests = self.collect_latest_requests(&messages)?;
 
+            for request in requests.into_values() {
+                let envelope = Envelope::new(&request).map_err(|error| {
+                    self.metrics.record_error(self.name(), "publish");
+                    TaskError::new(error)
+                })?;
+
+                match self
+                    .nats
+                    .publish(&request.publish_subscription(), &envelope)
+                    .await
+                {
+                    Ok(()) => {
+                        dispatched += 1;
+                        debug!(
+                            task_id = request.task_id,
+                            project_id = request.project_id,
+                            "dispatched code indexing task request"
+                        );
+                    }
+                    Err(crate::nats::NatsError::PublishDuplicate) => {
+                        skipped += 1;
+                        debug!(
+                            task_id = request.task_id,
+                            project_id = request.project_id,
+                            "skipped code indexing task request, already in-flight"
+                        );
+                    }
+                    Err(error) => {
+                        self.metrics.record_error(self.name(), "publish");
+                        return Err(TaskError::new(error));
+                    }
+                }
+            }
+
+            for message in messages {
                 message.ack().await.map_err(|error| {
                     self.metrics.record_error(self.name(), "ack");
                     TaskError::new(error)
@@ -132,106 +167,88 @@ impl SiphonCodeIndexingTaskDispatcher {
             }
         }
 
-        if total_dispatched > 0 || total_skipped > 0 {
+        if dispatched > 0 || skipped > 0 {
             self.metrics
-                .record_requests_published(self.name(), total_dispatched);
-            self.metrics
-                .record_requests_skipped(self.name(), total_skipped);
+                .record_requests_published(self.name(), dispatched);
+            self.metrics.record_requests_skipped(self.name(), skipped);
 
             info!(
-                dispatched = total_dispatched,
-                skipped = total_skipped,
-                "dispatched code indexing task requests"
+                dispatched,
+                skipped, "dispatched code indexing task requests"
             );
         }
 
         Ok(())
     }
 
-    async fn dispatch_siphon_message(
+    fn collect_latest_requests(
         &self,
-        envelope: &crate::types::Envelope,
-    ) -> Result<(u64, u64), TaskError> {
-        let replication_events =
-            decode_logical_replication_events(&envelope.payload).map_err(|error| {
+        messages: &[crate::nats::NatsMessage],
+    ) -> Result<HashMap<ProjectBranch, CodeIndexingTaskRequest>, TaskError> {
+        let mut latest: HashMap<ProjectBranch, CodeIndexingTaskRequest> = HashMap::new();
+
+        for message in messages {
+            let replication_events = decode_logical_replication_events(&message.envelope.payload)
+                .map_err(|error| {
                 self.metrics.record_error(self.name(), "decode");
                 TaskError::new(error)
             })?;
 
-        let extractor = ColumnExtractor::new(&replication_events);
-        let mut dispatched: u64 = 0;
-        let mut skipped: u64 = 0;
+            let extractor = ColumnExtractor::new(&replication_events);
 
-        for event in &replication_events.events {
-            if event.operation == Operation::InitialSnapshot as i32 {
-                debug!("skipping initial snapshot event");
-                continue;
-            }
-
-            let Some(task_id) = extractor.get_i64(event, "id") else {
-                warn!("failed to extract task id, skipping");
-                continue;
-            };
-            let Some(project_id) = extractor.get_i64(event, "project_id") else {
-                warn!("failed to extract project_id, skipping");
-                continue;
-            };
-            let Some(ref_name) = extractor.get_string(event, "ref") else {
-                warn!(task_id, "failed to extract ref, skipping");
-                continue;
-            };
-            let Some(commit_sha) = extractor.get_string(event, "commit_sha") else {
-                warn!(task_id, "failed to extract commit_sha, skipping");
-                continue;
-            };
-            let Some(traversal_path) = extractor.get_string(event, "traversal_path") else {
-                warn!(task_id, "failed to extract traversal_path, skipping");
-                continue;
-            };
-
-            let branch = ref_name
-                .strip_prefix("refs/heads/")
-                .unwrap_or(ref_name)
-                .to_string();
-
-            let request = CodeIndexingTaskRequest {
-                task_id,
-                project_id,
-                branch,
-                commit_sha: commit_sha.to_string(),
-                traversal_path: traversal_path.to_string(),
-            };
-
-            let publish_subscription = request.publish_subscription();
-            let request_envelope = Envelope::new(&request).map_err(|error| {
-                self.metrics.record_error(self.name(), "publish");
-                TaskError::new(error)
-            })?;
-
-            match self
-                .nats
-                .publish(&publish_subscription, &request_envelope)
-                .await
-            {
-                Ok(()) => {
-                    dispatched += 1;
-                    debug!(task_id, project_id, "dispatched code indexing task request");
+            for event in &replication_events.events {
+                if event.operation == Operation::InitialSnapshot as i32 {
+                    debug!("skipping initial snapshot event");
+                    continue;
                 }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    skipped += 1;
-                    debug!(
-                        task_id,
-                        project_id, "skipped code indexing task request, already in-flight"
-                    );
-                }
-                Err(error) => {
-                    self.metrics.record_error(self.name(), "publish");
-                    return Err(TaskError::new(error));
-                }
+
+                let Some(task_id) = extractor.get_i64(event, "id") else {
+                    warn!("failed to extract task id, skipping");
+                    continue;
+                };
+                let Some(project_id) = extractor.get_i64(event, "project_id") else {
+                    warn!("failed to extract project_id, skipping");
+                    continue;
+                };
+                let Some(ref_name) = extractor.get_string(event, "ref") else {
+                    warn!(task_id, "failed to extract ref, skipping");
+                    continue;
+                };
+                let Some(commit_sha) = extractor.get_string(event, "commit_sha") else {
+                    warn!(task_id, "failed to extract commit_sha, skipping");
+                    continue;
+                };
+                let Some(traversal_path) = extractor.get_string(event, "traversal_path") else {
+                    warn!(task_id, "failed to extract traversal_path, skipping");
+                    continue;
+                };
+
+                let branch = ref_name
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(ref_name)
+                    .to_string();
+
+                let request = CodeIndexingTaskRequest {
+                    task_id,
+                    project_id,
+                    branch,
+                    commit_sha: commit_sha.to_string(),
+                    traversal_path: traversal_path.to_string(),
+                };
+
+                let key = (request.project_id, request.branch.clone());
+                latest
+                    .entry(key)
+                    .and_modify(|existing| {
+                        if request.task_id > existing.task_id {
+                            *existing = request.clone();
+                        }
+                    })
+                    .or_insert(request);
             }
         }
 
-        Ok((dispatched, skipped))
+        Ok(latest)
     }
 }
 
@@ -367,5 +384,94 @@ mod tests {
             published[0].0.subject.as_ref(),
             "code.task.indexing.requested.42.bWFpbg"
         );
+    }
+
+    #[tokio::test]
+    async fn deduplicates_same_project_branch_within_batch() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(1, 42, "refs/heads/main", "old_sha", "/org/project-42")
+                .build(),
+            code_indexing_task_columns(2, 42, "refs/heads/main", "new_sha", "/org/project-42")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        let dispatcher = create_dispatcher(Arc::clone(&nats));
+        dispatcher.run().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.task_id, 2);
+        assert_eq!(request.commit_sha, "new_sha");
+    }
+
+    #[tokio::test]
+    async fn deduplicates_across_messages_in_same_batch() {
+        let nats = Arc::new(MockNatsServices::new());
+        let first_message = build_replication_events(vec![
+            code_indexing_task_columns(1, 42, "refs/heads/main", "old_sha", "/org/project-42")
+                .build(),
+        ]);
+        let second_message = build_replication_events(vec![
+            code_indexing_task_columns(5, 42, "refs/heads/main", "latest_sha", "/org/project-42")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(first_message));
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(second_message));
+
+        let dispatcher = create_dispatcher(Arc::clone(&nats));
+        dispatcher.run().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.task_id, 5);
+        assert_eq!(request.commit_sha, "latest_sha");
+    }
+
+    #[tokio::test]
+    async fn keeps_distinct_project_branch_pairs() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(1, 42, "refs/heads/main", "sha1", "/org/project-42").build(),
+            code_indexing_task_columns(2, 42, "refs/heads/develop", "sha2", "/org/project-42")
+                .build(),
+            code_indexing_task_columns(3, 99, "refs/heads/main", "sha3", "/org/project-99").build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        let dispatcher = create_dispatcher(Arc::clone(&nats));
+        dispatcher.run().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn deduplicates_out_of_order_task_ids() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(1, 42, "refs/heads/main", "aaa", "/org/project-42").build(),
+            code_indexing_task_columns(3, 42, "refs/heads/main", "ccc", "/org/project-42").build(),
+            code_indexing_task_columns(2, 42, "refs/heads/main", "bbb", "/org/project-42").build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        let dispatcher = create_dispatcher(Arc::clone(&nats));
+        dispatcher.run().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.task_id, 3);
+        assert_eq!(request.commit_sha, "ccc");
     }
 }
