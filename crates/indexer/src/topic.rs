@@ -85,11 +85,13 @@ pub struct CodeIndexingTaskRequest {
 
 impl CodeIndexingTaskRequest {
     pub fn publish_subscription(&self) -> Subscription {
+        use base64::Engine;
+        let encoded_branch = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&self.branch);
         Subscription::new(
             INDEXER_STREAM,
             format!(
                 "{}.{}.{}",
-                CODE_INDEXING_TASK_SUBJECT_PREFIX, self.project_id, self.branch
+                CODE_INDEXING_TASK_SUBJECT_PREFIX, self.project_id, encoded_branch
             ),
         )
     }

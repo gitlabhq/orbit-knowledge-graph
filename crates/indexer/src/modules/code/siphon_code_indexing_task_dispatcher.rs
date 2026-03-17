@@ -365,7 +365,7 @@ mod tests {
         let published = nats.get_published();
         assert_eq!(
             published[0].0.subject.as_ref(),
-            "code.task.indexing.requested.42.main"
+            "code.task.indexing.requested.42.bWFpbg"
         );
     }
 }
