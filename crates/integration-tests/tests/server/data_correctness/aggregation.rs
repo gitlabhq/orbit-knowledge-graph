@@ -291,6 +291,30 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
     });
     resp.assert_node_absent("Group", 101);
     resp.assert_node_absent("Group", 102);
+
+    // Also verify project visibility under the same restricted path.
+    // Projects 1000 and 1002 are under 1/100/, so CONTAINS count = 2.
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "p", "group_by": "g", "alias": "project_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        security_ctx,
+    )
+    .await;
+
+    resp.assert_node("Group", 100, |n| n.prop_i64("project_count") == Some(2));
+    resp.assert_node_absent("Group", 101);
+    resp.assert_node_absent("Group", 102);
 }
 
 pub(super) async fn aggregation_path_multiple_groups(ctx: &TestContext) {
