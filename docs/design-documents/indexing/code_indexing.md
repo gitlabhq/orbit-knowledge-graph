@@ -105,7 +105,7 @@ graph LR
 |---|---|
 | `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
 | `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
-| `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
+| `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
 
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
