@@ -89,7 +89,7 @@ async-nats = { version = "0.46.0", features = ["server_2_11"] }
 arrow-ipc = "57.2.0"
 clickhouse = { version = "0.14", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.1"
-testcontainers-modules = { version = "0.15.0", features = ["nats", "clickhouse"] }
+testcontainers-modules = { version = "0.15.0", features = ["nats"] }
 
 # Query engine dependencies
 indexmap = "2"
