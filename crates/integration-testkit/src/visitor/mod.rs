@@ -612,7 +612,15 @@ impl NodeExt for GraphNode {
     }
 
     fn prop_bool(&self, key: &str) -> Option<bool> {
-        self.properties.get(key)?.as_bool()
+        let v = self.properties.get(key)?;
+        v.as_bool().or_else(|| match v.as_str()? {
+            "true" => Some(true),
+            "false" => Some(false),
+            other => panic!(
+                "{}:{} property '{key}' has non-boolean string value: {other:?}",
+                self.entity_type, self.id
+            ),
+        })
     }
 
     fn has_prop(&self, key: &str) -> bool {
@@ -1088,9 +1096,21 @@ pub(crate) mod tests {
 
     #[test]
     fn prop_bool_returns_boolean_values() {
-        let node = make_node("User", 1, &[("active", json!(true)), ("name", json!("x"))]);
+        let node = make_node(
+            "User",
+            1,
+            &[("active", json!(true)), ("flag", json!("true"))],
+        );
         assert_eq!(node.prop_bool("active"), Some(true));
-        assert_eq!(node.prop_bool("name"), None);
+        assert_eq!(node.prop_bool("flag"), Some(true));
+        assert_eq!(node.prop_bool("missing"), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-boolean string value")]
+    fn prop_bool_panics_on_non_boolean_string() {
+        let node = make_node("User", 1, &[("name", json!("x"))]);
+        node.prop_bool("name");
     }
 
     #[test]
