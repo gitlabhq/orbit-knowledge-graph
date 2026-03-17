@@ -104,6 +104,7 @@ pub enum TableRef {
 /// - Left: all rows from left, matching from right (NULLs if no match)
 /// - Right: all rows from right, matching from left
 /// - Full: all rows from both sides
+/// - Cross: cartesian product, no ON condition
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum JoinType {
@@ -111,6 +112,7 @@ pub enum JoinType {
     Left,
     Right,
     Full,
+    Cross,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -353,6 +355,15 @@ impl TableRef {
             left: Box::new(left),
             right: Box::new(right),
             on,
+        }
+    }
+
+    pub fn cross_join(left: TableRef, right: TableRef) -> Self {
+        TableRef::Join {
+            join_type: JoinType::Cross,
+            left: Box::new(left),
+            right: Box::new(right),
+            on: Expr::lit(true), // ignored by codegen for Cross
         }
     }
 

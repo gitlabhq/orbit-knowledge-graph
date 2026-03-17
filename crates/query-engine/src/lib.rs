@@ -299,41 +299,37 @@ mod tests {
 
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
 
-        // Recursive CTE named "paths"
-        assert!(result.base.sql.contains("WITH RECURSIVE paths AS"));
+        // Non-recursive CTEs: forward + backward
+        assert!(
+            result.base.sql.contains("WITH forward AS"),
+            "should have forward CTE"
+        );
+        assert!(
+            result.base.sql.contains("backward AS"),
+            "should have backward CTE"
+        );
         assert!(result.base.sql.contains("UNION ALL"));
 
-        // Verify recursive structure references "paths"
-        assert!(
-            result.base.sql.contains("FROM paths"),
-            "recursive branches should reference paths CTE"
-        );
-
-        // Verify cycle detection and early termination
-        assert!(
-            result.base.sql.matches("NOT has").count() >= 2,
-            "should have cycle detection and early termination"
-        );
-
-        // Verify path construction with full materialization
+        // Path construction uses arrayConcat + tuples
         assert!(
             result.base.sql.contains("arrayConcat"),
-            "paths should be extended"
+            "paths should be concatenated"
         );
         assert!(
             result.base.sql.contains("tuple"),
             "path nodes should be typed tuples"
         );
-        // Verify path limit to prevent memory explosion
+
+        // Intersection: forward joins backward on meeting point
         assert!(
-            result.base.sql.contains("LIMIT 1000"),
-            "should limit paths to prevent memory issues"
+            result.base.sql.contains("f.end_id") && result.base.sql.contains("b.end_id"),
+            "should join forward and backward on end_id"
         );
     }
 
     #[test]
     fn path_finding_depth_control() {
-        // Verify max_depth is used in the recursive CTE
+        // Verify max_depth controls frontier depth
         let shallow = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -355,13 +351,31 @@ mod tests {
         let shallow_result = compile(shallow, &test_ontology(), &test_ctx()).unwrap();
         let deep_result = compile(deep, &test_ontology(), &test_ctx()).unwrap();
 
-        // Both use recursive CTE
-        assert!(shallow_result.base.sql.contains("WITH RECURSIVE paths AS"));
-        assert!(deep_result.base.sql.contains("WITH RECURSIVE paths AS"));
+        // max_depth=1: only forward CTE (no backward needed)
+        assert!(
+            shallow_result.base.sql.contains("WITH forward AS"),
+            "shallow should have forward CTE"
+        );
+        assert!(
+            !shallow_result.base.sql.contains("backward AS"),
+            "shallow (max_depth=1) should not have backward CTE"
+        );
 
-        // Depth limit is in WHERE clause (p.depth < N)
-        assert!(shallow_result.base.sql.contains("p.depth < {p"));
-        assert!(deep_result.base.sql.contains("p.depth < {p"));
+        // max_depth=3: both forward + backward CTEs
+        assert!(
+            deep_result.base.sql.contains("WITH forward AS"),
+            "deep should have forward CTE"
+        );
+        assert!(
+            deep_result.base.sql.contains("backward AS"),
+            "deep (max_depth=3) should have backward CTE"
+        );
+
+        // Deeper query should produce longer SQL (more join arms)
+        assert!(
+            deep_result.base.sql.len() > shallow_result.base.sql.len(),
+            "deeper max_depth should produce more SQL"
+        );
     }
 
     #[test]

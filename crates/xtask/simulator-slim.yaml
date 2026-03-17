@@ -145,5 +145,6 @@ evaluation:
   sample_size: 10
   iterations: 1
   skip_cache_warm: false
+  filter: shortest path
   output:
     format: text
