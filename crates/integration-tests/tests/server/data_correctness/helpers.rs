@@ -28,7 +28,7 @@ pub(super) use gkg_server::query_pipeline::{
 };
 pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
-pub(super) use query_engine::compile;
+pub(super) use query_engine::{SecurityContext, compile};
 pub(super) use serde_json::Value;
 
 pub(super) static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
@@ -51,9 +51,17 @@ pub(super) async fn run_query(
     json: &str,
     svc: &MockRedactionService,
 ) -> ResponseView {
+    run_query_with_security(ctx, json, svc, test_security_context()).await
+}
+
+pub(super) async fn run_query_with_security(
+    ctx: &TestContext,
+    json: &str,
+    svc: &MockRedactionService,
+    security_ctx: SecurityContext,
+) -> ResponseView {
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
-    let security_ctx = test_security_context();
     let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
