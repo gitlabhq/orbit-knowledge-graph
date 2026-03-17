@@ -14,25 +14,42 @@ pub use seed::load_seed;
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
 pub const GRAPH_SCHEMA_SQL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph.sql"));
 
-/// Fork a database per subtest and run all subtests in parallel.
+/// Fork a database per subtest and run with bounded concurrency.
 ///
 /// Each subtest gets its own isolated ClickHouse database via
 /// [`TestContext::fork`]. Use this when subtests write data beyond the
 /// initial seed (e.g. additional INSERTs in specific test cases).
+///
+/// At most `SUBTEST_CONCURRENCY` subtests run at a time (default 8, env
+/// var override).
 #[macro_export]
 macro_rules! run_subtests {
-    ($ctx:expr, $($test_fn:path),+ $(,)?) => {
-        futures::future::join_all(vec![
+    ($ctx:expr, $($test_fn:path),+ $(,)?) => {{
+        use futures::stream::StreamExt as _;
+
+        let _concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8);
+
+        let _futs = vec![
             $(
                 Box::pin(async {
                     let name = stringify!($test_fn).replace("::", "_").replace(' ', "");
                     let db = $ctx.fork(&name).await;
+                    let _t = std::time::Instant::now();
                     eprintln!("--- {}", name);
                     $test_fn(&db).await;
+                    eprintln!("    {} {:.2?}", name, _t.elapsed());
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
             )+
-        ]).await;
-    };
+        ];
+
+        futures::stream::iter(_futs)
+            .buffer_unordered(_concurrency)
+            .collect::<Vec<()>>()
+            .await;
+    }};
 }
 
 /// Run all subtests against the same shared database with bounded concurrency.
