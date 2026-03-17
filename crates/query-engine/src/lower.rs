@@ -228,7 +228,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
     let rel_type_filter = type_filter(&path.rel_types);
     let max_depth = path.max_depth;
-    let forward_depth = (max_depth + 1) / 2; // ceil(max_depth / 2)
+    let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
     let forward_cte = Cte::new(
@@ -455,7 +455,7 @@ fn build_frontier_arm(
     let edge_kinds = Expr::func(
         "array",
         (1..=depth)
-            .map(|i| Expr::col(&format!("e{i}"), "relationship_kind"))
+            .map(|i| Expr::col(format!("e{i}"), "relationship_kind"))
             .collect(),
     );
 
@@ -1116,10 +1116,11 @@ mod tests {
             panic!("expected Query");
         };
         assert!(!q.group_by.is_empty());
-        assert!(q
-            .select
-            .iter()
-            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"))
+        );
     }
 
     #[test]
