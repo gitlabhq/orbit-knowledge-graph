@@ -435,21 +435,42 @@ fn build_frontier_arm(
     }
 
     // path_nodes: array of (id, kind) tuples for each hop's exit node.
-    let path_nodes = Expr::func(
-        "array",
-        (1..=depth)
-            .map(|i| {
-                let alias = format!("e{i}");
+    //
+    // For backward arms, exclude the last hop (the meeting point) because
+    // it's already the last element in forward's path_nodes. Only include
+    // intermediate nodes between the end anchor and the meeting point.
+    let path_node_range = if is_forward {
+        1..=depth
+    } else {
+        1..=depth.saturating_sub(1)
+    };
+    let path_node_tuples: Vec<Expr> = path_node_range
+        .map(|i| {
+            let alias = format!("e{i}");
+            Expr::func(
+                "tuple",
+                vec![
+                    Expr::col(&alias, next_col),
+                    Expr::col(&alias, next_kind_col),
+                ],
+            )
+        })
+        .collect();
+    let path_nodes = if path_node_tuples.is_empty() {
+        // Backward depth 1: no intermediates. Use typed empty array.
+        Expr::func(
+            "arrayResize",
+            vec![
                 Expr::func(
-                    "tuple",
-                    vec![
-                        Expr::col(&alias, next_col),
-                        Expr::col(&alias, next_kind_col),
-                    ],
-                )
-            })
-            .collect(),
-    );
+                    "array",
+                    vec![Expr::func("tuple", vec![Expr::int(0), Expr::string("")])],
+                ),
+                Expr::int(0),
+            ],
+        )
+    } else {
+        Expr::func("array", path_node_tuples)
+    };
 
     // edge_kinds: array of relationship types for each hop.
     let edge_kinds = Expr::func(
@@ -1116,11 +1137,10 @@ mod tests {
             panic!("expected Query");
         };
         assert!(!q.group_by.is_empty());
-        assert!(
-            q.select
-                .iter()
-                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"))
-        );
+        assert!(q
+            .select
+            .iter()
+            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
     }
 
     #[test]
