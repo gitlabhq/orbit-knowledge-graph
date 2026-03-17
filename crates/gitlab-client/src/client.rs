@@ -56,6 +56,12 @@ impl GitlabClient {
     fn build_http_client(
         config: &GitlabClientConfiguration,
     ) -> Result<reqwest::Client, GitlabClientError> {
+        // reqwest is compiled with `rustls-no-provider`, so a CryptoProvider
+        // must be installed before building any client. The `install_default`
+        // call is idempotent — the Err case just means another caller already
+        // installed a provider.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let mut builder = reqwest::Client::builder();
 
         if let Some(resolve_host) = &config.resolve_host {
@@ -204,10 +210,6 @@ mod tests {
         assert_eq!(decoded.claims["aud"], "gitlab-knowledge-graph");
     }
 
-    fn install_crypto_provider() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    }
-
     fn config_with_resolve(
         base_url: &str,
         resolve_host: Option<&str>,
@@ -221,21 +223,18 @@ mod tests {
 
     #[test]
     fn build_http_client_without_resolve_host() {
-        install_crypto_provider();
         let config = config_with_resolve("https://gitlab.example.com", None);
         assert!(GitlabClient::build_http_client(&config).is_ok());
     }
 
     #[test]
     fn build_http_client_with_resolve_host_localhost() {
-        install_crypto_provider();
         let config = config_with_resolve("https://gitlab.example.com:11443", Some("localhost"));
         assert!(GitlabClient::build_http_client(&config).is_ok());
     }
 
     #[test]
     fn build_http_client_with_resolve_host_and_path() {
-        install_crypto_provider();
         let config = config_with_resolve("https://gitlab.example.com/backend", Some("localhost"));
         assert!(GitlabClient::build_http_client(&config).is_ok());
     }
