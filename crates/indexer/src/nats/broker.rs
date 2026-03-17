@@ -33,7 +33,7 @@ use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 use super::configuration::NatsConfiguration;
 use super::error::{NatsError, map_connect_error, map_subscribe_error};
 use super::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
-use super::message::{NatsMessage, NatsSubscription};
+use super::message::{NatsAcker, NatsMessage, NatsSubscription};
 
 /// NATS JetStream message broker.
 ///
@@ -324,10 +324,7 @@ impl NatsBroker {
             attempt,
         };
 
-        Ok(NatsMessage {
-            envelope,
-            acker: Arc::new(acker),
-        })
+        Ok(NatsMessage::new(envelope, NatsAcker(Arc::new(acker))))
     }
 
     pub async fn publish(
@@ -435,6 +432,53 @@ impl NatsBroker {
         }
 
         Ok(Box::pin(ReceiverStream::new(receiver)))
+    }
+
+    pub async fn consume_pending(
+        &self,
+        subscription: &Subscription,
+        batch_size: usize,
+    ) -> Result<Vec<NatsMessage>, NatsError> {
+        let stream = self.get_stream(&subscription.stream).await?;
+
+        let durable_name = format!(
+            "dispatch-{}",
+            subscription
+                .subject
+                .replace('.', "-")
+                .replace('*', "wildcard")
+        );
+
+        let consumer_config = ConsumerConfig {
+            filter_subject: subscription.subject.to_string(),
+            ack_wait: self.config.ack_wait(),
+            max_deliver: -1,
+            durable_name: Some(durable_name.clone()),
+            ..Default::default()
+        };
+
+        let consumer = stream
+            .get_or_create_consumer(&durable_name, consumer_config)
+            .await
+            .map_err(map_subscribe_error)?;
+
+        let batch = consumer
+            .fetch()
+            .max_messages(batch_size)
+            .expires(Duration::from_secs(1))
+            .messages()
+            .await
+            .map_err(map_subscribe_error)?;
+
+        tokio::pin!(batch);
+
+        let mut messages = Vec::new();
+        while let Some(result) = batch.next().await {
+            let nats_message = result.map_err(map_subscribe_error)?;
+            messages.push(Self::convert_message(nats_message)?);
+        }
+
+        Ok(messages)
     }
 
     async fn get_or_create_kv_store(&self, bucket: &str) -> Result<KvStore, NatsError> {
