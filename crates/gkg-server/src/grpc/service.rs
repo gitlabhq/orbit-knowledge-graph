@@ -254,7 +254,7 @@ impl KnowledgeGraphServiceImpl {
             .ontology
             .nodes()
             .map(|n| {
-                let should_expand = expand_nodes.iter().any(|e| e == &n.name);
+                let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
 
                 let properties = if should_expand {
                     n.fields
@@ -624,5 +624,31 @@ mod tests {
             mr.properties.is_empty(),
             "MergeRequest should not be expanded"
         );
+    }
+
+    #[test]
+    fn test_expand_all_wildcard() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            test_ontology(),
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+        );
+
+        let response = service.build_structured_schema(&["*".to_string()]);
+
+        for node in &response.nodes {
+            assert!(
+                !node.properties.is_empty(),
+                "Node {} should be expanded with wildcard",
+                node.name
+            );
+            assert!(
+                node.style.is_some(),
+                "Node {} should have style with wildcard",
+                node.name
+            );
+        }
     }
 }
