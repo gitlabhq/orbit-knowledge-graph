@@ -55,7 +55,7 @@ impl ToolRegistry {
             name: "get_graph_schema".to_string(),
             description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
                           and edges with their source/target types. Use expand_nodes to get \
-                          property details for specific types, or pass [\"*\"] to expand all."
+                          property details for specific types."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -63,7 +63,7 @@ impl ToolRegistry {
                     "expand_nodes": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Node types to expand with properties and relationships. Pass [\"*\"] to expand all nodes."
+                        "description": "Node types to expand with properties and relationships."
                     }
                 },
                 "additionalProperties": false
