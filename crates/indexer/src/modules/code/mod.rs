@@ -6,7 +6,7 @@
 
 mod archive;
 mod arrow_converter;
-mod blob_decoder;
+mod blob_stream;
 mod checkpoint_store;
 mod code_indexing_task_handler;
 pub mod config;

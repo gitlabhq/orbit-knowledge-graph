@@ -6,7 +6,7 @@ use gitlab_client::{ChangeStatus, ChangedPath};
 use tracing::{debug, info, warn};
 
 use super::archive;
-use super::blob_decoder::{BlobStream, DecodedBlob};
+use super::blob_stream::{BlobStream, ResolvedBlob};
 use super::repository_cache::RepositoryCache;
 use super::repository_service::RepositoryService;
 use crate::handler::HandlerError;
@@ -152,9 +152,9 @@ impl RepositoryResolver {
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download blobs: {e}")))?;
 
-        let mut blob_decoder = BlobStream::from_byte_stream(blob_stream);
+        let mut blobs = BlobStream::new(blob_stream);
         let mut write_count = 0;
-        while let Some(blob) = blob_decoder
+        while let Some(blob) = blobs
             .next_blob()
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to decode blob: {e}")))?
@@ -244,7 +244,7 @@ fn compute_changeset(changed_paths: Vec<ChangedPath>) -> IncrementalChangeset {
 }
 
 fn paths_for_blob<'a>(
-    blob: &DecodedBlob,
+    blob: &ResolvedBlob,
     paths_by_blob_id: &'a HashMap<String, Vec<String>>,
 ) -> &'a [String] {
     paths_by_blob_id
@@ -255,7 +255,7 @@ fn paths_for_blob<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::DecodedBlob;
+    use super::ResolvedBlob;
     use super::*;
 
     fn changed_path(
@@ -467,7 +467,7 @@ mod tests {
             vec!["a.rs".to_string(), "b.rs".to_string()],
         );
 
-        let blob = DecodedBlob {
+        let blob = ResolvedBlob {
             oid: "blob1".to_string(),
             data: b"content".to_vec(),
         };
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn paths_for_blob_returns_empty_for_unmatched() {
         let paths_by_blob_id = HashMap::new();
-        let blob = DecodedBlob {
+        let blob = ResolvedBlob {
             oid: "orphan".to_string(),
             data: b"data".to_vec(),
         };

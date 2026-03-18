@@ -1,14 +1,29 @@
 use std::pin::Pin;
 
-use futures::{Stream, StreamExt, stream::Fuse};
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use prost::Message;
 use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
 use tokio_util::io::StreamReader;
 
 #[derive(Debug)]
-pub struct DecodedBlob {
+pub struct ResolvedBlob {
     pub oid: String,
     pub data: Vec<u8>,
+}
+
+struct InProgressBlob {
+    oid: String,
+    data: Vec<u8>,
+}
+
+impl InProgressBlob {
+    fn into_resolved(self) -> ResolvedBlob {
+        ResolvedBlob {
+            oid: self.oid,
+            data: self.data,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -22,71 +37,72 @@ struct BlobChunk {
     #[prost(string, tag = "1")]
     oid: String,
     #[prost(int64, tag = "2")]
-    #[allow(dead_code)]
     size: i64,
     #[prost(bytes = "vec", tag = "3")]
     data: Vec<u8>,
     #[prost(bytes = "vec", tag = "4")]
-    #[allow(dead_code)]
     path: Vec<u8>,
 }
 
-type ChunkStream = Fuse<Pin<Box<dyn Stream<Item = Result<BlobChunk, BlobDecodeError>> + Send>>>;
+type ChunkStream = Pin<Box<dyn Stream<Item = Result<BlobChunk, BlobDecodeError>> + Send>>;
 
 pub struct BlobStream {
     chunks: ChunkStream,
-    current: Option<DecodedBlob>,
+    current: Option<InProgressBlob>,
 }
 
 impl BlobStream {
-    pub fn from_byte_stream<S, E>(stream: Pin<Box<S>>) -> Self
+    pub fn new<S, E>(stream: Pin<Box<S>>) -> Self
     where
-        S: Stream<Item = Result<bytes::Bytes, E>> + Send + ?Sized + 'static,
+        S: Stream<Item = Result<Bytes, E>> + Send + ?Sized + 'static,
         E: std::error::Error + Send + Sync + 'static,
     {
-        let io_stream = stream.map(|r| r.map_err(std::io::Error::other));
-        let reader = StreamReader::new(io_stream);
-        let frames = FramedRead::new(reader, LengthDelimitedCodec::new());
+        let reader = StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
 
-        let chunks: Pin<Box<dyn Stream<Item = Result<BlobChunk, BlobDecodeError>> + Send>> =
-            Box::pin(frames.flat_map(|frame_result| {
-                let items: Vec<Result<BlobChunk, BlobDecodeError>> = match frame_result {
-                    Ok(frame) => match ListBlobsResponse::decode(frame) {
-                        Ok(response) => response.blobs.into_iter().map(Ok).collect(),
-                        Err(e) => vec![Err(BlobDecodeError(format!(
-                            "failed to decode ListBlobsResponse: {e}"
-                        )))],
-                    },
-                    Err(e) => vec![Err(BlobDecodeError(format!("frame error: {e}")))],
-                };
-                futures::stream::iter(items)
-            }));
+        let mut codec = LengthDelimitedCodec::new();
+        codec.set_max_frame_length(4 * 1024 * 1024);
+
+        let chunks = FramedRead::new(reader, codec)
+            .map(|frame| {
+                let frame = frame.map_err(|e| BlobDecodeError(format!("frame error: {e}")))?;
+                let resp = ListBlobsResponse::decode(frame)
+                    .map_err(|e| BlobDecodeError(format!("protobuf decode error: {e}")))?;
+                Ok(resp.blobs)
+            })
+            .flat_map(
+                |result: Result<Vec<BlobChunk>, BlobDecodeError>| match result {
+                    Ok(blobs) => {
+                        futures::stream::iter(blobs.into_iter().map(Ok).collect::<Vec<_>>())
+                            .left_stream()
+                    }
+                    Err(e) => futures::stream::once(async move { Err(e) }).right_stream(),
+                },
+            );
 
         Self {
-            chunks: chunks.fuse(),
+            chunks: Box::pin(chunks),
             current: None,
         }
     }
 
-    pub async fn next_blob(&mut self) -> Result<Option<DecodedBlob>, BlobDecodeError> {
+    pub async fn next_blob(&mut self) -> Result<Option<ResolvedBlob>, BlobDecodeError> {
         loop {
             match self.chunks.next().await {
                 Some(Ok(chunk)) => {
                     if !chunk.oid.is_empty() {
-                        let new_blob = DecodedBlob {
+                        let prev = self.current.replace(InProgressBlob {
                             oid: chunk.oid,
                             data: chunk.data,
-                        };
-
-                        if let Some(completed) = self.current.replace(new_blob) {
-                            return Ok(Some(completed));
+                        });
+                        if let Some(blob) = prev {
+                            return Ok(Some(blob.into_resolved()));
                         }
                     } else if let Some(current) = &mut self.current {
                         current.data.extend_from_slice(&chunk.data);
                     }
                 }
                 Some(Err(e)) => return Err(e),
-                None => return Ok(self.current.take()),
+                None => return Ok(self.current.take().map(InProgressBlob::into_resolved)),
             }
         }
     }
@@ -109,22 +125,19 @@ mod tests {
     }
 
     fn blob_stream_from_bytes(data: Vec<u8>) -> BlobStream {
-        let stream: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>> =
-            Box::pin(futures::stream::once(async move {
-                Ok(bytes::Bytes::from(data))
-            }));
-        BlobStream::from_byte_stream(stream)
+        let stream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>> =
+            Box::pin(futures::stream::once(async move { Ok(Bytes::from(data)) }));
+        BlobStream::new(stream)
     }
 
     fn blob_stream_from_chunks(chunks: Vec<Vec<u8>>) -> BlobStream {
-        let stream: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>> =
-            Box::pin(futures::stream::iter(
-                chunks.into_iter().map(|c| Ok(bytes::Bytes::from(c))),
-            ));
-        BlobStream::from_byte_stream(stream)
+        let stream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>> = Box::pin(
+            futures::stream::iter(chunks.into_iter().map(|c| Ok(Bytes::from(c)))),
+        );
+        BlobStream::new(stream)
     }
 
-    async fn collect_blobs(data: Vec<u8>) -> Result<Vec<DecodedBlob>, BlobDecodeError> {
+    async fn collect_blobs(data: Vec<u8>) -> Result<Vec<ResolvedBlob>, BlobDecodeError> {
         let mut decoder = blob_stream_from_bytes(data);
         let mut blobs = Vec::new();
         while let Some(blob) = decoder.next_blob().await? {
