@@ -122,6 +122,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             WHERE traversal_path = {traversal_path:String}
               AND project_id = {project_id:Int64}
               AND branch = {branch:String}
+            HAVING count() > 0
         "#;
 
         let batches = self

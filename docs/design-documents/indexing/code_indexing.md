@@ -89,7 +89,9 @@ graph LR
 graph LR
     Siphon["Siphon CDC"] --> ExtNATS["NATS JetStream<br/>(Siphon stream)"]
     ExtNATS --> Dispatcher["SiphonCodeIndexingTaskDispatcher<br/>(DispatchIndexing mode)"]
+    ExtNATS --> Backfill["NamespaceCodeBackfillDispatcher<br/>(DispatchIndexing mode)"]
     Dispatcher --> IntNATS["NATS JetStream<br/>(GKG_INDEXER stream)"]
+    Backfill --> IntNATS
     IntNATS --> Handler["CodeIndexingTaskHandler<br/>(Indexer mode)"]
     Handler --> Rails["Rails internal API<br/>(archive download)"]
     Rails --> CodeGraph["code-graph<br/>(parse + analyze)"]
@@ -103,7 +105,7 @@ graph LR
 |---|---|
 | `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
 | `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
-| `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
+| `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
 
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
@@ -165,9 +167,19 @@ The `SiphonCodeIndexingTaskDispatcher` runs as a `ScheduledTask` in DispatchInde
 
 This separation lets task dispatching be stopped independently from the indexer — the handler keeps draining whatever was already dispatched, but no new work enters the pipeline.
 
+##### Namespace backfill dispatch
+
+When a namespace first enables Knowledge Graph indexing, its existing projects need to be indexed even though no push events have occurred yet. The `NamespaceCodeBackfillDispatcher` handles this by consuming `knowledge_graph_enabled_namespaces` CDC events from Siphon. For each newly enabled namespace it:
+
+1. Resolves the namespace's traversal path from `namespace_traversal_paths`
+2. Queries `project_namespace_traversal_paths` to find all projects under that namespace
+3. Publishes a `CodeIndexingTaskRequest` for each project to the `GKG_INDEXER` stream
+
+These backfill requests omit `branch` and `commit_sha`. The handler resolves the default branch from the Rails internal API at processing time.
+
 ##### Handler
 
-The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.
+The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and, if no branch was provided (e.g. from a namespace backfill), resolves the default branch from the Rails internal API. It then acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.
 
 Example NATS KV:
 
@@ -261,45 +273,48 @@ Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
 #### Checkpoint tracking
 
-The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). It serves two purposes:
-
-- The code indexing task handler and reconciliation handler check it to skip already-indexed commits.
-- The dispatch query anti-joins against it to find projects that have never been indexed.
+The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). The code indexing task handler checks it to skip already-indexed commits.
 
 #### Flow visual representation
 
 ```plaintext
-Rails (p_knowledge_graph_code_indexing_tasks)
-        |
-        v
-  Siphon CDC → NATS JetStream (Siphon stream)
-        |
-        v
-  SiphonCodeIndexingTaskDispatcher (DispatchIndexing mode)
-        |- Batch-pull Siphon messages
-        |- Decode protobuf, publish CodeIndexingTaskRequest JSON
-        \- Subject: code.task.indexing.requested.<project_id>.<branch>
-        |
-        v
-  NATS JetStream (GKG_INDEXER stream)
-        |
-        v
-  CodeIndexingTaskHandler (Indexer mode)
-        |
-        |- 1. Deserialize CodeIndexingTaskRequest
-        |- 2. Check checkpoint (skip already-indexed commits)
-        |- 3. Acquire distributed lock via NATS KV
-        |- 4. Download repository archive from Rails internal API
-        |- 5. Extract to temp directory
-        |- 6. Run indexing pipeline
-        |       |- File discovery (respects .gitignore)
-        |       |- Async file reads
-        |       |- CPU-bound parsing (bounded parallelism)
-        |       \- Analysis phase -> graph
-        |- 7. Convert graph to Arrow record batches
-        |- 8. Write to ClickHouse (5 tables)
-        |- 9. Clean up stale data
-        \- 10. Update checkpoint, release lock
+  Push events:                          Namespace enabled:
+  Rails (p_knowledge_graph_code_        Rails (knowledge_graph_enabled_
+         indexing_tasks)                       namespaces)
+        |                                      |
+        v                                      v
+  Siphon CDC → NATS JetStream (Siphon stream, two subjects)
+        |                                      |
+        v                                      v
+  SiphonCodeIndexingTask               NamespaceCodeBackfill
+  Dispatcher                           Dispatcher
+        |- Batch-pull messages                 |- Batch-pull messages
+        |- Decode protobuf                     |- Resolve namespace traversal path
+        \- Publish per task                    \- Publish per project in namespace
+        |                                      |
+        +------------------+-------------------+
+                           |
+                           v
+                 NATS JetStream (GKG_INDEXER stream)
+                           |
+                           v
+                 CodeIndexingTaskHandler (Indexer mode)
+                           |
+                           |- 1. Deserialize CodeIndexingTaskRequest
+                           |- 2. Resolve default branch from Rails (if not provided)
+                           |- 3. Check checkpoint (skip already-indexed commits)
+                           |- 4. Acquire distributed lock via NATS KV
+                           |- 5. Download repository archive from Rails internal API
+                           |- 6. Extract to temp directory
+                           |- 7. Run indexing pipeline
+                           |       |- File discovery (respects .gitignore)
+                           |       |- Async file reads
+                           |       |- CPU-bound parsing (bounded parallelism)
+                           |       \- Analysis phase -> graph
+                           |- 8. Convert graph to Arrow record batches
+                           |- 9. Write to ClickHouse (5 tables)
+                           |- 10. Clean up stale data
+                           \- 11. Update checkpoint, release lock
 ```
 
 ### Differences from the original local tool
