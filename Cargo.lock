@@ -2753,6 +2753,10 @@ dependencies = [
  "prost-build",
  "prost-types",
  "query-engine",
+ "querying-formatters",
+ "querying-pipeline",
+ "querying-shared-stages",
+ "querying-types",
  "reqwest 0.13.2",
  "rustc-hash",
  "rustls",
@@ -3408,6 +3412,8 @@ dependencies = [
  "gkg-server",
  "gkg-utils",
  "query-engine",
+ "querying-formatters",
+ "querying-shared-stages",
  "serde_json",
  "testcontainers",
  "tokio",
@@ -3439,6 +3445,9 @@ dependencies = [
  "parking_lot",
  "prost",
  "query-engine",
+ "querying-formatters",
+ "querying-pipeline",
+ "querying-shared-stages",
  "serde",
  "serde_json",
  "sha2",
@@ -5174,6 +5183,52 @@ dependencies = [
  "serde_json",
  "strum",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "querying-formatters"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "gkg-utils",
+ "indexmap 2.13.0",
+ "query-engine",
+ "querying-shared-stages",
+ "querying-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "querying-pipeline"
+version = "0.1.0"
+dependencies = [
+ "ontology",
+ "query-engine",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "querying-shared-stages"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "ontology",
+ "query-engine",
+ "querying-pipeline",
+ "querying-types",
+ "tokio",
+]
+
+[[package]]
+name = "querying-types"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "gkg-utils",
+ "query-engine",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

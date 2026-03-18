@@ -1,0 +1,13 @@
+[package]
+name = "querying-pipeline"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+ontology = { path = "../ontology" }
+query-engine = { path = "../query-engine" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

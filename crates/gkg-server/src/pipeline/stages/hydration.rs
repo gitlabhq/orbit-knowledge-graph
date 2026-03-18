@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use arrow::datatypes::Int64Type;
@@ -7,15 +8,12 @@ use clickhouse_client::ArrowClickHouseClient;
 use futures::future::try_join_all;
 use query_engine::{DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryType, compile};
 
-use crate::redaction::{QueryResult, RedactionMessage};
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
+use querying_types::QueryResult;
 
-use super::super::error::PipelineError;
-use super::super::metrics::PipelineObserver;
-use super::super::types::{
-    HydrationOutput, PipelineRequest, QueryPipelineContext, RedactionOutput,
-};
-use super::PipelineStage;
+use crate::pipeline::types::RedactionOutput;
+use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use querying_shared_stages::HydrationOutput;
 
 use query_engine::constants::{
     GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
@@ -27,6 +25,13 @@ type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 pub struct HydrationStage;
 
 impl HydrationStage {
+    /// Retrieve the ClickHouse client from server extensions.
+    fn client(ctx: &QueryPipelineContext) -> Result<&Arc<ArrowClickHouseClient>, PipelineError> {
+        ctx.server_extensions
+            .get::<Arc<ArrowClickHouseClient>>()
+            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
+    }
+
     /// Static hydration: use pre-built templates from compile time.
     async fn hydrate_static(
         ctx: &QueryPipelineContext,
@@ -85,10 +90,11 @@ impl HydrationStage {
         entity_type: &str,
         query_json: String,
     ) -> Result<PropertyMap, PipelineError> {
+        let client = Self::client(ctx)?;
         let compiled = compile(&query_json, &ctx.ontology, ctx.security_context()?)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
-        let mut query = ctx.client.query(&compiled.base.sql);
+        let mut query = client.query(&compiled.base.sql);
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
@@ -240,33 +246,29 @@ impl HydrationStage {
     }
 }
 
-impl<M: RedactionMessage> PipelineStage<M> for HydrationStage {
+impl PipelineStage for HydrationStage {
     type Input = RedactionOutput;
     type Output = HydrationOutput;
 
     async fn execute(
         &self,
-        input: Self::Input,
         ctx: &mut QueryPipelineContext,
-        _req: &mut PipelineRequest<'_, M>,
-        obs: &mut PipelineObserver,
+        obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
+        let input = ctx.phases.get::<RedactionOutput>().ok_or_else(|| {
+            PipelineError::Execution("RedactionOutput not found in phases".into())
+        })?;
         let t = Instant::now();
-        let mut query_result = input.query_result;
+        let mut query_result = input.query_result.clone();
+        let redacted_count = input.redacted_count;
         let result_context = query_result.ctx().clone();
 
         match &ctx.compiled()?.hydration {
-            HydrationPlan::None => {
-                obs.hydrated(t.elapsed());
-                return Ok(HydrationOutput {
-                    query_result,
-                    result_context,
-                    redacted_count: input.redacted_count,
-                });
-            }
+            HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
-                let property_map =
-                    obs.check(Self::hydrate_static(ctx, templates, &query_result).await)?;
+                let property_map = Self::hydrate_static(ctx, templates, &query_result)
+                    .await
+                    .inspect_err(|e| obs.record_error(e))?;
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
                 }
@@ -274,7 +276,9 @@ impl<M: RedactionMessage> PipelineStage<M> for HydrationStage {
             HydrationPlan::Dynamic => {
                 let refs = Self::extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
-                    let property_map = obs.check(Self::hydrate_dynamic(ctx, &refs).await)?;
+                    let property_map = Self::hydrate_dynamic(ctx, &refs)
+                        .await
+                        .inspect_err(|e| obs.record_error(e))?;
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }
             }
@@ -284,7 +288,7 @@ impl<M: RedactionMessage> PipelineStage<M> for HydrationStage {
         Ok(HydrationOutput {
             query_result,
             result_context,
-            redacted_count: input.redacted_count,
+            redacted_count,
         })
     }
 }
