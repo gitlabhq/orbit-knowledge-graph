@@ -41,11 +41,10 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 axum = { workspace = true }
+sha2 = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
-
-sha2 = { workspace = true }
 internment = { workspace = true }
 parser-core = { workspace = true }
 smallvec = { workspace = true }

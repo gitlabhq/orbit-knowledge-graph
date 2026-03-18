@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,6 +15,37 @@ use crate::modules::code::archive;
 
 const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
+
+#[derive(Debug)]
+enum IncrementalUpdateError {
+    ForcePushDetected,
+    TooManyChangedPaths,
+    Other(String),
+}
+
+impl fmt::Display for IncrementalUpdateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ForcePushDetected => write!(f, "force push detected"),
+            Self::TooManyChangedPaths => {
+                write!(f, "too many changed paths (exceeded {MAX_CHANGED_PATHS})")
+            }
+            Self::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl IncrementalUpdateError {
+    fn should_fallback_to_full_download(&self) -> bool {
+        matches!(self, Self::ForcePushDetected | Self::TooManyChangedPaths)
+    }
+}
+
+impl From<IncrementalUpdateError> for HandlerError {
+    fn from(error: IncrementalUpdateError) -> Self {
+        HandlerError::Processing(error.to_string())
+    }
+}
 
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
@@ -68,7 +100,7 @@ impl RepositoryResolver {
             .await
         {
             Ok(path) => Ok(path),
-            Err(error) if should_fallback_to_full_download(&error) => {
+            Err(error) if error.should_fallback_to_full_download() => {
                 warn!(
                     project_id,
                     branch,
@@ -83,7 +115,7 @@ impl RepositoryResolver {
                     })?;
                 self.full_download(project_id, branch, ref_name).await
             }
-            Err(error) => Err(error),
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -101,10 +133,14 @@ impl RepositoryResolver {
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))?;
 
-        if repo_path.exists() {
-            tokio::fs::remove_dir_all(&repo_path).await.map_err(|e| {
-                HandlerError::Processing(format!("failed to clean cache directory: {e}"))
-            })?;
+        match tokio::fs::remove_dir_all(&repo_path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(HandlerError::Processing(format!(
+                    "failed to clean cache directory: {e}"
+                )));
+            }
         }
         tokio::fs::create_dir_all(&repo_path).await.map_err(|e| {
             HandlerError::Processing(format!("failed to create cache directory: {e}"))
@@ -127,7 +163,7 @@ impl RepositoryResolver {
         branch: &str,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<PathBuf, HandlerError> {
+    ) -> Result<PathBuf, IncrementalUpdateError> {
         debug!(
             project_id,
             branch, from_sha, to_sha, "attempting incremental update"
@@ -137,7 +173,13 @@ impl RepositoryResolver {
             .repository_service
             .changed_paths(project_id, from_sha, to_sha)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to fetch changed paths: {e}")))?;
+            .map_err(|e| {
+                if e.is_force_push() {
+                    IncrementalUpdateError::ForcePushDetected
+                } else {
+                    IncrementalUpdateError::Other(format!("failed to fetch changed paths: {e}"))
+                }
+            })?;
 
         let changeset = compute_changeset(changed_path_stream).await?;
 
@@ -146,7 +188,7 @@ impl RepositoryResolver {
                 .delete_file(project_id, branch, path)
                 .await
                 .map_err(|e| {
-                    HandlerError::Processing(format!("failed to delete cached file: {e}"))
+                    IncrementalUpdateError::Other(format!("failed to delete cached file: {e}"))
                 })?;
         }
 
@@ -154,14 +196,14 @@ impl RepositoryResolver {
             .repository_service
             .download_blobs(project_id, from_sha, to_sha)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to download blobs: {e}")))?;
+            .map_err(|e| IncrementalUpdateError::Other(format!("failed to download blobs: {e}")))?;
 
         let mut blobs = BlobStream::new(blob_stream);
         let mut write_count = 0;
         while let Some(blob) = blobs
             .next_blob()
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to decode blob: {e}")))?
+            .map_err(|e| IncrementalUpdateError::Other(format!("failed to decode blob: {e}")))?
         {
             let paths = paths_for_blob(&blob, &changeset.paths_by_blob_id);
             for path in paths {
@@ -169,7 +211,7 @@ impl RepositoryResolver {
                     .write_file(project_id, branch, path, &blob.data)
                     .await
                     .map_err(|e| {
-                        HandlerError::Processing(format!("failed to write cached file: {e}"))
+                        IncrementalUpdateError::Other(format!("failed to write cached file: {e}"))
                     })?;
                 write_count += 1;
             }
@@ -178,7 +220,9 @@ impl RepositoryResolver {
         self.cache
             .update_commit(project_id, branch, to_sha)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to update cache commit: {e}")))?;
+            .map_err(|e| {
+                IncrementalUpdateError::Other(format!("failed to update cache commit: {e}"))
+            })?;
 
         info!(
             project_id,
@@ -194,15 +238,6 @@ impl RepositoryResolver {
     }
 }
 
-fn should_fallback_to_full_download(error: &HandlerError) -> bool {
-    match error {
-        HandlerError::Processing(msg) => {
-            msg.contains("force push") || msg.contains("too many changed paths")
-        }
-        _ => false,
-    }
-}
-
 #[derive(Debug)]
 struct IncrementalChangeset {
     deletions: Vec<String>,
@@ -211,7 +246,7 @@ struct IncrementalChangeset {
 
 async fn compute_changeset(
     stream: super::service::ByteStream,
-) -> Result<IncrementalChangeset, HandlerError> {
+) -> Result<IncrementalChangeset, IncrementalUpdateError> {
     let mut changed_paths = ChangedPathStream::new(stream);
     let mut deletions = Vec::new();
     let mut paths_by_blob_id: HashMap<String, Vec<String>> = HashMap::new();
@@ -220,13 +255,11 @@ async fn compute_changeset(
     while let Some(change) = changed_paths
         .next_path()
         .await
-        .map_err(|e| HandlerError::Processing(format!("failed to decode changed path: {e}")))?
+        .map_err(|e| IncrementalUpdateError::Other(format!("failed to decode changed path: {e}")))?
     {
         count += 1;
         if count > MAX_CHANGED_PATHS {
-            return Err(HandlerError::Processing(format!(
-                "too many changed paths (exceeded {MAX_CHANGED_PATHS})"
-            )));
+            return Err(IncrementalUpdateError::TooManyChangedPaths);
         }
 
         if change.old_mode == SUBMODULE_MODE || change.new_mode == SUBMODULE_MODE {
@@ -476,7 +509,7 @@ mod tests {
         let stream = byte_stream_from_ndjson(lines);
 
         let err = compute_changeset(stream).await.unwrap_err();
-        assert!(err.to_string().contains("too many changed paths"));
+        assert!(matches!(err, IncrementalUpdateError::TooManyChangedPaths));
     }
 
     #[test]

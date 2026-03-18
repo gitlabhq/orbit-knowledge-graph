@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use sha2::{Digest, Sha256};
+
 #[derive(Debug)]
 pub struct CachedRepository {
     pub path: PathBuf,
@@ -29,7 +31,6 @@ pub trait RepositoryCache: Send + Sync {
         project_id: i64,
         branch: &str,
         commit_sha: &str,
-        path: &Path,
     ) -> Result<(), RepositoryCacheError>;
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
@@ -82,12 +83,19 @@ impl LocalRepositoryCache {
     }
 
     fn branch_dir(&self, project_id: i64, branch: &str) -> PathBuf {
-        self.base_dir.join(project_id.to_string()).join(branch)
+        self.base_dir
+            .join(project_id.to_string())
+            .join(hashed_branch_name(branch))
     }
 
     fn repository_dir(&self, project_id: i64, branch: &str) -> PathBuf {
         self.branch_dir(project_id, branch).join(REPOSITORY_DIR)
     }
+}
+
+fn hashed_branch_name(branch: &str) -> String {
+    let hash = Sha256::digest(branch.as_bytes());
+    format!("{:x}", hash)
 }
 
 fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCacheError> {
@@ -136,7 +144,6 @@ impl RepositoryCache for LocalRepositoryCache {
         project_id: i64,
         branch: &str,
         commit_sha: &str,
-        _path: &Path,
     ) -> Result<(), RepositoryCacheError> {
         let branch_dir = self.branch_dir(project_id, branch);
         let meta_dir = branch_dir.join(META_DIR);
@@ -227,22 +234,20 @@ mod tests {
     #[tokio::test]
     async fn save_then_get_returns_cached_repository() {
         let (_dir, cache) = create_cache();
-        let branch_dir = cache.branch_dir(42, "main");
 
-        cache.save(42, "main", "abc123", &branch_dir).await.unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
         let cached = cache.get(42, "main").await.unwrap().unwrap();
 
-        assert_eq!(cached.path, branch_dir.join("repository"));
+        assert_eq!(cached.path, cache.repository_dir(42, "main"));
         assert_eq!(cached.commit, "abc123");
     }
 
     #[tokio::test]
     async fn save_overwrites_previous_commit() {
         let (_dir, cache) = create_cache();
-        let branch_dir = cache.branch_dir(42, "main");
 
-        cache.save(42, "main", "abc123", &branch_dir).await.unwrap();
-        cache.save(42, "main", "def456", &branch_dir).await.unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
+        cache.save(42, "main", "def456").await.unwrap();
 
         let cached = cache.get(42, "main").await.unwrap().unwrap();
         assert_eq!(cached.commit, "def456");
@@ -251,9 +256,8 @@ mod tests {
     #[tokio::test]
     async fn invalidate_removes_cached_repository() {
         let (_dir, cache) = create_cache();
-        let branch_dir = cache.branch_dir(42, "main");
 
-        cache.save(42, "main", "abc123", &branch_dir).await.unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
         cache.invalidate(42, "main").await.unwrap();
         let result = cache.get(42, "main").await.unwrap();
 
@@ -270,14 +274,9 @@ mod tests {
     #[tokio::test]
     async fn separate_branches_are_independent() {
         let (_dir, cache) = create_cache();
-        let main_dir = cache.branch_dir(42, "main");
-        let develop_dir = cache.branch_dir(42, "develop");
 
-        cache.save(42, "main", "aaa", &main_dir).await.unwrap();
-        cache
-            .save(42, "develop", "bbb", &develop_dir)
-            .await
-            .unwrap();
+        cache.save(42, "main", "aaa").await.unwrap();
+        cache.save(42, "develop", "bbb").await.unwrap();
 
         assert!(cache.get(42, "main").await.unwrap().is_some());
         assert!(cache.get(42, "develop").await.unwrap().is_some());
@@ -286,11 +285,9 @@ mod tests {
     #[tokio::test]
     async fn separate_projects_are_independent() {
         let (_dir, cache) = create_cache();
-        let dir_a = cache.branch_dir(1, "main");
-        let dir_b = cache.branch_dir(2, "main");
 
-        cache.save(1, "main", "aaa", &dir_a).await.unwrap();
-        cache.save(2, "main", "bbb", &dir_b).await.unwrap();
+        cache.save(1, "main", "aaa").await.unwrap();
+        cache.save(2, "main", "bbb").await.unwrap();
 
         assert!(cache.get(1, "main").await.unwrap().is_some());
         assert!(cache.get(2, "main").await.unwrap().is_some());
@@ -299,14 +296,9 @@ mod tests {
     #[tokio::test]
     async fn invalidate_one_branch_preserves_others() {
         let (_dir, cache) = create_cache();
-        let main_dir = cache.branch_dir(42, "main");
-        let develop_dir = cache.branch_dir(42, "develop");
 
-        cache.save(42, "main", "aaa", &main_dir).await.unwrap();
-        cache
-            .save(42, "develop", "bbb", &develop_dir)
-            .await
-            .unwrap();
+        cache.save(42, "main", "aaa").await.unwrap();
+        cache.save(42, "develop", "bbb").await.unwrap();
 
         cache.invalidate(42, "main").await.unwrap();
 
@@ -315,21 +307,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn branch_dir_uses_expected_path_structure() {
+    async fn branch_dir_hashes_branch_name() {
         let (dir, cache) = create_cache();
 
         let path = cache.branch_dir(42, "main");
 
-        assert_eq!(path, dir.path().join("42/main"));
+        let expected_hash = hashed_branch_name("main");
+        assert_eq!(path, dir.path().join(format!("42/{expected_hash}")));
+    }
+
+    #[tokio::test]
+    async fn branch_dir_prevents_path_traversal() {
+        let (dir, cache) = create_cache();
+
+        let safe_path = cache.branch_dir(42, "../../../tmp/evil");
+
+        assert!(safe_path.starts_with(dir.path().join("42")));
+        assert!(!safe_path.to_string_lossy().contains(".."));
     }
 
     #[tokio::test]
     async fn write_file_creates_parent_directories() {
         let (_dir, cache) = create_cache();
-        cache
-            .save(42, "main", "abc123", Path::new(""))
-            .await
-            .unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
 
         cache
             .write_file(42, "main", "src/deep/file.rs", b"content")
@@ -346,10 +346,7 @@ mod tests {
     #[tokio::test]
     async fn delete_file_removes_existing_file() {
         let (_dir, cache) = create_cache();
-        cache
-            .save(42, "main", "abc123", Path::new(""))
-            .await
-            .unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
         cache
             .write_file(42, "main", "file.rs", b"content")
             .await
@@ -364,10 +361,7 @@ mod tests {
     #[tokio::test]
     async fn delete_file_succeeds_when_file_does_not_exist() {
         let (_dir, cache) = create_cache();
-        cache
-            .save(42, "main", "abc123", Path::new(""))
-            .await
-            .unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
 
         cache
             .delete_file(42, "main", "nonexistent.rs")
@@ -378,10 +372,7 @@ mod tests {
     #[tokio::test]
     async fn update_commit_changes_stored_sha() {
         let (_dir, cache) = create_cache();
-        cache
-            .save(42, "main", "abc123", Path::new(""))
-            .await
-            .unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
 
         cache.update_commit(42, "main", "def456").await.unwrap();
 
@@ -392,10 +383,7 @@ mod tests {
     #[tokio::test]
     async fn write_file_rejects_path_traversal() {
         let (_dir, cache) = create_cache();
-        cache
-            .save(42, "main", "abc123", Path::new(""))
-            .await
-            .unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
 
         let result = cache
             .write_file(42, "main", "../../../etc/passwd", b"bad")
@@ -408,10 +396,7 @@ mod tests {
     #[tokio::test]
     async fn delete_file_rejects_path_traversal() {
         let (_dir, cache) = create_cache();
-        cache
-            .save(42, "main", "abc123", Path::new(""))
-            .await
-            .unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
 
         let result = cache.delete_file(42, "main", "../../../etc/passwd").await;
 
@@ -432,7 +417,7 @@ mod tests {
             .unwrap();
         tokio::fs::write(&test_file, "fn main() {}").await.unwrap();
 
-        cache.save(42, "main", "abc123", &branch_dir).await.unwrap();
+        cache.save(42, "main", "abc123").await.unwrap();
         let cached = cache.get(42, "main").await.unwrap().unwrap();
 
         let content = tokio::fs::read_to_string(cached.path.join("src/main.rs"))

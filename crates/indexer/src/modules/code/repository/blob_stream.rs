@@ -71,10 +71,7 @@ impl BlobStream {
             })
             .flat_map(
                 |result: Result<Vec<BlobChunk>, BlobDecodeError>| match result {
-                    Ok(blobs) => {
-                        futures::stream::iter(blobs.into_iter().map(Ok).collect::<Vec<_>>())
-                            .left_stream()
-                    }
+                    Ok(blobs) => futures::stream::iter(blobs.into_iter().map(Ok)).left_stream(),
                     Err(e) => futures::stream::once(async move { Err(e) }).right_stream(),
                 },
             );
