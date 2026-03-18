@@ -70,15 +70,13 @@ rule:
           stopBy: end
 ```
 
-Use `--selector KIND` with `run -p` to extract a sub-node from a pattern match (e.g. report just the function name, not the whole function).
-
 Use `constraints` in YAML rules to filter metavariable text by regex:
 
 ```yaml
 rule:
-  pattern: $F($$$)
+  pattern: $X.$METHOD()
 constraints:
-  F:
+  METHOD:
     regex: "^(unwrap|expect)$"
 ```
 
