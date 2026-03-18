@@ -105,15 +105,15 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
 
     // Rewrite each aggregate in SELECT: AGG(arg) → AGGIf(arg, folded_conds).
     for sel in &mut q.select {
-        if let Some((alias, conds)) = extract_and_match(&sel.expr, &folded_by_alias) {
-            sel.expr = rewrite_agg_to_if(&sel.expr, &if_names, conds, &alias);
+        if let Some((_alias, conds)) = extract_and_match(&sel.expr, &folded_by_alias) {
+            sel.expr = rewrite_agg_to_if(&sel.expr, &if_names, conds);
         }
     }
 
     // Also rewrite ORDER BY expressions that reference the same aggregates.
     for ord in &mut q.order_by {
-        if let Some((alias, conds)) = extract_and_match(&ord.expr, &folded_by_alias) {
-            ord.expr = rewrite_agg_to_if(&ord.expr, &if_names, conds, &alias);
+        if let Some((_alias, conds)) = extract_and_match(&ord.expr, &folded_by_alias) {
+            ord.expr = rewrite_agg_to_if(&ord.expr, &if_names, conds);
         }
     }
 
@@ -134,12 +134,7 @@ fn extract_and_match<'a>(
 }
 
 /// Rewrite `AGG(arg)` to `AGGIf(arg, cond1 AND cond2 AND ...)`.
-fn rewrite_agg_to_if(
-    expr: &Expr,
-    if_names: &HashMap<&str, &str>,
-    conditions: &[Expr],
-    _target_alias: &str,
-) -> Expr {
+fn rewrite_agg_to_if(expr: &Expr, if_names: &HashMap<&str, &str>, conditions: &[Expr]) -> Expr {
     match expr {
         Expr::FuncCall { name, args } => {
             let if_name = match if_names.get(name.as_str()) {
