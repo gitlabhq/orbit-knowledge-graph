@@ -34,7 +34,7 @@ pub trait RepositoryCache: Send + Sync {
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
 
-    fn repository_path(&self, project_id: i64, branch: &str) -> PathBuf;
+    fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf;
 
     async fn delete_file(
         &self,
@@ -59,6 +59,7 @@ pub trait RepositoryCache: Send + Sync {
     ) -> Result<(), RepositoryCacheError>;
 }
 
+const CACHE_DIR_NAME: &str = "gkg-repository-cache";
 const COMMIT_FILE: &str = ".commit";
 const META_DIR: &str = "meta";
 const REPOSITORY_DIR: &str = "repository";
@@ -70,7 +71,7 @@ pub struct LocalRepositoryCache {
 impl Default for LocalRepositoryCache {
     fn default() -> Self {
         Self {
-            base_dir: std::env::temp_dir().join("gkg-repository-cache"),
+            base_dir: std::env::temp_dir().join(CACHE_DIR_NAME),
         }
     }
 }
@@ -155,7 +156,7 @@ impl RepositoryCache for LocalRepositoryCache {
         }
     }
 
-    fn repository_path(&self, project_id: i64, branch: &str) -> PathBuf {
+    fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf {
         self.repository_dir(project_id, branch)
     }
 

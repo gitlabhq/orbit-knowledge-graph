@@ -12,7 +12,7 @@ use super::arrow_converter::ArrowConverter;
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::repository_resolver::RepositoryResolver;
+use super::repository::RepositoryResolver;
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
 
@@ -49,7 +49,7 @@ impl CodeIndexingPipeline {
         }
     }
 
-    pub fn repository_service(&self) -> &Arc<dyn super::repository_service::RepositoryService> {
+    pub fn repository_service(&self) -> &Arc<dyn super::repository::RepositoryService> {
         self.resolver.repository_service()
     }
 

@@ -6,7 +6,6 @@
 
 mod archive;
 mod arrow_converter;
-mod blob_stream;
 mod checkpoint_store;
 mod code_indexing_task_handler;
 pub mod config;
@@ -14,9 +13,7 @@ pub mod indexing_pipeline;
 pub mod locking;
 pub mod metrics;
 mod namespace_backfill_dispatcher;
-pub mod repository_cache;
-pub mod repository_resolver;
-mod repository_service;
+pub mod repository;
 mod siphon_code_indexing_task_dispatcher;
 mod siphon_decoder;
 mod stale_data_cleaner;
@@ -35,16 +32,16 @@ use metrics::CodeMetrics;
 pub use namespace_backfill_dispatcher::{
     NamespaceCodeBackfillDispatcher, NamespaceCodeBackfillDispatcherConfig,
 };
-use repository_resolver::RepositoryResolver;
+use repository::RepositoryResolver;
 pub use siphon_code_indexing_task_dispatcher::{
     SiphonCodeIndexingTaskDispatcher, SiphonCodeIndexingTaskDispatcherConfig,
 };
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
-pub use repository_cache::{LocalRepositoryCache, RepositoryCache};
-pub use repository_service::{
-    CachingRepositoryService, RailsRepositoryService, RepositoryService, RepositoryServiceError,
+pub use repository::{
+    CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
+    RepositoryService, RepositoryServiceError,
 };
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 
@@ -76,8 +73,7 @@ pub fn register_handlers(
     );
     let metrics = CodeMetrics::new();
 
-    let cache: Arc<dyn repository_cache::RepositoryCache> =
-        Arc::new(LocalRepositoryCache::default());
+    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::default());
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 

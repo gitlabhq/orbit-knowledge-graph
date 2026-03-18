@@ -2,16 +2,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gitlab_client::{ChangeStatus, ChangedPath};
+use super::changed_path_stream::ChangeStatus;
 use tracing::{debug, info, warn};
 
-use super::archive;
 use super::blob_stream::{BlobStream, ResolvedBlob};
-use super::repository_cache::RepositoryCache;
-use super::repository_service::RepositoryService;
+use super::cache::RepositoryCache;
+use super::changed_path_stream::ChangedPathStream;
+use super::service::RepositoryService;
 use crate::handler::HandlerError;
+use crate::modules::code::archive;
 
 const SUBMODULE_MODE: u32 = 0o160000;
+const MAX_CHANGED_PATHS: usize = 100_000;
 
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
@@ -66,10 +68,12 @@ impl RepositoryResolver {
             .await
         {
             Ok(path) => Ok(path),
-            Err(error) if is_force_push(&error) => {
+            Err(error) if should_fallback_to_full_download(&error) => {
                 warn!(
                     project_id,
-                    branch, "force push detected, falling back to full download"
+                    branch,
+                    reason = %error,
+                    "falling back to full download"
                 );
                 self.cache
                     .invalidate(project_id, branch)
@@ -89,7 +93,7 @@ impl RepositoryResolver {
         branch: &str,
         commit_sha: &str,
     ) -> Result<PathBuf, HandlerError> {
-        let repo_path = self.cache.repository_path(project_id, branch);
+        let repo_path = self.cache.code_repository_path(project_id, branch);
 
         let archive_bytes = self
             .repository_service
@@ -129,13 +133,13 @@ impl RepositoryResolver {
             branch, from_sha, to_sha, "attempting incremental update"
         );
 
-        let changed_paths = self
+        let changed_path_stream = self
             .repository_service
             .changed_paths(project_id, from_sha, to_sha)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to fetch changed paths: {e}")))?;
 
-        let changeset = compute_changeset(changed_paths);
+        let changeset = compute_changeset(changed_path_stream).await?;
 
         for path in &changeset.deletions {
             self.cache
@@ -186,27 +190,45 @@ impl RepositoryResolver {
             "incremental update complete"
         );
 
-        Ok(self.cache.repository_path(project_id, branch))
+        Ok(self.cache.code_repository_path(project_id, branch))
     }
 }
 
-fn is_force_push(error: &HandlerError) -> bool {
+fn should_fallback_to_full_download(error: &HandlerError) -> bool {
     match error {
-        HandlerError::Processing(msg) => msg.contains("force push"),
+        HandlerError::Processing(msg) => {
+            msg.contains("force push") || msg.contains("too many changed paths")
+        }
         _ => false,
     }
 }
 
+#[derive(Debug)]
 struct IncrementalChangeset {
     deletions: Vec<String>,
     paths_by_blob_id: HashMap<String, Vec<String>>,
 }
 
-fn compute_changeset(changed_paths: Vec<ChangedPath>) -> IncrementalChangeset {
+async fn compute_changeset(
+    stream: super::service::ByteStream,
+) -> Result<IncrementalChangeset, HandlerError> {
+    let mut changed_paths = ChangedPathStream::new(stream);
     let mut deletions = Vec::new();
     let mut paths_by_blob_id: HashMap<String, Vec<String>> = HashMap::new();
+    let mut count = 0usize;
 
-    for change in changed_paths {
+    while let Some(change) = changed_paths
+        .next_path()
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to decode changed path: {e}")))?
+    {
+        count += 1;
+        if count > MAX_CHANGED_PATHS {
+            return Err(HandlerError::Processing(format!(
+                "too many changed paths (exceeded {MAX_CHANGED_PATHS})"
+            )));
+        }
+
         if change.old_mode == SUBMODULE_MODE || change.new_mode == SUBMODULE_MODE {
             continue;
         }
@@ -237,10 +259,10 @@ fn compute_changeset(changed_paths: Vec<ChangedPath>) -> IncrementalChangeset {
         }
     }
 
-    IncrementalChangeset {
+    Ok(IncrementalChangeset {
         deletions,
         paths_by_blob_id,
-    }
+    })
 }
 
 fn paths_for_blob<'a>(
@@ -255,208 +277,206 @@ fn paths_for_blob<'a>(
 
 #[cfg(test)]
 mod tests {
+    use std::pin::Pin;
+
     use super::ResolvedBlob;
     use super::*;
 
-    fn changed_path(
+    fn ndjson_line(
         path: &str,
-        status: ChangeStatus,
+        status: &str,
         old_path: &str,
         old_blob_id: &str,
         new_blob_id: &str,
-    ) -> ChangedPath {
-        ChangedPath {
-            path: path.to_string(),
-            status,
-            old_path: old_path.to_string(),
-            new_mode: 0o100644,
-            old_mode: 0o100644,
-            old_blob_id: old_blob_id.to_string(),
-            new_blob_id: new_blob_id.to_string(),
-        }
+    ) -> String {
+        format!(
+            r#"{{"path":"{path}","status":"{status}","old_path":"{old_path}","new_mode":33188,"old_mode":33188,"old_blob_id":"{old_blob_id}","new_blob_id":"{new_blob_id}"}}"#
+        )
     }
 
-    fn changed_path_with_modes(
-        path: &str,
-        status: ChangeStatus,
-        old_mode: u32,
-        new_mode: u32,
-    ) -> ChangedPath {
-        ChangedPath {
-            path: path.to_string(),
-            status,
-            old_path: String::new(),
-            new_mode,
-            old_mode,
-            old_blob_id: String::new(),
-            new_blob_id: "blob1".to_string(),
-        }
+    fn ndjson_line_with_modes(path: &str, status: &str, old_mode: u32, new_mode: u32) -> String {
+        format!(
+            r#"{{"path":"{path}","status":"{status}","old_path":"","new_mode":{new_mode},"old_mode":{old_mode},"old_blob_id":"","new_blob_id":"blob1"}}"#
+        )
     }
 
-    #[test]
-    fn deleted_goes_to_deletions() {
-        let paths = vec![changed_path(
-            "removed.rs",
-            ChangeStatus::Deleted,
-            "",
-            "old",
-            "",
-        )];
+    fn byte_stream_from_ndjson(
+        lines: Vec<String>,
+    ) -> crate::modules::code::repository::service::ByteStream {
+        let body = lines.join("\n");
+        let stream: Pin<
+            Box<
+                dyn futures::Stream<
+                        Item = Result<
+                            bytes::Bytes,
+                            crate::modules::code::repository::service::RepositoryServiceError,
+                        >,
+                    > + Send,
+            >,
+        > = Box::pin(futures::stream::once(async move {
+            Ok(bytes::Bytes::from(body))
+        }));
+        stream
+    }
 
-        let changeset = compute_changeset(paths);
+    #[tokio::test]
+    async fn deleted_goes_to_deletions() {
+        let stream =
+            byte_stream_from_ndjson(vec![ndjson_line("removed.rs", "DELETED", "", "old", "")]);
+
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert_eq!(changeset.deletions, vec!["removed.rs"]);
         assert!(changeset.paths_by_blob_id.is_empty());
     }
 
-    #[test]
-    fn added_goes_to_blob_map() {
-        let paths = vec![changed_path("new.rs", ChangeStatus::Added, "", "", "blob1")];
+    #[tokio::test]
+    async fn added_goes_to_blob_map() {
+        let stream = byte_stream_from_ndjson(vec![ndjson_line("new.rs", "ADDED", "", "", "blob1")]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert!(changeset.deletions.is_empty());
         assert_eq!(changeset.paths_by_blob_id["blob1"], vec!["new.rs"]);
     }
 
-    #[test]
-    fn modified_goes_to_blob_map() {
-        let paths = vec![changed_path(
-            "file.rs",
-            ChangeStatus::Modified,
-            "",
-            "old",
-            "new",
-        )];
+    #[tokio::test]
+    async fn modified_goes_to_blob_map() {
+        let stream =
+            byte_stream_from_ndjson(vec![ndjson_line("file.rs", "MODIFIED", "", "old", "new")]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert!(changeset.deletions.is_empty());
         assert_eq!(changeset.paths_by_blob_id["new"], vec!["file.rs"]);
     }
 
-    #[test]
-    fn copied_goes_to_blob_map() {
-        let paths = vec![changed_path(
-            "copy.rs",
-            ChangeStatus::Copied,
-            "",
-            "blob1",
-            "blob1",
-        )];
+    #[tokio::test]
+    async fn copied_goes_to_blob_map() {
+        let stream =
+            byte_stream_from_ndjson(vec![ndjson_line("copy.rs", "COPIED", "", "blob1", "blob1")]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert!(changeset.deletions.is_empty());
         assert_eq!(changeset.paths_by_blob_id["blob1"], vec!["copy.rs"]);
     }
 
-    #[test]
-    fn renamed_creates_deletion_and_blob_entry() {
-        let paths = vec![changed_path(
+    #[tokio::test]
+    async fn renamed_creates_deletion_and_blob_entry() {
+        let stream = byte_stream_from_ndjson(vec![ndjson_line(
             "new_name.rs",
-            ChangeStatus::Renamed,
+            "RENAMED",
             "old_name.rs",
             "blob1",
             "blob1",
-        )];
+        )]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert_eq!(changeset.deletions, vec!["old_name.rs"]);
         assert_eq!(changeset.paths_by_blob_id["blob1"], vec!["new_name.rs"]);
     }
 
-    #[test]
-    fn renamed_with_edit_creates_deletion_and_new_blob_entry() {
-        let paths = vec![changed_path(
+    #[tokio::test]
+    async fn renamed_with_edit_creates_deletion_and_new_blob_entry() {
+        let stream = byte_stream_from_ndjson(vec![ndjson_line(
             "new_name.rs",
-            ChangeStatus::Renamed,
+            "RENAMED",
             "old_name.rs",
             "blob_old",
             "blob_new",
-        )];
+        )]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert_eq!(changeset.deletions, vec!["old_name.rs"]);
         assert_eq!(changeset.paths_by_blob_id["blob_new"], vec!["new_name.rs"]);
     }
 
-    #[test]
-    fn filters_submodule_by_new_mode() {
-        let paths = vec![changed_path_with_modes(
+    #[tokio::test]
+    async fn filters_submodule_by_new_mode() {
+        let stream = byte_stream_from_ndjson(vec![ndjson_line_with_modes(
             "submod",
-            ChangeStatus::Added,
+            "ADDED",
             0,
             SUBMODULE_MODE,
-        )];
+        )]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert!(changeset.deletions.is_empty());
         assert!(changeset.paths_by_blob_id.is_empty());
     }
 
-    #[test]
-    fn filters_submodule_by_old_mode() {
-        let paths = vec![changed_path_with_modes(
+    #[tokio::test]
+    async fn filters_submodule_by_old_mode() {
+        let stream = byte_stream_from_ndjson(vec![ndjson_line_with_modes(
             "submod",
-            ChangeStatus::Deleted,
+            "DELETED",
             SUBMODULE_MODE,
             0,
-        )];
+        )]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert!(changeset.deletions.is_empty());
     }
 
-    #[test]
-    fn type_change_is_skipped() {
-        let paths = vec![changed_path(
-            "file",
-            ChangeStatus::TypeChange,
-            "",
-            "old",
-            "new",
-        )];
+    #[tokio::test]
+    async fn type_change_is_skipped() {
+        let stream =
+            byte_stream_from_ndjson(vec![ndjson_line("file", "TYPE_CHANGE", "", "old", "new")]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert!(changeset.deletions.is_empty());
         assert!(changeset.paths_by_blob_id.is_empty());
     }
 
-    #[test]
-    fn unknown_status_is_skipped() {
-        let paths = vec![changed_path(
-            "file",
-            ChangeStatus::Unknown,
-            "",
-            "old",
-            "new",
-        )];
+    #[tokio::test]
+    async fn unknown_status_is_skipped() {
+        let stream =
+            byte_stream_from_ndjson(vec![ndjson_line("file", "SOMETHING_NEW", "", "old", "new")]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         assert!(changeset.deletions.is_empty());
         assert!(changeset.paths_by_blob_id.is_empty());
     }
 
-    #[test]
-    fn same_blob_id_maps_to_multiple_paths() {
-        let paths = vec![
-            changed_path("a.rs", ChangeStatus::Added, "", "", "shared_blob"),
-            changed_path("b.rs", ChangeStatus::Copied, "", "", "shared_blob"),
-        ];
+    #[tokio::test]
+    async fn same_blob_id_maps_to_multiple_paths() {
+        let stream = byte_stream_from_ndjson(vec![
+            ndjson_line("a.rs", "ADDED", "", "", "shared_blob"),
+            ndjson_line("b.rs", "COPIED", "", "", "shared_blob"),
+        ]);
 
-        let changeset = compute_changeset(paths);
+        let changeset = compute_changeset(stream).await.unwrap();
 
         let blob_paths = &changeset.paths_by_blob_id["shared_blob"];
         assert_eq!(blob_paths.len(), 2);
         assert!(blob_paths.contains(&"a.rs".to_string()));
         assert!(blob_paths.contains(&"b.rs".to_string()));
+    }
+
+    #[tokio::test]
+    async fn exceeding_max_changed_paths_returns_error() {
+        let lines: Vec<String> = (0..MAX_CHANGED_PATHS + 1)
+            .map(|i| {
+                ndjson_line(
+                    &format!("file_{i}.rs"),
+                    "ADDED",
+                    "",
+                    "",
+                    &format!("blob_{i}"),
+                )
+            })
+            .collect();
+        let stream = byte_stream_from_ndjson(lines);
+
+        let err = compute_changeset(stream).await.unwrap_err();
+        assert!(err.to_string().contains("too many changed paths"));
     }
 
     #[test]

@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::Stream;
-use gitlab_client::{ChangedPath, GitlabClient, GitlabClientError, ProjectInfo};
+use gitlab_client::{GitlabClient, GitlabClientError, ProjectInfo};
 use moka::future::Cache;
 
-pub type BlobByteStream =
+pub type ByteStream =
     Pin<Box<dyn Stream<Item = Result<bytes::Bytes, RepositoryServiceError>> + Send>>;
 
 #[derive(Debug, thiserror::Error)]
@@ -45,14 +45,14 @@ pub trait RepositoryService: Send + Sync {
         project_id: i64,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<Vec<ChangedPath>, RepositoryServiceError>;
+    ) -> Result<ByteStream, RepositoryServiceError>;
 
     async fn download_blobs(
         &self,
         project_id: i64,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<BlobByteStream, RepositoryServiceError>;
+    ) -> Result<ByteStream, RepositoryServiceError>;
 }
 
 fn map_gitlab_error(error: GitlabClientError) -> RepositoryServiceError {
@@ -94,11 +94,16 @@ impl RepositoryService for RailsRepositoryService {
         project_id: i64,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<Vec<ChangedPath>, RepositoryServiceError> {
-        self.gitlab_client
+    ) -> Result<ByteStream, RepositoryServiceError> {
+        use futures::StreamExt;
+
+        let stream = self
+            .gitlab_client
             .changed_paths(project_id, from_sha, to_sha)
             .await
-            .map_err(map_gitlab_error)
+            .map_err(map_gitlab_error)?;
+
+        Ok(Box::pin(stream.map(|r| r.map_err(map_gitlab_error))))
     }
 
     async fn download_blobs(
@@ -106,7 +111,7 @@ impl RepositoryService for RailsRepositoryService {
         project_id: i64,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<BlobByteStream, RepositoryServiceError> {
+    ) -> Result<ByteStream, RepositoryServiceError> {
         use futures::StreamExt;
 
         let stream = self
@@ -166,7 +171,7 @@ impl RepositoryService for CachingRepositoryService {
         project_id: i64,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<Vec<ChangedPath>, RepositoryServiceError> {
+    ) -> Result<ByteStream, RepositoryServiceError> {
         self.inner.changed_paths(project_id, from_sha, to_sha).await
     }
 
@@ -175,7 +180,7 @@ impl RepositoryService for CachingRepositoryService {
         project_id: i64,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<BlobByteStream, RepositoryServiceError> {
+    ) -> Result<ByteStream, RepositoryServiceError> {
         self.inner
             .download_blobs(project_id, from_sha, to_sha)
             .await
@@ -249,8 +254,8 @@ pub mod test_utils {
             _project_id: i64,
             _from_sha: &str,
             _to_sha: &str,
-        ) -> Result<Vec<ChangedPath>, RepositoryServiceError> {
-            Ok(Vec::new())
+        ) -> Result<ByteStream, RepositoryServiceError> {
+            Ok(Box::pin(futures::stream::empty()))
         }
 
         async fn download_blobs(
@@ -258,7 +263,7 @@ pub mod test_utils {
             _project_id: i64,
             _from_sha: &str,
             _to_sha: &str,
-        ) -> Result<BlobByteStream, RepositoryServiceError> {
+        ) -> Result<ByteStream, RepositoryServiceError> {
             Ok(Box::pin(futures::stream::empty()))
         }
     }
@@ -315,7 +320,7 @@ pub mod test_utils {
             project_id: i64,
             from_sha: &str,
             to_sha: &str,
-        ) -> Result<Vec<ChangedPath>, RepositoryServiceError> {
+        ) -> Result<ByteStream, RepositoryServiceError> {
             self.inner.changed_paths(project_id, from_sha, to_sha).await
         }
 
@@ -324,7 +329,7 @@ pub mod test_utils {
             project_id: i64,
             from_sha: &str,
             to_sha: &str,
-        ) -> Result<BlobByteStream, RepositoryServiceError> {
+        ) -> Result<ByteStream, RepositoryServiceError> {
             self.inner
                 .download_blobs(project_id, from_sha, to_sha)
                 .await

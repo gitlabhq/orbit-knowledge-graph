@@ -17,7 +17,7 @@ use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
     CodeIndexingTaskHandler, CodeIndexingTaskHandlerConfig, LocalRepositoryCache,
     RailsRepositoryService, RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
-    repository_cache::RepositoryCache, repository_resolver::RepositoryResolver,
+    repository::RepositoryCache, repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
