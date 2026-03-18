@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use tracing::info;
 
@@ -10,12 +10,6 @@ use crate::redaction::RedactionService;
 use crate::pipeline::types::AuthorizationOutput;
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 use querying_shared_stages::ExtractionOutput;
-
-/// gRPC authorization channel inserted into `ctx.server_extensions` before the pipeline runs.
-pub struct AuthorizationChannel {
-    pub tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
-    pub stream: Mutex<Streaming<ExecuteQueryMessage>>,
-}
 
 #[derive(Clone)]
 pub struct AuthorizationStage;
@@ -39,14 +33,20 @@ impl PipelineStage for AuthorizationStage {
             info!("No redaction required, returning result directly");
             Vec::new()
         } else {
-            let channel = ctx
+            let tx = ctx
                 .server_extensions
-                .get::<AuthorizationChannel>()
+                .get::<mpsc::Sender<Result<ExecuteQueryMessage, Status>>>()
                 .ok_or_else(|| {
-                    PipelineError::Authorization("AuthorizationChannel not available".into())
+                    PipelineError::Authorization("tx not available in server_extensions".into())
+                })?
+                .clone();
+            let stream = ctx
+                .server_extensions
+                .get_mut::<Streaming<ExecuteQueryMessage>>()
+                .ok_or_else(|| {
+                    PipelineError::Authorization("stream not available in server_extensions".into())
                 })?;
-            let mut stream = channel.stream.lock().await;
-            RedactionService::request_authorization(&resources_to_check, &channel.tx, &mut stream)
+            RedactionService::request_authorization(&resources_to_check, &tx, stream)
                 .await
                 .map_err(|e| PipelineError::Authorization(format!("{e:?}")))?
                 .authorizations

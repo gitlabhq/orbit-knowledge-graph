@@ -4,7 +4,7 @@ use crate::auth::Claims;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use querying_pipeline::{
@@ -14,8 +14,7 @@ use querying_shared_stages::{CompilationStage, ExtractionStage, OutputStage, Pip
 
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationChannel, AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage,
-    SecurityStage,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
 };
 
 #[derive(Clone)]
@@ -41,10 +40,8 @@ impl QueryPipelineService {
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(claims);
-        server_extensions.insert(AuthorizationChannel {
-            tx,
-            stream: Mutex::new(stream),
-        });
+        server_extensions.insert(tx);
+        server_extensions.insert(stream);
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
@@ -73,7 +70,7 @@ impl QueryPipelineService {
             .then(&OutputStage)
             .await?
             .finish()
-            .expect("OutputStage should produce PipelineOutput");
+            .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))?;
 
         obs.finish(output.row_count, output.redacted_count);
         Ok(output)
