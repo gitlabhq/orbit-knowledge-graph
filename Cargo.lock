@@ -5189,6 +5189,7 @@ dependencies = [
 name = "querying-formatters"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "gkg-utils",
  "indexmap 2.13.0",
  "query-engine",
