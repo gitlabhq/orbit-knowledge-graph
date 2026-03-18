@@ -6,15 +6,13 @@ use chrono::{DateTime, Utc};
 use code_graph::analysis::types::GraphData;
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
 use code_graph::loading::DirectoryFileSource;
-use tempfile::TempDir;
 use tracing::{debug, info, warn};
 
-use super::archive;
 use super::arrow_converter::ArrowConverter;
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::repository_service::RepositoryService;
+use super::repository_resolver::RepositoryResolver;
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
 
@@ -27,7 +25,7 @@ pub struct IndexingRequest {
 }
 
 pub struct CodeIndexingPipeline {
-    repository_service: Arc<dyn RepositoryService>,
+    resolver: RepositoryResolver,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
@@ -36,14 +34,14 @@ pub struct CodeIndexingPipeline {
 
 impl CodeIndexingPipeline {
     pub fn new(
-        repository_service: Arc<dyn RepositoryService>,
+        resolver: RepositoryResolver,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
     ) -> Self {
         Self {
-            repository_service,
+            resolver,
             checkpoint_store,
             stale_data_cleaner,
             metrics,
@@ -51,35 +49,27 @@ impl CodeIndexingPipeline {
         }
     }
 
+    pub fn repository_service(&self) -> &Arc<dyn super::repository_service::RepositoryService> {
+        self.resolver.repository_service()
+    }
+
     pub async fn index_project(
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
     ) -> Result<(), HandlerError> {
-        let temp_dir = TempDir::new()
-            .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
-
         let fetch_start = Instant::now();
-        let ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
-        let archive_bytes = self
-            .repository_service
-            .download_archive(request.project_id, ref_name)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))
-            .record_error_stage(&self.metrics, "repository_fetch")?;
+        let repo_path = self
+            .resolver
+            .resolve(
+                request.project_id,
+                &request.branch,
+                request.commit_sha.as_deref(),
+            )
+            .await?;
         self.metrics
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
-
-        context.progress.notify_in_progress().await;
-
-        let extract_start = Instant::now();
-        archive::extract_tar_gz(&archive_bytes, temp_dir.path())
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
-            .record_error_stage(&self.metrics, "repository_extract")?;
-        self.metrics
-            .repository_extract_duration
-            .record(extract_start.elapsed().as_secs_f64(), &[]);
 
         context.progress.notify_in_progress().await;
 
@@ -90,7 +80,7 @@ impl CodeIndexingPipeline {
             &request.branch,
             &request.traversal_path,
             indexed_at,
-            temp_dir.path(),
+            &repo_path,
         )
         .await?;
 

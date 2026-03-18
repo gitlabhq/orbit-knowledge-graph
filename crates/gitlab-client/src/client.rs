@@ -9,7 +9,7 @@ use tracing::debug;
 
 use crate::config::GitlabClientConfiguration;
 use crate::error::GitlabClientError;
-use crate::types::ProjectInfo;
+use crate::types::{ChangedPath, ProjectInfo};
 
 /// JWT issuer — Rails expects this value when validating incoming tokens.
 pub const JWT_ISSUER: &str = "gitlab";
@@ -134,6 +134,58 @@ impl GitlabClient {
         Ok(bytes.to_vec())
     }
 
+    pub async fn changed_paths(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<ChangedPath>, GitlabClientError> {
+        let base = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/changed_paths",
+            self.base_url, project_id
+        );
+        let url =
+            reqwest::Url::parse_with_params(&base, &[("from_sha", from_sha), ("to_sha", to_sha)])
+                .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
+
+        debug!(
+            project_id,
+            from_sha, to_sha, "fetching changed paths from GitLab"
+        );
+
+        let response = self.authenticated_get(url).await?;
+        Self::check_diff_status(&response, project_id)?;
+
+        let body = response.text().await?;
+        parse_ndjson(&body)
+    }
+
+    pub async fn download_blobs(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<u8>, GitlabClientError> {
+        let base = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/blobs",
+            self.base_url, project_id
+        );
+        let url =
+            reqwest::Url::parse_with_params(&base, &[("from_sha", from_sha), ("to_sha", to_sha)])
+                .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
+
+        debug!(
+            project_id,
+            from_sha, to_sha, "downloading blobs from GitLab"
+        );
+
+        let response = self.authenticated_get(url).await?;
+        Self::check_diff_status(&response, project_id)?;
+
+        let bytes = response.bytes().await?;
+        Ok(bytes.to_vec())
+    }
+
     async fn authenticated_get(
         &self,
         url: impl reqwest::IntoUrl,
@@ -161,6 +213,21 @@ impl GitlabClient {
         }
     }
 
+    fn check_diff_status(
+        response: &reqwest::Response,
+        project_id: i64,
+    ) -> Result<(), GitlabClientError> {
+        match response.status() {
+            StatusCode::OK => Ok(()),
+            StatusCode::BAD_REQUEST => Err(GitlabClientError::ForcePush(project_id)),
+            StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
+            StatusCode::NOT_FOUND => Err(GitlabClientError::NotFound(project_id)),
+            status => Err(GitlabClientError::Unexpected(format!(
+                "unexpected status {status}"
+            ))),
+        }
+    }
+
     fn sign_jwt(&self) -> Result<String, GitlabClientError> {
         let now = chrono::Utc::now().timestamp();
         let claims = JwtClaims {
@@ -175,6 +242,27 @@ impl GitlabClient {
         encode(&Header::new(Algorithm::HS256), &claims, &key)
             .map_err(|e| GitlabClientError::JwtSigning(e.to_string()))
     }
+}
+
+const MAX_CHANGED_PATHS: usize = 100_000;
+
+fn parse_ndjson(body: &str) -> Result<Vec<ChangedPath>, GitlabClientError> {
+    let mut paths = Vec::new();
+    for line in body.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        if paths.len() >= MAX_CHANGED_PATHS {
+            return Err(GitlabClientError::Unexpected(format!(
+                "changed paths exceeded limit of {MAX_CHANGED_PATHS}"
+            )));
+        }
+        let path: ChangedPath = serde_json::from_str(line).map_err(|e| {
+            GitlabClientError::Unexpected(format!("failed to parse changed path: {e}"))
+        })?;
+        paths.push(path);
+    }
+    Ok(paths)
 }
 
 #[cfg(test)]
@@ -261,5 +349,73 @@ mod tests {
         );
         let err = GitlabClient::build_http_client(&config).unwrap_err();
         assert!(err.to_string().contains("failed to resolve"));
+    }
+
+    mod ndjson_parsing {
+        use super::*;
+        use crate::types::ChangeStatus;
+
+        #[test]
+        fn parses_single_line() {
+            let body = r#"{"path":"src/main.rs","status":"ADDED","old_path":"","new_mode":33188,"old_blob_id":"","new_blob_id":"abc123"}"#;
+            let result = parse_ndjson(body).unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].path, "src/main.rs");
+            assert_eq!(result[0].status, ChangeStatus::Added);
+            assert_eq!(result[0].new_blob_id, "abc123");
+        }
+
+        #[test]
+        fn parses_multiple_lines() {
+            let body = concat!(
+                r#"{"path":"a.rs","status":"ADDED","old_path":"","new_mode":33188,"old_blob_id":"","new_blob_id":"aaa"}"#,
+                "\n",
+                r#"{"path":"b.rs","status":"MODIFIED","old_path":"","new_mode":33188,"old_blob_id":"bbb","new_blob_id":"ccc"}"#,
+            );
+            let result = parse_ndjson(body).unwrap();
+            assert_eq!(result.len(), 2);
+            assert_eq!(result[0].status, ChangeStatus::Added);
+            assert_eq!(result[1].status, ChangeStatus::Modified);
+        }
+
+        #[test]
+        fn skips_empty_lines() {
+            let body = "\n\n";
+            let result = parse_ndjson(body).unwrap();
+            assert!(result.is_empty());
+        }
+
+        #[test]
+        fn parses_renamed_with_old_path() {
+            let body = r#"{"path":"new.rs","status":"RENAMED","old_path":"old.rs","new_mode":33188,"old_blob_id":"aaa","new_blob_id":"aaa"}"#;
+            let result = parse_ndjson(body).unwrap();
+            assert_eq!(result[0].status, ChangeStatus::Renamed);
+            assert_eq!(result[0].old_path, "old.rs");
+        }
+
+        #[test]
+        fn unknown_status_deserializes() {
+            let body = r#"{"path":"a.rs","status":"SOMETHING_NEW","old_path":"","new_mode":33188,"old_blob_id":"","new_blob_id":"aaa"}"#;
+            let result = parse_ndjson(body).unwrap();
+            assert_eq!(result[0].status, ChangeStatus::Unknown);
+        }
+
+        #[test]
+        fn parses_all_known_statuses() {
+            for (json_status, expected) in [
+                ("DELETED", ChangeStatus::Deleted),
+                ("RENAMED", ChangeStatus::Renamed),
+                ("ADDED", ChangeStatus::Added),
+                ("MODIFIED", ChangeStatus::Modified),
+                ("COPIED", ChangeStatus::Copied),
+                ("TYPE_CHANGE", ChangeStatus::TypeChange),
+            ] {
+                let body = format!(
+                    r#"{{"path":"a","status":"{json_status}","old_path":"","new_mode":33188,"old_blob_id":"","new_blob_id":"x"}}"#
+                );
+                let result = parse_ndjson(&body).unwrap();
+                assert_eq!(result[0].status, expected, "failed for {json_status}");
+            }
+        }
     }
 }

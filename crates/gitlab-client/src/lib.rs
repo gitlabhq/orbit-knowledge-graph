@@ -6,4 +6,4 @@ mod types;
 pub use client::{GitlabClient, JWT_AUDIENCE, JWT_ISSUER, JWT_SUBJECT};
 pub use config::GitlabClientConfiguration;
 pub use error::GitlabClientError;
-pub use types::ProjectInfo;
+pub use types::{ChangeStatus, ChangedPath, ProjectInfo};

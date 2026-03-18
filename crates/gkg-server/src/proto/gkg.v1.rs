@@ -77,7 +77,7 @@ pub struct ExecuteQueryError {
 /// Request to retrieve the graph schema with optional node expansion.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetGraphSchemaRequest {
-    /// node names to include full properties/relationships; pass "*" to expand all
+    /// node names to include full properties/relationships; pass "\*" to expand all
     #[prost(string, repeated, tag = "1")]
     pub expand_nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// RAW: StructuredSchema; LLM: TOON text

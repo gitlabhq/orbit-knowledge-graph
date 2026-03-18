@@ -6,6 +6,7 @@
 
 mod archive;
 mod arrow_converter;
+mod blob_decoder;
 mod checkpoint_store;
 mod code_indexing_task_handler;
 pub mod config;
@@ -14,6 +15,7 @@ pub mod locking;
 pub mod metrics;
 mod namespace_backfill_dispatcher;
 pub mod repository_cache;
+pub mod repository_resolver;
 mod repository_service;
 mod siphon_code_indexing_task_dispatcher;
 mod siphon_decoder;
@@ -33,6 +35,7 @@ use metrics::CodeMetrics;
 pub use namespace_backfill_dispatcher::{
     NamespaceCodeBackfillDispatcher, NamespaceCodeBackfillDispatcherConfig,
 };
+use repository_resolver::RepositoryResolver;
 pub use siphon_code_indexing_task_dispatcher::{
     SiphonCodeIndexingTaskDispatcher, SiphonCodeIndexingTaskDispatcherConfig,
 };
@@ -73,8 +76,13 @@ pub fn register_handlers(
     );
     let metrics = CodeMetrics::new();
 
+    let cache: Arc<dyn repository_cache::RepositoryCache> =
+        Arc::new(LocalRepositoryCache::default());
+
+    let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
+
     let pipeline = Arc::new(indexing_pipeline::CodeIndexingPipeline::new(
-        Arc::clone(&repository_service),
+        resolver,
         Arc::clone(&checkpoint_store),
         stale_data_cleaner,
         metrics.clone(),

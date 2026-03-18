@@ -15,8 +15,9 @@ use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
-    CodeIndexingTaskHandler, CodeIndexingTaskHandlerConfig, RailsRepositoryService,
-    RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
+    CodeIndexingTaskHandler, CodeIndexingTaskHandlerConfig, LocalRepositoryCache,
+    RailsRepositoryService, RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
+    repository_cache::RepositoryCache, repository_resolver::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
@@ -49,8 +50,11 @@ impl CodeIndexingDeps {
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
         let metrics = CodeMetrics::new();
 
+        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::default());
+        let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
+
         let pipeline = Arc::new(CodeIndexingPipeline::new(
-            Arc::clone(&repository_service),
+            resolver,
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use gitlab_client::{GitlabClient, GitlabClientError, ProjectInfo};
+use gitlab_client::{ChangedPath, GitlabClient, GitlabClientError, ProjectInfo};
 use moka::future::Cache;
 
 #[derive(Debug, thiserror::Error)]
@@ -14,6 +14,15 @@ pub enum RepositoryServiceError {
 
     #[error("archive extraction failed: {0}")]
     Archive(String),
+
+    #[error("force push detected for project {0}")]
+    ForcePush(i64),
+}
+
+impl RepositoryServiceError {
+    pub fn is_force_push(&self) -> bool {
+        matches!(self, Self::ForcePush(_))
+    }
 }
 
 #[async_trait]
@@ -25,6 +34,27 @@ pub trait RepositoryService: Send + Sync {
         project_id: i64,
         ref_name: &str,
     ) -> Result<Vec<u8>, RepositoryServiceError>;
+
+    async fn changed_paths(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<ChangedPath>, RepositoryServiceError>;
+
+    async fn download_blobs(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<u8>, RepositoryServiceError>;
+}
+
+fn map_gitlab_error(error: GitlabClientError) -> RepositoryServiceError {
+    match error {
+        GitlabClientError::ForcePush(project_id) => RepositoryServiceError::ForcePush(project_id),
+        other => RepositoryServiceError::GitlabApi(other),
+    }
 }
 
 pub struct RailsRepositoryService {
@@ -52,6 +82,30 @@ impl RepositoryService for RailsRepositoryService {
             .gitlab_client
             .download_archive(project_id, ref_name)
             .await?)
+    }
+
+    async fn changed_paths(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<ChangedPath>, RepositoryServiceError> {
+        self.gitlab_client
+            .changed_paths(project_id, from_sha, to_sha)
+            .await
+            .map_err(map_gitlab_error)
+    }
+
+    async fn download_blobs(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<u8>, RepositoryServiceError> {
+        self.gitlab_client
+            .download_blobs(project_id, from_sha, to_sha)
+            .await
+            .map_err(map_gitlab_error)
     }
 }
 
@@ -95,6 +149,26 @@ impl RepositoryService for CachingRepositoryService {
                 Err(error)
             }
         }
+    }
+
+    async fn changed_paths(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<ChangedPath>, RepositoryServiceError> {
+        self.inner.changed_paths(project_id, from_sha, to_sha).await
+    }
+
+    async fn download_blobs(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<u8>, RepositoryServiceError> {
+        self.inner
+            .download_blobs(project_id, from_sha, to_sha)
+            .await
     }
 }
 
@@ -159,6 +233,24 @@ pub mod test_utils {
         ) -> Result<Vec<u8>, RepositoryServiceError> {
             Ok(Vec::new())
         }
+
+        async fn changed_paths(
+            &self,
+            _project_id: i64,
+            _from_sha: &str,
+            _to_sha: &str,
+        ) -> Result<Vec<ChangedPath>, RepositoryServiceError> {
+            Ok(Vec::new())
+        }
+
+        async fn download_blobs(
+            &self,
+            _project_id: i64,
+            _from_sha: &str,
+            _to_sha: &str,
+        ) -> Result<Vec<u8>, RepositoryServiceError> {
+            Ok(Vec::new())
+        }
     }
 
     pub struct CountingRepositoryService {
@@ -206,6 +298,26 @@ pub mod test_utils {
                 ));
             }
             self.inner.download_archive(project_id, ref_name).await
+        }
+
+        async fn changed_paths(
+            &self,
+            project_id: i64,
+            from_sha: &str,
+            to_sha: &str,
+        ) -> Result<Vec<ChangedPath>, RepositoryServiceError> {
+            self.inner.changed_paths(project_id, from_sha, to_sha).await
+        }
+
+        async fn download_blobs(
+            &self,
+            project_id: i64,
+            from_sha: &str,
+            to_sha: &str,
+        ) -> Result<Vec<u8>, RepositoryServiceError> {
+            self.inner
+                .download_blobs(project_id, from_sha, to_sha)
+                .await
         }
     }
 }
