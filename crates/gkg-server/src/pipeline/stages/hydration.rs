@@ -25,7 +25,7 @@ pub struct HydrationStage;
 
 impl HydrationStage {
     fn client(ctx: &QueryPipelineContext) -> Result<&Arc<ArrowClickHouseClient>, PipelineError> {
-        ctx.extensions
+        ctx.server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }

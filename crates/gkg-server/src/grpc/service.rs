@@ -128,11 +128,11 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
             let result = if use_llm_format {
                 llm_pipeline
-                    .run_query(&claims, &req.query, &tx, &mut stream)
+                    .run_query(claims, &req.query, tx.clone(), stream)
                     .await
             } else {
                 raw_pipeline
-                    .run_query(&claims, &req.query, &tx, &mut stream)
+                    .run_query(claims, &req.query, tx.clone(), stream)
                     .await
             };
 

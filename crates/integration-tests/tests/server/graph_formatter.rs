@@ -158,14 +158,14 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
-    let mut extensions = TypeMap::default();
-    extensions.insert(client);
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(client);
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx),
-        extensions,
+        server_extensions,
         phases: TypeMap::default(),
     };
     pipeline_ctx.phases.insert(RedactionOutput {

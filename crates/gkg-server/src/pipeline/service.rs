@@ -4,7 +4,7 @@ use crate::auth::Claims;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tonic::{Status, Streaming};
 
 use querying_pipeline::{
@@ -16,7 +16,9 @@ use querying_shared_stages::{
 };
 
 use super::metrics::OTelPipelineObserver;
-use super::stages::{ClickHouseExecutor, GrpcAuthorizer, HydrationStage, SecurityStage};
+use super::stages::{
+    AuthorizationChannel, AuthorizationStage, ClickHouseExecutor, HydrationStage, SecurityStage,
+};
 
 #[derive(Clone)]
 pub struct QueryPipelineService<F: ResultFormatter + Clone> {
@@ -36,30 +38,32 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
 
     pub async fn run_query(
         &self,
-        claims: &Claims,
+        claims: Claims,
         query_json: &str,
-        tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
-        stream: &mut Streaming<ExecuteQueryMessage>,
+        tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+        stream: Streaming<ExecuteQueryMessage>,
     ) -> Result<PipelineOutput, PipelineError> {
         let mut obs = OTelPipelineObserver::start();
 
-        let mut extensions = TypeMap::default();
-        extensions.insert(Arc::clone(&self.client));
+        let mut server_extensions = TypeMap::default();
+        server_extensions.insert(Arc::clone(&self.client));
+        server_extensions.insert(claims);
+        server_extensions.insert(AuthorizationChannel {
+            tx,
+            stream: Mutex::new(stream),
+        });
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
             compiled: None,
             ontology: Arc::clone(&self.ontology),
             security_context: None,
-            extensions,
+            server_extensions,
             phases: TypeMap::default(),
         };
 
-        let security = SecurityStage::new(claims);
-        let authorizer = GrpcAuthorizer::new(tx, stream);
-
         let output = PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&security)
+            .then(&SecurityStage)
             .await?
             .then(&CompilationStage)
             .await?
@@ -67,7 +71,7 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             .await?
             .then(&ExtractionStage)
             .await?
-            .then(&authorizer)
+            .then(&AuthorizationStage)
             .await?
             .then(&RedactionStage)
             .await?

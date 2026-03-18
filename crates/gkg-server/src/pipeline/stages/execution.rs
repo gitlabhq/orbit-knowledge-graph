@@ -20,7 +20,7 @@ impl PipelineStage for ClickHouseExecutor {
     ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
         let client = ctx
-            .extensions
+            .server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
         let compiled = ctx.compiled()?;

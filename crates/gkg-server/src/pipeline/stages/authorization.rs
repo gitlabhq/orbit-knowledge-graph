@@ -10,24 +10,16 @@ use crate::redaction::RedactionService;
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 use querying_shared_stages::{AuthorizationOutput, ExtractionOutput};
 
-pub struct GrpcAuthorizer<'a> {
-    tx: &'a mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
-    stream: Mutex<&'a mut Streaming<ExecuteQueryMessage>>,
+/// gRPC authorization channel inserted into `ctx.server_extensions` before the pipeline runs.
+pub struct AuthorizationChannel {
+    pub tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+    pub stream: Mutex<Streaming<ExecuteQueryMessage>>,
 }
 
-impl<'a> GrpcAuthorizer<'a> {
-    pub fn new(
-        tx: &'a mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
-        stream: &'a mut Streaming<ExecuteQueryMessage>,
-    ) -> Self {
-        Self {
-            tx,
-            stream: Mutex::new(stream),
-        }
-    }
-}
+#[derive(Clone)]
+pub struct AuthorizationStage;
 
-impl PipelineStage for GrpcAuthorizer<'_> {
+impl PipelineStage for AuthorizationStage {
     type Input = ExtractionOutput;
     type Output = AuthorizationOutput;
 
@@ -46,8 +38,14 @@ impl PipelineStage for GrpcAuthorizer<'_> {
             info!("No redaction required, returning result directly");
             Vec::new()
         } else {
-            let mut stream = self.stream.lock().await;
-            RedactionService::request_authorization(&resources_to_check, self.tx, &mut stream)
+            let channel = ctx
+                .server_extensions
+                .get::<AuthorizationChannel>()
+                .ok_or_else(|| {
+                    PipelineError::Authorization("AuthorizationChannel not available".into())
+                })?;
+            let mut stream = channel.stream.lock().await;
+            RedactionService::request_authorization(&resources_to_check, &channel.tx, &mut stream)
                 .await
                 .map_err(|e| PipelineError::Authorization(format!("{e:?}")))?
                 .authorizations

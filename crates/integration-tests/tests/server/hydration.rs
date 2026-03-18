@@ -81,14 +81,14 @@ async fn compile_execute_hydrate(
         redacted_count: 0,
     };
 
-    let mut extensions = TypeMap::default();
-    extensions.insert(Arc::clone(client));
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(Arc::clone(client));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
-        extensions,
+        server_extensions,
         phases: TypeMap::default(),
     };
     pipeline_ctx.phases.insert(redaction_output);
@@ -123,14 +123,14 @@ async fn compile_execute_redact_hydrate(
         redacted_count,
     };
 
-    let mut extensions = TypeMap::default();
-    extensions.insert(Arc::clone(client));
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(Arc::clone(client));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
-        extensions,
+        server_extensions,
         phases: TypeMap::default(),
     };
     pipeline_ctx.phases.insert(redaction_output);

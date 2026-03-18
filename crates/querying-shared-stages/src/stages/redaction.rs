@@ -71,7 +71,7 @@ mod tests {
             compiled: None,
             ontology: Arc::new(Ontology::new()),
             security_context: None,
-            extensions: Default::default(),
+            server_extensions: Default::default(),
             phases: Default::default(),
         };
         ctx.phases.insert(AuthorizationOutput {

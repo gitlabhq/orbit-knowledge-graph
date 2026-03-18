@@ -5,15 +5,10 @@ use crate::auth::Claims;
 
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
-pub struct SecurityStage<'a> {
-    claims: &'a Claims,
-}
+#[derive(Clone)]
+pub struct SecurityStage;
 
-impl<'a> SecurityStage<'a> {
-    pub fn new(claims: &'a Claims) -> Self {
-        Self { claims }
-    }
-
+impl SecurityStage {
     fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
         let org_id = claims
             .organization_id
@@ -28,7 +23,7 @@ impl<'a> SecurityStage<'a> {
     }
 }
 
-impl PipelineStage for SecurityStage<'_> {
+impl PipelineStage for SecurityStage {
     type Input = ();
     type Output = ();
 
@@ -37,7 +32,10 @@ impl PipelineStage for SecurityStage<'_> {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let result = Self::build_context(self.claims)
+        let claims = ctx.server_extensions.get::<Claims>().ok_or_else(|| {
+            PipelineError::Security("Claims not found in server_extensions".into())
+        })?;
+        let result = Self::build_context(claims)
             .map_err(|e| PipelineError::Security(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
         ctx.security_context = Some(result);

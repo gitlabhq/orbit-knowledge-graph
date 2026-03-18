@@ -19,4 +19,6 @@ pub use querying_shared_stages::{
 
 pub use helpers::{QueryRequest, receive_query_request, send_query_error};
 pub use service::QueryPipelineService;
-pub use stages::{ClickHouseExecutor, GrpcAuthorizer, HydrationStage, SecurityStage};
+pub use stages::{
+    AuthorizationChannel, AuthorizationStage, ClickHouseExecutor, HydrationStage, SecurityStage,
+};
