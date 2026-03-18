@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use querying_pipeline::{
-    CompilationStage, ExtractionStage, FormattingStage, PipelineError, PipelineOutput,
+    CompilationStage, Extensions, ExtractionStage, FormattingStage, PipelineError, PipelineOutput,
     PipelineRunner, QueryPipelineContext, RedactionStage, ResultFormatter,
 };
 
@@ -18,8 +18,7 @@ use super::stages::{ClickHouseExecutor, GrpcAuthorizer, HydrationStage, Security
 #[derive(Clone)]
 pub struct QueryPipelineService<F: ResultFormatter + Clone> {
     ontology: Arc<Ontology>,
-    executor: ClickHouseExecutor,
-    hydrator: HydrationStage,
+    client: Arc<ArrowClickHouseClient>,
     formatter: FormattingStage<F>,
 }
 
@@ -27,8 +26,7 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
     pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>, formatter: F) -> Self {
         Self {
             ontology,
-            executor: ClickHouseExecutor::new(client.clone()),
-            hydrator: HydrationStage::new(client),
+            client,
             formatter: FormattingStage::new(formatter),
         }
     }
@@ -42,11 +40,15 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
     ) -> Result<PipelineOutput, PipelineError> {
         let mut obs = OTelPipelineObserver::start();
 
+        let mut extensions = Extensions::default();
+        extensions.insert(Arc::clone(&self.client));
+
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
             compiled: None,
             ontology: Arc::clone(&self.ontology),
             security_context: None,
+            extensions,
         };
 
         let security = SecurityStage::new(claims);
@@ -57,7 +59,7 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             .await?
             .then(&CompilationStage)
             .await?
-            .then(&self.executor)
+            .then(&ClickHouseExecutor)
             .await?
             .then(&ExtractionStage)
             .await?
@@ -65,7 +67,7 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             .await?
             .then(&RedactionStage)
             .await?
-            .then(&self.hydrator)
+            .then(&HydrationStage)
             .await?
             .then(&self.formatter)
             .await?

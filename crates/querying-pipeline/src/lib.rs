@@ -14,8 +14,8 @@ pub use observer::{NoOpObserver, PipelineObserver};
 pub use stages::{CompilationStage, ExtractionStage, FormattingStage, RedactionStage};
 pub use traits::{PipelineRunner, PipelineStage};
 pub use types::{
-    AuthorizationOutput, ExecutionOutput, ExtractionOutput, HydrationOutput, PipelineOutput,
-    QueryPipelineContext, RedactionOutput,
+    AuthorizationOutput, ExecutionOutput, Extensions, ExtractionOutput, HydrationOutput,
+    PipelineOutput, QueryPipelineContext, RedactionOutput,
 };
 
 pub use querying_types;

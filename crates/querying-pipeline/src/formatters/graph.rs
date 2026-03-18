@@ -459,6 +459,7 @@ mod tests {
             })),
             ontology: Arc::new(Ontology::new()),
             security_context: None,
+            extensions: Default::default(),
         };
 
         (qr, result_ctx, pipeline_ctx)

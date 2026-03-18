@@ -12,7 +12,8 @@ use crate::common::{
     run_redaction, test_security_context,
 };
 use gkg_server::query_pipeline::{
-    HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext, RedactionOutput, row_to_json,
+    Extensions, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext, RedactionOutput,
+    row_to_json,
 };
 use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests_shared;
@@ -80,16 +81,18 @@ async fn compile_execute_hydrate(
         redacted_count: 0,
     };
 
+    let mut extensions = Extensions::default();
+    extensions.insert(Arc::clone(client));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
+        extensions,
     };
-    let hydrator = HydrationStage::new(Arc::clone(client));
     let mut obs = NoOpObserver;
 
-    let output = hydrator
+    let output = HydrationStage
         .execute(redaction_output, &mut pipeline_ctx, &mut obs)
         .await
         .expect("hydration should succeed");
@@ -118,16 +121,18 @@ async fn compile_execute_redact_hydrate(
         redacted_count,
     };
 
+    let mut extensions = Extensions::default();
+    extensions.insert(Arc::clone(client));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
+        extensions,
     };
-    let hydrator = HydrationStage::new(Arc::clone(client));
     let mut obs = NoOpObserver;
 
-    let output = hydrator
+    let output = HydrationStage
         .execute(redaction_output, &mut pipeline_ctx, &mut obs)
         .await
         .expect("hydration should succeed");

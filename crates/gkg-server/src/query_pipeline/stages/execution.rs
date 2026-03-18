@@ -8,15 +8,7 @@ use querying_pipeline::{
 };
 
 #[derive(Clone)]
-pub struct ClickHouseExecutor {
-    client: Arc<ArrowClickHouseClient>,
-}
-
-impl ClickHouseExecutor {
-    pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { client }
-    }
-}
+pub struct ClickHouseExecutor;
 
 impl PipelineStage for ClickHouseExecutor {
     type Input = ();
@@ -29,11 +21,15 @@ impl PipelineStage for ClickHouseExecutor {
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
+        let client = ctx
+            .extensions
+            .get::<Arc<ArrowClickHouseClient>>()
+            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
         let compiled = ctx.compiled()?;
         let sql = &compiled.base.sql;
         let params = &compiled.base.params;
 
-        let mut query = self.client.query(sql);
+        let mut query = client.query(sql);
         for (key, param) in params.iter() {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }

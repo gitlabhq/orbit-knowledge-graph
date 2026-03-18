@@ -12,7 +12,7 @@ use crate::common::{
     run_redaction, test_security_context,
 };
 use gkg_server::query_pipeline::{
-    GraphFormatter, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext,
+    Extensions, GraphFormatter, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext,
     RedactionOutput, ResultFormatter,
 };
 use gkg_server::redaction::QueryResult;
@@ -158,16 +158,18 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
+    let mut extensions = Extensions::default();
+    extensions.insert(client);
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx),
+        extensions,
     };
-    let hydrator = HydrationStage::new(client);
     let mut obs = NoOpObserver;
 
-    let output = hydrator
+    let output = HydrationStage
         .execute(
             RedactionOutput {
                 query_result: result,

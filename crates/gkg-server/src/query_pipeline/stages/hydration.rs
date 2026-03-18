@@ -23,17 +23,16 @@ use query_engine::constants::{
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 
 #[derive(Clone)]
-pub struct HydrationStage {
-    client: Arc<ArrowClickHouseClient>,
-}
+pub struct HydrationStage;
 
 impl HydrationStage {
-    pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { client }
+    fn client(ctx: &QueryPipelineContext) -> Result<&Arc<ArrowClickHouseClient>, PipelineError> {
+        ctx.extensions
+            .get::<Arc<ArrowClickHouseClient>>()
+            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
     async fn hydrate_static(
-        &self,
         ctx: &QueryPipelineContext,
         templates: &[HydrationTemplate],
         query_result: &QueryResult,
@@ -46,7 +45,11 @@ impl HydrationStage {
                     return None;
                 }
                 let query_json = template.with_ids(&ids);
-                Some(self.compile_and_fetch(ctx, &template.entity_type, query_json))
+                Some(Self::compile_and_fetch(
+                    ctx,
+                    &template.entity_type,
+                    query_json,
+                ))
             })
             .collect();
 
@@ -59,7 +62,6 @@ impl HydrationStage {
     }
 
     async fn hydrate_dynamic(
-        &self,
         ctx: &QueryPipelineContext,
         refs: &HashMap<String, Vec<i64>>,
     ) -> Result<PropertyMap, PipelineError> {
@@ -68,7 +70,7 @@ impl HydrationStage {
             .filter(|(_, ids)| !ids.is_empty())
             .map(|(entity_type, ids)| {
                 let query_json = Self::build_dynamic_search_query(ctx, entity_type, ids)?;
-                Ok(self.compile_and_fetch(ctx, entity_type, query_json))
+                Ok(Self::compile_and_fetch(ctx, entity_type, query_json))
             })
             .collect::<Result<Vec<_>, PipelineError>>()?;
 
@@ -81,15 +83,15 @@ impl HydrationStage {
     }
 
     async fn compile_and_fetch(
-        &self,
         ctx: &QueryPipelineContext,
         entity_type: &str,
         query_json: String,
     ) -> Result<PropertyMap, PipelineError> {
+        let client = Self::client(ctx)?;
         let compiled = compile(&query_json, &ctx.ontology, ctx.security_context()?)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
-        let mut query = self.client.query(&compiled.base.sql);
+        let mut query = client.query(&compiled.base.sql);
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
@@ -258,8 +260,7 @@ impl PipelineStage for HydrationStage {
                 });
             }
             HydrationPlan::Static(templates) => {
-                let property_map = self
-                    .hydrate_static(ctx, templates, &query_result)
+                let property_map = Self::hydrate_static(ctx, templates, &query_result)
                     .await
                     .inspect_err(|e| obs.record_error(e))?;
                 if !property_map.is_empty() {
@@ -269,8 +270,7 @@ impl PipelineStage for HydrationStage {
             HydrationPlan::Dynamic => {
                 let refs = Self::extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
-                    let property_map = self
-                        .hydrate_dynamic(ctx, &refs)
+                    let property_map = Self::hydrate_dynamic(ctx, &refs)
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
