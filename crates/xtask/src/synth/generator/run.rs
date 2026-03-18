@@ -332,6 +332,10 @@ impl Generator {
         self.interner.lock().unwrap().intern(s)
     }
 
+    pub fn ontology(&self) -> &ontology::Ontology {
+        &self.ontology
+    }
+
     pub fn next_entity_id(&self) -> i64 {
         self.global_entity_counter.fetch_add(1, Ordering::SeqCst)
     }
@@ -969,7 +973,7 @@ pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
             org_id, config.generation.organizations
         );
 
-        let mut edge_writer = writer.create_edge_writer(org_id)?;
+        let mut edge_writer = writer.create_edge_writer(org_id, generator.ontology())?;
 
         let gen_start = std::time::Instant::now();
         let org_nodes = generator.generate_organization_streaming(org_id, &mut edge_writer)?;

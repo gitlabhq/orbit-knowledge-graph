@@ -56,6 +56,22 @@ pub fn validate_ontology_constants(ontology: &crate::Ontology) {
          embedded ontology (\"{}\") — update the const in constants.rs",
         ontology.edge_table(),
     );
+
+    for (i, col) in ontology.edge_columns().iter().enumerate() {
+        assert_eq!(
+            col.name, EDGE_RESERVED_COLUMNS[i],
+            "edge_columns[{i}].name in YAML (\"{}\") doesn't match \
+             EDGE_RESERVED_COLUMNS[{i}] (\"{}\") — update YAML or constants.rs",
+            col.name, EDGE_RESERVED_COLUMNS[i],
+        );
+    }
+    assert_eq!(
+        ontology.edge_columns().len(),
+        EDGE_RESERVED_COLUMNS.len(),
+        "edge_columns count {} doesn't match EDGE_RESERVED_COLUMNS length {}",
+        ontology.edge_columns().len(),
+        EDGE_RESERVED_COLUMNS.len(),
+    );
 }
 
 #[cfg(test)]

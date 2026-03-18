@@ -11,7 +11,7 @@ use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use indexer::IndexerConfig;
 use indexer::checkpoint::ClickHouseCheckpointStore;
-use indexer::modules::code::SiphonCodeIndexingTaskDispatcher;
+use indexer::modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
 use indexer::modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
@@ -74,6 +74,13 @@ async fn main() -> anyhow::Result<()> {
                     services.nats.clone(),
                     metrics.clone(),
                     config.schedule.tasks.code_indexing_task.clone(),
+                )),
+                Box::new(NamespaceCodeBackfillDispatcher::new(
+                    services.nats.clone(),
+                    config.datalake.build_client(),
+                    config.graph.build_client(),
+                    metrics.clone(),
+                    config.schedule.tasks.namespace_code_backfill.clone(),
                 )),
                 Box::new(TableCleanup::new(
                     graph,

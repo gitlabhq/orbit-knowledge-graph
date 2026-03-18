@@ -14,6 +14,13 @@ settings:
   edge_table: "gl_edge"
   default_entity_sort_key: [traversal_path, id]
   edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+  edge_columns:
+    - {name: traversal_path, type: string}
+    - {name: relationship_kind, type: string}
+    - {name: source_id, type: int64}
+    - {name: source_kind, type: string}
+    - {name: target_id, type: int64}
+    - {name: target_kind, type: string}
   etl:
     default_watermark: _siphon_replicated_at
     default_deleted: _siphon_deleted

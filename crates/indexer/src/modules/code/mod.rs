@@ -9,13 +9,10 @@ mod arrow_converter;
 mod checkpoint_store;
 mod code_indexing_task_handler;
 pub mod config;
-pub mod dispatch;
 pub mod indexing_pipeline;
 pub mod locking;
 pub mod metrics;
-mod project_code_indexing_handler;
-mod project_store;
-mod push_event_store;
+mod namespace_backfill_dispatcher;
 mod repository_service;
 mod siphon_code_indexing_task_dispatcher;
 mod siphon_decoder;
@@ -27,21 +24,20 @@ use std::sync::Arc;
 
 use crate::IndexerConfig;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
-pub use project_code_indexing_handler::ProjectCodeIndexingHandlerConfig;
+pub use namespace_backfill_dispatcher::{
+    NamespaceCodeBackfillDispatcher, NamespaceCodeBackfillDispatcherConfig,
+};
 pub use siphon_code_indexing_task_dispatcher::{
     SiphonCodeIndexingTaskDispatcher, SiphonCodeIndexingTaskDispatcherConfig,
 };
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
-pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
-pub use project_code_indexing_handler::ProjectCodeIndexingHandler;
-pub use project_store::ClickHouseProjectStore;
-pub use push_event_store::ClickHousePushEventStore;
 pub use repository_service::{
     CachingRepositoryService, RailsRepositoryService, RepositoryService, RepositoryServiceError,
 };
@@ -58,7 +54,6 @@ pub fn register_handlers(
     };
 
     let code_indexing_task_config = config.engine.handlers.code_indexing_task.clone();
-    let project_reconciliation_config = config.engine.handlers.code_project_reconciliation.clone();
 
     let table_names =
         Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
@@ -71,13 +66,8 @@ pub fn register_handlers(
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
     let checkpoint_store: Arc<dyn checkpoint_store::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
-    let project_store: Arc<dyn project_store::ProjectStore> =
-        Arc::new(ClickHouseProjectStore::new(Arc::clone(&client)));
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
         stale_data_cleaner::ClickHouseStaleDataCleaner::new(client, &table_names),
-    );
-    let push_event_store: Arc<dyn push_event_store::PushEventStore> = Arc::new(
-        push_event_store::ClickHousePushEventStore::new(config.datalake.build_client()),
     );
     let metrics = CodeMetrics::new();
 
@@ -91,22 +81,11 @@ pub fn register_handlers(
 
     registry.register_handler(Box::new(CodeIndexingTaskHandler::new(
         Arc::clone(&pipeline),
+        Arc::clone(&repository_service),
         Arc::clone(&checkpoint_store),
-        metrics.clone(),
+        metrics,
         code_indexing_task_config,
     )));
-
-    registry.register_handler(Box::new(
-        project_code_indexing_handler::ProjectCodeIndexingHandler::new(
-            Arc::clone(&pipeline),
-            Arc::clone(&repository_service),
-            Arc::clone(&checkpoint_store),
-            Arc::clone(&project_store),
-            Arc::clone(&push_event_store),
-            metrics.clone(),
-            project_reconciliation_config,
-        ),
-    ));
 
     Ok(())
 }

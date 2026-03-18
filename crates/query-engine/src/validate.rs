@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
-use ontology::{DataType, EDGE_RESERVED_COLUMNS, Ontology};
+use ontology::{DataType, Ontology};
 
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
@@ -93,31 +93,6 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
         serde_json::Value::Array(_) => "an array",
         serde_json::Value::Object(_) => "an object",
     }
-}
-
-/// Map an edge reserved column name to its `DataType`.
-///
-/// The edge table schema is fixed (not YAML-driven), so the types are hardcoded
-/// here, matching `EDGE_RESERVED_COLUMNS` order from the ontology constants.
-/// See also `xtask/src/synth/arrow_schema.rs` which maintains the same mapping
-/// for Arrow schema generation.
-fn edge_column_type(column: &str) -> Option<DataType> {
-    // Positional types matching EDGE_RESERVED_COLUMNS:
-    //   traversal_path(String), relationship_kind(String),
-    //   source_id(Int), source_kind(String), target_id(Int), target_kind(String)
-    const EDGE_COLUMN_TYPES: &[DataType] = &[
-        DataType::String, // traversal_path
-        DataType::String, // relationship_kind
-        DataType::Int,    // source_id
-        DataType::String, // source_kind
-        DataType::Int,    // target_id
-        DataType::String, // target_kind
-    ];
-
-    EDGE_RESERVED_COLUMNS
-        .iter()
-        .position(|&c| c == column)
-        .map(|i| EDGE_COLUMN_TYPES[i])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,7 +242,7 @@ impl<'a> Validator<'a> {
 
         for (i, rel) in input.relationships.iter().enumerate() {
             for (prop, filter) in &rel.filters {
-                let Some(data_type) = edge_column_type(prop) else {
+                let Some(data_type) = self.ontology.get_edge_column_type(prop) else {
                     return Err(QueryError::Validation(format!(
                         "relationship[{i}] filter on unknown edge column \"{prop}\""
                     )));
@@ -602,6 +577,14 @@ mod tests {
                 ],
             )
             .with_fields("Project", [("name", DataType::String)])
+            .with_edge_columns([
+                ("traversal_path", DataType::String),
+                ("relationship_kind", DataType::String),
+                ("source_id", DataType::Int),
+                ("source_kind", DataType::String),
+                ("target_id", DataType::Int),
+                ("target_kind", DataType::String),
+            ])
     }
 
     fn assert_ok(json: &str) {
@@ -1298,11 +1281,81 @@ mod tests {
 
     #[test]
     fn edge_column_type_covers_all_reserved_columns() {
+        let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
         for col in ontology::EDGE_RESERVED_COLUMNS {
             assert!(
-                super::edge_column_type(col).is_some(),
-                "edge_column_type must cover reserved column \"{col}\""
+                ontology.get_edge_column_type(col).is_some(),
+                "get_edge_column_type must cover reserved column \"{col}\""
             );
         }
+    }
+
+    #[test]
+    fn edge_filter_type_comes_from_ontology_not_hardcoded() {
+        // Build an ontology where source_id is String instead of Int.
+        // If types were hardcoded in Rust, this test would FAIL (the hardcoded
+        // type is Int, so integer filters would pass). If types are YAML-driven,
+        // the Validator reads String and correctly rejects the integer.
+        let ontology = ontology::Ontology::new()
+            .with_nodes(["User", "Note"])
+            .with_edges(["AUTHORED"])
+            .with_edge_columns([
+                ("traversal_path", DataType::String),
+                ("relationship_kind", DataType::String),
+                ("source_id", DataType::String), // deliberately wrong: String instead of Int
+                ("source_kind", DataType::String),
+                ("target_id", DataType::Int),
+                ("target_kind", DataType::String),
+            ]);
+        let validator = Validator::new(&ontology);
+
+        let input = parse_input(r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User"}, {"id": "n", "entity": "Note"}],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
+        }"#)
+        .unwrap();
+
+        let result = validator.check_references(&input);
+        assert!(
+            result.is_err(),
+            "integer filter on String source_id should fail"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("source_id"),
+            "error should mention source_id, got: {err}"
+        );
+    }
+
+    #[test]
+    fn edge_filter_passes_with_correct_ontology_types() {
+        // Same setup but with correct types — integer filter on source_id passes.
+        let ontology = ontology::Ontology::new()
+            .with_nodes(["User", "Note"])
+            .with_edges(["AUTHORED"])
+            .with_edge_columns([
+                ("traversal_path", DataType::String),
+                ("relationship_kind", DataType::String),
+                ("source_id", DataType::Int),
+                ("source_kind", DataType::String),
+                ("target_id", DataType::Int),
+                ("target_kind", DataType::String),
+            ]);
+        let validator = Validator::new(&ontology);
+
+        let input = parse_input(r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User"}, {"id": "n", "entity": "Note"}],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
+        }"#)
+        .unwrap();
+
+        let result = validator.check_references(&input);
+        assert!(
+            result.is_ok(),
+            "integer filter on Int source_id should pass, got: {:?}",
+            result
+        );
     }
 }

@@ -6,6 +6,13 @@ use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::etl::EtlConfig;
 use serde::Deserialize;
 
+/// A column in the unified edge table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeColumn {
+    pub name: String,
+    pub data_type: DataType,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainInfo {
     pub name: String,

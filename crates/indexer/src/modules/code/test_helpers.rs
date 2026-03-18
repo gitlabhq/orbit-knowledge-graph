@@ -65,12 +65,19 @@ impl EventBuilder {
 }
 
 pub fn build_replication_events(events: Vec<(Vec<String>, ReplicationEvent)>) -> Bytes {
+    build_replication_events_for_table("p_knowledge_graph_code_indexing_tasks", events)
+}
+
+pub fn build_replication_events_for_table(
+    table: &str,
+    events: Vec<(Vec<String>, ReplicationEvent)>,
+) -> Bytes {
     let (columns, events): (Vec<_>, Vec<_>) = events.into_iter().unzip();
     let column_names = columns.into_iter().next().unwrap_or_default();
 
     let payload = LogicalReplicationEvents {
         event: 1,
-        table: "p_knowledge_graph_code_indexing_tasks".to_string(),
+        table: table.to_string(),
         schema: "public".to_string(),
         application_identifier: "test".to_string(),
         events,
