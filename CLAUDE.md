@@ -62,6 +62,7 @@ Integration tests need Docker: `mise test:integration`.
 | Helm charts (dev) | `helm-dev/gkg/`, `helm-dev/observability/` |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
+| AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Related repos and local paths | `/related-repositories` skill |
 
 ## Crate map
@@ -92,4 +93,5 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 ## Code quality
 
 - No narration comments. Keep only *why* comments. Use `/remove-llm-comments` to clean up.
+- Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
 - Check crates.io for latest version before adding dependencies.
