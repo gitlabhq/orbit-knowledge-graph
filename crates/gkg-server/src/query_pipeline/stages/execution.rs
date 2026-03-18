@@ -3,9 +3,8 @@ use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
 
-use querying_pipeline::{
-    ExecutionOutput, PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
-};
+use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use querying_shared_stages::ExecutionOutput;
 
 #[derive(Clone)]
 pub struct ClickHouseExecutor;

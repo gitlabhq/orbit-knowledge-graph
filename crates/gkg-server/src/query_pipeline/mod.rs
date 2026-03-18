@@ -3,12 +3,17 @@ pub(crate) mod metrics;
 mod service;
 mod stages;
 
-pub use querying_pipeline::PipelineObserver;
+// Pure pipeline framework
 pub use querying_pipeline::{
-    AuthorizationOutput, CompilationStage, ExecutionOutput, Extensions, ExtractionOutput,
-    ExtractionStage, FormattingStage, GoonFormatter, GraphEdge, GraphFormatter, GraphNode,
-    GraphResponse, HydrationOutput, NoOpObserver, PipelineError, PipelineOutput, PipelineRunner,
-    PipelineStage, QueryPipelineContext, RedactionOutput, RedactionStage, ResultFormatter,
+    Extensions, NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
+    QueryPipelineContext,
+};
+
+// Shared stages, formatters, and inter-stage types
+pub use querying_shared_stages::{
+    AuthorizationOutput, CompilationStage, ExecutionOutput, ExtractionOutput, ExtractionStage,
+    FormattingStage, GoonFormatter, GraphEdge, GraphFormatter, GraphNode, GraphResponse,
+    HydrationOutput, PipelineOutput, RedactionOutput, RedactionStage, ResultFormatter,
     column_value_to_json, row_to_json,
 };
 

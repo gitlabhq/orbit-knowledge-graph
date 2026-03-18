@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use crate::error::PipelineError;
-use crate::types::PipelineOutput;
 
 /// Trait for observing pipeline stage timings and outcomes.
 pub trait PipelineObserver: Send {
@@ -15,7 +14,7 @@ pub trait PipelineObserver: Send {
     fn record_error(&self, error: &PipelineError);
 
     /// Record all metrics for a successful pipeline run.
-    fn finish(self: Box<Self>, output: &PipelineOutput);
+    fn finish(&self, row_count: usize, redacted_count: usize);
 }
 
 /// No-op observer for local/CLI usage that doesn't need metrics.
@@ -28,5 +27,5 @@ impl PipelineObserver for NoOpObserver {
     fn authorized(&mut self, _elapsed: Duration) {}
     fn hydrated(&mut self, _elapsed: Duration) {}
     fn record_error(&self, _error: &PipelineError) {}
-    fn finish(self: Box<Self>, _output: &PipelineOutput) {}
+    fn finish(&self, _row_count: usize, _redacted_count: usize) {}
 }

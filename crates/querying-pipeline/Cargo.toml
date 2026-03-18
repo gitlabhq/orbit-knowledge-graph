@@ -4,32 +4,11 @@ version.workspace = true
 edition = "2024"
 license = "MIT"
 
-[features]
-default = []
-otel = ["opentelemetry", "labkit-rs"]
-
 [dependencies]
-arrow = { workspace = true }
-async-trait = { workspace = true }
-futures = { workspace = true }
-gkg-utils = { path = "../utils" }
-indexmap = { workspace = true }
 ontology = { path = "../ontology" }
 querying-types = { path = "../querying-types" }
 query-engine = { path = "../query-engine" }
-serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
-
-# Optional: OTel metrics support
-opentelemetry = { workspace = true, optional = true }
-labkit-rs = { path = "../labkit-rs", optional = true }
-
-[dev-dependencies]
-ontology = { path = "../ontology" }
-tokio = { workspace = true }
 
 [lints]
 workspace = true

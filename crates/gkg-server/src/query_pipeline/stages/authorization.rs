@@ -6,10 +6,8 @@ use tracing::info;
 
 use crate::redaction::{RedactionMessage, RedactionService};
 
-use querying_pipeline::{
-    AuthorizationOutput, ExtractionOutput, PipelineError, PipelineObserver, PipelineStage,
-    QueryPipelineContext,
-};
+use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use querying_shared_stages::{AuthorizationOutput, ExtractionOutput};
 
 /// Authorizer that performs authorization via gRPC bidirectional streaming to Rails.
 /// The `Streaming` is wrapped in a `Mutex` because `PipelineStage::execute` takes `&self`

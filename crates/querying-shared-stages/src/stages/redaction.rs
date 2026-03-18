@@ -1,7 +1,6 @@
-use crate::error::PipelineError;
-use crate::observer::PipelineObserver;
-use crate::traits::PipelineStage;
-use crate::types::{AuthorizationOutput, QueryPipelineContext, RedactionOutput};
+use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+
+use crate::types::{AuthorizationOutput, RedactionOutput};
 
 #[derive(Clone)]
 pub struct RedactionStage;
@@ -30,12 +29,12 @@ impl PipelineStage for RedactionStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::observer::NoOpObserver;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use ontology::Ontology;
     use query_engine::{EntityAuthConfig, ResultContext};
+    use querying_pipeline::NoOpObserver;
     use querying_types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
 

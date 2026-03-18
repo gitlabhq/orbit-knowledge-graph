@@ -3,10 +3,7 @@ use std::time::Instant;
 
 use query_engine::compile;
 
-use crate::error::PipelineError;
-use crate::observer::PipelineObserver;
-use crate::traits::PipelineStage;
-use crate::types::QueryPipelineContext;
+use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
 #[derive(Clone)]
 pub struct CompilationStage;

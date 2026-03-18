@@ -2754,6 +2754,7 @@ dependencies = [
  "prost-types",
  "query-engine",
  "querying-pipeline",
+ "querying-shared-stages",
  "querying-types",
  "reqwest 0.13.2",
  "rustc-hash",
@@ -5182,21 +5183,26 @@ dependencies = [
 name = "querying-pipeline"
 version = "0.1.0"
 dependencies = [
+ "ontology",
+ "query-engine",
+ "querying-types",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "querying-shared-stages"
+version = "0.1.0"
+dependencies = [
  "arrow",
- "async-trait",
- "futures",
  "gkg-utils",
  "indexmap 2.13.0",
- "labkit-rs",
  "ontology",
- "opentelemetry",
  "query-engine",
+ "querying-pipeline",
  "querying-types",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "tokio",
- "tracing",
 ]
 
 [[package]]

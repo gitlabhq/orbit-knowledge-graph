@@ -2,11 +2,8 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
-use query_engine::{CompiledQueryContext, ResultContext, SecurityContext};
-use querying_types::{QueryResult, ResourceAuthorization};
-use serde_json::Value;
+use query_engine::{CompiledQueryContext, SecurityContext};
 
 use crate::error::PipelineError;
 
@@ -56,37 +53,4 @@ impl QueryPipelineContext {
             .as_ref()
             .ok_or_else(|| PipelineError::Security("security context not yet available".into()))
     }
-}
-
-pub struct ExecutionOutput {
-    pub batches: Vec<RecordBatch>,
-    pub result_context: ResultContext,
-}
-
-pub struct ExtractionOutput {
-    pub query_result: QueryResult,
-}
-
-pub struct AuthorizationOutput {
-    pub query_result: QueryResult,
-    pub authorizations: Vec<ResourceAuthorization>,
-}
-
-pub struct RedactionOutput {
-    pub query_result: QueryResult,
-    pub redacted_count: usize,
-}
-
-pub struct HydrationOutput {
-    pub query_result: QueryResult,
-    pub result_context: ResultContext,
-    pub redacted_count: usize,
-}
-
-pub struct PipelineOutput {
-    pub formatted_result: Value,
-    pub query_type: String,
-    pub raw_query_strings: Vec<String>,
-    pub row_count: usize,
-    pub redacted_count: usize,
 }

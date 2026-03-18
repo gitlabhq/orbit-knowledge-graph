@@ -26,6 +26,7 @@ members = [
   "crates/integration-tests",
   "crates/querying-types",
   "crates/querying-pipeline",
+  "crates/querying-shared-stages",
 ]
 
 [workspace.dependencies]

@@ -1,9 +1,7 @@
-use querying_types::QueryResult;
+use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
-use crate::error::PipelineError;
-use crate::observer::PipelineObserver;
-use crate::traits::PipelineStage;
-use crate::types::{ExecutionOutput, ExtractionOutput, QueryPipelineContext};
+use crate::types::{ExecutionOutput, ExtractionOutput};
+use querying_types::QueryResult;
 
 #[derive(Clone)]
 pub struct ExtractionStage;
@@ -27,12 +25,12 @@ impl PipelineStage for ExtractionStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::observer::NoOpObserver;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use ontology::Ontology;
     use query_engine::ResultContext;
+    use querying_pipeline::NoOpObserver;
     use std::sync::Arc;
 
     #[tokio::test]

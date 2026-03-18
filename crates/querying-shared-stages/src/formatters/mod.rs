@@ -8,7 +8,7 @@ use gkg_utils::arrow::ColumnValue;
 use query_engine::ResultContext;
 use querying_types::QueryResult;
 
-use crate::types::QueryPipelineContext;
+use querying_pipeline::QueryPipelineContext;
 
 pub use goon::GoonFormatter;
 pub use graph::{GraphEdge, GraphFormatter, GraphNode, GraphResponse};

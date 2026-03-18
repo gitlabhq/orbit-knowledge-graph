@@ -5,7 +5,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram};
 
-use querying_pipeline::{PipelineError, PipelineObserver, PipelineOutput};
+use querying_pipeline::{PipelineError, PipelineObserver};
 
 static METRICS: LazyLock<QueryPipelineMetrics> = LazyLock::new(QueryPipelineMetrics::new);
 
@@ -122,30 +122,6 @@ impl OTelPipelineObserver {
             batch_count: 0,
         }
     }
-
-    /// Record all metrics for a successful pipeline run.
-    pub fn finish(self, output: &PipelineOutput) {
-        let qt = [KeyValue::new("query_type", self.query_type)];
-        let attrs = [
-            KeyValue::new("query_type", self.query_type),
-            KeyValue::new("status", "ok"),
-        ];
-        METRICS.queries_total.add(1, &attrs);
-        METRICS
-            .pipeline_duration_ms
-            .record(self.start.elapsed().as_secs_f64() * 1000.0, &attrs);
-        METRICS.compile_duration_ms.record(self.compile_ms, &qt);
-        METRICS.execute_duration_ms.record(self.execute_ms, &qt);
-        METRICS
-            .authorization_duration_ms
-            .record(self.authorization_ms, &qt);
-        METRICS.hydration_duration_ms.record(self.hydration_ms, &qt);
-        METRICS.node_count.record(self.batch_count as u64, &qt);
-        METRICS.result_set_size.record(output.row_count as u64, &qt);
-        METRICS
-            .redacted_count
-            .record(output.redacted_count as u64, &qt);
-    }
 }
 
 impl PipelineObserver for OTelPipelineObserver {
@@ -185,8 +161,24 @@ impl PipelineObserver for OTelPipelineObserver {
         }
     }
 
-    fn finish(self: Box<Self>, output: &PipelineOutput) {
-        // Delegate to the inherent method
-        OTelPipelineObserver::finish(*self, output);
+    fn finish(&self, row_count: usize, redacted_count: usize) {
+        let qt = [KeyValue::new("query_type", self.query_type)];
+        let attrs = [
+            KeyValue::new("query_type", self.query_type),
+            KeyValue::new("status", "ok"),
+        ];
+        METRICS.queries_total.add(1, &attrs);
+        METRICS
+            .pipeline_duration_ms
+            .record(self.start.elapsed().as_secs_f64() * 1000.0, &attrs);
+        METRICS.compile_duration_ms.record(self.compile_ms, &qt);
+        METRICS.execute_duration_ms.record(self.execute_ms, &qt);
+        METRICS
+            .authorization_duration_ms
+            .record(self.authorization_ms, &qt);
+        METRICS.hydration_duration_ms.record(self.hydration_ms, &qt);
+        METRICS.node_count.record(self.batch_count as u64, &qt);
+        METRICS.result_set_size.record(row_count as u64, &qt);
+        METRICS.redacted_count.record(redacted_count as u64, &qt);
     }
 }

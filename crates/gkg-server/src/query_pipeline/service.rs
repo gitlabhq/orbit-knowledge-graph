@@ -8,8 +8,11 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use querying_pipeline::{
-    CompilationStage, Extensions, ExtractionStage, FormattingStage, PipelineError, PipelineOutput,
-    PipelineRunner, QueryPipelineContext, RedactionStage, ResultFormatter,
+    Extensions, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext,
+};
+use querying_shared_stages::{
+    CompilationStage, ExtractionStage, FormattingStage, PipelineOutput, RedactionStage,
+    ResultFormatter,
 };
 
 use super::metrics::OTelPipelineObserver;
@@ -73,7 +76,7 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             .await?
             .finish();
 
-        obs.finish(&output);
+        obs.finish(output.row_count, output.redacted_count);
         Ok(output)
     }
 }

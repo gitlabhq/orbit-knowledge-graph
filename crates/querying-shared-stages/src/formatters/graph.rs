@@ -7,7 +7,7 @@ use query_engine::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::types::QueryPipelineContext;
+use querying_pipeline::QueryPipelineContext;
 use querying_types::{QueryResult, QueryResultRow};
 
 use super::{ResultFormatter, column_value_to_json};
