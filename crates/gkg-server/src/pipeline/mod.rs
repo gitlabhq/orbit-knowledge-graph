@@ -5,8 +5,8 @@ mod stages;
 
 // Pure pipeline framework
 pub use querying_pipeline::{
-    Extensions, NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
-    QueryPipelineContext,
+    NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
+    QueryPipelineContext, TypeMap,
 };
 
 // Shared stages, formatters, and inter-stage types

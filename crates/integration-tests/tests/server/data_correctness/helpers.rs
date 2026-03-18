@@ -23,8 +23,8 @@ pub(super) use crate::common::{
     run_redaction, test_security_context,
 };
 pub(super) use gkg_server::pipeline::{
-    Extensions, GraphFormatter, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext,
-    RedactionOutput, ResultFormatter,
+    GraphFormatter, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext,
+    RedactionOutput, ResultFormatter, TypeMap,
 };
 pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
@@ -69,7 +69,7 @@ pub(super) async fn run_query_with_security(
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
-    let mut extensions = Extensions::default();
+    let mut extensions = TypeMap::default();
     extensions.insert(client);
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
@@ -77,6 +77,7 @@ pub(super) async fn run_query_with_security(
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx),
         extensions,
+        phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
 

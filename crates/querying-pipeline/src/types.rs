@@ -7,15 +7,13 @@ use query_engine::{CompiledQueryContext, SecurityContext};
 
 use crate::error::PipelineError;
 
-/// Type-erased extension map for pipeline context.
-/// Server-specific stages insert concrete types (e.g. ClickHouse client, gRPC streams),
-/// and retrieve them by type. Local pipelines leave this empty.
+/// Type-erased map for storing values by their concrete type.
 #[derive(Default)]
-pub struct Extensions {
+pub struct TypeMap {
     map: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
-impl Extensions {
+impl TypeMap {
     pub fn insert<T: Send + Sync + 'static>(&mut self, val: T) {
         self.map.insert(TypeId::of::<T>(), Box::new(val));
     }
@@ -31,6 +29,13 @@ impl Extensions {
             .get_mut(&TypeId::of::<T>())
             .and_then(|b| b.downcast_mut())
     }
+
+    pub fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
+        self.map
+            .remove(&TypeId::of::<T>())
+            .and_then(|b| (b as Box<dyn Any>).downcast().ok())
+            .map(|b| *b)
+    }
 }
 
 pub struct QueryPipelineContext {
@@ -38,7 +43,10 @@ pub struct QueryPipelineContext {
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub ontology: Arc<Ontology>,
     pub security_context: Option<SecurityContext>,
-    pub extensions: Extensions,
+    /// Server-specific infrastructure (ClickHouse client, etc.)
+    pub extensions: TypeMap,
+    /// Inter-stage data flowing between pipeline stages.
+    pub phases: TypeMap,
 }
 
 impl QueryPipelineContext {

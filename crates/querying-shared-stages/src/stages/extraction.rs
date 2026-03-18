@@ -1,7 +1,7 @@
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use querying_types::QueryResult;
 
 use crate::types::{ExecutionOutput, ExtractionOutput};
-use querying_types::QueryResult;
 
 #[derive(Clone)]
 pub struct ExtractionStage;
@@ -51,24 +51,23 @@ mod tests {
         let mut ctx_result = ResultContext::new();
         ctx_result.add_node("p", "Project");
 
+        let input = ExecutionOutput {
+            batches: vec![batch],
+            result_context: ctx_result,
+        };
+
         let mut ctx = QueryPipelineContext {
             query_json: String::new(),
             compiled: None,
             ontology: Arc::new(Ontology::new()),
             security_context: None,
             extensions: Default::default(),
+            phases: Default::default(),
         };
         let mut obs = NoOpObserver;
 
         let output = ExtractionStage
-            .execute(
-                ExecutionOutput {
-                    batches: vec![batch],
-                    result_context: ctx_result,
-                },
-                &mut ctx,
-                &mut obs,
-            )
+            .execute(input, &mut ctx, &mut obs)
             .await
             .unwrap();
 

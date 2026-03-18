@@ -249,14 +249,7 @@ impl PipelineStage for HydrationStage {
         let result_context = query_result.ctx().clone();
 
         match &ctx.compiled()?.hydration {
-            HydrationPlan::None => {
-                obs.hydrated(t.elapsed());
-                return Ok(HydrationOutput {
-                    query_result,
-                    result_context,
-                    redacted_count: input.redacted_count,
-                });
-            }
+            HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
                 let property_map = Self::hydrate_static(ctx, templates, &query_result)
                     .await

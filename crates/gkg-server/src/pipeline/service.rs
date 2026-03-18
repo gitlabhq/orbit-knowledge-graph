@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use crate::auth::Claims;
-use crate::redaction::RedactionMessage;
+use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use querying_pipeline::{
-    Extensions, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext,
+    PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
 use querying_shared_stages::{
     CompilationStage, ExtractionStage, FormattingStage, PipelineOutput, RedactionStage,
@@ -34,16 +34,16 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
         }
     }
 
-    pub async fn run_query<M: RedactionMessage + 'static>(
+    pub async fn run_query(
         &self,
         claims: &Claims,
         query_json: &str,
-        tx: &mpsc::Sender<Result<M, Status>>,
-        stream: &mut Streaming<M>,
+        tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+        stream: &mut Streaming<ExecuteQueryMessage>,
     ) -> Result<PipelineOutput, PipelineError> {
         let mut obs = OTelPipelineObserver::start();
 
-        let mut extensions = Extensions::default();
+        let mut extensions = TypeMap::default();
         extensions.insert(Arc::clone(&self.client));
 
         let mut ctx = QueryPipelineContext {
@@ -52,6 +52,7 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             ontology: Arc::clone(&self.ontology),
             security_context: None,
             extensions,
+            phases: TypeMap::default(),
         };
 
         let security = SecurityStage::new(claims);
@@ -74,7 +75,8 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             .await?
             .then(&self.formatter)
             .await?
-            .finish();
+            .finish()
+            .expect("FormattingStage should produce PipelineOutput");
 
         obs.finish(output.row_count, output.redacted_count);
         Ok(output)

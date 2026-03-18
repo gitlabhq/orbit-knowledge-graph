@@ -70,6 +70,17 @@ mod tests {
         }
     }
 
+    fn make_ctx() -> QueryPipelineContext {
+        QueryPipelineContext {
+            query_json: String::new(),
+            compiled: None,
+            ontology: Arc::new(Ontology::new()),
+            security_context: None,
+            extensions: Default::default(),
+            phases: Default::default(),
+        }
+    }
+
     #[tokio::test]
     async fn denied_rows_are_redacted() {
         let auth = vec![ResourceAuthorization {
@@ -77,13 +88,7 @@ mod tests {
             authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
         }];
 
-        let mut ctx = QueryPipelineContext {
-            query_json: String::new(),
-            compiled: None,
-            ontology: Arc::new(Ontology::new()),
-            security_context: None,
-            extensions: Default::default(),
-        };
+        let mut ctx = make_ctx();
         let mut obs = NoOpObserver;
 
         let output = RedactionStage
@@ -97,13 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_authorizations_redacts_all() {
-        let mut ctx = QueryPipelineContext {
-            query_json: String::new(),
-            compiled: None,
-            ontology: Arc::new(Ontology::new()),
-            security_context: None,
-            extensions: Default::default(),
-        };
+        let mut ctx = make_ctx();
         let mut obs = NoOpObserver;
 
         let output = RedactionStage

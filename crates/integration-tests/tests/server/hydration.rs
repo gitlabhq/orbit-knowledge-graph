@@ -12,7 +12,7 @@ use crate::common::{
     run_redaction, test_security_context,
 };
 use gkg_server::pipeline::{
-    Extensions, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext, RedactionOutput,
+    HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext, RedactionOutput, TypeMap,
     row_to_json,
 };
 use gkg_server::redaction::QueryResult;
@@ -81,7 +81,7 @@ async fn compile_execute_hydrate(
         redacted_count: 0,
     };
 
-    let mut extensions = Extensions::default();
+    let mut extensions = TypeMap::default();
     extensions.insert(Arc::clone(client));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
@@ -89,6 +89,7 @@ async fn compile_execute_hydrate(
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
         extensions,
+        phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
 
@@ -121,7 +122,7 @@ async fn compile_execute_redact_hydrate(
         redacted_count,
     };
 
-    let mut extensions = Extensions::default();
+    let mut extensions = TypeMap::default();
     extensions.insert(Arc::clone(client));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
@@ -129,6 +130,7 @@ async fn compile_execute_redact_hydrate(
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
         extensions,
+        phases: TypeMap::default(),
     };
     let mut obs = NoOpObserver;
 

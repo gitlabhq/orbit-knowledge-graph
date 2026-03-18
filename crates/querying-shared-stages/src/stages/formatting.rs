@@ -1,8 +1,7 @@
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
-use crate::types::{HydrationOutput, PipelineOutput};
-
 use crate::formatters::ResultFormatter;
+use crate::types::{HydrationOutput, PipelineOutput};
 
 #[derive(Clone)]
 pub struct FormattingStage<F: ResultFormatter> {

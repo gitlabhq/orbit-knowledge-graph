@@ -4,22 +4,22 @@ use tokio::sync::{Mutex, mpsc};
 use tonic::{Status, Streaming};
 use tracing::info;
 
-use crate::redaction::{RedactionMessage, RedactionService};
+use crate::proto::ExecuteQueryMessage;
+use crate::redaction::RedactionService;
 
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 use querying_shared_stages::{AuthorizationOutput, ExtractionOutput};
 
-/// Authorizer that performs authorization via gRPC bidirectional streaming to Rails.
-/// The `Streaming` is wrapped in a `Mutex` because `PipelineStage::execute` takes `&self`
-/// but `request_authorization` needs `&mut Streaming`. The lock is always uncontended
-/// since each `GrpcAuthorizer` is created per-request and used exactly once.
-pub struct GrpcAuthorizer<'a, M: RedactionMessage> {
-    tx: &'a mpsc::Sender<Result<M, Status>>,
-    stream: Mutex<&'a mut Streaming<M>>,
+pub struct GrpcAuthorizer<'a> {
+    tx: &'a mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+    stream: Mutex<&'a mut Streaming<ExecuteQueryMessage>>,
 }
 
-impl<'a, M: RedactionMessage> GrpcAuthorizer<'a, M> {
-    pub fn new(tx: &'a mpsc::Sender<Result<M, Status>>, stream: &'a mut Streaming<M>) -> Self {
+impl<'a> GrpcAuthorizer<'a> {
+    pub fn new(
+        tx: &'a mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+        stream: &'a mut Streaming<ExecuteQueryMessage>,
+    ) -> Self {
         Self {
             tx,
             stream: Mutex::new(stream),
@@ -27,7 +27,7 @@ impl<'a, M: RedactionMessage> GrpcAuthorizer<'a, M> {
     }
 }
 
-impl<M: RedactionMessage + 'static> PipelineStage for GrpcAuthorizer<'_, M> {
+impl PipelineStage for GrpcAuthorizer<'_> {
     type Input = ExtractionOutput;
     type Output = AuthorizationOutput;
 

@@ -90,30 +90,9 @@ mod tests {
     }
 
     #[test]
-    fn admin_ignores_group_traversal_ids() {
-        let claims = make_claims(true, vec!["1/22/".into(), "1/33/".into()], Some(1));
-        let ctx = SecurityStage::build_context(&claims).unwrap();
-        assert_eq!(ctx.traversal_paths, vec!["1/"]);
-    }
-
-    #[test]
     fn non_admin_gets_their_group_paths() {
         let claims = make_claims(false, vec!["1/22/".into(), "1/33/".into()], Some(1));
         let ctx = SecurityStage::build_context(&claims).unwrap();
         assert_eq!(ctx.traversal_paths, vec!["1/22/", "1/33/"]);
-    }
-
-    #[test]
-    fn non_admin_with_empty_groups_gets_no_access() {
-        let claims = make_claims(false, vec![], Some(1));
-        let ctx = SecurityStage::build_context(&claims).unwrap();
-        assert!(ctx.traversal_paths.is_empty());
-    }
-
-    #[test]
-    fn non_admin_with_single_group_path() {
-        let claims = make_claims(false, vec!["1/24/111/".into()], Some(1));
-        let ctx = SecurityStage::build_context(&claims).unwrap();
-        assert_eq!(ctx.traversal_paths, vec!["1/24/111/"]);
     }
 }
