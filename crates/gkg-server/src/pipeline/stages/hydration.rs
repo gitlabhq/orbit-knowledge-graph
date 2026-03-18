@@ -11,8 +11,9 @@ use query_engine::{DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryTyp
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use querying_types::QueryResult;
 
+use crate::pipeline::types::RedactionOutput;
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
-use querying_shared_stages::{HydrationOutput, RedactionOutput};
+use querying_shared_stages::HydrationOutput;
 
 use query_engine::constants::{
     GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,

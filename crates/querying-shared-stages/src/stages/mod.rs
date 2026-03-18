@@ -1,9 +1,7 @@
 mod compilation;
 mod extraction;
-mod formatting;
-mod redaction;
+mod output;
 
 pub use compilation::CompilationStage;
 pub use extraction::ExtractionStage;
-pub use formatting::FormattingStage;
-pub use redaction::RedactionStage;
+pub use output::OutputStage;

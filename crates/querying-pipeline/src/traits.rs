@@ -9,8 +9,6 @@ pub trait PipelineStage: Send + Sync {
     type Input: Send + Sync + 'static;
     type Output: Send + Sync + 'static;
 
-    /// Stages read prior phase output from `ctx.phases.get::<Self::Input>()`.
-    /// Return the stage output — the runner inserts it into phases.
     fn execute(
         &self,
         ctx: &mut QueryPipelineContext,

@@ -7,8 +7,9 @@ use tracing::info;
 use crate::proto::ExecuteQueryMessage;
 use crate::redaction::RedactionService;
 
+use crate::pipeline::types::AuthorizationOutput;
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
-use querying_shared_stages::{AuthorizationOutput, ExtractionOutput};
+use querying_shared_stages::ExtractionOutput;
 
 /// gRPC authorization channel inserted into `ctx.server_extensions` before the pipeline runs.
 pub struct AuthorizationChannel {

@@ -12,11 +12,12 @@ use crate::common::{
     run_redaction, test_security_context,
 };
 use gkg_server::pipeline::HydrationStage;
+use gkg_server::pipeline::types::RedactionOutput;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
 use query_engine::compile;
+use querying_formatters::{GraphFormatter, ResultFormatter};
 use querying_pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
-use querying_shared_stages::{GraphFormatter, RedactionOutput, ResultFormatter};
 use serde_json::Value;
 
 static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
@@ -178,7 +179,7 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
         .await
         .expect("pipeline should succeed");
 
-    let value = GraphFormatter.format(&output.query_result, &output.result_context, &pipeline_ctx);
+    let value = GraphFormatter.format(&output.query_result, &output.result_context);
     assert_valid(&value);
     value
 }

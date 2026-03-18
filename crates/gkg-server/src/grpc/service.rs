@@ -23,7 +23,7 @@ use crate::proto::{
     execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
-use querying_shared_stages::{GoonFormatter, GraphFormatter};
+use querying_formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
 
@@ -35,8 +35,7 @@ pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
     tool_service: ToolService,
-    query_pipeline: QueryPipelineService<GraphFormatter>,
-    llm_pipeline: QueryPipelineService<GoonFormatter>,
+    pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
 }
 
@@ -49,15 +48,12 @@ impl KnowledgeGraphServiceImpl {
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let query_pipeline =
-            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), GraphFormatter);
-        let llm_pipeline = QueryPipelineService::new(Arc::clone(&ontology), client, GoonFormatter);
+        let pipeline = QueryPipelineService::new(Arc::clone(&ontology), client);
         Self {
             validator,
             ontology,
             tool_service,
-            query_pipeline,
-            llm_pipeline,
+            pipeline,
             cluster_health,
         }
     }
@@ -112,8 +108,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
 
-        let raw_pipeline = self.query_pipeline.clone();
-        let llm_pipeline = self.llm_pipeline.clone();
+        let pipeline = self.pipeline.clone();
 
         tokio::spawn(async move {
             let req = match receive_query_request(&mut stream, &tx).await {
@@ -125,15 +120,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
             let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
-            let result = if use_llm_format {
-                llm_pipeline
-                    .run_query(claims, &req.query, tx.clone(), stream)
-                    .await
-            } else {
-                raw_pipeline
-                    .run_query(claims, &req.query, tx.clone(), stream)
-                    .await
-            };
+            let result = pipeline
+                .run_query(claims, &req.query, tx.clone(), stream)
+                .await;
 
             match result {
                 Ok(output) => {
@@ -141,10 +130,16 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
                     use crate::proto::execute_query_result::Content;
 
-                    let content = if use_llm_format {
-                        Some(Content::FormattedText(output.formatted_result.to_string()))
+                    let formatted = if use_llm_format {
+                        GoonFormatter.format(&output.query_result, &output.result_context)
                     } else {
-                        Some(Content::ResultJson(output.formatted_result.to_string()))
+                        GraphFormatter.format(&output.query_result, &output.result_context)
+                    };
+
+                    let content = if use_llm_format {
+                        Some(Content::FormattedText(formatted.to_string()))
+                    } else {
+                        Some(Content::ResultJson(formatted.to_string()))
                     };
 
                     let metadata = Some(QueryMetadata {

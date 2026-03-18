@@ -10,30 +10,23 @@ use tonic::{Status, Streaming};
 use querying_pipeline::{
     PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
-use querying_shared_stages::{
-    CompilationStage, ExtractionStage, FormattingStage, PipelineOutput, RedactionStage,
-    ResultFormatter,
-};
+use querying_shared_stages::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationChannel, AuthorizationStage, ClickHouseExecutor, HydrationStage, SecurityStage,
+    AuthorizationChannel, AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage,
+    SecurityStage,
 };
 
 #[derive(Clone)]
-pub struct QueryPipelineService<F: ResultFormatter + Clone> {
+pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
-    formatter: FormattingStage<F>,
 }
 
-impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
-    pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>, formatter: F) -> Self {
-        Self {
-            ontology,
-            client,
-            formatter: FormattingStage::new(formatter),
-        }
+impl QueryPipelineService {
+    pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>) -> Self {
+        Self { ontology, client }
     }
 
     pub async fn run_query(
@@ -77,10 +70,10 @@ impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
             .await?
             .then(&HydrationStage)
             .await?
-            .then(&self.formatter)
+            .then(&OutputStage)
             .await?
             .finish()
-            .expect("FormattingStage should produce PipelineOutput");
+            .expect("OutputStage should produce PipelineOutput");
 
         obs.finish(output.row_count, output.redacted_count);
         Ok(output)

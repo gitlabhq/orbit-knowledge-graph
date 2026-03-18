@@ -2753,6 +2753,7 @@ dependencies = [
  "prost-build",
  "prost-types",
  "query-engine",
+ "querying-formatters",
  "querying-pipeline",
  "querying-shared-stages",
  "querying-types",
@@ -3411,6 +3412,7 @@ dependencies = [
  "gkg-server",
  "gkg-utils",
  "query-engine",
+ "querying-formatters",
  "querying-shared-stages",
  "serde_json",
  "testcontainers",
@@ -3443,6 +3445,7 @@ dependencies = [
  "parking_lot",
  "prost",
  "query-engine",
+ "querying-formatters",
  "querying-pipeline",
  "querying-shared-stages",
  "serde",
@@ -5183,6 +5186,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "querying-formatters"
+version = "0.1.0"
+dependencies = [
+ "gkg-utils",
+ "indexmap 2.13.0",
+ "query-engine",
+ "querying-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "querying-pipeline"
 version = "0.1.0"
 dependencies = [
@@ -5196,14 +5211,10 @@ name = "querying-shared-stages"
 version = "0.1.0"
 dependencies = [
  "arrow",
- "gkg-utils",
- "indexmap 2.13.0",
  "ontology",
  "query-engine",
  "querying-pipeline",
  "querying-types",
- "serde",
- "serde_json",
  "tokio",
 ]
 

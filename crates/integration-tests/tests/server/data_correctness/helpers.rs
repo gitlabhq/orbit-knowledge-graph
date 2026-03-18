@@ -23,11 +23,12 @@ pub(super) use crate::common::{
     run_redaction, test_security_context,
 };
 pub(super) use gkg_server::pipeline::HydrationStage;
+pub(super) use gkg_server::pipeline::types::RedactionOutput;
 pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
 pub(super) use query_engine::{SecurityContext, compile};
+pub(super) use querying_formatters::{GraphFormatter, ResultFormatter};
 pub(super) use querying_pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
-pub(super) use querying_shared_stages::{GraphFormatter, RedactionOutput, ResultFormatter};
 pub(super) use serde_json::Value;
 
 pub(super) static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
@@ -89,7 +90,7 @@ pub(super) async fn run_query_with_security(
         .await
         .expect("pipeline should succeed");
 
-    let value = GraphFormatter.format(&output.query_result, &output.result_context, &pipeline_ctx);
+    let value = GraphFormatter.format(&output.query_result, &output.result_context);
     assert_valid(&value);
     let response =
         serde_json::from_value(value).expect("response should deserialize to GraphResponse");

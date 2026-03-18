@@ -1,6 +1,6 @@
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
-use crate::types::{AuthorizationOutput, RedactionOutput};
+use crate::pipeline::types::{AuthorizationOutput, RedactionOutput};
 
 #[derive(Clone)]
 pub struct RedactionStage;

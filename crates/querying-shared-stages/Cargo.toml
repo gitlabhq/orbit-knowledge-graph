@@ -6,15 +6,10 @@ license = "MIT"
 
 [dependencies]
 arrow = { workspace = true }
-gkg-utils = { path = "../utils" }
-indexmap = { workspace = true }
 ontology = { path = "../ontology" }
 querying-pipeline = { path = "../querying-pipeline" }
 querying-types = { path = "../querying-types" }
 query-engine = { path = "../query-engine" }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tokio = { workspace = true }
 
 [dev-dependencies]
 ontology = { path = "../ontology" }
