@@ -11,13 +11,12 @@ use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
     run_redaction, test_security_context,
 };
-use gkg_server::pipeline::{
-    GraphFormatter, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext,
-    RedactionOutput, ResultFormatter, TypeMap,
-};
+use gkg_server::pipeline::HydrationStage;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
 use query_engine::compile;
+use querying_pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+use querying_shared_stages::{GraphFormatter, RedactionOutput, ResultFormatter};
 use serde_json::Value;
 
 static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =

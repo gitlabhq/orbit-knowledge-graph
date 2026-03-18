@@ -25,8 +25,8 @@ pub use enforcement::{QueryRequirements, Requirement};
 
 use std::collections::HashSet;
 
-use gkg_server::pipeline::{GraphEdge, GraphNode, GraphResponse};
 use query_engine::input::{Input, QueryType};
+use querying_shared_stages::{GraphEdge, GraphNode, GraphResponse};
 use serde_json::Value;
 
 // ─────────────────────────────────────────────────────────────────────────────

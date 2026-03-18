@@ -22,13 +22,12 @@ pub(super) use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
     run_redaction, test_security_context,
 };
-pub(super) use gkg_server::pipeline::{
-    GraphFormatter, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext,
-    RedactionOutput, ResultFormatter, TypeMap,
-};
+pub(super) use gkg_server::pipeline::HydrationStage;
 pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
 pub(super) use query_engine::{SecurityContext, compile};
+pub(super) use querying_pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+pub(super) use querying_shared_stages::{GraphFormatter, RedactionOutput, ResultFormatter};
 pub(super) use serde_json::Value;
 
 pub(super) static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =

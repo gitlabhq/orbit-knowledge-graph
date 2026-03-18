@@ -14,9 +14,7 @@ use tracing::{info, instrument};
 
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
-use crate::pipeline::{
-    GoonFormatter, GraphFormatter, QueryPipelineService, receive_query_request, send_query_error,
-};
+use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
     GetGraphSchemaRequest, GetGraphSchemaResponse, ListToolsRequest, ListToolsResponse,
@@ -25,6 +23,7 @@ use crate::proto::{
     execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
+use querying_shared_stages::{GoonFormatter, GraphFormatter};
 
 use super::auth::extract_claims;
 

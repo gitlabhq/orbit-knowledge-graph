@@ -205,7 +205,7 @@ mod tests {
         sample_response, sample_search_response,
     };
     use crate::visitor::{NodeExt, ResponseView};
-    use gkg_server::pipeline::GraphResponse;
+    use querying_shared_stages::GraphResponse;
 
     fn parse_test_input(json: &str) -> Input {
         parse_input(json).expect("test query JSON should parse into Input")
