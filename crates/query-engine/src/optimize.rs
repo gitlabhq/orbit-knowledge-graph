@@ -132,12 +132,11 @@ fn fold_filters_into_aggregates(q: &mut Query) {
 
     // Also rewrite ORDER BY expressions that reference the same aggregates.
     for ord in &mut q.order_by {
-        if let Some(alias) = extract_agg_target_alias(&ord.expr) {
-            if let Some(conds) = folded_by_alias.get(&alias) {
-                if !conds.is_empty() {
-                    ord.expr = rewrite_agg_to_if(&ord.expr, conds);
-                }
-            }
+        if let Some(alias) = extract_agg_target_alias(&ord.expr)
+            && let Some(conds) = folded_by_alias.get(&alias)
+            && !conds.is_empty()
+        {
+            ord.expr = rewrite_agg_to_if(&ord.expr, conds);
         }
     }
 
@@ -152,11 +151,7 @@ fn rewrite_agg_to_if(expr: &Expr, conditions: &[Expr]) -> Expr {
                 Some(n) => n,
                 None => return expr.clone(),
             };
-            let condition = conditions
-                .iter()
-                .cloned()
-                .reduce(|a, b| Expr::and(a, b))
-                .unwrap();
+            let condition = conditions.iter().cloned().reduce(Expr::and).unwrap();
 
             let mut new_args = args.clone();
             new_args.push(condition);
