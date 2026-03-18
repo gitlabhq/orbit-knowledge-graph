@@ -1,6 +1,6 @@
 //! AST optimization pass.
 //!
-//! Runs after lowering, enforce, and security — right before `check_ast`.
+//! Runs after lowering — before enforce, security, and check.
 //! Rewrites the AST for better ClickHouse performance without changing
 //! query semantics.
 //!
@@ -20,24 +20,19 @@
 //! Each `-If` aggregate maintains one counter per group regardless of data volume.
 //! See: <https://clickhouse.com/docs/en/sql-reference/aggregate-functions/combinators#-if>
 
+use std::collections::{HashMap, HashSet};
+
 use crate::ast::{Expr, Node, Op, Query};
+use crate::input::{Input, QueryType};
 
 /// Apply all optimization passes to the AST.
-pub fn optimize(node: &mut Node) {
-    match node {
-        Node::Query(q) => optimize_query(q),
-    }
-}
-
-fn optimize_query(q: &mut Query) {
-    let has_aggregates = q
-        .select
-        .iter()
-        .any(|sel| matches!(&sel.expr, Expr::FuncCall { name, .. } if is_aggregate(name)));
-    if !has_aggregates {
+pub fn optimize(node: &mut Node, input: &Input) {
+    if input.query_type != QueryType::Aggregation {
         return;
     }
-    fold_filters_into_aggregates(q);
+    match node {
+        Node::Query(q) => fold_filters_into_aggregates(q, input),
+    }
 }
 
 /// Rewrite `AGG(arg) ... WHERE <target_conds> AND <other_conds>`
@@ -46,8 +41,8 @@ fn optimize_query(q: &mut Query) {
 /// A WHERE conjunct is "foldable" into an aggregate if it references
 /// only columns from the aggregate's target table (i.e. the table alias
 /// of the aggregate's first argument). Structural predicates (JOINs,
-/// security filters, group-by node filters) stay in WHERE.
-fn fold_filters_into_aggregates(q: &mut Query) {
+/// group-by node filters) stay in WHERE.
+fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
     let where_clause = match q.where_clause.take() {
         Some(w) => w,
         None => return,
@@ -55,46 +50,46 @@ fn fold_filters_into_aggregates(q: &mut Query) {
 
     let conjuncts = flatten_and(where_clause);
 
-    // Collect (target_alias, agg_function_name) for each aggregate in SELECT.
-    let agg_targets: Vec<Option<String>> = q
-        .select
+    // Build target alias set from Input aggregations (node ID = table alias after lowering).
+    let target_aliases: HashSet<&str> = input
+        .aggregations
         .iter()
-        .map(|sel| extract_agg_target_alias(&sel.expr))
+        .filter_map(|agg| agg.target.as_deref())
         .collect();
 
-    // Partition conjuncts: for each aggregate, extract conjuncts that
-    // reference only its target alias. A conjunct is shared across all
-    // aggregates that target the same alias.
-    //
-    // A conjunct is "kept" in WHERE if:
-    //   - it references no columns (constant expression)
-    //   - it references multiple aliases (cross-table predicate)
-    //   - it references a group_by alias (group node filter must stay)
-    //   - it references an alias that isn't an aggregation target
-    let mut folded_by_alias: std::collections::HashMap<String, Vec<Expr>> =
-        std::collections::HashMap::new();
-    let mut remaining: Vec<Expr> = Vec::new();
-
-    // Collect all group_by aliases to avoid folding their filters.
-    let group_aliases: std::collections::HashSet<String> = q
-        .group_by
+    // Build group-by alias set to avoid folding their filters.
+    let group_aliases: HashSet<&str> = input
+        .aggregations
         .iter()
-        .filter_map(|e| match e {
-            Expr::Column { table, .. } => Some(table.clone()),
-            _ => None,
+        .filter_map(|agg| agg.group_by.as_deref())
+        .collect();
+
+    // Build mapping from SQL function name -> -If name using AggFunction.
+    let if_names: HashMap<&str, &str> = input
+        .aggregations
+        .iter()
+        .filter_map(|agg| {
+            agg.function
+                .as_sql_if()
+                .map(|if_n| (agg.function.as_sql(), if_n))
         })
         .collect();
 
-    let target_aliases: std::collections::HashSet<String> =
-        agg_targets.iter().filter_map(|a| a.clone()).collect();
+    let mut folded_by_alias: HashMap<String, Vec<Expr>> = HashMap::new();
+    let mut remaining: Vec<Expr> = Vec::new();
 
     for conjunct in conjuncts {
         let aliases = collect_column_aliases(&conjunct);
 
+        // Keep in WHERE if:
+        //   - references no columns (constant expression)
+        //   - references multiple aliases (cross-table predicate)
+        //   - references a group_by alias (group node filter must stay)
+        //   - references an alias that isn't an aggregation target
         let should_keep = aliases.is_empty()
             || aliases.len() > 1
-            || aliases.iter().any(|a| group_aliases.contains(a))
-            || aliases.iter().any(|a| !target_aliases.contains(a));
+            || aliases.iter().any(|a| group_aliases.contains(a.as_str()))
+            || aliases.iter().any(|a| !target_aliases.contains(a.as_str()));
 
         if should_keep {
             remaining.push(conjunct);
@@ -103,45 +98,52 @@ fn fold_filters_into_aggregates(q: &mut Query) {
         }
     }
 
-    // Nothing to fold — restore original WHERE.
     if folded_by_alias.is_empty() {
         q.where_clause = rebuild_and(remaining);
         return;
     }
 
     // Rewrite each aggregate in SELECT: AGG(arg) → AGGIf(arg, folded_conds).
-    for (i, sel) in q.select.iter_mut().enumerate() {
-        let target_alias = match agg_targets.get(i) {
-            Some(Some(alias)) => alias,
-            _ => continue,
-        };
-        let conds = match folded_by_alias.get(target_alias) {
-            Some(c) if !c.is_empty() => c,
-            _ => continue,
-        };
-
-        sel.expr = rewrite_agg_to_if(&sel.expr, conds);
+    for sel in &mut q.select {
+        if let Some((alias, conds)) = extract_and_match(&sel.expr, &folded_by_alias) {
+            sel.expr = rewrite_agg_to_if(&sel.expr, &if_names, conds, &alias);
+        }
     }
 
     // Also rewrite ORDER BY expressions that reference the same aggregates.
     for ord in &mut q.order_by {
-        if let Some(alias) = extract_agg_target_alias(&ord.expr)
-            && let Some(conds) = folded_by_alias.get(&alias)
-            && !conds.is_empty()
-        {
-            ord.expr = rewrite_agg_to_if(&ord.expr, conds);
+        if let Some((alias, conds)) = extract_and_match(&ord.expr, &folded_by_alias) {
+            ord.expr = rewrite_agg_to_if(&ord.expr, &if_names, conds, &alias);
         }
     }
 
     q.where_clause = rebuild_and(remaining);
 }
 
+/// Check if an expression is an aggregate targeting an alias with folded conditions.
+fn extract_and_match<'a>(
+    expr: &Expr,
+    folded: &'a HashMap<String, Vec<Expr>>,
+) -> Option<(String, &'a [Expr])> {
+    let alias = extract_agg_target_alias(expr)?;
+    let conds = folded.get(&alias)?;
+    if conds.is_empty() {
+        return None;
+    }
+    Some((alias, conds))
+}
+
 /// Rewrite `AGG(arg)` to `AGGIf(arg, cond1 AND cond2 AND ...)`.
-fn rewrite_agg_to_if(expr: &Expr, conditions: &[Expr]) -> Expr {
+fn rewrite_agg_to_if(
+    expr: &Expr,
+    if_names: &HashMap<&str, &str>,
+    conditions: &[Expr],
+    _target_alias: &str,
+) -> Expr {
     match expr {
         Expr::FuncCall { name, args } => {
-            let if_name = match agg_if_name(name) {
-                Some(n) => n,
+            let if_name = match if_names.get(name.as_str()) {
+                Some(n) => *n,
                 None => return expr.clone(),
             };
             let condition = match conditions.iter().cloned().reduce(Expr::and) {
@@ -160,14 +162,13 @@ fn rewrite_agg_to_if(expr: &Expr, conditions: &[Expr]) -> Expr {
     }
 }
 
-/// Map standard aggregate function names to their `-If` combinator.
-fn agg_if_name(name: &str) -> Option<&'static str> {
-    match name {
-        "COUNT" => Some("countIf"),
-        "SUM" => Some("sumIf"),
-        "AVG" => Some("avgIf"),
-        "MIN" => Some("minIf"),
-        "MAX" => Some("maxIf"),
+/// Extract the table alias from the first argument of a FuncCall.
+fn extract_agg_target_alias(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::FuncCall { args, .. } => args.first().and_then(|arg| match arg {
+            Expr::Column { table, .. } => Some(table.clone()),
+            _ => None,
+        }),
         _ => None,
     }
 }
@@ -198,13 +199,13 @@ fn rebuild_and(mut conjuncts: Vec<Expr>) -> Option<Expr> {
 }
 
 /// Collect all unique table aliases referenced by column expressions.
-fn collect_column_aliases(expr: &Expr) -> std::collections::HashSet<String> {
-    let mut aliases = std::collections::HashSet::new();
+fn collect_column_aliases(expr: &Expr) -> HashSet<String> {
+    let mut aliases = HashSet::new();
     collect_aliases_inner(expr, &mut aliases);
     aliases
 }
 
-fn collect_aliases_inner(expr: &Expr, aliases: &mut std::collections::HashSet<String>) {
+fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
     match expr {
         Expr::Column { table, .. } => {
             aliases.insert(table.clone());
@@ -225,28 +226,11 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut std::collections::HashSet<St
     }
 }
 
-/// Extract the table alias from the first argument of an aggregate FuncCall.
-/// Returns None if the expression isn't an aggregate or has no column arg.
-fn extract_agg_target_alias(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::FuncCall { name, args } if is_aggregate(name) => {
-            args.first().and_then(|arg| match arg {
-                Expr::Column { table, .. } => Some(table.clone()),
-                _ => None,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn is_aggregate(name: &str) -> bool {
-    matches!(name, "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "groupArray")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::{OrderExpr, SelectExpr, TableRef};
+    use crate::input::{AggFunction, InputAggregation};
 
     fn count_expr(table: &str, col: &str) -> Expr {
         Expr::func("COUNT", vec![Expr::col(table, col)])
@@ -266,8 +250,37 @@ mod tests {
         )
     }
 
+    fn agg_input(aggs: Vec<InputAggregation>) -> Input {
+        Input {
+            query_type: QueryType::Aggregation,
+            aggregations: aggs,
+            ..Default::default()
+        }
+    }
+
+    fn count_agg(target: &str, group_by: Option<&str>) -> InputAggregation {
+        InputAggregation {
+            function: AggFunction::Count,
+            target: Some(target.to_string()),
+            group_by: group_by.map(str::to_string),
+            property: None,
+            alias: Some("count".to_string()),
+        }
+    }
+
+    fn sum_agg(target: &str, property: &str, group_by: Option<&str>) -> InputAggregation {
+        InputAggregation {
+            function: AggFunction::Sum,
+            target: Some(target.to_string()),
+            group_by: group_by.map(str::to_string),
+            property: Some(property.to_string()),
+            alias: Some("total".to_string()),
+        }
+    }
+
     #[test]
     fn folds_target_filter_into_count_if() {
+        let input = agg_input(vec![count_agg("mr", Some("p"))]);
         let mut q = Query {
             select: vec![
                 SelectExpr::new(Expr::col("p", "name"), "p_name"),
@@ -282,9 +295,8 @@ mod tests {
             ..Default::default()
         };
 
-        optimize_query(&mut q);
+        fold_filters_into_aggregates(&mut q, &input);
 
-        // The target filter should be folded into countIf.
         match &q.select[1].expr {
             Expr::FuncCall { name, args } => {
                 assert_eq!(name, "countIf");
@@ -301,6 +313,7 @@ mod tests {
 
     #[test]
     fn keeps_group_by_node_filters_in_where() {
+        let input = agg_input(vec![count_agg("mr", Some("p"))]);
         let mut q = Query {
             select: vec![
                 SelectExpr::new(Expr::col("p", "name"), "p_name"),
@@ -315,21 +328,20 @@ mod tests {
             ..Default::default()
         };
 
-        optimize_query(&mut q);
+        fold_filters_into_aggregates(&mut q, &input);
 
-        // mr.state should be folded, p.name should stay in WHERE.
         match &q.select[1].expr {
             Expr::FuncCall { name, .. } => assert_eq!(name, "countIf"),
             other => panic!("expected countIf, got {other:?}"),
         }
 
-        // WHERE should still have the p.name filter.
         let where_aliases = collect_column_aliases(q.where_clause.as_ref().unwrap());
         assert!(where_aliases.contains("p"));
     }
 
     #[test]
     fn no_group_by_still_folds() {
+        let input = agg_input(vec![count_agg("mr", None)]);
         let mut q = Query {
             select: vec![SelectExpr::new(count_expr("mr", "id"), "total")],
             from: TableRef::scan("gl_merge_request", "mr"),
@@ -337,9 +349,8 @@ mod tests {
             ..Default::default()
         };
 
-        optimize_query(&mut q);
+        fold_filters_into_aggregates(&mut q, &input);
 
-        // Aggregate without GROUP BY still folds target filters.
         match &q.select[0].expr {
             Expr::FuncCall { name, args } => {
                 assert_eq!(name, "countIf");
@@ -352,22 +363,30 @@ mod tests {
 
     #[test]
     fn non_aggregate_query_skips_optimization() {
-        let mut q = Query {
+        let input = Input {
+            query_type: QueryType::Traversal,
+            ..Default::default()
+        };
+        let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr::new(Expr::col("mr", "id"), "mr_id")],
             from: TableRef::scan("gl_merge_request", "mr"),
             where_clause: Some(eq_filter("mr", "state", "merged")),
             ..Default::default()
+        }));
+
+        let original = match &node {
+            Node::Query(q) => q.where_clause.clone(),
         };
+        optimize(&mut node, &input);
 
-        let original_where = q.where_clause.clone();
-        optimize_query(&mut q);
-
-        // No aggregate functions in SELECT → no rewrite.
-        assert_eq!(q.where_clause, original_where);
+        match &node {
+            Node::Query(q) => assert_eq!(q.where_clause, original),
+        }
     }
 
     #[test]
     fn folds_multiple_conditions() {
+        let input = agg_input(vec![count_agg("mr", Some("p"))]);
         let mut q = Query {
             select: vec![
                 SelectExpr::new(Expr::col("p", "name"), "p_name"),
@@ -382,14 +401,12 @@ mod tests {
             ..Default::default()
         };
 
-        optimize_query(&mut q);
+        fold_filters_into_aggregates(&mut q, &input);
 
-        // Both mr conditions folded into a single countIf with AND.
         match &q.select[1].expr {
             Expr::FuncCall { name, args } => {
                 assert_eq!(name, "countIf");
                 assert_eq!(args.len(), 2);
-                // Second arg should be AND of both conditions.
                 match &args[1] {
                     Expr::BinaryOp { op: Op::And, .. } => {}
                     other => panic!("expected AND condition, got {other:?}"),
@@ -398,12 +415,12 @@ mod tests {
             other => panic!("expected countIf, got {other:?}"),
         }
 
-        // WHERE should be empty (no remaining conditions).
         assert!(q.where_clause.is_none());
     }
 
     #[test]
     fn rewrites_order_by_to_match() {
+        let input = agg_input(vec![count_agg("mr", Some("p"))]);
         let mut q = Query {
             select: vec![
                 SelectExpr::new(Expr::col("p", "name"), "p_name"),
@@ -419,9 +436,8 @@ mod tests {
             ..Default::default()
         };
 
-        optimize_query(&mut q);
+        fold_filters_into_aggregates(&mut q, &input);
 
-        // ORDER BY should also use countIf.
         match &q.order_by[0].expr {
             Expr::FuncCall { name, .. } => assert_eq!(name, "countIf"),
             other => panic!("expected countIf in ORDER BY, got {other:?}"),
@@ -430,6 +446,7 @@ mod tests {
 
     #[test]
     fn folds_sum_if() {
+        let input = agg_input(vec![sum_agg("mr", "additions", Some("p"))]);
         let mut q = Query {
             select: vec![
                 SelectExpr::new(Expr::col("p", "name"), "p_name"),
@@ -441,7 +458,7 @@ mod tests {
             ..Default::default()
         };
 
-        optimize_query(&mut q);
+        fold_filters_into_aggregates(&mut q, &input);
 
         match &q.select[1].expr {
             Expr::FuncCall { name, args } => {
@@ -454,7 +471,7 @@ mod tests {
 
     #[test]
     fn no_foldable_conditions_is_noop() {
-        // Cross-table predicate: references both mr and p — can't fold.
+        let input = agg_input(vec![count_agg("mr", Some("p"))]);
         let cross_table = Expr::eq(Expr::col("mr", "author_id"), Expr::col("p", "creator_id"));
         let mut q = Query {
             select: vec![
@@ -467,9 +484,8 @@ mod tests {
             ..Default::default()
         };
 
-        optimize_query(&mut q);
+        fold_filters_into_aggregates(&mut q, &input);
 
-        // Cross-table predicate stays in WHERE, COUNT unchanged.
         match &q.select[1].expr {
             Expr::FuncCall { name, .. } => assert_eq!(name, "COUNT"),
             other => panic!("expected COUNT, got {other:?}"),
