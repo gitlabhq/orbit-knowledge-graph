@@ -67,9 +67,10 @@ fn fold_filters_into_aggregates(q: &mut Query) {
     // aggregates that target the same alias.
     //
     // A conjunct is "kept" in WHERE if:
-    //   - it references columns from multiple aliases, or
-    //   - it references an alias that isn't an aggregation target, or
-    //   - it's a security filter (startsWith on traversal_path)
+    //   - it references no columns (constant expression)
+    //   - it references multiple aliases (cross-table predicate)
+    //   - it references a group_by alias (group node filter must stay)
+    //   - it references an alias that isn't an aggregation target
     let mut folded_by_alias: std::collections::HashMap<String, Vec<Expr>> =
         std::collections::HashMap::new();
     let mut remaining: Vec<Expr> = Vec::new();
@@ -90,22 +91,14 @@ fn fold_filters_into_aggregates(q: &mut Query) {
     for conjunct in conjuncts {
         let aliases = collect_column_aliases(&conjunct);
 
-        // Keep in WHERE if:
-        // - references no columns (constant expression)
-        // - references multiple aliases (cross-table predicate)
-        // - references a group_by alias (group node filter must stay)
-        // - references an alias that isn't an aggregation target
-        // - is a security filter (startsWith on traversal_path)
         let should_keep = aliases.is_empty()
             || aliases.len() > 1
             || aliases.iter().any(|a| group_aliases.contains(a))
-            || aliases.iter().any(|a| !target_aliases.contains(a))
-            || is_security_filter(&conjunct);
+            || aliases.iter().any(|a| !target_aliases.contains(a));
 
         if should_keep {
             remaining.push(conjunct);
-        } else {
-            let alias = aliases.into_iter().next().unwrap();
+        } else if let Some(alias) = aliases.into_iter().next() {
             folded_by_alias.entry(alias).or_default().push(conjunct);
         }
     }
@@ -151,7 +144,10 @@ fn rewrite_agg_to_if(expr: &Expr, conditions: &[Expr]) -> Expr {
                 Some(n) => n,
                 None => return expr.clone(),
             };
-            let condition = conditions.iter().cloned().reduce(Expr::and).unwrap();
+            let condition = match conditions.iter().cloned().reduce(Expr::and) {
+                Some(c) => c,
+                None => return expr.clone(),
+            };
 
             let mut new_args = args.clone();
             new_args.push(condition);
@@ -229,16 +225,6 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut std::collections::HashSet<St
     }
 }
 
-/// Check if an expression is a security filter (startsWith on traversal_path).
-fn is_security_filter(expr: &Expr) -> bool {
-    match expr {
-        Expr::FuncCall { name, args } if name == "startsWith" => args
-            .iter()
-            .any(|a| matches!(a, Expr::Column { column, .. } if column == "traversal_path")),
-        _ => false,
-    }
-}
-
 /// Extract the table alias from the first argument of an aggregate FuncCall.
 /// Returns None if the expression isn't an aggregate or has no column arg.
 fn extract_agg_target_alias(expr: &Expr) -> Option<String> {
@@ -280,16 +266,6 @@ mod tests {
         )
     }
 
-    fn security_filter(table: &str, path: &str) -> Expr {
-        Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(table, "traversal_path"),
-                Expr::Literal(serde_json::Value::String(path.to_string())),
-            ],
-        )
-    }
-
     #[test]
     fn folds_target_filter_into_count_if() {
         let mut q = Query {
@@ -299,7 +275,7 @@ mod tests {
             ],
             from: TableRef::scan("gl_merge_request", "mr"),
             where_clause: Some(Expr::and(
-                security_filter("mr", "1/2/"),
+                eq_filter("p", "name", "my-project"),
                 eq_filter("mr", "state", "merged"),
             )),
             group_by: vec![Expr::col("p", "name")],
@@ -309,18 +285,18 @@ mod tests {
         optimize_query(&mut q);
 
         // The target filter should be folded into countIf.
-        let agg = &q.select[1].expr;
-        match agg {
+        match &q.select[1].expr {
             Expr::FuncCall { name, args } => {
                 assert_eq!(name, "countIf");
-                assert_eq!(args.len(), 2); // arg + condition
+                assert_eq!(args.len(), 2);
             }
             other => panic!("expected FuncCall, got {other:?}"),
         }
 
-        // Security filter stays in WHERE.
-        assert!(q.where_clause.is_some());
-        assert!(is_security_filter(q.where_clause.as_ref().unwrap()));
+        // Group-by node filter stays in WHERE.
+        let where_aliases = collect_column_aliases(q.where_clause.as_ref().unwrap());
+        assert!(where_aliases.contains("p"));
+        assert!(!where_aliases.contains("mr"));
     }
 
     #[test]
@@ -478,23 +454,26 @@ mod tests {
 
     #[test]
     fn no_foldable_conditions_is_noop() {
+        // Cross-table predicate: references both mr and p — can't fold.
+        let cross_table = Expr::eq(Expr::col("mr", "author_id"), Expr::col("p", "creator_id"));
         let mut q = Query {
             select: vec![
                 SelectExpr::new(Expr::col("p", "name"), "p_name"),
                 SelectExpr::new(count_expr("mr", "id"), "mr_count"),
             ],
             from: TableRef::scan("gl_merge_request", "mr"),
-            where_clause: Some(security_filter("mr", "1/2/")),
+            where_clause: Some(cross_table),
             group_by: vec![Expr::col("p", "name")],
             ..Default::default()
         };
 
         optimize_query(&mut q);
 
-        // Security filter is not foldable, COUNT stays as-is.
+        // Cross-table predicate stays in WHERE, COUNT unchanged.
         match &q.select[1].expr {
             Expr::FuncCall { name, .. } => assert_eq!(name, "COUNT"),
             other => panic!("expected COUNT, got {other:?}"),
         }
+        assert!(q.where_clause.is_some());
     }
 }
