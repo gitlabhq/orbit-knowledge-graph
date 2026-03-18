@@ -166,7 +166,7 @@ impl QueryResultRow {
 }
 
 /// Type-safe wrapper around Arrow RecordBatch results for redaction processing.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QueryResult {
     rows: Vec<QueryResultRow>,
     ctx: ResultContext,

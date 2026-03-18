@@ -20,10 +20,13 @@ impl<F: ResultFormatter + Clone + Send + Sync> PipelineStage for FormattingStage
 
     async fn execute(
         &self,
-        input: Self::Input,
         ctx: &mut QueryPipelineContext,
         _obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
+        let input = ctx.phases.get::<HydrationOutput>().ok_or_else(|| {
+            PipelineError::Execution("HydrationOutput not found in phases".into())
+        })?;
+
         let row_count = input.query_result.authorized_count();
         let formatted = self
             .formatter

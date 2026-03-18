@@ -12,10 +12,12 @@ impl PipelineStage for ExtractionStage {
 
     async fn execute(
         &self,
-        input: Self::Input,
-        _ctx: &mut QueryPipelineContext,
+        ctx: &mut QueryPipelineContext,
         _obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
+        let input = ctx.phases.get::<ExecutionOutput>().ok_or_else(|| {
+            PipelineError::Execution("ExecutionOutput not found in phases".into())
+        })?;
         Ok(ExtractionOutput {
             query_result: QueryResult::from_batches(&input.batches, &input.result_context),
         })
@@ -51,11 +53,6 @@ mod tests {
         let mut ctx_result = ResultContext::new();
         ctx_result.add_node("p", "Project");
 
-        let input = ExecutionOutput {
-            batches: vec![batch],
-            result_context: ctx_result,
-        };
-
         let mut ctx = QueryPipelineContext {
             query_json: String::new(),
             compiled: None,
@@ -64,13 +61,13 @@ mod tests {
             extensions: Default::default(),
             phases: Default::default(),
         };
+        ctx.phases.insert(ExecutionOutput {
+            batches: vec![batch],
+            result_context: ctx_result,
+        });
         let mut obs = NoOpObserver;
 
-        let output = ExtractionStage
-            .execute(input, &mut ctx, &mut obs)
-            .await
-            .unwrap();
-
+        let output = ExtractionStage.execute(&mut ctx, &mut obs).await.unwrap();
         assert_eq!(output.query_result.len(), 2);
         assert!(output.query_result.ctx().get("p").is_some());
     }

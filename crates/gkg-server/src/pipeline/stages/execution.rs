@@ -15,7 +15,6 @@ impl PipelineStage for ClickHouseExecutor {
 
     async fn execute(
         &self,
-        _input: Self::Input,
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {

@@ -168,17 +168,14 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
         extensions,
         phases: TypeMap::default(),
     };
+    pipeline_ctx.phases.insert(RedactionOutput {
+        query_result: result,
+        redacted_count,
+    });
     let mut obs = NoOpObserver;
 
     let output = HydrationStage
-        .execute(
-            RedactionOutput {
-                query_result: result,
-                redacted_count,
-            },
-            &mut pipeline_ctx,
-            &mut obs,
-        )
+        .execute(&mut pipeline_ctx, &mut obs)
         .await
         .expect("pipeline should succeed");
 

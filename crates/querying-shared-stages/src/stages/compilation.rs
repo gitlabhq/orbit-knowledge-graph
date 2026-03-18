@@ -14,7 +14,6 @@ impl PipelineStage for CompilationStage {
 
     async fn execute(
         &self,
-        _input: Self::Input,
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {

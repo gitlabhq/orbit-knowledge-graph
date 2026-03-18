@@ -11,16 +11,18 @@ impl PipelineStage for RedactionStage {
 
     async fn execute(
         &self,
-        mut input: Self::Input,
-        _ctx: &mut QueryPipelineContext,
+        ctx: &mut QueryPipelineContext,
         _obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let redacted_count = input
-            .query_result
-            .apply_authorizations(&input.authorizations);
+        let input = ctx.phases.get::<AuthorizationOutput>().ok_or_else(|| {
+            PipelineError::Authorization("AuthorizationOutput not found in phases".into())
+        })?;
+
+        let mut query_result = input.query_result.clone();
+        let redacted_count = query_result.apply_authorizations(&input.authorizations);
 
         Ok(RedactionOutput {
-            query_result: input.query_result,
+            query_result,
             redacted_count,
         })
     }
@@ -38,7 +40,7 @@ mod tests {
     use querying_types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
 
-    fn make_input(authorizations: Vec<ResourceAuthorization>) -> AuthorizationOutput {
+    fn seed_ctx(authorizations: Vec<ResourceAuthorization>) -> QueryPipelineContext {
         let schema = Arc::new(Schema::new(vec![
             Field::new("_gkg_p_id", DataType::Int64, false),
             Field::new("_gkg_p_type", DataType::Utf8, false),
@@ -52,9 +54,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut ctx = ResultContext::new();
-        ctx.add_node("p", "Project");
-        ctx.add_entity_auth(
+        let mut result_ctx = ResultContext::new();
+        result_ctx.add_node("p", "Project");
+        result_ctx.add_entity_auth(
             "Project",
             EntityAuthConfig {
                 resource_type: "project".to_string(),
@@ -64,21 +66,19 @@ mod tests {
             },
         );
 
-        AuthorizationOutput {
-            query_result: QueryResult::from_batches(&[batch], &ctx),
-            authorizations,
-        }
-    }
-
-    fn make_ctx() -> QueryPipelineContext {
-        QueryPipelineContext {
+        let mut ctx = QueryPipelineContext {
             query_json: String::new(),
             compiled: None,
             ontology: Arc::new(Ontology::new()),
             security_context: None,
             extensions: Default::default(),
             phases: Default::default(),
-        }
+        };
+        ctx.phases.insert(AuthorizationOutput {
+            query_result: QueryResult::from_batches(&[batch], &result_ctx),
+            authorizations,
+        });
+        ctx
     }
 
     #[tokio::test]
@@ -87,29 +87,20 @@ mod tests {
             resource_type: "project".to_string(),
             authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
         }];
-
-        let mut ctx = make_ctx();
+        let mut ctx = seed_ctx(auth);
         let mut obs = NoOpObserver;
 
-        let output = RedactionStage
-            .execute(make_input(auth), &mut ctx, &mut obs)
-            .await
-            .unwrap();
-
+        let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
         assert_eq!(output.redacted_count, 1);
         assert_eq!(output.query_result.authorized_count(), 2);
     }
 
     #[tokio::test]
     async fn no_authorizations_redacts_all() {
-        let mut ctx = make_ctx();
+        let mut ctx = seed_ctx(vec![]);
         let mut obs = NoOpObserver;
 
-        let output = RedactionStage
-            .execute(make_input(vec![]), &mut ctx, &mut obs)
-            .await
-            .unwrap();
-
+        let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
         assert_eq!(output.redacted_count, 3);
         assert_eq!(output.query_result.authorized_count(), 0);
     }

@@ -33,10 +33,12 @@ impl PipelineStage for GrpcAuthorizer<'_> {
 
     async fn execute(
         &self,
-        input: Self::Input,
-        _ctx: &mut QueryPipelineContext,
+        ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
+        let input = ctx.phases.get::<ExtractionOutput>().ok_or_else(|| {
+            PipelineError::Authorization("ExtractionOutput not found in phases".into())
+        })?;
         let t = Instant::now();
 
         let resources_to_check = input.query_result.resource_checks();
@@ -54,7 +56,7 @@ impl PipelineStage for GrpcAuthorizer<'_> {
         obs.authorized(t.elapsed());
 
         Ok(AuthorizationOutput {
-            query_result: input.query_result,
+            query_result: input.query_result.clone(),
             authorizations,
         })
     }

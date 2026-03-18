@@ -91,10 +91,11 @@ async fn compile_execute_hydrate(
         extensions,
         phases: TypeMap::default(),
     };
+    pipeline_ctx.phases.insert(redaction_output);
     let mut obs = NoOpObserver;
 
     let output = HydrationStage
-        .execute(redaction_output, &mut pipeline_ctx, &mut obs)
+        .execute(&mut pipeline_ctx, &mut obs)
         .await
         .expect("hydration should succeed");
 
@@ -132,10 +133,11 @@ async fn compile_execute_redact_hydrate(
         extensions,
         phases: TypeMap::default(),
     };
+    pipeline_ctx.phases.insert(redaction_output);
     let mut obs = NoOpObserver;
 
     let output = HydrationStage
-        .execute(redaction_output, &mut pipeline_ctx, &mut obs)
+        .execute(&mut pipeline_ctx, &mut obs)
         .await
         .expect("hydration should succeed");
 

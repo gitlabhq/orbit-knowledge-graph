@@ -240,12 +240,15 @@ impl PipelineStage for HydrationStage {
 
     async fn execute(
         &self,
-        input: Self::Input,
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
+        let input = ctx.phases.get::<RedactionOutput>().ok_or_else(|| {
+            PipelineError::Execution("RedactionOutput not found in phases".into())
+        })?;
         let t = Instant::now();
-        let mut query_result = input.query_result;
+        let mut query_result = input.query_result.clone();
+        let redacted_count = input.redacted_count;
         let result_context = query_result.ctx().clone();
 
         match &ctx.compiled()?.hydration {
@@ -273,7 +276,7 @@ impl PipelineStage for HydrationStage {
         Ok(HydrationOutput {
             query_result,
             result_context,
-            redacted_count: input.redacted_count,
+            redacted_count,
         })
     }
 }
