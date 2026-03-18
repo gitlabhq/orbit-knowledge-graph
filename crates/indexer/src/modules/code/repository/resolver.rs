@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::changed_path_stream::ChangeStatus;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use super::blob_stream::{BlobStream, ResolvedBlob};
 use super::cache::RepositoryCache;
@@ -86,7 +86,7 @@ impl RepositoryResolver {
         };
 
         if cached.commit == ref_name {
-            debug!(
+            info!(
                 project_id,
                 branch,
                 commit = %ref_name,
@@ -125,6 +125,7 @@ impl RepositoryResolver {
         branch: &str,
         commit_sha: &str,
     ) -> Result<PathBuf, HandlerError> {
+        info!(project_id, branch, commit = %commit_sha, "starting full repository download");
         let repo_path = self.cache.code_repository_path(project_id, branch);
 
         let archive_bytes = self
@@ -164,7 +165,7 @@ impl RepositoryResolver {
         from_sha: &str,
         to_sha: &str,
     ) -> Result<PathBuf, IncrementalUpdateError> {
-        debug!(
+        info!(
             project_id,
             branch, from_sha, to_sha, "attempting incremental update"
         );
