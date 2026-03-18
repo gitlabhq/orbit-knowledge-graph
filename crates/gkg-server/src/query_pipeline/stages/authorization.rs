@@ -1,30 +1,34 @@
 use std::time::Instant;
 
+use async_trait::async_trait;
+use tokio::sync::mpsc;
+use tonic::{Status, Streaming};
 use tracing::info;
 
 use crate::redaction::{RedactionMessage, RedactionService};
 
-use super::super::error::PipelineError;
-use super::super::metrics::PipelineObserver;
-use super::super::types::{
-    AuthorizationOutput, ExtractionOutput, PipelineRequest, QueryPipelineContext,
+use querying_pipeline::{
+    AuthorizationOutput, Authorizer, ExtractionOutput, PipelineError, PipelineObserver,
 };
-use super::PipelineStage;
 
-#[derive(Clone)]
-pub struct AuthorizationStage;
+pub struct GrpcAuthorizer<'a, M: RedactionMessage> {
+    tx: &'a mpsc::Sender<Result<M, Status>>,
+    stream: &'a mut Streaming<M>,
+}
 
-impl<M: RedactionMessage> PipelineStage<M> for AuthorizationStage {
-    type Input = ExtractionOutput;
-    type Output = AuthorizationOutput;
+impl<'a, M: RedactionMessage> GrpcAuthorizer<'a, M> {
+    pub fn new(tx: &'a mpsc::Sender<Result<M, Status>>, stream: &'a mut Streaming<M>) -> Self {
+        Self { tx, stream }
+    }
+}
 
-    async fn execute(
-        &self,
-        input: Self::Input,
-        _ctx: &mut QueryPipelineContext,
-        req: &mut PipelineRequest<'_, M>,
-        obs: &mut PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
+#[async_trait]
+impl<M: RedactionMessage + 'static> Authorizer for GrpcAuthorizer<'_, M> {
+    async fn authorize(
+        &mut self,
+        input: ExtractionOutput,
+        obs: &mut dyn PipelineObserver,
+    ) -> Result<AuthorizationOutput, PipelineError> {
         let t = Instant::now();
 
         let resources_to_check = input.query_result.resource_checks();
@@ -32,16 +36,9 @@ impl<M: RedactionMessage> PipelineStage<M> for AuthorizationStage {
             info!("No redaction required, returning result directly");
             Vec::new()
         } else {
-            let tx = req
-                .tx
-                .ok_or_else(|| PipelineError::Streaming("tx not available".into()))?;
-            let stream = req
-                .stream
-                .as_deref_mut()
-                .ok_or_else(|| PipelineError::Streaming("stream not available".into()))?;
-            RedactionService::request_authorization(&resources_to_check, tx, stream)
+            RedactionService::request_authorization(&resources_to_check, self.tx, self.stream)
                 .await
-                .map_err(PipelineError::from)?
+                .map_err(|e| PipelineError::Authorization(format!("{e:?}")))?
                 .authorizations
         };
 

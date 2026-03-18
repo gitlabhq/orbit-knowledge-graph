@@ -2753,6 +2753,8 @@ dependencies = [
  "prost-build",
  "prost-types",
  "query-engine",
+ "querying-pipeline",
+ "querying-types",
  "reqwest 0.13.2",
  "rustc-hash",
  "rustls",
@@ -5174,6 +5176,38 @@ dependencies = [
  "serde_json",
  "strum",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "querying-pipeline"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "futures",
+ "gkg-utils",
+ "indexmap 2.13.0",
+ "labkit-rs",
+ "ontology",
+ "opentelemetry",
+ "query-engine",
+ "querying-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "querying-types"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "gkg-utils",
+ "query-engine",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

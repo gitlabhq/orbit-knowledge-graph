@@ -8,14 +8,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::common::{
-    DummyClaims, GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext,
-    load_ontology, run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
+    run_redaction, test_security_context,
 };
-use gkg_server::auth::Claims;
-use gkg_server::proto::ExecuteQueryMessage;
 use gkg_server::query_pipeline::{
-    HydrationStage, PipelineObserver, PipelineRequest, PipelineStage, QueryPipelineContext,
-    RedactionOutput, row_to_json,
+    HydrationStage, Hydrator, NoOpObserver, QueryPipelineContext, RedactionOutput, row_to_json,
 };
 use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests_shared;
@@ -83,23 +80,16 @@ async fn compile_execute_hydrate(
         redacted_count: 0,
     };
 
-    let claims = Claims::dummy();
-    let mut pipeline_ctx = QueryPipelineContext {
+    let pipeline_ctx = QueryPipelineContext {
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
-        client: Arc::clone(client),
         security_context: Some(security_ctx.clone()),
     };
-    let mut req: PipelineRequest<'_, ExecuteQueryMessage> = PipelineRequest {
-        claims: &claims,
-        query_json: "",
-        tx: None,
-        stream: None,
-    };
-    let mut obs = PipelineObserver::start();
+    let hydrator = HydrationStage::new(Arc::clone(client));
+    let mut obs = NoOpObserver;
 
-    let output = HydrationStage
-        .execute(redaction_output, &mut pipeline_ctx, &mut req, &mut obs)
+    let output = hydrator
+        .hydrate(redaction_output, &pipeline_ctx, &mut obs)
         .await
         .expect("hydration should succeed");
 
@@ -127,23 +117,16 @@ async fn compile_execute_redact_hydrate(
         redacted_count,
     };
 
-    let claims = Claims::dummy();
-    let mut pipeline_ctx = QueryPipelineContext {
+    let pipeline_ctx = QueryPipelineContext {
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
-        client: Arc::clone(client),
         security_context: Some(security_ctx.clone()),
     };
-    let mut req: PipelineRequest<'_, ExecuteQueryMessage> = PipelineRequest {
-        claims: &claims,
-        query_json: "",
-        tx: None,
-        stream: None,
-    };
-    let mut obs = PipelineObserver::start();
+    let hydrator = HydrationStage::new(Arc::clone(client));
+    let mut obs = NoOpObserver;
 
-    let output = HydrationStage
-        .execute(redaction_output, &mut pipeline_ctx, &mut req, &mut obs)
+    let output = hydrator
+        .hydrate(redaction_output, &pipeline_ctx, &mut obs)
         .await
         .expect("hydration should succeed");
 

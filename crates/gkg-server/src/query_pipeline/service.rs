@@ -7,72 +7,82 @@ use ontology::Ontology;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
-use super::error::PipelineError;
-use super::formatters::ResultFormatter;
-use super::metrics::PipelineObserver;
-use super::stages::{
-    AuthorizationStage, CompilationStage, ExecutionStage, ExtractionStage, FormattingStage,
-    HydrationStage, PipelineRunner, RedactionStage, SecurityStage,
+use querying_pipeline::{
+    Authorizer, CompilationStage, ExecutionOutput, ExtractionStage, FormattingStage, Hydrator,
+    PipelineError, PipelineOutput, QueryExecutor, QueryPipelineContext, RedactionStage,
+    ResultFormatter,
 };
-use super::types::{PipelineOutput, PipelineRequest, QueryPipelineContext};
+
+use super::metrics::OTelPipelineObserver;
+use super::stages::{ClickHouseExecutor, GrpcAuthorizer, HydrationStage, SecurityStage};
 
 #[derive(Clone)]
 pub struct QueryPipelineService<F: ResultFormatter + Clone> {
     ontology: Arc<Ontology>,
-    client: Arc<ArrowClickHouseClient>,
+    executor: Arc<ClickHouseExecutor>,
+    hydrator: Arc<HydrationStage>,
     formatter: FormattingStage<F>,
 }
 
 impl<F: ResultFormatter + Clone> QueryPipelineService<F> {
     pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>, formatter: F) -> Self {
         Self {
-            ontology,
-            client,
+            ontology: ontology.clone(),
+            executor: Arc::new(ClickHouseExecutor::new(client.clone())),
+            hydrator: Arc::new(HydrationStage::new(client)),
             formatter: FormattingStage::new(formatter),
         }
     }
 
-    pub async fn run_query<M: RedactionMessage>(
+    pub async fn run_query<M: RedactionMessage + 'static>(
         &self,
         claims: &Claims,
         query_json: &str,
         tx: &mpsc::Sender<Result<M, Status>>,
         stream: &mut Streaming<M>,
     ) -> Result<PipelineOutput, PipelineError> {
-        let mut obs = PipelineObserver::start();
+        let mut obs = OTelPipelineObserver::start();
+
+        // Security: build context from JWT claims (server-specific)
+        let security_context = obs.check_result(
+            SecurityStage::build_context(claims)
+                .map_err(|e| PipelineError::Security(e.to_string())),
+        )?;
 
         let mut ctx = QueryPipelineContext {
             compiled: None,
             ontology: Arc::clone(&self.ontology),
-            client: Arc::clone(&self.client),
-            security_context: None,
+            security_context: Some(security_context),
         };
 
-        let req = PipelineRequest {
-            claims,
-            query_json,
-            tx: Some(tx),
-            stream: Some(stream),
+        // Compilation (pure)
+        CompilationStage.execute(query_json, &mut ctx, &mut obs)?;
+
+        // Execution (ClickHouse)
+        let batches = self.executor.execute(&ctx, &mut obs).await?;
+        let execution_output = ExecutionOutput {
+            batches,
+            result_context: ctx.compiled()?.base.result_context.clone(),
         };
 
-        let output = PipelineRunner::start(&mut ctx, req, &mut obs)
-            .then(&SecurityStage)
-            .await?
-            .then(&CompilationStage)
-            .await?
-            .then(&ExecutionStage)
-            .await?
-            .then(&ExtractionStage)
-            .await?
-            .then(&AuthorizationStage)
-            .await?
-            .then(&RedactionStage)
-            .await?
-            .then(&HydrationStage)
-            .await?
-            .then(&self.formatter)
-            .await?
-            .finish();
+        // Extraction (pure)
+        let extraction_output = ExtractionStage.execute(execution_output);
+
+        // Authorization (gRPC)
+        let mut authorizer = GrpcAuthorizer::new(tx, stream);
+        let authorization_output = authorizer.authorize(extraction_output, &mut obs).await?;
+
+        // Redaction (pure)
+        let redaction_output = RedactionStage.execute(authorization_output);
+
+        // Hydration (ClickHouse)
+        let hydration_output = self
+            .hydrator
+            .hydrate(redaction_output, &ctx, &mut obs)
+            .await?;
+
+        // Formatting (pure)
+        let output = self.formatter.execute(hydration_output, &ctx)?;
 
         obs.finish(&output);
         Ok(output)

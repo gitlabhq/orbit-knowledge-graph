@@ -189,14 +189,11 @@ impl QueryResult {
                 let columns = ArrowUtils::extract_row(batch, row_idx);
 
                 let dynamic_nodes = if is_path_finding {
-                    // Extract nodes from the _gkg_path column in path finding queries.
-                    // The column is Array(Tuple(Int64, String)) where each tuple is (node_id, entity_type).
                     ArrowUtils::get_i64_string_pairs(batch, PATH_COLUMN, row_idx)
                         .into_iter()
                         .map(|(id, t)| NodeRef::new(id, t))
                         .collect()
                 } else if is_neighbors {
-                    // Neighbor node from _gkg_neighbor_id / _gkg_neighbor_type columns
                     let neighbor =
                         ArrowUtils::get_column::<Int64Type>(batch, NEIGHBOR_ID_COLUMN, row_idx)
                             .and_then(|id| {
@@ -214,7 +211,6 @@ impl QueryResult {
                     Vec::new()
                 };
 
-                // Relationship kinds per hop — only present in path finding queries
                 let edge_kinds = if is_path_finding {
                     ArrowUtils::get_string_list(batch, EDGE_KINDS_COLUMN, row_idx)
                 } else {
@@ -260,8 +256,6 @@ impl QueryResult {
     }
 
     /// Collect all resource IDs that need authorization, grouped by (resource_type, ability).
-    /// Static node IDs come from `_gkg_{alias}_id` (enforce.rs selects the configured
-    /// auth column there). Dynamic node IDs may need owner resolution from edge columns.
     pub fn resource_checks(&self) -> Vec<ResourceCheck> {
         let mut ids: HashMap<(&str, &str), HashSet<i64>> = HashMap::new();
 
@@ -283,8 +277,6 @@ impl QueryResult {
                     continue;
                 };
                 let auth_id = if let Some(ref owner) = auth.owner_entity {
-                    // If owner can't be found, skip — apply_authorizations will
-                    // fail-closed since no auth result will exist for this entity.
                     let Some(id) = find_owner_id(row, owner, &self.ctx) else {
                         continue;
                     };
@@ -309,14 +301,6 @@ impl QueryResult {
 
     /// Apply authorization results to rows. Fails closed: any row containing a node
     /// that cannot be verified as authorized is marked unauthorized.
-    ///
-    /// A row is marked unauthorized if ANY node in the row:
-    /// - Has an entity type not configured for redaction (not in entity_to_resource)
-    /// - Has no authorization result from the redaction service
-    /// - Is explicitly marked as unauthorized
-    ///
-    /// For path finding queries, all nodes in the path are checked.
-    /// For neighbors queries, the neighbor node is checked.
     pub fn apply_authorizations(&mut self, authorizations: &[ResourceAuthorization]) -> usize {
         let mut redacted_count = 0;
         let redaction_nodes: Vec<_> = self.ctx.nodes().cloned().collect();
@@ -326,10 +310,8 @@ impl QueryResult {
                 continue;
             }
 
-            // Check redaction nodes (from _gkg_* columns)
             for redaction_node in &redaction_nodes {
                 let Some(node_ref) = row.node_ref(redaction_node) else {
-                    // Fail closed: NULL IDs cannot be verified, so deny the row
                     row.set_unauthorized();
                     redacted_count += 1;
                     break;
@@ -341,8 +323,6 @@ impl QueryResult {
                 }
             }
 
-            // Dynamic nodes (path finding, neighbors): entity type discovered at runtime,
-            // so auth ID may need resolution from edge columns
             if row.authorized {
                 for node_ref in &row.dynamic_nodes {
                     let mut node_ref = node_ref.clone();
@@ -390,10 +370,6 @@ fn is_authorized(
     auth.authorized.get(&node_ref.id).copied().unwrap_or(false)
 }
 
-/// For indirect-auth entities (owner_entity is set in EntityAuthConfig), rewrite
-/// node_ref.id to the owner entity's ID so is_authorized can use it directly.
-/// Returns false if the entity requires owner resolution but the owner cannot be
-/// found — the caller must deny the row (fail-closed).
 fn resolve_dynamic_auth_id(
     row: &QueryResultRow,
     node_ref: &mut NodeRef,
@@ -414,13 +390,7 @@ fn resolve_dynamic_auth_id(
     }
 }
 
-/// Find the ID of an owner entity in a row by searching static and dynamic nodes.
 fn find_owner_id(row: &QueryResultRow, owner_type: &str, ctx: &ResultContext) -> Option<i64> {
-    // Check static nodes for a direct match (entity IS the owner type).
-    // Also check for an indirect match: a static node that is itself an
-    // indirect-auth entity with the same owner_entity already holds the
-    // owner's ID in its _gkg_*_id column (enforce.rs emits it from the
-    // auth id column, e.g. `project_id` for File/Definition).
     for redaction_node in ctx.nodes() {
         if let Some(nr) = row.node_ref(redaction_node) {
             if nr.entity_type == owner_type {
@@ -434,9 +404,6 @@ fn find_owner_id(row: &QueryResultRow, owner_type: &str, ctx: &ResultContext) ->
         }
     }
 
-    // Check dynamic nodes in the row (e.g. adjacent path nodes).
-    // Only direct entity_type match — dynamic nodes hold their own ID,
-    // not the owner's.
     for other in row.dynamic_nodes() {
         if other.entity_type == owner_type {
             return Some(other.id);
@@ -871,7 +838,6 @@ mod tests {
 
         #[test]
         fn fail_closed_unknown_entity_type() {
-            // ctx with no entity_auth → every node is unknown → all rows denied
             let mut ctx = ResultContext::new();
             ctx.add_node("u", "User");
             ctx.add_node("p", "Project");
@@ -939,10 +905,6 @@ mod tests {
 
         #[test]
         fn fail_closed_dynamic_node_unresolvable_owner() {
-            // Simulates a dynamic node (e.g. Definition) that requires indirect auth
-            // via an owner entity (Project), but the owner isn't in the row.
-            // Must deny even if the entity's own ID collides with an authorized
-            // project ID.
             let batch = make_batch(vec![
                 ("_gkg_u_id", Arc::new(Int64Array::from(vec![1]))),
                 ("_gkg_u_type", Arc::new(StringArray::from(vec!["User"]))),
@@ -970,12 +932,8 @@ mod tests {
             );
 
             let mut result = QueryResult::from_batches(&[batch], &ctx);
-
-            // Manually inject a dynamic node: Definition with ID 1000.
-            // No Project node exists in the row, so find_owner_id will return None.
             result.rows_mut()[0].dynamic_nodes = vec![NodeRef::new(1000, "Definition")];
 
-            // Authorize user 1 AND project 1000 — the ID collision scenario.
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
@@ -998,9 +956,6 @@ mod tests {
 
         #[test]
         fn dynamic_node_with_resolvable_owner_passes() {
-            // Same setup as above, but now the owner Project IS in the row
-            // as a static node. The Definition should resolve its auth via
-            // the Project and pass.
             let batch = make_batch(vec![
                 ("_gkg_p_id", Arc::new(Int64Array::from(vec![1000]))),
                 ("_gkg_p_type", Arc::new(StringArray::from(vec!["Project"]))),
@@ -1028,8 +983,6 @@ mod tests {
             );
 
             let mut result = QueryResult::from_batches(&[batch], &ctx);
-
-            // Inject a Definition neighbor — owner Project 1000 IS in the row.
             result.rows_mut()[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
 
             let authorizations = vec![ResourceAuthorization {
@@ -1048,12 +1001,6 @@ mod tests {
 
         #[test]
         fn dynamic_node_resolves_owner_via_sibling_indirect_static_node() {
-            // Center node is File (indirect auth, owner: Project).
-            // enforce.rs emits _gkg_f_id = project_id (1000), _gkg_f_type = "File".
-            // Dynamic neighbor is Definition (also indirect auth, owner: Project).
-            // find_owner_id should recognize that File's _gkg_f_id IS the
-            // Project owner's ID because File's auth config has
-            // owner_entity == Some("Project").
             let batch = make_batch(vec![
                 ("_gkg_f_id", Arc::new(Int64Array::from(vec![1000]))),
                 ("_gkg_f_type", Arc::new(StringArray::from(vec!["File"]))),

@@ -1,35 +1,14 @@
-use crate::redaction::{QueryResult, RedactionMessage};
+use querying_types::QueryResult;
 
-use super::super::error::PipelineError;
-use super::super::metrics::PipelineObserver;
-use super::super::types::{
-    ExecutionOutput, ExtractionOutput, PipelineRequest, QueryPipelineContext,
-};
-use super::PipelineStage;
+use crate::types::{ExecutionOutput, ExtractionOutput};
 
-#[derive(Clone)]
 pub struct ExtractionStage;
 
 impl ExtractionStage {
-    fn process(input: ExecutionOutput) -> ExtractionOutput {
+    pub fn execute(&self, input: ExecutionOutput) -> ExtractionOutput {
         ExtractionOutput {
             query_result: QueryResult::from_batches(&input.batches, &input.result_context),
         }
-    }
-}
-
-impl<M: RedactionMessage> PipelineStage<M> for ExtractionStage {
-    type Input = ExecutionOutput;
-    type Output = ExtractionOutput;
-
-    async fn execute(
-        &self,
-        input: Self::Input,
-        _ctx: &mut QueryPipelineContext,
-        _req: &mut PipelineRequest<'_, M>,
-        _obs: &mut PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        Ok(Self::process(input))
     }
 }
 
@@ -60,7 +39,8 @@ mod tests {
         let mut ctx_result = ResultContext::new();
         ctx_result.add_node("p", "Project");
 
-        let output = ExtractionStage::process(ExecutionOutput {
+        let stage = ExtractionStage;
+        let output = stage.execute(ExecutionOutput {
             batches: vec![batch],
             result_context: ctx_result,
         });

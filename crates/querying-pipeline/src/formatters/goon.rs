@@ -1,8 +1,8 @@
 use query_engine::ResultContext;
 use serde_json::Value;
 
-use crate::query_pipeline::QueryPipelineContext;
-use crate::redaction::QueryResult;
+use crate::types::QueryPipelineContext;
+use querying_types::QueryResult;
 
 use super::ResultFormatter;
 use super::graph::GraphFormatter;

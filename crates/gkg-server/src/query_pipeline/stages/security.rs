@@ -2,18 +2,13 @@ use query_engine::SecurityContext;
 use thiserror::Error;
 
 use crate::auth::Claims;
-use crate::redaction::RedactionMessage;
 
-use super::super::error::PipelineError;
-use super::super::metrics::PipelineObserver;
-use super::super::types::{PipelineRequest, QueryPipelineContext};
-use super::PipelineStage;
-
-#[derive(Clone)]
+/// Build a SecurityContext from JWT Claims. Server-specific because it reads JWT claims.
+/// For local/CLI usage, construct SecurityContext directly.
 pub struct SecurityStage;
 
 impl SecurityStage {
-    fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
+    pub fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
         let org_id = claims
             .organization_id
             .ok_or_else(|| SecurityError("missing organization_id in claims".to_string()))?
@@ -24,24 +19,6 @@ impl SecurityStage {
             claims.group_traversal_ids.clone()
         };
         SecurityContext::new(org_id, traversal_paths).map_err(|e| SecurityError(e.to_string()))
-    }
-}
-
-impl<M: RedactionMessage> PipelineStage<M> for SecurityStage {
-    type Input = ();
-    type Output = ();
-
-    async fn execute(
-        &self,
-        _input: Self::Input,
-        ctx: &mut QueryPipelineContext,
-        req: &mut PipelineRequest<'_, M>,
-        obs: &mut PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        let result = Self::build_context(req.claims);
-        let security_context = obs.check(result.map_err(PipelineError::from))?;
-        ctx.security_context = Some(security_context);
-        Ok(())
     }
 }
 

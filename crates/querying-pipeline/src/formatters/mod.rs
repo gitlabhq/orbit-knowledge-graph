@@ -4,11 +4,11 @@ mod raw_row;
 
 use serde_json::{Value, json};
 
-use crate::redaction::QueryResult;
 use gkg_utils::arrow::ColumnValue;
 use query_engine::ResultContext;
+use querying_types::QueryResult;
 
-use super::types::QueryPipelineContext;
+use crate::types::QueryPipelineContext;
 
 pub use goon::GoonFormatter;
 pub use graph::{GraphEdge, GraphFormatter, GraphNode, GraphResponse};
@@ -23,7 +23,7 @@ pub trait ResultFormatter: Send + Sync {
     ) -> Value;
 }
 
-pub(crate) fn column_value_to_json(value: &ColumnValue) -> Value {
+pub fn column_value_to_json(value: &ColumnValue) -> Value {
     match value {
         ColumnValue::Int64(v) => json!(v),
         ColumnValue::Float64(v) if v.is_finite() => json!(v),

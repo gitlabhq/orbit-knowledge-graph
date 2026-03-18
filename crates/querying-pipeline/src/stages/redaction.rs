@@ -1,17 +1,9 @@
-use crate::redaction::RedactionMessage;
+use crate::types::{AuthorizationOutput, RedactionOutput};
 
-use super::super::error::PipelineError;
-use super::super::metrics::PipelineObserver;
-use super::super::types::{
-    AuthorizationOutput, PipelineRequest, QueryPipelineContext, RedactionOutput,
-};
-use super::PipelineStage;
-
-#[derive(Clone)]
 pub struct RedactionStage;
 
 impl RedactionStage {
-    fn process(mut input: AuthorizationOutput) -> RedactionOutput {
+    pub fn execute(&self, mut input: AuthorizationOutput) -> RedactionOutput {
         let redacted_count = input
             .query_result
             .apply_authorizations(&input.authorizations);
@@ -23,21 +15,6 @@ impl RedactionStage {
     }
 }
 
-impl<M: RedactionMessage> PipelineStage<M> for RedactionStage {
-    type Input = AuthorizationOutput;
-    type Output = RedactionOutput;
-
-    async fn execute(
-        &self,
-        input: Self::Input,
-        _ctx: &mut QueryPipelineContext,
-        _req: &mut PipelineRequest<'_, M>,
-        _obs: &mut PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        Ok(Self::process(input))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,9 +22,8 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use query_engine::{EntityAuthConfig, ResultContext};
+    use querying_types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
-
-    use crate::redaction::{QueryResult, ResourceAuthorization};
 
     fn make_input(authorizations: Vec<ResourceAuthorization>) -> AuthorizationOutput {
         let schema = Arc::new(Schema::new(vec![
@@ -88,7 +64,8 @@ mod tests {
             authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
         }];
 
-        let output = RedactionStage::process(make_input(auth));
+        let stage = RedactionStage;
+        let output = stage.execute(make_input(auth));
 
         assert_eq!(output.redacted_count, 1);
         assert_eq!(output.query_result.authorized_count(), 2);
@@ -96,7 +73,8 @@ mod tests {
 
     #[test]
     fn no_authorizations_redacts_all() {
-        let output = RedactionStage::process(make_input(vec![]));
+        let stage = RedactionStage;
+        let output = stage.execute(make_input(vec![]));
 
         assert_eq!(output.redacted_count, 3);
         assert_eq!(output.query_result.authorized_count(), 0);

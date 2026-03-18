@@ -1,31 +1,21 @@
 use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use query_engine::{CompiledQueryContext, ResultContext, SecurityContext};
+use querying_types::{QueryResult, ResourceAuthorization};
 use serde_json::Value;
 
-use tokio::sync::mpsc;
-use tonic::{Status, Streaming};
+use crate::error::{PipelineError, SecurityError};
 
-use crate::auth::Claims;
-use crate::redaction::{QueryResult, RedactionMessage, ResourceAuthorization};
-
-use super::error::PipelineError;
-use crate::query_pipeline::stages::SecurityError;
-
-pub struct PipelineRequest<'a, M: RedactionMessage> {
-    pub claims: &'a Claims,
-    pub query_json: &'a str,
-    pub tx: Option<&'a mpsc::Sender<Result<M, Status>>>,
-    pub stream: Option<&'a mut Streaming<M>>,
+pub struct PipelineRequest {
+    pub query_json: String,
+    pub security_context: SecurityContext,
 }
 
 pub struct QueryPipelineContext {
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub ontology: Arc<Ontology>,
-    pub client: Arc<ArrowClickHouseClient>,
     pub security_context: Option<SecurityContext>,
 }
 
@@ -38,7 +28,9 @@ impl QueryPipelineContext {
 
     pub fn security_context(&self) -> Result<&SecurityContext, PipelineError> {
         self.security_context.as_ref().ok_or_else(|| {
-            PipelineError::Security(SecurityError("security context not yet available".into()))
+            PipelineError::Security(
+                SecurityError("security context not yet available".into()).to_string(),
+            )
         })
     }
 }
@@ -66,16 +58,6 @@ pub struct HydrationOutput {
     pub query_result: QueryResult,
     pub result_context: ResultContext,
     pub redacted_count: usize,
-}
-
-#[cfg(test)]
-pub fn dummy_clickhouse_client() -> Arc<ArrowClickHouseClient> {
-    Arc::new(ArrowClickHouseClient::new(
-        "http://localhost:0",
-        "default",
-        "default",
-        None,
-    ))
 }
 
 pub struct PipelineOutput {

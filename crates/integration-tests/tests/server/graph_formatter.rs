@@ -8,12 +8,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::common::{
-    DummyClaims, GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext,
-    load_ontology, run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
+    run_redaction, test_security_context,
 };
 use gkg_server::query_pipeline::{
-    GraphFormatter, HydrationStage, PipelineObserver, PipelineRequest, PipelineStage,
-    QueryPipelineContext, RedactionOutput, ResultFormatter,
+    GraphFormatter, HydrationStage, Hydrator, NoOpObserver, QueryPipelineContext, RedactionOutput,
+    ResultFormatter,
 };
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
@@ -158,29 +158,21 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
-    let mut pipeline_ctx = QueryPipelineContext {
+    let pipeline_ctx = QueryPipelineContext {
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
-        client,
         security_context: Some(security_ctx),
     };
-    let claims = gkg_server::auth::Claims::dummy();
-    let mut req = PipelineRequest::<gkg_server::proto::ExecuteQueryMessage> {
-        claims: &claims,
-        query_json: "",
-        tx: None,
-        stream: None,
-    };
-    let mut obs = PipelineObserver::start();
+    let hydrator = HydrationStage::new(client);
+    let mut obs = NoOpObserver;
 
-    let output = HydrationStage
-        .execute(
+    let output = hydrator
+        .hydrate(
             RedactionOutput {
                 query_result: result,
                 redacted_count,
             },
-            &mut pipeline_ctx,
-            &mut req,
+            &pipeline_ctx,
             &mut obs,
         )
         .await

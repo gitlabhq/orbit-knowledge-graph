@@ -1,10 +1,6 @@
-use crate::redaction::RedactionMessage;
-
-use super::super::error::PipelineError;
-use super::super::formatters::ResultFormatter;
-use super::super::metrics::PipelineObserver;
-use super::super::types::{HydrationOutput, PipelineOutput, PipelineRequest, QueryPipelineContext};
-use super::PipelineStage;
+use crate::error::PipelineError;
+use crate::formatters::ResultFormatter;
+use crate::types::{HydrationOutput, PipelineOutput, QueryPipelineContext};
 
 #[derive(Clone)]
 pub struct FormattingStage<F: ResultFormatter> {
@@ -16,7 +12,7 @@ impl<F: ResultFormatter> FormattingStage<F> {
         Self { formatter }
     }
 
-    fn process(
+    pub fn execute(
         &self,
         input: HydrationOutput,
         ctx: &QueryPipelineContext,
@@ -42,23 +38,6 @@ impl<F: ResultFormatter> FormattingStage<F> {
     }
 }
 
-impl<M: RedactionMessage, F: ResultFormatter + Clone + Send + Sync> PipelineStage<M>
-    for FormattingStage<F>
-{
-    type Input = HydrationOutput;
-    type Output = PipelineOutput;
-
-    async fn execute(
-        &self,
-        input: Self::Input,
-        ctx: &mut QueryPipelineContext,
-        _req: &mut PipelineRequest<'_, M>,
-        _obs: &mut PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        self.process(input, ctx)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,11 +48,10 @@ mod tests {
     use query_engine::{
         CompiledQueryContext, HydrationPlan, ParameterizedQuery, QueryType, ResultContext,
     };
+    use querying_types::QueryResult;
     use serde_json::{Value, json};
     use std::collections::HashMap;
     use std::sync::Arc;
-
-    use crate::redaction::QueryResult;
 
     #[derive(Clone)]
     struct ConstFormatter(Value);
@@ -127,15 +105,14 @@ mod tests {
                 .unwrap(),
             })),
             ontology: Arc::new(Ontology::new()),
-            client: crate::query_pipeline::types::dummy_clickhouse_client(),
             security_context: None,
         };
 
         let stage = FormattingStage::new(ConstFormatter(json!(["ok"])));
-        let output = stage.process(input, &ctx).unwrap();
+        let output = stage.execute(input, &ctx).unwrap();
 
         assert_eq!(output.formatted_result, json!(["ok"]));
-        assert_eq!(output.row_count, 2); // 3 total - 1 redacted
+        assert_eq!(output.row_count, 2);
         assert_eq!(output.redacted_count, 1);
         assert_eq!(output.raw_query_strings, vec!["SELECT 1"]);
         assert_eq!(output.query_type, "");

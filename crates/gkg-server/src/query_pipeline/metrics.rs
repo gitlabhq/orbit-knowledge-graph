@@ -5,8 +5,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram};
 
-use super::error::PipelineError;
-use super::types::PipelineOutput;
+use querying_pipeline::{PipelineError, PipelineObserver, PipelineOutput};
 
 static METRICS: LazyLock<QueryPipelineMetrics> = LazyLock::new(QueryPipelineMetrics::new);
 
@@ -89,8 +88,6 @@ impl QueryPipelineMetrics {
     }
 }
 
-/// Maps a [`PipelineError`] variant to its error counter and a reason label.
-/// Returns `None` for `Compile` — those are already tracked by `qe.threat.*` counters.
 fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
     match err {
         PipelineError::Security(_) => Some((&METRICS.security_rejected, "security")),
@@ -98,11 +95,12 @@ fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
         PipelineError::Execution(_) => Some((&METRICS.execution_failed, "execution")),
         PipelineError::Authorization(_) => Some((&METRICS.authorization_failed, "authorization")),
         PipelineError::Streaming(_) => Some((&METRICS.streaming_failed, "streaming")),
+        PipelineError::Custom(_) => None,
     }
 }
 
-/// Collects per-stage timings and records all pipeline metrics on completion.
-pub struct PipelineObserver {
+/// OpenTelemetry-backed pipeline observer for the server.
+pub struct OTelPipelineObserver {
     query_type: &'static str,
     start: Instant,
     compile_ms: f64,
@@ -112,7 +110,7 @@ pub struct PipelineObserver {
     batch_count: usize,
 }
 
-impl PipelineObserver {
+impl OTelPipelineObserver {
     pub fn start() -> Self {
         Self {
             query_type: "unknown",
@@ -125,35 +123,9 @@ impl PipelineObserver {
         }
     }
 
-    pub fn set_query_type(&mut self, query_type: &'static str) {
-        self.query_type = query_type;
-    }
-
-    pub fn compiled(&mut self, elapsed: Duration) {
-        self.compile_ms = elapsed.as_secs_f64() * 1000.0;
-    }
-
-    pub fn executed(&mut self, elapsed: Duration, batch_count: usize) {
-        self.execute_ms = elapsed.as_secs_f64() * 1000.0;
-        self.batch_count = batch_count;
-    }
-
-    pub fn authorized(&mut self, elapsed: Duration) {
-        self.authorization_ms = elapsed.as_secs_f64() * 1000.0;
-    }
-
-    pub fn hydrated(&mut self, elapsed: Duration) {
-        self.hydration_ms = elapsed.as_secs_f64() * 1000.0;
-    }
-
-    pub fn elapsed_ms(&self) -> f64 {
-        self.start.elapsed().as_secs_f64() * 1000.0
-    }
-
-    /// Pass a fallible stage result through, recording error metrics if it failed.
-    pub fn check<T>(&self, result: Result<T, PipelineError>) -> Result<T, PipelineError> {
+    pub fn check_result<T>(&self, result: Result<T, PipelineError>) -> Result<T, PipelineError> {
         if let Err(ref e) = result {
-            record_error(self.query_type, self.start, e);
+            self.record_error(e);
         }
         result
     }
@@ -183,17 +155,45 @@ impl PipelineObserver {
     }
 }
 
-fn record_error(query_type: &'static str, start: Instant, err: &PipelineError) {
-    let attrs = [
-        KeyValue::new("query_type", query_type),
-        KeyValue::new("status", err.code()),
-    ];
-    METRICS.queries_total.add(1, &attrs);
-    METRICS
-        .pipeline_duration_ms
-        .record(start.elapsed().as_secs_f64() * 1000.0, &attrs);
+impl PipelineObserver for OTelPipelineObserver {
+    fn set_query_type(&mut self, query_type: &'static str) {
+        self.query_type = query_type;
+    }
 
-    if let Some((counter, reason)) = counter_info(err) {
-        counter.add(1, &[KeyValue::new("reason", reason)]);
+    fn compiled(&mut self, elapsed: Duration) {
+        self.compile_ms = elapsed.as_secs_f64() * 1000.0;
+    }
+
+    fn executed(&mut self, elapsed: Duration, batch_count: usize) {
+        self.execute_ms = elapsed.as_secs_f64() * 1000.0;
+        self.batch_count = batch_count;
+    }
+
+    fn authorized(&mut self, elapsed: Duration) {
+        self.authorization_ms = elapsed.as_secs_f64() * 1000.0;
+    }
+
+    fn hydrated(&mut self, elapsed: Duration) {
+        self.hydration_ms = elapsed.as_secs_f64() * 1000.0;
+    }
+
+    fn record_error(&self, err: &PipelineError) {
+        let attrs = [
+            KeyValue::new("query_type", self.query_type),
+            KeyValue::new("status", err.code()),
+        ];
+        METRICS.queries_total.add(1, &attrs);
+        METRICS
+            .pipeline_duration_ms
+            .record(self.start.elapsed().as_secs_f64() * 1000.0, &attrs);
+
+        if let Some((counter, reason)) = counter_info(err) {
+            counter.add(1, &[KeyValue::new("reason", reason)]);
+        }
+    }
+
+    fn finish(self: Box<Self>, output: &PipelineOutput) {
+        // Delegate to the inherent method
+        OTelPipelineObserver::finish(*self, output);
     }
 }

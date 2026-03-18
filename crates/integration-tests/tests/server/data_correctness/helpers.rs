@@ -19,12 +19,12 @@ pub(super) use std::collections::HashSet;
 pub(super) use std::sync::Arc;
 
 pub(super) use crate::common::{
-    DummyClaims, GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext,
-    load_ontology, run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
+    run_redaction, test_security_context,
 };
 pub(super) use gkg_server::query_pipeline::{
-    GraphFormatter, HydrationStage, PipelineObserver, PipelineRequest, PipelineStage,
-    QueryPipelineContext, RedactionOutput, ResultFormatter,
+    GraphFormatter, HydrationStage, Hydrator, NoOpObserver, QueryPipelineContext, RedactionOutput,
+    ResultFormatter,
 };
 pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
@@ -69,29 +69,21 @@ pub(super) async fn run_query_with_security(
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
-    let mut pipeline_ctx = QueryPipelineContext {
+    let pipeline_ctx = QueryPipelineContext {
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
-        client,
         security_context: Some(security_ctx),
     };
-    let claims = gkg_server::auth::Claims::dummy();
-    let mut req = PipelineRequest::<gkg_server::proto::ExecuteQueryMessage> {
-        claims: &claims,
-        query_json: "",
-        tx: None,
-        stream: None,
-    };
-    let mut obs = PipelineObserver::start();
+    let hydrator = HydrationStage::new(client);
+    let mut obs = NoOpObserver;
 
-    let output = HydrationStage
-        .execute(
+    let output = hydrator
+        .hydrate(
             RedactionOutput {
                 query_result: result,
                 redacted_count,
             },
-            &mut pipeline_ctx,
-            &mut req,
+            &pipeline_ctx,
             &mut obs,
         )
         .await
