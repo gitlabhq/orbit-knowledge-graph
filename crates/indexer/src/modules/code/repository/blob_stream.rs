@@ -44,6 +44,8 @@ struct BlobChunk {
     path: Vec<u8>,
 }
 
+const MAX_FRAME_LENGTH: usize = 4 * 1024 * 1024; // 4 MiB
+
 type ChunkStream = Pin<Box<dyn Stream<Item = Result<BlobChunk, BlobDecodeError>> + Send>>;
 
 pub struct BlobStream {
@@ -60,7 +62,7 @@ impl BlobStream {
         let reader = StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
 
         let mut codec = LengthDelimitedCodec::new();
-        codec.set_max_frame_length(4 * 1024 * 1024);
+        codec.set_max_frame_length(MAX_FRAME_LENGTH);
 
         let chunks = FramedRead::new(reader, codec)
             .map(|frame| {
