@@ -47,7 +47,7 @@ impl<M: RedactionMessage + 'static> PipelineStage for GrpcAuthorizer<'_, M> {
             Vec::new()
         } else {
             let mut stream = self.stream.lock().await;
-            RedactionService::request_authorization(&resources_to_check, self.tx, &mut *stream)
+            RedactionService::request_authorization(&resources_to_check, self.tx, &mut stream)
                 .await
                 .map_err(|e| PipelineError::Authorization(format!("{e:?}")))?
                 .authorizations
