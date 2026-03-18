@@ -4,25 +4,27 @@ description: >
   AST-based code search and rewrite via tree-sitter patterns.
   Use instead of Grep/Edit for structural matching, batch rewrites,
   or context-aware queries (e.g. "unwrap inside impl blocks").
-allowed-tools: Bash(ast-grep *), Read, Glob
+allowed-tools: Bash(mise exec -- ast-grep *), Read, Glob
 ---
 
 # ast-grep
 
 Matches code by parsed AST, not text. Supports metavariable capture, relational rules, and in-place rewrite.
 
+All commands must be run through `mise exec --` since ast-grep is installed via mise:
+
 ## Commands
 
 ```shell
-# Pattern search (default command)
-ast-grep run -p '$X.unwrap()' -l rust .
+# Pattern search
+mise exec -- ast-grep run -p '$X.unwrap()' -l rust .
 
 # Rewrite: always preview first, then apply with -U
-ast-grep run -p '$X.lock().unwrap()' -l rust .
-ast-grep run -p '$X.lock().unwrap()' -r '$X.lock().expect("lock poisoned")' -l rust -U .
+mise exec -- ast-grep run -p '$X.lock().unwrap()' -l rust .
+mise exec -- ast-grep run -p '$X.lock().unwrap()' -r '$X.lock().expect("lock poisoned")' -l rust -U .
 
 # Structural search with YAML rules (for relational/composite logic)
-ast-grep scan --inline-rules 'id: name
+mise exec -- ast-grep scan --inline-rules 'id: name
 language: rust
 rule:
   pattern: $X.unwrap()
@@ -31,11 +33,11 @@ rule:
     stopBy: end' .
 
 # JSON output for programmatic use
-ast-grep run -p '$X.unwrap()' -l rust --json .
+mise exec -- ast-grep run -p '$X.unwrap()' -l rust --json .
 
 # Debug: see how ast-grep parses your pattern or target code
-ast-grep run -p 'PATTERN' -l rust --debug-query=cst   # concrete syntax tree
-ast-grep run -p 'PATTERN' -l rust --debug-query=pattern # metavar detection
+mise exec -- ast-grep run -p 'PATTERN' -l rust --debug-query=cst   # concrete syntax tree
+mise exec -- ast-grep run -p 'PATTERN' -l rust --debug-query=pattern # metavar detection
 ```
 
 ## Pattern syntax
@@ -49,7 +51,7 @@ ast-grep run -p 'PATTERN' -l rust --debug-query=pattern # metavar detection
 
 Patterns must be valid parseable code. Bare `.unwrap()` is an ERROR — use `$X.unwrap()`.
 
-Use `--selector KIND` to disambiguate patterns that parse as the wrong node type. Provide surrounding context in the pattern and select the sub-node you actually want: `ast-grep run -p 'struct S { pub $N: $T }' --selector field_declaration -l rust .`
+Use `--selector KIND` to disambiguate patterns that parse as the wrong node type. Provide surrounding context in the pattern and select the sub-node you actually want: `mise exec -- ast-grep run -p 'struct S { pub $N: $T }' --selector field_declaration -l rust .`
 
 ## YAML rule structure
 
