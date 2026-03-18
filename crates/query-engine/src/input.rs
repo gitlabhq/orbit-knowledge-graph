@@ -389,6 +389,19 @@ impl AggFunction {
             Self::Collect => "groupArray",
         }
     }
+
+    /// ClickHouse `-If` combinator variant (e.g. `countIf`, `sumIf`).
+    /// Returns `None` for functions that don't support the combinator.
+    pub fn as_sql_if(&self) -> Option<&'static str> {
+        match self {
+            Self::Count => Some("countIf"),
+            Self::Sum => Some("sumIf"),
+            Self::Avg => Some("avgIf"),
+            Self::Min => Some("minIf"),
+            Self::Max => Some("maxIf"),
+            Self::Collect => None,
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

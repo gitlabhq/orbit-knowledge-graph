@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! JSON → Schema Validate → Parse → Validate → Lower → Security → Check → Codegen → SQL
+//! JSON → Schema Validate → Parse → Validate → Lower → Security → Optimize → Check → Codegen → SQL
 //! ```
 //!
 //! # Example
@@ -41,6 +41,7 @@ pub mod input;
 pub mod lower;
 pub mod metrics;
 pub mod normalize;
+pub mod optimize;
 pub mod security;
 pub mod validate;
 
@@ -98,6 +99,7 @@ pub fn compile(
     let mut node = lower(&input).count_err()?;
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx).count_err()?;
+    optimize::optimize(&mut node);
     check_ast(&node, ctx).count_err()?;
     let base = codegen(&node, result_context).count_err()?;
 
