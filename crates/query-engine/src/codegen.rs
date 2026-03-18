@@ -2,7 +2,7 @@
 //!
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
-use crate::ast::{ChType, Cte, Expr, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
 use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
@@ -327,10 +327,16 @@ impl Context {
             } => {
                 let left_sql = self.emit_table_ref(left)?;
                 let right_sql = self.emit_table_ref(right)?;
-                let on_expr = self.emit_expr(on);
-                Ok(format!(
-                    "{left_sql} {join_type} JOIN {right_sql} ON {on_expr}"
-                ))
+                if *join_type == JoinType::Cross {
+                    // ClickHouse doesn't support plain CROSS JOIN in all
+                    // algorithms. Emit INNER JOIN ON 1 which is equivalent.
+                    Ok(format!("{left_sql} INNER JOIN {right_sql} ON 1"))
+                } else {
+                    let on_expr = self.emit_expr(on);
+                    Ok(format!(
+                        "{left_sql} {join_type} JOIN {right_sql} ON {on_expr}"
+                    ))
+                }
             }
             TableRef::Union { queries, alias } => {
                 let union_parts: Vec<String> = queries
