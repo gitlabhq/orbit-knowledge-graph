@@ -149,15 +149,20 @@ impl<'a> Validator<'a> {
     }
 
     /// Defense-in-depth: reject queries that exceed hard caps on complexity.
-    /// The JSON schema already enforces these limits via maxItems / maximum,
-    /// so this only fires if schema validation was somehow bypassed.
+    /// The JSON schema already enforces these limits via maxItems / maximum /
+    /// maxProperties, so this only fires if schema validation was somehow bypassed.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
         const MAX_HOPS_CAP: u32 = 3;
         const MAX_DEPTH_CAP: u32 = 3;
         const MAX_NODES_CAP: usize = 5;
         const MAX_RELS_CAP: usize = 5;
+        const MAX_AGGS_CAP: usize = 10;
         const MAX_NODE_IDS: usize = 500;
         const MAX_IN_VALUES: usize = 100;
+        const MAX_FILTERS_PER_NODE: usize = 20;
+        const MAX_FILTERS_PER_REL: usize = 10;
+        const MAX_COLUMNS: usize = 50;
+        const MAX_REL_TYPES: usize = 10;
 
         if input.nodes.len() > MAX_NODES_CAP {
             return Err(QueryError::DepthExceeded(format!(
@@ -171,6 +176,12 @@ impl<'a> Validator<'a> {
                 input.relationships.len()
             )));
         }
+        if input.aggregations.len() > MAX_AGGS_CAP {
+            return Err(QueryError::LimitExceeded(format!(
+                "aggregations count ({}) must not exceed {MAX_AGGS_CAP}",
+                input.aggregations.len()
+            )));
+        }
         for rel in &input.relationships {
             if rel.max_hops > MAX_HOPS_CAP {
                 return Err(QueryError::DepthExceeded(format!(
@@ -178,20 +189,54 @@ impl<'a> Validator<'a> {
                     rel.max_hops
                 )));
             }
+            if rel.types.len() > MAX_REL_TYPES {
+                return Err(QueryError::LimitExceeded(format!(
+                    "relationship type count ({}) must not exceed {MAX_REL_TYPES}",
+                    rel.types.len()
+                )));
+            }
+            if rel.filters.len() > MAX_FILTERS_PER_REL {
+                return Err(QueryError::LimitExceeded(format!(
+                    "relationship filter count ({}) must not exceed {MAX_FILTERS_PER_REL}",
+                    rel.filters.len()
+                )));
+            }
         }
-        if let Some(ref path) = input.path
-            && path.max_depth > MAX_DEPTH_CAP
-        {
-            return Err(QueryError::DepthExceeded(format!(
-                "max_depth ({}) must not exceed {MAX_DEPTH_CAP}",
-                path.max_depth
-            )));
+        if let Some(ref path) = input.path {
+            if path.max_depth > MAX_DEPTH_CAP {
+                return Err(QueryError::DepthExceeded(format!(
+                    "max_depth ({}) must not exceed {MAX_DEPTH_CAP}",
+                    path.max_depth
+                )));
+            }
+            if path.rel_types.len() > MAX_REL_TYPES {
+                return Err(QueryError::LimitExceeded(format!(
+                    "path rel_types count ({}) must not exceed {MAX_REL_TYPES}",
+                    path.rel_types.len()
+                )));
+            }
         }
         for node in &input.nodes {
             if node.node_ids.len() > MAX_NODE_IDS {
                 return Err(QueryError::LimitExceeded(format!(
                     "node_ids count ({}) for node \"{}\" must not exceed {MAX_NODE_IDS}",
                     node.node_ids.len(),
+                    node.id
+                )));
+            }
+            if node.filters.len() > MAX_FILTERS_PER_NODE {
+                return Err(QueryError::LimitExceeded(format!(
+                    "filter count ({}) for node \"{}\" must not exceed {MAX_FILTERS_PER_NODE}",
+                    node.filters.len(),
+                    node.id
+                )));
+            }
+            if let Some(crate::input::ColumnSelection::List(cols)) = &node.columns
+                && cols.len() > MAX_COLUMNS
+            {
+                return Err(QueryError::LimitExceeded(format!(
+                    "columns count ({}) for node \"{}\" must not exceed {MAX_COLUMNS}",
+                    cols.len(),
                     node.id
                 )));
             }

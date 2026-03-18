@@ -35,6 +35,7 @@
       "type": "array",
       "description": "Aggregation functions to apply. Required when query_type is 'aggregation'.",
       "default": [],
+      "maxItems": 10,
       "items": {
         "$ref": "#/$defs/Aggregation"
       }
@@ -239,13 +240,14 @@
         },
         "filters": {
           "type": "object",
-          "description": "Property filters. Keys are property names, values are Filter objects.",
+          "description": "Property filters. Keys are property names, values are Filter objects. SECURITY: Limited to 20 to prevent query complexity explosion.",
           "propertyNames": {
             "$ref": "#/$defs/Identifier"
           },
           "additionalProperties": {
             "$ref": "#/$defs/Filter"
           },
+          "maxProperties": 20,
           "default": {}
         },
         "node_ids": {
@@ -282,7 +284,8 @@
           "items": {
             "$ref": "#/$defs/Identifier"
           },
-          "minItems": 1
+          "minItems": 1,
+          "maxItems": 50
         }
       ]
     },
@@ -325,7 +328,8 @@
         },
         {
           "type": "string",
-          "description": "String value"
+          "description": "String value",
+          "maxLength": 1024
         },
         {
           "type": "boolean",
@@ -336,7 +340,8 @@
           "description": "List of values",
           "items": {
             "$ref": "#/$defs/FilterValue"
-          }
+          },
+          "maxItems": 100
         }
       ]
     },
@@ -375,7 +380,7 @@
         },
         {
           "if": { "properties": { "op": { "enum": ["contains", "starts_with", "ends_with"] } } },
-          "then": { "required": ["value"], "properties": { "value": { "type": "string" } } }
+          "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
         }
       ]
     },
@@ -417,13 +422,14 @@
         },
         "filters": {
           "type": "object",
-          "description": "Filters on relationship properties",
+          "description": "Filters on relationship properties. SECURITY: Limited to 10 to prevent query complexity explosion.",
           "propertyNames": {
             "$ref": "#/$defs/Identifier"
           },
           "additionalProperties": {
             "$ref": "#/$defs/Filter"
           },
+          "maxProperties": 10,
           "default": {}
         }
       },
@@ -452,7 +458,8 @@
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
-          "minItems": 1
+          "minItems": 1,
+          "maxItems": 10
         }
       ]
     },
@@ -535,7 +542,8 @@
           "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
-          }
+          },
+          "maxItems": 10
         }
       }
     },
@@ -564,6 +572,7 @@
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
+          "maxItems": 10,
           "default": []
         }
       }
