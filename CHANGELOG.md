@@ -1,3 +1,64 @@
+## [0.12.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.11.0...v0.12.0) (2026-03-18)
+
+### Features
+
+* **indexer:** add dead letter queue for exhausted retry messages ([bbc5aac](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bbc5aac2226c8a48ad81ae667bfebf6d2a22e656)) by Jean-Gabriel Doyon
+* **indexer:** add NATS progress pings to code indexing pipeline ([fdf4c78](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fdf4c78cf8fed49006a6c84e924757181ff54ebf)) by Jean-Gabriel Doyon
+* **indexer:** consume code indexing tasks instead of push events ([d33be50](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d33be509a562bb30974d9b96c4e2e4c012c12b24)) by Jean-Gabriel Doyon
+* **indexer:** decouple code indexing dispatch from handler via NATS ([77586ca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/77586ca8d696c3ab5b06b5ea774f07992607a8d8)) by Jean-Gabriel Doyon
+* **indexer:** replace polling code reconciliation with event-driven backfill ([8575aa4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8575aa42f28cc4fca407f9cbc475602720ee478c)) by Jean-Gabriel Doyon
+* **indexer:** send in-progress acks to prevent NATS message redelivery ([cd3da8d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cd3da8d3d046240daaa2ff0d21d7ac2be274742d)) by Jean-Gabriel Doyon
+* **ontology:** edge schema from YAML not Rust ([fbe610b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fbe610b068b949f18256601d4874c46a852bebc4)) by Adam Mulvany
+* **testing:** fix intermittent flakiness in concurrent integration tests ([41ab911](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41ab91188dfb61e0d24850386ff58559c2250ce7)) by Michael Usachenko
+
+### Fixes
+
+* **ci:** route all Docker Hub images through GitLab dependency proxy ([6a56af2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6a56af2c2cdefc40b77a86eb5549e6259deb98ed)) by Michael Usachenko
+* **data:** enforce assert_node_count on all search/traversal/neighbors tests ([3eac441](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3eac441db4bc08c266961454003fcb0ea4898063)) by Michael Usachenko
+* **indexer:** term-ack dead messages to free WorkQueue subject slots ([cc6fb13](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cc6fb130dc6599d6f523039ff5fa84d66eaab059)) by Jean-Gabriel Doyon
+* **indexer:** use create_or_update_stream to survive rolling updates ([a2f9f8b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a2f9f8b290c6b639b50d33891f9a373afe7906cd)) by Jean-Gabriel Doyon
+* **query-engine:** type-check relationship filters against edge schema ([b5f9e48](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b5f9e487cc69b5aa25571f9e8860b0348cf46f3b)) by Adam Mulvany
+* **server:** support wildcard expand in GetGraphSchema RPC ([9f7045e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f7045e1e9f5c82e0b160123814a2c73e439ef9d)) by Michael Angelo Rivera
+* **tests:** assert edge set instead of discarding in traversal_with_order_by + harden MustInspect ([589881e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/589881eeb522e2afed69e685fd33ebb9692bf3da)) by Michael Usachenko
+
+### Performance
+
+* **integration-testkit:** optimize test infrastructure performance ([c0144a7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c0144a76cf823e93c0bf9920c1bbe1fccc4a9dca)) by Michael Usachenko
+* **query-engine:** fold WHERE filters into -If aggregate combinators ([ba31a0d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ba31a0d7be2c544d2bbadfa6d123386173dbc92d)) by Michael Usachenko
+* **query-engine:** replace recursive CTE with bidirectional UNION ALL for path-finding ([c09ffba](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c09ffba96148d8d46bb811cd36dc3e69f5c949be)) by Michael Usachenko
+* **schema:** add by_target projection and bloom filter index to gl_edge ([98624ce](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/98624ce850148fc7ec0de72de0b11ee599ace909)) by michaelusa
+
+### Other
+
+* add ADR 005 for code indexing task table ([b4798a6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b4798a6b9d36d2c9a6c4bfaf02a7029536dfa5ca)) by Jean-Gabriel Doyon
+* **aggregation:** add traversal path authorization tests ([5258b7b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5258b7b22e1a14b3d0e51cea65245e82c665e2c5)) by Michael Usachenko
+* **data-correctness:** add 19 missing integration tests ([99a7d4f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/99a7d4f4646fd77da95680e38d241c601d22acb8)) by Michael Usachenko
+* **deps:** update rust crate bollard to v0.20.2 ([edd7ba4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/edd7ba4a3a251d750f646a8c4e382e9a971b1cac)) by GitLab Renovate Bot
+* **deps:** update rust crate config to v0.15.22 ([51da395](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/51da395764390737b66f138adb8ee2f8eaeefdaa)) by GitLab Renovate Bot
+* **deps:** update rust crate kube to v3.1.0 ([accf2da](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/accf2da53927c66582b0c190d71599b790e76e06)) by GitLab Renovate Bot
+* **deps:** update rust crate toml to v1.0.7 ([83b64c5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/83b64c5e02502649c1dc7363cad4d219f0af6093)) by GitLab Renovate Bot
+* **deps:** update rust crate tracing-subscriber to v0.3.23 ([3b40f90](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3b40f903536c7b630daf2cce9a1d89a8b5117734)) by GitLab Renovate Bot
+* **indexer:** add NATS subject to message envelope ([e69d23c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e69d23c05f9dbc0d5a6f2c8f61d1169a2eaa43ab)) by Jean-Gabriel Doyon
+* **indexer:** rename checkpoint fields and make commit_sha optional ([7e45821](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7e45821294e840dbab663695de06ba30ef2d52f5)) by Jean-Gabriel Doyon
+* **indexer:** rename Topic to Subscription with explicit options ([0c60245](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0c602453b08323d1a5d260bfdc9dc3a9dd63fc23)) by Jean-Gabriel Doyon
+* **readme:** add Mark Unthank as Product Designer ([02ec111](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02ec111ea22d28dcd066ab560bfcc50ad4df54d4)) by Lyle Kozloff
+* **readme:** update Design/UX related info ([f109c4e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f109c4ea0fd66ea73c2654eca135608cb110717e)) by Mark Unthank
+* remove stale Gitaly references across documentation ([447579d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/447579d4e090c0107b769b24b50b0f62604c9292)) by Michael Angelo Rivera
+* replace hardcoded relative paths with .cargo/config.toml env vars ([f702a07](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f702a0703aa4c098a5e64893d7ed70f2493fa2e7)) by Michael Usachenko
+* **server:** remove gitaly-client crate ([c8b0e0e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c8b0e0ea06df44f41c0b6830dbb7bf67a70520b3)) by Michael Angelo Rivera
+* **server:** replace ring with aws-lc-rs ([fe486f7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fe486f7475cc56b0d9729a8ab1eea3d6f23c0d81)) by Bohdan Parkhomchuk
+* **testing:** add aggregation sort, sum, and redaction tests ([64296da](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/64296dafda74fec48479b4df42e63a8f984e7360)) by Michael Usachenko
+* **testing:** add edge case tests for giant strings, sql injection, and empty results ([d9a189b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d9a189b012dda0a6ac3d6c16d06fa6c252402432)) by Michael Usachenko
+* **testing:** add neighbors mixed entity types and redaction tests ([dfe2926](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dfe2926d4c27eeb16c5ac44a038f541bc2b64ff5)) by Michael Usachenko
+* **testing:** add pagination, limit, empty result, and combined feature tests ([eb498af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eb498af6aedf2c00d1c7b1b474c4a02996764812)) by Michael Usachenko
+* **testing:** add path finding max_depth and redaction tests ([7c8ff91](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7c8ff9157a216b80971960e2e49e79a1beeb1b9a)) by Michael Usachenko
+* **testing:** add search tests for contains, is_null, ordering, redaction, and unicode ([0d7abf5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0d7abf5bb2dae0d7ec1d85b1d387684492358a82)) by Michael Usachenko
+* **testing:** add traversal order_by, variable-length, incoming, and filter tests ([4a5bc04](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a5bc04b634bb79067b9038b02b603989a762eca)) by Michael Usachenko
+* **testing:** extend seed data with subgroups, notes, unicode user, and new edges ([742d275](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/742d2754c1a49a14442f71420cc47e473a5fdd41)) by Michael Usachenko
+* **tests:** replace testkit extract helpers with ArrowUtils::get_column_by_name ([555eff3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/555eff386c4f5131a3c8ed9d982ef18ef0ca43f6)) by Michael Usachenko
+* **tests:** split data_correctness.rs into modules by query type ([f49df90](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f49df902d76dfb935a9ffbb4a136ac0dd73af164)) by Michael Usachenko
+* **utils:** consolidate arrow extraction helpers ([6a884dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6a884dd59987338d76354824c152537f2a131fe4)) by Michael Usachenko
+
 ## [0.11.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.10.0...v0.11.0) (2026-03-13)
 
 ### Features
