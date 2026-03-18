@@ -49,6 +49,8 @@ ast-grep run -p 'PATTERN' -l rust --debug-query=pattern # metavar detection
 
 Patterns must be valid parseable code. Bare `.unwrap()` is an ERROR — use `$X.unwrap()`.
 
+Use `--selector KIND` to disambiguate patterns that parse as the wrong node type. Provide surrounding context in the pattern and select the sub-node you actually want: `ast-grep run -p 'struct S { pub $N: $T }' --selector field_declaration -l rust .`
+
 ## YAML rule structure
 
 Rules combine three categories:
