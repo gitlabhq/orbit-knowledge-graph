@@ -216,13 +216,13 @@ SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/',
     source_id Int64,
-    source_kind String,
-    relationship_kind String,
+    source_kind LowCardinality(String),
+    relationship_kind LowCardinality(String),
     target_id Int64,
-    target_kind String,
+    target_kind LowCardinality(String),
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
-    INDEX idx_relationship relationship_kind TYPE bloom_filter GRANULARITY 4,
+    INDEX idx_relationship relationship_kind TYPE set(100) GRANULARITY 4,
     PROJECTION by_target (
         SELECT source_kind, source_id, relationship_kind, target_kind, target_id
         ORDER BY target_id, target_kind, relationship_kind
