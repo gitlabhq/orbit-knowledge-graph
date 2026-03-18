@@ -190,11 +190,12 @@ impl GitlabClient {
         let response = self.authenticated_get(url).await?;
         Self::check_diff_status(&response, project_id)?;
 
-        let stream = futures::stream::unfold(response, |mut resp| async {
+        let stream = futures::stream::unfold(Some(response), |state| async {
+            let mut resp = state?;
             match resp.chunk().await {
-                Ok(Some(bytes)) => Some((Ok(bytes), resp)),
+                Ok(Some(bytes)) => Some((Ok(bytes), Some(resp))),
                 Ok(None) => None,
-                Err(e) => Some((Err(e.into()), resp)),
+                Err(e) => Some((Err(e.into()), None)),
             }
         });
 
