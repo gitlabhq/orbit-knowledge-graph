@@ -33,6 +33,7 @@ pub trait RepositoryCache: Send + Sync {
 }
 
 const COMMIT_FILE: &str = ".commit";
+const META_DIR: &str = "meta";
 const REPOSITORY_DIR: &str = "repository";
 
 pub struct LocalRepositoryCache {
@@ -57,7 +58,7 @@ impl RepositoryCache for LocalRepositoryCache {
         branch: &str,
     ) -> Result<Option<CachedRepository>, RepositoryCacheError> {
         let branch_dir = self.branch_dir(project_id, branch);
-        let commit_file = branch_dir.join(COMMIT_FILE);
+        let commit_file = branch_dir.join(META_DIR).join(COMMIT_FILE);
 
         let commit = match tokio::fs::read_to_string(&commit_file).await {
             Ok(content) => content.trim().to_string(),
@@ -79,9 +80,11 @@ impl RepositoryCache for LocalRepositoryCache {
         _path: &Path,
     ) -> Result<(), RepositoryCacheError> {
         let branch_dir = self.branch_dir(project_id, branch);
+        let meta_dir = branch_dir.join(META_DIR);
         let repository_dir = branch_dir.join(REPOSITORY_DIR);
+        tokio::fs::create_dir_all(&meta_dir).await?;
         tokio::fs::create_dir_all(&repository_dir).await?;
-        tokio::fs::write(branch_dir.join(COMMIT_FILE), commit_sha).await?;
+        tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
         Ok(())
     }
 
