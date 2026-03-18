@@ -22,7 +22,7 @@ pub(super) use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
     run_redaction, test_security_context,
 };
-pub(super) use gkg_server::query_pipeline::{
+pub(super) use gkg_server::pipeline::{
     Extensions, GraphFormatter, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext,
     RedactionOutput, ResultFormatter,
 };

@@ -5185,7 +5185,6 @@ version = "0.1.0"
 dependencies = [
  "ontology",
  "query-engine",
- "querying-types",
  "thiserror 2.0.18",
 ]
 

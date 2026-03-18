@@ -11,7 +11,7 @@ use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
     run_redaction, test_security_context,
 };
-use gkg_server::query_pipeline::{
+use gkg_server::pipeline::{
     Extensions, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext, RedactionOutput,
     row_to_json,
 };

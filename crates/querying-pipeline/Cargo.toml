@@ -6,7 +6,6 @@ license = "MIT"
 
 [dependencies]
 ontology = { path = "../ontology" }
-querying-types = { path = "../querying-types" }
 query-engine = { path = "../query-engine" }
 thiserror = { workspace = true }
 
