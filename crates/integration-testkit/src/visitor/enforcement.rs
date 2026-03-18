@@ -205,7 +205,7 @@ mod tests {
         sample_response, sample_search_response,
     };
     use crate::visitor::{NodeExt, ResponseView};
-    use querying_shared_stages::GraphResponse;
+    use querying_formatters::GraphResponse;
 
     fn parse_test_input(json: &str) -> Input {
         parse_input(json).expect("test query JSON should parse into Input")
