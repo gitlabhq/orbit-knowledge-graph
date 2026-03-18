@@ -5,22 +5,27 @@ use query_engine::compile;
 
 use crate::error::PipelineError;
 use crate::observer::PipelineObserver;
+use crate::traits::PipelineStage;
 use crate::types::QueryPipelineContext;
 
+#[derive(Clone)]
 pub struct CompilationStage;
 
-impl CompilationStage {
-    pub fn execute(
+impl PipelineStage for CompilationStage {
+    type Input = ();
+    type Output = ();
+
+    async fn execute(
         &self,
-        query_json: &str,
+        _input: Self::Input,
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
-    ) -> Result<(), PipelineError> {
+    ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
         let ontology = &ctx.ontology;
         let security_context = ctx.security_context()?;
 
-        let compiled = compile(query_json, ontology, security_context)
+        let compiled = compile(&ctx.query_json, ontology, security_context)
             .map_err(|e| PipelineError::Compile(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
 

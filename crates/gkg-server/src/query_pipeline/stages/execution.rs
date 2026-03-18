@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::record_batch::RecordBatch;
-use async_trait::async_trait;
 use clickhouse_client::ArrowClickHouseClient;
 
-use querying_pipeline::{PipelineError, PipelineObserver, QueryExecutor, QueryPipelineContext};
+use querying_pipeline::{
+    ExecutionOutput, PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
+};
 
 #[derive(Clone)]
 pub struct ClickHouseExecutor {
@@ -18,13 +18,16 @@ impl ClickHouseExecutor {
     }
 }
 
-#[async_trait]
-impl QueryExecutor for ClickHouseExecutor {
+impl PipelineStage for ClickHouseExecutor {
+    type Input = ();
+    type Output = ExecutionOutput;
+
     async fn execute(
         &self,
-        ctx: &QueryPipelineContext,
+        _input: Self::Input,
+        ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
-    ) -> Result<Vec<RecordBatch>, PipelineError> {
+    ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
         let compiled = ctx.compiled()?;
         let sql = &compiled.base.sql;
@@ -41,6 +44,9 @@ impl QueryExecutor for ClickHouseExecutor {
             .inspect_err(|e| obs.record_error(e))?;
 
         obs.executed(t.elapsed(), batches.len());
-        Ok(batches)
+        Ok(ExecutionOutput {
+            batches,
+            result_context: compiled.base.result_context.clone(),
+        })
     }
 }

@@ -441,6 +441,7 @@ mod tests {
         let qr = QueryResult::from_batches(&[batch], &result_ctx);
 
         let pipeline_ctx = QueryPipelineContext {
+            query_json: String::new(),
             compiled: Some(Arc::new(CompiledQueryContext {
                 query_type: QueryType::Search,
                 base: ParameterizedQuery {

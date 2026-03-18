@@ -123,13 +123,6 @@ impl OTelPipelineObserver {
         }
     }
 
-    pub fn check_result<T>(&self, result: Result<T, PipelineError>) -> Result<T, PipelineError> {
-        if let Err(ref e) = result {
-            self.record_error(e);
-        }
-        result
-    }
-
     /// Record all metrics for a successful pipeline run.
     pub fn finish(self, output: &PipelineOutput) {
         let qt = [KeyValue::new("query_type", self.query_type)];

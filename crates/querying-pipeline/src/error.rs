@@ -1,5 +1,3 @@
-use std::fmt;
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -39,14 +37,3 @@ impl PipelineError {
         Self::Custom(err.into())
     }
 }
-
-impl fmt::Display for SecurityError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Debug)]
-pub struct SecurityError(pub String);
-
-impl std::error::Error for SecurityError {}

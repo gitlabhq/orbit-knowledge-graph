@@ -12,11 +12,10 @@ pub use formatters::{
 };
 pub use observer::{NoOpObserver, PipelineObserver};
 pub use stages::{CompilationStage, ExtractionStage, FormattingStage, RedactionStage};
-pub use traits::{Authorizer, Hydrator, NoOpAuthorizer, NoOpHydrator, QueryExecutor};
+pub use traits::{PipelineRunner, PipelineStage};
 pub use types::{
     AuthorizationOutput, ExecutionOutput, ExtractionOutput, HydrationOutput, PipelineOutput,
-    PipelineRequest, QueryPipelineContext, RedactionOutput,
+    QueryPipelineContext, RedactionOutput,
 };
 
-// Re-export querying-types for convenience
 pub use querying_types;

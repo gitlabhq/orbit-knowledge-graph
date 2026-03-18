@@ -12,8 +12,8 @@ use crate::common::{
     run_redaction, test_security_context,
 };
 use gkg_server::query_pipeline::{
-    GraphFormatter, HydrationStage, Hydrator, NoOpObserver, QueryPipelineContext, RedactionOutput,
-    ResultFormatter,
+    GraphFormatter, HydrationStage, NoOpObserver, PipelineStage, QueryPipelineContext,
+    RedactionOutput, ResultFormatter,
 };
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
@@ -158,7 +158,8 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
-    let pipeline_ctx = QueryPipelineContext {
+    let mut pipeline_ctx = QueryPipelineContext {
+        query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx),
@@ -167,12 +168,12 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     let mut obs = NoOpObserver;
 
     let output = hydrator
-        .hydrate(
+        .execute(
             RedactionOutput {
                 query_result: result,
                 redacted_count,
             },
-            &pipeline_ctx,
+            &mut pipeline_ctx,
             &mut obs,
         )
         .await

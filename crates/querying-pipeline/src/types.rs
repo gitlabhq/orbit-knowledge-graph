@@ -6,14 +6,10 @@ use query_engine::{CompiledQueryContext, ResultContext, SecurityContext};
 use querying_types::{QueryResult, ResourceAuthorization};
 use serde_json::Value;
 
-use crate::error::{PipelineError, SecurityError};
-
-pub struct PipelineRequest {
-    pub query_json: String,
-    pub security_context: SecurityContext,
-}
+use crate::error::PipelineError;
 
 pub struct QueryPipelineContext {
+    pub query_json: String,
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub ontology: Arc<Ontology>,
     pub security_context: Option<SecurityContext>,
@@ -27,11 +23,9 @@ impl QueryPipelineContext {
     }
 
     pub fn security_context(&self) -> Result<&SecurityContext, PipelineError> {
-        self.security_context.as_ref().ok_or_else(|| {
-            PipelineError::Security(
-                SecurityError("security context not yet available".into()).to_string(),
-            )
-        })
+        self.security_context
+            .as_ref()
+            .ok_or_else(|| PipelineError::Security("security context not yet available".into()))
     }
 }
 

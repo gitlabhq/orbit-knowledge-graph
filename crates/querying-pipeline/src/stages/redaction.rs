@@ -1,26 +1,40 @@
-use crate::types::{AuthorizationOutput, RedactionOutput};
+use crate::error::PipelineError;
+use crate::observer::PipelineObserver;
+use crate::traits::PipelineStage;
+use crate::types::{AuthorizationOutput, QueryPipelineContext, RedactionOutput};
 
+#[derive(Clone)]
 pub struct RedactionStage;
 
-impl RedactionStage {
-    pub fn execute(&self, mut input: AuthorizationOutput) -> RedactionOutput {
+impl PipelineStage for RedactionStage {
+    type Input = AuthorizationOutput;
+    type Output = RedactionOutput;
+
+    async fn execute(
+        &self,
+        mut input: Self::Input,
+        _ctx: &mut QueryPipelineContext,
+        _obs: &mut dyn PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
         let redacted_count = input
             .query_result
             .apply_authorizations(&input.authorizations);
 
-        RedactionOutput {
+        Ok(RedactionOutput {
             query_result: input.query_result,
             redacted_count,
-        }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::observer::NoOpObserver;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
+    use ontology::Ontology;
     use query_engine::{EntityAuthConfig, ResultContext};
     use querying_types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
@@ -57,24 +71,44 @@ mod tests {
         }
     }
 
-    #[test]
-    fn denied_rows_are_redacted() {
+    #[tokio::test]
+    async fn denied_rows_are_redacted() {
         let auth = vec![ResourceAuthorization {
             resource_type: "project".to_string(),
             authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
         }];
 
-        let stage = RedactionStage;
-        let output = stage.execute(make_input(auth));
+        let mut ctx = QueryPipelineContext {
+            query_json: String::new(),
+            compiled: None,
+            ontology: Arc::new(Ontology::new()),
+            security_context: None,
+        };
+        let mut obs = NoOpObserver;
+
+        let output = RedactionStage
+            .execute(make_input(auth), &mut ctx, &mut obs)
+            .await
+            .unwrap();
 
         assert_eq!(output.redacted_count, 1);
         assert_eq!(output.query_result.authorized_count(), 2);
     }
 
-    #[test]
-    fn no_authorizations_redacts_all() {
-        let stage = RedactionStage;
-        let output = stage.execute(make_input(vec![]));
+    #[tokio::test]
+    async fn no_authorizations_redacts_all() {
+        let mut ctx = QueryPipelineContext {
+            query_json: String::new(),
+            compiled: None,
+            ontology: Arc::new(Ontology::new()),
+            security_context: None,
+        };
+        let mut obs = NoOpObserver;
+
+        let output = RedactionStage
+            .execute(make_input(vec![]), &mut ctx, &mut obs)
+            .await
+            .unwrap();
 
         assert_eq!(output.redacted_count, 3);
         assert_eq!(output.query_result.authorized_count(), 0);

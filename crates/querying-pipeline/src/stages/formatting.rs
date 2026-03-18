@@ -1,5 +1,7 @@
 use crate::error::PipelineError;
 use crate::formatters::ResultFormatter;
+use crate::observer::PipelineObserver;
+use crate::traits::PipelineStage;
 use crate::types::{HydrationOutput, PipelineOutput, QueryPipelineContext};
 
 #[derive(Clone)]
@@ -11,12 +13,18 @@ impl<F: ResultFormatter> FormattingStage<F> {
     pub fn new(formatter: F) -> Self {
         Self { formatter }
     }
+}
 
-    pub fn execute(
+impl<F: ResultFormatter + Clone + Send + Sync> PipelineStage for FormattingStage<F> {
+    type Input = HydrationOutput;
+    type Output = PipelineOutput;
+
+    async fn execute(
         &self,
-        input: HydrationOutput,
-        ctx: &QueryPipelineContext,
-    ) -> Result<PipelineOutput, PipelineError> {
+        input: Self::Input,
+        ctx: &mut QueryPipelineContext,
+        _obs: &mut dyn PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
         let row_count = input.query_result.authorized_count();
         let formatted = self
             .formatter
@@ -41,6 +49,7 @@ impl<F: ResultFormatter> FormattingStage<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::observer::NoOpObserver;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
@@ -62,8 +71,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn assembles_output_with_correct_counts() {
+    #[tokio::test]
+    async fn assembles_output_with_correct_counts() {
         let schema = Arc::new(Schema::new(vec![
             Field::new("_gkg_p_id", DataType::Int64, false),
             Field::new("_gkg_p_type", DataType::Utf8, false),
@@ -88,7 +97,8 @@ mod tests {
             query_result: qr,
             redacted_count: 1,
         };
-        let ctx = QueryPipelineContext {
+        let mut ctx = QueryPipelineContext {
+            query_json: String::new(),
             compiled: Some(Arc::new(CompiledQueryContext {
                 query_type: QueryType::Search,
                 base: ParameterizedQuery {
@@ -107,9 +117,10 @@ mod tests {
             ontology: Arc::new(Ontology::new()),
             security_context: None,
         };
+        let mut obs = NoOpObserver;
 
         let stage = FormattingStage::new(ConstFormatter(json!(["ok"])));
-        let output = stage.execute(input, &ctx).unwrap();
+        let output = stage.execute(input, &mut ctx, &mut obs).await.unwrap();
 
         assert_eq!(output.formatted_result, json!(["ok"]));
         assert_eq!(output.row_count, 2);

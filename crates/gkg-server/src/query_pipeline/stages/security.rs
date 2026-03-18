@@ -3,12 +3,18 @@ use thiserror::Error;
 
 use crate::auth::Claims;
 
-/// Build a SecurityContext from JWT Claims. Server-specific because it reads JWT claims.
-/// For local/CLI usage, construct SecurityContext directly.
-pub struct SecurityStage;
+use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
-impl SecurityStage {
-    pub fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
+pub struct SecurityStage<'a> {
+    claims: &'a Claims,
+}
+
+impl<'a> SecurityStage<'a> {
+    pub fn new(claims: &'a Claims) -> Self {
+        Self { claims }
+    }
+
+    fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
         let org_id = claims
             .organization_id
             .ok_or_else(|| SecurityError("missing organization_id in claims".to_string()))?
@@ -19,6 +25,24 @@ impl SecurityStage {
             claims.group_traversal_ids.clone()
         };
         SecurityContext::new(org_id, traversal_paths).map_err(|e| SecurityError(e.to_string()))
+    }
+}
+
+impl PipelineStage for SecurityStage<'_> {
+    type Input = ();
+    type Output = ();
+
+    async fn execute(
+        &self,
+        _input: Self::Input,
+        ctx: &mut QueryPipelineContext,
+        obs: &mut dyn PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        let result = Self::build_context(self.claims)
+            .map_err(|e| PipelineError::Security(e.to_string()))
+            .inspect_err(|e| obs.record_error(e))?;
+        ctx.security_context = Some(result);
+        Ok(())
     }
 }
 
@@ -54,7 +78,6 @@ mod tests {
     fn admin_gets_org_wide_access() {
         let claims = make_claims(true, vec![], Some(42));
         let ctx = SecurityStage::build_context(&claims).unwrap();
-
         assert_eq!(ctx.org_id, 42);
         assert_eq!(ctx.traversal_paths, vec!["42/"]);
     }
@@ -63,31 +86,20 @@ mod tests {
     fn missing_org_id_returns_error() {
         let claims = make_claims(true, vec![], None);
         let err = SecurityStage::build_context(&claims).unwrap_err();
-
         assert!(err.to_string().contains("missing organization_id"));
     }
 
     #[test]
     fn admin_ignores_group_traversal_ids() {
-        let claims = make_claims(
-            true,
-            vec!["1/22/".to_string(), "1/33/".to_string()],
-            Some(1),
-        );
+        let claims = make_claims(true, vec!["1/22/".into(), "1/33/".into()], Some(1));
         let ctx = SecurityStage::build_context(&claims).unwrap();
-
         assert_eq!(ctx.traversal_paths, vec!["1/"]);
     }
 
     #[test]
     fn non_admin_gets_their_group_paths() {
-        let claims = make_claims(
-            false,
-            vec!["1/22/".to_string(), "1/33/".to_string()],
-            Some(1),
-        );
+        let claims = make_claims(false, vec!["1/22/".into(), "1/33/".into()], Some(1));
         let ctx = SecurityStage::build_context(&claims).unwrap();
-
         assert_eq!(ctx.traversal_paths, vec!["1/22/", "1/33/"]);
     }
 
@@ -95,15 +107,13 @@ mod tests {
     fn non_admin_with_empty_groups_gets_no_access() {
         let claims = make_claims(false, vec![], Some(1));
         let ctx = SecurityStage::build_context(&claims).unwrap();
-
         assert!(ctx.traversal_paths.is_empty());
     }
 
     #[test]
     fn non_admin_with_single_group_path() {
-        let claims = make_claims(false, vec!["1/24/111/".to_string()], Some(1));
+        let claims = make_claims(false, vec!["1/24/111/".into()], Some(1));
         let ctx = SecurityStage::build_context(&claims).unwrap();
-
         assert_eq!(ctx.traversal_paths, vec!["1/24/111/"]);
     }
 }

@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use async_trait::async_trait;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::future::try_join_all;
 use query_engine::{DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryType, compile};
@@ -13,7 +12,7 @@ use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use querying_types::QueryResult;
 
 use querying_pipeline::{
-    HydrationOutput, Hydrator, PipelineError, PipelineObserver, QueryPipelineContext,
+    HydrationOutput, PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
     RedactionOutput,
 };
 
@@ -235,14 +234,16 @@ impl HydrationStage {
     }
 }
 
-#[async_trait]
-impl Hydrator for HydrationStage {
-    async fn hydrate(
+impl PipelineStage for HydrationStage {
+    type Input = RedactionOutput;
+    type Output = HydrationOutput;
+
+    async fn execute(
         &self,
-        input: RedactionOutput,
-        ctx: &QueryPipelineContext,
+        input: Self::Input,
+        ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
-    ) -> Result<HydrationOutput, PipelineError> {
+    ) -> Result<Self::Output, PipelineError> {
         let t = Instant::now();
         let mut query_result = input.query_result;
         let result_context = query_result.ctx().clone();
