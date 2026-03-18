@@ -23,6 +23,7 @@ SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/
 "cargo:cargo-geiger" = "0.13.0"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.21.5"
+"cargo:ast-grep" = "0.42.0"
 "sccache" = "0.13.0"
 "tilt" = "0.36.1"
 "zig" = "0.15.2"
