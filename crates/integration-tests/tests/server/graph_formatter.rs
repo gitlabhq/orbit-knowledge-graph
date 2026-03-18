@@ -8,16 +8,16 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::common::{
-    DummyClaims, GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext,
-    load_ontology, run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
+    run_redaction, test_security_context,
 };
-use gkg_server::query_pipeline::{
-    GraphFormatter, HydrationStage, PipelineObserver, PipelineRequest, PipelineStage,
-    QueryPipelineContext, RedactionOutput, ResultFormatter,
-};
+use gkg_server::pipeline::HydrationStage;
+use gkg_server::pipeline::types::RedactionOutput;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
 use query_engine::compile;
+use querying_formatters::{GraphFormatter, ResultFormatter};
+use querying_pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use serde_json::Value;
 
 static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
@@ -158,35 +158,38 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(client);
     let mut pipeline_ctx = QueryPipelineContext {
+        query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
-        client,
         security_context: Some(security_ctx),
+        server_extensions,
+        phases: TypeMap::default(),
     };
-    let claims = gkg_server::auth::Claims::dummy();
-    let mut req = PipelineRequest::<gkg_server::proto::ExecuteQueryMessage> {
-        claims: &claims,
-        query_json: "",
-        tx: None,
-        stream: None,
-    };
-    let mut obs = PipelineObserver::start();
+    pipeline_ctx.phases.insert(RedactionOutput {
+        query_result: result,
+        redacted_count,
+    });
+    let mut obs = NoOpObserver;
 
-    let output = HydrationStage
-        .execute(
-            RedactionOutput {
-                query_result: result,
-                redacted_count,
-            },
-            &mut pipeline_ctx,
-            &mut req,
-            &mut obs,
-        )
+    let hydration_output = HydrationStage
+        .execute(&mut pipeline_ctx, &mut obs)
         .await
         .expect("pipeline should succeed");
 
-    let value = GraphFormatter.format(&output.query_result, &output.result_context, &pipeline_ctx);
+    let pipeline_output = querying_shared_stages::PipelineOutput {
+        row_count: hydration_output.query_result.authorized_count(),
+        redacted_count: hydration_output.redacted_count,
+        query_type: compiled.query_type.to_string(),
+        raw_query_strings: vec![compiled.base.sql.clone()],
+        compiled: Arc::clone(&compiled),
+        query_result: hydration_output.query_result,
+        result_context: hydration_output.result_context,
+    };
+
+    let value = GraphFormatter.format(&pipeline_output);
     assert_valid(&value);
     value
 }

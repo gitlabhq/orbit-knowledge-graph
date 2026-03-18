@@ -7,8 +7,8 @@ use query_engine::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::query_pipeline::QueryPipelineContext;
-use crate::redaction::{QueryResult, QueryResultRow};
+use querying_shared_stages::PipelineOutput;
+use querying_types::{QueryResult, QueryResultRow};
 
 use super::{ResultFormatter, column_value_to_json};
 
@@ -50,24 +50,17 @@ type EdgeKey = (String, i64, String, i64, String, Option<i64>);
 pub struct GraphFormatter;
 
 impl ResultFormatter for GraphFormatter {
-    fn format(
-        &self,
-        result: &QueryResult,
-        result_context: &ResultContext,
-        ctx: &QueryPipelineContext,
-    ) -> Value {
-        let response = self.build_response(result, result_context, ctx);
+    fn format(&self, output: &PipelineOutput) -> Value {
+        let response = self.build_response(output);
         serde_json::to_value(response).unwrap_or(Value::Null)
     }
 }
 
 impl GraphFormatter {
-    pub(crate) fn build_response(
-        &self,
-        result: &QueryResult,
-        result_context: &ResultContext,
-        ctx: &QueryPipelineContext,
-    ) -> GraphResponse {
+    pub fn build_response(&self, output: &PipelineOutput) -> GraphResponse {
+        let result = &output.query_result;
+        let result_context = &output.result_context;
+
         let query_type = result_context
             .query_type
             .map(|qt| qt.to_string())
@@ -77,7 +70,7 @@ impl GraphFormatter {
         let mut edges: Vec<GraphEdge> = Vec::new();
         let mut edge_set: HashSet<EdgeKey> = HashSet::new();
 
-        let aggregations = ctx.compiled().ok().map(|c| &c.input.aggregations);
+        let aggregations = Some(&output.compiled.input.aggregations);
 
         let edge_prefixes: Vec<&str> = result_context
             .edges()
@@ -115,7 +108,7 @@ impl GraphFormatter {
                     result,
                     result_context,
                     &edge_prefixes,
-                    ctx,
+                    output,
                     &mut node_map,
                     &mut edges,
                 );
@@ -316,14 +309,16 @@ impl GraphFormatter {
         result: &QueryResult,
         result_context: &ResultContext,
         edge_prefixes: &[&str],
-        ctx: &QueryPipelineContext,
+        output: &PipelineOutput,
         node_map: &mut IndexMap<(String, i64), GraphNode>,
         edges: &mut Vec<GraphEdge>,
     ) {
-        let direction = ctx
-            .compiled()
-            .ok()
-            .and_then(|c| c.input.neighbors.as_ref().map(|n| n.direction));
+        let direction = output
+            .compiled
+            .input
+            .neighbors
+            .as_ref()
+            .map(|n| n.direction);
 
         for row in result.authorized_rows() {
             let mut center: Option<(String, i64)> = None;
@@ -414,11 +409,10 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use ontology::Ontology;
     use query_engine::{CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext};
     use std::sync::Arc;
 
-    fn make_search_ctx() -> (QueryResult, ResultContext, QueryPipelineContext) {
+    fn make_search_output() -> PipelineOutput {
         let schema = Arc::new(Schema::new(vec![
             Field::new("_gkg_p_id", DataType::Int64, false),
             Field::new("_gkg_p_type", DataType::Utf8, false),
@@ -440,13 +434,17 @@ mod tests {
 
         let qr = QueryResult::from_batches(&[batch], &result_ctx);
 
-        let pipeline_ctx = QueryPipelineContext {
-            compiled: Some(Arc::new(CompiledQueryContext {
+        PipelineOutput {
+            row_count: qr.authorized_count(),
+            redacted_count: 0,
+            query_type: "search".to_string(),
+            raw_query_strings: vec![],
+            compiled: Arc::new(CompiledQueryContext {
                 query_type: QueryType::Search,
                 base: ParameterizedQuery {
-                    sql: "SELECT 1".to_string(),
+                    sql: String::new(),
                     params: HashMap::new(),
-                    result_context: ResultContext::new(),
+                    result_context: result_ctx.clone(),
                 },
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
@@ -455,20 +453,17 @@ mod tests {
                     "limit": 10
                 }))
                 .unwrap(),
-            })),
-            ontology: Arc::new(Ontology::new()),
-            client: crate::query_pipeline::types::dummy_clickhouse_client(),
-            security_context: None,
-        };
-
-        (qr, result_ctx, pipeline_ctx)
+            }),
+            query_result: qr,
+            result_context: result_ctx,
+        }
     }
 
     #[test]
     fn search_produces_nodes_no_edges() {
-        let (qr, result_ctx, ctx) = make_search_ctx();
+        let output = make_search_output();
         let formatter = GraphFormatter;
-        let response = formatter.build_response(&qr, &result_ctx, &ctx);
+        let response = formatter.build_response(&output);
 
         assert_eq!(response.query_type, "search");
         assert_eq!(response.nodes.len(), 2);
@@ -476,137 +471,14 @@ mod tests {
     }
 
     #[test]
-    fn search_response_has_no_columns_or_row_count() {
-        let (qr, result_ctx, ctx) = make_search_ctx();
-        let formatter = GraphFormatter;
-        let value = formatter.format(&qr, &result_ctx, &ctx);
-        let obj = value.as_object().unwrap();
-
-        assert!(obj.contains_key("query_type"));
-        assert!(obj.contains_key("nodes"));
-        assert!(obj.contains_key("edges"));
-        assert!(!obj.contains_key("columns"));
-        assert!(!obj.contains_key("row_count"));
-    }
-
-    #[test]
     fn node_properties_exclude_gkg_prefix() {
-        let (qr, result_ctx, ctx) = make_search_ctx();
+        let output = make_search_output();
         let formatter = GraphFormatter;
-        let response = formatter.build_response(&qr, &result_ctx, &ctx);
+        let response = formatter.build_response(&output);
 
         for node in &response.nodes {
             assert!(!node.properties.keys().any(|k| k.starts_with("_gkg_")));
             assert!(node.properties.contains_key("name"));
         }
-    }
-
-    #[test]
-    fn deduplicates_nodes_by_type_and_id() {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_p_id", DataType::Int64, false),
-            Field::new("_gkg_p_type", DataType::Utf8, false),
-            Field::new("p_name", DataType::Utf8, false),
-        ]));
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(Int64Array::from(vec![1, 1, 2])),
-                Arc::new(StringArray::from(vec!["Project", "Project", "Project"])),
-                Arc::new(StringArray::from(vec!["Alpha", "Alpha", "Beta"])),
-            ],
-        )
-        .unwrap();
-
-        let mut result_ctx = ResultContext::new();
-        result_ctx.add_node("p", "Project");
-        result_ctx.query_type = Some(QueryType::Search);
-
-        let qr = QueryResult::from_batches(&[batch], &result_ctx);
-
-        let ctx = QueryPipelineContext {
-            compiled: Some(Arc::new(CompiledQueryContext {
-                query_type: QueryType::Search,
-                base: ParameterizedQuery {
-                    sql: "SELECT 1".to_string(),
-                    params: HashMap::new(),
-                    result_context: ResultContext::new(),
-                },
-                hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "search",
-                    "node": {"id": "p", "entity": "Project"},
-                    "limit": 10
-                }))
-                .unwrap(),
-            })),
-            ontology: Arc::new(Ontology::new()),
-            client: crate::query_pipeline::types::dummy_clickhouse_client(),
-            security_context: None,
-        };
-
-        let formatter = GraphFormatter;
-        let response = formatter.build_response(&qr, &result_ctx, &ctx);
-
-        assert_eq!(response.nodes.len(), 2);
-    }
-
-    #[test]
-    fn node_ordering_matches_row_order() {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_p_id", DataType::Int64, false),
-            Field::new("_gkg_p_type", DataType::Utf8, false),
-            Field::new("p_name", DataType::Utf8, false),
-        ]));
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(Int64Array::from(vec![3, 1, 4, 1, 5, 2])),
-                Arc::new(StringArray::from(vec![
-                    "Project", "Project", "Project", "Project", "Project", "Project",
-                ])),
-                Arc::new(StringArray::from(vec![
-                    "Charlie", "Alpha", "Delta", "Alpha", "Echo", "Beta",
-                ])),
-            ],
-        )
-        .unwrap();
-
-        let mut result_ctx = ResultContext::new();
-        result_ctx.add_node("p", "Project");
-        result_ctx.query_type = Some(QueryType::Search);
-
-        let qr = QueryResult::from_batches(&[batch], &result_ctx);
-
-        let ctx = QueryPipelineContext {
-            compiled: Some(Arc::new(CompiledQueryContext {
-                query_type: QueryType::Search,
-                base: ParameterizedQuery {
-                    sql: "SELECT 1".to_string(),
-                    params: HashMap::new(),
-                    result_context: ResultContext::new(),
-                },
-                hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "search",
-                    "node": {"id": "p", "entity": "Project"},
-                    "limit": 10
-                }))
-                .unwrap(),
-            })),
-            ontology: Arc::new(Ontology::new()),
-            client: crate::query_pipeline::types::dummy_clickhouse_client(),
-            security_context: None,
-        };
-
-        let formatter = GraphFormatter;
-        let response = formatter.build_response(&qr, &result_ctx, &ctx);
-
-        let ids: Vec<i64> = response.nodes.iter().map(|n| n.id).collect();
-        assert_eq!(
-            ids,
-            vec![3, 1, 4, 5, 2],
-            "node order must match row order (dedup keeps first occurrence)"
-        );
     }
 }

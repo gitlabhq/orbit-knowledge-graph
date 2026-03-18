@@ -24,6 +24,10 @@ members = [
   "crates/integration-testkit",
   "crates/utils",
   "crates/integration-tests",
+  "crates/querying-types",
+  "crates/querying-pipeline",
+  "crates/querying-shared-stages",
+  "crates/querying-formatters",
 ]
 
 [workspace.dependencies]
