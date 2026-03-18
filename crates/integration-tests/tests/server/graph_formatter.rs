@@ -174,12 +174,22 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     });
     let mut obs = NoOpObserver;
 
-    let output = HydrationStage
+    let hydration_output = HydrationStage
         .execute(&mut pipeline_ctx, &mut obs)
         .await
         .expect("pipeline should succeed");
 
-    let value = GraphFormatter.format(&output.query_result, &output.result_context);
+    let pipeline_output = querying_shared_stages::PipelineOutput {
+        row_count: hydration_output.query_result.authorized_count(),
+        redacted_count: hydration_output.redacted_count,
+        query_type: compiled.query_type.to_string(),
+        raw_query_strings: vec![compiled.base.sql.clone()],
+        compiled: Arc::clone(&compiled),
+        query_result: hydration_output.query_result,
+        result_context: hydration_output.result_context,
+    };
+
+    let value = GraphFormatter.format(&pipeline_output);
     assert_valid(&value);
     value
 }

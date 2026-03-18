@@ -1,7 +1,5 @@
-use query_engine::ResultContext;
+use querying_shared_stages::PipelineOutput;
 use serde_json::Value;
-
-use querying_types::QueryResult;
 
 use super::ResultFormatter;
 use super::graph::GraphFormatter;
@@ -10,8 +8,8 @@ use super::graph::GraphFormatter;
 pub struct GoonFormatter;
 
 impl ResultFormatter for GoonFormatter {
-    fn format(&self, result: &QueryResult, result_context: &ResultContext) -> Value {
-        let graph = GraphFormatter.build_response(result, result_context);
+    fn format(&self, output: &PipelineOutput) -> Value {
+        let graph = GraphFormatter.build_response(output);
         serde_json::to_value(graph).unwrap_or(Value::Null)
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
 use crate::types::{HydrationOutput, PipelineOutput};
@@ -25,6 +27,7 @@ impl PipelineStage for OutputStage {
             redacted_count: input.redacted_count,
             query_type: compiled.query_type.to_string(),
             raw_query_strings: vec![compiled.base.sql.clone()],
+            compiled: Arc::clone(compiled),
             query_result: input.query_result.clone(),
             result_context: input.result_context.clone(),
         })

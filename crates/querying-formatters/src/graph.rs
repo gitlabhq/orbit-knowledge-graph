@@ -7,6 +7,7 @@ use query_engine::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use querying_shared_stages::PipelineOutput;
 use querying_types::{QueryResult, QueryResultRow};
 
 use super::{ResultFormatter, column_value_to_json};
@@ -49,18 +50,17 @@ type EdgeKey = (String, i64, String, i64, String, Option<i64>);
 pub struct GraphFormatter;
 
 impl ResultFormatter for GraphFormatter {
-    fn format(&self, result: &QueryResult, result_context: &ResultContext) -> Value {
-        let response = self.build_response(result, result_context);
+    fn format(&self, output: &PipelineOutput) -> Value {
+        let response = self.build_response(output);
         serde_json::to_value(response).unwrap_or(Value::Null)
     }
 }
 
 impl GraphFormatter {
-    pub fn build_response(
-        &self,
-        result: &QueryResult,
-        result_context: &ResultContext,
-    ) -> GraphResponse {
+    pub fn build_response(&self, output: &PipelineOutput) -> GraphResponse {
+        let result = &output.query_result;
+        let result_context = &output.result_context;
+
         let query_type = result_context
             .query_type
             .map(|qt| qt.to_string())
@@ -70,7 +70,7 @@ impl GraphFormatter {
         let mut edges: Vec<GraphEdge> = Vec::new();
         let mut edge_set: HashSet<EdgeKey> = HashSet::new();
 
-        let aggregations: Option<&Vec<query_engine::input::InputAggregation>> = None;
+        let aggregations = Some(&output.compiled.input.aggregations);
 
         let edge_prefixes: Vec<&str> = result_context
             .edges()
@@ -108,6 +108,7 @@ impl GraphFormatter {
                     result,
                     result_context,
                     &edge_prefixes,
+                    output,
                     &mut node_map,
                     &mut edges,
                 );
@@ -308,10 +309,16 @@ impl GraphFormatter {
         result: &QueryResult,
         result_context: &ResultContext,
         edge_prefixes: &[&str],
+        output: &PipelineOutput,
         node_map: &mut IndexMap<(String, i64), GraphNode>,
         edges: &mut Vec<GraphEdge>,
     ) {
-        let direction: Option<query_engine::input::Direction> = None;
+        let direction = output
+            .compiled
+            .input
+            .neighbors
+            .as_ref()
+            .map(|n| n.direction);
 
         for row in result.authorized_rows() {
             let mut center: Option<(String, i64)> = None;
@@ -397,14 +404,15 @@ impl GraphFormatter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::ResultContext;
+    use query_engine::{CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext};
     use std::sync::Arc;
 
-    fn make_search_data() -> (QueryResult, ResultContext) {
+    fn make_search_output() -> PipelineOutput {
         let schema = Arc::new(Schema::new(vec![
             Field::new("_gkg_p_id", DataType::Int64, false),
             Field::new("_gkg_p_type", DataType::Utf8, false),
@@ -425,14 +433,37 @@ mod tests {
         result_ctx.query_type = Some(QueryType::Search);
 
         let qr = QueryResult::from_batches(&[batch], &result_ctx);
-        (qr, result_ctx)
+
+        PipelineOutput {
+            row_count: qr.authorized_count(),
+            redacted_count: 0,
+            query_type: "search".to_string(),
+            raw_query_strings: vec![],
+            compiled: Arc::new(CompiledQueryContext {
+                query_type: QueryType::Search,
+                base: ParameterizedQuery {
+                    sql: String::new(),
+                    params: HashMap::new(),
+                    result_context: result_ctx.clone(),
+                },
+                hydration: HydrationPlan::None,
+                input: serde_json::from_value(serde_json::json!({
+                    "query_type": "search",
+                    "node": {"id": "p", "entity": "Project"},
+                    "limit": 10
+                }))
+                .unwrap(),
+            }),
+            query_result: qr,
+            result_context: result_ctx,
+        }
     }
 
     #[test]
     fn search_produces_nodes_no_edges() {
-        let (qr, result_ctx) = make_search_data();
+        let output = make_search_output();
         let formatter = GraphFormatter;
-        let response = formatter.build_response(&qr, &result_ctx);
+        let response = formatter.build_response(&output);
 
         assert_eq!(response.query_type, "search");
         assert_eq!(response.nodes.len(), 2);
@@ -441,9 +472,9 @@ mod tests {
 
     #[test]
     fn node_properties_exclude_gkg_prefix() {
-        let (qr, result_ctx) = make_search_data();
+        let output = make_search_output();
         let formatter = GraphFormatter;
-        let response = formatter.build_response(&qr, &result_ctx);
+        let response = formatter.build_response(&output);
 
         for node in &response.nodes {
             assert!(!node.properties.keys().any(|k| k.starts_with("_gkg_")));

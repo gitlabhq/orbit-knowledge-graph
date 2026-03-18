@@ -131,9 +131,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     use crate::proto::execute_query_result::Content;
 
                     let formatted = if use_llm_format {
-                        GoonFormatter.format(&output.query_result, &output.result_context)
+                        GoonFormatter.format(&output)
                     } else {
-                        GraphFormatter.format(&output.query_result, &output.result_context)
+                        GraphFormatter.format(&output)
                     };
 
                     let content = if use_llm_format {

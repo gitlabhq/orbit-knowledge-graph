@@ -5193,6 +5193,7 @@ dependencies = [
  "gkg-utils",
  "indexmap 2.13.0",
  "query-engine",
+ "querying-shared-stages",
  "querying-types",
  "serde",
  "serde_json",
