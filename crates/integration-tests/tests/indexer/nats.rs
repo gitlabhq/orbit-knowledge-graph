@@ -37,7 +37,7 @@ async fn start_nats_container() -> (testcontainers::ContainerAsync<Nats>, String
         .with_cmd(&nats_cmd)
         .with_tag("2.11-alpine")
         .with_mapped_port(0, ContainerPort::Tcp(4222))
-        .with_ready_conditions(vec![WaitFor::seconds(3)])
+        .with_ready_conditions(vec![WaitFor::Nothing])
         .start()
         .await
         .expect("failed to start NATS container");
@@ -52,7 +52,14 @@ async fn start_nats_container() -> (testcontainers::ContainerAsync<Nats>, String
         .await
         .expect("failed to get NATS port");
 
+    let host = if host.to_string() == "localhost" {
+        "127.0.0.1".to_string()
+    } else {
+        host.to_string()
+    };
+
     let url = format!("{host}:{port}");
+    super::common::wait_for_nats(&url, Duration::from_secs(60)).await;
     (container, url)
 }
 

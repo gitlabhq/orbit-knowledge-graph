@@ -1,5 +1,7 @@
 #![allow(dead_code, unused_imports)]
 
+use std::time::Duration;
+
 pub mod handlers;
 pub mod siphon;
 
@@ -12,3 +14,20 @@ pub use integration_testkit::{
     assert_edge_count_for_traversal_path, assert_edges_have_traversal_path, assert_node_count,
 };
 pub use siphon::{create_member, create_namespace, create_project, create_user};
+
+/// Poll until a NATS connection succeeds, or panic after `timeout`.
+pub async fn wait_for_nats(url: &str, timeout: Duration) {
+    let nats_url = format!("nats://{url}");
+    let poll_interval = Duration::from_millis(100);
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        if async_nats::connect(&nats_url).await.is_ok() {
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("NATS not reachable at {url} after {timeout:?}");
+        }
+        tokio::time::sleep(poll_interval).await;
+    }
+}

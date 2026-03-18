@@ -41,14 +41,16 @@ async fn start_infra() -> Infra {
         .with_cmd(&nats_cmd)
         .with_tag("2.11-alpine")
         .with_mapped_port(0, ContainerPort::Tcp(4222))
-        .with_ready_conditions(vec![WaitFor::seconds(3)])
+        .with_ready_conditions(vec![WaitFor::Nothing])
         .start()
         .await
         .expect("failed to start NATS");
 
     let nats_host = nats_container.get_host().await.unwrap();
     let nats_port = nats_container.get_host_port_ipv4(4222).await.unwrap();
-    let nats_client = async_nats::connect(format!("nats://{nats_host}:{nats_port}"))
+    let nats_addr = format!("{nats_host}:{nats_port}");
+    super::common::wait_for_nats(&nats_addr, Duration::from_secs(60)).await;
+    let nats_client = async_nats::connect(format!("nats://{nats_addr}"))
         .await
         .expect("failed to connect to NATS");
 

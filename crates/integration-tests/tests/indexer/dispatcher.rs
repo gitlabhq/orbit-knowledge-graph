@@ -131,7 +131,7 @@ impl TestContext {
             .with_cmd(&NatsServerCmd::default().with_jetstream())
             .with_tag("2.11-alpine")
             .with_mapped_port(0, ContainerPort::Tcp(4222))
-            .with_ready_conditions(vec![WaitFor::seconds(3)])
+            .with_ready_conditions(vec![WaitFor::Nothing])
             .start()
             .await
             .unwrap();
@@ -139,7 +139,9 @@ impl TestContext {
         let host = container.get_host().await.unwrap();
         let port = container.get_host_port_ipv4(4222).await.unwrap();
 
-        (container, format!("{host}:{port}"))
+        let url = format!("{host}:{port}");
+        common::wait_for_nats(&url, std::time::Duration::from_secs(60)).await;
+        (container, url)
     }
 
     async fn create_stream(url: &str) {

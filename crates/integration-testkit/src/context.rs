@@ -39,6 +39,8 @@ fn session_id() -> &'static str {
 const MAX_CONNECTION_ATTEMPTS: u32 = 200;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
+const TEMPLATE_DATABASE: &str = "template";
+
 pub struct TestContext {
     _container: Arc<ContainerAsync<GenericImage>>,
     pub config: ClickHouseConfiguration,
@@ -53,6 +55,7 @@ impl TestContext {
         let url = Self::extract_url(&container).await;
         Self::wait_for_ready(&url).await;
         Self::run_schema_in(&url, TEST_DATABASE, schema_sqls).await;
+        Self::create_template_db(&url, schema_sqls).await;
         eprintln!("[context] new(): {:.2?}", t.elapsed());
 
         let config = ClickHouseConfiguration {
@@ -164,6 +167,7 @@ impl TestContext {
     }
 
     pub async fn fork(&self, name: &str) -> Self {
+        let t = std::time::Instant::now();
         let admin =
             ArrowClickHouseClient::new(&self.url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
         admin
@@ -171,8 +175,8 @@ impl TestContext {
             .await
             .unwrap_or_else(|e| panic!("failed to create database {name}: {e}"));
 
-        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(|s| s.as_str()).collect();
-        Self::run_schema_in(&self.url, name, &schema_refs).await;
+        Self::clone_tables_from_template(&self.url, name).await;
+        eprintln!("[context] fork({name}): {:.2?}", t.elapsed());
 
         Self {
             _container: Arc::clone(&self._container),
@@ -292,6 +296,60 @@ impl TestContext {
             }
             tokio::time::sleep(CONNECTION_RETRY_DELAY).await;
         }
+    }
+
+    async fn create_template_db(url: &str, schema_sqls: &[&str]) {
+        let admin = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+        admin
+            .execute(&format!(
+                "CREATE DATABASE IF NOT EXISTS `{TEMPLATE_DATABASE}`"
+            ))
+            .await
+            .expect("failed to create template database");
+        Self::run_schema_in(url, TEMPLATE_DATABASE, schema_sqls).await;
+    }
+
+    /// Clone every table from the template database into `target` using
+    /// `CREATE TABLE ... AS template.table`. This is much faster than
+    /// replaying all DDL statements because ClickHouse copies the schema
+    /// in a single internal operation per table without parsing the full
+    /// CREATE statement.
+    async fn clone_tables_from_template(url: &str, target: &str) {
+        let admin = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+
+        let batches = admin
+            .query_arrow(&format!(
+                "SELECT name FROM system.tables WHERE database = '{TEMPLATE_DATABASE}'"
+            ))
+            .await
+            .expect("failed to list template tables");
+
+        let stmts: Vec<String> = batches
+            .iter()
+            .flat_map(|batch| {
+                let col = ArrowUtils::get_column_by_name::<StringArray>(batch, "name")
+                    .expect("name column");
+                (0..batch.num_rows())
+                    .map(|i| {
+                        let table = col.value(i);
+                        format!(
+                            "CREATE TABLE IF NOT EXISTS `{target}`.`{table}` AS `{TEMPLATE_DATABASE}`.`{table}`"
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        futures::future::join_all(stmts.iter().map(|sql| {
+            let admin = &admin;
+            async move {
+                admin
+                    .execute(sql)
+                    .await
+                    .unwrap_or_else(|e| panic!("failed to clone table: {e}\n{sql}"));
+            }
+        }))
+        .await;
     }
 
     async fn run_schema_in(url: &str, database: &str, schema_sqls: &[&str]) {

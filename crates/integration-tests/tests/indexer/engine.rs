@@ -134,7 +134,7 @@ impl TestContext {
             .with_cmd(&NatsServerCmd::default().with_jetstream())
             .with_tag("2.11-alpine")
             .with_mapped_port(0, ContainerPort::Tcp(4222))
-            .with_ready_conditions(vec![WaitFor::seconds(3)])
+            .with_ready_conditions(vec![WaitFor::Nothing])
             .start()
             .await
             .expect("failed to start NATS container");
@@ -145,7 +145,9 @@ impl TestContext {
             .await
             .expect("failed to get port");
 
-        (container, format!("{host}:{port}"))
+        let url = format!("{host}:{port}");
+        super::common::wait_for_nats(&url, Duration::from_secs(60)).await;
+        (container, url)
     }
 
     async fn start_clickhouse() -> (testcontainers::ContainerAsync<GenericImage>, String) {
