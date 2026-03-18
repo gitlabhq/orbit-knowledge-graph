@@ -27,8 +27,12 @@ pub struct StreamingEdgeWriter {
 
 impl StreamingEdgeWriter {
     /// Create a new streaming edge writer for the given path.
-    pub fn new(path: &Path, flush_threshold: Option<usize>) -> Result<Self> {
-        let schema = Arc::new(edge_schema());
+    pub fn new(
+        path: &Path,
+        flush_threshold: Option<usize>,
+        ontology: &ontology::Ontology,
+    ) -> Result<Self> {
+        let schema = Arc::new(edge_schema(ontology));
         let props = WriterProperties::builder()
             .set_compression(Compression::ZSTD(Default::default()))
             .build();
@@ -155,11 +159,15 @@ impl ParquetWriter {
     }
 
     /// Create a streaming edge writer for an organization.
-    pub fn create_edge_writer(&self, org_id: u32) -> Result<StreamingEdgeWriter> {
+    pub fn create_edge_writer(
+        &self,
+        org_id: u32,
+        ontology: &ontology::Ontology,
+    ) -> Result<StreamingEdgeWriter> {
         let org_dir = self.output_dir.join(format!("org_{}", org_id));
         fs::create_dir_all(&org_dir)?;
         let edge_path = org_dir.join("edges.parquet");
-        StreamingEdgeWriter::new(&edge_path, None)
+        StreamingEdgeWriter::new(&edge_path, None, ontology)
     }
 
     /// Write only node data to Parquet files (edges written separately via streaming).

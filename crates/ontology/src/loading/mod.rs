@@ -87,6 +87,15 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     ontology.edge_table = schema.settings.edge_table;
     ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;
     ontology.edge_sort_key = schema.settings.edge_sort_key;
+    ontology.edge_columns = schema
+        .settings
+        .edge_columns
+        .into_iter()
+        .map(|c| crate::entities::EdgeColumn {
+            name: c.name,
+            data_type: c.data_type,
+        })
+        .collect();
 
     let etl_settings = EtlSettings {
         watermark: schema.settings.etl.default_watermark,
@@ -99,6 +108,19 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         return Err(OntologyError::Validation(format!(
             "edge_table '{}' does not start with table_prefix '{}'",
             ontology.edge_table, ontology.table_prefix
+        )));
+    }
+
+    let actual_names: Vec<&str> = ontology
+        .edge_columns
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    let expected: &[&str] = crate::constants::EDGE_RESERVED_COLUMNS;
+    if actual_names != expected {
+        return Err(OntologyError::Validation(format!(
+            "edge_columns names {:?} do not match EDGE_RESERVED_COLUMNS {:?}",
+            actual_names, expected
         )));
     }
 

@@ -63,38 +63,15 @@ impl ToArrowType for DataType {
 }
 
 /// Create the Arrow schema for the unified edges table.
-///
-/// Matches `EdgeEntity` from ontology:
-/// - relationship_kind: Utf8 (e.g., "AUTHORED", "CONTAINS")
-/// - source_id: Int64 (source node ID)
-/// - source_kind: Utf8 (e.g., "User", "Group")
-/// - target_id: Int64 (target node ID)
-/// - target_kind: Utf8 (e.g., "MergeRequest", "Project")
-pub fn edge_schema() -> Schema {
-    use ontology::constants::EDGE_RESERVED_COLUMNS;
-
-    // Column types for each edge reserved column (in order).
-    // Validated by test_edge_schema_matches_ontology_constants.
-    const EDGE_COLUMN_TYPES: &[ArrowDataType] = &[
-        ArrowDataType::Utf8,  // traversal_path
-        ArrowDataType::Utf8,  // relationship_kind
-        ArrowDataType::Int64, // source_id
-        ArrowDataType::Utf8,  // source_kind
-        ArrowDataType::Int64, // target_id
-        ArrowDataType::Utf8,  // target_kind
-    ];
-
-    assert_eq!(
-        EDGE_RESERVED_COLUMNS.len(),
-        EDGE_COLUMN_TYPES.len(),
-        "EDGE_COLUMN_TYPES must match EDGE_RESERVED_COLUMNS length"
-    );
-
+pub fn edge_schema(ontology: &ontology::Ontology) -> Schema {
     Schema::new(
-        EDGE_RESERVED_COLUMNS
+        ontology
+            .edge_columns()
             .iter()
-            .zip(EDGE_COLUMN_TYPES.iter())
-            .map(|(name, dtype)| ArrowField::new(*name, dtype.clone(), false))
+            .map(|col| {
+                let arrow_type = col.data_type.to_arrow_type();
+                ArrowField::new(&col.name, arrow_type, false)
+            })
             .collect::<Vec<_>>(),
     )
 }
@@ -207,7 +184,8 @@ mod tests {
 
     #[test]
     fn test_edge_schema() {
-        let schema = edge_schema();
+        let ontology = ontology::Ontology::load_embedded().expect("must load");
+        let schema = edge_schema(&ontology);
         assert_eq!(schema.fields().len(), 6);
 
         let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
@@ -226,7 +204,8 @@ mod tests {
 
     #[test]
     fn test_edge_schema_matches_ontology_constants() {
-        let schema = edge_schema();
+        let ontology = ontology::Ontology::load_embedded().expect("must load");
+        let schema = edge_schema(&ontology);
         let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
 
         assert_eq!(
@@ -259,7 +238,8 @@ mod tests {
 
     #[test]
     fn test_to_clickhouse_ddl() {
-        let schema = edge_schema();
+        let ontology = ontology::Ontology::load_embedded().expect("must load");
+        let schema = edge_schema(&ontology);
         let ddl = to_clickhouse_ddl(
             "gl_edge",
             &schema,
