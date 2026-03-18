@@ -25,12 +25,14 @@ type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 pub struct HydrationStage;
 
 impl HydrationStage {
+    /// Retrieve the ClickHouse client from server extensions.
     fn client(ctx: &QueryPipelineContext) -> Result<&Arc<ArrowClickHouseClient>, PipelineError> {
         ctx.server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
+    /// Static hydration: use pre-built templates from compile time.
     async fn hydrate_static(
         ctx: &QueryPipelineContext,
         templates: &[HydrationTemplate],
@@ -60,6 +62,7 @@ impl HydrationStage {
         Ok(merged)
     }
 
+    /// Dynamic hydration: build search queries from scratch at runtime.
     async fn hydrate_dynamic(
         ctx: &QueryPipelineContext,
         refs: &HashMap<String, Vec<i64>>,
@@ -81,6 +84,7 @@ impl HydrationStage {
         Ok(merged)
     }
 
+    /// Compile a hydration query JSON string, execute it, and parse the results.
     async fn compile_and_fetch(
         ctx: &QueryPipelineContext,
         entity_type: &str,
@@ -102,6 +106,7 @@ impl HydrationStage {
         Self::parse_property_batches(entity_type, &batches)
     }
 
+    /// Collect entity IDs for a static template from `_gkg_{alias}_id` columns.
     fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
         let id_column = redaction_id_column(&template.node_alias);
         let mut ids: Vec<i64> = result
@@ -113,6 +118,7 @@ impl HydrationStage {
         ids
     }
 
+    /// Merge static hydration results back into rows as flat columns.
     fn merge_static_properties(
         result: &mut QueryResult,
         property_map: &PropertyMap,
@@ -132,6 +138,7 @@ impl HydrationStage {
         }
     }
 
+    /// Collect unique entity (type, id) pairs from dynamic_nodes across all authorized rows.
     fn extract_dynamic_refs(result: &QueryResult) -> HashMap<String, Vec<i64>> {
         let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
 
@@ -151,6 +158,7 @@ impl HydrationStage {
         refs
     }
 
+    /// Merge dynamic hydration results into NodeRef.properties on dynamic_nodes.
     fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap) {
         for row in result.authorized_rows_mut() {
             for node_ref in row.dynamic_nodes_mut() {
@@ -162,6 +170,9 @@ impl HydrationStage {
         }
     }
 
+    /// Build a search query JSON from scratch for dynamic hydration.
+    /// Reads `input.options.dynamic_columns` to decide whether to fetch all columns
+    /// or only the entity's `default_columns` from the ontology.
     fn build_dynamic_search_query(
         ctx: &QueryPipelineContext,
         entity_type: &str,
