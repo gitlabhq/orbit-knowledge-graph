@@ -5,24 +5,6 @@ info: To determine the technical writer assigned to the Stage/Group associated w
 title: Graph schema
 ---
 
-{{< details >}}
-
-- Tier: Ultimate
-- Offering: GitLab.com
-
-{{< /details >}}
-
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
-- Enabled on GitLab.com in GitLab 18.XX.
-
-{{< /history >}}
-
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-
 The knowledge graph schema defines the objects Orbit indexes and the relationships it tracks.
 
 ## Node types
