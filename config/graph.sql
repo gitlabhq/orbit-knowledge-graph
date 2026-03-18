@@ -221,11 +221,16 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     target_id Int64,
     target_kind String,
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_relationship relationship_kind TYPE bloom_filter GRANULARITY 4,
+    PROJECTION by_target (
+        SELECT source_kind, source_id, relationship_kind, target_kind, target_id
+        ORDER BY target_id, target_kind, relationship_kind
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind)
 PRIMARY KEY (traversal_path, source_id, source_kind, relationship_kind)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- CI graph tables
 
