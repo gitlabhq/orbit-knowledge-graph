@@ -228,15 +228,15 @@ impl SiphonCodeIndexingTaskDispatcher {
                     .unwrap_or(ref_name)
                     .to_string();
 
+                let key = (project_id, branch.clone());
+
                 let request = CodeIndexingTaskRequest {
                     task_id,
                     project_id,
-                    branch,
-                    commit_sha: commit_sha.to_string(),
+                    branch: Some(branch),
+                    commit_sha: Some(commit_sha.to_string()),
                     traversal_path: traversal_path.to_string(),
                 };
-
-                let key = (request.project_id, request.branch.clone());
                 latest
                     .entry(key)
                     .and_modify(|existing| {
@@ -296,8 +296,8 @@ mod tests {
             serde_json::from_slice(&published[0].1.payload).unwrap();
         assert_eq!(request.task_id, 42);
         assert_eq!(request.project_id, 123);
-        assert_eq!(request.branch, "main");
-        assert_eq!(request.commit_sha, "abc123");
+        assert_eq!(request.branch.as_deref(), Some("main"));
+        assert_eq!(request.commit_sha.as_deref(), Some("abc123"));
         assert_eq!(request.traversal_path, "/org/project-123");
     }
 
@@ -322,7 +322,7 @@ mod tests {
         let published = nats.get_published();
         let request: CodeIndexingTaskRequest =
             serde_json::from_slice(&published[0].1.payload).unwrap();
-        assert_eq!(request.branch, "feature/test");
+        assert_eq!(request.branch.as_deref(), Some("feature/test"));
     }
 
     #[tokio::test]
@@ -392,7 +392,7 @@ mod tests {
         let request: CodeIndexingTaskRequest =
             serde_json::from_slice(&published[0].1.payload).unwrap();
         assert_eq!(request.task_id, 2);
-        assert_eq!(request.commit_sha, "new_sha");
+        assert_eq!(request.commit_sha.as_deref(), Some("new_sha"));
     }
 
     #[tokio::test]
@@ -418,7 +418,7 @@ mod tests {
         let request: CodeIndexingTaskRequest =
             serde_json::from_slice(&published[0].1.payload).unwrap();
         assert_eq!(request.task_id, 5);
-        assert_eq!(request.commit_sha, "latest_sha");
+        assert_eq!(request.commit_sha.as_deref(), Some("latest_sha"));
     }
 
     #[tokio::test]
@@ -458,6 +458,6 @@ mod tests {
         let request: CodeIndexingTaskRequest =
             serde_json::from_slice(&published[0].1.payload).unwrap();
         assert_eq!(request.task_id, 3);
-        assert_eq!(request.commit_sha, "ccc");
+        assert_eq!(request.commit_sha.as_deref(), Some("ccc"));
     }
 }

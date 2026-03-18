@@ -124,17 +124,12 @@ engine:
       max_attempts: 5  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
       events_stream_name: siphon_stream_main_db
-    code_project_reconciliation:
-      concurrency_group: code
-      max_attempts: 1  # re-dispatched every 30 minutes, no need to retry
 
 schedule:
   tasks:
     global: {}
     namespace: {}
-    project_code:
-      interval_secs: 1800
-      batch_size: 1000
+    namespace_code_backfill: {}
 
 gkgServer:
   image:

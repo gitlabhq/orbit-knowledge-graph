@@ -14,10 +14,9 @@ use flate2::write::GzEncoder;
 use gitlab_client::{GitlabClient, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
-    ClickHouseCodeCheckpointStore, ClickHouseProjectStore, ClickHousePushEventStore,
-    ClickHouseStaleDataCleaner, CodeIndexingPipeline, CodeIndexingTaskHandler,
-    CodeIndexingTaskHandlerConfig, ProjectCodeIndexingHandler, ProjectCodeIndexingHandlerConfig,
-    RailsRepositoryService, RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
+    ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
+    CodeIndexingTaskHandler, CodeIndexingTaskHandlerConfig, RailsRepositoryService,
+    RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
@@ -32,8 +31,6 @@ pub struct CodeIndexingDeps {
     pub pipeline: Arc<CodeIndexingPipeline>,
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
-    pub project_store: Arc<ClickHouseProjectStore>,
-    pub push_event_store: Arc<ClickHousePushEventStore>,
     pub metrics: CodeMetrics,
 }
 
@@ -44,16 +41,12 @@ impl CodeIndexingDeps {
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
             &graph_client,
         )));
-        let project_store = Arc::new(ClickHouseProjectStore::new(Arc::clone(&graph_client)));
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
 
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
-        let push_event_store = Arc::new(ClickHousePushEventStore::new(
-            clickhouse.config.build_client(),
-        ));
         let metrics = CodeMetrics::new();
 
         let pipeline = Arc::new(CodeIndexingPipeline::new(
@@ -68,8 +61,6 @@ impl CodeIndexingDeps {
             pipeline,
             repository_service,
             checkpoint_store,
-            project_store,
-            push_event_store,
             metrics,
         }
     }
@@ -77,21 +68,10 @@ impl CodeIndexingDeps {
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
         CodeIndexingTaskHandler::new(
             Arc::clone(&self.pipeline),
+            Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             CodeIndexingTaskHandlerConfig::default(),
-        )
-    }
-
-    pub fn reconciliation_handler(&self) -> ProjectCodeIndexingHandler {
-        ProjectCodeIndexingHandler::new(
-            Arc::clone(&self.pipeline),
-            Arc::clone(&self.repository_service),
-            Arc::clone(&self.checkpoint_store) as _,
-            Arc::clone(&self.project_store) as _,
-            Arc::clone(&self.push_event_store) as _,
-            self.metrics.clone(),
-            ProjectCodeIndexingHandlerConfig::default(),
         )
     }
 }
@@ -261,22 +241,6 @@ pub async fn create_project_in_graph(
         .execute(&format!(
             "INSERT INTO gl_project (id, traversal_path, full_path, _version) \
              VALUES ({project_id}, '{traversal_path}', '{full_path}', 1)",
-        ))
-        .await;
-}
-
-pub async fn create_push_event(
-    clickhouse: &TestContext,
-    project_id: i64,
-    event_id: i64,
-    branch: &str,
-    commit_sha: &str,
-) {
-    clickhouse
-        .execute(&format!(
-            "INSERT INTO siphon_push_event_payloads \
-             (commit_count, action, ref_type, commit_to, ref, event_id, project_id) \
-             VALUES (1, 2, 0, '{commit_sha}', '{branch}', {event_id}, {project_id})",
         ))
         .await;
 }
