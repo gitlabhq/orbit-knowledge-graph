@@ -1,12 +1,14 @@
-use prost::Message;
+use std::pin::Pin;
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct ResolvedBlob {
+use futures::{Stream, StreamExt, stream::Fuse};
+use prost::Message;
+use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
+use tokio_util::io::StreamReader;
+
+#[derive(Debug)]
+pub struct DecodedBlob {
     pub oid: String,
     pub data: Vec<u8>,
-    pub size: i64,
-    pub path: String,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -20,101 +22,73 @@ struct BlobChunk {
     #[prost(string, tag = "1")]
     oid: String,
     #[prost(int64, tag = "2")]
+    #[allow(dead_code)]
     size: i64,
     #[prost(bytes = "vec", tag = "3")]
     data: Vec<u8>,
     #[prost(bytes = "vec", tag = "4")]
+    #[allow(dead_code)]
     path: Vec<u8>,
 }
 
-pub struct BlobIterator<'a> {
-    data: &'a [u8],
-    cursor: usize,
-    pending_chunks: std::vec::IntoIter<BlobChunk>,
-    current_oid: String,
-    current_size: i64,
-    current_path: String,
-    current_data: Vec<u8>,
+type ChunkStream = Fuse<Pin<Box<dyn Stream<Item = Result<BlobChunk, BlobDecodeError>> + Send>>>;
+
+pub struct BlobStream {
+    chunks: ChunkStream,
+    current: Option<DecodedBlob>,
 }
 
-impl<'a> BlobIterator<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self {
-            data,
-            cursor: 0,
-            pending_chunks: Vec::new().into_iter(),
-            current_oid: String::new(),
-            current_size: 0,
-            current_path: String::new(),
-            current_data: Vec::new(),
-        }
-    }
+impl BlobStream {
+    pub fn from_byte_stream<S, E>(stream: Pin<Box<S>>) -> Self
+    where
+        S: Stream<Item = Result<bytes::Bytes, E>> + Send + ?Sized + 'static,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        let io_stream = stream.map(|r| r.map_err(std::io::Error::other));
+        let reader = StreamReader::new(io_stream);
+        let frames = FramedRead::new(reader, LengthDelimitedCodec::new());
 
-    pub fn next_blob(&mut self) -> Result<Option<ResolvedBlob>, BlobDecodeError> {
-        loop {
-            let Some(chunk) = self.next_chunk()? else {
-                if self.current_oid.is_empty() {
-                    return Ok(None);
-                }
-                return Ok(Some(ResolvedBlob {
-                    oid: std::mem::take(&mut self.current_oid),
-                    data: std::mem::take(&mut self.current_data),
-                    size: self.current_size,
-                    path: std::mem::take(&mut self.current_path),
-                }));
-            };
-
-            if !chunk.oid.is_empty() && !self.current_oid.is_empty() {
-                let completed = ResolvedBlob {
-                    oid: std::mem::replace(&mut self.current_oid, chunk.oid),
-                    data: std::mem::take(&mut self.current_data),
-                    size: std::mem::replace(&mut self.current_size, chunk.size),
-                    path: std::mem::replace(
-                        &mut self.current_path,
-                        String::from_utf8_lossy(&chunk.path).into_owned(),
-                    ),
+        let chunks: Pin<Box<dyn Stream<Item = Result<BlobChunk, BlobDecodeError>> + Send>> =
+            Box::pin(frames.flat_map(|frame_result| {
+                let items: Vec<Result<BlobChunk, BlobDecodeError>> = match frame_result {
+                    Ok(frame) => match ListBlobsResponse::decode(frame) {
+                        Ok(response) => response.blobs.into_iter().map(Ok).collect(),
+                        Err(e) => vec![Err(BlobDecodeError(format!(
+                            "failed to decode ListBlobsResponse: {e}"
+                        )))],
+                    },
+                    Err(e) => vec![Err(BlobDecodeError(format!("frame error: {e}")))],
                 };
-                self.current_data.extend_from_slice(&chunk.data);
-                return Ok(Some(completed));
-            }
+                futures::stream::iter(items)
+            }));
 
-            if !chunk.oid.is_empty() {
-                self.current_oid = chunk.oid;
-                self.current_size = chunk.size;
-                self.current_path = String::from_utf8_lossy(&chunk.path).into_owned();
-            }
-            self.current_data.extend_from_slice(&chunk.data);
+        Self {
+            chunks: chunks.fuse(),
+            current: None,
         }
     }
 
-    fn next_chunk(&mut self) -> Result<Option<BlobChunk>, BlobDecodeError> {
-        if let Some(chunk) = self.pending_chunks.next() {
-            return Ok(Some(chunk));
+    pub async fn next_blob(&mut self) -> Result<Option<DecodedBlob>, BlobDecodeError> {
+        loop {
+            match self.chunks.next().await {
+                Some(Ok(chunk)) => {
+                    if !chunk.oid.is_empty() {
+                        let new_blob = DecodedBlob {
+                            oid: chunk.oid,
+                            data: chunk.data,
+                        };
+
+                        if let Some(completed) = self.current.replace(new_blob) {
+                            return Ok(Some(completed));
+                        }
+                    } else if let Some(current) = &mut self.current {
+                        current.data.extend_from_slice(&chunk.data);
+                    }
+                }
+                Some(Err(e)) => return Err(e),
+                None => return Ok(self.current.take()),
+            }
         }
-
-        if self.cursor + 4 > self.data.len() {
-            return Ok(None);
-        }
-
-        let frame_len =
-            u32::from_be_bytes(self.data[self.cursor..self.cursor + 4].try_into().unwrap())
-                as usize;
-        self.cursor += 4;
-
-        if self.cursor + frame_len > self.data.len() {
-            return Err(BlobDecodeError(
-                "truncated protobuf frame in blob stream".into(),
-            ));
-        }
-
-        let frame = &self.data[self.cursor..self.cursor + frame_len];
-        self.cursor += frame_len;
-
-        let response = ListBlobsResponse::decode(frame)
-            .map_err(|e| BlobDecodeError(format!("failed to decode ListBlobsResponse: {e}")))?;
-
-        self.pending_chunks = response.blobs.into_iter();
-        Ok(self.pending_chunks.next())
     }
 }
 
@@ -134,17 +108,33 @@ mod tests {
         buf
     }
 
-    fn collect_blobs(data: &[u8]) -> Result<Vec<ResolvedBlob>, BlobDecodeError> {
-        let mut iter = BlobIterator::new(data);
+    fn blob_stream_from_bytes(data: Vec<u8>) -> BlobStream {
+        let stream: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>> =
+            Box::pin(futures::stream::once(async move {
+                Ok(bytes::Bytes::from(data))
+            }));
+        BlobStream::from_byte_stream(stream)
+    }
+
+    fn blob_stream_from_chunks(chunks: Vec<Vec<u8>>) -> BlobStream {
+        let stream: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>> =
+            Box::pin(futures::stream::iter(
+                chunks.into_iter().map(|c| Ok(bytes::Bytes::from(c))),
+            ));
+        BlobStream::from_byte_stream(stream)
+    }
+
+    async fn collect_blobs(data: Vec<u8>) -> Result<Vec<DecodedBlob>, BlobDecodeError> {
+        let mut decoder = blob_stream_from_bytes(data);
         let mut blobs = Vec::new();
-        while let Some(blob) = iter.next_blob()? {
+        while let Some(blob) = decoder.next_blob().await? {
             blobs.push(blob);
         }
         Ok(blobs)
     }
 
-    #[test]
-    fn decodes_single_blob_single_frame() {
+    #[tokio::test]
+    async fn decodes_single_blob_single_frame() {
         let response = ListBlobsResponse {
             blobs: vec![BlobChunk {
                 oid: "abc123".into(),
@@ -153,18 +143,16 @@ mod tests {
                 path: b"src/main.rs".to_vec(),
             }],
         };
-        let data = encode_frame(&response);
 
-        let blobs = collect_blobs(&data).unwrap();
+        let blobs = collect_blobs(encode_frame(&response)).await.unwrap();
+
         assert_eq!(blobs.len(), 1);
         assert_eq!(blobs[0].oid, "abc123");
         assert_eq!(blobs[0].data, b"hello");
-        assert_eq!(blobs[0].size, 5);
-        assert_eq!(blobs[0].path, "src/main.rs");
     }
 
-    #[test]
-    fn decodes_multi_chunk_blob() {
+    #[tokio::test]
+    async fn decodes_multi_chunk_blob() {
         let chunk1 = ListBlobsResponse {
             blobs: vec![BlobChunk {
                 oid: "abc123".into(),
@@ -184,15 +172,15 @@ mod tests {
         let mut data = encode_frame(&chunk1);
         data.extend_from_slice(&encode_frame(&chunk2));
 
-        let blobs = collect_blobs(&data).unwrap();
+        let blobs = collect_blobs(data).await.unwrap();
+
         assert_eq!(blobs.len(), 1);
         assert_eq!(blobs[0].oid, "abc123");
         assert_eq!(blobs[0].data, b"helloworld");
-        assert_eq!(blobs[0].size, 10);
     }
 
-    #[test]
-    fn decodes_multiple_blobs() {
+    #[tokio::test]
+    async fn decodes_multiple_blobs() {
         let response = ListBlobsResponse {
             blobs: vec![
                 BlobChunk {
@@ -209,9 +197,9 @@ mod tests {
                 },
             ],
         };
-        let data = encode_frame(&response);
 
-        let blobs = collect_blobs(&data).unwrap();
+        let blobs = collect_blobs(encode_frame(&response)).await.unwrap();
+
         assert_eq!(blobs.len(), 2);
         assert_eq!(blobs[0].oid, "aaa");
         assert_eq!(blobs[0].data, b"foo");
@@ -219,14 +207,14 @@ mod tests {
         assert_eq!(blobs[1].data, b"bar");
     }
 
-    #[test]
-    fn empty_stream_returns_empty() {
-        let blobs = collect_blobs(&[]).unwrap();
+    #[tokio::test]
+    async fn empty_stream_returns_empty() {
+        let blobs = collect_blobs(vec![]).await.unwrap();
         assert!(blobs.is_empty());
     }
 
-    #[test]
-    fn truncated_frame_returns_error() {
+    #[tokio::test]
+    async fn truncated_frame_returns_error() {
         let response = ListBlobsResponse {
             blobs: vec![BlobChunk {
                 oid: "abc".into(),
@@ -238,7 +226,27 @@ mod tests {
         let mut data = encode_frame(&response);
         data.truncate(data.len() - 2);
 
-        let err = collect_blobs(&data).unwrap_err();
-        assert!(err.to_string().contains("truncated"));
+        let err = collect_blobs(data).await.unwrap_err();
+        assert!(err.to_string().contains("frame error"));
+    }
+
+    #[tokio::test]
+    async fn handles_frame_split_across_stream_chunks() {
+        let response = ListBlobsResponse {
+            blobs: vec![BlobChunk {
+                oid: "abc123".into(),
+                size: 5,
+                data: b"hello".to_vec(),
+                path: b"main.rs".to_vec(),
+            }],
+        };
+        let data = encode_frame(&response);
+        let mid = data.len() / 2;
+
+        let mut decoder = blob_stream_from_chunks(vec![data[..mid].to_vec(), data[mid..].to_vec()]);
+        let blob = decoder.next_blob().await.unwrap().unwrap();
+
+        assert_eq!(blob.oid, "abc123");
+        assert_eq!(blob.data, b"hello");
     }
 }

@@ -66,7 +66,7 @@ parquet = { version = "57", default-features = false, features = ["arrow", "snap
 tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.28.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-tokio-util = { version = "0.7.18", features = ["io-util"] }
+tokio-util = { version = "0.7.18", features = ["io-util", "codec"] }
 tokio-rayon = "2.1.0"
 ignore = "0.4.25"
 rayon = "1.11.0"

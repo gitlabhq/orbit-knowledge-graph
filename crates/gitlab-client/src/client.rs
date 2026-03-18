@@ -1,7 +1,9 @@
 use std::net::SocketAddr;
+use std::pin::Pin;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use futures::Stream;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -10,6 +12,8 @@ use tracing::debug;
 use crate::config::GitlabClientConfiguration;
 use crate::error::GitlabClientError;
 use crate::types::{ChangedPath, ProjectInfo};
+
+pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
 
 /// JWT issuer — Rails expects this value when validating incoming tokens.
 pub const JWT_ISSUER: &str = "gitlab";
@@ -165,7 +169,7 @@ impl GitlabClient {
         project_id: i64,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<Vec<u8>, GitlabClientError> {
+    ) -> Result<ByteStream, GitlabClientError> {
         let base = format!(
             "{}/api/v4/internal/orbit/project/{}/repository/blobs",
             self.base_url, project_id
@@ -182,8 +186,15 @@ impl GitlabClient {
         let response = self.authenticated_get(url).await?;
         Self::check_diff_status(&response, project_id)?;
 
-        let bytes = response.bytes().await?;
-        Ok(bytes.to_vec())
+        let stream = futures::stream::unfold(response, |mut resp| async {
+            match resp.chunk().await {
+                Ok(Some(bytes)) => Some((Ok(bytes), resp)),
+                Ok(None) => None,
+                Err(e) => Some((Err(e.into()), resp)),
+            }
+        });
+
+        Ok(Box::pin(stream))
     }
 
     async fn authenticated_get(

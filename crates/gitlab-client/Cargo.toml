@@ -6,7 +6,9 @@ license = "LicenseRef-EE"
 
 [dependencies]
 base64 = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true }
+futures = { workspace = true }
 jsonwebtoken = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }

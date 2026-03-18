@@ -6,7 +6,7 @@ use gitlab_client::{ChangeStatus, ChangedPath};
 use tracing::{debug, info, warn};
 
 use super::archive;
-use super::blob_decoder::{BlobIterator, ResolvedBlob};
+use super::blob_decoder::{BlobStream, DecodedBlob};
 use super::repository_cache::RepositoryCache;
 use super::repository_service::RepositoryService;
 use crate::handler::HandlerError;
@@ -146,16 +146,17 @@ impl RepositoryResolver {
                 })?;
         }
 
-        let blob_bytes = self
+        let blob_stream = self
             .repository_service
             .download_blobs(project_id, from_sha, to_sha)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download blobs: {e}")))?;
 
-        let mut blob_iter = BlobIterator::new(&blob_bytes);
+        let mut blob_decoder = BlobStream::from_byte_stream(blob_stream);
         let mut write_count = 0;
-        while let Some(blob) = blob_iter
+        while let Some(blob) = blob_decoder
             .next_blob()
+            .await
             .map_err(|e| HandlerError::Processing(format!("failed to decode blob: {e}")))?
         {
             let paths = paths_for_blob(&blob, &changeset.paths_by_blob_id);
@@ -243,7 +244,7 @@ fn compute_changeset(changed_paths: Vec<ChangedPath>) -> IncrementalChangeset {
 }
 
 fn paths_for_blob<'a>(
-    blob: &ResolvedBlob,
+    blob: &DecodedBlob,
     paths_by_blob_id: &'a HashMap<String, Vec<String>>,
 ) -> &'a [String] {
     paths_by_blob_id
@@ -254,7 +255,7 @@ fn paths_for_blob<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::ResolvedBlob;
+    use super::DecodedBlob;
     use super::*;
 
     fn changed_path(
@@ -466,11 +467,9 @@ mod tests {
             vec!["a.rs".to_string(), "b.rs".to_string()],
         );
 
-        let blob = ResolvedBlob {
+        let blob = DecodedBlob {
             oid: "blob1".to_string(),
             data: b"content".to_vec(),
-            size: 7,
-            path: "a.rs".to_string(),
         };
 
         let paths = paths_for_blob(&blob, &paths_by_blob_id);
@@ -480,11 +479,9 @@ mod tests {
     #[test]
     fn paths_for_blob_returns_empty_for_unmatched() {
         let paths_by_blob_id = HashMap::new();
-        let blob = ResolvedBlob {
+        let blob = DecodedBlob {
             oid: "orphan".to_string(),
             data: b"data".to_vec(),
-            size: 4,
-            path: "file.rs".to_string(),
         };
 
         let paths = paths_for_blob(&blob, &paths_by_blob_id);
