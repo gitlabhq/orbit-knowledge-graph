@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfiguration;
-use labkit_rs::correlation::grpc::server_interceptor;
 use ontology::Ontology;
 use tonic::transport::Server as TonicServer;
 use tracing::info;
@@ -13,15 +12,9 @@ use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
 
 use super::service::KnowledgeGraphServiceImpl;
 
-type Interceptor = fn(tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status>;
-type ServiceWithInterceptor = tonic::service::interceptor::InterceptedService<
-    KnowledgeGraphServiceServer<KnowledgeGraphServiceImpl>,
-    Interceptor,
->;
-
 pub struct GrpcServer {
     addr: SocketAddr,
-    service: ServiceWithInterceptor,
+    service: KnowledgeGraphServiceServer<KnowledgeGraphServiceImpl>,
 }
 
 impl GrpcServer {
@@ -36,7 +29,7 @@ impl GrpcServer {
             KnowledgeGraphServiceImpl::new(validator, ontology, clickhouse_config, cluster_health);
         Self {
             addr,
-            service: KnowledgeGraphServiceServer::with_interceptor(service, server_interceptor),
+            service: KnowledgeGraphServiceServer::new(service),
         }
     }
 
@@ -48,6 +41,9 @@ impl GrpcServer {
         info!(addr = %self.addr, "Starting gRPC server");
 
         TonicServer::builder()
+            .layer(labkit::grpc::GrpcMetricsLayer::new())
+            .layer(labkit::grpc::GrpcTraceLayer::new())
+            .layer(labkit::grpc::GrpcCorrelationLayer::new())
             .add_service(self.service)
             .serve(self.addr)
             .await

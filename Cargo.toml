@@ -7,7 +7,6 @@ members = [
   "crates/treesitter-visit",
   "crates/code-parser",
   "crates/code-graph",
-  "crates/labkit-rs",
   "crates/clickhouse-client",
   "crates/indexer",
   "crates/query-engine",
@@ -32,6 +31,7 @@ members = [
 ]
 
 [workspace.dependencies]
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "9e6e377" }
 arrow = "57.2.0"
 enum-as-inner = "0.7.0"
 datafusion = { version = "52.1.0", default-features = false, features = ["sql", "nested_expressions"] }

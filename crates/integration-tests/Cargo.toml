@@ -39,4 +39,7 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tower = { workspace = true }
 tempfile = { workspace = true }
+labkit = { workspace = true, features = ["http"] }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio", "testing"] }
 zstd = "0.13.3"

@@ -1,11 +1,7 @@
 use std::pin::Pin;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfiguration;
-use labkit_rs::correlation::grpc::{
-    context_from_request, with_correlation, with_correlation_stream,
-};
-use labkit_rs::metrics::grpc::GrpcMetrics;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -26,10 +22,6 @@ use crate::tools::{ToolRegistry, ToolService};
 use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
-
-const SERVICE_NAME: &str = "gkg.v1.KnowledgeGraphService";
-
-static METRICS: LazyLock<GrpcMetrics> = LazyLock::new(GrpcMetrics::new);
 
 pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
@@ -74,24 +66,18 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "ListTools", || {
-                with_correlation(&request, async {
-                    info!("Listing tools for user");
+        info!("Listing tools for user");
 
-                    let tools = ToolRegistry::get_all_tools(&self.ontology)
-                        .into_iter()
-                        .map(|t| ProtoToolDefinition {
-                            name: t.name,
-                            description: t.description,
-                            parameters_json_schema: t.parameters.to_string(),
-                        })
-                        .collect();
-
-                    Ok(Response::new(ListToolsResponse { tools }))
-                })
+        let tools = ToolRegistry::get_all_tools(&self.ontology)
+            .into_iter()
+            .map(|t| ProtoToolDefinition {
+                name: t.name,
+                description: t.description,
+                parameters_json_schema: t.parameters.to_string(),
             })
-            .await
+            .collect();
+
+        Ok(Response::new(ListToolsResponse { tools }))
     }
 
     type ExecuteQueryStream = ExecuteQueryStream;
@@ -104,7 +90,6 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        let context = context_from_request(&request);
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
 
@@ -162,13 +147,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             }
         });
 
-        let stream = ReceiverStream::new(rx);
-        let metered_stream = METRICS.record_stream(SERVICE_NAME, "ExecuteQuery", stream);
-
-        Ok(Response::new(Box::pin(with_correlation_stream(
-            context,
-            metered_stream,
-        ))))
+        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
     #[instrument(skip(self, request), fields(user_id))]
@@ -179,35 +158,25 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "GetGraphSchema", || {
-                with_correlation(&request, async {
-                    let req = request.get_ref();
-                    info!(format = ?req.format, "Fetching graph schema for user");
+        let req = request.get_ref();
+        info!(format = ?req.format, "Fetching graph schema for user");
 
-                    let response = if req.format == ResponseFormat::Llm as i32 {
-                        let toon_text = self
-                            .tool_service
-                            .build_schema_toon(&req.expand_nodes)
-                            .map_err(|e| Status::internal(e.to_string()))?;
-                        GetGraphSchemaResponse {
-                            content: Some(get_graph_schema_response::Content::FormattedText(
-                                toon_text,
-                            )),
-                        }
-                    } else {
-                        let structured = self.build_structured_schema(&req.expand_nodes);
-                        GetGraphSchemaResponse {
-                            content: Some(get_graph_schema_response::Content::Structured(
-                                structured,
-                            )),
-                        }
-                    };
+        let response = if req.format == ResponseFormat::Llm as i32 {
+            let toon_text = self
+                .tool_service
+                .build_schema_toon(&req.expand_nodes)
+                .map_err(|e| Status::internal(e.to_string()))?;
+            GetGraphSchemaResponse {
+                content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
+            }
+        } else {
+            let structured = self.build_structured_schema(&req.expand_nodes);
+            GetGraphSchemaResponse {
+                content: Some(get_graph_schema_response::Content::Structured(structured)),
+            }
+        };
 
-                    Ok(Response::new(response))
-                })
-            })
-            .await
+        Ok(Response::new(response))
     }
 
     #[instrument(skip(self, request), fields(user_id))]
@@ -218,17 +187,11 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "GetClusterHealth", || {
-                with_correlation(&request, async {
-                    let req = request.get_ref();
-                    info!(format = ?req.format, "Fetching cluster health for user");
+        let req = request.get_ref();
+        info!(format = ?req.format, "Fetching cluster health for user");
 
-                    let response = self.cluster_health.get_cluster_health(req.format).await;
-                    Ok(Response::new(response))
-                })
-            })
-            .await
+        let response = self.cluster_health.get_cluster_health(req.format).await;
+        Ok(Response::new(response))
     }
 }
 

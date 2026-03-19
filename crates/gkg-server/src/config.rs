@@ -7,7 +7,6 @@ use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
 use indexer::nats::NatsConfiguration;
 use indexer::scheduler::ScheduleConfig;
-use labkit_rs::metrics::MetricsConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::SECRET_FILE_DIR;
@@ -130,6 +129,12 @@ impl AppConfig {
 }
 
 pub type SharedAppConfig = Arc<AppConfig>;
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    #[serde(default)]
+    pub otlp_endpoint: String,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
