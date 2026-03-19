@@ -62,4 +62,3 @@ health_check:
 
 metrics:
   otlp_endpoint: "http://localhost:4317"
-  service_name: gkg-server

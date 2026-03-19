@@ -2712,7 +2712,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "jsonwebtoken",
- "reqwest 0.13.2",
+ "reqwest",
  "rustls",
  "serde",
  "serde_json",
@@ -2745,7 +2745,7 @@ dependencies = [
  "indexmap 2.13.0",
  "jsonschema",
  "jsonwebtoken",
- "labkit-rs",
+ "labkit",
  "ontology",
  "opentelemetry",
  "parking_lot",
@@ -2753,7 +2753,7 @@ dependencies = [
  "prost-build",
  "prost-types",
  "query-engine",
- "reqwest 0.13.2",
+ "reqwest",
  "rustc-hash",
  "rustls",
  "serde",
@@ -2768,9 +2768,7 @@ dependencies = [
  "tonic-prost-build",
  "toon-format",
  "tower",
- "tower-http",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -3435,7 +3433,10 @@ dependencies = [
  "indexer",
  "integration-testkit",
  "jsonschema",
+ "labkit",
  "ontology",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "parking_lot",
  "prost",
  "query-engine",
@@ -3645,7 +3646,7 @@ dependencies = [
  "referencing",
  "regex",
  "regex-syntax",
- "reqwest 0.13.2",
+ "reqwest",
  "rustls",
  "serde",
  "serde_json",
@@ -3782,33 +3783,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "labkit-rs"
+name = "labkit"
 version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9e6e377#9e6e377a9bc3496a6ca4c0efbcf9eedf448ac154"
 dependencies = [
- "async-stream",
  "axum",
- "bytes",
- "chrono",
- "futures-core",
  "futures-util",
  "http",
+ "http-body",
  "http-body-util",
+ "labkit-fields",
  "opentelemetry",
+ "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
- "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
- "pin-project",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
+ "pin-project-lite",
  "tonic",
  "tower",
+ "tower-http",
+ "tower-layer",
+ "tower-service",
  "tracing",
+ "tracing-core",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "ulid",
 ]
+
+[[package]]
+name = "labkit-fields"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9e6e377#9e6e377a9bc3496a6ca4c0efbcf9eedf448ac154"
 
 [[package]]
 name = "lazy_static"
@@ -4358,6 +4363,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry-appender-tracing"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef6a1ac5ca3accf562b8c306fa8483c85f4390f768185ab775f242f7fe8fdcc2"
+dependencies = [
+ "opentelemetry",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "opentelemetry-http"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4367,7 +4384,6 @@ dependencies = [
  "bytes",
  "http",
  "opentelemetry",
- "reqwest 0.12.28",
 ]
 
 [[package]]
@@ -4382,11 +4398,9 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost",
- "reqwest 0.12.28",
  "thiserror 2.0.18",
  "tokio",
  "tonic",
- "tracing",
 ]
 
 [[package]]
@@ -4401,12 +4415,6 @@ dependencies = [
  "tonic",
  "tonic-prost",
 ]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
 name = "opentelemetry_sdk"
@@ -5394,40 +5402,6 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
-
-[[package]]
-name = "reqwest"
-version = "0.12.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "futures-channel",
- "futures-core",
- "futures-util",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "js-sys",
- "log",
- "percent-encoding",
- "pin-project-lite",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sync_wrapper",
- "tokio",
- "tower",
- "tower-http",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
 
 [[package]]
 name = "reqwest"
@@ -7095,6 +7069,22 @@ dependencies = [
  "log",
  "once_cell",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-opentelemetry"
+version = "0.32.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ac28f2d093c6c477eaa76b23525478f38de514fa9aeb1285738d4b97a9552fc"
+dependencies = [
+ "js-sys",
+ "opentelemetry",
+ "smallvec",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
+ "tracing-subscriber",
+ "web-time",
 ]
 
 [[package]]

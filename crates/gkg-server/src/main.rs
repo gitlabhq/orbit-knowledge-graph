@@ -26,14 +26,19 @@ async fn main() -> anyhow::Result<()> {
         .install_default()
         .expect("Failed to install rustls CryptoProvider");
 
-    labkit_rs::logging::init();
-
     let args = Args::parse();
     let config = AppConfig::load()?;
+
+    let mut builder = labkit::Builder::new(args.mode.service_name())
+        .propagate_correlation(true)
+        .echo_response_header(true);
+    if !config.metrics.otlp_endpoint.is_empty() {
+        builder = builder.otel_grpc_endpoint(&config.metrics.otlp_endpoint);
+    }
+    let _guard = builder.init().expect("labkit init");
+
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);
-
-    let _metrics = labkit_rs::metrics::try_init_with_config(config.metrics.clone()).ok();
 
     info!(mode = ?args.mode, "starting");
 

@@ -37,7 +37,7 @@ parking_lot = { workspace = true }
 query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonwebtoken = { workspace = true }
-labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum", "metrics-grpc"] }
+labkit = { workspace = true, features = ["http", "grpc", "otel"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -45,9 +45,7 @@ tokio = { workspace = true }
 tokio-util.workspace = true
 tokio-stream = { workspace = true }
 tower = { workspace = true }
-tower-http = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 arrow-ipc = { workspace = true }
 clickhouse = { workspace = true }

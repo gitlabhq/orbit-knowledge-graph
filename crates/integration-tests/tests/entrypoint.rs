@@ -11,4 +11,5 @@ mod server {
     pub mod health;
     pub mod hydration;
     pub mod redaction;
+    pub mod telemetry;
 }

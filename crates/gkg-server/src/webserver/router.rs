@@ -5,11 +5,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router, routing::get};
 use clickhouse_client::ArrowClickHouseClient;
-use labkit_rs::correlation::http::{CorrelationIdLayer, PropagateCorrelationIdLayer};
-use labkit_rs::metrics::http::HttpMetricsLayer;
+use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
 use tokio::time::timeout;
-use tower_http::trace::TraceLayer;
 
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -77,7 +75,6 @@ pub fn create_router(graph_client: ArrowClickHouseClient) -> Router {
         .route("/ready", get(ready))
         .with_state(state)
         .layer(HttpMetricsLayer::new())
-        .layer(CorrelationIdLayer::new())
-        .layer(TraceLayer::new_for_http())
-        .layer(PropagateCorrelationIdLayer::new())
+        .layer(GitlabTraceLayer::new())
+        .layer(CorrelationLayer::new())
 }
