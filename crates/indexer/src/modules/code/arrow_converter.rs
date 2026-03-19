@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Int64Builder, StringBuilder, TimestampMicrosecondBuilder};
+use arrow::array::{
+    ArrayRef, BooleanBuilder, Int64Builder, StringBuilder, TimestampMicrosecondBuilder,
+};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
@@ -332,6 +334,7 @@ impl ArrowConverter {
         let mut target_id = Int64Builder::with_capacity(rels.len());
         let mut target_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 16);
         let mut version = TimestampMicrosecondBuilder::with_capacity(rels.len());
+        let mut deleted = BooleanBuilder::with_capacity(rels.len());
 
         for rel in rels {
             let (src_kind_str, tgt_kind_str) = relationship_kind_to_strings(&rel.kind);
@@ -350,6 +353,7 @@ impl ArrowConverter {
             target_id.append_value(tgt_id);
             target_kind.append_value(tgt_kind_str);
             version.append_value(self.version_micros);
+            deleted.append_value(false);
         }
 
         let schema = Schema::new(vec![
@@ -364,6 +368,7 @@ impl ArrowConverter {
                 DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
                 false,
             ),
+            Field::new("_deleted", DataType::Boolean, false),
         ]);
 
         RecordBatch::try_new(
@@ -376,6 +381,7 @@ impl ArrowConverter {
                 Arc::new(target_id.finish()) as ArrayRef,
                 Arc::new(target_kind.finish()) as ArrayRef,
                 Arc::new(version.finish().with_timezone("UTC")) as ArrayRef,
+                Arc::new(deleted.finish()) as ArrayRef,
             ],
         )
     }
@@ -405,6 +411,7 @@ struct BaseColumnBuilders {
     project_id: Int64Builder,
     branch: StringBuilder,
     version: TimestampMicrosecondBuilder,
+    deleted: BooleanBuilder,
     traversal_path_value: String,
     project_id_value: i64,
     branch_value: String,
@@ -424,6 +431,7 @@ impl BaseColumnBuilders {
             project_id: Int64Builder::with_capacity(capacity),
             branch: StringBuilder::with_capacity(capacity, capacity * branch.len()),
             version: TimestampMicrosecondBuilder::with_capacity(capacity),
+            deleted: BooleanBuilder::with_capacity(capacity),
             traversal_path_value: traversal_path.to_string(),
             project_id_value: project_id,
             branch_value: branch.to_string(),
@@ -436,6 +444,7 @@ impl BaseColumnBuilders {
         self.project_id.append_value(self.project_id_value);
         self.branch.append_value(&self.branch_value);
         self.version.append_value(self.version_micros);
+        self.deleted.append_value(false);
     }
 
     fn build_batch_with_id(
@@ -453,6 +462,7 @@ impl BaseColumnBuilders {
                 DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
                 false,
             ),
+            Field::new("_deleted", DataType::Boolean, false),
         ];
 
         let mut columns: Vec<ArrayRef> = vec![
@@ -461,6 +471,7 @@ impl BaseColumnBuilders {
             Arc::new(self.project_id.finish()),
             Arc::new(self.branch.finish()),
             Arc::new(self.version.finish().with_timezone("UTC")),
+            Arc::new(self.deleted.finish()),
         ];
 
         for (name, dtype, nullable, array) in extra_columns {
