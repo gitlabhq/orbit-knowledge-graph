@@ -11,7 +11,7 @@ use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::locking::project_lock_key;
 use super::metrics::CodeMetrics;
-use super::repository_service::RepositoryService;
+use super::repository::RepositoryService;
 use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::CodeIndexingTaskRequest;
@@ -71,7 +71,7 @@ impl Handler for CodeIndexingTaskHandler {
                 ))
             })?;
 
-        debug!(
+        info!(
             task_id = request.task_id,
             project_id = request.project_id,
             branch = ?request.branch,
@@ -230,7 +230,9 @@ mod tests {
     use crate::modules::code::checkpoint_store::CodeIndexingCheckpoint;
     use crate::modules::code::checkpoint_store::test_utils::MockCodeCheckpointStore;
     use crate::modules::code::metrics::CodeMetrics;
-    use crate::modules::code::repository_service::test_utils::MockRepositoryService;
+    use crate::modules::code::repository::RepositoryResolver;
+    use crate::modules::code::repository::cache::LocalRepositoryCache;
+    use crate::modules::code::repository::service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices};
@@ -265,8 +267,12 @@ mod tests {
                     .expect("code tables must resolve"),
             );
 
+            let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> =
+                Arc::new(LocalRepositoryCache::default());
+            let resolver = RepositoryResolver::new(Arc::clone(&mock_repo), cache);
+
             let pipeline = Arc::new(CodeIndexingPipeline::new(
-                Arc::clone(&mock_repo),
+                resolver,
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),
