@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
@@ -14,9 +14,6 @@ pub enum RepositoryCacheError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("path traversal detected: {0}")]
-    PathTraversal(String),
-
     #[error("archive extraction failed: {0}")]
     Archive(String),
 }
@@ -28,13 +25,6 @@ pub trait RepositoryCache: Send + Sync {
         project_id: i64,
         branch: &str,
     ) -> Result<Option<CachedRepository>, RepositoryCacheError>;
-
-    async fn save(
-        &self,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-    ) -> Result<(), RepositoryCacheError>;
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
 
@@ -85,26 +75,6 @@ fn hashed_branch_name(branch: &str) -> String {
     format!("{:x}", hash)
 }
 
-#[allow(dead_code)]
-fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCacheError> {
-    let mut depth: i32 = 0;
-    for component in Path::new(relative).components() {
-        match component {
-            std::path::Component::ParentDir => {
-                depth -= 1;
-                if depth < 0 {
-                    return Err(RepositoryCacheError::PathTraversal(relative.to_string()));
-                }
-            }
-            std::path::Component::Normal(_) => {
-                depth += 1;
-            }
-            _ => {}
-        }
-    }
-    Ok(base.join(relative))
-}
-
 #[async_trait]
 impl RepositoryCache for LocalRepositoryCache {
     async fn get(
@@ -131,21 +101,6 @@ impl RepositoryCache for LocalRepositoryCache {
             path: repository_dir,
             commit,
         }))
-    }
-
-    async fn save(
-        &self,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-    ) -> Result<(), RepositoryCacheError> {
-        let branch_dir = self.branch_dir(project_id, branch);
-        let meta_dir = branch_dir.join(META_DIR);
-        let repository_dir = branch_dir.join(REPOSITORY_DIR);
-        tokio::fs::create_dir_all(&meta_dir).await?;
-        tokio::fs::create_dir_all(&repository_dir).await?;
-        tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
-        Ok(())
     }
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
@@ -195,6 +150,26 @@ mod tests {
         (temp_dir, cache)
     }
 
+    fn build_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        let mut tar_builder = tar::Builder::new(Vec::new());
+        for (path, content) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(path).unwrap();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar_builder.append(&header, &content[..]).unwrap();
+        }
+        let tar_bytes = tar_builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&tar_bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
     #[tokio::test]
     async fn get_returns_none_when_no_cache_exists() {
         let (_dir, cache) = create_cache();
@@ -205,35 +180,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn save_then_get_returns_cached_repository() {
-        let (_dir, cache) = create_cache();
-
-        cache.save(42, "main", "abc123").await.unwrap();
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
-
-        assert_eq!(cached.path, cache.repository_dir(42, "main"));
-        assert_eq!(cached.commit, "abc123");
-    }
-
-    #[tokio::test]
-    async fn save_overwrites_previous_commit() {
-        let (_dir, cache) = create_cache();
-
-        cache.save(42, "main", "abc123").await.unwrap();
-        cache.save(42, "main", "def456").await.unwrap();
-
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
-        assert_eq!(cached.commit, "def456");
-    }
-
-    #[tokio::test]
     async fn invalidate_removes_cached_repository() {
         let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        cache
+            .extract_archive(42, "main", "abc123", &archive)
+            .await
+            .unwrap();
 
-        cache.save(42, "main", "abc123").await.unwrap();
         cache.invalidate(42, "main").await.unwrap();
-        let result = cache.get(42, "main").await.unwrap();
 
+        let result = cache.get(42, "main").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -247,9 +204,16 @@ mod tests {
     #[tokio::test]
     async fn separate_branches_are_independent() {
         let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
 
-        cache.save(42, "main", "aaa").await.unwrap();
-        cache.save(42, "develop", "bbb").await.unwrap();
+        cache
+            .extract_archive(42, "main", "aaa", &archive)
+            .await
+            .unwrap();
+        cache
+            .extract_archive(42, "develop", "bbb", &archive)
+            .await
+            .unwrap();
 
         assert!(cache.get(42, "main").await.unwrap().is_some());
         assert!(cache.get(42, "develop").await.unwrap().is_some());
@@ -258,9 +222,16 @@ mod tests {
     #[tokio::test]
     async fn separate_projects_are_independent() {
         let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
 
-        cache.save(1, "main", "aaa").await.unwrap();
-        cache.save(2, "main", "bbb").await.unwrap();
+        cache
+            .extract_archive(1, "main", "aaa", &archive)
+            .await
+            .unwrap();
+        cache
+            .extract_archive(2, "main", "bbb", &archive)
+            .await
+            .unwrap();
 
         assert!(cache.get(1, "main").await.unwrap().is_some());
         assert!(cache.get(2, "main").await.unwrap().is_some());
@@ -269,9 +240,16 @@ mod tests {
     #[tokio::test]
     async fn invalidate_one_branch_preserves_others() {
         let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
 
-        cache.save(42, "main", "aaa").await.unwrap();
-        cache.save(42, "develop", "bbb").await.unwrap();
+        cache
+            .extract_archive(42, "main", "aaa", &archive)
+            .await
+            .unwrap();
+        cache
+            .extract_archive(42, "develop", "bbb", &archive)
+            .await
+            .unwrap();
 
         cache.invalidate(42, "main").await.unwrap();
 
@@ -297,48 +275,6 @@ mod tests {
 
         assert!(safe_path.starts_with(dir.path().join("42")));
         assert!(!safe_path.to_string_lossy().contains(".."));
-    }
-
-    #[tokio::test]
-    async fn preserves_files_in_repository_directory() {
-        let (_dir, cache) = create_cache();
-        let branch_dir = cache.branch_dir(42, "main");
-        let repository_dir = branch_dir.join("repository");
-        tokio::fs::create_dir_all(&repository_dir).await.unwrap();
-
-        let test_file = repository_dir.join("src/main.rs");
-        tokio::fs::create_dir_all(test_file.parent().unwrap())
-            .await
-            .unwrap();
-        tokio::fs::write(&test_file, "fn main() {}").await.unwrap();
-
-        cache.save(42, "main", "abc123").await.unwrap();
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
-
-        let content = tokio::fs::read_to_string(cached.path.join("src/main.rs"))
-            .await
-            .unwrap();
-        assert_eq!(content, "fn main() {}");
-    }
-
-    fn build_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
-        use flate2::Compression;
-        use flate2::write::GzEncoder;
-        use std::io::Write;
-
-        let mut tar_builder = tar::Builder::new(Vec::new());
-        for (path, content) in files {
-            let mut header = tar::Header::new_gnu();
-            header.set_path(path).unwrap();
-            header.set_size(content.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            tar_builder.append(&header, &content[..]).unwrap();
-        }
-        let tar_bytes = tar_builder.into_inner().unwrap();
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
-        encoder.write_all(&tar_bytes).unwrap();
-        encoder.finish().unwrap()
     }
 
     #[tokio::test]
