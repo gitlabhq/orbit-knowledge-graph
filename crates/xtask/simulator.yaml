@@ -16,27 +16,90 @@ clickhouse:
     max_insert_block_size: 100000
 
   schema:
-    engine: MergeTree
+    engine: ReplacingMergeTree
     index_granularity: 8192
+
+    settings:
+      deduplicate_merge_projection_mode: "'rebuild'"
 
     node_primary_key: [traversal_path, id]
     node_order_by: [traversal_path, id]
 
-    edge_primary_key: [traversal_path, source_id, source_kind, target_id, target_kind]
-    edge_order_by: [traversal_path, source_id, source_kind, target_id, target_kind]
+    edge_primary_key: [traversal_path, source_id, source_kind, relationship_kind]
+    edge_order_by: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
 
     indexes:
       - name: idx_relationship
         table: edges
         expression: relationship_kind
-        type: bloom_filter
+        type: set
         granularity: 4
+      # Node table skip indexes for frequently filtered columns
+      - name: idx_state
+        table: gl_merge_request
+        expression: state
+        type: set
+        granularity: 2
+      - name: idx_draft
+        table: gl_merge_request
+        expression: draft
+        type: minmax
+        granularity: 2
+      - name: idx_status
+        table: gl_pipeline
+        expression: status
+        type: set
+        granularity: 2
+      - name: idx_state
+        table: gl_work_item
+        expression: state
+        type: set
+        granularity: 2
+      - name: idx_work_item_type
+        table: gl_work_item
+        expression: work_item_type
+        type: set
+        granularity: 2
+      - name: idx_confidential
+        table: gl_work_item
+        expression: confidential
+        type: minmax
+        granularity: 2
+      - name: idx_state
+        table: gl_vulnerability
+        expression: state
+        type: set
+        granularity: 2
+      - name: idx_severity
+        table: gl_vulnerability
+        expression: severity
+        type: set
+        granularity: 2
+      - name: idx_report_type
+        table: gl_vulnerability
+        expression: report_type
+        type: set
+        granularity: 2
+      - name: idx_noteable_type
+        table: gl_note
+        expression: noteable_type
+        type: set
+        granularity: 2
+      - name: idx_status
+        table: gl_job
+        expression: status
+        type: set
+        granularity: 2
 
     projections:
       - name: by_target
         table: edges
         columns: [source_kind, source_id, relationship_kind, target_kind, target_id]
         order_by: [target_id, target_kind, relationship_kind]
+      - name: id_lookup
+        table: "*"
+        columns: ["*"]
+        order_by: [id]
 
 generation:
   ontology_path: config/ontology

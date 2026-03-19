@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS gl_note (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
+    INDEX idx_noteable_type noteable_type TYPE set(10) GRANULARITY 2,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -124,6 +125,8 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(10) GRANULARITY 2,
+    INDEX idx_draft draft TYPE minmax GRANULARITY 2,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -217,6 +220,9 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(10) GRANULARITY 2,
+    INDEX idx_work_item_type work_item_type TYPE set(10) GRANULARITY 2,
+    INDEX idx_confidential confidential TYPE minmax GRANULARITY 2,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -259,6 +265,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
+    INDEX idx_status status TYPE set(20) GRANULARITY 2,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -298,6 +305,7 @@ CREATE TABLE IF NOT EXISTS gl_job (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
+    INDEX idx_status status TYPE set(20) GRANULARITY 2,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -323,6 +331,9 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(10) GRANULARITY 2,
+    INDEX idx_severity severity TYPE set(10) GRANULARITY 2,
+    INDEX idx_report_type report_type TYPE set(20) GRANULARITY 2,
     PROJECTION id_lookup (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
