@@ -1,7 +1,9 @@
 use std::net::SocketAddr;
+use std::pin::Pin;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use futures::{Stream, StreamExt};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -10,6 +12,8 @@ use tracing::debug;
 use crate::config::GitlabClientConfiguration;
 use crate::error::GitlabClientError;
 use crate::types::ProjectInfo;
+
+pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
 
 /// JWT issuer — Rails expects this value when validating incoming tokens.
 pub const JWT_ISSUER: &str = "gitlab";
@@ -134,6 +138,101 @@ impl GitlabClient {
         Ok(bytes.to_vec())
     }
 
+    pub async fn changed_paths(
+        &self,
+        project_id: i64,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<ByteStream, GitlabClientError> {
+        let base = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/changed_paths",
+            self.base_url, project_id
+        );
+        let url = reqwest::Url::parse_with_params(
+            &base,
+            &[
+                ("left_tree_revision", from_sha),
+                ("right_tree_revision", to_sha),
+            ],
+        )
+        .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
+
+        debug!(
+            project_id,
+            from_sha, to_sha, "fetching changed paths from GitLab"
+        );
+
+        self.streaming_get(url, project_id).await
+    }
+
+    pub async fn list_blobs(
+        &self,
+        project_id: i64,
+        oids: &[String],
+    ) -> Result<ByteStream, GitlabClientError> {
+        let url = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/list_blobs",
+            self.base_url, project_id
+        );
+
+        debug!(
+            project_id,
+            blob_count = oids.len(),
+            "listing blobs from GitLab"
+        );
+
+        #[derive(Serialize)]
+        struct ListBlobsRequest<'a> {
+            revisions: &'a [String],
+        }
+
+        let body = ListBlobsRequest { revisions: oids };
+        self.streaming_post(&url, project_id, &body).await
+    }
+
+    async fn streaming_get(
+        &self,
+        url: reqwest::Url,
+        project_id: i64,
+    ) -> Result<ByteStream, GitlabClientError> {
+        let response = self.authenticated_get(url).await?;
+        Self::check_diff_status(&response, project_id)?;
+
+        let stream = futures::stream::unfold(Some(response), |state| async {
+            let mut resp = state?;
+            match resp.chunk().await {
+                Ok(Some(bytes)) => Some((Ok(bytes), Some(resp))),
+                Ok(None) => None,
+                Err(e) => Some((Err(e.into()), None)),
+            }
+        })
+        .fuse();
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn streaming_post(
+        &self,
+        url: &str,
+        project_id: i64,
+        body: &impl serde::Serialize,
+    ) -> Result<ByteStream, GitlabClientError> {
+        let response = self.authenticated_post(url, body).await?;
+        Self::check_response_status(&response, project_id)?;
+
+        let stream = futures::stream::unfold(Some(response), |state| async {
+            let mut resp = state?;
+            match resp.chunk().await {
+                Ok(Some(bytes)) => Some((Ok(bytes), Some(resp))),
+                Ok(None) => None,
+                Err(e) => Some((Err(e.into()), None)),
+            }
+        })
+        .fuse();
+
+        Ok(Box::pin(stream))
+    }
+
     async fn authenticated_get(
         &self,
         url: impl reqwest::IntoUrl,
@@ -143,6 +242,21 @@ impl GitlabClient {
             .http
             .get(url)
             .header(AUTH_HEADER, &token)
+            .send()
+            .await?)
+    }
+
+    async fn authenticated_post(
+        &self,
+        url: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<reqwest::Response, GitlabClientError> {
+        let token = self.sign_jwt()?;
+        Ok(self
+            .http
+            .post(url)
+            .header(AUTH_HEADER, &token)
+            .json(body)
             .send()
             .await?)
     }
@@ -159,6 +273,16 @@ impl GitlabClient {
                 "unexpected status {status}"
             ))),
         }
+    }
+
+    fn check_diff_status(
+        response: &reqwest::Response,
+        project_id: i64,
+    ) -> Result<(), GitlabClientError> {
+        if response.status() == StatusCode::BAD_REQUEST {
+            return Err(GitlabClientError::ForcePush(project_id));
+        }
+        Self::check_response_status(response, project_id)
     }
 
     fn sign_jwt(&self) -> Result<String, GitlabClientError> {

@@ -40,6 +40,29 @@ pub trait RepositoryCache: Send + Sync {
 
     fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf;
 
+    async fn delete_file(
+        &self,
+        project_id: i64,
+        branch: &str,
+        relative_path: &str,
+    ) -> Result<(), RepositoryCacheError>;
+
+    async fn write_file(
+        &self,
+        project_id: i64,
+        branch: &str,
+        relative_path: &str,
+        content: &[u8],
+    ) -> Result<(), RepositoryCacheError>;
+
+    async fn rename_file(
+        &self,
+        project_id: i64,
+        branch: &str,
+        old_path: &str,
+        new_path: &str,
+    ) -> Result<(), RepositoryCacheError>;
+
     async fn update_commit(
         &self,
         project_id: i64,
@@ -94,7 +117,6 @@ fn hashed_branch_name(branch: &str) -> String {
     format!("{:x}", hash)
 }
 
-#[allow(dead_code)]
 fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCacheError> {
     let mut depth: i32 = 0;
     for component in Path::new(relative).components() {
@@ -168,6 +190,57 @@ impl RepositoryCache for LocalRepositoryCache {
 
     fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf {
         self.repository_dir(project_id, branch)
+    }
+
+    async fn delete_file(
+        &self,
+        project_id: i64,
+        branch: &str,
+        relative_path: &str,
+    ) -> Result<(), RepositoryCacheError> {
+        let repo_dir = self.repository_dir(project_id, branch);
+        let target = validated_path(&repo_dir, relative_path)?;
+        match tokio::fs::remove_file(&target).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    async fn write_file(
+        &self,
+        project_id: i64,
+        branch: &str,
+        relative_path: &str,
+        content: &[u8],
+    ) -> Result<(), RepositoryCacheError> {
+        let repo_dir = self.repository_dir(project_id, branch);
+        let target = validated_path(&repo_dir, relative_path)?;
+        if let Some(parent) = target.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(&target, content).await?;
+        Ok(())
+    }
+
+    async fn rename_file(
+        &self,
+        project_id: i64,
+        branch: &str,
+        old_path: &str,
+        new_path: &str,
+    ) -> Result<(), RepositoryCacheError> {
+        let repo_dir = self.repository_dir(project_id, branch);
+        let source = validated_path(&repo_dir, old_path)?;
+        let destination = validated_path(&repo_dir, new_path)?;
+        if let Some(parent) = destination.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        match tokio::fs::rename(&source, &destination).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn update_commit(
@@ -457,5 +530,72 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(content, "fn main() {}");
+    }
+
+    #[tokio::test]
+    async fn write_file_creates_parent_directories() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        cache
+            .write_file(42, "main", "src/deep/file.rs", b"content")
+            .await
+            .unwrap();
+
+        let repo_dir = cache.repository_dir(42, "main");
+        let content = tokio::fs::read_to_string(repo_dir.join("src/deep/file.rs"))
+            .await
+            .unwrap();
+        assert_eq!(content, "content");
+    }
+
+    #[tokio::test]
+    async fn delete_file_removes_existing_file() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+        cache
+            .write_file(42, "main", "file.rs", b"content")
+            .await
+            .unwrap();
+
+        cache.delete_file(42, "main", "file.rs").await.unwrap();
+
+        let repo_dir = cache.repository_dir(42, "main");
+        assert!(!repo_dir.join("file.rs").exists());
+    }
+
+    #[tokio::test]
+    async fn delete_file_succeeds_when_file_does_not_exist() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        cache
+            .delete_file(42, "main", "nonexistent.rs")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn write_file_rejects_path_traversal() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache
+            .write_file(42, "main", "../../../etc/passwd", b"bad")
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[tokio::test]
+    async fn delete_file_rejects_path_traversal() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache.delete_file(42, "main", "../../../etc/passwd").await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
     }
 }
