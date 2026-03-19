@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -148,9 +148,14 @@ impl GitlabClient {
             "{}/api/v4/internal/orbit/project/{}/repository/changed_paths",
             self.base_url, project_id
         );
-        let url =
-            reqwest::Url::parse_with_params(&base, &[("from_sha", from_sha), ("to_sha", to_sha)])
-                .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
+        let url = reqwest::Url::parse_with_params(
+            &base,
+            &[
+                ("left_tree_revision", from_sha),
+                ("right_tree_revision", to_sha),
+            ],
+        )
+        .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
 
         debug!(
             project_id,
@@ -160,26 +165,29 @@ impl GitlabClient {
         self.streaming_get(url, project_id).await
     }
 
-    pub async fn download_blobs(
+    pub async fn list_blobs(
         &self,
         project_id: i64,
-        from_sha: &str,
-        to_sha: &str,
+        oids: &[String],
     ) -> Result<ByteStream, GitlabClientError> {
-        let base = format!(
-            "{}/api/v4/internal/orbit/project/{}/repository/blobs",
+        let url = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/list_blobs",
             self.base_url, project_id
         );
-        let url =
-            reqwest::Url::parse_with_params(&base, &[("from_sha", from_sha), ("to_sha", to_sha)])
-                .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
 
         debug!(
             project_id,
-            from_sha, to_sha, "downloading blobs from GitLab"
+            blob_count = oids.len(),
+            "listing blobs from GitLab"
         );
 
-        self.streaming_get(url, project_id).await
+        #[derive(Serialize)]
+        struct ListBlobsRequest<'a> {
+            revisions: &'a [String],
+        }
+
+        let body = ListBlobsRequest { revisions: oids };
+        self.streaming_post(&url, project_id, &body).await
     }
 
     async fn streaming_get(
@@ -197,7 +205,30 @@ impl GitlabClient {
                 Ok(None) => None,
                 Err(e) => Some((Err(e.into()), None)),
             }
-        });
+        })
+        .fuse();
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn streaming_post(
+        &self,
+        url: &str,
+        project_id: i64,
+        body: &impl serde::Serialize,
+    ) -> Result<ByteStream, GitlabClientError> {
+        let response = self.authenticated_post(url, body).await?;
+        Self::check_response_status(&response, project_id)?;
+
+        let stream = futures::stream::unfold(Some(response), |state| async {
+            let mut resp = state?;
+            match resp.chunk().await {
+                Ok(Some(bytes)) => Some((Ok(bytes), Some(resp))),
+                Ok(None) => None,
+                Err(e) => Some((Err(e.into()), None)),
+            }
+        })
+        .fuse();
 
         Ok(Box::pin(stream))
     }
@@ -211,6 +242,21 @@ impl GitlabClient {
             .http
             .get(url)
             .header(AUTH_HEADER, &token)
+            .send()
+            .await?)
+    }
+
+    async fn authenticated_post(
+        &self,
+        url: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<reqwest::Response, GitlabClientError> {
+        let token = self.sign_jwt()?;
+        Ok(self
+            .http
+            .post(url)
+            .header(AUTH_HEADER, &token)
+            .json(body)
             .send()
             .await?)
     }

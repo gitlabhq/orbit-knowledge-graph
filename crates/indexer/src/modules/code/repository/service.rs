@@ -47,11 +47,10 @@ pub trait RepositoryService: Send + Sync {
         to_sha: &str,
     ) -> Result<ByteStream, RepositoryServiceError>;
 
-    async fn download_blobs(
+    async fn list_blobs(
         &self,
         project_id: i64,
-        from_sha: &str,
-        to_sha: &str,
+        oids: &[String],
     ) -> Result<ByteStream, RepositoryServiceError>;
 }
 
@@ -106,17 +105,16 @@ impl RepositoryService for RailsRepositoryService {
         Ok(Box::pin(stream.map(|r| r.map_err(map_gitlab_error))))
     }
 
-    async fn download_blobs(
+    async fn list_blobs(
         &self,
         project_id: i64,
-        from_sha: &str,
-        to_sha: &str,
+        oids: &[String],
     ) -> Result<ByteStream, RepositoryServiceError> {
         use futures::StreamExt;
 
         let stream = self
             .gitlab_client
-            .download_blobs(project_id, from_sha, to_sha)
+            .list_blobs(project_id, oids)
             .await
             .map_err(map_gitlab_error)?;
 
@@ -175,15 +173,12 @@ impl RepositoryService for CachingRepositoryService {
         self.inner.changed_paths(project_id, from_sha, to_sha).await
     }
 
-    async fn download_blobs(
+    async fn list_blobs(
         &self,
         project_id: i64,
-        from_sha: &str,
-        to_sha: &str,
+        oids: &[String],
     ) -> Result<ByteStream, RepositoryServiceError> {
-        self.inner
-            .download_blobs(project_id, from_sha, to_sha)
-            .await
+        self.inner.list_blobs(project_id, oids).await
     }
 }
 
@@ -258,11 +253,10 @@ pub mod test_utils {
             Ok(Box::pin(futures::stream::empty()))
         }
 
-        async fn download_blobs(
+        async fn list_blobs(
             &self,
             _project_id: i64,
-            _from_sha: &str,
-            _to_sha: &str,
+            _oids: &[String],
         ) -> Result<ByteStream, RepositoryServiceError> {
             Ok(Box::pin(futures::stream::empty()))
         }
@@ -324,15 +318,12 @@ pub mod test_utils {
             self.inner.changed_paths(project_id, from_sha, to_sha).await
         }
 
-        async fn download_blobs(
+        async fn list_blobs(
             &self,
             project_id: i64,
-            from_sha: &str,
-            to_sha: &str,
+            oids: &[String],
         ) -> Result<ByteStream, RepositoryServiceError> {
-            self.inner
-                .download_blobs(project_id, from_sha, to_sha)
-                .await
+            self.inner.list_blobs(project_id, oids).await
         }
     }
 }

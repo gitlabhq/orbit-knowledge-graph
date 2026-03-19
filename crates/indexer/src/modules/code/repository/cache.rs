@@ -52,6 +52,14 @@ pub trait RepositoryCache: Send + Sync {
         content: &[u8],
     ) -> Result<(), RepositoryCacheError>;
 
+    async fn rename_file(
+        &self,
+        project_id: i64,
+        branch: &str,
+        old_path: &str,
+        new_path: &str,
+    ) -> Result<(), RepositoryCacheError>;
+
     async fn update_commit(
         &self,
         project_id: i64,
@@ -196,6 +204,26 @@ impl RepositoryCache for LocalRepositoryCache {
         }
         tokio::fs::write(&target, content).await?;
         Ok(())
+    }
+
+    async fn rename_file(
+        &self,
+        project_id: i64,
+        branch: &str,
+        old_path: &str,
+        new_path: &str,
+    ) -> Result<(), RepositoryCacheError> {
+        let repo_dir = self.repository_dir(project_id, branch);
+        let source = validated_path(&repo_dir, old_path)?;
+        let destination = validated_path(&repo_dir, new_path)?;
+        if let Some(parent) = destination.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        match tokio::fs::rename(&source, &destination).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn update_commit(

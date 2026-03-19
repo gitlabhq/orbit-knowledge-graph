@@ -15,11 +15,13 @@ use crate::modules::code::archive;
 
 const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
+const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
 
 #[derive(Debug)]
 enum IncrementalUpdateError {
     ForcePushDetected,
     TooManyChangedPaths,
+    IncompleteBlobDownload { expected: usize, actual: usize },
     Other(String),
 }
 
@@ -30,6 +32,12 @@ impl fmt::Display for IncrementalUpdateError {
             Self::TooManyChangedPaths => {
                 write!(f, "too many changed paths (exceeded {MAX_CHANGED_PATHS})")
             }
+            Self::IncompleteBlobDownload { expected, actual } => {
+                write!(
+                    f,
+                    "blob download incomplete: expected {expected} writes but got {actual}"
+                )
+            }
             Self::Other(msg) => write!(f, "{msg}"),
         }
     }
@@ -37,7 +45,12 @@ impl fmt::Display for IncrementalUpdateError {
 
 impl IncrementalUpdateError {
     fn should_fallback_to_full_download(&self) -> bool {
-        matches!(self, Self::ForcePushDetected | Self::TooManyChangedPaths)
+        matches!(
+            self,
+            Self::ForcePushDetected
+                | Self::TooManyChangedPaths
+                | Self::IncompleteBlobDownload { .. }
+        )
     }
 }
 
@@ -184,6 +197,15 @@ impl RepositoryResolver {
 
         let changeset = compute_changeset(changed_path_stream).await?;
 
+        for (old_path, new_path) in &changeset.renames {
+            self.cache
+                .rename_file(project_id, branch, old_path, new_path)
+                .await
+                .map_err(|e| {
+                    IncrementalUpdateError::Other(format!("failed to rename cached file: {e}"))
+                })?;
+        }
+
         for path in &changeset.deletions {
             self.cache
                 .delete_file(project_id, branch, path)
@@ -193,29 +215,44 @@ impl RepositoryResolver {
                 })?;
         }
 
-        let blob_stream = self
-            .repository_service
-            .download_blobs(project_id, from_sha, to_sha)
-            .await
-            .map_err(|e| IncrementalUpdateError::Other(format!("failed to download blobs: {e}")))?;
+        let expected_writes: usize = changeset.paths_by_blob_id.values().map(|v| v.len()).sum();
 
-        let mut blobs = BlobStream::new(blob_stream);
+        let blob_oids: Vec<String> = changeset.paths_by_blob_id.keys().cloned().collect();
         let mut write_count = 0;
-        while let Some(blob) = blobs
-            .next_blob()
-            .await
-            .map_err(|e| IncrementalUpdateError::Other(format!("failed to decode blob: {e}")))?
-        {
-            let paths = paths_for_blob(&blob, &changeset.paths_by_blob_id);
-            for path in paths {
-                self.cache
-                    .write_file(project_id, branch, path, &blob.data)
-                    .await
-                    .map_err(|e| {
-                        IncrementalUpdateError::Other(format!("failed to write cached file: {e}"))
-                    })?;
-                write_count += 1;
+
+        for batch in blob_oids.chunks(MAX_BLOB_OIDS_PER_REQUEST) {
+            let blob_stream = self
+                .repository_service
+                .list_blobs(project_id, batch)
+                .await
+                .map_err(|e| IncrementalUpdateError::Other(format!("failed to list blobs: {e}")))?;
+
+            let mut blobs = BlobStream::new(blob_stream);
+            while let Some(blob) = blobs
+                .next_blob()
+                .await
+                .map_err(|e| IncrementalUpdateError::Other(format!("failed to decode blob: {e}")))?
+            {
+                let paths = paths_for_blob(&blob, &changeset.paths_by_blob_id);
+                for path in paths {
+                    self.cache
+                        .write_file(project_id, branch, path, &blob.data)
+                        .await
+                        .map_err(|e| {
+                            IncrementalUpdateError::Other(format!(
+                                "failed to write cached file: {e}"
+                            ))
+                        })?;
+                    write_count += 1;
+                }
             }
+        }
+
+        if write_count < expected_writes {
+            return Err(IncrementalUpdateError::IncompleteBlobDownload {
+                expected: expected_writes,
+                actual: write_count,
+            });
         }
 
         self.cache
@@ -230,6 +267,7 @@ impl RepositoryResolver {
             branch,
             from_sha,
             to_sha,
+            renames = changeset.renames.len(),
             deletions = changeset.deletions.len(),
             writes = write_count,
             "incremental update complete"
@@ -242,6 +280,7 @@ impl RepositoryResolver {
 #[derive(Debug)]
 struct IncrementalChangeset {
     deletions: Vec<String>,
+    renames: Vec<(String, String)>,
     paths_by_blob_id: HashMap<String, Vec<String>>,
 }
 
@@ -250,7 +289,9 @@ async fn compute_changeset(
 ) -> Result<IncrementalChangeset, IncrementalUpdateError> {
     let mut changed_paths = ChangedPathStream::new(stream);
     let mut deletions = Vec::new();
+    let mut renames = Vec::new();
     let mut paths_by_blob_id: HashMap<String, Vec<String>> = HashMap::new();
+    let mut deleted_by_blob_id: HashMap<String, String> = HashMap::new();
     let mut count = 0usize;
 
     while let Some(change) = changed_paths
@@ -269,7 +310,10 @@ async fn compute_changeset(
 
         match change.status {
             ChangeStatus::Deleted => {
-                deletions.push(change.path);
+                deleted_by_blob_id.insert(change.old_blob_id, change.path);
+            }
+            ChangeStatus::Renamed if change.old_blob_id == change.new_blob_id => {
+                renames.push((change.old_path, change.path));
             }
             ChangeStatus::Renamed => {
                 deletions.push(change.old_path);
@@ -293,8 +337,21 @@ async fn compute_changeset(
         }
     }
 
+    // Match DELETED + ADDED pairs with the same blob ID as renames.
+    // Rails may report renames as separate DELETED/ADDED entries instead of RENAMED.
+    for (blob_id, deleted_path) in deleted_by_blob_id {
+        if let Some(added_paths) = paths_by_blob_id.remove(&blob_id) {
+            for added_path in added_paths {
+                renames.push((deleted_path.clone(), added_path));
+            }
+        } else {
+            deletions.push(deleted_path);
+        }
+    }
+
     Ok(IncrementalChangeset {
         deletions,
+        renames,
         paths_by_blob_id,
     })
 }
@@ -397,7 +454,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn renamed_creates_deletion_and_blob_entry() {
+    async fn renamed_same_content_creates_rename_entry() {
         let stream = byte_stream_from_ndjson(vec![ndjson_line(
             "new_name.rs",
             "RENAMED",
@@ -408,8 +465,12 @@ mod tests {
 
         let changeset = compute_changeset(stream).await.unwrap();
 
-        assert_eq!(changeset.deletions, vec!["old_name.rs"]);
-        assert_eq!(changeset.paths_by_blob_id["blob1"], vec!["new_name.rs"]);
+        assert!(changeset.deletions.is_empty());
+        assert!(changeset.paths_by_blob_id.is_empty());
+        assert_eq!(
+            changeset.renames,
+            vec![("old_name.rs".to_string(), "new_name.rs".to_string())]
+        );
     }
 
     #[tokio::test]
@@ -426,6 +487,23 @@ mod tests {
 
         assert_eq!(changeset.deletions, vec!["old_name.rs"]);
         assert_eq!(changeset.paths_by_blob_id["blob_new"], vec!["new_name.rs"]);
+    }
+
+    #[tokio::test]
+    async fn deleted_plus_added_same_blob_detected_as_rename() {
+        let stream = byte_stream_from_ndjson(vec![
+            ndjson_line("old_name.rs", "DELETED", "", "blob1", ""),
+            ndjson_line("new_name.rs", "ADDED", "", "", "blob1"),
+        ]);
+
+        let changeset = compute_changeset(stream).await.unwrap();
+
+        assert!(changeset.deletions.is_empty());
+        assert!(changeset.paths_by_blob_id.is_empty());
+        assert_eq!(
+            changeset.renames,
+            vec![("old_name.rs".to_string(), "new_name.rs".to_string())]
+        );
     }
 
     #[tokio::test]
