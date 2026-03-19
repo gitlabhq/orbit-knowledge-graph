@@ -1,0 +1,30 @@
+[package]
+name = "gkg-fuzz"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+compiler = { path = "../query-engine/compiler" }
+parser-core = { path = "../code-parser" }
+
+[dev-dependencies]
+bolero = "0.13.4"
+
+[[test]]
+name = "fuzz_compile"
+path = "tests/fuzz_compile/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_ruby"
+path = "tests/fuzz_ruby/fuzz_target.rs"
+harness = false
+
+# Override workspace lint: bolero's libfuzzer harness requires unsafe glue.
+[lints.rust]
+unsafe_code = "allow"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(bolero_should_panic)'] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
