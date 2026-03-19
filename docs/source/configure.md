@@ -49,8 +49,6 @@ Updates to the graph can take several minutes.
 
 ## View the knowledge graph
 
-Use the UI to browse the graph of indexed groups, projects, and related objects.
-
 Prerequisites:
 
 - You must have the Reporter, Developer, Maintainer, or Owner role for a group or project to view its data.
@@ -58,5 +56,4 @@ Prerequisites:
 To view the knowledge graph:
 
 1. On the left sidebar, select **Search or go to** > **Your work**.
-1. Select **Orbit** > **Node explorer**.
-1. Optional. Select a node to view its details.
+1. Select **Orbit** > **Data explorer**.
