@@ -49,6 +49,10 @@ impl CodeIndexingPipeline {
         }
     }
 
+    pub fn repository_service(&self) -> &Arc<dyn super::repository::RepositoryService> {
+        self.resolver.repository_service()
+    }
+
     pub async fn index_project(
         &self,
         context: &HandlerContext,

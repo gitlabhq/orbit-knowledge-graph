@@ -23,6 +23,10 @@ impl RepositoryResolver {
         }
     }
 
+    pub fn repository_service(&self) -> &Arc<dyn RepositoryService> {
+        &self.repository_service
+    }
+
     pub async fn resolve(
         &self,
         project_id: i64,
