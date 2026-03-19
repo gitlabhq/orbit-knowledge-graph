@@ -37,6 +37,10 @@ service KnowledgeGraphService {
   // Returns cluster health and component status.
   // Used by GET /api/v4/orbit/status.
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
+
+  // Returns entity counts per domain, scoped by traversal_path prefix.
+  // Used by admin dashboards to inspect graph coverage.
+  rpc GetGraphStats(GetGraphStatsRequest) returns (GetGraphStatsResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -261,4 +265,30 @@ message ComponentHealth {
 message ReplicaStatus {
   int32 ready = 1;
   int32 desired = 2;
+}
+
+// ---------------------------------------------------------------------------
+// GetGraphStats — unary, returns entity counts grouped by domain
+// ---------------------------------------------------------------------------
+
+// Request for graph entity counts scoped by traversal_path prefix.
+message GetGraphStatsRequest {
+  string traversal_path = 1;  // traversal_path prefix to scope counts (e.g. "1/2/")
+}
+
+// Response containing entity counts grouped by domain.
+message GetGraphStatsResponse {
+  repeated GraphStatsDomain domains = 1;
+}
+
+// Entity counts for a single domain (e.g. "ci", "core", "plan").
+message GraphStatsDomain {
+  string name = 1;
+  repeated GraphStatsItem items = 2;
+}
+
+// Count for a single entity type (e.g. "Project": 42).
+message GraphStatsItem {
+  string name = 1;
+  int64 count = 2;
 }
