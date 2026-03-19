@@ -4,7 +4,7 @@
 //! fetches repository code from Gitaly, runs the code-graph, and
 //! writes the resulting graph data to ClickHouse.
 
-mod archive;
+pub(crate) mod archive;
 mod arrow_converter;
 mod checkpoint_store;
 mod code_indexing_task_handler;

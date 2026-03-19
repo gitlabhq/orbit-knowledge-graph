@@ -6,7 +6,6 @@ use tracing::info;
 use super::cache::RepositoryCache;
 use super::service::RepositoryService;
 use crate::handler::HandlerError;
-use crate::modules::code::archive;
 
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
@@ -70,7 +69,6 @@ impl RepositoryResolver {
         commit_sha: &str,
     ) -> Result<PathBuf, HandlerError> {
         info!(project_id, branch, commit = %commit_sha, "starting full repository download");
-        let repo_path = self.cache.code_repository_path(project_id, branch);
 
         let archive_bytes = self
             .repository_service
@@ -78,32 +76,10 @@ impl RepositoryResolver {
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))?;
 
-        match tokio::fs::remove_dir_all(&repo_path).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                return Err(HandlerError::Processing(format!(
-                    "failed to clean cache directory: {e}"
-                )));
-            }
-        }
-        tokio::fs::create_dir_all(&repo_path).await.map_err(|e| {
-            HandlerError::Processing(format!("failed to create cache directory: {e}"))
-        })?;
-
-        if let Err(e) = archive::extract_tar_gz(&archive_bytes, &repo_path) {
-            let _ = tokio::fs::remove_dir_all(&repo_path).await;
-            return Err(HandlerError::Processing(format!(
-                "failed to extract archive: {e}"
-            )));
-        }
-
         self.cache
-            .update_commit(project_id, branch, commit_sha)
+            .extract_archive(project_id, branch, commit_sha, &archive_bytes)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to save cache: {e}")))?;
-
-        Ok(repo_path)
+            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
     }
 }
 
