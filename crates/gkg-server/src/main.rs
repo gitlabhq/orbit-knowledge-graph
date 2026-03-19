@@ -32,6 +32,14 @@ async fn main() -> anyhow::Result<()> {
     let mut builder = labkit::Builder::new(args.mode.service_name())
         .propagate_correlation(true)
         .echo_response_header(true);
+    if let Some(level) = config
+        .metrics
+        .log_level
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
+        builder = builder.log_level(level);
+    }
     if !config.metrics.otlp_endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otlp_endpoint);
     }
