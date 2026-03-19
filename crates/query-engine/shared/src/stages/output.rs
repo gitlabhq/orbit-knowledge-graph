@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
 use crate::types::{HydrationOutput, PipelineOutput};
 

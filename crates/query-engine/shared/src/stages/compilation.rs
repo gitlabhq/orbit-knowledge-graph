@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use query_engine::compile;
+use compiler::compile;
 
-use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
 #[derive(Clone)]
 pub struct CompilationStage;

@@ -23,7 +23,7 @@ use crate::proto::{
     execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
-use querying_formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
 

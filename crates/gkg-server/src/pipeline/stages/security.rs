@@ -1,9 +1,11 @@
-use query_engine::SecurityContext;
+use query_engine::compiler::SecurityContext;
 use thiserror::Error;
 
 use crate::auth::Claims;
 
-use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use query_engine::pipeline::{
+    PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
+};
 
 #[derive(Clone)]
 pub struct SecurityStage;

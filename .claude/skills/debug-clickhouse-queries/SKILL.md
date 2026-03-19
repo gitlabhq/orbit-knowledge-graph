@@ -196,7 +196,7 @@ The ontology must match. If ontology says `User -> MergeRequest` but query expec
 
 Association edges must be queryable given the security filter rules. The generator uses `edge_is_queryable()`:
 
-This matches the query engine's behavior (`crates/query-engine/src/security.rs`):
+This matches the query engine's behavior (`crates/query-engine/compiler/src/security.rs`):
 - **User** (exempt): Only filtered by relationships, not path. Edges just need same org.
 - **Other entities**: Must be at or below the source's path level.
 
@@ -215,7 +215,7 @@ SELECT id, traversal_path FROM gl_user WHERE id = <sampled_user_id>
 ## Places to investigate
 
 Column name definitions:
-- `crates/query-engine/src/security.rs` - security filter column name
+- `crates/query-engine/compiler/src/security.rs` - security filter column name
 - `crates/xtask/src/synth/arrow_schema.rs` - data generation schema
 
 Enum value sources:

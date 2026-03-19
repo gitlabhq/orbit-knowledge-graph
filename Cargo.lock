@@ -1129,6 +1129,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "compiler"
+version = "0.1.0"
+dependencies = [
+ "const_format",
+ "gkg-utils",
+ "jsonschema",
+ "once_cell",
+ "ontology",
+ "opentelemetry",
+ "pretty_assertions",
+ "regex",
+ "serde",
+ "serde_json",
+ "strum",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2518,6 +2536,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "formatters"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "compiler",
+ "gkg-utils",
+ "indexmap 2.13.0",
+ "serde",
+ "serde_json",
+ "shared",
+ "types",
+]
+
+[[package]]
 name = "fraction"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2753,10 +2785,6 @@ dependencies = [
  "prost-build",
  "prost-types",
  "query-engine",
- "querying-formatters",
- "querying-pipeline",
- "querying-shared-stages",
- "querying-types",
  "reqwest 0.13.2",
  "rustc-hash",
  "rustls",
@@ -3412,8 +3440,6 @@ dependencies = [
  "gkg-server",
  "gkg-utils",
  "query-engine",
- "querying-formatters",
- "querying-shared-stages",
  "serde_json",
  "testcontainers",
  "tokio",
@@ -3445,9 +3471,6 @@ dependencies = [
  "parking_lot",
  "prost",
  "query-engine",
- "querying-formatters",
- "querying-pipeline",
- "querying-shared-stages",
  "serde",
  "serde_json",
  "sha2",
@@ -4836,6 +4859,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
+name = "pipeline"
+version = "0.1.0"
+dependencies = [
+ "compiler",
+ "ontology",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "pkcs1"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5171,64 +5203,11 @@ dependencies = [
 name = "query-engine"
 version = "0.1.0"
 dependencies = [
- "const_format",
- "gkg-utils",
- "jsonschema",
- "once_cell",
- "ontology",
- "opentelemetry",
- "pretty_assertions",
- "regex",
- "serde",
- "serde_json",
- "strum",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "querying-formatters"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "gkg-utils",
- "indexmap 2.13.0",
- "query-engine",
- "querying-shared-stages",
- "querying-types",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "querying-pipeline"
-version = "0.1.0"
-dependencies = [
- "ontology",
- "query-engine",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "querying-shared-stages"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "ontology",
- "query-engine",
- "querying-pipeline",
- "querying-types",
- "tokio",
-]
-
-[[package]]
-name = "querying-types"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "gkg-utils",
- "query-engine",
- "serde",
- "serde_json",
+ "compiler",
+ "formatters",
+ "pipeline",
+ "shared",
+ "types",
 ]
 
 [[package]]
@@ -6101,6 +6080,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "compiler",
+ "ontology",
+ "pipeline",
+ "tokio",
+ "types",
 ]
 
 [[package]]
@@ -7370,6 +7361,17 @@ name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
+
+[[package]]
+name = "types"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "compiler",
+ "gkg-utils",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "ucd-trie"

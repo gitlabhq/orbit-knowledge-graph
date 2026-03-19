@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
 use code_graph::loading::DirectoryFileSource;
 use ontology::Ontology;
-use query_engine::SecurityContext;
+use query_engine::compiler::SecurityContext;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -363,7 +363,7 @@ fn run_query(
     for (label, input) in sorted_queries {
         let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
 
-        match query_engine::compile(&input_json, &ontology, &security_ctx) {
+        match query_engine::compiler::compile(&input_json, &ontology, &security_ctx) {
             Ok(result) => {
                 results.push(QueryOutput::Success(QueryResult {
                     label,

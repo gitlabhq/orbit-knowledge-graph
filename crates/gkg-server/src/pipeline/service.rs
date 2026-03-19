@@ -7,10 +7,10 @@ use ontology::Ontology;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
-use querying_pipeline::{
+use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
-use querying_shared_stages::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
+use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
 use super::metrics::OTelPipelineObserver;
 use super::stages::{

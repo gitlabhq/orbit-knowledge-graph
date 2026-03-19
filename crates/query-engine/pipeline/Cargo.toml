@@ -1,12 +1,12 @@
 [package]
-name = "querying-pipeline"
+name = "pipeline"
 version.workspace = true
 edition = "2024"
 license = "MIT"
 
 [dependencies]
-ontology = { path = "../ontology" }
-query-engine = { path = "../query-engine" }
+ontology = { path = "../../ontology" }
+compiler = { path = "../compiler" }
 thiserror = { workspace = true }
 
 [lints]

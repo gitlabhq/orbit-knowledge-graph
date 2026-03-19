@@ -1,15 +1,15 @@
 [package]
-name = "querying-formatters"
+name = "formatters"
 version.workspace = true
 edition = "2024"
 license = "MIT"
 
 [dependencies]
-gkg-utils = { path = "../utils" }
+gkg-utils = { path = "../../utils" }
 indexmap = { workspace = true }
-querying-shared-stages = { path = "../querying-shared-stages" }
-querying-types = { path = "../querying-types" }
-query-engine = { path = "../query-engine" }
+shared = { path = "../shared" }
+types = { path = "../types" }
+compiler = { path = "../compiler" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

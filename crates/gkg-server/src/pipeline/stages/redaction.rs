@@ -1,4 +1,6 @@
-use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use query_engine::pipeline::{
+    PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
+};
 
 use crate::pipeline::types::{AuthorizationOutput, RedactionOutput};
 
@@ -35,9 +37,9 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use ontology::Ontology;
-    use query_engine::{EntityAuthConfig, ResultContext};
-    use querying_pipeline::NoOpObserver;
-    use querying_types::{QueryResult, ResourceAuthorization};
+    use query_engine::compiler::{EntityAuthConfig, ResultContext};
+    use query_engine::pipeline::NoOpObserver;
+    use query_engine::types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
 
     fn seed_ctx(authorizations: Vec<ResourceAuthorization>) -> QueryPipelineContext {

@@ -1,4 +1,4 @@
-//! ClickHouse parameter types shared between `query-engine` and `clickhouse-client`.
+//! ClickHouse parameter types shared between `compiler` and `clickhouse-client`.
 
 use std::fmt;
 

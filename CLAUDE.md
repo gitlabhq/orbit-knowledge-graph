@@ -72,7 +72,12 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | Crate | Role |
 |---|---|
 | `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading |
-| `query-engine` | JSON DSL -> parameterized ClickHouse SQL, security context enforcement |
+| `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
+| `query-engine/compiler` | JSON DSL -> parameterized ClickHouse SQL, security context enforcement |
+| `query-engine/types` | Type-safe result schema for redaction processing |
+| `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |
+| `query-engine/shared` | Shared pipeline stages (compilation, extraction, output) |
+| `query-engine/formatters` | Result formatters (graph, raw row, goon) |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/` |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `code-parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
