@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
@@ -16,6 +16,9 @@ pub enum RepositoryCacheError {
 
     #[error("archive extraction failed: {0}")]
     Archive(String),
+
+    #[error("path traversal detected: {0}")]
+    PathTraversal(String),
 }
 
 #[async_trait]
@@ -26,7 +29,23 @@ pub trait RepositoryCache: Send + Sync {
         branch: &str,
     ) -> Result<Option<CachedRepository>, RepositoryCacheError>;
 
+    async fn save(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+    ) -> Result<(), RepositoryCacheError>;
+
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
+
+    fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf;
+
+    async fn update_commit(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+    ) -> Result<(), RepositoryCacheError>;
 
     async fn extract_archive(
         &self,
@@ -75,6 +94,26 @@ fn hashed_branch_name(branch: &str) -> String {
     format!("{:x}", hash)
 }
 
+#[allow(dead_code)]
+fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCacheError> {
+    let mut depth: i32 = 0;
+    for component in Path::new(relative).components() {
+        match component {
+            std::path::Component::ParentDir => {
+                depth -= 1;
+                if depth < 0 {
+                    return Err(RepositoryCacheError::PathTraversal(relative.to_string()));
+                }
+            }
+            std::path::Component::Normal(_) => {
+                depth += 1;
+            }
+            _ => {}
+        }
+    }
+    Ok(base.join(relative))
+}
+
 #[async_trait]
 impl RepositoryCache for LocalRepositoryCache {
     async fn get(
@@ -103,6 +142,21 @@ impl RepositoryCache for LocalRepositoryCache {
         }))
     }
 
+    async fn save(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+    ) -> Result<(), RepositoryCacheError> {
+        let branch_dir = self.branch_dir(project_id, branch);
+        let meta_dir = branch_dir.join(META_DIR);
+        let repository_dir = branch_dir.join(REPOSITORY_DIR);
+        tokio::fs::create_dir_all(&meta_dir).await?;
+        tokio::fs::create_dir_all(&repository_dir).await?;
+        tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
+        Ok(())
+    }
+
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
         let branch_dir = self.branch_dir(project_id, branch);
         match tokio::fs::remove_dir_all(&branch_dir).await {
@@ -110,6 +164,22 @@ impl RepositoryCache for LocalRepositoryCache {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf {
+        self.repository_dir(project_id, branch)
+    }
+
+    async fn update_commit(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+    ) -> Result<(), RepositoryCacheError> {
+        let meta_dir = self.branch_dir(project_id, branch).join(META_DIR);
+        tokio::fs::create_dir_all(&meta_dir).await?;
+        tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
+        Ok(())
     }
 
     async fn extract_archive(
@@ -183,6 +253,28 @@ mod tests {
         let result = cache.get(42, "main").await.unwrap();
 
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn save_then_get_returns_cached_repository() {
+        let (_dir, cache) = create_cache();
+
+        cache.save(42, "main", "abc123").await.unwrap();
+        let cached = cache.get(42, "main").await.unwrap().unwrap();
+
+        assert_eq!(cached.path, cache.repository_dir(42, "main"));
+        assert_eq!(cached.commit, "abc123");
+    }
+
+    #[tokio::test]
+    async fn save_overwrites_previous_commit() {
+        let (_dir, cache) = create_cache();
+
+        cache.save(42, "main", "abc123").await.unwrap();
+        cache.save(42, "main", "def456").await.unwrap();
+
+        let cached = cache.get(42, "main").await.unwrap().unwrap();
+        assert_eq!(cached.commit, "def456");
     }
 
     #[tokio::test]
@@ -332,5 +424,38 @@ mod tests {
 
         let cached = cache.get(42, "main").await.unwrap().unwrap();
         assert_eq!(cached.commit, "commit2");
+    }
+
+    #[tokio::test]
+    async fn update_commit_changes_stored_sha() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        cache.update_commit(42, "main", "def456").await.unwrap();
+
+        let cached = cache.get(42, "main").await.unwrap().unwrap();
+        assert_eq!(cached.commit, "def456");
+    }
+
+    #[tokio::test]
+    async fn preserves_files_in_repository_directory() {
+        let (_dir, cache) = create_cache();
+        let branch_dir = cache.branch_dir(42, "main");
+        let repository_dir = branch_dir.join("repository");
+        tokio::fs::create_dir_all(&repository_dir).await.unwrap();
+
+        let test_file = repository_dir.join("src/main.rs");
+        tokio::fs::create_dir_all(test_file.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&test_file, "fn main() {}").await.unwrap();
+
+        cache.save(42, "main", "abc123").await.unwrap();
+        let cached = cache.get(42, "main").await.unwrap().unwrap();
+
+        let content = tokio::fs::read_to_string(cached.path.join("src/main.rs"))
+            .await
+            .unwrap();
+        assert_eq!(content, "fn main() {}");
     }
 }
