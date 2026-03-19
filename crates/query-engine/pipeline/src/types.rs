@@ -2,8 +2,8 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use compiler::{CompiledQueryContext, SecurityContext};
 use ontology::Ontology;
-use query_engine::{CompiledQueryContext, SecurityContext};
 
 use crate::error::PipelineError;
 

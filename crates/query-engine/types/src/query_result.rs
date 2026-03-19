@@ -4,11 +4,11 @@ use std::collections::{HashMap, HashSet};
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use query_engine::GKG_COLUMN_PREFIX;
-use query_engine::constants::{
+use compiler::GKG_COLUMN_PREFIX;
+use compiler::constants::{
     EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
 };
-use query_engine::{QueryType, RedactionNode, ResultContext};
+use compiler::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
@@ -418,7 +418,7 @@ mod tests {
     use super::*;
     use arrow::array::{Array, Int64Array, StringArray, TimestampMillisecondArray, UInt64Array};
     use arrow::datatypes::{Field, Schema};
-    use query_engine::EntityAuthConfig;
+    use compiler::EntityAuthConfig;
     use std::collections::HashSet;
     use std::sync::Arc;
 

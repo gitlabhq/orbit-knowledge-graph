@@ -5,7 +5,7 @@ mod raw_row;
 use serde_json::{Value, json};
 
 use gkg_utils::arrow::ColumnValue;
-use querying_shared_stages::PipelineOutput;
+use shared::PipelineOutput;
 
 pub use goon::GoonFormatter;
 pub use graph::{GraphEdge, GraphFormatter, GraphNode, GraphResponse};

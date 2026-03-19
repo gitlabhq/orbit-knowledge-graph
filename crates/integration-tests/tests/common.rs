@@ -2,7 +2,7 @@
 
 use gkg_server::redaction::QueryResult;
 use ontology::Ontology;
-use query_engine::{CompiledQueryContext, SecurityContext, compile};
+use query_engine::compiler::{CompiledQueryContext, SecurityContext, compile};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
 pub use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};

@@ -12,7 +12,7 @@ use crate::common::{
 };
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
-use query_engine::{build_entity_auth, compile};
+use query_engine::compiler::{build_entity_auth, compile};
 
 const TABLE_USERS: &str = "gl_user";
 const TABLE_GROUPS: &str = "gl_group";
@@ -836,7 +836,7 @@ fn fail_closed_null_id_denies_row() {
     use arrow::array::{Array, Int64Array, StringArray};
     use arrow::datatypes::{Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::ResultContext;
+    use query_engine::compiler::ResultContext;
     use std::sync::Arc;
 
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
@@ -1836,7 +1836,7 @@ fn fail_closed_null_type_denies_row() {
     use arrow::array::{Array, Int64Array, StringArray};
     use arrow::datatypes::{Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::ResultContext;
+    use query_engine::compiler::ResultContext;
     use std::sync::Arc;
 
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
@@ -4140,7 +4140,7 @@ async fn range_pagination_comprehensive(ctx: &TestContext) {
     }"#;
     let err = compile(json, &ontology, &security_ctx).unwrap_err();
     assert!(
-        matches!(err, query_engine::QueryError::Validation(_)),
+        matches!(err, query_engine::compiler::QueryError::Validation(_)),
         "limit + range together should be a validation error, got: {err}"
     );
 

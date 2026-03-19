@@ -1,10 +1,10 @@
-use query_engine::{
+use compiler::{
     GKG_COLUMN_PREFIX, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, QueryType,
     RELATIONSHIP_TYPE_COLUMN, ResultContext,
 };
 use serde_json::{Value, json};
 
-use querying_types::{NodeRef, QueryResultRow};
+use types::{NodeRef, QueryResultRow};
 
 use super::column_value_to_json;
 
@@ -76,8 +76,8 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use gkg_utils::arrow::ColumnValue;
-    use querying_types::QueryResult;
     use std::sync::Arc;
+    use types::QueryResult;
 
     fn make_test_result() -> (QueryResult, ResultContext) {
         let schema = Arc::new(Schema::new(vec![

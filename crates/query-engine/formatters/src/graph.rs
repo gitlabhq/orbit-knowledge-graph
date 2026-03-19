@@ -1,14 +1,14 @@
 use std::collections::HashSet;
 
-use indexmap::IndexMap;
-use query_engine::{
+use compiler::{
     EdgeMeta, NEIGHBOR_IS_OUTGOING_COLUMN, QueryType, RELATIONSHIP_TYPE_COLUMN, ResultContext,
 };
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use querying_shared_stages::PipelineOutput;
-use querying_types::{QueryResult, QueryResultRow};
+use shared::PipelineOutput;
+use types::{QueryResult, QueryResultRow};
 
 use super::{ResultFormatter, column_value_to_json};
 
@@ -219,7 +219,7 @@ impl GraphFormatter {
         result: &QueryResult,
         result_context: &ResultContext,
         edge_prefixes: &[&str],
-        aggregations: Option<&Vec<query_engine::input::InputAggregation>>,
+        aggregations: Option<&Vec<compiler::input::InputAggregation>>,
         node_map: &mut IndexMap<(String, i64), GraphNode>,
     ) {
         let Some(aggs) = aggregations else { return };
@@ -368,7 +368,7 @@ impl GraphFormatter {
                 .map(|value| value != 0)
                 .unwrap_or(!matches!(
                     direction,
-                    Some(query_engine::input::Direction::Incoming)
+                    Some(compiler::input::Direction::Incoming)
                 ));
 
             let (from, from_id, to, to_id) = if is_outgoing {
@@ -409,7 +409,7 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::{CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext};
+    use compiler::{CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext};
     use std::sync::Arc;
 
     fn make_search_output() -> PipelineOutput {

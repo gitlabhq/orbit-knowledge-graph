@@ -8,8 +8,10 @@ use crate::proto::ExecuteQueryMessage;
 use crate::redaction::RedactionService;
 
 use crate::pipeline::types::AuthorizationOutput;
-use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
-use querying_shared_stages::ExtractionOutput;
+use query_engine::pipeline::{
+    PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
+};
+use query_engine::shared::ExtractionOutput;
 
 #[derive(Clone)]
 pub struct AuthorizationStage;

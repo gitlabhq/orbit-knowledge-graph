@@ -10,8 +10,6 @@ gkg-utils = { path = "../utils" }
 futures = { workspace = true }
 gkg-server = { path = "../gkg-server" }
 query-engine = { path = "../query-engine" }
-querying-formatters = { path = "../querying-formatters" }
-querying-shared-stages = { path = "../querying-shared-stages" }
 serde_json = { workspace = true }
 testcontainers = { workspace = true }
 tokio = { workspace = true }

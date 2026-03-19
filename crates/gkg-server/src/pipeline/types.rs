@@ -1,4 +1,4 @@
-use querying_types::{QueryResult, ResourceAuthorization};
+use query_engine::types::{QueryResult, ResourceAuthorization};
 
 pub struct AuthorizationOutput {
     pub query_result: QueryResult,

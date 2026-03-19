@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use query_engine::input::{Input, QueryType};
+use query_engine::compiler::input::{Input, QueryType};
 
 /// Query features that require corresponding assertions in the test.
 ///
@@ -198,14 +198,14 @@ impl Drop for AssertionTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_engine::input::parse_input;
+    use query_engine::compiler::input::parse_input;
 
     use crate::visitor::tests::{
         make_node, make_path_edge, sample_aggregation_response, sample_neighbors_response,
         sample_response, sample_search_response,
     };
     use crate::visitor::{NodeExt, ResponseView};
-    use querying_formatters::GraphResponse;
+    use query_engine::formatters::GraphResponse;
 
     fn parse_test_input(json: &str) -> Input {
         parse_input(json).expect("test query JSON should parse into Input")

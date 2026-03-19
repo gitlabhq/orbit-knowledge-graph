@@ -11,6 +11,11 @@ members = [
   "crates/clickhouse-client",
   "crates/indexer",
   "crates/query-engine",
+  "crates/query-engine/compiler",
+  "crates/query-engine/types",
+  "crates/query-engine/pipeline",
+  "crates/query-engine/shared",
+  "crates/query-engine/formatters",
   "crates/cli",
 
   "crates/gkg-server",
@@ -24,10 +29,6 @@ members = [
   "crates/integration-testkit",
   "crates/utils",
   "crates/integration-tests",
-  "crates/querying-types",
-  "crates/querying-pipeline",
-  "crates/querying-shared-stages",
-  "crates/querying-formatters",
 ]
 
 [workspace.dependencies]

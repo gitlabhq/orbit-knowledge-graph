@@ -7,7 +7,7 @@ use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
 use ontology::Ontology;
-use query_engine::{ParamValue, SecurityContext, compile};
+use query_engine::compiler::{ParamValue, SecurityContext, compile};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};

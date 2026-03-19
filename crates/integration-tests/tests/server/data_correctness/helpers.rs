@@ -26,9 +26,11 @@ pub(super) use gkg_server::pipeline::HydrationStage;
 pub(super) use gkg_server::pipeline::types::RedactionOutput;
 pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
-pub(super) use query_engine::{SecurityContext, compile};
-pub(super) use querying_formatters::{GraphFormatter, ResultFormatter};
-pub(super) use querying_pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+pub(super) use query_engine::compiler::{SecurityContext, compile};
+pub(super) use query_engine::formatters::{GraphFormatter, ResultFormatter};
+pub(super) use query_engine::pipeline::{
+    NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap,
+};
 pub(super) use serde_json::Value;
 
 pub(super) static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
@@ -90,7 +92,7 @@ pub(super) async fn run_query_with_security(
         .await
         .expect("pipeline should succeed");
 
-    let pipeline_output = querying_shared_stages::PipelineOutput {
+    let pipeline_output = query_engine::shared::PipelineOutput {
         row_count: hydration_output.query_result.authorized_count(),
         redacted_count: hydration_output.redacted_count,
         query_type: compiled.query_type.to_string(),

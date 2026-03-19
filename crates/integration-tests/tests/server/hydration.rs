@@ -15,9 +15,9 @@ use gkg_server::pipeline::HydrationStage;
 use gkg_server::pipeline::types::RedactionOutput;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests_shared;
-use query_engine::{HydrationPlan, SecurityContext, compile};
-use querying_formatters::row_to_json;
-use querying_pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
+use query_engine::formatters::row_to_json;
+use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 
 async fn setup_test_data(ctx: &TestContext) {
     ctx.execute(
@@ -69,7 +69,11 @@ async fn compile_execute_hydrate(
     ontology: &Arc<ontology::Ontology>,
     security_ctx: &SecurityContext,
     client: &Arc<clickhouse_client::ArrowClickHouseClient>,
-) -> (QueryResult, query_engine::ResultContext, HydrationPlan) {
+) -> (
+    QueryResult,
+    query_engine::compiler::ResultContext,
+    HydrationPlan,
+) {
     let compiled = compile(json, ontology, security_ctx).unwrap();
     let plan = compiled.hydration.clone();
 
@@ -110,7 +114,7 @@ async fn compile_execute_redact_hydrate(
     security_ctx: &SecurityContext,
     client: &Arc<clickhouse_client::ArrowClickHouseClient>,
     mock_service: &MockRedactionService,
-) -> (QueryResult, query_engine::ResultContext, usize) {
+) -> (QueryResult, query_engine::compiler::ResultContext, usize) {
     let compiled = compile(json, ontology, security_ctx).unwrap();
 
     let batches = ctx.query_parameterized(&compiled.base).await;
