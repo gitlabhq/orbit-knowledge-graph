@@ -1,0 +1,19 @@
+[package]
+name = "shared"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+arrow = { workspace = true }
+ontology = { path = "../../ontology" }
+pipeline = { path = "../pipeline" }
+types = { path = "../types" }
+compiler = { path = "../compiler" }
+
+[dev-dependencies]
+ontology = { path = "../../ontology" }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

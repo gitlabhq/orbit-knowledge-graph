@@ -1,5 +1,5 @@
-use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
-use querying_types::QueryResult;
+use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use types::QueryResult;
 
 use crate::types::{ExecutionOutput, ExtractionOutput};
 
@@ -30,9 +30,9 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
+    use compiler::ResultContext;
     use ontology::Ontology;
-    use query_engine::ResultContext;
-    use querying_pipeline::NoOpObserver;
+    use pipeline::NoOpObserver;
     use std::sync::Arc;
 
     #[tokio::test]

@@ -5,7 +5,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram};
 
-use querying_pipeline::{PipelineError, PipelineObserver};
+use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 static METRICS: LazyLock<QueryPipelineMetrics> = LazyLock::new(QueryPipelineMetrics::new);
 

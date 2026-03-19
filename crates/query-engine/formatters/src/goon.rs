@@ -1,5 +1,5 @@
-use querying_shared_stages::PipelineOutput;
 use serde_json::Value;
+use shared::PipelineOutput;
 
 use super::ResultFormatter;
 use super::graph::GraphFormatter;

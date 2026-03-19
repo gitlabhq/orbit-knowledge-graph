@@ -5,7 +5,7 @@ use tracing::{error, warn};
 
 use crate::proto::{ExecuteQueryError, ExecuteQueryMessage, execute_query_message};
 
-use querying_pipeline::PipelineError;
+use query_engine::pipeline::PipelineError;
 
 pub struct QueryRequest {
     pub query: String,

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
-use query_engine::{CompiledQueryContext, ResultContext};
-use querying_types::QueryResult;
+use compiler::{CompiledQueryContext, ResultContext};
+use types::QueryResult;
 
 pub struct ExecutionOutput {
     pub batches: Vec<RecordBatch>,

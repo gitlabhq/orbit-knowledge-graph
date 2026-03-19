@@ -144,7 +144,7 @@ and the formatted `GraphResponse`:
 
 ```rust
 use integration_testkit::visitor::{ResponseView, NodeExt};
-use query_engine::compile;
+use query_engine::compiler::compile;
 
 let compiled = compile(json, &ontology, &security_ctx).unwrap();
 // ... run pipeline, get response ...

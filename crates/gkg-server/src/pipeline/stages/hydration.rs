@@ -6,16 +6,20 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::future::try_join_all;
-use query_engine::{DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryType, compile};
+use query_engine::compiler::{
+    DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryType, compile,
+};
 
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
-use querying_types::QueryResult;
+use query_engine::types::QueryResult;
 
 use crate::pipeline::types::RedactionOutput;
-use querying_pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
-use querying_shared_stages::HydrationOutput;
+use query_engine::pipeline::{
+    PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
+};
+use query_engine::shared::HydrationOutput;
 
-use query_engine::constants::{
+use query_engine::compiler::constants::{
     GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
 };
 

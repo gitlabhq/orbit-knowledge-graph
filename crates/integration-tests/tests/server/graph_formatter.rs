@@ -15,9 +15,9 @@ use gkg_server::pipeline::HydrationStage;
 use gkg_server::pipeline::types::RedactionOutput;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
-use query_engine::compile;
-use querying_formatters::{GraphFormatter, ResultFormatter};
-use querying_pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+use query_engine::compiler::compile;
+use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use serde_json::Value;
 
 static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
@@ -179,7 +179,7 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
         .await
         .expect("pipeline should succeed");
 
-    let pipeline_output = querying_shared_stages::PipelineOutput {
+    let pipeline_output = query_engine::shared::PipelineOutput {
         row_count: hydration_output.query_result.authorized_count(),
         redacted_count: hydration_output.redacted_count,
         query_type: compiled.query_type.to_string(),
