@@ -28,6 +28,7 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.21.5"
 "cargo:ast-grep" = "0.42.0"
+"cargo:cargo-bolero" = "0.13.4"
 "sccache" = "0.13.0"
 "tilt" = "0.36.1"
 "zig" = "0.15.2"
@@ -47,6 +48,14 @@ hyperfine = "1.20.0"
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
 description = "Install git hooks (lefthook + worktree support)"
+
+[tasks."fuzz:compile"]
+run = "cargo bolero run fuzz_compile -p gkg-fuzz"
+description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
+
+[tasks."fuzz:ruby"]
+run = "cargo bolero run fuzz_ruby -p gkg-fuzz"
+description = "Fuzz the Ruby code parser"
 
 [tasks.build]
 run = "cargo build --release"
