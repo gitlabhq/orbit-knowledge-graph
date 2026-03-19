@@ -91,8 +91,12 @@ impl RepositoryResolver {
             HandlerError::Processing(format!("failed to create cache directory: {e}"))
         })?;
 
-        archive::extract_tar_gz(&archive_bytes, &repo_path)
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))?;
+        if let Err(e) = archive::extract_tar_gz(&archive_bytes, &repo_path) {
+            let _ = tokio::fs::remove_dir_all(&repo_path).await;
+            return Err(HandlerError::Processing(format!(
+                "failed to extract archive: {e}"
+            )));
+        }
 
         self.cache
             .update_commit(project_id, branch, commit_sha)

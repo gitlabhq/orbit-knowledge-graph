@@ -247,6 +247,7 @@ mod tests {
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
+        _cache_dir: tempfile::TempDir,
     }
 
     impl TestContext {
@@ -267,8 +268,9 @@ mod tests {
                     .expect("code tables must resolve"),
             );
 
+            let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
             let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> =
-                Arc::new(LocalRepositoryCache::default());
+                Arc::new(LocalRepositoryCache::new(temp_dir.path().to_path_buf()));
             let resolver = RepositoryResolver::new(Arc::clone(&mock_repo), cache);
 
             let pipeline = Arc::new(CodeIndexingPipeline::new(
@@ -292,6 +294,7 @@ mod tests {
                 mock_nats,
                 mock_locks,
                 mock_checkpoints,
+                _cache_dir: temp_dir,
             }
         }
 

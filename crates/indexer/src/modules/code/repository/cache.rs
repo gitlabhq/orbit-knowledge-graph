@@ -119,8 +119,14 @@ impl RepositoryCache for LocalRepositoryCache {
             Err(e) => return Err(e.into()),
         };
 
+        let repository_dir = branch_dir.join(REPOSITORY_DIR);
+        match tokio::fs::metadata(&repository_dir).await {
+            Ok(meta) if meta.is_dir() => {}
+            _ => return Ok(None),
+        }
+
         Ok(Some(CachedRepository {
-            path: branch_dir.join(REPOSITORY_DIR),
+            path: repository_dir,
             commit,
         }))
     }
@@ -272,7 +278,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn branch_dir_prevents_path_traversal() {
+    async fn branch_dir_hashes_away_path_traversal_characters() {
         let (dir, cache) = create_cache();
 
         let safe_path = cache.branch_dir(42, "../../../tmp/evil");
