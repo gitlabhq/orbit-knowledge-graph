@@ -82,11 +82,6 @@
           "type": "integer",
           "description": "The id of the last row from the previous page.",
           "minimum": 0
-        },
-        "traversal_path": {
-          "type": "string",
-          "description": "The traversal_path of the last row from the previous page. When provided, resumes at the exact PK position. When omitted, falls back to the security context's traversal paths.",
-          "minLength": 1
         }
       },
       "additionalProperties": false
