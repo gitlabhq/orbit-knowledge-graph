@@ -39,6 +39,7 @@ fn session_id() -> &'static str {
 const MAX_CONNECTION_ATTEMPTS: u32 = 200;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
+#[derive(Clone)]
 pub struct TestContext {
     _container: Arc<ContainerAsync<GenericImage>>,
     pub config: ClickHouseConfiguration,
