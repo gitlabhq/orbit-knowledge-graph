@@ -1121,4 +1121,125 @@ mod ontology_integration_tests {
             .is_ok()
         );
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ParameterizedQuery::render (compile → render round-trip)
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn render_traversal_inlines_all_params() {
+        let rendered = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+                    {"id": "u", "entity": "User"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+                "limit": 10
+            }"#,
+            &load_test_ontology(),
+            &test_ctx(),
+        )
+        .unwrap()
+        .base
+        .render();
+
+        assert!(
+            !rendered.contains("{p"),
+            "rendered SQL should have no placeholders: {rendered}"
+        );
+        assert!(rendered.contains("'opened'"));
+        assert!(rendered.contains("'AUTHORED'"));
+    }
+
+    #[test]
+    fn render_in_filter_inlines_array() {
+        let rendered = compile(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "filters": {
+                    "user_type": {"op": "in", "value": ["project_bot", "service_account"]}
+                }},
+                "limit": 10
+            }"#,
+            &load_test_ontology(),
+            &test_ctx(),
+        )
+        .unwrap()
+        .base
+        .render();
+
+        assert!(
+            !rendered.contains("{p"),
+            "rendered SQL should have no placeholders: {rendered}"
+        );
+        assert!(
+            rendered.contains("['project_bot', 'service_account']"),
+            "should inline array: {rendered}"
+        );
+    }
+
+    #[test]
+    fn render_node_ids_inlines_array() {
+        let rendered = compile(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "node_ids": [100, 200, 300]},
+                "limit": 10
+            }"#,
+            &load_test_ontology(),
+            &test_ctx(),
+        )
+        .unwrap()
+        .base
+        .render();
+
+        assert!(
+            !rendered.contains("{p"),
+            "rendered SQL should have no placeholders: {rendered}"
+        );
+        assert!(
+            rendered.contains("[100, 200, 300]"),
+            "should inline node_ids: {rendered}"
+        );
+    }
+
+    #[test]
+    fn debug_json_round_trip() {
+        let compiled = compile(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+                    {"id": "u", "entity": "User"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+                "limit": 10
+            }"#,
+            &load_test_ontology(),
+            &test_ctx(),
+        )
+        .unwrap();
+
+        let debug_json = serde_json::json!({
+            "base": compiled.base.sql,
+            "base_rendered": compiled.base.render(),
+            "hydration": serde_json::json!([]),
+        });
+
+        let serialized = debug_json.to_string();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&serialized).expect("should round-trip");
+
+        let base = parsed["base"].as_str().unwrap();
+        let rendered = parsed["base_rendered"].as_str().unwrap();
+
+        assert!(base.contains("{p"), "base should have placeholders");
+        assert!(
+            !rendered.contains("{p"),
+            "rendered should have no placeholders"
+        );
+        assert!(parsed["hydration"].is_array());
+    }
 }

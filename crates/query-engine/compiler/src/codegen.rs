@@ -7,45 +7,9 @@ use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
+pub use gkg_utils::clickhouse::ParamValue;
 use serde_json::Value;
 use std::collections::HashMap;
-
-/// A query parameter with its ClickHouse type and JSON value.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParamValue {
-    pub ch_type: ChType,
-    pub value: Value,
-}
-
-impl ParamValue {
-    /// Render as a ClickHouse SQL literal for debugging/observability.
-    pub fn render_literal(&self) -> String {
-        fn quote(s: &str) -> String {
-            format!("'{}'", s.replace('\'', "''"))
-        }
-
-        match &self.value {
-            Value::String(s) => quote(s),
-            Value::Bool(b) => b.to_string(),
-            Value::Number(n) => n.to_string(),
-            Value::Null => "NULL".to_string(),
-            Value::Array(arr) => {
-                let elements: Vec<String> = arr
-                    .iter()
-                    .map(|v| match v {
-                        Value::String(s) => quote(s),
-                        Value::Number(n) => n.to_string(),
-                        Value::Bool(b) => b.to_string(),
-                        Value::Null => "NULL".to_string(),
-                        other => quote(&other.to_string()),
-                    })
-                    .collect();
-                format!("[{}]", elements.join(", "))
-            }
-            other => quote(&other.to_string()),
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {
@@ -917,5 +881,80 @@ mod tests {
             "expected derived table alias: {}",
             result.sql
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ParameterizedQuery::render
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn render_replaces_scalar_params() {
+        let mut params = HashMap::new();
+        params.insert(
+            "p0".into(),
+            ParamValue {
+                ch_type: ChType::String,
+                value: Value::from("User"),
+            },
+        );
+        params.insert(
+            "p1".into(),
+            ParamValue {
+                ch_type: ChType::String,
+                value: Value::from("active"),
+            },
+        );
+
+        let pq = ParameterizedQuery {
+            sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
+            params,
+            result_context: empty_ctx(),
+        };
+
+        assert_eq!(
+            pq.render(),
+            "SELECT * FROM t WHERE kind = 'User' AND state = 'active'"
+        );
+    }
+
+    #[test]
+    fn render_replaces_array_params() {
+        let mut params = HashMap::new();
+        params.insert(
+            "p0".into(),
+            ParamValue {
+                ch_type: ChType::Array(gkg_utils::clickhouse::ChScalar::String),
+                value: serde_json::json!(["a", "b"]),
+            },
+        );
+        params.insert(
+            "p1".into(),
+            ParamValue {
+                ch_type: ChType::Array(gkg_utils::clickhouse::ChScalar::Int64),
+                value: serde_json::json!([10, 20]),
+            },
+        );
+
+        let pq = ParameterizedQuery {
+            sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
+            params,
+            result_context: empty_ctx(),
+        };
+
+        assert_eq!(
+            pq.render(),
+            "SELECT * FROM t WHERE x IN ['a', 'b'] AND y IN [10, 20]"
+        );
+    }
+
+    #[test]
+    fn render_leaves_unknown_params() {
+        let pq = ParameterizedQuery {
+            sql: "SELECT {p0:String} AND {p1:Int64}".into(),
+            params: HashMap::new(),
+            result_context: empty_ctx(),
+        };
+
+        assert_eq!(pq.render(), "SELECT {p0:String} AND {p1:Int64}");
     }
 }

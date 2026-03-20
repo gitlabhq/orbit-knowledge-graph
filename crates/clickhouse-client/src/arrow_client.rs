@@ -33,8 +33,7 @@ impl ArrowClickHouseClient {
             .with_option("output_format_arrow_string_as_string", "1")
             .with_option("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
             .with_option("join_algorithm", "full_sorting_merge,hash")
-            .with_option("query_plan_join_swap_table", "true")
-            .with_option("query_plan_optimize_join_order_limit", "0");
+            .with_option("query_plan_join_swap_table", "true");
 
         if let Some(password) = password {
             client = client.with_password(password);
