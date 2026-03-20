@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+use serde_json::json;
 
 use crate::types::{HydrationOutput, PipelineOutput};
 
@@ -22,11 +23,17 @@ impl PipelineStage for OutputStage {
 
         let compiled = ctx.compiled()?;
 
+        let debug_json = json!({
+            "base": compiled.base.sql,
+            "base_rendered": compiled.base.render(),
+            "hydration": input.hydration_queries,
+        });
+
         Ok(PipelineOutput {
             row_count: input.query_result.authorized_count(),
             redacted_count: input.redacted_count,
             query_type: compiled.query_type.to_string(),
-            raw_query_strings: vec![compiled.base.sql.clone()],
+            raw_query_strings: vec![debug_json.to_string()],
             compiled: Arc::clone(compiled),
             query_result: input.query_result.clone(),
             result_context: input.result_context.clone(),

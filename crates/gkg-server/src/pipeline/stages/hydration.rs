@@ -17,7 +17,7 @@ use crate::pipeline::types::RedactionOutput;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
-use query_engine::shared::HydrationOutput;
+use query_engine::shared::{DebugQuery, HydrationOutput};
 
 use query_engine::compiler::constants::{
     GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
@@ -41,7 +41,7 @@ impl HydrationStage {
         ctx: &QueryPipelineContext,
         templates: &[HydrationTemplate],
         query_result: &QueryResult,
-    ) -> Result<PropertyMap, PipelineError> {
+    ) -> Result<(PropertyMap, Vec<DebugQuery>), PipelineError> {
         let futures: Vec<_> = templates
             .iter()
             .filter_map(|template| {
@@ -60,17 +60,19 @@ impl HydrationStage {
 
         let results = try_join_all(futures).await?;
         let mut merged = HashMap::new();
-        for props in results {
+        let mut debug_queries = Vec::new();
+        for (props, debug) in results {
             merged.extend(props);
+            debug_queries.push(debug);
         }
-        Ok(merged)
+        Ok((merged, debug_queries))
     }
 
     /// Dynamic hydration: build search queries from scratch at runtime.
     async fn hydrate_dynamic(
         ctx: &QueryPipelineContext,
         refs: &HashMap<String, Vec<i64>>,
-    ) -> Result<PropertyMap, PipelineError> {
+    ) -> Result<(PropertyMap, Vec<DebugQuery>), PipelineError> {
         let futures: Vec<_> = refs
             .iter()
             .filter(|(_, ids)| !ids.is_empty())
@@ -82,10 +84,12 @@ impl HydrationStage {
 
         let results = try_join_all(futures).await?;
         let mut merged = HashMap::new();
-        for props in results {
+        let mut debug_queries = Vec::new();
+        for (props, debug) in results {
             merged.extend(props);
+            debug_queries.push(debug);
         }
-        Ok(merged)
+        Ok((merged, debug_queries))
     }
 
     /// Compile a hydration query JSON string, execute it, and parse the results.
@@ -93,10 +97,15 @@ impl HydrationStage {
         ctx: &QueryPipelineContext,
         entity_type: &str,
         query_json: String,
-    ) -> Result<PropertyMap, PipelineError> {
+    ) -> Result<(PropertyMap, DebugQuery), PipelineError> {
         let client = Self::client(ctx)?;
         let compiled = compile(&query_json, &ctx.ontology, ctx.security_context()?)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
+
+        let debug = DebugQuery {
+            sql: compiled.base.sql.clone(),
+            rendered: compiled.base.render(),
+        };
 
         let mut query = client.query(&compiled.base.sql);
         for (key, param) in &compiled.base.params {
@@ -107,7 +116,8 @@ impl HydrationStage {
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
-        Self::parse_property_batches(entity_type, &batches)
+        let props = Self::parse_property_batches(entity_type, &batches)?;
+        Ok((props, debug))
     }
 
     /// Collect entity IDs for a static template from `_gkg_{alias}_id` columns.
@@ -266,13 +276,15 @@ impl PipelineStage for HydrationStage {
         let mut query_result = input.query_result.clone();
         let redacted_count = input.redacted_count;
         let result_context = query_result.ctx().clone();
+        let mut hydration_queries = Vec::new();
 
         match &ctx.compiled()?.hydration {
             HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
-                let property_map = Self::hydrate_static(ctx, templates, &query_result)
+                let (property_map, debug) = Self::hydrate_static(ctx, templates, &query_result)
                     .await
                     .inspect_err(|e| obs.record_error(e))?;
+                hydration_queries = debug;
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
                 }
@@ -280,9 +292,10 @@ impl PipelineStage for HydrationStage {
             HydrationPlan::Dynamic => {
                 let refs = Self::extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
-                    let property_map = Self::hydrate_dynamic(ctx, &refs)
+                    let (property_map, debug) = Self::hydrate_dynamic(ctx, &refs)
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
+                    hydration_queries = debug;
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }
             }
@@ -293,6 +306,7 @@ impl PipelineStage for HydrationStage {
             query_result,
             result_context,
             redacted_count,
+            hydration_queries,
         })
     }
 }

@@ -6064,6 +6064,8 @@ dependencies = [
  "compiler",
  "ontology",
  "pipeline",
+ "serde",
+ "serde_json",
  "tokio",
  "types",
 ]

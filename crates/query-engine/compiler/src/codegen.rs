@@ -17,6 +17,36 @@ pub struct ParamValue {
     pub value: Value,
 }
 
+impl ParamValue {
+    /// Render as a ClickHouse SQL literal for debugging/observability.
+    pub fn render_literal(&self) -> String {
+        fn quote(s: &str) -> String {
+            format!("'{}'", s.replace('\'', "''"))
+        }
+
+        match &self.value {
+            Value::String(s) => quote(s),
+            Value::Bool(b) => b.to_string(),
+            Value::Number(n) => n.to_string(),
+            Value::Null => "NULL".to_string(),
+            Value::Array(arr) => {
+                let elements: Vec<String> = arr
+                    .iter()
+                    .map(|v| match v {
+                        Value::String(s) => quote(s),
+                        Value::Number(n) => n.to_string(),
+                        Value::Bool(b) => b.to_string(),
+                        Value::Null => "NULL".to_string(),
+                        other => quote(&other.to_string()),
+                    })
+                    .collect();
+                format!("[{}]", elements.join(", "))
+            }
+            other => quote(&other.to_string()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {
     pub sql: String,
@@ -64,28 +94,30 @@ impl HydrationTemplate {
     }
 }
 
-/// Display inlines parameters into SQL for debugging/testing.
-///
-/// Replaces `{name:Type}` placeholders with literal values.
-/// **Not for production use** — use parameterized queries to prevent injection.
-#[cfg(test)]
-impl std::fmt::Display for ParameterizedQuery {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ParameterizedQuery {
+    /// Render SQL with parameters inlined for debugging/observability.
+    ///
+    /// Replaces `{name:Type}` placeholders with literal values using
+    /// `ParamValue::render_literal`. Handles both scalar and array types.
+    /// **Not for execution** — use parameterized queries to prevent injection.
+    pub fn render(&self) -> String {
         use regex::Regex;
 
-        let re = Regex::new(r"\{(\w+):\w+\}").expect("valid regex");
-        let result = re.replace_all(&self.sql, |caps: &regex::Captures| {
+        let re = Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex");
+        re.replace_all(&self.sql, |caps: &regex::Captures| {
             let name = &caps[1];
-            match self.params.get(name).map(|p| &p.value) {
-                Some(Value::String(s)) => format!("'{}'", s.replace('\'', "''")),
-                Some(Value::Bool(b)) => b.to_string(),
-                Some(Value::Number(n)) => n.to_string(),
-                Some(Value::Null) => "NULL".to_string(),
-                Some(v) => format!("'{}'", v.to_string().replace('\'', "''")),
+            match self.params.get(name) {
+                Some(param) => param.render_literal(),
                 None => caps[0].to_string(),
             }
-        });
-        write!(f, "{}", result)
+        })
+        .into_owned()
+    }
+}
+
+impl std::fmt::Display for ParameterizedQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.render())
     }
 }
 
