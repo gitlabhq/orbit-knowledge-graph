@@ -359,6 +359,18 @@ impl<'a> Validator<'a> {
                 )));
             }
         }
+        if input.cursor.is_some() && input.range.is_some() {
+            return Err(QueryError::PaginationError(
+                "cannot specify both 'cursor' and 'range'".to_string(),
+            ));
+        }
+        if let Some(ref cursor) = input.cursor {
+            if cursor.traversal_path.is_empty() {
+                return Err(QueryError::PaginationError(
+                    "cursor.traversal_path must not be empty".to_string(),
+                ));
+            }
+        }
         Ok(())
     }
 

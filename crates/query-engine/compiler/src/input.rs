@@ -65,6 +65,7 @@ pub struct Input {
     #[serde(default = "default_limit")]
     pub limit: u32,
     pub range: Option<InputRange>,
+    pub cursor: Option<InputCursor>,
     pub order_by: Option<InputOrderBy>,
     pub aggregation_sort: Option<InputAggSort>,
     #[serde(default)]
@@ -87,6 +88,7 @@ impl Default for Input {
             neighbors: None,
             limit: default_limit(),
             range: None,
+            cursor: None,
             order_by: None,
             aggregation_sort: None,
             options: QueryOptions::default(),
@@ -129,6 +131,14 @@ fn default_limit() -> u32 {
 pub struct InputRange {
     pub start: u32,
     pub end: u32,
+}
+
+/// Keyset pagination cursor. Encodes the last seen `(traversal_path, id)` position.
+/// Mutually exclusive with `range`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InputCursor {
+    pub traversal_path: String,
+    pub id: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display, strum::IntoStaticStr)]

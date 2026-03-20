@@ -22,16 +22,131 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Expr, Node, Op, Query};
+use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
 use crate::input::{Input, QueryType};
+use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+
+const KEYSET_CTE_NAME: &str = "_keyset_ids";
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &Input) {
-    if input.query_type != QueryType::Aggregation {
-        return;
-    }
     match node {
-        Node::Query(q) => fold_filters_into_aggregates(q, input),
+        Node::Query(q) => {
+            if input.cursor.is_some() {
+                apply_keyset_pagination(q, input);
+            }
+            if input.query_type == QueryType::Aggregation {
+                fold_filters_into_aggregates(q, input);
+            }
+        }
+    }
+}
+
+/// Keyset pagination with SIP (Sideways Information Passing).
+///
+/// Replaces OFFSET-based pagination with a cursor predicate that uses both
+/// PK columns `(traversal_path, id)` for granule pruning. Materializes the
+/// filtered root node IDs in a CTE and pushes them into the edge table scan
+/// via IN subquery.
+///
+/// Emits decomposed form `(tp > x) OR (tp = x AND id > y)` because
+/// ClickHouse does NOT push tuple comparisons `(a, b) > (x, y)` into the
+/// primary key index.
+fn apply_keyset_pagination(q: &mut Query, input: &Input) {
+    let cursor = match &input.cursor {
+        Some(c) => c,
+        None => return,
+    };
+
+    let root_node = match input.nodes.first() {
+        Some(n) => n,
+        None => return,
+    };
+
+    let root_alias = &root_node.id;
+    let root_table = match &root_node.table {
+        Some(t) => t.clone(),
+        None => return,
+    };
+
+    // Build the decomposed keyset predicate:
+    //   (traversal_path > :cursor_tp)
+    //   OR (traversal_path = :cursor_tp AND id > :cursor_id)
+    let tp_gt = Expr::binary(
+        Op::Gt,
+        Expr::col(root_alias, TRAVERSAL_PATH_COLUMN),
+        Expr::param(ChType::String, cursor.traversal_path.clone()),
+    );
+    let tp_eq_and_id_gt = Expr::and(
+        Expr::eq(
+            Expr::col(root_alias, TRAVERSAL_PATH_COLUMN),
+            Expr::param(ChType::String, cursor.traversal_path.clone()),
+        ),
+        Expr::binary(
+            Op::Gt,
+            Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
+            Expr::param(ChType::Int64, cursor.id),
+        ),
+    );
+    let keyset_predicate = Expr::or(tp_gt, tp_eq_and_id_gt);
+
+    // Build the CTE: SELECT id FROM root_table WHERE <keyset_predicate>
+    // The security pass will inject startsWith(traversal_path, ...) into the CTE automatically.
+    let cte_query = Query {
+        select: vec![SelectExpr::new(
+            Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
+            DEFAULT_PRIMARY_KEY,
+        )],
+        from: TableRef::scan(&root_table, root_alias),
+        where_clause: Some(keyset_predicate.clone()),
+        ..Default::default()
+    };
+    q.ctes.push(Cte::new(KEYSET_CTE_NAME, cte_query));
+
+    // Add keyset predicate to the main query WHERE (for direct PK pushdown on root table)
+    q.where_clause = Expr::and_all([q.where_clause.take(), Some(keyset_predicate)]);
+
+    // Add IN filter on root node: root.id IN (SELECT id FROM _keyset_ids)
+    let root_in = Expr::InSubquery {
+        expr: Box::new(Expr::col(root_alias, DEFAULT_PRIMARY_KEY)),
+        cte_name: KEYSET_CTE_NAME.to_string(),
+        column: DEFAULT_PRIMARY_KEY.to_string(),
+    };
+    q.where_clause = Expr::and_all([q.where_clause.take(), Some(root_in)]);
+
+    // SIP: push keyset IDs into edge table scan
+    // Find the first edge alias and inject source_id IN (SELECT id FROM _keyset_ids)
+    if !input.relationships.is_empty() {
+        let edge_aliases = collect_edge_aliases(&q.from);
+        if let Some(edge_alias) = edge_aliases.first() {
+            let edge_in = Expr::InSubquery {
+                expr: Box::new(Expr::col(edge_alias, "source_id")),
+                cte_name: KEYSET_CTE_NAME.to_string(),
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            };
+            q.where_clause = Expr::and_all([q.where_clause.take(), Some(edge_in)]);
+        }
+    }
+
+    // Remove OFFSET — keyset replaces it
+    q.offset = None;
+}
+
+/// Collect edge table aliases from the FROM clause.
+fn collect_edge_aliases(table_ref: &TableRef) -> Vec<String> {
+    match table_ref {
+        TableRef::Scan { table, alias, .. }
+            if table.starts_with("gl_edge") || table == "gl_edge" =>
+        {
+            vec![alias.clone()]
+        }
+        TableRef::Scan { .. } => vec![],
+        TableRef::Join { left, right, .. } => {
+            let mut aliases = collect_edge_aliases(left);
+            aliases.extend(collect_edge_aliases(right));
+            aliases
+        }
+        TableRef::Union { .. } | TableRef::Subquery { .. } => vec![],
     }
 }
 
@@ -217,7 +332,7 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
                 collect_aliases_inner(arg, aliases);
             }
         }
-        Expr::Literal(_) | Expr::Param { .. } => {}
+        Expr::Literal(_) | Expr::Param { .. } | Expr::InSubquery { .. } => {}
     }
 }
 
