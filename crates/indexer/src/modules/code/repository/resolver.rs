@@ -57,6 +57,7 @@ impl IncrementalUpdateError {
             Self::ForcePushDetected
                 | Self::TooManyChangedPaths
                 | Self::IncompleteBlobDownload { .. }
+                | Self::Other(_)
         )
     }
 }
