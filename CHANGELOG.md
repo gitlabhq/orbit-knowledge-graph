@@ -1,3 +1,20 @@
+## [0.14.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.13.0...v0.14.0) (2026-03-20)
+
+### Features
+
+* **indexer:** add RepositoryCache and RepositoryResolver for full downloads ([5439def](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5439def89511ce31b676168c6f1c994e5b7b473e)) by Jean-Gabriel Doyon
+* **query-engine:** add SIP pre-filtering and enable keyset pagination ([fee802b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fee802bdace7c84e95a778ff2453628c59d0a808)) by Michael Usachenko
+* **schema:** add compression codecs to graph table columns ([854a94b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/854a94bbe537a22cebf38d8ae9192290e47b19fb)) by Jean-Gabriel Doyon
+* **schema:** add skip indexes on frequently filtered columns and all booleans ([e8f3098](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e8f3098bdadf0a533e6761024e04d0e8fbc753c8)) by Michael Usachenko
+* **schema:** apply LowCardinality to low-cardinality string columns ([4425f9f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4425f9f7214bf095142a113111976bb6c193c8fc)) by Michael Usachenko
+* **schema:** reorder edge table PK and replace projections ([249c7b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/249c7b7d484cd695c95317e62e885d39c3a07e5a)) by Michael Usachenko
+* **schema:** replace id_lookup projections with bloom_filter skip indexes ([f268dc8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f268dc8b757ac9b571fcefdf2b65da6ebcff089f)) by Michael Usachenko
+
+### Fixes
+
+* **deps:** upgrade aws-lc-sys to 0.39.0 for RUSTSEC-2026-0044/0048 ([85122d0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85122d0ca57f423ba44a96edd9e8b279cbcd2de6)) by Michael Usachenko
+* **integration-testkit:** report failing subtest name on panic ([6c1ff32](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6c1ff324485dd38b3d7f579961e5bfbaf203ed3b)) by Michael Usachenko
+
 ## [0.13.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.12.0...v0.13.0) (2026-03-20)
 
 ### Features
