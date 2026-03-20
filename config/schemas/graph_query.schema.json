@@ -57,7 +57,7 @@
     },
     "range": {
       "type": "object",
-      "description": "Bounded result window for pagination. Mutually exclusive with limit. Size (end - start) capped at 1000 by the server.",
+      "description": "Bounded result window for pagination. Mutually exclusive with limit and cursor. Size (end - start) capped at 1000 by the server.",
       "required": ["start", "end"],
       "properties": {
         "start": {
@@ -69,6 +69,19 @@
           "type": "integer",
           "description": "Index of the last row to return (exclusive). end - start must not exceed 1000.",
           "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "cursor": {
+      "type": "object",
+      "description": "Keyset pagination cursor. Returns results after the given id position. Combined with traversal paths from the security context for full primary key utilization. Mutually exclusive with range.",
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "The id of the last row from the previous page. Results will start after this position in (traversal_path, id) sort order.",
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -90,6 +103,11 @@
     {
       "not": {
         "required": ["limit", "range"]
+      }
+    },
+    {
+      "not": {
+        "required": ["cursor", "range"]
       }
     },
     {

@@ -98,7 +98,7 @@ pub fn compile(
     let input = validated_input(json_input, ontology).count_err()?;
 
     let mut node = lower(&input).count_err()?;
-    optimize(&mut node, &input);
+    optimize(&mut node, &input, ctx);
     let result_context = enforce_return(&mut node, &input)?;
     apply_security_context(&mut node, ctx).count_err()?;
     check_ast(&node, ctx).count_err()?;
