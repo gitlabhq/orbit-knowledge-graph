@@ -107,7 +107,7 @@ impl GitlabClient {
         debug!(project_id, url = %url, "fetching project info from GitLab");
 
         let response = self.authenticated_get(&url).await?;
-        Self::check_status(&response, project_id)?;
+        Self::check_response_status(&response, project_id)?;
 
         let info: ProjectInfo = response.json().await?;
         Ok(info)
@@ -128,7 +128,7 @@ impl GitlabClient {
         debug!(project_id, ref_name, url = %url, "downloading archive from GitLab");
 
         let response = self.authenticated_get(url).await?;
-        Self::check_status(&response, project_id)?;
+        Self::check_response_status(&response, project_id)?;
 
         let bytes = response.bytes().await?;
         Ok(bytes.to_vec())
@@ -147,7 +147,7 @@ impl GitlabClient {
             .await?)
     }
 
-    fn check_status(
+    fn check_response_status(
         response: &reqwest::Response,
         project_id: i64,
     ) -> Result<(), GitlabClientError> {
