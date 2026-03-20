@@ -33,6 +33,7 @@ const ROOT_SIP_CTE: &str = "_root_ids";
 pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
+            apply_keyset_pagination(q, input, ctx);
             apply_sip_prefilter(q, input, ctx);
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
@@ -42,19 +43,53 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
     }
 }
 
-/// SIP (Sideways Information Passing) pre-filter with optional keyset pagination.
+/// Keyset pagination and OFFSET elimination.
 ///
-/// When the root node is selective (has filters, node_ids, or a cursor),
+/// When a cursor is present, decomposes it into a PK predicate:
+///   (traversal_path > :tp) OR (traversal_path = :tp AND id > :cursor_id)
+/// for each traversal path in the security context. This lets ClickHouse
+/// seek directly via the primary key instead of scanning + skipping via OFFSET.
+///
+/// When node_ids are present (with or without a cursor), OFFSET is also
+/// removed -- the result set is already bounded by explicit IDs, so
+/// positional skipping is redundant.
+fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) {
+    let root_node = match input.nodes.first() {
+        Some(n) => n,
+        None => return,
+    };
+
+    let has_node_ids = !root_node.node_ids.is_empty();
+
+    if let Some(cursor) = &input.cursor {
+        let root_alias = &root_node.id;
+        let keyset_predicate = if ctx.traversal_paths.len() == 1 {
+            build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
+        } else {
+            Expr::or_all(
+                ctx.traversal_paths
+                    .iter()
+                    .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor.id))),
+            )
+            .unwrap_or_else(|| Expr::param(ChType::Bool, false))
+        };
+
+        q.where_clause = Expr::and_all([q.where_clause.take(), Some(keyset_predicate)]);
+        q.offset = None;
+    } else if has_node_ids {
+        q.offset = None;
+    }
+}
+
+/// SIP (Sideways Information Passing) pre-filter.
+///
+/// When the root node is selective (has filters, node_ids, cursor, or id_range),
 /// materializes the root node's matching IDs in a CTE and pushes them into
 /// the edge table scan via IN subquery. This narrows the edge scan by ~40%.
-///
-/// When a cursor is present, also injects the decomposed keyset predicate
-/// for full PK pushdown and removes OFFSET.
 fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
-    // Only applies to traversal/search queries with relationships (need an edge to push into)
     if !matches!(
         input.query_type,
-        QueryType::Traversal | QueryType::Search | QueryType::Aggregation
+        QueryType::Traversal | QueryType::Aggregation
     ) {
         return;
     }
@@ -82,7 +117,8 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         Some(t) => t.clone(),
         None => return,
     };
-    // Build optional keyset predicate from cursor + security context
+
+    // Build optional keyset predicate for the CTE (narrows the materialized set)
     let keyset_predicate = input.cursor.as_ref().map(|cursor| {
         if ctx.traversal_paths.len() == 1 {
             build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
@@ -117,7 +153,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         root_only_conds
             .into_iter()
             .map(Some)
-            .chain(std::iter::once(keyset_predicate.clone())),
+            .chain(std::iter::once(keyset_predicate)),
     );
 
     let cte_query = Query {
@@ -131,22 +167,10 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     };
     q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
 
-    // Add keyset predicate to the main query WHERE (for direct PK pushdown)
-    if let Some(pred) = keyset_predicate {
-        q.where_clause = Expr::and_all([q.where_clause.take(), Some(pred)]);
-    }
-
     // SIP: push root IDs into every edge table scan in the FROM tree.
-    // For direct scans, adds to the outer WHERE. For scans inside Union/Subquery
-    // arms (multi-hop), injects into each arm's WHERE directly.
     if let Some(first_rel) = input.relationships.first() {
         let (start_col, _) = first_rel.direction.edge_columns();
         inject_sip_into_from(&mut q.from, &mut q.where_clause, start_col, ROOT_SIP_CTE);
-    }
-
-    // Keyset replaces OFFSET
-    if has_cursor {
-        q.offset = None;
     }
 }
 
