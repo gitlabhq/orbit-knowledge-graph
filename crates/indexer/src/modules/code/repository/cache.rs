@@ -121,6 +121,9 @@ fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCach
     let mut depth: i32 = 0;
     for component in Path::new(relative).components() {
         match component {
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(RepositoryCacheError::PathTraversal(relative.to_string()));
+            }
             std::path::Component::ParentDir => {
                 depth -= 1;
                 if depth < 0 {
@@ -130,7 +133,7 @@ fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCach
             std::path::Component::Normal(_) => {
                 depth += 1;
             }
-            _ => {}
+            std::path::Component::CurDir => {}
         }
     }
     Ok(base.join(relative))
@@ -597,5 +600,39 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[tokio::test]
+    async fn write_file_rejects_absolute_path() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache.write_file(42, "main", "/etc/passwd", b"bad").await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[tokio::test]
+    async fn delete_file_rejects_absolute_path() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache.delete_file(42, "main", "/etc/passwd").await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[tokio::test]
+    async fn write_file_allows_sibling_path_within_base() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache
+            .write_file(42, "main", "foo/../bar.rs", b"content")
+            .await;
+
+        assert!(result.is_ok());
     }
 }

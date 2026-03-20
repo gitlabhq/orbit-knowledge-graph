@@ -16,6 +16,14 @@ const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
 const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
 
+fn is_valid_git_ref(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && !value.contains("..")
+        && !value.contains('\0')
+        && value.bytes().all(|b| b > 0x1f && b != 0x7f)
+}
+
 #[derive(Debug)]
 enum IncrementalUpdateError {
     ForcePushDetected,
@@ -158,6 +166,12 @@ impl RepositoryResolver {
         from_sha: &str,
         to_sha: &str,
     ) -> Result<PathBuf, IncrementalUpdateError> {
+        if !is_valid_git_ref(from_sha) || !is_valid_git_ref(to_sha) {
+            return Err(IncrementalUpdateError::Other(format!(
+                "invalid git ref: from={from_sha}, to={to_sha}"
+            )));
+        }
+
         info!(
             project_id,
             branch, from_sha, to_sha, "attempting incremental update"
@@ -271,7 +285,7 @@ async fn compute_changeset(
     let mut deletions = Vec::new();
     let mut renames = Vec::new();
     let mut paths_by_blob_id: HashMap<String, Vec<String>> = HashMap::new();
-    let mut deleted_by_blob_id: HashMap<String, String> = HashMap::new();
+    let mut deleted_by_blob_id: HashMap<String, Vec<String>> = HashMap::new();
     let mut count = 0usize;
 
     while let Some(change) = changed_paths
@@ -290,7 +304,10 @@ async fn compute_changeset(
 
         match change.status {
             ChangeStatus::Deleted => {
-                deleted_by_blob_id.insert(change.old_blob_id, change.path);
+                deleted_by_blob_id
+                    .entry(change.old_blob_id)
+                    .or_default()
+                    .push(change.path);
             }
             ChangeStatus::Renamed if change.old_blob_id == change.new_blob_id => {
                 renames.push((change.old_path, change.path));
@@ -319,13 +336,23 @@ async fn compute_changeset(
 
     // Match DELETED + ADDED pairs with the same blob ID as renames.
     // Rails may report renames as separate DELETED/ADDED entries instead of RENAMED.
-    for (blob_id, deleted_path) in deleted_by_blob_id {
+    for (blob_id, deleted_paths) in deleted_by_blob_id {
         if let Some(added_paths) = paths_by_blob_id.remove(&blob_id) {
-            for added_path in added_paths {
-                renames.push((deleted_path.clone(), added_path));
+            for (deleted_path, added_path) in deleted_paths.iter().zip(added_paths.iter()) {
+                renames.push((deleted_path.clone(), added_path.clone()));
+            }
+            // Any unmatched deleted paths become deletions
+            for deleted_path in deleted_paths.iter().skip(added_paths.len()) {
+                deletions.push(deleted_path.clone());
+            }
+            // Any unmatched added paths go back to the blob map for download
+            let remaining_added: Vec<String> =
+                added_paths.into_iter().skip(deleted_paths.len()).collect();
+            if !remaining_added.is_empty() {
+                paths_by_blob_id.insert(blob_id, remaining_added);
             }
         } else {
-            deletions.push(deleted_path);
+            deletions.extend(deleted_paths);
         }
     }
 

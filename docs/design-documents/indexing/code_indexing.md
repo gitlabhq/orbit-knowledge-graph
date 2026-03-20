@@ -93,7 +93,7 @@ graph LR
     Dispatcher --> IntNATS["NATS JetStream<br/>(GKG_INDEXER stream)"]
     Backfill --> IntNATS
     IntNATS --> Handler["CodeIndexingTaskHandler<br/>(Indexer mode)"]
-    Handler --> Rails["Rails internal API<br/>(archive download)"]
+    Handler --> Rails["Rails internal API<br/>(archive download | incremental fetch)"]
     Rails --> CodeGraph["code-graph<br/>(parse + analyze)"]
     CodeGraph --> Arrow["ArrowConverter"]
     Arrow --> ClickHouse["ClickHouse"]
@@ -259,7 +259,7 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
-3. Resolves the repository via `RepositoryResolver`, which checks the local disk cache first and only downloads from the Rails internal API on a cache miss or stale commit
+3. Resolves the repository via `RepositoryResolver`, which checks the local disk cache and applies one of three strategies: cache hit (same commit), incremental update (fetch only changed files via `changed_paths` + `list_blobs` streaming endpoints), or full archive download as a fallback
 4. Runs the streaming indexing pipeline to produce the graph
 5. Converts the graph to Arrow record batches and writes them to ClickHouse
 6. Cleans up stale data from the previous indexing run
@@ -304,7 +304,7 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
                            |- 2. Resolve default branch from Rails (if not provided)
                            |- 3. Check checkpoint (skip already-indexed commits)
                            |- 4. Acquire distributed lock via NATS KV
-                           |- 5. Resolve repository (check disk cache, download on miss)
+                           |- 5. Resolve repository (cache hit, incremental update, or full download)
                            |- 6. Run indexing pipeline
                            |       |- File discovery (respects .gitignore)
                            |       |- Async file reads
@@ -324,7 +324,7 @@ tool. Here are the main architectural differences in the current service:
 | Aspect | Original (local) | Current (service) |
 |---|---|---|
 | Graph database | lbug (embedded) | ClickHouse |
-| Code access | Local filesystem | Rails internal API (archive download) |
+| Code access | Local filesystem | Rails internal API (incremental fetch with full archive fallback) |
 | Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC → dispatcher → internal NATS stream |
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
