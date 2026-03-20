@@ -34,6 +34,14 @@ pub enum Expr {
     /// Prefix: `NOT active` → `(NOT t.active)`
     /// Postfix: `IS NULL` → `(t.deleted_at IS NULL)`
     UnaryOp { op: Op, expr: Box<Expr> },
+    /// Subquery IN check → `expr IN (SELECT column FROM cte_name)`
+    /// Used for SIP pre-filtering: materialize IDs in a CTE, then filter
+    /// multiple tables against the same set.
+    InSubquery {
+        expr: Box<Expr>,
+        cte_name: String,
+        column: String,
+    },
 }
 
 /// SQL operators for expressions.

@@ -26,6 +26,11 @@ clickhouse:
     edge_order_by: [traversal_path, source_id, source_kind, target_id, target_kind]
 
     indexes:
+      - name: idx_id
+        table: "*"
+        expression: id
+        type: bloom_filter(0.01)
+        granularity: 1
       - name: idx_relationship
         table: edges
         expression: relationship_kind

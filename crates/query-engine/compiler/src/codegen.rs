@@ -245,6 +245,14 @@ impl Context {
                     format!("({op} {e})")
                 }
             }
+            Expr::InSubquery {
+                expr,
+                cte_name,
+                column,
+            } => {
+                let e = self.emit_expr(expr);
+                format!("{e} IN (SELECT {column} FROM {cte_name})")
+            }
         }
     }
 
