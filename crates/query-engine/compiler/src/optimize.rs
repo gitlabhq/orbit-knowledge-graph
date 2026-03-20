@@ -173,8 +173,12 @@ fn build_keyset_expr(alias: &str, tp: &str, cursor_id: i64) -> Expr {
 }
 
 /// Walk the FROM tree and inject `{edge_alias}.{start_col} IN (SELECT id FROM _root_ids)`
-/// into every edge table scan. For direct scans, appends to the outer WHERE.
-/// For scans inside Union/Subquery arms (multi-hop), injects into each arm's WHERE.
+/// into edge table scans that connect directly to the root node.
+///
+/// For direct scans and single-hop joins, recurses the full tree.
+/// For Union arms (multi-hop), only injects into the first (leftmost) edge scan
+/// in each arm -- intermediate edge scans (e2, e3, ...) connect to hop results,
+/// not to root node IDs.
 fn inject_sip_into_from(table_ref: &mut TableRef, outer_where: &mut Option<Expr>, start_col: &str) {
     match table_ref {
         TableRef::Scan { table, alias, .. } if is_edge_table(table) => {
@@ -188,12 +192,27 @@ fn inject_sip_into_from(table_ref: &mut TableRef, outer_where: &mut Option<Expr>
         }
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                inject_sip_into_from(&mut arm.from, &mut arm.where_clause, start_col);
+                inject_sip_first_edge(&mut arm.from, &mut arm.where_clause, start_col);
             }
         }
         TableRef::Subquery { query, .. } => {
             inject_sip_into_from(&mut query.from, &mut query.where_clause, start_col);
         }
+    }
+}
+
+/// Inject SIP into only the first (leftmost) edge scan in a FROM tree.
+/// Used for multi-hop UNION ALL arms where only `e1` connects to root node IDs.
+fn inject_sip_first_edge(from: &mut TableRef, where_clause: &mut Option<Expr>, start_col: &str) {
+    match from {
+        TableRef::Scan { table, alias, .. } if is_edge_table(table) => {
+            let sip_filter = make_sip_filter(alias, start_col);
+            *where_clause = Expr::and_all([where_clause.take(), Some(sip_filter)]);
+        }
+        TableRef::Join { left, .. } => {
+            inject_sip_first_edge(left, where_clause, start_col);
+        }
+        _ => {}
     }
 }
 
