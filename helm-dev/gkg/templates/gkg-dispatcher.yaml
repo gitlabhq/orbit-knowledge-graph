@@ -16,11 +16,16 @@ data:
     schedule:
       {{- toYaml .Values.schedule | nindent 6 }}
     {{- end }}
-    {{- if .Values.otel.enabled }}
     metrics:
-      otlp_endpoint: {{ .Values.otel.endpoint | quote }}
-      service_name: "gkg-dispatcher"
-    {{- end }}
+      log_level: {{ .Values.gkgServer.logLevel | default "info" | quote }}
+      otel:
+        enabled: {{ .Values.metrics.otel.enabled }}
+        {{- if .Values.metrics.otel.enabled }}
+        endpoint: {{ .Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ .Values.metrics.prometheus.enabled }}
+        port: {{ .Values.metrics.prometheus.port }}
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -42,7 +47,7 @@ spec:
           labels:
             {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-dispatcher") | nindent 12 }}
           annotations:
-            checksum/config: {{ toJson .Values.clickhouse.datalake | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.schedule | sha256sum }}
+            checksum/config: {{ toJson .Values.clickhouse.datalake | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.metrics | sha256sum }}-{{ toJson .Values.schedule | sha256sum }}
         spec:
           restartPolicy: Never
           securityContext:

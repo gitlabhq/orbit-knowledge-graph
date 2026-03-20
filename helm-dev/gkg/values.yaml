@@ -184,10 +184,13 @@ gkgServer:
         cpu: 200m
         memory: 128Mi
 
-# OTEL configuration for telemetry
-otel:
-  enabled: false
-  endpoint: ""
+metrics:
+  otel:
+    enabled: false
+    endpoint: ""
+  prometheus:
+    enabled: false
+    port: 9394
 
 # GitLab Runner subchart defaults
 gitlab-runner:

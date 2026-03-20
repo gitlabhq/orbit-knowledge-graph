@@ -368,6 +368,10 @@ gkgServer:
         cpu: 200m
         memory: 128Mi
 
-otel:
-  enabled: true
-  endpoint: "http://gkg-obs-alloy:4317"
+metrics:
+  otel:
+    enabled: true
+    endpoint: "http://gkg-obs-alloy:4317"
+  prometheus:
+    enabled: false
+    port: 9394

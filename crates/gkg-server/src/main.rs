@@ -40,8 +40,11 @@ async fn main() -> anyhow::Result<()> {
     {
         builder = builder.log_level(level);
     }
-    if !config.metrics.otlp_endpoint.is_empty() {
-        builder = builder.otel_grpc_endpoint(&config.metrics.otlp_endpoint);
+    if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
+        builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
+    }
+    if config.metrics.prometheus.enabled {
+        builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
     }
     let _guard = builder.init().expect("labkit init");
 

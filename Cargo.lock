@@ -3818,7 +3818,7 @@ dependencies = [
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9e6e377#9e6e377a9bc3496a6ca4c0efbcf9eedf448ac154"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=4c866ad#4c866ad8e8506647b3c76a5de27a203e5d6b837c"
 dependencies = [
  "axum",
  "futures-util",
@@ -3829,8 +3829,11 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
+ "opentelemetry-prometheus",
  "opentelemetry_sdk",
  "pin-project-lite",
+ "prometheus",
+ "tokio",
  "tonic",
  "tower",
  "tower-http",
@@ -3846,7 +3849,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9e6e377#9e6e377a9bc3496a6ca4c0efbcf9eedf448ac154"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=4c866ad#4c866ad8e8506647b3c76a5de27a203e5d6b837c"
 
 [[package]]
 name = "lazy_static"
@@ -4434,6 +4437,19 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tonic",
+]
+
+[[package]]
+name = "opentelemetry-prometheus"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14095eb06b569eb5d538fa4555969f7e8a410ed7910c903bfd295f9e1a50d7ea"
+dependencies = [
+ "once_cell",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "prometheus",
+ "tracing",
 ]
 
 [[package]]
@@ -5047,6 +5063,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot",
+ "protobuf",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "prost"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5097,6 +5128,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8991c4cbdb8bc5b11f0b074ffe286c30e523de90fee5ba8132f1399f23cb3dd7"
 dependencies = [
  "prost",
+]
+
+[[package]]
+name = "protobuf"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65a1d4ddae7d8b5de68153b48f6aa3bba8cb002b243dbdbc55a5afbc98f99f4"
+dependencies = [
+ "once_cell",
+ "protobuf-support",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protobuf-support"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e36c2f31e0a47f9280fb347ef5e461ffcd2c52dd520d8e216b52f93b0b0d7d6"
+dependencies = [
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6813,6 +6864,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 

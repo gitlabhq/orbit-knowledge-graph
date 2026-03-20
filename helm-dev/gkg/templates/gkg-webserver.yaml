@@ -20,11 +20,16 @@ data:
       {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
     graph:
       {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.graph) | nindent 6 }}
-    {{- if .Values.otel.enabled }}
     metrics:
-      otlp_endpoint: {{ .Values.otel.endpoint | quote }}
-      service_name: "gkg-webserver"
-    {{- end }}
+      log_level: {{ .Values.gkgServer.logLevel | default "info" | quote }}
+      otel:
+        enabled: {{ .Values.metrics.otel.enabled }}
+        {{- if .Values.metrics.otel.enabled }}
+        endpoint: {{ .Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ .Values.metrics.prometheus.enabled }}
+        port: {{ .Values.metrics.prometheus.port }}
 ---
 apiVersion: v1
 kind: Service
@@ -71,7 +76,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-webserver") | nindent 8 }}
       annotations:
-        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.otel | sha256sum }}
+        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.metrics | sha256sum }}
     spec:
       enableServiceLinks: false
       securityContext:
@@ -87,6 +92,10 @@ spec:
               containerPort: 8080
             - name: grpc
               containerPort: 50054
+            {{- if .Values.metrics.prometheus.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.prometheus.port }}
+            {{- end }}
           env:
             - name: LOG_FORMAT
               value: "json"

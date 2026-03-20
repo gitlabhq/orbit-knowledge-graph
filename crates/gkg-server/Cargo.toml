@@ -37,7 +37,7 @@ parking_lot = { workspace = true }
 query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonwebtoken = { workspace = true }
-labkit = { workspace = true, features = ["http", "grpc", "otel"] }
+labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

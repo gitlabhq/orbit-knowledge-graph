@@ -61,4 +61,9 @@ health_check:
     - nats
 
 metrics:
-  otlp_endpoint: "http://localhost:4317"
+  otel:
+    enabled: false
+    endpoint: "http://localhost:4317"
+  prometheus:
+    enabled: false
+    port: 9394
