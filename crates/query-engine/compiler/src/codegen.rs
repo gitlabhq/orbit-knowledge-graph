@@ -7,15 +7,9 @@ use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
+pub use gkg_utils::clickhouse::ParamValue;
 use serde_json::Value;
 use std::collections::HashMap;
-
-/// A query parameter with its ClickHouse type and JSON value.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParamValue {
-    pub ch_type: ChType,
-    pub value: Value,
-}
 
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {
@@ -64,28 +58,30 @@ impl HydrationTemplate {
     }
 }
 
-/// Display inlines parameters into SQL for debugging/testing.
-///
-/// Replaces `{name:Type}` placeholders with literal values.
-/// **Not for production use** — use parameterized queries to prevent injection.
-#[cfg(test)]
-impl std::fmt::Display for ParameterizedQuery {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ParameterizedQuery {
+    /// Render SQL with parameters inlined for debugging/observability.
+    ///
+    /// Replaces `{name:Type}` placeholders with literal values using
+    /// `ParamValue::render_literal`. Handles both scalar and array types.
+    /// **Not for execution** — use parameterized queries to prevent injection.
+    pub fn render(&self) -> String {
         use regex::Regex;
 
-        let re = Regex::new(r"\{(\w+):\w+\}").expect("valid regex");
-        let result = re.replace_all(&self.sql, |caps: &regex::Captures| {
+        let re = Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex");
+        re.replace_all(&self.sql, |caps: &regex::Captures| {
             let name = &caps[1];
-            match self.params.get(name).map(|p| &p.value) {
-                Some(Value::String(s)) => format!("'{}'", s.replace('\'', "''")),
-                Some(Value::Bool(b)) => b.to_string(),
-                Some(Value::Number(n)) => n.to_string(),
-                Some(Value::Null) => "NULL".to_string(),
-                Some(v) => format!("'{}'", v.to_string().replace('\'', "''")),
+            match self.params.get(name) {
+                Some(param) => param.render_literal(),
                 None => caps[0].to_string(),
             }
-        });
-        write!(f, "{}", result)
+        })
+        .into_owned()
+    }
+}
+
+impl std::fmt::Display for ParameterizedQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.render())
     }
 }
 
@@ -885,5 +881,80 @@ mod tests {
             "expected derived table alias: {}",
             result.sql
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ParameterizedQuery::render
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn render_replaces_scalar_params() {
+        let mut params = HashMap::new();
+        params.insert(
+            "p0".into(),
+            ParamValue {
+                ch_type: ChType::String,
+                value: Value::from("User"),
+            },
+        );
+        params.insert(
+            "p1".into(),
+            ParamValue {
+                ch_type: ChType::String,
+                value: Value::from("active"),
+            },
+        );
+
+        let pq = ParameterizedQuery {
+            sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
+            params,
+            result_context: empty_ctx(),
+        };
+
+        assert_eq!(
+            pq.render(),
+            "SELECT * FROM t WHERE kind = 'User' AND state = 'active'"
+        );
+    }
+
+    #[test]
+    fn render_replaces_array_params() {
+        let mut params = HashMap::new();
+        params.insert(
+            "p0".into(),
+            ParamValue {
+                ch_type: ChType::Array(gkg_utils::clickhouse::ChScalar::String),
+                value: serde_json::json!(["a", "b"]),
+            },
+        );
+        params.insert(
+            "p1".into(),
+            ParamValue {
+                ch_type: ChType::Array(gkg_utils::clickhouse::ChScalar::Int64),
+                value: serde_json::json!([10, 20]),
+            },
+        );
+
+        let pq = ParameterizedQuery {
+            sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
+            params,
+            result_context: empty_ctx(),
+        };
+
+        assert_eq!(
+            pq.render(),
+            "SELECT * FROM t WHERE x IN ['a', 'b'] AND y IN [10, 20]"
+        );
+    }
+
+    #[test]
+    fn render_leaves_unknown_params() {
+        let pq = ParameterizedQuery {
+            sql: "SELECT {p0:String} AND {p1:Int64}".into(),
+            params: HashMap::new(),
+            result_context: empty_ctx(),
+        };
+
+        assert_eq!(pq.render(), "SELECT {p0:String} AND {p1:Int64}");
     }
 }
