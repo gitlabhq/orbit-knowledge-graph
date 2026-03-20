@@ -27,15 +27,13 @@ use crate::input::{Input, QueryType};
 use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 
-const KEYSET_CTE_NAME: &str = "_keyset_ids";
+const SIP_CTE_NAME: &str = "_root_ids";
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
-            if input.cursor.is_some() {
-                apply_keyset_pagination(q, input, ctx);
-            }
+            apply_sip_prefilter(q, input, ctx);
             if input.query_type == QueryType::Aggregation {
                 fold_filters_into_aggregates(q, input);
             }
@@ -43,26 +41,40 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
     }
 }
 
-/// Keyset pagination with SIP (Sideways Information Passing).
+/// SIP (Sideways Information Passing) pre-filter with optional keyset pagination.
 ///
-/// Replaces OFFSET-based pagination with a cursor predicate that uses both
-/// PK columns `(traversal_path, id)` for granule pruning. Materializes the
-/// filtered root node IDs in a CTE and pushes them into the edge table scan
-/// via IN subquery.
+/// When the root node is selective (has filters, node_ids, or a cursor),
+/// materializes the root node's matching IDs in a CTE and pushes them into
+/// the edge table scan via IN subquery. This narrows the edge scan by ~40%.
 ///
-/// Emits decomposed form `(tp > x) OR (tp = x AND id > y)` because
-/// ClickHouse does NOT push tuple comparisons `(a, b) > (x, y)` into the
-/// primary key index.
-fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) {
-    let cursor_id = match &input.cursor {
-        Some(c) => c.id,
-        None => return,
-    };
+/// When a cursor is present, also injects the decomposed keyset predicate
+/// for full PK pushdown and removes OFFSET.
+fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
+    // Only applies to traversal/search queries with relationships (need an edge to push into)
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Search | QueryType::Aggregation
+    ) {
+        return;
+    }
+    if input.relationships.is_empty() {
+        return;
+    }
 
     let root_node = match input.nodes.first() {
         Some(n) => n,
         None => return,
     };
+
+    let has_cursor = input.cursor.is_some();
+    let has_filters = !root_node.filters.is_empty();
+    let has_node_ids = !root_node.node_ids.is_empty();
+    let has_id_range = root_node.id_range.is_some();
+
+    // Only apply SIP when the root node scan is selective
+    if !has_cursor && !has_filters && !has_node_ids && !has_id_range {
+        return;
+    }
 
     let root_alias = &root_node.id;
     let root_table = match &root_node.table {
@@ -70,67 +82,57 @@ fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) 
         None => return,
     };
 
-    // Build the decomposed keyset predicate using the security context's
-    // traversal paths. For each path, emit:
-    //   (traversal_path > :path) OR (traversal_path = :path AND id > :cursor_id)
-    //
-    // ClickHouse does NOT push tuple (a, b) > (x, y) into the PK index.
-    // The decomposed form enables full PK pushdown on (traversal_path, id).
-    let keyset_predicate = if ctx.traversal_paths.len() == 1 {
-        let tp = &ctx.traversal_paths[0];
-        build_keyset_expr(root_alias, tp, cursor_id)
-    } else {
-        // Multiple paths: OR together a keyset predicate for each
-        match Expr::or_all(
-            ctx.traversal_paths
-                .iter()
-                .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor_id))),
-        ) {
-            Some(expr) => expr,
-            None => return,
+    // Build optional keyset predicate from cursor + security context
+    let keyset_predicate = input.cursor.as_ref().map(|cursor| {
+        if ctx.traversal_paths.len() == 1 {
+            build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
+        } else {
+            Expr::or_all(
+                ctx.traversal_paths
+                    .iter()
+                    .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor.id))),
+            )
+            .unwrap_or_else(|| Expr::param(ChType::Bool, false))
         }
-    };
+    });
 
-    // Build the CTE: SELECT id FROM root_table WHERE <keyset_predicate>
-    // The security pass will inject startsWith(traversal_path, ...) into the CTE automatically.
+    // Build the CTE: SELECT id FROM root_table WHERE <existing root filters>
+    // The CTE replicates the root node's WHERE conditions (filters, node_ids, id_range)
+    // plus the keyset predicate if present. The security pass will inject
+    // startsWith(traversal_path, ...) automatically since the CTE scans a gl_* table.
+    let cte_where = Expr::and_all([q.where_clause.clone(), keyset_predicate.clone()]);
+
     let cte_query = Query {
         select: vec![SelectExpr::new(
             Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
             DEFAULT_PRIMARY_KEY,
         )],
         from: TableRef::scan(&root_table, root_alias),
-        where_clause: Some(keyset_predicate.clone()),
+        where_clause: cte_where,
         ..Default::default()
     };
-    q.ctes.push(Cte::new(KEYSET_CTE_NAME, cte_query));
+    q.ctes.push(Cte::new(SIP_CTE_NAME, cte_query));
 
-    // Add keyset predicate to the main query WHERE (for direct PK pushdown on root table)
-    q.where_clause = Expr::and_all([q.where_clause.take(), Some(keyset_predicate)]);
-
-    // Add IN filter on root node: root.id IN (SELECT id FROM _keyset_ids)
-    let root_in = Expr::InSubquery {
-        expr: Box::new(Expr::col(root_alias, DEFAULT_PRIMARY_KEY)),
-        cte_name: KEYSET_CTE_NAME.to_string(),
-        column: DEFAULT_PRIMARY_KEY.to_string(),
-    };
-    q.where_clause = Expr::and_all([q.where_clause.take(), Some(root_in)]);
-
-    // SIP: push keyset IDs into edge table scan
-    // Find the first edge alias and inject source_id IN (SELECT id FROM _keyset_ids)
-    if !input.relationships.is_empty() {
-        let edge_aliases = collect_edge_aliases(&q.from);
-        if let Some(edge_alias) = edge_aliases.first() {
-            let edge_in = Expr::InSubquery {
-                expr: Box::new(Expr::col(edge_alias, "source_id")),
-                cte_name: KEYSET_CTE_NAME.to_string(),
-                column: DEFAULT_PRIMARY_KEY.to_string(),
-            };
-            q.where_clause = Expr::and_all([q.where_clause.take(), Some(edge_in)]);
-        }
+    // Add keyset predicate to the main query WHERE (for direct PK pushdown)
+    if let Some(pred) = keyset_predicate {
+        q.where_clause = Expr::and_all([q.where_clause.take(), Some(pred)]);
     }
 
-    // Remove OFFSET — keyset replaces it
-    q.offset = None;
+    // SIP: push root IDs into edge table scan
+    let edge_aliases = collect_edge_aliases(&q.from);
+    if let Some(edge_alias) = edge_aliases.first() {
+        let edge_in = Expr::InSubquery {
+            expr: Box::new(Expr::col(edge_alias, "source_id")),
+            cte_name: SIP_CTE_NAME.to_string(),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        };
+        q.where_clause = Expr::and_all([q.where_clause.take(), Some(edge_in)]);
+    }
+
+    // Keyset replaces OFFSET
+    if has_cursor {
+        q.offset = None;
+    }
 }
 
 /// Build a decomposed keyset predicate for one traversal path:
