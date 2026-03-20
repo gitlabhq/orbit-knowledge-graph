@@ -63,6 +63,7 @@ Integration tests need Docker: `mise test:integration`.
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
+| Indexing progress endpoint | `crates/gkg-server/src/indexing_progress/` |
 | Related repos and local paths | `/related-repositories` skill |
 | Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |
 
@@ -94,7 +95,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `datalake-generator` | Synthetic GitLab data for load testing |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, and `ResponseView` assertion framework for integration tests |
-| `integration-tests` | Integration tests for server (health, redaction, hydration, data correctness, graph formatting); depends on gkg-server + integration-testkit |
+| `integration-tests` | Integration tests for server (health, redaction, hydration, data correctness, graph formatting, indexing progress); depends on gkg-server + integration-testkit |
 | `xtask` | Developer task runner (data generation, query evaluation, ClickHouse management) |
 
 ## Code quality

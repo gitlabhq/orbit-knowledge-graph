@@ -361,6 +361,43 @@ pub struct GraphStatsItem {
     #[prost(int64, tag = "2")]
     pub count: i64,
 }
+/// Request for indexing progress of a single namespace.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetNamespaceIndexingProgressRequest {
+    #[prost(int64, tag = "1")]
+    pub namespace_id: i64,
+}
+/// Response with per-entity indexing statuses grouped by domain.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetNamespaceIndexingProgressResponse {
+    #[prost(int64, tag = "1")]
+    pub namespace_id: i64,
+    /// not_found | queued | indexing | completed
+    #[prost(string, tag = "2")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "3")]
+    pub domains: ::prost::alloc::vec::Vec<IndexingProgressDomain>,
+}
+/// Indexing progress for a single domain.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct IndexingProgressDomain {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub items: ::prost::alloc::vec::Vec<IndexingProgressItem>,
+}
+/// Indexing status for a single entity type.
+/// SDLC entities use: pending | in_progress | completed.
+/// Source code entities use: waiting_for_projects | indexing | completed.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IndexingProgressItem {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(int64, tag = "3")]
+    pub count: i64,
+}
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
 /// LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
@@ -457,7 +494,7 @@ pub mod knowledge_graph_service_client {
     )]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    /// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+    /// Core service exposing 6 RPCs. Gated behind the :knowledge_graph feature flag
     /// in Rails. JWT auth carries user identity and traversal IDs for authorization.
     #[derive(Debug, Clone)]
     pub struct KnowledgeGraphServiceClient<T> {
@@ -680,6 +717,37 @@ pub mod knowledge_graph_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /// Returns per-entity indexing progress for a namespace, derived from checkpoint tables.
+        /// Used by admin dashboards to monitor indexing pipeline status.
+        pub async fn get_namespace_indexing_progress(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetNamespaceIndexingProgressRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetNamespaceIndexingProgressResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetNamespaceIndexingProgress",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "gkg.v1.KnowledgeGraphService",
+                        "GetNamespaceIndexingProgress",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -749,8 +817,17 @@ pub mod knowledge_graph_service_server {
             tonic::Response<super::GetGraphStatsResponse>,
             tonic::Status,
         >;
+        /// Returns per-entity indexing progress for a namespace, derived from checkpoint tables.
+        /// Used by admin dashboards to monitor indexing pipeline status.
+        async fn get_namespace_indexing_progress(
+            &self,
+            request: tonic::Request<super::GetNamespaceIndexingProgressRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetNamespaceIndexingProgressResponse>,
+            tonic::Status,
+        >;
     }
-    /// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+    /// Core service exposing 6 RPCs. Gated behind the :knowledge_graph feature flag
     /// in Rails. JWT auth carries user identity and traversal IDs for authorization.
     #[derive(Debug)]
     pub struct KnowledgeGraphServiceServer<T> {
@@ -1056,6 +1133,60 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetGraphStatsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/GetNamespaceIndexingProgress" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetNamespaceIndexingProgressSvc<T: KnowledgeGraphService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<
+                        super::GetNamespaceIndexingProgressRequest,
+                    > for GetNamespaceIndexingProgressSvc<T> {
+                        type Response = super::GetNamespaceIndexingProgressResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::GetNamespaceIndexingProgressRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::get_namespace_indexing_progress(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetNamespaceIndexingProgressSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

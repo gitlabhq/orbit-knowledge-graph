@@ -31,10 +31,22 @@ impl GraphStatsService {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
+        let entity_counts = self.fetch_entity_counts(traversal_path).await?;
+
+        info!(entity_count = entity_counts.len(), "Graph stats fetched");
+
+        let domains = present_domain_response(&self.ontology, &entity_counts);
+        Ok(GetGraphStatsResponse { domains })
+    }
+
+    pub async fn fetch_entity_counts(
+        &self,
+        traversal_path: &str,
+    ) -> Result<HashMap<String, i64>, Status> {
         let input = GraphStatsInput::from_ontology(&self.ontology, traversal_path.to_string());
 
         if input.nodes.is_empty() {
-            return Ok(GetGraphStatsResponse { domains: vec![] });
+            return Ok(HashMap::new());
         }
 
         let ast = lower::lower(&input);
@@ -76,10 +88,7 @@ impl GraphStatsService {
             }
         }
 
-        info!(entity_count = entity_counts.len(), "Graph stats fetched");
-
-        let domains = present_domain_response(&self.ontology, &entity_counts);
-        Ok(GetGraphStatsResponse { domains })
+        Ok(entity_counts)
     }
 }
 

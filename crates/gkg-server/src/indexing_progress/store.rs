@@ -1,0 +1,154 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use arrow::array::{Array, StringArray, UInt64Array};
+use arrow::record_batch::RecordBatch;
+use clickhouse_client::ArrowClickHouseClient;
+use gkg_utils::arrow::ArrowUtils;
+use tonic::Status;
+
+pub struct IndexingProgressStore {
+    graph_client: Arc<ArrowClickHouseClient>,
+    datalake_client: Arc<ArrowClickHouseClient>,
+}
+
+pub struct CodeIndexingCounts {
+    pub total_projects: i64,
+    pub indexed_projects: i64,
+}
+
+impl CodeIndexingCounts {
+    pub fn new(total_projects: i64, indexed_projects: i64) -> Self {
+        Self {
+            total_projects,
+            indexed_projects,
+        }
+    }
+}
+
+impl IndexingProgressStore {
+    pub fn new(
+        graph_client: Arc<ArrowClickHouseClient>,
+        datalake_client: Arc<ArrowClickHouseClient>,
+    ) -> Self {
+        Self {
+            graph_client,
+            datalake_client,
+        }
+    }
+
+    pub async fn resolve_traversal_path(&self, namespace_id: i64) -> Result<String, Status> {
+        let batches = self
+            .datalake_client
+            .query(
+                "SELECT argMax(traversal_path, version) AS traversal_path \
+                 FROM namespace_traversal_paths \
+                 WHERE id = {namespace_id:Int64} \
+                 GROUP BY id \
+                 HAVING NOT argMax(deleted, version)",
+            )
+            .param("namespace_id", namespace_id)
+            .fetch_arrow()
+            .await
+            .map_err(|e| Status::internal(format!("ClickHouse error: {e}")))?;
+
+        for batch in &batches {
+            let Some(paths) =
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path")
+            else {
+                continue;
+            };
+            if batch.num_rows() > 0 && !paths.is_null(0) {
+                let path = paths.value(0);
+                if !path.is_empty() {
+                    return Ok(path.to_string());
+                }
+            }
+        }
+
+        Ok(String::new())
+    }
+
+    pub async fn fetch_sdlc_checkpoint_statuses(
+        &self,
+        namespace_id: i64,
+    ) -> Result<HashMap<String, bool>, Status> {
+        let prefix = format!("ns.{namespace_id}.");
+
+        let batches = self
+            .graph_client
+            .query(
+                "SELECT key, argMax(cursor_values, _version) AS cursor_values \
+                 FROM checkpoint \
+                 WHERE startsWith(key, {prefix:String}) \
+                 GROUP BY key \
+                 HAVING NOT argMax(_deleted, _version)",
+            )
+            .param("prefix", prefix.as_str())
+            .fetch_arrow()
+            .await
+            .map_err(|e| Status::internal(format!("ClickHouse error: {e}")))?;
+
+        let mut statuses = HashMap::new();
+        for batch in &batches {
+            let Some(keys) = ArrowUtils::get_column_by_name::<StringArray>(batch, "key") else {
+                continue;
+            };
+            let Some(cursors) =
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "cursor_values")
+            else {
+                continue;
+            };
+            for row in 0..batch.num_rows() {
+                if keys.is_null(row) {
+                    continue;
+                }
+                let key = keys.value(row);
+                let plan_name = key.strip_prefix(&prefix).unwrap_or(key);
+                let cursor_value = if cursors.is_null(row) {
+                    ""
+                } else {
+                    cursors.value(row)
+                };
+                let completed = cursor_value.is_empty() || cursor_value == "null";
+                statuses.insert(plan_name.to_string(), completed);
+            }
+        }
+
+        Ok(statuses)
+    }
+
+    pub async fn fetch_indexed_projects(&self, traversal_path: &str) -> Result<i64, Status> {
+        let batches = self
+            .graph_client
+            .query(
+                "SELECT count(DISTINCT project_id) AS cnt FROM ( \
+                     SELECT project_id \
+                     FROM code_indexing_checkpoint \
+                     WHERE startsWith(traversal_path, {traversal_path:String}) \
+                     GROUP BY traversal_path, project_id, branch \
+                     HAVING NOT argMax(_deleted, _version) \
+                 )",
+            )
+            .param("traversal_path", traversal_path)
+            .fetch_arrow()
+            .await
+            .map_err(|e| Status::internal(format!("ClickHouse error: {e}")))?;
+
+        Ok(extract_count(&batches))
+    }
+}
+
+fn extract_count(batches: &[RecordBatch]) -> i64 {
+    for batch in batches {
+        if batch.num_rows() == 0 {
+            continue;
+        }
+        if let Some(counts) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt")
+            && !counts.is_null(0)
+        {
+            return counts.value(0) as i64;
+        }
+    }
+    0
+}
