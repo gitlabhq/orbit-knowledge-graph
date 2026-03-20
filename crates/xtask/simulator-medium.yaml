@@ -1,9 +1,11 @@
-# Simulator configuration - 100M edge scale test
+# Simulator configuration - medium scale (~1.3M edges)
+#
+# Fast enough to generate in ~10s, large enough for meaningful query plans.
 #
 # Workflow:
-#   1. Generate data:  cargo xtask synth generate
-#   2. Load to CH:     cargo xtask synth load
-#   3. Evaluate:       cargo xtask synth evaluate
+#   1. Generate data:  cargo xtask synth generate -c crates/xtask/simulator-medium.yaml
+#   2. Load to CH:     cargo xtask synth load -c crates/xtask/simulator-medium.yaml
+#   3. Evaluate:       cargo xtask synth evaluate -c crates/xtask/simulator-medium.yaml
 
 clickhouse:
   url: http://localhost:8123
@@ -11,8 +13,8 @@ clickhouse:
   password: password
 
   client:
-    send_timeout: 3600
-    receive_timeout: 3600
+    send_timeout: 300
+    receive_timeout: 300
     max_insert_block_size: 100000
 
   schema:
@@ -20,8 +22,6 @@ clickhouse:
     index_granularity: 8192
 
     # Use per-node sort_key from ontology YAML (matches graph.sql).
-    # gl_user: ORDER BY (id), code tables: ORDER BY (traversal_path, project_id, branch, id),
-    # most SDLC nodes: ORDER BY (traversal_path, id).
     use_ontology_sort_keys: true
 
     # Edge table schema matches graph.sql exactly.
@@ -117,62 +117,62 @@ clickhouse:
 
 generation:
   ontology_path: config/ontology
-  output_dir: gl_synthetic_data
+  output_dir: gl_synthetic_data_medium
   skip_if_present: false
   parallel: false
-  batch_size: 100000
+  batch_size: 50000
 
   seed: 42
   fake_data_path: crates/xtask/fake_data.yaml
 
-  # Single org, scaled for ~100M edges with ~10M nodes
+  # Single org, ~1.3M edges / ~500k nodes
   organizations: 1
   namespace_entity: Group
 
   roots:
-    User: 10000                       # 10k users
-    Group: 20                         # 20 top-level groups
+    User: 1000                        # 1k users
+    Group: 10                         # 10 top-level groups
 
-  # Node estimates (~10M nodes):
-  # - 300 groups × 10 projects = 3k projects
-  # - 3k × 100 MRs = 300k MRs
-  # - 300k × 2 diffs = 600k diffs
-  # - 600k × 4 files = 2.4M files
-  # - 3k × 100 pipelines = 300k pipelines  
-  # - 300k × 3 stages = 900k stages
-  # - 900k × 4 jobs = 3.6M jobs
+  # Node estimates (~500k nodes):
+  # - 70 groups × 5 projects = 350 projects
+  # - 350 × 20 MRs = 7k MRs
+  # - 7k × 2 diffs = 14k diffs
+  # - 14k × 3 files = 42k files
+  # - 350 × 20 pipelines = 7k pipelines
+  # - 7k × 3 stages = 21k stages
+  # - 21k × 3 jobs = 63k jobs
   #
-  # Edge estimates (~100M edges):
-  # - Relationship edges: ~10M (from hierarchy)
-  # - Association edges:  ~90M (high fanout associations)
+  # Edge estimates (~1.3M edges):
+  # - Relationship edges: ~150k
+  # - Association edges:  ~1.1M
 
   relationships:
     CONTAINS:
-      "Group -> Group":               # Self-referential: 3 levels x 2 per parent = 300 total groups
+      "Group -> Group":
         count: 2
         max_depth: 3
-      "Group -> Project": 10          # 10 projects per group = 3k projects
+      "Group -> Project": 5
 
     IN_PROJECT:
-      "MergeRequest -> Project": 100  # 100 MRs per project = 300k MRs
-      "WorkItem -> Project": 100      # 100 work items = 300k
-      "Pipeline -> Project": 100      # 100 pipelines = 300k
-      "Vulnerability -> Project": 5
-      "Finding -> Project": 10
-      "Milestone -> Project": 3
-      "Label -> Project": 5
+      "MergeRequest -> Project": 20
+      "WorkItem -> Project": 20
+      "Pipeline -> Project": 20
+      "Vulnerability -> Project": 3
+      "Finding -> Project": 5
+      "Milestone -> Project": 2
+      "Label -> Project": 3
 
     HAS_STAGE:
-      "Pipeline -> Stage": 3          # 900k stages
+      "Pipeline -> Stage": 3
 
     HAS_JOB:
-      "Stage -> Job": 4               # 3.6M jobs
+      "Stage -> Job": 3
 
     HAS_DIFF:
-      "MergeRequest -> MergeRequestDiff": 2  # 600k diffs
+      "MergeRequest -> MergeRequestDiff": 2
 
     HAS_FILE:
-      "MergeRequestDiff -> MergeRequestDiffFile": 4  # 2.4M files
+      "MergeRequestDiff -> MergeRequestDiffFile": 3
 
     HAS_NOTE:
       "MergeRequest -> Note": 2
@@ -184,30 +184,22 @@ generation:
     HAS_IDENTIFIER:
       "Finding -> VulnerabilityIdentifier": 1
 
-  # High-volume associations to reach ~90M edges
-  # Using high counts per target to create dense connectivity
   associations:
     AUTHORED:
-      # 300k MRs × 100 = 30M edges
-      "User -> MergeRequest": 100
-      # 300k WorkItems × 100 = 30M edges
-      "User -> WorkItem": 100
-      # ~1.5M Notes × 10 = 15M edges
-      "User -> Note": 10
+      "User -> MergeRequest": 10
+      "User -> WorkItem": 10
+      "User -> Note": 5
 
     MEMBER_OF:
-      # 300 groups × 100 = 30k edges (small)
-      "User -> Group": 100
+      "User -> Group": 10
 
     ASSIGNED:
-      # 300k MRs × 50 = 15M edges
-      "User -> MergeRequest": 50
-      # 300k WorkItems × 10 = 3M edges
-      "User -> WorkItem": 10
+      "User -> MergeRequest": 5
+      "User -> WorkItem": 3
 
     REVIEWER:
       "MergeRequest -> User":
-        ratio: 3
+        ratio: 2
         per: source
 
     TRIGGERED:
@@ -228,7 +220,7 @@ generation:
       "MergeRequest -> WorkItem": 0.5
 
     FIXES:
-      "MergeRequest -> Vulnerability": 0.1
+      "MergeRequest -> Vulnerability": 0.2
 
     IN_MILESTONE:
       "WorkItem -> Milestone": 0.5
@@ -238,8 +230,8 @@ generation:
 
 evaluation:
   queries_path: fixtures/queries/sdlc_queries.yaml
-  metadata_dir: ./evaluation_results
-  sample_size: 100
+  metadata_dir: ./evaluation_results_medium
+  sample_size: 50
   iterations: 1
   skip_cache_warm: false
   output:

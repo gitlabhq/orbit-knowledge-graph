@@ -139,11 +139,19 @@ pub struct SchemaConfig {
     /// Table engine type: MergeTree, ReplacingMergeTree, etc.
     #[serde(default = "default_engine_type")]
     pub engine: String,
+    /// Use per-node sort_key from the ontology YAML instead of global node_order_by.
+    /// When true, each node table gets its own ORDER BY from the ontology
+    /// (e.g. gl_user uses [id], code tables use [traversal_path, project_id, branch, id]).
+    /// When false (default), all node tables share the same node_order_by.
+    #[serde(default)]
+    pub use_ontology_sort_keys: bool,
     /// PRIMARY KEY columns for node tables (sparse index, not uniqueness constraint).
     /// If empty, defaults to ORDER BY columns.
+    /// Ignored when use_ontology_sort_keys is true.
     #[serde(default)]
     pub node_primary_key: Vec<String>,
     /// ORDER BY columns for node tables (physical sort order on disk).
+    /// Ignored when use_ontology_sort_keys is true.
     #[serde(default = "default_node_order_by")]
     pub node_order_by: Vec<String>,
     /// PRIMARY KEY columns for edge table.
@@ -208,6 +216,7 @@ impl Default for SchemaConfig {
     fn default() -> Self {
         Self {
             engine: default_engine_type(),
+            use_ontology_sort_keys: false,
             node_primary_key: vec![],
             node_order_by: default_node_order_by(),
             edge_primary_key: vec![],
