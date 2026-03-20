@@ -8,6 +8,8 @@ license = "MIT"
 arrow = { workspace = true }
 ontology = { path = "../../ontology" }
 pipeline = { path = "../pipeline" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 types = { path = "../types" }
 compiler = { path = "../compiler" }
 

@@ -302,6 +302,7 @@ struct QueryResult {
     input: Value,
     sql: String,
     params: HashMap<String, Value>,
+    rendered_sql: String,
 }
 
 #[derive(Serialize)]
@@ -365,6 +366,7 @@ fn run_query(
 
         match query_engine::compiler::compile(&input_json, &ontology, &security_ctx) {
             Ok(result) => {
+                let rendered_sql = result.base.render();
                 results.push(QueryOutput::Success(QueryResult {
                     label,
                     input,
@@ -375,6 +377,7 @@ fn run_query(
                         .into_iter()
                         .map(|(k, v)| (k, v.value))
                         .collect(),
+                    rendered_sql,
                 }));
             }
             Err(e) => {
@@ -406,10 +409,11 @@ fn run_query(
                         println!("**SQL:**\n```sql\n{}\n```\n", r.sql);
                         if !r.params.is_empty() {
                             println!(
-                                "**Params:**\n```json\n{}\n```",
+                                "**Params:**\n```json\n{}\n```\n",
                                 serde_json::to_string_pretty(&r.params)?
                             );
                         }
+                        println!("**Rendered SQL:**\n```sql\n{}\n```", r.rendered_sql);
                     }
                     QueryOutput::Error(e) => {
                         println!("\n### {} [ERROR]\n", e.label);

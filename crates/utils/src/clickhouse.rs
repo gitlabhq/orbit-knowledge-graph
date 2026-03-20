@@ -74,3 +74,114 @@ impl ChType {
         }
     }
 }
+
+/// A query parameter with its ClickHouse type and JSON value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParamValue {
+    pub ch_type: ChType,
+    pub value: Value,
+}
+
+impl ParamValue {
+    /// Render as a ClickHouse SQL literal for debugging/observability.
+    pub fn render_literal(&self) -> String {
+        render_value(&self.value)
+    }
+}
+
+/// Render a JSON value as a ClickHouse SQL literal.
+pub fn render_value(value: &Value) -> String {
+    fn quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "''"))
+    }
+
+    match value {
+        Value::String(s) => quote(s),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Null => "NULL".to_string(),
+        Value::Array(arr) => {
+            let elements: Vec<String> = arr.iter().map(render_value).collect();
+            format!("[{}]", elements.join(", "))
+        }
+        other => quote(&other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn render_literal_string() {
+        let p = ParamValue {
+            ch_type: ChType::String,
+            value: Value::String("hello".into()),
+        };
+        assert_eq!(p.render_literal(), "'hello'");
+    }
+
+    #[test]
+    fn render_literal_string_with_quotes() {
+        let p = ParamValue {
+            ch_type: ChType::String,
+            value: Value::String("it's a test".into()),
+        };
+        assert_eq!(p.render_literal(), "'it''s a test'");
+    }
+
+    #[test]
+    fn render_literal_int() {
+        let p = ParamValue {
+            ch_type: ChType::Int64,
+            value: Value::from(42),
+        };
+        assert_eq!(p.render_literal(), "42");
+    }
+
+    #[test]
+    fn render_literal_bool() {
+        let p = ParamValue {
+            ch_type: ChType::Bool,
+            value: Value::Bool(true),
+        };
+        assert_eq!(p.render_literal(), "true");
+    }
+
+    #[test]
+    fn render_literal_null() {
+        let p = ParamValue {
+            ch_type: ChType::String,
+            value: Value::Null,
+        };
+        assert_eq!(p.render_literal(), "NULL");
+    }
+
+    #[test]
+    fn render_literal_string_array() {
+        let p = ParamValue {
+            ch_type: ChType::Array(ChScalar::String),
+            value: json!(["active", "blocked"]),
+        };
+        assert_eq!(p.render_literal(), "['active', 'blocked']");
+    }
+
+    #[test]
+    fn render_literal_int_array() {
+        let p = ParamValue {
+            ch_type: ChType::Array(ChScalar::Int64),
+            value: json!([1, 2, 3]),
+        };
+        assert_eq!(p.render_literal(), "[1, 2, 3]");
+    }
+
+    #[test]
+    fn render_literal_empty_array() {
+        let p = ParamValue {
+            ch_type: ChType::Array(ChScalar::String),
+            value: json!([]),
+        };
+        assert_eq!(p.render_literal(), "[]");
+    }
+}
