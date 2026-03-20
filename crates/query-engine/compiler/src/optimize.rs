@@ -82,9 +82,14 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         None => return,
     };
 
-    // Build optional keyset predicate from cursor + security context
+    // Build optional keyset predicate from cursor.
+    // When cursor includes traversal_path, resumes at the exact PK position.
+    // When traversal_path is absent, falls back to the security context's
+    // paths (correct for single-path, approximate for multi-path).
     let keyset_predicate = input.cursor.as_ref().map(|cursor| {
-        if ctx.traversal_paths.len() == 1 {
+        if let Some(ref tp) = cursor.traversal_path {
+            build_keyset_expr(root_alias, tp, cursor.id)
+        } else if ctx.traversal_paths.len() == 1 {
             build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
         } else {
             Expr::or_all(
