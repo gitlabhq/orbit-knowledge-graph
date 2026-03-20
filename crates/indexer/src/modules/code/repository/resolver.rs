@@ -2,18 +2,21 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::changed_path_stream::ChangeStatus;
 use tracing::{info, warn};
 
 use super::blob_stream::BlobStream;
 use super::cache::RepositoryCache;
-use super::changed_path_stream::ChangedPathStream;
+use super::changed_path_stream::{ChangeStatus, ChangedPath, ChangedPathStream};
 use super::service::RepositoryService;
 use crate::handler::HandlerError;
 
 const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
 const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
+
+// ---------------------------------------------------------------------------
+// RepositoryResolver
+// ---------------------------------------------------------------------------
 
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
@@ -126,7 +129,6 @@ impl RepositoryResolver {
         }
 
         let expected_writes: usize = changeset.paths_by_blob_id.values().map(|v| v.len()).sum();
-
         let blob_oids: Vec<String> = changeset.paths_by_blob_id.keys().cloned().collect();
         let mut write_count = 0;
 
@@ -184,6 +186,10 @@ impl RepositoryResolver {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Changeset computation
+// ---------------------------------------------------------------------------
+
 #[derive(Debug)]
 struct IncrementalChangeset {
     deletions: Vec<String>,
@@ -191,14 +197,93 @@ struct IncrementalChangeset {
     paths_by_blob_id: HashMap<String, Vec<String>>,
 }
 
+#[derive(Default)]
+struct ChangesetBuilder {
+    deletions: Vec<String>,
+    renames: Vec<(String, String)>,
+    paths_by_blob_id: HashMap<String, Vec<String>>,
+    deleted_by_blob_id: HashMap<String, Vec<String>>,
+}
+
+impl ChangesetBuilder {
+    fn record(&mut self, change: ChangedPath) {
+        match change.status {
+            ChangeStatus::Deleted => {
+                self.deleted_by_blob_id
+                    .entry(change.old_blob_id)
+                    .or_default()
+                    .push(change.path);
+            }
+            ChangeStatus::Renamed if change.old_blob_id == change.new_blob_id => {
+                self.renames.push((change.old_path, change.path));
+            }
+            ChangeStatus::Renamed => {
+                self.deletions.push(change.old_path);
+                self.paths_by_blob_id
+                    .entry(change.new_blob_id)
+                    .or_default()
+                    .push(change.path);
+            }
+            ChangeStatus::Added | ChangeStatus::Modified | ChangeStatus::Copied => {
+                self.paths_by_blob_id
+                    .entry(change.new_blob_id)
+                    .or_default()
+                    .push(change.path);
+            }
+            ChangeStatus::TypeChange => {
+                warn!(path = %change.path, "skipping TYPE_CHANGE entry");
+            }
+            ChangeStatus::Unknown => {
+                warn!(path = %change.path, "skipping unknown change status");
+            }
+        }
+    }
+
+    fn build(mut self) -> IncrementalChangeset {
+        self.reconcile_delete_add_renames();
+        IncrementalChangeset {
+            deletions: self.deletions,
+            renames: self.renames,
+            paths_by_blob_id: self.paths_by_blob_id,
+        }
+    }
+
+    /// Rails sometimes reports renames as separate DELETED + ADDED entries
+    /// instead of a single RENAMED entry. When a deleted blob ID matches an
+    /// added blob ID, pair them up as renames. Any unpaired leftovers stay
+    /// as plain deletions or additions.
+    fn reconcile_delete_add_renames(&mut self) {
+        for (blob_id, deleted_paths) in std::mem::take(&mut self.deleted_by_blob_id) {
+            let Some(added_paths) = self.paths_by_blob_id.remove(&blob_id) else {
+                self.deletions.extend(deleted_paths);
+                continue;
+            };
+
+            let paired = deleted_paths.len().min(added_paths.len());
+
+            self.renames.extend(
+                deleted_paths
+                    .iter()
+                    .zip(added_paths.iter())
+                    .map(|(d, a)| (d.clone(), a.clone())),
+            );
+
+            self.deletions
+                .extend(deleted_paths.into_iter().skip(paired));
+
+            let remaining: Vec<String> = added_paths.into_iter().skip(paired).collect();
+            if !remaining.is_empty() {
+                self.paths_by_blob_id.insert(blob_id, remaining);
+            }
+        }
+    }
+}
+
 async fn compute_changeset(
     stream: super::service::ByteStream,
 ) -> Result<IncrementalChangeset, String> {
     let mut changed_paths = ChangedPathStream::new(stream);
-    let mut deletions = Vec::new();
-    let mut renames = Vec::new();
-    let mut paths_by_blob_id: HashMap<String, Vec<String>> = HashMap::new();
-    let mut deleted_by_blob_id: HashMap<String, Vec<String>> = HashMap::new();
+    let mut builder = ChangesetBuilder::default();
     let mut count = 0usize;
 
     while let Some(change) = changed_paths
@@ -217,63 +302,10 @@ async fn compute_changeset(
             ));
         }
 
-        match change.status {
-            ChangeStatus::Deleted => {
-                deleted_by_blob_id
-                    .entry(change.old_blob_id)
-                    .or_default()
-                    .push(change.path);
-            }
-            ChangeStatus::Renamed if change.old_blob_id == change.new_blob_id => {
-                renames.push((change.old_path, change.path));
-            }
-            ChangeStatus::Renamed => {
-                deletions.push(change.old_path);
-                paths_by_blob_id
-                    .entry(change.new_blob_id)
-                    .or_default()
-                    .push(change.path);
-            }
-            ChangeStatus::Added | ChangeStatus::Modified | ChangeStatus::Copied => {
-                paths_by_blob_id
-                    .entry(change.new_blob_id)
-                    .or_default()
-                    .push(change.path);
-            }
-            ChangeStatus::TypeChange => {
-                warn!(path = %change.path, "skipping TYPE_CHANGE entry");
-            }
-            ChangeStatus::Unknown => {
-                warn!(path = %change.path, "skipping unknown change status");
-            }
-        }
+        builder.record(change);
     }
 
-    // Match DELETED + ADDED pairs with the same blob ID as renames.
-    // Rails may report renames as separate DELETED/ADDED entries instead of RENAMED.
-    for (blob_id, deleted_paths) in deleted_by_blob_id {
-        if let Some(added_paths) = paths_by_blob_id.remove(&blob_id) {
-            for (deleted_path, added_path) in deleted_paths.iter().zip(added_paths.iter()) {
-                renames.push((deleted_path.clone(), added_path.clone()));
-            }
-            for deleted_path in deleted_paths.iter().skip(added_paths.len()) {
-                deletions.push(deleted_path.clone());
-            }
-            let remaining_added: Vec<String> =
-                added_paths.into_iter().skip(deleted_paths.len()).collect();
-            if !remaining_added.is_empty() {
-                paths_by_blob_id.insert(blob_id, remaining_added);
-            }
-        } else {
-            deletions.extend(deleted_paths);
-        }
-    }
-
-    Ok(IncrementalChangeset {
-        deletions,
-        renames,
-        paths_by_blob_id,
-    })
+    Ok(builder.build())
 }
 
 #[cfg(test)]
@@ -286,6 +318,10 @@ mod tests {
     use crate::modules::code::repository::service::RepositoryServiceError;
     use async_trait::async_trait;
     use parking_lot::Mutex;
+
+    // -----------------------------------------------------------------------
+    // Test doubles
+    // -----------------------------------------------------------------------
 
     struct FileSnapshot {
         path: String,
@@ -331,61 +367,6 @@ mod tests {
                 })
                 .collect();
         }
-    }
-
-    fn build_test_tar_gz(files: &[(&str, &str)]) -> Vec<u8> {
-        let mut tar_builder = tar::Builder::new(Vec::new());
-        for (path, content) in files {
-            let content_bytes = content.as_bytes();
-            let mut header = tar::Header::new_gnu();
-            header.set_path(path).unwrap();
-            header.set_size(content_bytes.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            tar_builder.append(&header, content_bytes).unwrap();
-        }
-        let tar_bytes = tar_builder.into_inner().unwrap();
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-        encoder.write_all(&tar_bytes).unwrap();
-        encoder.finish().unwrap()
-    }
-
-    #[derive(Clone, PartialEq, prost::Message)]
-    struct TestListBlobsResponse {
-        #[prost(message, repeated, tag = "1")]
-        blobs: Vec<TestBlobChunk>,
-    }
-
-    #[derive(Clone, PartialEq, prost::Message)]
-    struct TestBlobChunk {
-        #[prost(string, tag = "1")]
-        oid: String,
-        #[prost(int64, tag = "2")]
-        size: i64,
-        #[prost(bytes = "vec", tag = "3")]
-        data: Vec<u8>,
-        #[prost(bytes = "vec", tag = "4")]
-        path: Vec<u8>,
-    }
-
-    fn encode_blobs(snapshots: &[FileSnapshot], requested_oids: &[String]) -> Vec<u8> {
-        use prost::Message;
-        let chunks: Vec<TestBlobChunk> = snapshots
-            .iter()
-            .filter(|s| requested_oids.contains(&s.blob_id))
-            .map(|s| TestBlobChunk {
-                oid: s.blob_id.clone(),
-                size: s.content.len() as i64,
-                data: s.content.clone(),
-                path: s.path.as_bytes().to_vec(),
-            })
-            .collect();
-        let resp = TestListBlobsResponse { blobs: chunks };
-        let frame = resp.encode_to_vec();
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&(frame.len() as u32).to_be_bytes());
-        buf.extend_from_slice(&frame);
-        buf
     }
 
     #[async_trait]
@@ -452,6 +433,65 @@ mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Test helpers
+    // -----------------------------------------------------------------------
+
+    fn build_test_tar_gz(files: &[(&str, &str)]) -> Vec<u8> {
+        let mut tar_builder = tar::Builder::new(Vec::new());
+        for (path, content) in files {
+            let content_bytes = content.as_bytes();
+            let mut header = tar::Header::new_gnu();
+            header.set_path(path).unwrap();
+            header.set_size(content_bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar_builder.append(&header, content_bytes).unwrap();
+        }
+        let tar_bytes = tar_builder.into_inner().unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&tar_bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct TestListBlobsResponse {
+        #[prost(message, repeated, tag = "1")]
+        blobs: Vec<TestBlobChunk>,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct TestBlobChunk {
+        #[prost(string, tag = "1")]
+        oid: String,
+        #[prost(int64, tag = "2")]
+        size: i64,
+        #[prost(bytes = "vec", tag = "3")]
+        data: Vec<u8>,
+        #[prost(bytes = "vec", tag = "4")]
+        path: Vec<u8>,
+    }
+
+    fn encode_blobs(snapshots: &[FileSnapshot], requested_oids: &[String]) -> Vec<u8> {
+        use prost::Message;
+        let chunks: Vec<TestBlobChunk> = snapshots
+            .iter()
+            .filter(|s| requested_oids.contains(&s.blob_id))
+            .map(|s| TestBlobChunk {
+                oid: s.blob_id.clone(),
+                size: s.content.len() as i64,
+                data: s.content.clone(),
+                path: s.path.as_bytes().to_vec(),
+            })
+            .collect();
+        let resp = TestListBlobsResponse { blobs: chunks };
+        let frame = resp.encode_to_vec();
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&(frame.len() as u32).to_be_bytes());
+        buf.extend_from_slice(&frame);
+        buf
+    }
+
     fn create_resolver(
         service: Arc<ScriptedRepositoryService>,
     ) -> (tempfile::TempDir, RepositoryResolver) {
@@ -461,6 +501,47 @@ mod tests {
         let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);
         (temp_dir, resolver)
     }
+
+    fn ndjson_line(
+        path: &str,
+        status: &str,
+        old_path: &str,
+        old_blob_id: &str,
+        new_blob_id: &str,
+    ) -> String {
+        format!(
+            r#"{{"path":"{path}","status":"{status}","old_path":"{old_path}","new_mode":33188,"old_mode":33188,"old_blob_id":"{old_blob_id}","new_blob_id":"{new_blob_id}"}}"#
+        )
+    }
+
+    fn ndjson_line_with_modes(path: &str, status: &str, old_mode: u32, new_mode: u32) -> String {
+        format!(
+            r#"{{"path":"{path}","status":"{status}","old_path":"","new_mode":{new_mode},"old_mode":{old_mode},"old_blob_id":"","new_blob_id":"blob1"}}"#
+        )
+    }
+
+    fn byte_stream_from_ndjson(
+        lines: Vec<String>,
+    ) -> crate::modules::code::repository::service::ByteStream {
+        let body = lines.join("\n");
+        let stream: Pin<
+            Box<
+                dyn futures::Stream<
+                        Item = Result<
+                            bytes::Bytes,
+                            crate::modules::code::repository::service::RepositoryServiceError,
+                        >,
+                    > + Send,
+            >,
+        > = Box::pin(futures::stream::once(async move {
+            Ok(bytes::Bytes::from(body))
+        }));
+        stream
+    }
+
+    // -----------------------------------------------------------------------
+    // Resolver tests
+    // -----------------------------------------------------------------------
 
     #[tokio::test]
     async fn resolve_cache_miss_does_full_download() {
@@ -532,42 +613,9 @@ mod tests {
         assert!(path.join("src/main.rs").exists());
     }
 
-    fn ndjson_line(
-        path: &str,
-        status: &str,
-        old_path: &str,
-        old_blob_id: &str,
-        new_blob_id: &str,
-    ) -> String {
-        format!(
-            r#"{{"path":"{path}","status":"{status}","old_path":"{old_path}","new_mode":33188,"old_mode":33188,"old_blob_id":"{old_blob_id}","new_blob_id":"{new_blob_id}"}}"#
-        )
-    }
-
-    fn ndjson_line_with_modes(path: &str, status: &str, old_mode: u32, new_mode: u32) -> String {
-        format!(
-            r#"{{"path":"{path}","status":"{status}","old_path":"","new_mode":{new_mode},"old_mode":{old_mode},"old_blob_id":"","new_blob_id":"blob1"}}"#
-        )
-    }
-
-    fn byte_stream_from_ndjson(
-        lines: Vec<String>,
-    ) -> crate::modules::code::repository::service::ByteStream {
-        let body = lines.join("\n");
-        let stream: Pin<
-            Box<
-                dyn futures::Stream<
-                        Item = Result<
-                            bytes::Bytes,
-                            crate::modules::code::repository::service::RepositoryServiceError,
-                        >,
-                    > + Send,
-            >,
-        > = Box::pin(futures::stream::once(async move {
-            Ok(bytes::Bytes::from(body))
-        }));
-        stream
-    }
+    // -----------------------------------------------------------------------
+    // Changeset tests
+    // -----------------------------------------------------------------------
 
     #[tokio::test]
     async fn deleted_goes_to_deletions() {
