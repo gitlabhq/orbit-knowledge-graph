@@ -14,10 +14,6 @@ const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
 const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
 
-// ---------------------------------------------------------------------------
-// RepositoryResolver
-// ---------------------------------------------------------------------------
-
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
     cache: Arc<dyn RepositoryCache>,
@@ -186,10 +182,6 @@ impl RepositoryResolver {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Changeset computation
-// ---------------------------------------------------------------------------
-
 #[derive(Debug)]
 struct IncrementalChangeset {
     deletions: Vec<String>,
@@ -319,10 +311,6 @@ mod tests {
     use async_trait::async_trait;
     use parking_lot::Mutex;
 
-    // -----------------------------------------------------------------------
-    // Test doubles
-    // -----------------------------------------------------------------------
-
     struct FileSnapshot {
         path: String,
         content: Vec<u8>,
@@ -433,10 +421,6 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Test helpers
-    // -----------------------------------------------------------------------
-
     fn build_test_tar_gz(files: &[(&str, &str)]) -> Vec<u8> {
         let mut tar_builder = tar::Builder::new(Vec::new());
         for (path, content) in files {
@@ -539,10 +523,6 @@ mod tests {
         stream
     }
 
-    // -----------------------------------------------------------------------
-    // Resolver tests
-    // -----------------------------------------------------------------------
-
     #[tokio::test]
     async fn resolve_cache_miss_does_full_download() {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
@@ -612,10 +592,6 @@ mod tests {
 
         assert!(path.join("src/main.rs").exists());
     }
-
-    // -----------------------------------------------------------------------
-    // Changeset tests
-    // -----------------------------------------------------------------------
 
     #[tokio::test]
     async fn deleted_goes_to_deletions() {
