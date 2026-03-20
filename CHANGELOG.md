@@ -1,3 +1,19 @@
+## [0.15.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.14.0...v0.15.0) (2026-03-20)
+
+### Features
+
+* **metrics:** bump labkit-rs, add prometheus support ([4c2162c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4c2162c5358737b5c83b611a2a2f588263c83f7a)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **ci:** auto-retry release jobs on runner_system_failure ([fb82d3a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fb82d3aba7bc9d137a311fa07ab1927c2d6a5335)) by Bohdan Parkhomchuk
+* **query:** add target-side SIP for aggregations ([45a0d51](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/45a0d515a2a662c6d63ba0fe70acb48fe8fde980)) by Michael Usachenko
+* **xtask:** align simulator schema with graph.sql and fix association edge paths ([8bdcfd3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8bdcfd30697050862da548ca97769630b950b2d6)) by Michael Usachenko
+
+### Performance
+
+* **schema:** apply PK compression codecs and reduce index granularity ([07346cd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/07346cd3d5bc359b76d7dd0092c0b8d142b19059)) by Michael Usachenko
+
 ## [0.14.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.13.0...v0.14.0) (2026-03-20)
 
 ### Features
