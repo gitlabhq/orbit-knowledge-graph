@@ -15,14 +15,6 @@ const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
 const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
 
-fn is_valid_git_ref(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 256
-        && !value.contains("..")
-        && !value.contains('\0')
-        && value.bytes().all(|b| b > 0x1f && b != 0x7f)
-}
-
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
     cache: Arc<dyn RepositoryCache>,
@@ -106,10 +98,6 @@ impl RepositoryResolver {
         from_sha: &str,
         to_sha: &str,
     ) -> Result<PathBuf, String> {
-        if !is_valid_git_ref(from_sha) || !is_valid_git_ref(to_sha) {
-            return Err(format!("invalid git ref: from={from_sha}, to={to_sha}"));
-        }
-
         info!(
             project_id,
             branch, from_sha, to_sha, "attempting incremental update"
