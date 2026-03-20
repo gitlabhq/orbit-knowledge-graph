@@ -69,23 +69,23 @@ macro_rules! run_subtests_shared {
             .unwrap_or(8);
 
         let _sem = std::sync::Arc::new(tokio::sync::Semaphore::new(_concurrency));
+        let _ctx: std::sync::Arc<_> = std::sync::Arc::new(Clone::clone($ctx));
         let mut _handles: Vec<(&str, tokio::task::JoinHandle<()>)> = Vec::new();
 
         $(
-            let _permit = _sem.clone().acquire_owned().await.unwrap();
-            let _name: &str = stringify!($test_fn);
-            // SAFETY: ctx outlives all spawned tasks because we join below.
-            // The borrow checker can't see this, so we use a raw pointer.
-            let _ctx_ptr = $ctx as *const _ as usize;
-            let _handle = tokio::task::spawn(async move {
-                let _ctx_ref = unsafe { &*(_ctx_ptr as *const _) };
-                let _t = std::time::Instant::now();
-                eprintln!("--- {}", _name);
-                $test_fn(_ctx_ref).await;
-                eprintln!("    {} {:.2?}", _name, _t.elapsed());
-                drop(_permit);
-            });
-            _handles.push((_name, _handle));
+            {
+                let _sem = std::sync::Arc::clone(&_sem);
+                let _ctx = std::sync::Arc::clone(&_ctx);
+                let _name: &str = stringify!($test_fn);
+                let _handle = tokio::task::spawn(async move {
+                    let _permit = _sem.acquire_owned().await.unwrap();
+                    let _t = std::time::Instant::now();
+                    eprintln!("--- {}", _name);
+                    $test_fn(&_ctx).await;
+                    eprintln!("    {} {:.2?}", _name, _t.elapsed());
+                });
+                _handles.push((_name, _handle));
+            }
         )+
 
         let mut _failed: Vec<String> = Vec::new();
@@ -93,8 +93,11 @@ macro_rules! run_subtests_shared {
             match _handle.await {
                 Ok(()) => {}
                 Err(e) => {
-                    let msg = if let Some(s) = e.into_panic().downcast_ref::<String>() {
+                    let payload = e.into_panic();
+                    let msg = if let Some(s) = payload.downcast_ref::<String>() {
                         s.clone()
+                    } else if let Some(s) = payload.downcast_ref::<&str>() {
+                        s.to_string()
                     } else {
                         "panic (see stderr)".to_string()
                     };
