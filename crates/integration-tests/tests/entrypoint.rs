@@ -11,6 +11,7 @@ mod server {
     pub mod graph_stats;
     pub mod health;
     pub mod hydration;
+    pub mod indexing_progress;
     pub mod redaction;
     pub mod telemetry;
 }

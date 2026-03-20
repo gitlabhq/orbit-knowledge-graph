@@ -16,7 +16,7 @@ enum ResponseFormat {
   RESPONSE_FORMAT_LLM = 1;
 }
 
-// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+// Core service exposing 6 RPCs. Gated behind the :knowledge_graph feature flag
 // in Rails. JWT auth carries user identity and traversal IDs for authorization.
 service KnowledgeGraphService {
   // Returns available tool definitions with parameter schemas.
@@ -41,6 +41,11 @@ service KnowledgeGraphService {
   // Returns entity counts per domain, scoped by traversal_path prefix.
   // Used by admin dashboards to inspect graph coverage.
   rpc GetGraphStats(GetGraphStatsRequest) returns (GetGraphStatsResponse);
+
+  // Returns per-entity indexing progress for a namespace, derived from checkpoint tables.
+  // Used by admin dashboards to monitor indexing pipeline status.
+  rpc GetNamespaceIndexingProgress(GetNamespaceIndexingProgressRequest)
+      returns (GetNamespaceIndexingProgressResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -291,4 +296,35 @@ message GraphStatsDomain {
 message GraphStatsItem {
   string name = 1;
   int64 count = 2;
+}
+
+// ---------------------------------------------------------------------------
+// GetNamespaceIndexingProgress — unary, returns per-entity indexing status
+// ---------------------------------------------------------------------------
+
+// Request for indexing progress of a single namespace.
+message GetNamespaceIndexingProgressRequest {
+  int64 namespace_id = 1;
+}
+
+// Response with per-entity indexing statuses grouped by domain.
+message GetNamespaceIndexingProgressResponse {
+  int64 namespace_id = 1;
+  string status = 2;  // not_found | queued | indexing | completed
+  repeated IndexingProgressDomain domains = 3;
+}
+
+// Indexing progress for a single domain.
+message IndexingProgressDomain {
+  string name = 1;
+  repeated IndexingProgressItem items = 2;
+}
+
+// Indexing status for a single entity type.
+// SDLC entities use: pending | in_progress | completed.
+// Source code entities use: waiting_for_projects | indexing | completed.
+message IndexingProgressItem {
+  string name = 1;
+  string status = 2;
+  int64 count = 3;
 }

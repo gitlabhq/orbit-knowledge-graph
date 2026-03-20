@@ -6,6 +6,7 @@ pub mod constants;
 pub mod graph_stats;
 pub mod grpc;
 pub mod health_check;
+pub mod indexing_progress;
 pub mod pipeline;
 pub mod proto;
 pub mod redaction;
