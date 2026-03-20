@@ -381,6 +381,10 @@ build-proto-gem:
   tags:
     - saas-linux-medium-amd64
   stage: build
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
   before_script: []
   script:
     - BUNDLE_GEMFILE=tools/protogem/Gemfile bundle install --quiet
@@ -439,6 +443,10 @@ semantic-release:
 .docker-release:
   stage: build
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
   services:
     - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
       alias: docker
