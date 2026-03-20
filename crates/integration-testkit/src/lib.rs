@@ -63,28 +63,56 @@ macro_rules! run_subtests {
 #[macro_export]
 macro_rules! run_subtests_shared {
     ($ctx:expr, $($test_fn:path),+ $(,)?) => {{
-        use futures::stream::StreamExt as _;
-
         let _concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(8);
 
-        let _futs = vec![
-            $(
-                Box::pin(async {
-                    let _t = std::time::Instant::now();
-                    eprintln!("--- {}", stringify!($test_fn));
-                    $test_fn($ctx).await;
-                    eprintln!("    {} {:.2?}", stringify!($test_fn), _t.elapsed());
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>,
-            )+
-        ];
+        let _sem = std::sync::Arc::new(tokio::sync::Semaphore::new(_concurrency));
+        let _ctx: std::sync::Arc<_> = std::sync::Arc::new(Clone::clone($ctx));
+        let mut _handles: Vec<(&str, tokio::task::JoinHandle<()>)> = Vec::new();
 
-        futures::stream::iter(_futs)
-            .buffer_unordered(_concurrency)
-            .collect::<Vec<()>>()
-            .await;
+        $(
+            {
+                let _sem = std::sync::Arc::clone(&_sem);
+                let _ctx = std::sync::Arc::clone(&_ctx);
+                let _name: &str = stringify!($test_fn);
+                let _handle = tokio::task::spawn(async move {
+                    let _permit = _sem.acquire_owned().await.unwrap();
+                    let _t = std::time::Instant::now();
+                    eprintln!("--- {}", _name);
+                    $test_fn(&_ctx).await;
+                    eprintln!("    {} {:.2?}", _name, _t.elapsed());
+                });
+                _handles.push((_name, _handle));
+            }
+        )+
+
+        let mut _failed: Vec<String> = Vec::new();
+        for (_name, _handle) in _handles {
+            match _handle.await {
+                Ok(()) => {}
+                Err(e) => {
+                    let payload = e.into_panic();
+                    let msg = if let Some(s) = payload.downcast_ref::<String>() {
+                        s.clone()
+                    } else if let Some(s) = payload.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else {
+                        "panic (see stderr)".to_string()
+                    };
+                    _failed.push(format!("{}: {}", _name, msg));
+                }
+            }
+        }
+
+        if !_failed.is_empty() {
+            panic!(
+                "\n{} subtest(s) failed:\n{}",
+                _failed.len(),
+                _failed.iter().map(|f| format!("  - {f}")).collect::<Vec<_>>().join("\n")
+            );
+        }
     }};
 }
 
