@@ -515,6 +515,11 @@
           "type": "string",
           "description": "Human-readable description of the relationship."
         },
+        "cross_namespace": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, source and target entities may reside in different namespace hierarchies (e.g. cross-project issue closure, group labels on project items). Prevents the query compiler from adding traversal_path equality to JOIN conditions for this edge type."
+        },
         "properties": {
           "type": "object",
           "description": "Property definitions for this edge (for edges with additional data).",

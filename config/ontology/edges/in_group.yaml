@@ -1,6 +1,7 @@
 # config/ontology/edges/in_group.yaml
 
 description: Entity belongs to a group
+cross_namespace: true
 
 variants:
   - from_node: { type: Milestone, id: id }

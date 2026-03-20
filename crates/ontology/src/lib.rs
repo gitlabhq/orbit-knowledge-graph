@@ -32,7 +32,7 @@ pub use entities::{
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
@@ -98,6 +98,8 @@ pub struct Ontology {
     pub(crate) edge_descriptions: BTreeMap<String, String>,
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
     pub(crate) edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
+    /// Edge types where source and target may reside in different namespaces.
+    pub(crate) cross_namespace_edges: BTreeSet<String>,
     pub(crate) etl_settings: EtlSettings,
 }
 
@@ -129,6 +131,7 @@ impl Ontology {
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
             edge_etl_configs: BTreeMap::new(),
+            cross_namespace_edges: BTreeSet::new(),
             etl_settings: EtlSettings {
                 watermark: "_siphon_replicated_at".to_string(),
                 deleted: "_siphon_deleted".to_string(),
@@ -163,6 +166,18 @@ impl Ontology {
     pub fn with_edges(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
         for name in names {
             self.edges.insert(name.into(), vec![]);
+        }
+        self
+    }
+
+    /// Mark edge types as cross-namespace (source and target may be in different namespaces).
+    #[must_use]
+    pub fn with_cross_namespace_edges(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        for name in names {
+            self.cross_namespace_edges.insert(name.into());
         }
         self
     }
@@ -488,6 +503,12 @@ impl Ontology {
     /// Returns `Some` only for edges sourced from join tables.
     pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&EdgeSourceEtlConfig> {
         self.edge_etl_configs.get(relationship_kind)
+    }
+
+    /// Whether source and target of this edge type may reside in different namespaces.
+    #[must_use]
+    pub fn is_cross_namespace(&self, relationship_kind: &str) -> bool {
+        self.cross_namespace_edges.contains(relationship_kind)
     }
 
     /// Check if an edge has ETL config (i.e., is sourced from a join table).
@@ -1473,5 +1494,33 @@ properties:
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
         assert_eq!(entity.sort_key, default_sort_key);
+    }
+
+    #[test]
+    fn cross_namespace_edges_loaded_from_yaml() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert!(ontology.is_cross_namespace("CLOSES"));
+        assert!(ontology.is_cross_namespace("RELATED_TO"));
+        assert!(ontology.is_cross_namespace("CONTAINS"));
+        assert!(ontology.is_cross_namespace("IN_GROUP"));
+        assert!(ontology.is_cross_namespace("HAS_LABEL"));
+        assert!(ontology.is_cross_namespace("IN_MILESTONE"));
+
+        assert!(!ontology.is_cross_namespace("IN_PROJECT"));
+        assert!(!ontology.is_cross_namespace("AUTHORED"));
+        assert!(!ontology.is_cross_namespace("TRIGGERED"));
+        assert!(!ontology.is_cross_namespace("DEFINES"));
+    }
+
+    #[test]
+    fn cross_namespace_builder() {
+        let ontology = Ontology::new()
+            .with_edges(["CLOSES", "IN_PROJECT"])
+            .with_cross_namespace_edges(["CLOSES"]);
+
+        assert!(ontology.is_cross_namespace("CLOSES"));
+        assert!(!ontology.is_cross_namespace("IN_PROJECT"));
+        assert!(!ontology.is_cross_namespace("NONEXISTENT"));
     }
 }

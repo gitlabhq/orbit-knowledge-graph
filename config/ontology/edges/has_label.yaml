@@ -1,6 +1,7 @@
 # config/ontology/edges/has_label.yaml
 
 description: Entity has a label applied
+cross_namespace: true
 
 variants:
   - from_node: { type: WorkItem, id: id }

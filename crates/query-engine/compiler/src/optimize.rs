@@ -844,6 +844,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                same_namespace: false,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()
@@ -912,6 +913,7 @@ mod tests {
                     max_hops: 1,
                     direction: Direction::Outgoing,
                     filters: Default::default(),
+                    same_namespace: false,
                 },
                 InputRelationship {
                     types: vec!["MANAGES".into()],
@@ -921,6 +923,7 @@ mod tests {
                     max_hops: 1,
                     direction: Direction::Outgoing,
                     filters: Default::default(),
+                    same_namespace: false,
                 },
             ],
             aggregations: vec![count_agg("mr", Some("p"))],
@@ -977,6 +980,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                same_namespace: false,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()

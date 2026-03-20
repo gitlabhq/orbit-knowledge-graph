@@ -85,6 +85,8 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             ))
         })?;
 
+        node.has_traversal_path = node_entity.has_traversal_path;
+
         node.redaction_id_column = node_entity
             .redaction
             .as_ref()
@@ -128,6 +130,13 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             filter.value = Some(coerce_value(value, enum_values));
         }
     }
+
+    for rel in &mut input.relationships {
+        let is_wildcard = rel.types.is_empty() || (rel.types.len() == 1 && rel.types[0] == "*");
+        rel.same_namespace =
+            !is_wildcard && rel.types.iter().all(|t| !ontology.is_cross_namespace(t));
+    }
+
     Ok(input)
 }
 

@@ -183,6 +183,9 @@ pub struct InputNode {
     /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
     #[serde(skip)]
     pub redaction_id_column: String,
+    /// Whether this node's table has a `traversal_path` column. Set during normalization.
+    #[serde(skip)]
+    pub has_traversal_path: bool,
 }
 
 impl Default for InputNode {
@@ -197,6 +200,7 @@ impl Default for InputNode {
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
+            has_traversal_path: false,
         }
     }
 }
@@ -309,6 +313,12 @@ pub struct InputRelationship {
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, InputFilter>,
+    /// All specified relationship types connect entities within the same namespace.
+    /// When true, the lowering phase adds `edge.traversal_path = node.traversal_path`
+    /// to join conditions, enabling ClickHouse to use sort-key-aligned joins.
+    /// Set during normalization based on the ontology's `cross_namespace` flag.
+    #[serde(skip)]
+    pub same_namespace: bool,
 }
 
 fn default_hops() -> u32 {

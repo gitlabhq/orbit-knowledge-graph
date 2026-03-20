@@ -1,6 +1,7 @@
 # config/ontology/edges/in_milestone.yaml
 
 description: Entity belongs to a milestone
+cross_namespace: true
 
 variants:
   - from_node: { type: WorkItem, id: id }

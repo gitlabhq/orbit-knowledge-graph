@@ -773,6 +773,8 @@ fn build_joins(
             let alias = format!("hop_e{i}");
             edge_aliases.insert(i, alias.clone());
 
+            let target_tp_eq = rel.same_namespace && target.has_traversal_path;
+
             let union = build_hop_union_all(rel, &alias);
             let (from_col, to_col) = rel.direction.union_columns();
 
@@ -781,10 +783,21 @@ fn build_joins(
                 Expr::col(&alias, from_col),
             );
 
-            let target_cond = Expr::eq(
+            let target_id_cond = Expr::eq(
                 Expr::col(&alias, to_col),
                 Expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
             );
+            let target_cond = if target_tp_eq {
+                Expr::and(
+                    Expr::eq(
+                        Expr::col(&alias, TRAVERSAL_PATH_COLUMN),
+                        Expr::col(&rel.to, TRAVERSAL_PATH_COLUMN),
+                    ),
+                    target_id_cond,
+                )
+            } else {
+                target_id_cond
+            };
 
             let union_join_cond = match (source_joined, target_joined) {
                 (true, true) => Expr::and(source_cond.clone(), target_cond.clone()),
@@ -824,9 +837,13 @@ fn build_joins(
             let alias = format!("e{i}");
             edge_aliases.insert(i, alias.clone());
 
+            let from_node = find_node(nodes, &rel.from)?;
+            let source_tp_eq = rel.same_namespace && from_node.has_traversal_path;
+            let target_tp_eq = rel.same_namespace && target.has_traversal_path;
+
             let (edge, edge_type_cond) = edge_scan(&alias, &type_filter(&rel.types));
-            let source_cond = source_join_cond(&rel.from, &alias, rel.direction);
-            let target_cond = target_join_cond(&alias, &rel.to, rel.direction);
+            let source_cond = source_join_cond(&rel.from, &alias, rel.direction, source_tp_eq);
+            let target_cond = target_join_cond(&alias, &rel.to, rel.direction, target_tp_eq);
 
             let mut edge_join_cond = match (source_joined, target_joined) {
                 (true, true) => Expr::and(source_cond.clone(), target_cond.clone()),
@@ -872,8 +889,11 @@ fn build_joins(
 }
 
 /// Join from source node to edge table.
-fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
-    match dir {
+///
+/// When `tp_eq` is true, adds `node.traversal_path = edge.traversal_path` to align
+/// the join key with the edge table's sort key, enabling sort-merge joins.
+fn source_join_cond(node: &str, edge: &str, dir: Direction, tp_eq: bool) -> Expr {
+    let id_cond = match dir {
         Direction::Outgoing => Expr::eq(
             Expr::col(node, DEFAULT_PRIMARY_KEY),
             Expr::col(edge, "source_id"),
@@ -892,6 +912,17 @@ fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
                 Expr::col(edge, "target_id"),
             ),
         ),
+    };
+    if tp_eq {
+        Expr::and(
+            Expr::eq(
+                Expr::col(node, TRAVERSAL_PATH_COLUMN),
+                Expr::col(edge, TRAVERSAL_PATH_COLUMN),
+            ),
+            id_cond,
+        )
+    } else {
+        id_cond
     }
 }
 
@@ -920,8 +951,12 @@ fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Directi
 }
 
 /// Join from edge table to target node.
-fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
-    match dir {
+///
+/// When `tp_eq` is true, adds `edge.traversal_path = node.traversal_path` to align
+/// the join key with the target table's `(traversal_path, id)` sort key, enabling
+/// sort-merge joins instead of hash joins with full table scans.
+fn target_join_cond(edge: &str, node: &str, dir: Direction, tp_eq: bool) -> Expr {
+    let id_cond = match dir {
         Direction::Outgoing => Expr::eq(
             Expr::col(edge, "target_id"),
             Expr::col(node, DEFAULT_PRIMARY_KEY),
@@ -940,6 +975,17 @@ fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
             ),
         ),
+    };
+    if tp_eq {
+        Expr::and(
+            Expr::eq(
+                Expr::col(edge, TRAVERSAL_PATH_COLUMN),
+                Expr::col(node, TRAVERSAL_PATH_COLUMN),
+            ),
+            id_cond,
+        )
+    } else {
+        id_cond
     }
 }
 
@@ -2030,6 +2076,180 @@ mod tests {
         assert!(
             !table_ref_has_starts_with(&q.from),
             "neighbors join should not contain startsWith"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Traversal path join narrowing
+    // ─────────────────────────────────────────────────────────────────────────
+
+    fn contains_tp_eq(expr: &Expr) -> bool {
+        match expr {
+            Expr::BinaryOp {
+                op: Op::Eq,
+                left,
+                right,
+            } => {
+                matches!(
+                    (left.as_ref(), right.as_ref()),
+                    (
+                        Expr::Column { column: l, .. },
+                        Expr::Column { column: r, .. },
+                    ) if l == TRAVERSAL_PATH_COLUMN && r == TRAVERSAL_PATH_COLUMN
+                )
+            }
+            Expr::BinaryOp { left, right, .. } => contains_tp_eq(left) || contains_tp_eq(right),
+            _ => false,
+        }
+    }
+
+    fn join_on_exprs(table_ref: &TableRef) -> Vec<&Expr> {
+        match table_ref {
+            TableRef::Join {
+                on, left, right, ..
+            } => {
+                let mut exprs = vec![on];
+                exprs.extend(join_on_exprs(left));
+                exprs.extend(join_on_exprs(right));
+                exprs
+            }
+            _ => vec![],
+        }
+    }
+
+    fn tp_ontology() -> Ontology {
+        use ontology::DataType;
+        Ontology::new()
+            .with_nodes(["User", "Project", "MergeRequest"])
+            .with_edges(["IN_PROJECT", "AUTHORED"])
+            .with_fields(
+                "Project",
+                [
+                    ("traversal_path", DataType::String),
+                    ("name", DataType::String),
+                ],
+            )
+            .with_default_columns("Project", ["name"])
+            .with_fields(
+                "MergeRequest",
+                [
+                    ("traversal_path", DataType::String),
+                    ("title", DataType::String),
+                ],
+            )
+            .with_default_columns("MergeRequest", ["title"])
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("state", DataType::String)],
+            )
+            .with_default_columns("User", ["username", "state"])
+    }
+
+    fn validated_input_with(json: &str, ontology: &Ontology) -> Input {
+        let input = parse_input(json).unwrap();
+        validate::Validator::new(ontology)
+            .check_references(&input)
+            .unwrap();
+        normalize::normalize(input, ontology).unwrap()
+    }
+
+    #[test]
+    fn tp_eq_added_for_same_namespace_edge() {
+        let ontology = tp_ontology();
+        let input = validated_input_with(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+            "limit": 10
+        }"#,
+            &ontology,
+        );
+
+        assert!(
+            input.relationships[0].same_namespace,
+            "IN_PROJECT should be same_namespace"
+        );
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let on_exprs = join_on_exprs(&q.from);
+        let has_tp = on_exprs.iter().any(|e| contains_tp_eq(e));
+        assert!(
+            has_tp,
+            "same-namespace edge with traversal_path nodes should have tp equality in JOIN"
+        );
+    }
+
+    #[test]
+    fn tp_eq_absent_when_source_lacks_tp() {
+        let ontology = tp_ontology();
+        let input = validated_input_with(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 10
+        }"#,
+            &ontology,
+        );
+
+        let mr_node = input.nodes.iter().find(|n| n.id == "mr").unwrap();
+        assert!(mr_node.has_traversal_path);
+        let u_node = input.nodes.iter().find(|n| n.id == "u").unwrap();
+        assert!(!u_node.has_traversal_path);
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let on_exprs = join_on_exprs(&q.from);
+        let tp_count = on_exprs.iter().filter(|e| contains_tp_eq(e)).count();
+        assert_eq!(
+            tp_count, 1,
+            "should have tp equality on target (MR) join only, not source (User)"
+        );
+    }
+
+    #[test]
+    fn tp_eq_absent_for_cross_namespace_edge() {
+        let ontology = tp_ontology().with_cross_namespace_edges(["IN_PROJECT"]);
+
+        let input = validated_input_with(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+            "limit": 10
+        }"#,
+            &ontology,
+        );
+
+        assert!(
+            !input.relationships[0].same_namespace,
+            "cross-namespace edge should not be same_namespace"
+        );
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let on_exprs = join_on_exprs(&q.from);
+        let has_tp = on_exprs.iter().any(|e| contains_tp_eq(e));
+        assert!(
+            !has_tp,
+            "cross-namespace edge should NOT have tp equality in JOIN"
         );
     }
 }

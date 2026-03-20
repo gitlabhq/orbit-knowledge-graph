@@ -1,6 +1,7 @@
 # config/ontology/edges/closes.yaml
 
 description: Merge request closes a work item when merged
+cross_namespace: true
 
 variants:
   - from_node: { type: MergeRequest, id: id }

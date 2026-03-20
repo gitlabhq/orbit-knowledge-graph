@@ -12,6 +12,8 @@ pub(crate) struct EdgeYaml {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub cross_namespace: bool,
+    #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
     etl: Option<EdgeEtlYaml>,

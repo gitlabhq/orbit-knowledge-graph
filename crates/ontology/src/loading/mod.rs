@@ -196,6 +196,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
+        if edge_def.cross_namespace {
+            ontology.cross_namespace_edges.insert(edge_name.clone());
+        }
+
         if let Some(etl_config) = edge_def.into_etl_config(&etl_settings)? {
             ontology
                 .edge_etl_configs

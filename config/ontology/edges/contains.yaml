@@ -1,6 +1,7 @@
 # config/ontology/edges/contains.yaml
 
 description: Container relationship for core entities (hierarchy/ownership)
+cross_namespace: true
 
 variants:
   - from_node: { type: Group, id: id }
