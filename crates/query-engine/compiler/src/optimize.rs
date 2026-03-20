@@ -860,6 +860,71 @@ mod tests {
     }
 
     #[test]
+    fn target_sip_deduplicates_same_alias_across_relationships() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["CONTAINS".into()],
+                    from: "p".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+                InputRelationship {
+                    types: vec!["MANAGES".into()],
+                    from: "p".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+            ],
+            aggregations: vec![count_agg("mr", Some("p"))],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("mr", "id"), "mr_count"),
+            ],
+            from: TableRef::scan("gl_edge", "e0"),
+            where_clause: Some(eq_filter("mr", "state", "merged")),
+            group_by: vec![Expr::col("p", "name")],
+            ..Default::default()
+        };
+
+        apply_target_sip_prefilter(&mut q, &input);
+
+        assert_eq!(
+            q.ctes.len(),
+            1,
+            "should create exactly one CTE despite two relationships targeting 'mr'"
+        );
+        assert_eq!(q.ctes[0].name, "_target_mr_ids");
+    }
+
+    #[test]
     fn target_sip_skips_when_no_target_filters() {
         use crate::input::{Direction, InputNode, InputRelationship};
 
