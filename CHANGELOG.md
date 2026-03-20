@@ -1,3 +1,31 @@
+## [0.13.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.12.0...v0.13.0) (2026-03-20)
+
+### Features
+
+* **config:** add configurable log level ([dc015f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dc015f95c30a5d81452de90311c5a72a1bc6c74c)) by Bohdan Parkhomchuk
+* **pipeline:** hoist up query pipeline as its own crate + decouple formatting ([7c8ee23](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7c8ee23a000fbeec3973b19ac20f55935b0c18d4)) by Michael Usachenko
+* **query-engine:** add query observability, tune ch client settings ([95dbd84](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/95dbd8499cec55dcb8c84c218f5ccc14966b2750)) by Michael Usachenko
+* **server:** add GetGraphStats gRPC endpoint ([693ae7a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/693ae7ad9582b142e55b0dc14e61ae829ddad5d2)) by Jean-Gabriel Doyon
+* **tooling:** add ast-grep skill for structural code search and rewrite ([cd21bee](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cd21beedce7b44f5a953c7067c5163a30c7f1822)) by Michael Usachenko
+
+### Fixes
+
+* **indexer:** add `_deleted` column to code indexing Arrow batches ([edead02](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/edead02fe289ce7ff51adf5de79bc882b4060411)) by Jean-Gabriel Doyon
+* **lint:** exclude .opencode, .sessions, and .dev folders from Vale scanning ([a13c70a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a13c70a6f1cfe007a50bc4f1cd3c985f35317fb8)) by Michael Usachenko
+* **query-engine:** bound all unbounded query DSL fields ([2e8d00e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2e8d00e576f70dca33f6cca7c98caafc73495abd)) by Michael Usachenko
+* **test:** update telemetry integration test for pipeline module rename ([d118aa3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d118aa331d6489e81b264dee96a467140f90d997)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **schema:** use LowCardinality and set index on gl_edge ([4483068](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/448306818170c03689df1a4397e849de62968269)) by Michael Usachenko
+
+### Other
+
+* **deps:** update rust crate cliclack to 0.5.0 ([091de67](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/091de67dcad6362c4b7cc71616350902f1f7e77f)) by GitLab Renovate Bot
+* **deps:** update rust crate tar to v0.4.45 ([5fb164d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5fb164d1554f8e47d08cdd8beed018ad8b79b4ad)) by GitLab Renovate Bot
+* **observability:** migrate to official labkit-rs ([2c8e02b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2c8e02b12eb6e45a96ff2b26b88311956f2da41a)) by Bohdan Parkhomchuk
+* **query-engine:** restructure into parent crate with subcrates ([dd7ad8a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd7ad8afe17a7938fe9206b3dd74f76a08140480)) by Michael Usachenko
+
 ## [0.12.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.11.0...v0.12.0) (2026-03-18)
 
 ### Features
