@@ -20,6 +20,9 @@ ignore = [
     "RUSTSEC-2023-0071",
     # paste unmaintained - transitive dep from clickhouse crate
     "RUSTSEC-2024-0436",
+    # rustls-webpki 0.102.8 - transitive dep from async-nats, no patch for 0.102.x
+    # Remove when async-nats drops rustls-webpki 0.102.x (check: cargo tree -i rustls-webpki@0.102.8)
+    "RUSTSEC-2026-0049",
 ]
 
 [licenses]
