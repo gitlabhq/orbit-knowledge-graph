@@ -27,7 +27,7 @@ use crate::input::{Input, QueryType};
 use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 
-const SIP_CTE_NAME: &str = "_root_ids";
+const ROOT_SIP_CTE: &str = "_root_ids";
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
@@ -35,6 +35,7 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
         Node::Query(q) => {
             apply_sip_prefilter(q, input, ctx);
             if input.query_type == QueryType::Aggregation {
+                apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
             }
         }
@@ -81,7 +82,6 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         Some(t) => t.clone(),
         None => return,
     };
-
     // Build optional keyset predicate from cursor + security context
     let keyset_predicate = input.cursor.as_ref().map(|cursor| {
         if ctx.traversal_paths.len() == 1 {
@@ -129,7 +129,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         where_clause: cte_where,
         ..Default::default()
     };
-    q.ctes.push(Cte::new(SIP_CTE_NAME, cte_query));
+    q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
 
     // Add keyset predicate to the main query WHERE (for direct PK pushdown)
     if let Some(pred) = keyset_predicate {
@@ -141,12 +141,99 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     // arms (multi-hop), injects into each arm's WHERE directly.
     if let Some(first_rel) = input.relationships.first() {
         let (start_col, _) = first_rel.direction.edge_columns();
-        inject_sip_into_from(&mut q.from, &mut q.where_clause, start_col);
+        inject_sip_into_from(&mut q.from, &mut q.where_clause, start_col, ROOT_SIP_CTE);
     }
 
     // Keyset replaces OFFSET
     if has_cursor {
         q.offset = None;
+    }
+}
+
+/// Target-side SIP for aggregation queries.
+///
+/// When an aggregation target node has filters, materializes the matching
+/// target IDs in a CTE and pushes them into the edge scan from the target
+/// side. This narrows the edge scan by the selectivity of the target filters,
+/// which is the common case for aggregations (e.g. "count merged MRs per project"
+/// where the target MR has `state = 'merged'`).
+///
+/// Target conditions are intentionally kept in the main WHERE clause so that
+/// `fold_filters_into_aggregates` can still convert aggregates to `-If`
+/// combinators (e.g. `countIf`). The two optimizations serve different layers:
+/// SIP narrows the edge scan (I/O), while `-If` gives ClickHouse bounded
+/// aggregation memory per group regardless of data volume.
+fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
+    if input.relationships.is_empty() {
+        return;
+    }
+
+    let target_aliases: HashSet<&str> = input
+        .aggregations
+        .iter()
+        .filter_map(|agg| agg.target.as_deref())
+        .collect();
+
+    let mut injected: HashSet<String> = HashSet::new();
+
+    for rel in &input.relationships {
+        let target_node = match input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.to && target_aliases.contains(n.id.as_str()))
+        {
+            Some(n) => n,
+            None => continue,
+        };
+
+        let target_table = match &target_node.table {
+            Some(t) => t.clone(),
+            None => continue,
+        };
+
+        let target_alias = &target_node.id;
+
+        if !injected.insert(target_alias.clone()) {
+            continue;
+        }
+
+        // Clone target-only conjuncts into the CTE; leave originals in WHERE
+        // so fold_filters can still convert them to -If combinators.
+        let target_only_conds: Vec<Expr> = q
+            .where_clause
+            .as_ref()
+            .map(|w| {
+                let conjuncts = flatten_and(w.clone());
+                conjuncts
+                    .into_iter()
+                    .filter(|c| {
+                        let aliases = collect_column_aliases(c);
+                        !aliases.is_empty() && aliases.iter().all(|a| a == target_alias)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if target_only_conds.is_empty() {
+            continue;
+        }
+
+        let cte_name = format!("_target_{target_alias}_ids");
+        let cte_where = Expr::and_all(target_only_conds.into_iter().map(Some));
+
+        let cte_query = Query {
+            select: vec![SelectExpr::new(
+                Expr::col(target_alias, DEFAULT_PRIMARY_KEY),
+                DEFAULT_PRIMARY_KEY,
+            )],
+            from: TableRef::scan(&target_table, target_alias),
+            where_clause: cte_where,
+            ..Default::default()
+        };
+        q.ctes.push(Cte::new(&cte_name, cte_query));
+
+        let (_, end_col) = rel.direction.edge_columns();
+        inject_sip_into_from(&mut q.from, &mut q.where_clause, end_col, &cte_name);
     }
 }
 
@@ -172,45 +259,55 @@ fn build_keyset_expr(alias: &str, tp: &str, cursor_id: i64) -> Expr {
     Expr::or(tp_gt, tp_eq_and_id_gt)
 }
 
-/// Walk the FROM tree and inject `{edge_alias}.{start_col} IN (SELECT id FROM _root_ids)`
-/// into edge table scans that connect directly to the root node.
+/// Walk the FROM tree and inject `{edge_alias}.{edge_col} IN (SELECT <id_col> FROM <cte>)`
+/// into edge table scans.
 ///
 /// For direct scans and single-hop joins, recurses the full tree.
 /// For Union arms (multi-hop), only injects into the first (leftmost) edge scan
 /// in each arm -- intermediate edge scans (e2, e3, ...) connect to hop results,
 /// not to root node IDs.
-fn inject_sip_into_from(table_ref: &mut TableRef, outer_where: &mut Option<Expr>, start_col: &str) {
+fn inject_sip_into_from(
+    table_ref: &mut TableRef,
+    outer_where: &mut Option<Expr>,
+    edge_col: &str,
+    cte_name: &str,
+) {
     match table_ref {
         TableRef::Scan { table, alias, .. } if is_edge_table(table) => {
-            let sip_filter = make_sip_filter(alias, start_col);
+            let sip_filter = make_sip_filter(alias, edge_col, cte_name);
             *outer_where = Expr::and_all([outer_where.take(), Some(sip_filter)]);
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            inject_sip_into_from(left, outer_where, start_col);
-            inject_sip_into_from(right, outer_where, start_col);
+            inject_sip_into_from(left, outer_where, edge_col, cte_name);
+            inject_sip_into_from(right, outer_where, edge_col, cte_name);
         }
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                inject_sip_first_edge(&mut arm.from, &mut arm.where_clause, start_col);
+                inject_sip_first_edge(&mut arm.from, &mut arm.where_clause, edge_col, cte_name);
             }
         }
         TableRef::Subquery { query, .. } => {
-            inject_sip_into_from(&mut query.from, &mut query.where_clause, start_col);
+            inject_sip_into_from(&mut query.from, &mut query.where_clause, edge_col, cte_name);
         }
     }
 }
 
 /// Inject SIP into only the first (leftmost) edge scan in a FROM tree.
 /// Used for multi-hop UNION ALL arms where only `e1` connects to root node IDs.
-fn inject_sip_first_edge(from: &mut TableRef, where_clause: &mut Option<Expr>, start_col: &str) {
+fn inject_sip_first_edge(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    edge_col: &str,
+    cte_name: &str,
+) {
     match from {
         TableRef::Scan { table, alias, .. } if is_edge_table(table) => {
-            let sip_filter = make_sip_filter(alias, start_col);
+            let sip_filter = make_sip_filter(alias, edge_col, cte_name);
             *where_clause = Expr::and_all([where_clause.take(), Some(sip_filter)]);
         }
         TableRef::Join { left, .. } => {
-            inject_sip_first_edge(left, where_clause, start_col);
+            inject_sip_first_edge(left, where_clause, edge_col, cte_name);
         }
         _ => {}
     }
@@ -220,10 +317,10 @@ fn is_edge_table(table: &str) -> bool {
     table == "gl_edge" || table.starts_with("gl_edge")
 }
 
-fn make_sip_filter(alias: &str, start_col: &str) -> Expr {
+fn make_sip_filter(alias: &str, edge_col: &str, cte_name: &str) -> Expr {
     Expr::InSubquery {
-        expr: Box::new(Expr::col(alias, start_col)),
-        cte_name: SIP_CTE_NAME.to_string(),
+        expr: Box::new(Expr::col(alias, edge_col)),
+        cte_name: cte_name.to_string(),
         column: DEFAULT_PRIMARY_KEY.to_string(),
     }
 }
@@ -439,6 +536,16 @@ mod tests {
                 value: serde_json::Value::String(val.to_string()),
             },
         )
+    }
+
+    fn has_in_subquery(expr: &Expr, expected_cte: &str) -> bool {
+        match expr {
+            Expr::InSubquery { cte_name, .. } => cte_name == expected_cte,
+            Expr::BinaryOp { left, right, .. } => {
+                has_in_subquery(left, expected_cte) || has_in_subquery(right, expected_cte)
+            }
+            _ => false,
+        }
     }
 
     fn agg_input(aggs: Vec<InputAggregation>) -> Input {
@@ -683,5 +790,188 @@ mod tests {
             other => panic!("expected COUNT, got {other:?}"),
         }
         assert!(q.where_clause.is_some());
+    }
+
+    #[test]
+    fn target_sip_injects_cte_for_aggregation_target_with_filters() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "p".into(),
+                to: "mr".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![count_agg("mr", Some("p"))],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("mr", "id"), "mr_count"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_project", "p"),
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_edge", "e0"),
+                    TableRef::scan("gl_merge_request", "mr"),
+                    Expr::eq(Expr::col("e0", "target_id"), Expr::col("mr", "id")),
+                ),
+                Expr::eq(Expr::col("p", "id"), Expr::col("e0", "source_id")),
+            ),
+            where_clause: Some(eq_filter("mr", "state", "merged")),
+            group_by: vec![Expr::col("p", "name")],
+            ..Default::default()
+        };
+
+        apply_target_sip_prefilter(&mut q, &input);
+
+        // Should have created a _target_mr_ids CTE
+        assert_eq!(q.ctes.len(), 1, "expected one CTE for target SIP");
+        assert_eq!(q.ctes[0].name, "_target_mr_ids");
+
+        // The WHERE should now include an IN subquery referencing the CTE.
+        assert!(
+            has_in_subquery(q.where_clause.as_ref().unwrap(), "_target_mr_ids"),
+            "WHERE should contain InSubquery referencing _target_mr_ids"
+        );
+    }
+
+    #[test]
+    fn target_sip_deduplicates_same_alias_across_relationships() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["CONTAINS".into()],
+                    from: "p".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+                InputRelationship {
+                    types: vec!["MANAGES".into()],
+                    from: "p".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+            ],
+            aggregations: vec![count_agg("mr", Some("p"))],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("mr", "id"), "mr_count"),
+            ],
+            from: TableRef::scan("gl_edge", "e0"),
+            where_clause: Some(eq_filter("mr", "state", "merged")),
+            group_by: vec![Expr::col("p", "name")],
+            ..Default::default()
+        };
+
+        apply_target_sip_prefilter(&mut q, &input);
+
+        assert_eq!(
+            q.ctes.len(),
+            1,
+            "should create exactly one CTE despite two relationships targeting 'mr'"
+        );
+        assert_eq!(q.ctes[0].name, "_target_mr_ids");
+    }
+
+    #[test]
+    fn target_sip_skips_when_no_target_filters() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    // No filters on the target
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "p".into(),
+                to: "mr".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![count_agg("mr", Some("p"))],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("mr", "id"), "mr_count"),
+            ],
+            from: TableRef::scan("gl_edge", "e0"),
+            ..Default::default()
+        };
+
+        apply_target_sip_prefilter(&mut q, &input);
+
+        assert!(
+            q.ctes.is_empty(),
+            "no CTE should be created without target filters"
+        );
     }
 }
