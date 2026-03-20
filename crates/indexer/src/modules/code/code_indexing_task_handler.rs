@@ -71,7 +71,7 @@ impl Handler for CodeIndexingTaskHandler {
                 ))
             })?;
 
-        info!(
+        debug!(
             task_id = request.task_id,
             project_id = request.project_id,
             branch = ?request.branch,
