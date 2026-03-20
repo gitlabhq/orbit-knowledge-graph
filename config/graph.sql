@@ -44,7 +44,13 @@ CREATE TABLE IF NOT EXISTS gl_user (
     created_at Nullable(DateTime64(6, 'UTC')),
     updated_at Nullable(DateTime64(6, 'UTC')),
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(10) GRANULARITY 2,
+    INDEX idx_user_type user_type TYPE set(20) GRANULARITY 2,
+    INDEX idx_private_profile private_profile TYPE minmax GRANULARITY 1,
+    INDEX idx_is_admin is_admin TYPE minmax GRANULARITY 1,
+    INDEX idx_is_auditor is_auditor TYPE minmax GRANULARITY 1,
+    INDEX idx_is_external is_external TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -77,7 +83,8 @@ CREATE TABLE IF NOT EXISTS gl_project (
     last_activity_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String default '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_archived archived TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -97,7 +104,10 @@ CREATE TABLE IF NOT EXISTS gl_note (
     updated_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_noteable_type noteable_type TYPE set(10) GRANULARITY 2,
+    INDEX idx_internal internal TYPE minmax GRANULARITY 1,
+    INDEX idx_confidential confidential TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -120,7 +130,11 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     prepared_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(10) GRANULARITY 2,
+    INDEX idx_draft draft TYPE minmax GRANULARITY 1,
+    INDEX idx_squash squash TYPE minmax GRANULARITY 1,
+    INDEX idx_discussion_locked discussion_locked TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -156,7 +170,12 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     binary Nullable(Bool),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_too_large too_large TYPE minmax GRANULARITY 1,
+    INDEX idx_new_file new_file TYPE minmax GRANULARITY 1,
+    INDEX idx_renamed_file renamed_file TYPE minmax GRANULARITY 1,
+    INDEX idx_deleted_file deleted_file TYPE minmax GRANULARITY 1,
+    INDEX idx_binary binary TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -208,7 +227,10 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     closed_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(10) GRANULARITY 2,
+    INDEX idx_work_item_type work_item_type TYPE set(10) GRANULARITY 2,
+    INDEX idx_confidential confidential TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -249,7 +271,9 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     finished_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_status status TYPE set(20) GRANULARITY 2,
+    INDEX idx_tag tag TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -286,7 +310,10 @@ CREATE TABLE IF NOT EXISTS gl_job (
     queued_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_status status TYPE set(20) GRANULARITY 2,
+    INDEX idx_allow_failure allow_failure TYPE minmax GRANULARITY 1,
+    INDEX idx_retried retried TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -310,7 +337,12 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     dismissed_at Nullable(DateTime64(6, 'UTC')),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(10) GRANULARITY 2,
+    INDEX idx_severity severity TYPE set(10) GRANULARITY 2,
+    INDEX idx_report_type report_type TYPE set(20) GRANULARITY 2,
+    INDEX idx_resolved_on_default_branch resolved_on_default_branch TYPE minmax GRANULARITY 1,
+    INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -355,7 +387,8 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     overridden_uuid Nullable(String),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_deduplicated deduplicated TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -369,7 +402,8 @@ CREATE TABLE IF NOT EXISTS gl_security_scan (
     updated_at DateTime64(6, 'UTC') DEFAULT now(),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_latest latest TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
@@ -404,7 +438,9 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     is_default Nullable(Bool),
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
-    _deleted Bool DEFAULT false
+    _deleted Bool DEFAULT false,
+    INDEX idx_protected protected TYPE minmax GRANULARITY 1,
+    INDEX idx_is_default is_default TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
