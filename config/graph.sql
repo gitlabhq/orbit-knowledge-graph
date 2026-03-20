@@ -537,7 +537,7 @@ SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_clean
 
 CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(ZSTD(1)),
     branch String CODEC(ZSTD(1)),
     last_task_id Int64 CODEC(ZSTD(1)),
     last_commit Nullable(String) CODEC(ZSTD(1)),
@@ -547,4 +547,4 @@ CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
     PROJECTION project_lookup (SELECT * ORDER BY project_id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
