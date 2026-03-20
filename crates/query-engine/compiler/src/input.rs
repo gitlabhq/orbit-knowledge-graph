@@ -133,11 +133,12 @@ pub struct InputRange {
     pub end: u32,
 }
 
-/// Keyset pagination cursor. Encodes the last seen `(traversal_path, id)` position.
+/// Keyset pagination cursor. Encodes the last seen row's `id`.
+/// Combined with traversal paths from the security context to build the
+/// decomposed keyset predicate `(tp > x) OR (tp = x AND id > cursor_id)`.
 /// Mutually exclusive with `range`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputCursor {
-    pub traversal_path: String,
     pub id: i64,
 }
 

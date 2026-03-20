@@ -24,16 +24,17 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
 use crate::input::{Input, QueryType};
+use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 
 const KEYSET_CTE_NAME: &str = "_keyset_ids";
 
 /// Apply all optimization passes to the AST.
-pub fn optimize(node: &mut Node, input: &Input) {
+pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
             if input.cursor.is_some() {
-                apply_keyset_pagination(q, input);
+                apply_keyset_pagination(q, input, ctx);
             }
             if input.query_type == QueryType::Aggregation {
                 fold_filters_into_aggregates(q, input);
@@ -52,9 +53,9 @@ pub fn optimize(node: &mut Node, input: &Input) {
 /// Emits decomposed form `(tp > x) OR (tp = x AND id > y)` because
 /// ClickHouse does NOT push tuple comparisons `(a, b) > (x, y)` into the
 /// primary key index.
-fn apply_keyset_pagination(q: &mut Query, input: &Input) {
-    let cursor = match &input.cursor {
-        Some(c) => c,
+fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) {
+    let cursor_id = match &input.cursor {
+        Some(c) => c.id,
         None => return,
     };
 
@@ -69,26 +70,26 @@ fn apply_keyset_pagination(q: &mut Query, input: &Input) {
         None => return,
     };
 
-    // Build the decomposed keyset predicate:
-    //   (traversal_path > :cursor_tp)
-    //   OR (traversal_path = :cursor_tp AND id > :cursor_id)
-    let tp_gt = Expr::binary(
-        Op::Gt,
-        Expr::col(root_alias, TRAVERSAL_PATH_COLUMN),
-        Expr::param(ChType::String, cursor.traversal_path.clone()),
-    );
-    let tp_eq_and_id_gt = Expr::and(
-        Expr::eq(
-            Expr::col(root_alias, TRAVERSAL_PATH_COLUMN),
-            Expr::param(ChType::String, cursor.traversal_path.clone()),
-        ),
-        Expr::binary(
-            Op::Gt,
-            Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
-            Expr::param(ChType::Int64, cursor.id),
-        ),
-    );
-    let keyset_predicate = Expr::or(tp_gt, tp_eq_and_id_gt);
+    // Build the decomposed keyset predicate using the security context's
+    // traversal paths. For each path, emit:
+    //   (traversal_path > :path) OR (traversal_path = :path AND id > :cursor_id)
+    //
+    // ClickHouse does NOT push tuple (a, b) > (x, y) into the PK index.
+    // The decomposed form enables full PK pushdown on (traversal_path, id).
+    let keyset_predicate = if ctx.traversal_paths.len() == 1 {
+        let tp = &ctx.traversal_paths[0];
+        build_keyset_expr(root_alias, tp, cursor_id)
+    } else {
+        // Multiple paths: OR together a keyset predicate for each
+        match Expr::or_all(
+            ctx.traversal_paths
+                .iter()
+                .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor_id))),
+        ) {
+            Some(expr) => expr,
+            None => return,
+        }
+    };
 
     // Build the CTE: SELECT id FROM root_table WHERE <keyset_predicate>
     // The security pass will inject startsWith(traversal_path, ...) into the CTE automatically.
@@ -130,6 +131,28 @@ fn apply_keyset_pagination(q: &mut Query, input: &Input) {
 
     // Remove OFFSET — keyset replaces it
     q.offset = None;
+}
+
+/// Build a decomposed keyset predicate for one traversal path:
+///   (traversal_path > :tp) OR (traversal_path = :tp AND id > :cursor_id)
+fn build_keyset_expr(alias: &str, tp: &str, cursor_id: i64) -> Expr {
+    let tp_gt = Expr::binary(
+        Op::Gt,
+        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+        Expr::param(ChType::String, tp.to_string()),
+    );
+    let tp_eq_and_id_gt = Expr::and(
+        Expr::eq(
+            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+            Expr::param(ChType::String, tp.to_string()),
+        ),
+        Expr::binary(
+            Op::Gt,
+            Expr::col(alias, DEFAULT_PRIMARY_KEY),
+            Expr::param(ChType::Int64, cursor_id),
+        ),
+    );
+    Expr::or(tp_gt, tp_eq_and_id_gt)
 }
 
 /// Collect edge table aliases from the FROM clause.
@@ -487,7 +510,8 @@ mod tests {
         let original = match &node {
             Node::Query(q) => q.where_clause.clone(),
         };
-        optimize(&mut node, &input);
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        optimize(&mut node, &input, &ctx);
 
         match &node {
             Node::Query(q) => assert_eq!(q.where_clause, original),
