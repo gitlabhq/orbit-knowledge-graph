@@ -625,6 +625,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rename_file_rejects_path_traversal_in_old_path() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache
+            .rename_file(42, "main", "../../../etc/passwd", "safe.rs")
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[tokio::test]
+    async fn rename_file_rejects_path_traversal_in_new_path() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache
+            .rename_file(42, "main", "safe.rs", "../../../etc/passwd")
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[tokio::test]
+    async fn rename_file_rejects_absolute_old_path() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache
+            .rename_file(42, "main", "/etc/passwd", "safe.rs")
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[tokio::test]
+    async fn rename_file_rejects_absolute_new_path() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache
+            .rename_file(42, "main", "safe.rs", "/etc/passwd")
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[tokio::test]
     async fn write_file_allows_sibling_path_within_base() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();

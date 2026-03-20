@@ -9,6 +9,7 @@ use super::cache::RepositoryCache;
 use super::changed_path_stream::{ChangeStatus, ChangedPath, ChangedPathStream};
 use super::service::RepositoryService;
 use crate::handler::HandlerError;
+use crate::modules::code::metrics::CodeMetrics;
 
 const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
@@ -17,16 +18,19 @@ const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
     cache: Arc<dyn RepositoryCache>,
+    metrics: CodeMetrics,
 }
 
 impl RepositoryResolver {
     pub fn new(
         repository_service: Arc<dyn RepositoryService>,
         cache: Arc<dyn RepositoryCache>,
+        metrics: CodeMetrics,
     ) -> Self {
         Self {
             repository_service,
             cache,
+            metrics,
         }
     }
 
@@ -45,10 +49,12 @@ impl RepositoryResolver {
             .map_err(|e| HandlerError::Processing(format!("cache lookup failed: {e}")))?;
 
         let Some(cached) = cached else {
+            self.metrics.record_resolution_strategy("full_download");
             return self.full_download(project_id, branch, ref_name).await;
         };
 
         if cached.commit == ref_name {
+            self.metrics.record_resolution_strategy("cache_hit");
             info!(
                 project_id,
                 branch,
@@ -62,8 +68,13 @@ impl RepositoryResolver {
             .incremental_update(project_id, branch, &cached.commit, ref_name)
             .await
         {
-            Ok(path) => Ok(path),
+            Ok(path) => {
+                self.metrics.record_resolution_strategy("incremental");
+                Ok(path)
+            }
             Err(reason) => {
+                self.metrics
+                    .record_resolution_strategy("full_download_fallback");
                 warn!(project_id, branch, reason, "falling back to full download");
                 self.full_download(project_id, branch, ref_name).await
             }
@@ -482,7 +493,11 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let cache: Arc<dyn RepositoryCache> =
             Arc::new(LocalRepositoryCache::new(temp_dir.path().to_path_buf()));
-        let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);
+        let resolver = RepositoryResolver::new(
+            service as Arc<dyn RepositoryService>,
+            cache,
+            CodeMetrics::default(),
+        );
         (temp_dir, resolver)
     }
 

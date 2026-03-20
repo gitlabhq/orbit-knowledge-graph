@@ -85,6 +85,7 @@ The indexer emits metrics under five OpenTelemetry meters: `etl_engine` for the 
 | `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error) | Total code indexing tasks processed |
 | `indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
 | `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
+| `indexer.code.repository.resolution` | Counter | count | `strategy` (cache_hit, incremental, full_download, full_download_fallback) | Repository resolution strategy used |
 | `indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
 | `indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
 | `indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |

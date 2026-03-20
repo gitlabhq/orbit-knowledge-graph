@@ -271,7 +271,7 @@ mod tests {
             let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
             let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> =
                 Arc::new(LocalRepositoryCache::new(temp_dir.path().to_path_buf()));
-            let resolver = RepositoryResolver::new(Arc::clone(&mock_repo), cache);
+            let resolver = RepositoryResolver::new(Arc::clone(&mock_repo), cache, metrics.clone());
 
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,

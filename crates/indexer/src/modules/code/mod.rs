@@ -75,7 +75,7 @@ pub fn register_handlers(
 
     let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::default());
 
-    let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
+    let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 
     let pipeline = Arc::new(indexing_pipeline::CodeIndexingPipeline::new(
         resolver,

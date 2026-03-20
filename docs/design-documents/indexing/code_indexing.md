@@ -111,7 +111,7 @@ graph LR
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the datalake and the property graph |
-| Rails internal API | Proxies repository archive downloads and project info lookups |
+| Rails internal API | Proxies repository operations: project info lookups, archive downloads, changed path diffs (NDJSON), and blob streaming (length-delimited protobuf) |
 
 For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 [SDLC indexing design document](sdlc_indexing.md).
@@ -187,7 +187,7 @@ Example NATS KV:
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 1 hour (estimated based on the amount of resources)
 
-After acquiring the lock, the service downloads the repository archive from the Rails internal API.
+After acquiring the lock, the service resolves the repository using a three-tier strategy: if the branch is already cached at the same commit, the cached files are reused directly. If the cache exists at an older commit, an incremental update fetches only the changed paths and their blob content from the Rails internal API, applying renames, deletions, and writes to the cache. If no cache exists or the incremental update fails (e.g. due to a force push), the service falls back to downloading the full repository archive.
 
 #### Transform (call graph construction)
 
