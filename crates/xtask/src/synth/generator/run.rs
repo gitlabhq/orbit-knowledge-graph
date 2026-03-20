@@ -11,7 +11,7 @@ use super::parquet_writer::{ParquetWriter, StreamingEdgeWriter};
 use super::traversal::{EntityContext, EntityRegistry};
 use crate::synth::arrow_schema::ToArrowSchema;
 use crate::synth::config::{Config, EdgeRatio};
-use crate::synth::constants::ASSOCIATION_TRAVERSAL_PATH;
+
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use ontology::{NodeEntity, Ontology};
@@ -20,6 +20,25 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+
+// ── Helpers ───────────────────────────────────────────────────────────
+
+/// Pick the more specific traversal_path between source and target.
+///
+/// In production, edges are scoped to the namespace where the resource lives.
+/// For association edges between a global entity (e.g. User at `1/`) and a
+/// scoped entity (e.g. MergeRequest at `1/7/30/81/`), the scoped entity's
+/// path wins. We use path length as a proxy for specificity since deeper
+/// namespaces always produce longer path strings.
+fn most_specific_path(registry: &EntityRegistry, source_id: i64, target_id: i64) -> String {
+    let src = registry
+        .get_path(source_id)
+        .expect("missing path for source");
+    let tgt = registry
+        .get_path(target_id)
+        .expect("missing path for target");
+    if tgt.len() >= src.len() { tgt } else { src }.to_string()
+}
 
 // ── Public types ──────────────────────────────────────────────────────
 
@@ -547,7 +566,7 @@ impl Generator {
                     if is_parent_type {
                         registry.add(registry_key, EntityContext::new(entity_id, traversal_path));
                     } else {
-                        registry.add_id_only(registry_key, entity_id);
+                        registry.add_id_only(registry_key, entity_id, &traversal_path);
                     }
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
@@ -627,8 +646,9 @@ impl Generator {
                         IterationDirection::Source => (primary_id, secondary_id),
                     };
 
+                    let path = most_specific_path(registry, source_id, target_id);
                     edges.push(EdgeRecord {
-                        traversal_path: self.intern(ASSOCIATION_TRAVERSAL_PATH),
+                        traversal_path: self.intern(&path),
                         relationship_kind: rel_kind.clone(),
                         source: source_id,
                         source_kind: src_kind.clone(),
@@ -727,7 +747,7 @@ impl Generator {
                     if is_parent_type {
                         registry.add(registry_key, EntityContext::new(entity_id, traversal_path));
                     } else {
-                        registry.add_id_only(registry_key, entity_id);
+                        registry.add_id_only(registry_key, entity_id, &traversal_path);
                     }
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
@@ -806,8 +826,9 @@ impl Generator {
                         IterationDirection::Source => (primary_id, secondary_id),
                     };
 
+                    let path = most_specific_path(registry, source_id, target_id);
                     edge_writer.push(EdgeRecord {
-                        traversal_path: self.intern(ASSOCIATION_TRAVERSAL_PATH),
+                        traversal_path: self.intern(&path),
                         relationship_kind: rel_kind.clone(),
                         source: source_id,
                         source_kind: src_kind.clone(),
@@ -1157,7 +1178,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generator_association_edges_use_sentinel_path() {
+    fn test_generator_association_edges_use_source_traversal_path() {
         let (config, ontology) = test_config_and_ontology();
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
@@ -1169,7 +1190,13 @@ mod tests {
             .collect();
         assert!(!authored.is_empty());
         for edge in &authored {
-            assert_eq!(edge.traversal_path.as_ref(), ASSOCIATION_TRAVERSAL_PATH);
+            // Association edges should inherit the source node's traversal_path,
+            // not the sentinel "0/". Source nodes always have a path starting with "1/".
+            assert!(
+                edge.traversal_path.as_ref().starts_with("1/"),
+                "AUTHORED edge should have source node's traversal_path, got '{}'",
+                edge.traversal_path.as_ref()
+            );
         }
     }
 
