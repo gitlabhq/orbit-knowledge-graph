@@ -8,15 +8,16 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, instrument};
 
-use crate::auth::JwtValidator;
+use crate::auth::{Claims, JwtValidator};
 use crate::cluster_health::ClusterHealthChecker;
+use crate::graph_stats::GraphStatsService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
-    GetGraphSchemaRequest, GetGraphSchemaResponse, ListToolsRequest, ListToolsResponse,
-    QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
-    SchemaNodeStyle, SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition,
-    execute_query_message, get_graph_schema_response,
+    GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
+    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
+    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
+    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
 use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
@@ -29,6 +30,7 @@ pub struct KnowledgeGraphServiceImpl {
     tool_service: ToolService,
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
+    graph_stats: GraphStatsService,
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -40,13 +42,15 @@ impl KnowledgeGraphServiceImpl {
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let pipeline = QueryPipelineService::new(Arc::clone(&ontology), client);
+        let pipeline = QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client));
+        let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
             validator,
             ontology,
             tool_service,
             pipeline,
             cluster_health,
+            graph_stats,
         }
     }
 }
@@ -193,6 +197,23 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let response = self.cluster_health.get_cluster_health(req.format).await;
         Ok(Response::new(response))
     }
+
+    #[instrument(skip(self, request), fields(user_id))]
+    async fn get_graph_stats(
+        &self,
+        request: Request<GetGraphStatsRequest>,
+    ) -> Result<Response<GetGraphStatsResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+
+        let req = request.get_ref();
+        authorize_traversal_path(&claims, &req.traversal_path)?;
+
+        info!(traversal_path = %req.traversal_path, "Fetching graph stats for user");
+
+        let response = self.graph_stats.get_stats(&req.traversal_path).await?;
+        Ok(Response::new(response))
+    }
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -334,6 +355,30 @@ impl KnowledgeGraphServiceImpl {
 
         (outgoing, incoming)
     }
+}
+
+fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(), Status> {
+    let org_id = claims
+        .organization_id
+        .ok_or_else(|| Status::unauthenticated("missing organization_id in claims"))?;
+
+    let authorized_paths = if claims.admin {
+        vec![format!("{org_id}/")]
+    } else {
+        claims.group_traversal_ids.clone()
+    };
+
+    let is_authorized = authorized_paths
+        .iter()
+        .any(|allowed| requested_path.starts_with(allowed));
+
+    if !is_authorized {
+        return Err(Status::permission_denied(
+            "traversal_path is not within any authorized scope",
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -580,6 +625,76 @@ mod tests {
         assert!(
             mr.properties.is_empty(),
             "MergeRequest should not be expanded"
+        );
+    }
+
+    fn test_claims() -> Claims {
+        Claims {
+            sub: "u:1".into(),
+            iss: "gitlab".into(),
+            aud: "gitlab-knowledge-graph".into(),
+            iat: 0,
+            exp: i64::MAX,
+            user_id: 1,
+            username: "test".into(),
+            admin: false,
+            organization_id: Some(1),
+            min_access_level: None,
+            group_traversal_ids: vec![],
+        }
+    }
+
+    #[test]
+    fn authorize_traversal_path_grants_and_denies_correctly() {
+        let admin = |org| Claims {
+            admin: true,
+            organization_id: Some(org),
+            ..test_claims()
+        };
+        let user = |org, groups: Vec<&str>| Claims {
+            organization_id: Some(org),
+            group_traversal_ids: groups.into_iter().map(String::from).collect(),
+            ..test_claims()
+        };
+
+        for (claims, path) in [
+            (admin(42), "42/"),
+            (admin(42), "42/100/200/"),
+            (user(1, vec!["1/22/", "1/33/"]), "1/22/"),
+            (user(1, vec!["1/22/", "1/33/"]), "1/22/44/"),
+            (user(1, vec!["1/22/", "1/33/"]), "1/33/55/"),
+        ] {
+            assert!(
+                authorize_traversal_path(&claims, path).is_ok(),
+                "expected OK for {path}"
+            );
+        }
+
+        for (claims, path) in [
+            (admin(42), "99/100/"),
+            (user(1, vec!["1/22/"]), "1/99/"),
+            (user(1, vec!["1/22/33/"]), "1/22/"),
+            (user(1, vec![]), "1/22/"),
+        ] {
+            assert_eq!(
+                authorize_traversal_path(&claims, path).unwrap_err().code(),
+                tonic::Code::PermissionDenied,
+                "expected PermissionDenied for {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn authorize_traversal_path_missing_org_id_returns_unauthenticated() {
+        let claims = Claims {
+            organization_id: None,
+            ..test_claims()
+        };
+        assert_eq!(
+            authorize_traversal_path(&claims, "1/22/")
+                .unwrap_err()
+                .code(),
+            tonic::Code::Unauthenticated
         );
     }
 

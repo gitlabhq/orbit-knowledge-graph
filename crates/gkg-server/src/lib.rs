@@ -3,6 +3,7 @@ pub mod cli;
 pub mod cluster_health;
 pub mod config;
 pub mod constants;
+pub mod graph_stats;
 pub mod grpc;
 pub mod health_check;
 pub mod pipeline;
