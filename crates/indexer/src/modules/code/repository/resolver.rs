@@ -124,12 +124,6 @@ impl RepositoryResolver {
                     reason = %error,
                     "falling back to full download"
                 );
-                self.cache
-                    .invalidate(project_id, branch)
-                    .await
-                    .map_err(|e| {
-                        HandlerError::Processing(format!("cache invalidation failed: {e}"))
-                    })?;
                 self.full_download(project_id, branch, ref_name).await
             }
             Err(error) => Err(error.into()),
