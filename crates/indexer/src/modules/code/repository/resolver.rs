@@ -231,15 +231,6 @@ impl ChangesetBuilder {
         }
     }
 
-    fn build(mut self) -> IncrementalChangeset {
-        self.reconcile_delete_add_renames();
-        IncrementalChangeset {
-            deletions: self.deletions,
-            renames: self.renames,
-            paths_by_blob_id: self.paths_by_blob_id,
-        }
-    }
-
     /// Gitaly sometimes reports renames as separate DELETED + ADDED entries
     /// instead of a single RENAMED entry. When a deleted blob ID matches an
     /// added blob ID, pair them up as renames. Any unpaired leftovers stay
@@ -267,6 +258,15 @@ impl ChangesetBuilder {
             if !remaining.is_empty() {
                 self.paths_by_blob_id.insert(blob_id, remaining);
             }
+        }
+    }
+
+    fn build(mut self) -> IncrementalChangeset {
+        self.reconcile_delete_add_renames();
+        IncrementalChangeset {
+            deletions: self.deletions,
+            renames: self.renames,
+            paths_by_blob_id: self.paths_by_blob_id,
         }
     }
 }
