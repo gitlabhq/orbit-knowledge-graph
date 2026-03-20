@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
     INDEX idx_relationship relationship_kind TYPE set(100) GRANULARITY 4,
-    PROJECTION reverse_lookup (SELECT * ORDER BY (target_id, relationship_kind)),
+    PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind)),
     PROJECTION by_source (SELECT * ORDER BY (source_id, relationship_kind))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind)
