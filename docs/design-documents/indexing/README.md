@@ -7,6 +7,7 @@ The Knowledge Graph indexing architecture transforms GitLab SDLC metadata and co
 This document outlines the general architecture, shared patterns, and components across both indexing domains. For detailed implementation specifics, see:
 
 - [Code Indexing Architecture](code_indexing.md)
+- [Ruby Call Graph Rethink](ruby_call_graph_rethink.md)
 - [SDLC Indexing Architecture](sdlc_indexing.md)
 - [Namespace Deletion](namespace_deletion.md)
 

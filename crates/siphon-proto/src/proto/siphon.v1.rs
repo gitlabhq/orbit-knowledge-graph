@@ -93,7 +93,17 @@ pub mod replication_event {
         #[prost(message, optional, tag = "2")]
         pub value: ::core::option::Option<super::Value>,
     }
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+        PartialOrd,
+        Ord,
+        ::prost::Enumeration
+    )]
     #[repr(i32)]
     pub enum Operation {
         Unspecified = 0,
@@ -171,7 +181,9 @@ impl LogicalReplicationEventType {
             Self::ClickhouseRefreshEvent => {
                 "LOGICAL_REPLICATION_EVENT_TYPE_CLICKHOUSE_REFRESH_EVENT"
             }
-            Self::ReferencedCdcEvent => "LOGICAL_REPLICATION_EVENT_TYPE_REFERENCED_CDC_EVENT",
+            Self::ReferencedCdcEvent => {
+                "LOGICAL_REPLICATION_EVENT_TYPE_REFERENCED_CDC_EVENT"
+            }
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -182,7 +194,9 @@ impl LogicalReplicationEventType {
             "LOGICAL_REPLICATION_EVENT_TYPE_CLICKHOUSE_REFRESH_EVENT" => {
                 Some(Self::ClickhouseRefreshEvent)
             }
-            "LOGICAL_REPLICATION_EVENT_TYPE_REFERENCED_CDC_EVENT" => Some(Self::ReferencedCdcEvent),
+            "LOGICAL_REPLICATION_EVENT_TYPE_REFERENCED_CDC_EVENT" => {
+                Some(Self::ReferencedCdcEvent)
+            }
             _ => None,
         }
     }
