@@ -96,11 +96,29 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         }
     });
 
-    // Build the CTE: SELECT id FROM root_table WHERE <existing root filters>
-    // The CTE replicates the root node's WHERE conditions (filters, node_ids, id_range)
-    // plus the keyset predicate if present. The security pass will inject
-    // startsWith(traversal_path, ...) automatically since the CTE scans a gl_* table.
-    let cte_where = Expr::and_all([q.where_clause.clone(), keyset_predicate.clone()]);
+    // Build the CTE: SELECT id FROM root_table WHERE <root-only filters>
+    // Extract only WHERE conjuncts that reference the root node alias.
+    // The security pass will inject startsWith(traversal_path, ...) automatically.
+    let root_only_conds = q
+        .where_clause
+        .as_ref()
+        .map(|w| {
+            let conjuncts = flatten_and(w.clone());
+            conjuncts
+                .into_iter()
+                .filter(|c| {
+                    let aliases = collect_column_aliases(c);
+                    !aliases.is_empty() && aliases.iter().all(|a| a == root_alias)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let cte_where = Expr::and_all(
+        root_only_conds
+            .into_iter()
+            .map(Some)
+            .chain(std::iter::once(keyset_predicate.clone())),
+    );
 
     let cte_query = Query {
         select: vec![SelectExpr::new(
@@ -118,15 +136,20 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         q.where_clause = Expr::and_all([q.where_clause.take(), Some(pred)]);
     }
 
-    // SIP: push root IDs into edge table scan
-    let edge_aliases = collect_edge_aliases(&q.from);
-    if let Some(edge_alias) = edge_aliases.first() {
-        let edge_in = Expr::InSubquery {
-            expr: Box::new(Expr::col(edge_alias, "source_id")),
-            cte_name: SIP_CTE_NAME.to_string(),
-            column: DEFAULT_PRIMARY_KEY.to_string(),
-        };
-        q.where_clause = Expr::and_all([q.where_clause.take(), Some(edge_in)]);
+    // SIP: push root IDs into edge table scan.
+    // The edge column depends on direction: outgoing joins on source_id,
+    // incoming joins on target_id.
+    if let Some(first_rel) = input.relationships.first() {
+        let (start_col, _) = first_rel.direction.edge_columns();
+        let edge_aliases = collect_edge_aliases(&q.from);
+        if let Some(edge_alias) = edge_aliases.first() {
+            let edge_in = Expr::InSubquery {
+                expr: Box::new(Expr::col(edge_alias, start_col)),
+                cte_name: SIP_CTE_NAME.to_string(),
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            };
+            q.where_clause = Expr::and_all([q.where_clause.take(), Some(edge_in)]);
+        }
     }
 
     // Keyset replaces OFFSET
