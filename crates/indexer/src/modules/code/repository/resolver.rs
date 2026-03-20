@@ -240,7 +240,7 @@ impl ChangesetBuilder {
         }
     }
 
-    /// Rails sometimes reports renames as separate DELETED + ADDED entries
+    /// Gitaly sometimes reports renames as separate DELETED + ADDED entries
     /// instead of a single RENAMED entry. When a deleted blob ID matches an
     /// added blob ID, pair them up as renames. Any unpaired leftovers stay
     /// as plain deletions or additions.
