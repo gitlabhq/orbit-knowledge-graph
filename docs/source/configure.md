@@ -38,7 +38,7 @@ Prerequisites:
 
 To turn Orbit on or off:
 
-1. On the left sidebar, select **Search or go to** > **Your work**.
+1. In the top bar, select **Search or go to** > **Your work**.
 1. Select **Orbit** > **Configuration**.
 1. Next to the top-level group you want to index, turn **Enable** on or off.
 
@@ -55,5 +55,5 @@ Prerequisites:
 
 To view the knowledge graph:
 
-1. On the left sidebar, select **Search or go to** > **Your work**.
+1. In the top bar, select **Search or go to** > **Your work**.
 1. Select **Orbit** > **Data explorer**.
