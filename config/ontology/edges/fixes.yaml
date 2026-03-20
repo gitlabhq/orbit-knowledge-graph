@@ -1,6 +1,7 @@
 # config/ontology/edges/fixes.yaml
 
 description: Merge request fixes a vulnerability
+cross_namespace: true
 
 variants:
   - from_node: { type: MergeRequest, id: id }
