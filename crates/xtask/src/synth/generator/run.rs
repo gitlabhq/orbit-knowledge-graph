@@ -21,6 +21,25 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+// ── Helpers ───────────────────────────────────────────────────────────
+
+/// Pick the more specific traversal_path between source and target.
+///
+/// In production, edges are scoped to the namespace where the resource lives.
+/// For association edges between a global entity (e.g. User at `1/`) and a
+/// scoped entity (e.g. MergeRequest at `1/7/30/81/`), the scoped entity's
+/// path wins. We use path length as a proxy for specificity since deeper
+/// namespaces always produce longer path strings.
+fn most_specific_path(registry: &EntityRegistry, source_id: i64, target_id: i64) -> String {
+    let src = registry
+        .get_path(source_id)
+        .expect("missing path for source");
+    let tgt = registry
+        .get_path(target_id)
+        .expect("missing path for target");
+    if tgt.len() >= src.len() { tgt } else { src }.to_string()
+}
+
 // ── Public types ──────────────────────────────────────────────────────
 
 /// Interned string type for edge records to avoid millions of small allocations.
@@ -627,14 +646,9 @@ impl Generator {
                         IterationDirection::Source => (primary_id, secondary_id),
                     };
 
-                    let path = registry.get_path(source_id).unwrap_or_else(|| {
-                        panic!(
-                            "missing traversal_path for source_id {} ({} edge {}->{})",
-                            source_id, edge_type, source_kind, target_kind
-                        )
-                    });
+                    let path = most_specific_path(registry, source_id, target_id);
                     edges.push(EdgeRecord {
-                        traversal_path: self.intern(path),
+                        traversal_path: self.intern(&path),
                         relationship_kind: rel_kind.clone(),
                         source: source_id,
                         source_kind: src_kind.clone(),
@@ -812,14 +826,9 @@ impl Generator {
                         IterationDirection::Source => (primary_id, secondary_id),
                     };
 
-                    let path = registry.get_path(source_id).unwrap_or_else(|| {
-                        panic!(
-                            "missing traversal_path for source_id {} ({} edge {}->{})",
-                            source_id, edge_type, source_kind, target_kind
-                        )
-                    });
+                    let path = most_specific_path(registry, source_id, target_id);
                     edge_writer.push(EdgeRecord {
-                        traversal_path: self.intern(path),
+                        traversal_path: self.intern(&path),
                         relationship_kind: rel_kind.clone(),
                         source: source_id,
                         source_kind: src_kind.clone(),
