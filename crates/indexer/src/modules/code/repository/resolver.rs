@@ -279,13 +279,13 @@ async fn compute_changeset(
         .await
         .map_err(|e| IncrementalUpdateError::Other(format!("failed to decode changed path: {e}")))?
     {
+        if change.old_mode == SUBMODULE_MODE || change.new_mode == SUBMODULE_MODE {
+            continue;
+        }
+
         count += 1;
         if count > MAX_CHANGED_PATHS {
             return Err(IncrementalUpdateError::TooManyChangedPaths);
-        }
-
-        if change.old_mode == SUBMODULE_MODE || change.new_mode == SUBMODULE_MODE {
-            continue;
         }
 
         match change.status {
