@@ -128,8 +128,14 @@ impl RepositoryCache for LocalRepositoryCache {
         }
         tokio::fs::create_dir_all(&repo_dir).await?;
 
-        crate::modules::code::archive::extract_tar_gz(archive_bytes, &repo_dir)
-            .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
+        let archive_owned = archive_bytes.to_vec();
+        let repo_dir_owned = repo_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::modules::code::archive::extract_tar_gz(&archive_owned, &repo_dir_owned)
+        })
+        .await
+        .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
+        .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
 
         let meta_dir = self.branch_dir(project_id, branch).join(META_DIR);
         tokio::fs::create_dir_all(&meta_dir).await?;

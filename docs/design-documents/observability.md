@@ -84,12 +84,11 @@ The indexer emits metrics under five OpenTelemetry meters: `etl_engine` for the 
 |---|---|---|---|---|
 | `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error) | Total code indexing tasks processed |
 | `indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
-| `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of fetching a repository archive from the Rails internal API |
-| `indexer.code.repository.extract.duration` | Histogram | s | | Duration of extracting a repository archive to disk |
+| `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
 | `indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
 | `indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
 | `indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
-| `indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, repository_extract, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage |
+| `indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage |
 
 *Namespace deletion module metrics (`indexer_namespace_deletion`):*
 

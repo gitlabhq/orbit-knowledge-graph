@@ -62,7 +62,8 @@ impl CodeIndexingPipeline {
                 &request.branch,
                 request.commit_sha.as_deref(),
             )
-            .await?;
+            .await
+            .record_error_stage(&self.metrics, "repository_fetch")?;
         self.metrics
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
