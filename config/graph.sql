@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS gl_user (
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
     INDEX idx_state state TYPE set(10) GRANULARITY 2,
-    INDEX idx_user_type user_type TYPE set(20) GRANULARITY 2,
+    INDEX idx_user_type user_type TYPE set(26) GRANULARITY 2,
     INDEX idx_private_profile private_profile TYPE minmax GRANULARITY 1,
     INDEX idx_is_admin is_admin TYPE minmax GRANULARITY 1,
     INDEX idx_is_auditor is_auditor TYPE minmax GRANULARITY 1,
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS gl_note (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
-    INDEX idx_noteable_type noteable_type TYPE set(10) GRANULARITY 2,
+    INDEX idx_noteable_type noteable_type TYPE set(14) GRANULARITY 2,
     INDEX idx_internal internal TYPE minmax GRANULARITY 1,
     INDEX idx_confidential confidential TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
-    INDEX idx_state state TYPE set(10) GRANULARITY 2,
+    INDEX idx_state state TYPE set(6) GRANULARITY 2,
     INDEX idx_draft draft TYPE minmax GRANULARITY 1,
     INDEX idx_squash squash TYPE minmax GRANULARITY 1,
     INDEX idx_discussion_locked discussion_locked TYPE minmax GRANULARITY 1
@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     target_kind LowCardinality(String),
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
-    INDEX idx_relationship relationship_kind TYPE set(100) GRANULARITY 4,
+    INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
     PROJECTION by_target (
         SELECT source_kind, source_id, relationship_kind, target_kind, target_id
         ORDER BY target_id, target_kind, relationship_kind
@@ -272,7 +272,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
-    INDEX idx_status status TYPE set(20) GRANULARITY 2,
+    INDEX idx_status status TYPE set(16) GRANULARITY 2,
     INDEX idx_tag tag TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -311,7 +311,7 @@ CREATE TABLE IF NOT EXISTS gl_job (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
-    INDEX idx_status status TYPE set(20) GRANULARITY 2,
+    INDEX idx_status status TYPE set(16) GRANULARITY 2,
     INDEX idx_allow_failure allow_failure TYPE minmax GRANULARITY 1,
     INDEX idx_retried retried TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
@@ -338,9 +338,9 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     traversal_path String DEFAULT '0/',
     _version DateTime64(6, 'UTC') DEFAULT now64(6),
     _deleted Bool DEFAULT false,
-    INDEX idx_state state TYPE set(10) GRANULARITY 2,
-    INDEX idx_severity severity TYPE set(10) GRANULARITY 2,
-    INDEX idx_report_type report_type TYPE set(20) GRANULARITY 2,
+    INDEX idx_state state TYPE set(4) GRANULARITY 2,
+    INDEX idx_severity severity TYPE set(8) GRANULARITY 2,
+    INDEX idx_report_type report_type TYPE set(4) GRANULARITY 2,
     INDEX idx_resolved_on_default_branch resolved_on_default_branch TYPE minmax GRANULARITY 1,
     INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
