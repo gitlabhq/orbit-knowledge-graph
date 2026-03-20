@@ -259,7 +259,7 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
-3. Downloads the repository archive from the Rails internal API and extracts it to a temp directory
+3. Resolves the repository via `RepositoryResolver`, which checks the local disk cache first and only downloads from the Rails internal API on a cache miss or stale commit
 4. Runs the streaming indexing pipeline to produce the graph
 5. Converts the graph to Arrow record batches and writes them to ClickHouse
 6. Cleans up stale data from the previous indexing run
@@ -304,17 +304,16 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
                            |- 2. Resolve default branch from Rails (if not provided)
                            |- 3. Check checkpoint (skip already-indexed commits)
                            |- 4. Acquire distributed lock via NATS KV
-                           |- 5. Download repository archive from Rails internal API
-                           |- 6. Extract to temp directory
-                           |- 7. Run indexing pipeline
+                           |- 5. Resolve repository (check disk cache, download on miss)
+                           |- 6. Run indexing pipeline
                            |       |- File discovery (respects .gitignore)
                            |       |- Async file reads
                            |       |- CPU-bound parsing (bounded parallelism)
                            |       \- Analysis phase -> graph
-                           |- 8. Convert graph to Arrow record batches
-                           |- 9. Write to ClickHouse (5 tables)
-                           |- 10. Clean up stale data
-                           \- 11. Update checkpoint, release lock
+                           |- 7. Convert graph to Arrow record batches
+                           |- 8. Write to ClickHouse (5 tables)
+                           |- 9. Clean up stale data
+                           \- 10. Update checkpoint, release lock
 ```
 
 ### Differences from the original local tool

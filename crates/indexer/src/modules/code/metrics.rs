@@ -11,7 +11,6 @@ pub struct CodeMetrics {
     pub(super) events_processed: Counter<u64>,
     pub(super) handler_duration: Histogram<f64>,
     pub(super) repository_fetch_duration: Histogram<f64>,
-    pub(super) repository_extract_duration: Histogram<f64>,
     pub(super) indexing_duration: Histogram<f64>,
     pub(super) files_processed: Counter<u64>,
     pub(super) nodes_indexed: Counter<u64>,
@@ -44,13 +43,6 @@ impl CodeMetrics {
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
-        let repository_extract_duration = meter
-            .f64_histogram("indexer.code.repository.extract.duration")
-            .with_unit("s")
-            .with_description("Duration of extracting a repository archive to disk")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
         let indexing_duration = meter
             .f64_histogram("indexer.code.indexing.duration")
             .with_unit("s")
@@ -77,7 +69,6 @@ impl CodeMetrics {
             events_processed,
             handler_duration,
             repository_fetch_duration,
-            repository_extract_duration,
             indexing_duration,
             files_processed,
             nodes_indexed,
