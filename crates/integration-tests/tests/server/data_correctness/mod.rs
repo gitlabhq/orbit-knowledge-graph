@@ -91,6 +91,11 @@ async fn data_correctness() {
         edge_cases::giant_string_survives_pipeline,
         edge_cases::sql_injection_string_preserved,
         edge_cases::empty_result_has_valid_schema,
+        // SIP pre-filter correctness
+        edge_cases::sip_prefilter_with_node_ids_returns_correct_results,
+        edge_cases::sip_prefilter_with_filter_returns_correct_results,
+        edge_cases::sip_prefilter_multi_hop_returns_correct_results,
+        edge_cases::sip_target_aggregation_with_filter_returns_correct_counts,
         // referential integrity
         edge_cases::traversal_referential_integrity_on_complex_query,
     );
