@@ -359,6 +359,11 @@ impl<'a> Validator<'a> {
                 )));
             }
         }
+        if input.cursor.is_some() && input.range.is_some() {
+            return Err(QueryError::PaginationError(
+                "cannot specify both 'cursor' and 'range'".to_string(),
+            ));
+        }
         Ok(())
     }
 
