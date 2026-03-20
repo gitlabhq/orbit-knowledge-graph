@@ -234,10 +234,10 @@ async fn handle_changed_paths(
 ) -> impl IntoResponse {
     let projects = state.projects.lock();
     match projects.get(&project_id) {
-        Some(p) => {
-            let body = p.changed_paths_ndjson.clone().unwrap_or_default();
-            (StatusCode::OK, body).into_response()
-        }
+        Some(p) => match &p.changed_paths_ndjson {
+            Some(ndjson) => (StatusCode::OK, ndjson.clone()).into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
