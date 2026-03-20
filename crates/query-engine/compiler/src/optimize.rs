@@ -181,6 +181,10 @@ fn build_keyset_expr(alias: &str, tp: &str, cursor_id: i64) -> Expr {
 }
 
 /// Collect edge table aliases from the FROM clause.
+///
+/// Does not recurse into Union/Subquery -- multi-hop queries wrap edge scans
+/// in UNION ALL subqueries where the alias is internal. SIP silently skips
+/// those shapes (safe: no incorrect results, just no optimization for multi-hop).
 fn collect_edge_aliases(table_ref: &TableRef) -> Vec<String> {
     match table_ref {
         TableRef::Scan { table, alias, .. }
@@ -194,7 +198,11 @@ fn collect_edge_aliases(table_ref: &TableRef) -> Vec<String> {
             aliases.extend(collect_edge_aliases(right));
             aliases
         }
-        TableRef::Union { .. } | TableRef::Subquery { .. } => vec![],
+        TableRef::Union { queries, .. } => queries
+            .iter()
+            .flat_map(|q| collect_edge_aliases(&q.from))
+            .collect(),
+        TableRef::Subquery { query, .. } => collect_edge_aliases(&query.from),
     }
 }
 
@@ -380,7 +388,10 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
                 collect_aliases_inner(arg, aliases);
             }
         }
-        Expr::Literal(_) | Expr::Param { .. } | Expr::InSubquery { .. } => {}
+        Expr::InSubquery { expr, .. } => {
+            collect_aliases_inner(expr, aliases);
+        }
+        Expr::Literal(_) | Expr::Param { .. } => {}
     }
 }
 
