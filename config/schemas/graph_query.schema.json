@@ -75,18 +75,13 @@
     },
     "cursor": {
       "type": "object",
-      "description": "Keyset pagination cursor. Returns results after the given (traversal_path, id) position. Mutually exclusive with range.",
+      "description": "Keyset pagination cursor. Returns results after the given id position. Combined with traversal paths from the security context for full primary key utilization. Mutually exclusive with range.",
       "required": ["id"],
       "properties": {
         "id": {
           "type": "integer",
-          "description": "The id of the last row from the previous page.",
+          "description": "The id of the last row from the previous page. Results will start after this position in (traversal_path, id) sort order.",
           "minimum": 0
-        },
-        "traversal_path": {
-          "type": "string",
-          "description": "The traversal_path of the last row from the previous page. When provided, resumes at the exact PK position. When omitted, falls back to the security context's traversal paths.",
-          "minLength": 1
         }
       },
       "additionalProperties": false
