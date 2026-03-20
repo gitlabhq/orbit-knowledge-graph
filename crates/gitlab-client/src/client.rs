@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -30,6 +31,19 @@ pub const JWT_SUBJECT: &str = "gkg-indexer:code";
 const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 
 const JWT_EXPIRY_SECONDS: i64 = 300;
+
+fn into_byte_stream(response: reqwest::Response) -> ByteStream {
+    let stream = futures::stream::unfold(Some(response), |state| async {
+        let mut resp = state?;
+        match resp.chunk().await {
+            Ok(Some(bytes)) => Some((Ok(bytes), Some(resp))),
+            Ok(None) => None,
+            Err(e) => Some((Err(e.into()), None)),
+        }
+    })
+    .fuse();
+    Box::pin(stream)
+}
 
 #[derive(Serialize)]
 struct JwtClaims {
@@ -98,6 +112,7 @@ impl GitlabClient {
         }
 
         builder
+            .connect_timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| GitlabClientError::Unexpected(format!("failed to build HTTP client: {e}")))
     }
@@ -197,18 +212,7 @@ impl GitlabClient {
     ) -> Result<ByteStream, GitlabClientError> {
         let response = self.authenticated_get(url).await?;
         Self::check_diff_status(&response, project_id)?;
-
-        let stream = futures::stream::unfold(Some(response), |state| async {
-            let mut resp = state?;
-            match resp.chunk().await {
-                Ok(Some(bytes)) => Some((Ok(bytes), Some(resp))),
-                Ok(None) => None,
-                Err(e) => Some((Err(e.into()), None)),
-            }
-        })
-        .fuse();
-
-        Ok(Box::pin(stream))
+        Ok(into_byte_stream(response))
     }
 
     async fn streaming_post(
@@ -219,18 +223,7 @@ impl GitlabClient {
     ) -> Result<ByteStream, GitlabClientError> {
         let response = self.authenticated_post(url, body).await?;
         Self::check_response_status(&response, project_id)?;
-
-        let stream = futures::stream::unfold(Some(response), |state| async {
-            let mut resp = state?;
-            match resp.chunk().await {
-                Ok(Some(bytes)) => Some((Ok(bytes), Some(resp))),
-                Ok(None) => None,
-                Err(e) => Some((Err(e.into()), None)),
-            }
-        })
-        .fuse();
-
-        Ok(Box::pin(stream))
+        Ok(into_byte_stream(response))
     }
 
     async fn authenticated_get(
@@ -282,7 +275,14 @@ impl GitlabClient {
         if response.status() == StatusCode::BAD_REQUEST {
             return Err(GitlabClientError::ForcePush(project_id));
         }
-        Self::check_response_status(response, project_id)
+        match response.status() {
+            StatusCode::OK => Ok(()),
+            StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
+            StatusCode::NOT_FOUND => Err(GitlabClientError::NotFound(project_id)),
+            status => Err(GitlabClientError::Unexpected(format!(
+                "unexpected status {status} for project {project_id}"
+            ))),
+        }
     }
 
     fn sign_jwt(&self) -> Result<String, GitlabClientError> {

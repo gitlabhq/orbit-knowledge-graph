@@ -45,6 +45,7 @@ struct BlobChunk {
 }
 
 const MAX_FRAME_LENGTH: usize = 4 * 1024 * 1024; // 4 MiB
+const MAX_BLOB_SIZE: usize = 1024 * 1024; // 1 MiB
 
 type ChunkStream = Pin<Box<dyn Stream<Item = Result<BlobChunk, BlobDecodeError>> + Send>>;
 
@@ -98,6 +99,12 @@ impl BlobStream {
                         }
                     } else if let Some(current) = &mut self.current {
                         current.data.extend_from_slice(&chunk.data);
+                        if current.data.len() > MAX_BLOB_SIZE {
+                            return Err(BlobDecodeError(format!(
+                                "blob {} exceeds maximum size of {MAX_BLOB_SIZE} bytes",
+                                current.oid
+                            )));
+                        }
                     }
                 }
                 Some(Err(e)) => return Err(e),

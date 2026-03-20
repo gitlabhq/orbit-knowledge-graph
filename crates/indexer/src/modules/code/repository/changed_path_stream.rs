@@ -14,7 +14,6 @@ pub struct ChangedPath {
     pub new_mode: u32,
     #[serde(default)]
     pub old_mode: u32,
-    #[allow(dead_code)]
     pub old_blob_id: String,
     pub new_blob_id: String,
 }
@@ -45,7 +44,8 @@ impl ChangedPathStream {
         E: std::error::Error + Send + Sync + 'static,
     {
         let reader = StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
-        let lines = FramedRead::new(reader, LinesCodec::new()).filter_map(|result| async {
+        let codec = LinesCodec::new_with_max_length(1024 * 1024);
+        let lines = FramedRead::new(reader, codec).filter_map(|result| async {
             match result {
                 Ok(line) if line.is_empty() => None,
                 Ok(line) => Some(serde_json::from_str::<ChangedPath>(&line).map_err(|e| {
