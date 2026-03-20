@@ -134,6 +134,8 @@ pub type SharedAppConfig = Arc<AppConfig>;
 pub struct MetricsConfig {
     #[serde(default)]
     pub otlp_endpoint: String,
+    #[serde(default)]
+    pub log_level: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
