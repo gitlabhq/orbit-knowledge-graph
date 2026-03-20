@@ -25,7 +25,7 @@ SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 -- Graph node tables
 
 CREATE TABLE IF NOT EXISTS gl_user (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     username String DEFAULT '' CODEC(ZSTD(1)),
     email String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
@@ -53,10 +53,10 @@ CREATE TABLE IF NOT EXISTS gl_user (
     INDEX idx_is_external is_external TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_group (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     name Nullable(String) CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
     visibility_level LowCardinality(Nullable(String)) CODEC(LZ4),
@@ -69,10 +69,10 @@ CREATE TABLE IF NOT EXISTS gl_group (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_project (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     name Nullable(String) CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
     visibility_level LowCardinality(Nullable(String)) CODEC(LZ4),
@@ -89,10 +89,10 @@ CREATE TABLE IF NOT EXISTS gl_project (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_note (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     note Nullable(String) CODEC(ZSTD(3)),
     noteable_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
     noteable_id Nullable(Int64) CODEC(ZSTD(1)),
@@ -113,10 +113,10 @@ CREATE TABLE IF NOT EXISTS gl_note (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_merge_request (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     iid Nullable(Int64) CODEC(ZSTD(1)),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(3)),
@@ -141,10 +141,10 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     merge_request_id Int64 CODEC(ZSTD(1)),
     state Nullable(String) CODEC(ZSTD(1)),
     base_commit_sha Nullable(String) CODEC(ZSTD(1)),
@@ -160,10 +160,10 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     merge_request_id Int64 CODEC(ZSTD(1)),
     merge_request_diff_id Int64 CODEC(ZSTD(1)),
     too_large Bool DEFAULT false,
@@ -184,10 +184,10 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_milestone (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     iid Nullable(Int64) CODEC(ZSTD(1)),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
@@ -202,10 +202,10 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_label (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     title Nullable(String) CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
     color Nullable(String) CODEC(ZSTD(1)),
@@ -217,10 +217,10 @@ CREATE TABLE IF NOT EXISTS gl_label (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_work_item (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     iid Nullable(Int64) CODEC(ZSTD(1)),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
@@ -242,14 +242,14 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    source_id Int64 CODEC(ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), ZSTD(1)),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
-    target_id Int64 CODEC(ZSTD(1)),
+    target_id Int64 CODEC(Delta(8), ZSTD(1)),
     target_kind LowCardinality(String) CODEC(LZ4),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -259,12 +259,12 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind)
 PRIMARY KEY (traversal_path, relationship_kind)
-SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- CI graph tables
 
 CREATE TABLE IF NOT EXISTS gl_pipeline (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     iid Nullable(Int64) CODEC(ZSTD(1)),
     sha Nullable(String) CODEC(ZSTD(1)),
     ref Nullable(String) CODEC(ZSTD(1)),
@@ -284,10 +284,10 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_stage (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     name Nullable(String) CODEC(ZSTD(1)),
     status LowCardinality(String) DEFAULT '' CODEC(LZ4),
     position Nullable(Int64) CODEC(ZSTD(1)),
@@ -299,10 +299,10 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_job (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     name Nullable(String) CODEC(ZSTD(1)),
     status LowCardinality(String) DEFAULT '' CODEC(LZ4),
     ref Nullable(String) CODEC(ZSTD(1)),
@@ -326,12 +326,12 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- Security graph tables
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
     state LowCardinality(String) DEFAULT '' CODEC(LZ4),
@@ -356,10 +356,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     external_id String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
     vendor LowCardinality(String) DEFAULT 'GitLab' CODEC(LZ4),
@@ -371,10 +371,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     external_type String DEFAULT '' CODEC(ZSTD(1)),
     external_id String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
@@ -387,10 +387,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_finding (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     uuid String DEFAULT '' CODEC(ZSTD(1)),
     name Nullable(String) CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
@@ -405,10 +405,10 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_security_scan (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     scan_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
     status LowCardinality(String) DEFAULT '' CODEC(LZ4),
     latest Bool DEFAULT true,
@@ -421,10 +421,10 @@ CREATE TABLE IF NOT EXISTS gl_security_scan (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     uuid String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
@@ -444,10 +444,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_branch (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     project_id Int64 CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
     protected Nullable(Bool),
@@ -460,14 +460,14 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- Code indexing tables
 
 CREATE TABLE IF NOT EXISTS gl_directory (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
     branch String CODEC(ZSTD(1)),
     path String CODEC(ZSTD(3)),
     name String CODEC(ZSTD(1)),
@@ -476,12 +476,12 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_file (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
     branch String CODEC(ZSTD(1)),
     path String CODEC(ZSTD(3)),
     name String CODEC(ZSTD(1)),
@@ -492,12 +492,12 @@ CREATE TABLE IF NOT EXISTS gl_file (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_definition (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
     branch String CODEC(ZSTD(1)),
     file_path String CODEC(ZSTD(3)),
     fqn String CODEC(ZSTD(3)),
@@ -512,12 +512,12 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_imported_symbol (
-    id Int64 CODEC(ZSTD(1)),
+    id Int64 CODEC(Delta(8), ZSTD(1)),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
     branch String CODEC(ZSTD(1)),
     file_path String CODEC(ZSTD(3)),
     import_type LowCardinality(String) CODEC(LZ4),
@@ -533,7 +533,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
     traversal_path String CODEC(ZSTD(1)),
