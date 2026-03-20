@@ -19,11 +19,16 @@ data:
     gitlab:
       base_url: {{ .Values.gitlab.baseUrl | quote }}
     {{- end }}
-    {{- if .Values.otel.enabled }}
     metrics:
-      otlp_endpoint: {{ .Values.otel.endpoint | quote }}
-      service_name: "gkg-indexer"
-    {{- end }}
+      log_level: {{ .Values.gkgServer.logLevel | default "info" | quote }}
+      otel:
+        enabled: {{ .Values.metrics.otel.enabled }}
+        {{- if .Values.metrics.otel.enabled }}
+        endpoint: {{ .Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ .Values.metrics.prometheus.enabled }}
+        port: {{ .Values.metrics.prometheus.port }}
     {{- if .Values.engine }}
     engine:
       {{- toYaml .Values.engine | nindent 6 }}
@@ -50,7 +55,7 @@ spec:
       labels:
         {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "gkg-indexer") | nindent 8 }}
       annotations:
-        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitlab | sha256sum }}-{{ toJson .Values.otel | sha256sum }}-{{ toJson .Values.engine | sha256sum }}-{{ toJson .Values.schedule | sha256sum }}
+        checksum/config: {{ toJson .Values.clickhouse | sha256sum }}-{{ toJson .Values.nats | sha256sum }}-{{ toJson .Values.gitlab | sha256sum }}-{{ toJson .Values.metrics | sha256sum }}-{{ toJson .Values.engine | sha256sum }}-{{ toJson .Values.schedule | sha256sum }}
     spec:
       enableServiceLinks: false
       securityContext:
@@ -64,6 +69,10 @@ spec:
           ports:
             - name: health
               containerPort: 4202
+            {{- if .Values.metrics.prometheus.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.prometheus.port }}
+            {{- end }}
           env:
             - name: LOG_FORMAT
               value: "json"

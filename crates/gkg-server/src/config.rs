@@ -133,9 +133,40 @@ pub type SharedAppConfig = Arc<AppConfig>;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MetricsConfig {
     #[serde(default)]
-    pub otlp_endpoint: String,
-    #[serde(default)]
     pub log_level: Option<String>,
+    #[serde(default)]
+    pub otel: OtelConfig,
+    #[serde(default)]
+    pub prometheus: PrometheusConfig,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct OtelConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub endpoint: String,
+}
+
+fn default_prometheus_port() -> u16 {
+    9394
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PrometheusConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_prometheus_port")]
+    pub port: u16,
+}
+
+impl Default for PrometheusConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_prometheus_port(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -163,7 +194,7 @@ mod tests {
             ("GKG_GRAPH__DATABASE", "gkg"),
             ("GKG_GRAPH__USERNAME", "default"),
             ("GKG_GRAPH__PASSWORD", "supersecret"),
-            ("GKG_METRICS__OTLP_ENDPOINT", "http://gkg-obs-alloy:4317"),
+            ("GKG_METRICS__OTEL__ENDPOINT", "http://gkg-obs-alloy:4317"),
         ];
 
         // SAFETY: nextest runs each test in its own process, so env mutations are isolated
@@ -184,7 +215,7 @@ mod tests {
         let config = result.expect("AppConfig::load should not fail for plain string env vars");
         assert_eq!(config.nats.url, "gkg-nats:4222");
         assert_eq!(config.graph.password.as_deref(), Some("supersecret"));
-        assert_eq!(config.metrics.otlp_endpoint, "http://gkg-obs-alloy:4317");
+        assert_eq!(config.metrics.otel.endpoint, "http://gkg-obs-alloy:4317");
     }
 
     #[test]
