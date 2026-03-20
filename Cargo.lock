@@ -3482,6 +3482,7 @@ dependencies = [
  "testcontainers-modules",
  "tokio",
  "tokio-stream",
+ "tonic",
  "tower",
  "zstd",
 ]
