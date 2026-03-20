@@ -11,7 +11,7 @@ use super::parquet_writer::{ParquetWriter, StreamingEdgeWriter};
 use super::traversal::{EntityContext, EntityRegistry};
 use crate::synth::arrow_schema::ToArrowSchema;
 use crate::synth::config::{Config, EdgeRatio};
-use crate::synth::constants::ASSOCIATION_TRAVERSAL_PATH;
+
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use ontology::{NodeEntity, Ontology};
@@ -627,9 +627,12 @@ impl Generator {
                         IterationDirection::Source => (primary_id, secondary_id),
                     };
 
-                    let path = registry
-                        .get_path(source_id)
-                        .unwrap_or(ASSOCIATION_TRAVERSAL_PATH);
+                    let path = registry.get_path(source_id).unwrap_or_else(|| {
+                        panic!(
+                            "missing traversal_path for source_id {} ({} edge {}->{})",
+                            source_id, edge_type, source_kind, target_kind
+                        )
+                    });
                     edges.push(EdgeRecord {
                         traversal_path: self.intern(path),
                         relationship_kind: rel_kind.clone(),
@@ -809,9 +812,12 @@ impl Generator {
                         IterationDirection::Source => (primary_id, secondary_id),
                     };
 
-                    let path = registry
-                        .get_path(source_id)
-                        .unwrap_or(ASSOCIATION_TRAVERSAL_PATH);
+                    let path = registry.get_path(source_id).unwrap_or_else(|| {
+                        panic!(
+                            "missing traversal_path for source_id {} ({} edge {}->{})",
+                            source_id, edge_type, source_kind, target_kind
+                        )
+                    });
                     edge_writer.push(EdgeRecord {
                         traversal_path: self.intern(path),
                         relationship_kind: rel_kind.clone(),
