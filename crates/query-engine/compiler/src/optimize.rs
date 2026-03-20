@@ -63,16 +63,7 @@ fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) 
 
     if let Some(cursor) = &input.cursor {
         let root_alias = &root_node.id;
-        let keyset_predicate = if ctx.traversal_paths.len() == 1 {
-            build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
-        } else {
-            Expr::or_all(
-                ctx.traversal_paths
-                    .iter()
-                    .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor.id))),
-            )
-            .unwrap_or_else(|| Expr::param(ChType::Bool, false))
-        };
+        let keyset_predicate = build_keyset_predicate(root_alias, cursor, ctx);
 
         q.where_clause = Expr::and_all([q.where_clause.take(), Some(keyset_predicate)]);
         q.offset = None;
@@ -119,18 +110,10 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     };
 
     // Build optional keyset predicate for the CTE (narrows the materialized set)
-    let keyset_predicate = input.cursor.as_ref().map(|cursor| {
-        if ctx.traversal_paths.len() == 1 {
-            build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
-        } else {
-            Expr::or_all(
-                ctx.traversal_paths
-                    .iter()
-                    .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor.id))),
-            )
-            .unwrap_or_else(|| Expr::param(ChType::Bool, false))
-        }
-    });
+    let keyset_predicate = input
+        .cursor
+        .as_ref()
+        .map(|cursor| build_keyset_predicate(root_alias, cursor, ctx));
 
     // Build the CTE: SELECT id FROM root_table WHERE <root-only filters>
     // Extract only WHERE conjuncts that reference the root node alias.
@@ -258,6 +241,29 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
 
         let (_, end_col) = rel.direction.edge_columns();
         inject_sip_into_from(&mut q.from, &mut q.where_clause, end_col, &cte_name);
+    }
+}
+
+use crate::input::InputCursor;
+
+/// Build the full keyset predicate from a cursor.
+///
+/// When `cursor.traversal_path` is present, generates a single exact
+/// predicate using the actual PK position of the last row. When absent,
+/// falls back to the security context's traversal paths (correct for
+/// single-path, approximate for multi-path).
+fn build_keyset_predicate(alias: &str, cursor: &InputCursor, ctx: &SecurityContext) -> Expr {
+    if let Some(ref tp) = cursor.traversal_path {
+        build_keyset_expr(alias, tp, cursor.id)
+    } else if ctx.traversal_paths.len() == 1 {
+        build_keyset_expr(alias, &ctx.traversal_paths[0], cursor.id)
+    } else {
+        Expr::or_all(
+            ctx.traversal_paths
+                .iter()
+                .map(|tp| Some(build_keyset_expr(alias, tp, cursor.id))),
+        )
+        .unwrap_or_else(|| Expr::param(ChType::Bool, false))
     }
 }
 
