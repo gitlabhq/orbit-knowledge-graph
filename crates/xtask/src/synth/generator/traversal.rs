@@ -162,11 +162,12 @@ impl EntityRegistry {
             .push(context);
     }
 
-    /// Add only an entity ID (for leaf entities with no children).
-    /// This saves memory by not storing traversal paths for entities
-    /// that won't be used as parents.
-    pub fn add_id_only(&mut self, node_type: &str, id: i64) {
+    /// Add an entity ID with its traversal path (for leaf entities with no children).
+    /// The ID is stored compactly without `EntityContext`, but the path is
+    /// preserved in `id_paths` so association edge generation can inherit it.
+    pub fn add_id_only(&mut self, node_type: &str, id: i64, traversal_path: &str) {
         debug_assert!(!self.compacted, "Cannot add after compaction");
+        self.id_paths.insert(id, traversal_path.to_string());
         self.ids_only
             .entry(node_type.to_string())
             .or_default()
@@ -580,8 +581,8 @@ mod tests {
         registry.add("Group", EntityContext::root_group(1, 101));
 
         // Add ID-only (leaf entities)
-        registry.add_id_only("MergeRequest", 500);
-        registry.add_id_only("MergeRequest", 501);
+        registry.add_id_only("MergeRequest", 500, "1/100/");
+        registry.add_id_only("MergeRequest", 501, "1/101/");
 
         // Before compaction: full contexts accessible via get()
         assert!(registry.get("Group").is_some());
@@ -611,7 +612,7 @@ mod tests {
 
         // Mix: some entities added as full, some as id-only, same type
         registry.add("Project", EntityContext::new(10, "1/100/".to_string()));
-        registry.add_id_only("Project", 20);
+        registry.add_id_only("Project", 20, "1/100/");
 
         assert_eq!(registry.count("Project"), 2);
 
@@ -640,8 +641,8 @@ mod tests {
         );
 
         // Non-aliased type
-        registry.add_id_only("Project", 500);
-        registry.add_id_only("Project", 501);
+        registry.add_id_only("Project", 500, "1/100/");
+        registry.add_id_only("Project", 501, "1/101/");
 
         let aliases: HashMap<String, String> = [
             ("Group@1".to_string(), "Group".to_string()),

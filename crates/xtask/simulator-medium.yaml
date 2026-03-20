@@ -1,6 +1,6 @@
-# Simulator configuration - medium scale (~5M edges)
+# Simulator configuration - medium scale (~1.3M edges)
 #
-# Fast enough to generate in ~30s, large enough for meaningful query plans.
+# Fast enough to generate in ~10s, large enough for meaningful query plans.
 #
 # Workflow:
 #   1. Generate data:  cargo xtask synth generate -c crates/xtask/simulator-medium.yaml
@@ -125,7 +125,7 @@ generation:
   seed: 42
   fake_data_path: crates/xtask/fake_data.yaml
 
-  # Single org, ~5M edges / ~500k nodes
+  # Single org, ~1.3M edges / ~500k nodes
   organizations: 1
   namespace_entity: Group
 
@@ -142,9 +142,9 @@ generation:
   # - 7k × 3 stages = 21k stages
   # - 21k × 3 jobs = 63k jobs
   #
-  # Edge estimates (~5M edges):
+  # Edge estimates (~1.3M edges):
   # - Relationship edges: ~150k
-  # - Association edges:  ~4.5M
+  # - Association edges:  ~1.1M
 
   relationships:
     CONTAINS:

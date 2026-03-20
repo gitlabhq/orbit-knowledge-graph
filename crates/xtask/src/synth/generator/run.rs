@@ -547,7 +547,7 @@ impl Generator {
                     if is_parent_type {
                         registry.add(registry_key, EntityContext::new(entity_id, traversal_path));
                     } else {
-                        registry.add_id_only(registry_key, entity_id);
+                        registry.add_id_only(registry_key, entity_id, &traversal_path);
                     }
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
@@ -730,7 +730,7 @@ impl Generator {
                     if is_parent_type {
                         registry.add(registry_key, EntityContext::new(entity_id, traversal_path));
                     } else {
-                        registry.add_id_only(registry_key, entity_id);
+                        registry.add_id_only(registry_key, entity_id, &traversal_path);
                     }
 
                     let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child

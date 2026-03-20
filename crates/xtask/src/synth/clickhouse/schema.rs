@@ -28,12 +28,13 @@ impl<'a> SchemaGenerator<'a> {
             let schema = node.to_arrow_schema();
 
             let (primary_key, order_by): (Vec<&str>, Vec<&str>) =
-                if self.config.use_ontology_sort_keys {
+                if self.config.use_ontology_sort_keys && !node.sort_key.is_empty() {
                     // Use the per-node sort_key from ontology YAML as both ORDER BY and PK.
                     // This matches graph.sql where each table has its own ORDER BY/PK.
                     let sort_key: Vec<&str> = node.sort_key.iter().map(|s| s.as_str()).collect();
                     (sort_key.clone(), sort_key)
                 } else {
+                    // Fall back to global config when sort_key is empty or flag is off.
                     let pk = self
                         .config
                         .node_primary_key
