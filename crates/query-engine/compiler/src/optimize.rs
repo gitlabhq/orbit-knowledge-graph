@@ -136,20 +136,12 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         q.where_clause = Expr::and_all([q.where_clause.take(), Some(pred)]);
     }
 
-    // SIP: push root IDs into edge table scan.
-    // The edge column depends on direction: outgoing joins on source_id,
-    // incoming joins on target_id.
+    // SIP: push root IDs into every edge table scan in the FROM tree.
+    // For direct scans, adds to the outer WHERE. For scans inside Union/Subquery
+    // arms (multi-hop), injects into each arm's WHERE directly.
     if let Some(first_rel) = input.relationships.first() {
         let (start_col, _) = first_rel.direction.edge_columns();
-        let edge_aliases = collect_edge_aliases(&q.from);
-        if let Some(edge_alias) = edge_aliases.first() {
-            let edge_in = Expr::InSubquery {
-                expr: Box::new(Expr::col(edge_alias, start_col)),
-                cte_name: SIP_CTE_NAME.to_string(),
-                column: DEFAULT_PRIMARY_KEY.to_string(),
-            };
-            q.where_clause = Expr::and_all([q.where_clause.take(), Some(edge_in)]);
-        }
+        inject_sip_into_from(&mut q.from, &mut q.where_clause, start_col);
     }
 
     // Keyset replaces OFFSET
@@ -180,27 +172,40 @@ fn build_keyset_expr(alias: &str, tp: &str, cursor_id: i64) -> Expr {
     Expr::or(tp_gt, tp_eq_and_id_gt)
 }
 
-/// Collect edge table aliases from the FROM clause.
-/// Recurses into Union/Subquery to find edge scans inside multi-hop
-/// UNION ALL subqueries (built by `build_hop_union_all` in lower.rs).
-fn collect_edge_aliases(table_ref: &TableRef) -> Vec<String> {
+/// Walk the FROM tree and inject `{edge_alias}.{start_col} IN (SELECT id FROM _root_ids)`
+/// into every edge table scan. For direct scans, appends to the outer WHERE.
+/// For scans inside Union/Subquery arms (multi-hop), injects into each arm's WHERE.
+fn inject_sip_into_from(table_ref: &mut TableRef, outer_where: &mut Option<Expr>, start_col: &str) {
     match table_ref {
-        TableRef::Scan { table, alias, .. }
-            if table.starts_with("gl_edge") || table == "gl_edge" =>
-        {
-            vec![alias.clone()]
+        TableRef::Scan { table, alias, .. } if is_edge_table(table) => {
+            let sip_filter = make_sip_filter(alias, start_col);
+            *outer_where = Expr::and_all([outer_where.take(), Some(sip_filter)]);
         }
-        TableRef::Scan { .. } => vec![],
+        TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_edge_aliases(left);
-            aliases.extend(collect_edge_aliases(right));
-            aliases
+            inject_sip_into_from(left, outer_where, start_col);
+            inject_sip_into_from(right, outer_where, start_col);
         }
-        TableRef::Union { queries, .. } => queries
-            .iter()
-            .flat_map(|q| collect_edge_aliases(&q.from))
-            .collect(),
-        TableRef::Subquery { query, .. } => collect_edge_aliases(&query.from),
+        TableRef::Union { queries, .. } => {
+            for arm in queries {
+                inject_sip_into_from(&mut arm.from, &mut arm.where_clause, start_col);
+            }
+        }
+        TableRef::Subquery { query, .. } => {
+            inject_sip_into_from(&mut query.from, &mut query.where_clause, start_col);
+        }
+    }
+}
+
+fn is_edge_table(table: &str) -> bool {
+    table == "gl_edge" || table.starts_with("gl_edge")
+}
+
+fn make_sip_filter(alias: &str, start_col: &str) -> Expr {
+    Expr::InSubquery {
+        expr: Box::new(Expr::col(alias, start_col)),
+        cte_name: SIP_CTE_NAME.to_string(),
+        column: DEFAULT_PRIMARY_KEY.to_string(),
     }
 }
 
