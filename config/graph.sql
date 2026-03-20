@@ -352,7 +352,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     INDEX idx_severity severity TYPE set(8) GRANULARITY 2,
     INDEX idx_report_type report_type TYPE set(4) GRANULARITY 2,
     INDEX idx_resolved_on_default_branch resolved_on_default_branch TYPE minmax GRANULARITY 1,
-    INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1
+    INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
