@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::changed_path_stream::ChangeStatus;
 use tracing::{info, warn};
 
-use super::blob_stream::{BlobStream, ResolvedBlob};
+use super::blob_stream::BlobStream;
 use super::cache::RepositoryCache;
 use super::changed_path_stream::ChangedPathStream;
 use super::service::RepositoryService;
@@ -22,50 +21,6 @@ fn is_valid_git_ref(value: &str) -> bool {
         && !value.contains("..")
         && !value.contains('\0')
         && value.bytes().all(|b| b > 0x1f && b != 0x7f)
-}
-
-#[derive(Debug)]
-enum IncrementalUpdateError {
-    ForcePushDetected,
-    TooManyChangedPaths,
-    IncompleteBlobDownload { expected: usize, actual: usize },
-    Other(String),
-}
-
-impl fmt::Display for IncrementalUpdateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ForcePushDetected => write!(f, "force push detected"),
-            Self::TooManyChangedPaths => {
-                write!(f, "too many changed paths (exceeded {MAX_CHANGED_PATHS})")
-            }
-            Self::IncompleteBlobDownload { expected, actual } => {
-                write!(
-                    f,
-                    "blob download incomplete: expected {expected} writes but got {actual}"
-                )
-            }
-            Self::Other(msg) => write!(f, "{msg}"),
-        }
-    }
-}
-
-impl IncrementalUpdateError {
-    fn should_fallback_to_full_download(&self) -> bool {
-        matches!(
-            self,
-            Self::ForcePushDetected
-                | Self::TooManyChangedPaths
-                | Self::IncompleteBlobDownload { .. }
-                | Self::Other(_)
-        )
-    }
-}
-
-impl From<IncrementalUpdateError> for HandlerError {
-    fn from(error: IncrementalUpdateError) -> Self {
-        HandlerError::Processing(error.to_string())
-    }
 }
 
 pub struct RepositoryResolver {
@@ -117,16 +72,10 @@ impl RepositoryResolver {
             .await
         {
             Ok(path) => Ok(path),
-            Err(error) if error.should_fallback_to_full_download() => {
-                warn!(
-                    project_id,
-                    branch,
-                    reason = %error,
-                    "falling back to full download"
-                );
+            Err(reason) => {
+                warn!(project_id, branch, reason, "falling back to full download");
                 self.full_download(project_id, branch, ref_name).await
             }
-            Err(error) => Err(error.into()),
         }
     }
 
@@ -156,11 +105,9 @@ impl RepositoryResolver {
         branch: &str,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<PathBuf, IncrementalUpdateError> {
+    ) -> Result<PathBuf, String> {
         if !is_valid_git_ref(from_sha) || !is_valid_git_ref(to_sha) {
-            return Err(IncrementalUpdateError::Other(format!(
-                "invalid git ref: from={from_sha}, to={to_sha}"
-            )));
+            return Err(format!("invalid git ref: from={from_sha}, to={to_sha}"));
         }
 
         info!(
@@ -172,13 +119,7 @@ impl RepositoryResolver {
             .repository_service
             .changed_paths(project_id, from_sha, to_sha)
             .await
-            .map_err(|e| {
-                if e.is_force_push() {
-                    IncrementalUpdateError::ForcePushDetected
-                } else {
-                    IncrementalUpdateError::Other(format!("failed to fetch changed paths: {e}"))
-                }
-            })?;
+            .map_err(|e| format!("failed to fetch changed paths: {e}"))?;
 
         let changeset = compute_changeset(changed_path_stream).await?;
 
@@ -186,18 +127,14 @@ impl RepositoryResolver {
             self.cache
                 .rename_file(project_id, branch, old_path, new_path)
                 .await
-                .map_err(|e| {
-                    IncrementalUpdateError::Other(format!("failed to rename cached file: {e}"))
-                })?;
+                .map_err(|e| format!("failed to rename cached file: {e}"))?;
         }
 
         for path in &changeset.deletions {
             self.cache
                 .delete_file(project_id, branch, path)
                 .await
-                .map_err(|e| {
-                    IncrementalUpdateError::Other(format!("failed to delete cached file: {e}"))
-                })?;
+                .map_err(|e| format!("failed to delete cached file: {e}"))?;
         }
 
         let expected_writes: usize = changeset.paths_by_blob_id.values().map(|v| v.len()).sum();
@@ -210,42 +147,39 @@ impl RepositoryResolver {
                 .repository_service
                 .list_blobs(project_id, batch)
                 .await
-                .map_err(|e| IncrementalUpdateError::Other(format!("failed to list blobs: {e}")))?;
+                .map_err(|e| format!("failed to list blobs: {e}"))?;
 
             let mut blobs = BlobStream::new(blob_stream);
             while let Some(blob) = blobs
                 .next_blob()
                 .await
-                .map_err(|e| IncrementalUpdateError::Other(format!("failed to decode blob: {e}")))?
+                .map_err(|e| format!("failed to decode blob: {e}"))?
             {
-                let paths = paths_for_blob(&blob, &changeset.paths_by_blob_id);
+                let paths = changeset
+                    .paths_by_blob_id
+                    .get(&blob.oid)
+                    .map(|v| v.as_slice())
+                    .unwrap_or_default();
                 for path in paths {
                     self.cache
                         .write_file(project_id, branch, path, &blob.data)
                         .await
-                        .map_err(|e| {
-                            IncrementalUpdateError::Other(format!(
-                                "failed to write cached file: {e}"
-                            ))
-                        })?;
+                        .map_err(|e| format!("failed to write cached file: {e}"))?;
                     write_count += 1;
                 }
             }
         }
 
         if write_count < expected_writes {
-            return Err(IncrementalUpdateError::IncompleteBlobDownload {
-                expected: expected_writes,
-                actual: write_count,
-            });
+            return Err(format!(
+                "blob download incomplete: expected {expected_writes} writes but got {write_count}"
+            ));
         }
 
         self.cache
             .update_commit(project_id, branch, to_sha)
             .await
-            .map_err(|e| {
-                IncrementalUpdateError::Other(format!("failed to update cache commit: {e}"))
-            })?;
+            .map_err(|e| format!("failed to update cache commit: {e}"))?;
 
         info!(
             project_id,
@@ -271,7 +205,7 @@ struct IncrementalChangeset {
 
 async fn compute_changeset(
     stream: super::service::ByteStream,
-) -> Result<IncrementalChangeset, IncrementalUpdateError> {
+) -> Result<IncrementalChangeset, String> {
     let mut changed_paths = ChangedPathStream::new(stream);
     let mut deletions = Vec::new();
     let mut renames = Vec::new();
@@ -282,7 +216,7 @@ async fn compute_changeset(
     while let Some(change) = changed_paths
         .next_path()
         .await
-        .map_err(|e| IncrementalUpdateError::Other(format!("failed to decode changed path: {e}")))?
+        .map_err(|e| format!("failed to decode changed path: {e}"))?
     {
         if change.old_mode == SUBMODULE_MODE || change.new_mode == SUBMODULE_MODE {
             continue;
@@ -290,7 +224,9 @@ async fn compute_changeset(
 
         count += 1;
         if count > MAX_CHANGED_PATHS {
-            return Err(IncrementalUpdateError::TooManyChangedPaths);
+            return Err(format!(
+                "too many changed paths (exceeded {MAX_CHANGED_PATHS})"
+            ));
         }
 
         match change.status {
@@ -332,11 +268,9 @@ async fn compute_changeset(
             for (deleted_path, added_path) in deleted_paths.iter().zip(added_paths.iter()) {
                 renames.push((deleted_path.clone(), added_path.clone()));
             }
-            // Any unmatched deleted paths become deletions
             for deleted_path in deleted_paths.iter().skip(added_paths.len()) {
                 deletions.push(deleted_path.clone());
             }
-            // Any unmatched added paths go back to the blob map for download
             let remaining_added: Vec<String> =
                 added_paths.into_iter().skip(deleted_paths.len()).collect();
             if !remaining_added.is_empty() {
@@ -354,22 +288,11 @@ async fn compute_changeset(
     })
 }
 
-fn paths_for_blob<'a>(
-    blob: &ResolvedBlob,
-    paths_by_blob_id: &'a HashMap<String, Vec<String>>,
-) -> &'a [String] {
-    paths_by_blob_id
-        .get(&blob.oid)
-        .map(|v| v.as_slice())
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Write as _;
     use std::pin::Pin;
 
-    use super::ResolvedBlob;
     use super::*;
     use crate::modules::code::repository::cache::{LocalRepositoryCache, RepositoryCache};
     use crate::modules::code::repository::service::RepositoryServiceError;
@@ -836,35 +759,6 @@ mod tests {
         let stream = byte_stream_from_ndjson(lines);
 
         let err = compute_changeset(stream).await.unwrap_err();
-        assert!(matches!(err, IncrementalUpdateError::TooManyChangedPaths));
-    }
-
-    #[test]
-    fn paths_for_blob_returns_all_matching_paths() {
-        let mut paths_by_blob_id = HashMap::new();
-        paths_by_blob_id.insert(
-            "blob1".to_string(),
-            vec!["a.rs".to_string(), "b.rs".to_string()],
-        );
-
-        let blob = ResolvedBlob {
-            oid: "blob1".to_string(),
-            data: b"content".to_vec(),
-        };
-
-        let paths = paths_for_blob(&blob, &paths_by_blob_id);
-        assert_eq!(paths, &["a.rs", "b.rs"]);
-    }
-
-    #[test]
-    fn paths_for_blob_returns_empty_for_unmatched() {
-        let paths_by_blob_id = HashMap::new();
-        let blob = ResolvedBlob {
-            oid: "orphan".to_string(),
-            data: b"data".to_vec(),
-        };
-
-        let paths = paths_for_blob(&blob, &paths_by_blob_id);
-        assert!(paths.is_empty());
+        assert!(err.contains("too many changed paths"));
     }
 }
