@@ -43,36 +43,42 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
     }
 }
 
-/// Keyset pagination: decompose cursor into a PK predicate and remove OFFSET.
+/// Keyset pagination and OFFSET elimination.
 ///
-/// Applies to any query type with a cursor. Generates:
+/// When a cursor is present, decomposes it into a PK predicate:
 ///   (traversal_path > :tp) OR (traversal_path = :tp AND id > :cursor_id)
 /// for each traversal path in the security context. This lets ClickHouse
 /// seek directly via the primary key instead of scanning + skipping via OFFSET.
+///
+/// When node_ids are present (with or without a cursor), OFFSET is also
+/// removed -- the result set is already bounded by explicit IDs, so
+/// positional skipping is redundant.
 fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) {
-    let cursor = match &input.cursor {
-        Some(c) => c,
+    let root_node = match input.nodes.first() {
+        Some(n) => n,
         None => return,
     };
 
-    let root_alias = match input.nodes.first() {
-        Some(n) => &n.id,
-        None => return,
-    };
+    let has_node_ids = !root_node.node_ids.is_empty();
 
-    let keyset_predicate = if ctx.traversal_paths.len() == 1 {
-        build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
-    } else {
-        Expr::or_all(
-            ctx.traversal_paths
-                .iter()
-                .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor.id))),
-        )
-        .unwrap_or_else(|| Expr::param(ChType::Bool, false))
-    };
+    if let Some(cursor) = &input.cursor {
+        let root_alias = &root_node.id;
+        let keyset_predicate = if ctx.traversal_paths.len() == 1 {
+            build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
+        } else {
+            Expr::or_all(
+                ctx.traversal_paths
+                    .iter()
+                    .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor.id))),
+            )
+            .unwrap_or_else(|| Expr::param(ChType::Bool, false))
+        };
 
-    q.where_clause = Expr::and_all([q.where_clause.take(), Some(keyset_predicate)]);
-    q.offset = None;
+        q.where_clause = Expr::and_all([q.where_clause.take(), Some(keyset_predicate)]);
+        q.offset = None;
+    } else if has_node_ids {
+        q.offset = None;
+    }
 }
 
 /// SIP (Sideways Information Passing) pre-filter.
