@@ -75,6 +75,9 @@ pub struct EntityRegistry {
     entities: HashMap<String, Vec<EntityContext>>,
     /// Compact ID-only storage (used after compaction for associations).
     ids_only: HashMap<String, Vec<i64>>,
+    /// ID → traversal_path lookup, built during compaction.
+    /// Used by association edge generation to assign realistic traversal paths.
+    id_paths: HashMap<i64, String>,
     /// Whether the registry has been compacted.
     compacted: bool,
     /// Namespace ID counter (for Groups only, monotonically increasing).
@@ -90,6 +93,7 @@ impl EntityRegistry {
         Self {
             entities: HashMap::new(),
             ids_only: HashMap::new(),
+            id_paths: HashMap::new(),
             compacted: false,
             namespace_counter: AtomicI64::new(org_id as i64 + 1),
             entity_counter: AtomicI64::new(1),
@@ -123,10 +127,15 @@ impl EntityRegistry {
         if self.compacted {
             return;
         }
-        // Convert full entities to IDs and merge, resolving aliases
+        // Convert full entities to IDs and merge, resolving aliases.
+        // Preserve id→traversal_path mapping for association edge generation.
         for (node_type, contexts) in self.entities.drain() {
             let real_type = aliases.get(&node_type).cloned().unwrap_or(node_type);
-            let ids: Vec<i64> = contexts.into_iter().map(|c| c.id).collect();
+            let mut ids = Vec::with_capacity(contexts.len());
+            for ctx in contexts {
+                self.id_paths.insert(ctx.id, ctx.traversal_path.clone());
+                ids.push(ctx.id);
+            }
             self.ids_only.entry(real_type).or_default().extend(ids);
         }
         // Also resolve aliases in existing id-only entries
@@ -188,6 +197,12 @@ impl EntityRegistry {
 
     pub fn all_entities(&self) -> &HashMap<String, Vec<EntityContext>> {
         &self.entities
+    }
+
+    /// Look up traversal_path for an entity ID.
+    /// Available after compaction (populated during compact_with_aliases).
+    pub fn get_path(&self, id: i64) -> Option<&str> {
+        self.id_paths.get(&id).map(|s| s.as_str())
     }
 
     pub fn count(&self, node_type: &str) -> usize {

@@ -627,8 +627,11 @@ impl Generator {
                         IterationDirection::Source => (primary_id, secondary_id),
                     };
 
+                    let path = registry
+                        .get_path(source_id)
+                        .unwrap_or(ASSOCIATION_TRAVERSAL_PATH);
                     edges.push(EdgeRecord {
-                        traversal_path: self.intern(ASSOCIATION_TRAVERSAL_PATH),
+                        traversal_path: self.intern(path),
                         relationship_kind: rel_kind.clone(),
                         source: source_id,
                         source_kind: src_kind.clone(),
@@ -806,8 +809,11 @@ impl Generator {
                         IterationDirection::Source => (primary_id, secondary_id),
                     };
 
+                    let path = registry
+                        .get_path(source_id)
+                        .unwrap_or(ASSOCIATION_TRAVERSAL_PATH);
                     edge_writer.push(EdgeRecord {
-                        traversal_path: self.intern(ASSOCIATION_TRAVERSAL_PATH),
+                        traversal_path: self.intern(path),
                         relationship_kind: rel_kind.clone(),
                         source: source_id,
                         source_kind: src_kind.clone(),
@@ -1157,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generator_association_edges_use_sentinel_path() {
+    fn test_generator_association_edges_use_source_traversal_path() {
         let (config, ontology) = test_config_and_ontology();
         let generator = Generator::new(ontology, config).unwrap();
         let data = generator.generate_organization(1).unwrap();
@@ -1169,7 +1175,13 @@ mod tests {
             .collect();
         assert!(!authored.is_empty());
         for edge in &authored {
-            assert_eq!(edge.traversal_path.as_ref(), ASSOCIATION_TRAVERSAL_PATH);
+            // Association edges should inherit the source node's traversal_path,
+            // not the sentinel "0/". Source nodes always have a path starting with "1/".
+            assert!(
+                edge.traversal_path.as_ref().starts_with("1/"),
+                "AUTHORED edge should have source node's traversal_path, got '{}'",
+                edge.traversal_path.as_ref()
+            );
         }
     }
 
