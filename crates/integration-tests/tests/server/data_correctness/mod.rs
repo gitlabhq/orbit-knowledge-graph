@@ -68,6 +68,9 @@ async fn data_correctness() {
         aggregation::aggregation_nested_path_includes_child_projects,
         aggregation::aggregation_non_nested_path_only,
         aggregation::aggregation_empty_security_context_rejects_at_compile,
+        // optimizer: target elimination and edge-only aggregation correctness
+        aggregation::aggregation_count_with_target_elimination,
+        aggregation::aggregation_count_with_edge_only_root_elimination,
         // path finding
         path_finding::path_finding_returns_valid_complete_paths,
         path_finding::path_finding_multiple_destinations_returns_distinct_paths,

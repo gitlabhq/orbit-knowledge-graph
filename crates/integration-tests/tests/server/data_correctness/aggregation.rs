@@ -462,3 +462,64 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
         "error should mention traversal_path filter, got: {err}"
     );
 }
+
+/// Verifies COUNT when the target node is eliminable (no filters, not in GROUP BY).
+/// The optimizer should rewrite COUNT(note.id) → COUNT(e.target_id) and remove
+/// gl_note from the JOIN tree. Results must still be correct.
+pub(super) async fn aggregation_count_with_target_elimination(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "note", "entity": "Note"}
+            ],
+            "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "note"}],
+            "aggregations": [{"function": "count", "target": "note", "group_by": "mr", "alias": "note_count"}],
+            "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // MR 2000 has 3 notes (3000, 3002, 3003), MR 2001 has 1 note (3001)
+    resp.assert_node("MergeRequest", 2000, |n| {
+        n.prop_i64("note_count") == Some(3)
+    });
+    resp.assert_node("MergeRequest", 2001, |n| {
+        n.prop_i64("note_count") == Some(1)
+    });
+    resp.assert_node_order("MergeRequest", &[2000, 2001]);
+}
+
+/// Verifies COUNT with edge-only aggregation where the root node is eliminated.
+/// The optimizer rewrites COUNT(mr.id) → COUNT(e.source_id) and removes
+/// gl_merge_request from the JOIN. Group node (Project) results must be correct.
+pub(super) async fn aggregation_count_with_edge_only_root_elimination(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "note", "entity": "Note"},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "note"}],
+            "aggregations": [{"function": "count", "target": "note", "group_by": "mr", "alias": "note_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node("MergeRequest", 2000, |n| {
+        n.prop_i64("note_count") == Some(3)
+    });
+    resp.assert_node("MergeRequest", 2001, |n| {
+        n.prop_i64("note_count") == Some(1)
+    });
+    resp.assert_node_absent("MergeRequest", 2002);
+    resp.assert_node_absent("MergeRequest", 2003);
+}
