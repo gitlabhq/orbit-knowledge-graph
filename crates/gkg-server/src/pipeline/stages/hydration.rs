@@ -264,7 +264,11 @@ impl HydrationStage {
                             .filter_map(|(k, v)| match v {
                                 serde_json::Value::String(s) => Some((k, ColumnValue::String(s))),
                                 serde_json::Value::Number(n) => {
-                                    n.as_i64().map(|i| (k, ColumnValue::Int64(i)))
+                                    if let Some(i) = n.as_i64() {
+                                        Some((k, ColumnValue::Int64(i)))
+                                    } else {
+                                        n.as_f64().map(|f| (k, ColumnValue::Float64(f)))
+                                    }
                                 }
                                 serde_json::Value::Bool(b) => {
                                     Some((k, ColumnValue::String(b.to_string())))

@@ -1405,6 +1405,33 @@ mod ontology_integration_tests {
     }
 
     #[test]
+    fn hydration_empty_columns_produces_empty_json() {
+        let ctx = test_ctx();
+
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: vec![InputNode {
+                id: "hydrate".to_string(),
+                entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
+                columns: Some(ColumnSelection::List(vec!["id".into()])),
+                node_ids: vec![1],
+                ..InputNode::default()
+            }],
+            limit: 1,
+            ..Input::default()
+        };
+
+        let result = compile_input(input, &ctx).unwrap();
+        let rendered = result.base.render();
+
+        assert!(
+            !rendered.contains("map("),
+            "empty props should use literal '{{}}', not map(): {rendered}"
+        );
+    }
+
+    #[test]
     fn hydration_id_column_excluded_from_map() {
         let ctx = test_ctx();
 

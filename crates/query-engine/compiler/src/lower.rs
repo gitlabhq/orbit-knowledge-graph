@@ -656,35 +656,37 @@ fn build_hydration_arm(node: &InputNode) -> Result<Query> {
         .as_ref()
         .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
     let alias = &node.id;
+    let pk = &node.id_property;
 
     let columns: Vec<&str> = match &node.columns {
         Some(ColumnSelection::List(cols)) => cols.iter().map(|s| s.as_str()).collect(),
         _ => vec![],
     };
 
-    let map_args: Vec<Expr> = columns
-        .iter()
-        .filter(|&&c| c != DEFAULT_PRIMARY_KEY)
-        .flat_map(|&col| {
-            [
-                Expr::string(col),
-                Expr::func("toString", vec![Expr::col(alias, col)]),
-            ]
-        })
-        .collect();
+    let prop_columns: Vec<&str> = columns.iter().filter(|&&c| c != pk).copied().collect();
 
-    let props_expr = Expr::func("toJSONString", vec![Expr::func("map", map_args)]);
+    let json_expr = if prop_columns.is_empty() {
+        Expr::string("{}")
+    } else {
+        let map_args: Vec<Expr> = prop_columns
+            .iter()
+            .flat_map(|&col| {
+                [
+                    Expr::string(col),
+                    Expr::func("toString", vec![Expr::col(alias, col)]),
+                ]
+            })
+            .collect();
+        Expr::func("toJSONString", vec![Expr::func("map", map_args)])
+    };
 
     let select = vec![
-        SelectExpr::new(
-            Expr::col(alias, DEFAULT_PRIMARY_KEY),
-            format!("{alias}_{DEFAULT_PRIMARY_KEY}"),
-        ),
+        SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
         SelectExpr::new(Expr::string(entity), format!("{alias}_entity_type")),
-        SelectExpr::new(props_expr, format!("{alias}_props")),
+        SelectExpr::new(json_expr, format!("{alias}_props")),
     ];
 
-    let where_clause = id_filter(alias, DEFAULT_PRIMARY_KEY, &node.node_ids);
+    let where_clause = id_filter(alias, pk, &node.node_ids);
 
     Ok(Query {
         select,
