@@ -187,6 +187,7 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
         compiled: Arc::clone(&compiled),
         query_result: hydration_output.query_result,
         result_context: hydration_output.result_context,
+        stats: None,
     };
 
     let value = GraphFormatter.format(&pipeline_output);
