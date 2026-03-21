@@ -200,17 +200,16 @@ async fn enrich_execution(
         exec.explain_pipeline = profiler.explain_pipeline(rendered_sql).await.ok();
     }
 
-    if opts.profile {
-        if let Ok(Some(entry)) = profiler.fetch_query_log(&exec.query_id).await {
-            exec.query_log = Some(serde_json::to_value(&entry).unwrap_or_default());
-        }
+    if opts.profile
+        && let Ok(Some(entry)) = profiler.fetch_query_log(&exec.query_id).await
+    {
+        exec.query_log = Some(serde_json::to_value(&entry).unwrap_or_default());
     }
 
-    if opts.processors {
-        if let Ok(profiles) = profiler.fetch_processors_profile(&exec.query_id).await {
-            if !profiles.is_empty() {
-                exec.processors = Some(serde_json::to_value(&profiles).unwrap_or_default());
-            }
-        }
+    if opts.processors
+        && let Ok(profiles) = profiler.fetch_processors_profile(&exec.query_id).await
+        && !profiles.is_empty()
+    {
+        exec.processors = Some(serde_json::to_value(&profiles).unwrap_or_default());
     }
 }
