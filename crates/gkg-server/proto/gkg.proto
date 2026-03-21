@@ -83,6 +83,15 @@ message QueryMetadata {
   string query_type = 1;              // e.g. "traversal", "aggregation", "search"
   repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s) for debugging
   int32 row_count = 3;                // rows returned after redaction
+  ClickHouseExecutionStats clickhouse_stats = 4; // ClickHouse execution statistics
+}
+
+// Statistics from the ClickHouse X-ClickHouse-Summary response header.
+message ClickHouseExecutionStats {
+  uint64 read_rows = 1;     // total rows read (scanned) by ClickHouse
+  uint64 read_bytes = 2;    // total bytes read
+  uint64 elapsed_ns = 3;    // server-side elapsed time in nanoseconds
+  uint64 result_rows = 4;   // rows in the result set
 }
 
 // Server-sent error when query compilation or execution fails.

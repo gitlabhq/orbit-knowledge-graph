@@ -64,6 +64,25 @@ pub struct QueryMetadata {
     /// rows returned after redaction
     #[prost(int32, tag = "3")]
     pub row_count: i32,
+    /// ClickHouse execution statistics
+    #[prost(message, optional, tag = "4")]
+    pub clickhouse_stats: ::core::option::Option<ClickHouseExecutionStats>,
+}
+/// Statistics from the ClickHouse X-ClickHouse-Summary response header.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ClickHouseExecutionStats {
+    /// total rows read (scanned) by ClickHouse
+    #[prost(uint64, tag = "1")]
+    pub read_rows: u64,
+    /// total bytes read
+    #[prost(uint64, tag = "2")]
+    pub read_bytes: u64,
+    /// server-side elapsed time in nanoseconds
+    #[prost(uint64, tag = "3")]
+    pub elapsed_ns: u64,
+    /// rows in the result set
+    #[prost(uint64, tag = "4")]
+    pub result_rows: u64,
 }
 /// Server-sent error when query compilation or execution fails.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

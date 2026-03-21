@@ -28,6 +28,7 @@ members = [
   "crates/integration-testkit",
   "crates/utils",
   "crates/integration-tests",
+  "crates/gkg-query",
 ]
 
 [workspace.dependencies]

@@ -1018,6 +1018,7 @@ dependencies = [
  "clickhouse",
  "futures",
  "gkg-utils",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2750,6 +2751,23 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "gkg-query"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "gkg-server",
+ "jsonwebtoken",
+ "prost",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tonic",
 ]
 
 [[package]]

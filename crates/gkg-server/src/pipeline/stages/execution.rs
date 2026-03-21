@@ -6,7 +6,7 @@ use clickhouse_client::ArrowClickHouseClient;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
-use query_engine::shared::ExecutionOutput;
+use query_engine::shared::{ClickHouseStats, ExecutionOutput};
 
 #[derive(Clone)]
 pub struct ClickHouseExecutor;
@@ -26,15 +26,10 @@ impl PipelineStage for ClickHouseExecutor {
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
         let compiled = ctx.compiled()?;
-        let sql = &compiled.base.sql;
-        let params = &compiled.base.params;
+        let rendered_sql = compiled.base.render();
 
-        let mut query = client.query(sql);
-        for (key, param) in params.iter() {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-        }
-        let batches = query
-            .fetch_arrow()
+        let (batches, query_stats) = client
+            .fetch_arrow_with_stats(&rendered_sql)
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
@@ -43,6 +38,12 @@ impl PipelineStage for ClickHouseExecutor {
         Ok(ExecutionOutput {
             batches,
             result_context: compiled.base.result_context.clone(),
+            stats: Some(ClickHouseStats {
+                read_rows: query_stats.read_rows,
+                read_bytes: query_stats.read_bytes,
+                elapsed_ns: query_stats.elapsed_ns,
+                result_rows: query_stats.result_rows,
+            }),
         })
     }
 }
