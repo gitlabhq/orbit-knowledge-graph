@@ -58,8 +58,8 @@ pub use constants::{
 };
 pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
+pub use input::{ColumnSelection, Input, InputNode, QueryType, parse_input};
 pub use input::{DynamicColumnMode, EntityAuthConfig};
-pub use input::{Input, QueryType, parse_input};
 pub use lower::lower;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use normalize::{build_entity_auth, normalize};
@@ -96,12 +96,19 @@ pub fn compile(
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let input = validated_input(json_input, ontology).count_err()?;
+    compile_input(input, ctx)
+}
 
+/// Compile from a pre-built `Input`. Used for internal query types (Hydration)
+/// that bypass JSON schema validation.
+pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
     let mut node = lower(&input).count_err()?;
     optimize(&mut node, &input, ctx);
     let result_context = enforce_return(&mut node, &input)?;
-    apply_security_context(&mut node, ctx).count_err()?;
-    check_ast(&node, ctx).count_err()?;
+    if input.query_type != QueryType::Hydration {
+        apply_security_context(&mut node, ctx).count_err()?;
+        check_ast(&node, ctx).count_err()?;
+    }
     let base = codegen(&node, result_context).count_err()?;
 
     let hydration = build_hydration_plan(&input);
@@ -124,7 +131,7 @@ pub fn compile(
 ///   runtime from edge data, so the server builds search queries on the fly.
 fn build_hydration_plan(input: &Input) -> HydrationPlan {
     match input.query_type {
-        QueryType::Aggregation => HydrationPlan::None,
+        QueryType::Aggregation | QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
         // TODO: Static hydration for Traversal/Search requires the base query
         // in lower.rs to emit only ID/type columns (slim SELECT). Until that
@@ -1241,5 +1248,52 @@ mod ontology_integration_tests {
             "rendered should have no placeholders"
         );
         assert!(parsed["hydration"].is_array());
+    }
+
+    #[test]
+    fn hydration_query_type_generates_union_all() {
+        let ctx = test_ctx();
+
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: vec![
+                InputNode {
+                    id: "hydrate".to_string(),
+                    entity: Some("Note".to_string()),
+                    table: Some("gl_note".to_string()),
+                    columns: Some(ColumnSelection::List(vec![
+                        "id".into(),
+                        "noteable_type".into(),
+                    ])),
+                    node_ids: vec![1, 2, 3],
+                    ..InputNode::default()
+                },
+                InputNode {
+                    id: "hydrate".to_string(),
+                    entity: Some("Project".to_string()),
+                    table: Some("gl_project".to_string()),
+                    columns: Some(ColumnSelection::List(vec!["id".into(), "name".into()])),
+                    node_ids: vec![10, 20],
+                    ..InputNode::default()
+                },
+            ],
+            limit: 10,
+            ..Input::default()
+        };
+
+        let result = compile_input(input, &ctx).unwrap();
+        let sql = &result.base.sql;
+        let rendered = result.base.render();
+        println!("Hydration SQL:\n{sql}");
+        println!("\nRendered:\n{rendered}");
+
+        assert!(sql.contains("UNION ALL"), "should contain UNION ALL");
+        assert!(sql.contains("toJSONString"), "should contain toJSONString");
+        assert!(sql.contains("gl_note"), "should reference gl_note");
+        assert!(sql.contains("gl_project"), "should reference gl_project");
+        assert!(
+            matches!(result.hydration, HydrationPlan::None),
+            "hydration query should not trigger further hydration"
+        );
     }
 }

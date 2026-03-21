@@ -6,7 +6,10 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
 use futures::future::try_join_all;
-use query_engine::compiler::{DynamicColumnMode, HydrationPlan, HydrationTemplate, compile};
+use query_engine::compiler::{
+    ColumnSelection, DynamicColumnMode, HydrationPlan, HydrationTemplate, Input, InputNode,
+    QueryType, compile, compile_input,
+};
 
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use query_engine::types::QueryResult;
@@ -24,9 +27,6 @@ use query_engine::compiler::constants::{
 };
 
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
-
-const CONSOLIDATED_ENTITY_TYPE_COL: &str = "_gkg_entity_type";
-const CONSOLIDATED_PROPS_COL: &str = "_gkg_props";
 
 #[derive(Clone)]
 pub struct HydrationStage;
@@ -71,10 +71,9 @@ impl HydrationStage {
         Ok((merged, debug_queries, executions))
     }
 
-    /// Consolidated dynamic hydration: builds a single UNION ALL query across all
-    /// entity types, bypassing the full compilation pipeline. Each arm uses
-    /// `id IN (...)` for primary-key point lookups and `Map(String, String)` for
-    /// uniform column alignment.
+    /// Consolidated dynamic hydration: builds an `Input` with one node per entity
+    /// type, compiles it as `QueryType::Hydration` (which generates a UNION ALL
+    /// with proper parameterization), and executes a single query.
     async fn hydrate_dynamic_consolidated(
         ctx: &QueryPipelineContext,
         refs: &HashMap<String, Vec<i64>>,
@@ -85,92 +84,92 @@ impl HydrationStage {
             .get::<ProfilingConfig>()
             .cloned()
             .unwrap_or_default();
-        let security = ctx.security_context()?;
-        let input = &ctx.compiled()?.input;
+        let base_input = &ctx.compiled()?.input;
 
-        let mut arms: Vec<String> = Vec::new();
+        let mut nodes = Vec::new();
+        let mut total_ids: usize = 0;
 
         for (entity_type, ids) in refs {
             if ids.is_empty() {
                 continue;
             }
-            let node = match ctx.ontology.get_node(entity_type) {
-                Some(n) => n,
-                None => continue,
-            };
+            let node = ctx.ontology.get_node(entity_type).ok_or_else(|| {
+                PipelineError::Execution(format!(
+                    "entity type not found in ontology: {entity_type}"
+                ))
+            })?;
 
-            let columns = match input.options.dynamic_columns {
+            let columns = match base_input.options.dynamic_columns {
                 DynamicColumnMode::All => node
                     .fields
                     .iter()
                     .filter(|f| f.name != "_version" && f.name != "_deleted")
-                    .map(|f| f.name.as_str())
+                    .map(|f| f.name.clone())
                     .collect::<Vec<_>>(),
                 DynamicColumnMode::Default => {
                     if node.default_columns.is_empty() {
                         continue;
                     }
-                    node.default_columns.iter().map(|s| s.as_str()).collect()
+                    node.default_columns.clone()
                 }
             };
 
-            let id_list = ids
+            let capped_ids: Vec<i64> = ids
                 .iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
+                .copied()
+                .take(MAX_DYNAMIC_HYDRATION_RESULTS)
+                .collect();
+            total_ids += capped_ids.len();
 
-            let map_entries = columns
-                .iter()
-                .filter(|&&c| c != "id")
-                .map(|&col| format!("'{col}', toString({col})"))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let table = &node.destination_table;
-
-            let traversal_filter =
-                if node.has_traversal_path && !security.traversal_paths.is_empty() {
-                    let path = &security.traversal_paths[0];
-                    format!(" AND startsWith(traversal_path, '{path}')")
-                } else {
-                    String::new()
-                };
-
-            let limit = ids.len().min(MAX_DYNAMIC_HYDRATION_RESULTS);
-
-            arms.push(format!(
-                "SELECT id, '{entity_type}' AS {CONSOLIDATED_ENTITY_TYPE_COL}, \
-                 toJSONString(map({map_entries})) AS {CONSOLIDATED_PROPS_COL} \
-                 FROM {table} \
-                 WHERE id IN ({id_list}){traversal_filter} \
-                 LIMIT {limit}"
-            ));
+            nodes.push(InputNode {
+                id: HYDRATION_NODE_ALIAS.to_string(),
+                entity: Some(entity_type.clone()),
+                table: Some(node.destination_table.clone()),
+                columns: Some(ColumnSelection::List(columns)),
+                node_ids: capped_ids,
+                ..InputNode::default()
+            });
         }
 
-        if arms.is_empty() {
+        if nodes.is_empty() {
             return Ok((HashMap::new(), Vec::new(), Vec::new()));
         }
 
-        let sql = arms.join(" UNION ALL ");
+        let hydration_input = Input {
+            query_type: QueryType::Hydration,
+            nodes,
+            limit: total_ids as u32,
+            ..Input::default()
+        };
 
+        let compiled = compile_input(hydration_input, ctx.security_context()?)
+            .map_err(|e| PipelineError::Compile(e.to_string()))?;
+
+        let rendered_sql = compiled.base.render();
         let debug = DebugQuery {
-            sql: sql.clone(),
-            rendered: sql.clone(),
+            sql: compiled.base.sql.clone(),
+            rendered: rendered_sql.clone(),
         };
 
         let (batches, execution) = if profiling.enabled {
+            let http_params: Vec<(String, String)> = compiled
+                .base
+                .params
+                .iter()
+                .map(|(k, v)| (k.clone(), v.render_http_param()))
+                .collect();
+
             let t = Instant::now();
             let (batches, query_stats) = client
                 .profiler()
-                .execute_with_stats(&sql, &[], &[])
+                .execute_with_stats(&compiled.base.sql, &http_params, &[])
                 .await
                 .map_err(|e| PipelineError::Execution(e.to_string()))?;
             let elapsed = t.elapsed();
 
             let mut execution = QueryExecution {
                 label: "hydration:consolidated".into(),
-                rendered_sql: sql.clone(),
+                rendered_sql,
                 query_id: query_stats.query_id.clone(),
                 elapsed_ms: elapsed.as_secs_f64() * 1000.0,
                 stats: QueryExecutionStats {
@@ -188,14 +187,17 @@ impl HydrationStage {
             };
 
             if profiling.explain {
-                execution.explain_plan = client.profiler().explain_plan(&sql).await.ok();
+                execution.explain_plan = client.profiler().explain_plan(&debug.rendered).await.ok();
             }
 
             (batches, execution)
         } else {
             let t = Instant::now();
-            let batches = client
-                .query(&sql)
+            let mut query = client.query(&compiled.base.sql);
+            for (key, param) in &compiled.base.params {
+                query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
+            }
+            let batches = query
                 .fetch_arrow()
                 .await
                 .map_err(|e| PipelineError::Execution(e.to_string()))?;
@@ -204,7 +206,7 @@ impl HydrationStage {
 
             let execution = QueryExecution {
                 label: "hydration:consolidated".into(),
-                rendered_sql: sql,
+                rendered_sql,
                 query_id: String::new(),
                 elapsed_ms: elapsed.as_secs_f64() * 1000.0,
                 stats: QueryExecutionStats {
@@ -226,11 +228,16 @@ impl HydrationStage {
     }
 
     fn parse_consolidated_batches(batches: &[RecordBatch]) -> Result<PropertyMap, PipelineError> {
+        let alias = HYDRATION_NODE_ALIAS;
+        let entity_type_col = format!("{alias}_entity_type");
+        let props_col = format!("{alias}_props");
+        let id_col = format!("{alias}_id");
+
         let mut result = HashMap::new();
 
         for batch in batches {
             for row_idx in 0..batch.num_rows() {
-                let Some(id) = ArrowUtils::get_column::<Int64Type>(batch, "id", row_idx) else {
+                let Some(id) = ArrowUtils::get_column::<Int64Type>(batch, &id_col, row_idx) else {
                     continue;
                 };
 
@@ -238,23 +245,33 @@ impl HydrationStage {
 
                 let entity_type = row_data
                     .iter()
-                    .find(|(name, _)| name.as_str() == CONSOLIDATED_ENTITY_TYPE_COL)
+                    .find(|(name, _)| name.as_str() == entity_type_col)
                     .and_then(|(_, v)| v.as_string().cloned());
 
                 let Some(entity_type) = entity_type else {
                     continue;
                 };
 
-                let props = row_data
+                let props: HashMap<String, ColumnValue> = row_data
                     .iter()
-                    .find(|(name, _)| name.as_str() == CONSOLIDATED_PROPS_COL)
+                    .find(|(name, _)| name.as_str() == props_col)
                     .and_then(|(_, v)| v.as_string())
                     .and_then(|json_str| {
-                        serde_json::from_str::<HashMap<String, String>>(json_str).ok()
+                        serde_json::from_str::<HashMap<String, serde_json::Value>>(json_str).ok()
                     })
                     .map(|m| {
                         m.into_iter()
-                            .map(|(k, v)| (k, ColumnValue::String(v)))
+                            .filter_map(|(k, v)| match v {
+                                serde_json::Value::String(s) => Some((k, ColumnValue::String(s))),
+                                serde_json::Value::Number(n) => {
+                                    n.as_i64().map(|i| (k, ColumnValue::Int64(i)))
+                                }
+                                serde_json::Value::Bool(b) => {
+                                    Some((k, ColumnValue::String(b.to_string())))
+                                }
+                                serde_json::Value::Null => None,
+                                _ => Some((k, ColumnValue::String(v.to_string()))),
+                            })
                             .collect()
                     })
                     .unwrap_or_default();
