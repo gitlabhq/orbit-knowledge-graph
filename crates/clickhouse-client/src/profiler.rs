@@ -61,6 +61,13 @@ impl QueryProfiler {
         })
     }
 
+    // Mirrors clickhouse-rs Query::do_execute request building:
+    // - URL params: database, default_format, query settings, param_* bindings
+    // - Auth: X-ClickHouse-User / X-ClickHouse-Key headers
+    // - Body: SQL query text
+    // Additionally sets wait_end_of_query=1 to capture X-ClickHouse-Summary
+    // response headers (read_rows, read_bytes, memory_usage) which the
+    // clickhouse-rs crate discards.
     pub async fn execute_with_stats(
         &self,
         sql: &str,

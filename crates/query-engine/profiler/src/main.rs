@@ -131,6 +131,7 @@ async fn main() -> Result<()> {
     ));
 
     let profiling_config = ProfilingConfig {
+        enabled: true,
         explain: cli.explain,
         query_log: cli.profile,
         processors: cli.processors,

@@ -21,6 +21,8 @@ pub struct ClickHouseConfiguration {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ProfilingConfig {
     #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
     pub explain: bool,
     #[serde(default)]
     pub query_log: bool,

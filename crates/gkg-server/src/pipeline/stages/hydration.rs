@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::ArrowClickHouseClient;
+use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
 use futures::future::try_join_all;
 use query_engine::compiler::{
     DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryType, compile,
@@ -105,6 +105,11 @@ impl HydrationStage {
         query_json: String,
     ) -> Result<(PropertyMap, DebugQuery, QueryExecution), PipelineError> {
         let client = Self::client(ctx)?;
+        let profiling = ctx
+            .server_extensions
+            .get::<ProfilingConfig>()
+            .cloned()
+            .unwrap_or_default();
         let compiled = compile(&query_json, &ctx.ontology, ctx.security_context()?)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
@@ -113,34 +118,78 @@ impl HydrationStage {
             sql: compiled.base.sql.clone(),
             rendered: rendered_sql.clone(),
         };
+        let label = format!("hydration:{entity_type}");
 
-        let t = std::time::Instant::now();
-        let mut query = client.query(&compiled.base.sql);
-        for (key, param) in &compiled.base.params {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-        }
-        let batches = query
-            .fetch_arrow()
-            .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))?;
+        let (batches, execution) = if profiling.enabled {
+            let http_params: Vec<(String, String)> = compiled
+                .base
+                .params
+                .iter()
+                .map(|(k, v)| (k.clone(), v.render_http_param()))
+                .collect();
 
-        let elapsed = t.elapsed();
-        let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
+            let t = std::time::Instant::now();
+            let (batches, query_stats) = client
+                .profiler()
+                .execute_with_stats(&compiled.base.sql, &http_params, &[])
+                .await
+                .map_err(|e| PipelineError::Execution(e.to_string()))?;
+            let elapsed = t.elapsed();
 
-        let execution = QueryExecution {
-            label: format!("hydration:{entity_type}"),
-            rendered_sql,
-            query_id: String::new(),
-            elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-            stats: QueryExecutionStats {
-                result_rows,
-                elapsed_ns: elapsed.as_nanos() as u64,
-                ..Default::default()
-            },
-            explain_plan: None,
-            explain_pipeline: None,
-            query_log: None,
-            processors: None,
+            let mut execution = QueryExecution {
+                label,
+                rendered_sql,
+                query_id: query_stats.query_id.clone(),
+                elapsed_ms: elapsed.as_secs_f64() * 1000.0,
+                stats: QueryExecutionStats {
+                    read_rows: query_stats.read_rows,
+                    read_bytes: query_stats.read_bytes,
+                    result_rows: query_stats.result_rows,
+                    result_bytes: query_stats.result_bytes,
+                    elapsed_ns: query_stats.elapsed_ns,
+                    memory_usage: query_stats.memory_usage,
+                },
+                explain_plan: None,
+                explain_pipeline: None,
+                query_log: None,
+                processors: None,
+            };
+
+            if profiling.explain {
+                execution.explain_plan = client.profiler().explain_plan(&debug.rendered).await.ok();
+            }
+
+            (batches, execution)
+        } else {
+            let t = std::time::Instant::now();
+            let mut query = client.query(&compiled.base.sql);
+            for (key, param) in &compiled.base.params {
+                query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
+            }
+            let batches = query
+                .fetch_arrow()
+                .await
+                .map_err(|e| PipelineError::Execution(e.to_string()))?;
+            let elapsed = t.elapsed();
+            let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
+
+            let execution = QueryExecution {
+                label,
+                rendered_sql,
+                query_id: String::new(),
+                elapsed_ms: elapsed.as_secs_f64() * 1000.0,
+                stats: QueryExecutionStats {
+                    result_rows,
+                    elapsed_ns: elapsed.as_nanos() as u64,
+                    ..Default::default()
+                },
+                explain_plan: None,
+                explain_pipeline: None,
+                query_log: None,
+                processors: None,
+            };
+
+            (batches, execution)
         };
 
         let props = Self::parse_property_batches(entity_type, &batches)?;
