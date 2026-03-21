@@ -67,9 +67,260 @@ pub fn lower(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input) -> Result<Node> {
+    // Use edge-centric lowering when we have relationships — edge is the FROM
+    // table, node conditions are IN subqueries, node properties come from
+    // hydration. This eliminates hash table building for node tables.
+    if !input.relationships.is_empty() {
+        return lower_traversal_edge_centric(input);
+    }
+
+    // Search-only (no relationships): scan the single node table directly.
+    let node = input
+        .nodes
+        .first()
+        .ok_or_else(|| QueryError::Lowering("no nodes in input".into()))?;
+    let table = resolve_table(node)?;
+    let from = TableRef::scan(&table, &node.id);
+    let where_clause = build_node_where(node);
+
+    let mut select = Vec::new();
+    if let Some(ColumnSelection::List(cols)) = &node.columns {
+        for col in cols {
+            select.push(SelectExpr::new(
+                Expr::col(&node.id, col),
+                format!("{}_{col}", node.id),
+            ));
+        }
+    }
+
+    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
+        vec![OrderExpr {
+            expr: Expr::col(&ob.node, &ob.property),
+            desc: ob.direction == OrderDirection::Desc,
+        }]
+    });
+    let (limit, offset) = pagination(input);
+
+    Ok(Node::Query(Box::new(Query {
+        select,
+        from,
+        where_clause,
+        order_by,
+        limit,
+        offset,
+        ..Default::default()
+    })))
+}
+
+/// Edge-centric traversal: edge table is the only FROM, node tables are
+/// referenced via IN subqueries for filtering. Node properties are deferred
+/// to the hydration pipeline.
+///
+/// This eliminates hash table building for node tables and enables PREWHERE
+/// filtering of edges via IN-built HashSets — LIMIT pushdown works naturally
+/// because PREWHERE evaluates per-row during the edge scan.
+fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
+    let first_rel = input.relationships.first().unwrap();
+
+    // Multi-hop: fall back to JOIN-based lowering (UNION ALL arms)
+    if input.relationships.iter().any(|r| r.max_hops > 1) {
+        return lower_traversal_join_fallback(input);
+    }
+
+    // Edge-centric: first relationship's edge drives the scan.
+    // All node conditions and secondary relationships become IN subqueries.
+    let edge_alias = "e0";
+    let (edge, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
+    let (start_col, end_col) = first_rel.direction.edge_columns();
+
+    let mut select = Vec::new();
+    select.extend(edge_select_exprs(edge_alias));
+
+    // Track which nodes are connected to the driving edge and via which column
+    let mut node_edge_col: HashMap<String, String> = HashMap::new();
+    node_edge_col.insert(first_rel.from.clone(), start_col.to_string());
+    node_edge_col.insert(first_rel.to.clone(), end_col.to_string());
+
+    // Add _gkg_* columns for ALL nodes
+    for node in &input.nodes {
+        let entity = node.entity.as_deref().unwrap_or("Unknown");
+        let col = node_edge_col.get(&node.id);
+        select.push(SelectExpr::new(
+            if let Some(c) = col {
+                Expr::col(edge_alias, c.as_str())
+            } else {
+                // Node not directly on driving edge — ID comes from secondary
+                // edge CTE. Use a placeholder; hydration resolves it.
+                Expr::param(ChType::Int64, 0i64)
+            },
+            format!("_gkg_{}_id", node.id),
+        ));
+        select.push(SelectExpr::new(
+            Expr::param(ChType::String, entity.to_string()),
+            format!("_gkg_{}_type", node.id),
+        ));
+    }
+
+    let mut where_parts: Vec<Expr> = Vec::new();
+    let mut ctes = Vec::new();
+
+    if let Some(tc) = edge_type_cond {
+        where_parts.push(tc);
+    }
+
+    // Add IN subquery for each node that has conditions (node_ids, filters)
+    // AND is connected to the driving edge.
+    for node in &input.nodes {
+        let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
+        if !has_conditions {
+            continue;
+        }
+        if let Some(edge_col) = node_edge_col.get(&node.id) {
+            let table = resolve_table(node)?;
+            let node_where = build_node_where(node);
+            let cte_name = format!("_nf_{}", node.id);
+            let cte_query = Query {
+                select: vec![SelectExpr::new(
+                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                    DEFAULT_PRIMARY_KEY,
+                )],
+                from: TableRef::scan(&table, &node.id),
+                where_clause: node_where,
+                ..Default::default()
+            };
+            ctes.push(Cte::new(&cte_name, cte_query));
+            where_parts.push(Expr::InSubquery {
+                expr: Box::new(Expr::col(edge_alias, edge_col.as_str())),
+                cte_name,
+                column: DEFAULT_PRIMARY_KEY.into(),
+            });
+        }
+    }
+
+    // Add IN subquery for each SECONDARY relationship (i > 0).
+    // Each secondary relationship connects via a shared node to the driving edge.
+    // We add: e0.{shared_col} IN (SELECT {opposite_col} FROM gl_edge WHERE rel=... AND {filter})
+    for (i, rel) in input.relationships.iter().enumerate().skip(1) {
+        // Find which node this relationship shares with the driving edge
+        let (shared_node_id, shared_edge_col) = if let Some(col) = node_edge_col.get(&rel.from) {
+            (&rel.from, col.clone())
+        } else if let Some(col) = node_edge_col.get(&rel.to) {
+            (&rel.to, col.clone())
+        } else {
+            // No shared node — can't convert to IN subquery, skip
+            continue;
+        };
+
+        let (sec_start, sec_end) = rel.direction.edge_columns();
+        // The shared node appears on one side of the secondary edge.
+        // We need to SELECT the shared side's column from the secondary edge.
+        let (_sec_filter_col, sec_select_col) = if shared_node_id == &rel.from {
+            // Shared node is the FROM of secondary → it maps to sec_start
+            (sec_start, sec_start)
+        } else {
+            // Shared node is the TO of secondary → it maps to sec_end
+            (sec_end, sec_end)
+        };
+
+        // Find the OTHER node of this relationship (not shared with driving edge)
+        let other_node_id = if shared_node_id == &rel.from {
+            &rel.to
+        } else {
+            &rel.from
+        };
+        let other_node = input.nodes.iter().find(|n| n.id == *other_node_id);
+        let other_has_conditions =
+            other_node.is_some_and(|n| !n.node_ids.is_empty() || !n.filters.is_empty());
+
+        // Skip secondary edge CTE when the other node has no conditions.
+        // A universal relationship (e.g. IN_PROJECT where every MR has one)
+        // without filters would scan ALL edges to build a useless HashSet.
+        if !other_has_conditions {
+            continue;
+        }
+
+        let other_col = if other_node_id == &rel.from {
+            sec_start
+        } else {
+            sec_end
+        };
+
+        // Build the secondary edge IN subquery
+        let sec_alias = format!("_se{i}");
+        let mut sec_where_parts: Vec<Expr> = Vec::new();
+
+        // Relationship type filter
+        if let Some(tf) = Expr::col_in(
+            &sec_alias,
+            "relationship_kind",
+            ChType::String,
+            rel.types.iter().map(|t| Value::String(t.clone())).collect(),
+        ) {
+            sec_where_parts.push(tf);
+        }
+
+        // Filter the secondary edge by the other node's conditions
+        if let Some(node) = other_node
+            && !node.node_ids.is_empty()
+            && let Some(f) = Expr::col_in(
+                &sec_alias,
+                other_col,
+                ChType::Int64,
+                node.node_ids
+                    .iter()
+                    .map(|&id| Value::Number(id.into()))
+                    .collect(),
+            )
+        {
+            sec_where_parts.push(f);
+        }
+
+        let sec_where = Expr::and_all(sec_where_parts.into_iter().map(Some));
+        let cte_name = format!("_rel{i}");
+        let cte_query = Query {
+            select: vec![SelectExpr::new(
+                Expr::col(&sec_alias, sec_select_col),
+                DEFAULT_PRIMARY_KEY,
+            )],
+            from: TableRef::scan(EDGE_TABLE, &sec_alias),
+            where_clause: sec_where,
+            ..Default::default()
+        };
+        ctes.push(Cte::new(&cte_name, cte_query));
+
+        // e0.{shared_col} IN (SELECT id FROM _rel{i})
+        where_parts.push(Expr::InSubquery {
+            expr: Box::new(Expr::col(edge_alias, &shared_edge_col)),
+            cte_name,
+            column: DEFAULT_PRIMARY_KEY.into(),
+        });
+    }
+
+    let where_clause = Expr::and_all(where_parts.into_iter().map(Some));
+    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
+        vec![OrderExpr {
+            expr: Expr::col(edge_alias, &ob.property),
+            desc: ob.direction == OrderDirection::Desc,
+        }]
+    });
+    let (limit, offset) = pagination(input);
+
+    Ok(Node::Query(Box::new(Query {
+        ctes,
+        select,
+        from: edge,
+        where_clause,
+        order_by,
+        limit,
+        offset,
+        ..Default::default()
+    })))
+}
+
+/// JOIN-based fallback for multi-hop traversals.
+fn lower_traversal_join_fallback(input: &Input) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
-
     let mut select = Vec::new();
     for node in &input.nodes {
         if let Some(ColumnSelection::List(cols)) = &node.columns {
@@ -82,14 +333,12 @@ fn lower_traversal(input: &Input) -> Result<Node> {
         }
     }
     add_edge_columns(&mut select, &input.relationships, &edge_aliases);
-
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
             expr: Expr::col(&ob.node, &ob.property),
             desc: ob.direction == OrderDirection::Desc,
         }]
     });
-
     let (limit, offset) = pagination(input);
 
     Ok(Node::Query(Box::new(Query {
@@ -101,6 +350,28 @@ fn lower_traversal(input: &Input) -> Result<Node> {
         offset,
         ..Default::default()
     })))
+}
+
+/// Build WHERE clause for a single node's filters and node_ids.
+fn build_node_where(node: &InputNode) -> Option<Expr> {
+    let mut parts: Vec<Expr> = Vec::new();
+    if !node.node_ids.is_empty()
+        && let Some(filter) = Expr::col_in(
+            &node.id,
+            DEFAULT_PRIMARY_KEY,
+            ChType::Int64,
+            node.node_ids
+                .iter()
+                .map(|&id| serde_json::Value::Number(id.into()))
+                .collect(),
+        )
+    {
+        parts.push(filter);
+    }
+    for (col, filter) in &node.filters {
+        parts.push(filter_expr(&node.id, col, filter));
+    }
+    Expr::and_all(parts.into_iter().map(Some))
 }
 
 /// Add edge columns to SELECT for each relationship.

@@ -126,11 +126,8 @@ fn build_hydration_plan(input: &Input) -> HydrationPlan {
     match input.query_type {
         QueryType::Aggregation => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
-        // TODO: Static hydration for Traversal/Search requires the base query
-        // in lower.rs to emit only ID/type columns (slim SELECT). Until that
-        // refactor lands, Traversal/Search results already carry all requested
-        // columns from the base query, so no hydration pass is needed.
-        QueryType::Traversal | QueryType::Search => HydrationPlan::None,
+        QueryType::Traversal => HydrationPlan::None,
+        QueryType::Search => HydrationPlan::None,
     }
 }
 
