@@ -1,5 +1,7 @@
+mod config;
 mod executor;
 mod output;
+mod service;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,8 +13,10 @@ use compiler::SecurityContext;
 use ontology::Ontology;
 use tracing_subscriber::EnvFilter;
 
-use executor::{ProfilerOptions, enrich_output, run_profiler_pipeline};
+use config::ProfilingConfig;
+use executor::enrich_output;
 use output::build_output;
+use service::ProfilerPipelineService;
 
 #[derive(Parser)]
 #[command(
@@ -126,17 +130,22 @@ async fn main() -> Result<()> {
         &custom_settings,
     ));
 
-    let mut output =
-        run_profiler_pipeline(Arc::clone(&client), ontology, security_ctx, &query_json).await?;
-
-    let opts = ProfilerOptions {
+    let profiling_config = ProfilingConfig {
         explain: cli.explain,
-        profile: cli.profile,
+        query_log: cli.profile,
         processors: cli.processors,
+        instance_health: cli.health,
     };
-    enrich_output(&client, &mut output, &opts).await;
 
-    let instance_health = if cli.health {
+    let service = ProfilerPipelineService::new(ontology, Arc::clone(&client));
+    let mut output = service
+        .run_query(security_ctx, &query_json)
+        .await
+        .map_err(|e| anyhow::anyhow!("pipeline failed: {e}"))?;
+
+    enrich_output(&client, &mut output, &profiling_config).await;
+
+    let instance_health = if profiling_config.instance_health {
         match client.profiler().fetch_instance_health().await {
             Ok(health) => Some(serde_json::to_value(&health).unwrap_or_default()),
             Err(e) => {
@@ -157,12 +166,8 @@ async fn main() -> Result<()> {
     );
 
     match cli.format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string(&profiler_output)?);
-        }
-        OutputFormat::Pretty => {
-            println!("{}", serde_json::to_string_pretty(&profiler_output)?);
-        }
+        OutputFormat::Json => println!("{}", serde_json::to_string(&profiler_output)?),
+        OutputFormat::Pretty => println!("{}", serde_json::to_string_pretty(&profiler_output)?),
     }
 
     Ok(())
