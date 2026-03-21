@@ -877,18 +877,33 @@ fn apply_edge_only_aggregation(q: &mut Query, input: &Input) {
 
 /// Eliminate the target node table when it's only used as a COUNT target with
 /// no user filters. Rewrites COUNT(target.id) → COUNT(edge.end_col) and removes
-/// the target table JOIN. Applies to single-relationship aggregations where the
-/// COUNT target is the `to` node (not the root).
+/// the target table JOIN. Works for single or multi-relationship queries where
+/// one relationship's `to` node is the COUNT target.
 fn apply_target_only_count_elimination(q: &mut Query, input: &Input) {
-    if input.relationships.len() != 1 {
-        return;
-    }
-    let rel = &input.relationships[0];
-    if rel.max_hops > 1 {
+    if input.relationships.is_empty() {
         return;
     }
 
-    let target_alias = &rel.to;
+    // Find all COUNT targets
+    let count_targets: HashSet<&str> = input
+        .aggregations
+        .iter()
+        .filter(|a| a.function == crate::input::AggFunction::Count && a.property.is_none())
+        .filter_map(|a| a.target.as_deref())
+        .collect();
+    if count_targets.len() != 1 {
+        return;
+    }
+    let target_alias = *count_targets.iter().next().unwrap();
+
+    // All aggregations must be COUNT targeting the same node
+    if !input.aggregations.iter().all(|a| {
+        a.function == crate::input::AggFunction::Count
+            && a.target.as_deref() == Some(target_alias)
+            && a.property.is_none()
+    }) {
+        return;
+    }
 
     // Target must not be in GROUP BY
     let group_by_nodes: HashSet<_> = input
@@ -896,21 +911,23 @@ fn apply_target_only_count_elimination(q: &mut Query, input: &Input) {
         .iter()
         .filter_map(|a| a.group_by.as_deref())
         .collect();
-    if group_by_nodes.contains(target_alias.as_str()) {
+    if group_by_nodes.contains(target_alias) {
         return;
     }
 
-    // All aggregations must be COUNT targeting the target node
-    if !input.aggregations.iter().all(|a| {
-        a.function == crate::input::AggFunction::Count
-            && a.target.as_deref() == Some(target_alias.as_str())
-            && a.property.is_none()
-    }) {
-        return;
-    }
+    // Find the relationship whose `to` node is the COUNT target
+    let (rel_idx, rel) = match input
+        .relationships
+        .iter()
+        .enumerate()
+        .find(|(_, r)| r.to == target_alias && r.max_hops <= 1)
+    {
+        Some(found) => found,
+        None => return,
+    };
 
     // Target node must have no user-specified filters
-    let target_node = match input.nodes.iter().find(|n| n.id == *target_alias) {
+    let target_node = match input.nodes.iter().find(|n| n.id == target_alias) {
         Some(n) => n,
         None => return,
     };
@@ -919,14 +936,14 @@ fn apply_target_only_count_elimination(q: &mut Query, input: &Input) {
     }
 
     let (_, end_col) = rel.direction.edge_columns();
-    let edge_alias = "e0";
+    let edge_alias = format!("e{rel_idx}");
 
     // Rewrite COUNT(target.id) → COUNT(edge.end_col) in SELECT and ORDER BY
     for sel in &mut q.select {
-        rewrite_count_target(&mut sel.expr, target_alias, edge_alias, end_col);
+        rewrite_count_target(&mut sel.expr, target_alias, &edge_alias, end_col);
     }
     for ord in &mut q.order_by {
-        rewrite_count_target(&mut ord.expr, target_alias, edge_alias, end_col);
+        rewrite_count_target(&mut ord.expr, target_alias, &edge_alias, end_col);
     }
 
     // Remove target table from FROM tree, preserve edge-side conditions (e.g. target_kind)
@@ -967,43 +984,48 @@ fn apply_target_only_count_elimination(q: &mut Query, input: &Input) {
     }
 }
 
-/// Remove the target (rightmost) table scan from the FROM tree.
-/// Expected pattern: Join(inner, Scan(target), on_outer)
-/// Result:           inner, with edge-only conditions from ON returned for WHERE injection.
+/// Remove a table scan from the FROM tree by alias.
+/// Searches the JOIN tree for `Join(..., Scan(target_alias), on)` and removes it,
+/// returning edge-only conditions from the ON clause for WHERE injection.
 fn eliminate_target_scan(from: &mut TableRef, target_alias: &str) -> Vec<Expr> {
-    let matches = matches!(
+    // Check if the right side of this join is the target
+    let right_is_target = matches!(
         from,
         TableRef::Join { right, .. }
         if matches!(right.as_ref(), TableRef::Scan { alias, .. } if alias == target_alias)
     );
-    if !matches {
-        return Vec::new();
+
+    if right_is_target {
+        let old = std::mem::replace(
+            from,
+            TableRef::Scan {
+                table: String::new(),
+                alias: String::new(),
+            },
+        );
+        let TableRef::Join {
+            left: inner, on, ..
+        } = old
+        else {
+            unreachable!()
+        };
+        let extracted: Vec<Expr> = flatten_and(on)
+            .into_iter()
+            .filter(|c| {
+                let aliases = collect_column_aliases(c);
+                !aliases.iter().any(|a| a == target_alias)
+            })
+            .collect();
+        *from = *inner;
+        return extracted;
     }
 
-    let old = std::mem::replace(
-        from,
-        TableRef::Scan {
-            table: String::new(),
-            alias: String::new(),
-        },
-    );
-    let TableRef::Join {
-        left: inner, on, ..
-    } = old
-    else {
-        unreachable!()
-    };
-
-    let extracted: Vec<Expr> = flatten_and(on)
-        .into_iter()
-        .filter(|c| {
-            let aliases = collect_column_aliases(c);
-            !aliases.iter().any(|a| a == target_alias)
-        })
-        .collect();
-
-    *from = *inner;
-    extracted
+    // Recurse into left subtree
+    if let TableRef::Join { left, .. } = from {
+        eliminate_target_scan(left, target_alias)
+    } else {
+        Vec::new()
+    }
 }
 
 /// Rewrite COUNT(old_alias.id) → COUNT(new_alias.new_col) in an expression tree.
