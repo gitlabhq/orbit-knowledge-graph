@@ -212,14 +212,20 @@ impl QueryExecutor {
     }
 
     /// Merge base safe defaults with user-provided overrides into a SETTINGS clause.
+    ///
+    /// Values are classified as numeric (emitted bare), boolean (emitted bare),
+    /// already-quoted (emitted as-is), or string (wrapped in single quotes).
+    /// Output is sorted by key for deterministic ordering across runs.
     fn build_settings(user: &std::collections::HashMap<String, String>) -> String {
-        let mut merged: std::collections::HashMap<&str, String> = BASE_QUERY_SETTINGS
+        let mut merged: std::collections::BTreeMap<&str, String> = BASE_QUERY_SETTINGS
             .iter()
             .map(|(k, v)| (*k, v.to_string()))
             .collect();
         for (k, v) in user {
-            // Wrap string values in quotes if they aren't already
-            let formatted = if v.starts_with('\'') || v.parse::<f64>().is_ok() {
+            let formatted = if v.starts_with('\'')
+                || v.parse::<u64>().is_ok()
+                || matches!(v.as_str(), "true" | "false" | "0" | "1")
+            {
                 v.clone()
             } else {
                 format!("'{v}'")
