@@ -79,29 +79,34 @@ impl IndexingProgressReader {
             .map_err(|e| Status::internal(format!("ClickHouse error: {e}")))?;
 
         let mut statuses = HashMap::new();
+
         for batch in &batches {
-            let Some(keys) = ArrowUtils::get_column_by_name::<StringArray>(batch, "key") else {
+            let (Some(keys), Some(cursors)) = (
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "key"),
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "cursor_values"),
+            ) else {
                 continue;
             };
-            let Some(cursors) =
-                ArrowUtils::get_column_by_name::<StringArray>(batch, "cursor_values")
-            else {
-                continue;
-            };
+
             for row in 0..batch.num_rows() {
                 if keys.is_null(row) {
                     continue;
                 }
-                let key = keys.value(row);
-                let plan_name = key.strip_prefix(&prefix).unwrap_or(key);
-                let cursor_value = if cursors.is_null(row) {
-                    ""
-                } else {
-                    cursors.value(row)
-                };
-                let trimmed = cursor_value.trim();
-                let completed = trimmed.is_empty() || trimmed == "null" || trimmed == "[]";
-                statuses.insert(plan_name.to_string(), completed);
+
+                let plan_name = keys
+                    .value(row)
+                    .strip_prefix(&prefix)
+                    .unwrap_or(keys.value(row));
+                let completed = cursors.is_null(row)
+                    || cursors.value(row).is_empty()
+                    || cursors.value(row) == "null";
+
+                if let Some(existing) = statuses.insert(plan_name.to_string(), completed) {
+                    tracing::warn!(
+                        plan_name,
+                        "duplicate checkpoint key, previous value: {existing}"
+                    );
+                }
             }
         }
 
